@@ -31,6 +31,9 @@ package version in `source.version`, the profiled slot in `runtime_version`, and
 the original source receipt in `runtime_source`. Source-qualified deferred stamps
 copy and verify the complete prepared assembly, so first use does not depend on
 the original source location.
+The native installer pins the complete receipt before waiting for its transaction
+lock and passes that same receipt into profile construction or deferred stamping.
+A valid receipt-only change is refused even when its runtime generation is unchanged.
 
 Source-qualified generations require an exact `current-version` or
 `last-known-good` selector. If neither resolves and source-qualified slots exist,

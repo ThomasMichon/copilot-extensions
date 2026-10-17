@@ -437,9 +437,42 @@ def test_source_stamp_retains_full_assembly_after_original_is_unavailable(
                for name in profiles.LIBRARIES)
 
 
+@pytest.mark.parametrize("operation", ["stamp", "provision"])
+def test_source_handoff_refuses_valid_receipt_change_with_unchanged_generation(
+    profiles, payload, commands, tmp_path, operation,
+):
+    root = tmp_path / "runtime"
+    _provision(profiles, root, payload)
+    before = {path.relative_to(root): path.read_bytes()
+              for path in root.rglob("*") if path.is_file()}
+    selected = _prepare_source(profiles, payload)
+    expected = json.dumps(profiles.source.manifest_fields(selected), sort_keys=True)
+    document = selected.document()
+    document["source_tree"] = "c" * 40
+    (payload / "runtime-source.json").write_text(json.dumps(document), encoding="utf-8")
+    changed = profiles.source.read_source_identity(payload, "1.0.0")
+    assert changed.runtime_version == selected.runtime_version
+    assert changed != selected
+    commands.clear()
+    with pytest.raises(RuntimeError, match="source identity changed after runtime selection"):
+        if operation == "stamp":
+            profiles.stamp_source(
+                root, payload, selected.runtime_version, expected_identity=expected,
+            )
+        else:
+            _provision(
+                profiles, root, payload, expected_source_version=selected.runtime_version,
+                expected_source_identity=expected,
+            )
+    assert commands == []
+    assert {path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()} == before
+
+
 @pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("receipt_change", [False, True])
 def test_native_source_stamp_publishes_only_verified_complete_snapshot(
-    profiles, payload, tmp_path, host,
+    profiles, payload, tmp_path, host, receipt_change,
 ):
     if host == "powershell" and os.name != "nt":
         pytest.skip("Windows PowerShell unavailable")
@@ -449,12 +482,43 @@ def test_native_source_stamp_publishes_only_verified_complete_snapshot(
     if shell is None:
         pytest.skip(f"{host} unavailable")
     shutil.copytree(SCRIPTS, payload / "scripts")
+    if receipt_change:
+        entry = payload / "scripts" / ("init.sh" if host == "bash" else "init.ps1")
+        text = entry.read_text(encoding="utf-8")
+        if host == "bash":
+            boundary = "_enter_install_lock() {\n"
+            mutation = (
+                '    "$(_source_python)" -I -c '
+                "'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); "
+                'd=json.loads(p.read_text()); d["source_tree"]="c"*40; '
+                "p.write_text(json.dumps(d))' \"$PLUGIN_DIR/runtime-source.json\"\n"
+            )
+        else:
+            boundary = (
+                "function Enter-InstallLock {\n"
+                "    param([int]$TimeoutSec = (Get-InstallLockTimeoutSec))\n"
+            )
+            mutation = """
+    $receiptPath = Join-Path $PluginDir 'runtime-source.json'
+    $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    $receipt.source_tree = 'c' * 40
+    [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Compress -Depth 8),
+        (New-Object Text.UTF8Encoding $false))
+"""
+        assert text.count(boundary) == 1
+        entry.write_text(text.replace(boundary, boundary + mutation), encoding="utf-8")
     (payload / "tests").mkdir()
     (payload / "tests" / "input.txt").write_text("hashed input\n")
     identity = _prepare_source(profiles, payload)
     home = tmp_path / "home"
     home.mkdir()
     root = home / ".agent-containers"
+    previous = {"current-version": b"previous", "payload-dir": b"previous-payload",
+                "stamped-version": b"previous"}
+    if receipt_change:
+        root.mkdir()
+        for name, value in previous.items():
+            (root / name).write_bytes(value)
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("COPILOT_", "AGENT_CONTAINERS_"))}
     env.update(HOME=home.as_posix(), USERPROFILE=str(home),
@@ -476,7 +540,19 @@ def test_native_source_stamp_publishes_only_verified_complete_snapshot(
             output.seek(0)
             pytest.fail(output.read().decode("utf-8", errors="replace"))
         output.seek(0)
-        assert result.returncode == 0, output.read().decode("utf-8", errors="replace")
+        detail = output.read().decode("utf-8", errors="replace")
+        if receipt_change:
+            assert result.returncode != 0, detail
+            assert "Source runtime identity changed after runtime selection" in detail
+            changed = profiles.source.read_source_identity(payload, "1.0.0")
+            assert changed.runtime_version == identity.runtime_version
+            assert changed != identity
+            for name, value in previous.items():
+                assert (root / name).read_bytes() == value
+            assert not (root / "snapshots").exists()
+            assert not (home / ".local" / "bin").exists()
+            return
+        assert result.returncode == 0, detail
     snapshot = Path((root / "payload-dir").read_text().strip())
     assert snapshot.name == identity.runtime_version
     assert profiles.source.read_source_identity(snapshot, "1.0.0") == identity
@@ -680,6 +756,9 @@ def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_p
     prefix = source[:source.index(marker) + len(marker)]
     receipt = tmp_path / "staged-arguments.txt"
     if extension == "ps1":
+        shutil.copy2(
+            SCRIPTS / "versioned_runtime_native.ps1", scripts / "versioned_runtime_native.ps1",
+        )
         body = (
             '[System.IO.File]::WriteAllLines($env:PROFILE_STAGE_RECEIPT, '
             '[string[]]@($InstallDir, $Profile, $Action, [string]$Force.IsPresent, '

@@ -257,6 +257,7 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_SELECTED=0
+SOURCE_RUNTIME_IDENTITY='{}'
 _source_python() {
     local candidate
     for candidate in python3 python; do
@@ -276,9 +277,23 @@ _source_runtime_version() {
         --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-containers "$@"
 }
 if [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
-    SRC_VERSION="$(_source_runtime_version)" || exit 1
+    SOURCE_RUNTIME_IDENTITY="$(_source_runtime_version --format json)" || exit 1
+    source_python="$(_source_python)" || exit 1
+    SRC_VERSION="$("$source_python" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' \
+        "$SOURCE_RUNTIME_IDENTITY")" || exit 1
     SOURCE_SELECTED=1
 fi
+
+_assert_source_runtime_identity() {
+    if [[ "$SOURCE_SELECTED" == 1 || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+        local current
+        current="$(_source_runtime_version --expected-runtime-version "$SRC_VERSION" --format json)" || return 1
+        if [[ "$current" != "$SOURCE_RUNTIME_IDENTITY" ]]; then
+            _fail 'Source runtime identity changed after runtime selection; refusing publication'
+            return 1
+        fi
+    fi
+}
 
 # --- self-provisioning (runtime-self-provisioning pattern) -------------------
 # Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
@@ -499,9 +514,7 @@ trap '_exit_install_lock' EXIT
 trap '_exit_install_lock; exit 130' INT
 trap '_exit_install_lock; exit 143' TERM
 
-if [[ "$SOURCE_SELECTED" == 1 || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
-    _source_runtime_version --expected-runtime-version "$SRC_VERSION" >/dev/null || exit 1
-fi
+_assert_source_runtime_identity || exit 1
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
@@ -516,7 +529,9 @@ if [[ "$ACTION" == "stamp" ]]; then
         source_python="$(_source_python)" || exit 1
         stamp_payload="$("$source_python" -I -B "$SCRIPT_DIR/runtime_profile.py" \
             --root "$INSTALL_DIR" --payload "$PLUGIN_DIR" --stamp-source \
-            --expected-source-version "$SRC_VERSION")" || exit 1
+            --expected-source-version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY")" || exit 1
+        _assert_source_runtime_identity || exit 1
         printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
     fi
     printf '%s\n' "$stamp_payload" > "$INSTALL_DIR/payload-dir"
@@ -569,6 +584,7 @@ profile_args=(
     -I "$SCRIPT_DIR/runtime_profile.py" --root "$INSTALL_DIR"
     --payload "$PLUGIN_DIR" --python "$PYTHON_CMD" --tsv
     --expected-source-version "$SRC_VERSION"
+    --expected-source-identity "$SOURCE_RUNTIME_IDENTITY"
 )
 if [[ "$HAVE_UV" -eq 1 ]]; then profile_args+=(--uv "$(command -v uv)"); fi
 if [[ -n "$PROFILE" ]]; then profile_args+=(--profile "$PROFILE"); fi
@@ -576,6 +592,7 @@ if ! profile_result="$("$PYTHON_CMD" "${profile_args[@]}")"; then
     _fail 'Failed to provision the selected agent-containers runtime profile'
     exit 1
 fi
+_assert_source_runtime_identity || exit 1
 IFS=$'\t' read -r RUNTIME_PROFILE RUNTIME_VERSION VENV_DIR VENV_PYTHON <<< "$profile_result"
 _ok "Runtime profile: $RUNTIME_PROFILE ($RUNTIME_VERSION)"
 
@@ -621,9 +638,9 @@ fi
 TMP="$MANIFEST_PATH.tmp"
 SOURCE_FIELDS=""
 if [[ "$SOURCE_SELECTED" == 1 ]]; then
-    SOURCE_FIELDS="$(_source_runtime_version --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || exit 1
+    _assert_source_runtime_identity || exit 1
     # The profile coordinator owns the profiled runtime_version; retain only source evidence here.
-    SOURCE_FIELDS="$("$PYTHON_CMD" -I -c 'import json,sys; d=json.loads("{"+sys.argv[1]+"}"); print(json.dumps({"runtime_source":d["runtime_source"]})[1:-1]+",")' "$SOURCE_FIELDS")"
+    SOURCE_FIELDS="$("$PYTHON_CMD" -I -c 'import json,sys; d=json.loads(sys.argv[1]); print(json.dumps({"runtime_source":d["runtime_source"]})[1:-1]+",")' "$SOURCE_RUNTIME_IDENTITY")" || exit 1
 fi
 cat > "$TMP" << EOF
 {
