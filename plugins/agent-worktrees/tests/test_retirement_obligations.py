@@ -274,3 +274,45 @@ def test_generic_blocker_does_not_echo_claim_references(tmp_path: Path) -> None:
     assert blocker is not None
     assert "1 held resource claim" in blocker.reason
     assert record.resources[0].ref not in blocker.reason
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pair_id", "new-pair"),
+        ("pair_kind", "anchor"),
+        ("pair_role", "knowledge"),
+        ("pair_ref", "m/other/another-peer"),
+    ],
+)
+def test_each_pair_identity_change_defers_retirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: str
+) -> None:
+    monkeypatch.setattr(
+        tracking.cfg, "project_dir", lambda name: tmp_path / str(name)
+    )
+    record = make_record(tmp_path)
+    record.pair_id = "original-pair"
+    record.pair_kind = "worktree"
+    record.pair_role = "harness"
+    record.pair_ref = "m/other/peer"
+    path = tmp_path / "tracking" / f"{record.worktree_id}.yaml"
+    tracking.save_record(record, path)
+    mutate_record(path, lambda latest: setattr(latest, field, value))
+    original = path.read_bytes()
+
+    assert tracking.retire_record(record, path.parent) is False
+    assert path.read_bytes() == original
+
+
+def test_pr_blocker_names_numbered_and_unnumbered_entries(tmp_path: Path) -> None:
+    from agent_worktrees.retirement_safety import retirement_blocker
+
+    record = make_record(tmp_path)
+    record.prs = [
+        tracking.PRRecord(number=42, state="open"),
+        tracking.PRRecord(state="creating"),
+    ]
+    blocker = retirement_blocker(record)
+    assert blocker is not None
+    assert "PR #42, ?" in blocker.reason
