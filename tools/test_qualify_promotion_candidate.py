@@ -197,7 +197,11 @@ def _candidate_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     if "      - full\n" not in gate:
         gate = gate.replace("    needs:\n", "    needs:\n      - full\n", 1)
     workflow.write_text(before + gate, encoding="utf-8")
-    monkeypatch.setattr(inventory, "regular", lambda root, path: workflow)
+    original = inventory.regular
+    monkeypatch.setattr(
+        inventory, "regular",
+        lambda root, path: workflow if path == Path(".github/workflows/ci.yml") else original(root, path),
+    )
     return workflow
 
 
@@ -208,6 +212,8 @@ def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregat
     required, allowed_skips, digest = inventory.required_jobs(ROOT)
     assert {"guards + lint", "full - agent-worktrees", "archive sources (windows-latest)"} <= required
     assert {"agent-bridge", "agent-index", "Promotion snapshot gate"} <= required
+    assert {f"agent-dispatch (partition {index}/3)" for index in (1, 2, 3)} <= required
+    assert "agent-dispatch" not in required
     assert any(name.startswith("fleet-manager (windows-latest,") for name in required)
     assert any(name.startswith("fleet-manager (ubuntu-latest,") for name in required)
     assert len(required) > 50
@@ -226,7 +232,10 @@ def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(
     assert represented != canonical and b"\r\njobs:\r\n" in represented
     workflow.write_bytes(represented)
     assert inventory.required_jobs(ROOT) == lf
-    assert lf[2] == hashlib.sha256(canonical).hexdigest()
+    helper = (ROOT / "tools/ci_plugin_partitions.py").read_bytes().replace(b"\r\n", b"\n")
+    assert lf[2] == hashlib.sha256(
+        canonical + b"\0tools/ci_plugin_partitions.py\0" + helper,
+    ).hexdigest()
 
 
 def test_inventory_rejects_unknown_lone_cr_source_representation(
@@ -258,6 +267,100 @@ def test_inventory_refuses_missing_or_unsupported_recipes_instead_of_silently_na
     workflow.write_text(text, encoding="utf-8")
     with pytest.raises(CandidateValidationError):
         inventory.required_jobs(ROOT)
+
+
+def _partition_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str,
+) -> Path:
+    helper = tmp_path / "ci_plugin_partitions.py"
+    helper.write_text(text, encoding="utf-8")
+    original = inventory.regular
+    monkeypatch.setattr(
+        inventory, "regular",
+        lambda root, path: helper if path == Path("tools/ci_plugin_partitions.py") else original(root, path),
+    )
+    return helper
+
+
+@pytest.mark.parametrize("text", [
+    "", "_SMOKE_PARTITIONS = dict(agent_dispatch=3)",
+    "_SMOKE_PARTITIONS = {'agent-dispatch': True}",
+    "_SMOKE_PARTITIONS = {'agent-dispatch': 1}",
+    "_SMOKE_PARTITIONS = {'agent-dispatch': 257}",
+    "_SMOKE_PARTITIONS = {'unknown-plugin': 3}",
+    "_SMOKE_PARTITIONS = {'agent-worktrees': 3}",
+    "_SMOKE_PARTITIONS = {'agent-dispatch': 3, 'agent-dispatch': 4}",
+    "_SMOKE_PARTITIONS = {'agent-dispatch': 3}\n_SMOKE_PARTITIONS = {}",
+    "_SMOKE_PARTITIONS = {'agent-dispatch': 3}\n_SMOKE_PARTITIONS: dict = {}",
+    "_SMOKE_PARTITIONS = {'agent-dispatch': 256}",
+    "_SMOKE_PARTITIONS = {",
+])
+def test_inventory_refuses_malformed_ambiguous_or_oversized_partition_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str,
+) -> None:
+    _candidate_workflow(tmp_path, monkeypatch)
+    _partition_source(tmp_path, monkeypatch, text)
+    with pytest.raises(CandidateValidationError, match="smoke partition inventory"):
+        inventory.required_jobs(ROOT)
+
+
+def test_partition_source_is_not_executed_and_its_normalized_bytes_are_receipt_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _candidate_workflow(tmp_path, monkeypatch)
+    text = "_SMOKE_PARTITIONS = {'agent-dispatch': 3}\nraise RuntimeError('must not execute')\n"
+    helper = _partition_source(tmp_path, monkeypatch, text)
+    original = inventory.required_jobs(ROOT)
+    helper.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+    assert inventory.required_jobs(ROOT) == original
+    helper.write_text(text + "# changed source\n", encoding="utf-8")
+    changed = inventory.required_jobs(ROOT)
+    assert changed[:2] == original[:2] and changed[2] != original[2]
+    helper.unlink()
+    with pytest.raises(CandidateValidationError, match="smoke partition inventory"):
+        inventory.required_jobs(ROOT)
+
+
+@pytest.mark.parametrize("mutation", ["include", "extra-axis", "discover", "output", "name"])
+def test_partition_matrix_requires_its_explicit_discovery_and_name_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    text = workflow.read_text("utf-8")
+    old, new = {
+        "include": ("include: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}",
+                    "include: ${{ fromJson(needs.discover.outputs.smoke) }}"),
+        "extra-axis": ("include: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}",
+                       "include: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}\n        extra: [one]"),
+        "discover": ('python tools/ci_plugin_partitions.py matrix "$SMOKE"', 'python other.py "$SMOKE"'),
+        "output": ('echo "smoke_matrix=$SMOKE_MATRIX"', 'echo "other=$SMOKE_MATRIX"'),
+        "name": ("    name: ${{ matrix.name }}", "    name: prefix ${{ matrix.name }}"),
+    }[mutation]
+    assert old in text
+    workflow.write_text(text.replace(old, new), encoding="utf-8")
+    with pytest.raises(CandidateValidationError, match="discovered partitions"):
+        inventory.required_jobs(ROOT)
+
+
+@pytest.mark.parametrize("partition", [1, 2, 3])
+@pytest.mark.parametrize("conclusion", ["missing", "failure", "cancelled"])
+def test_every_actual_dispatch_partition_must_execute_successfully(
+    backend: dict, monkeypatch: pytest.MonkeyPatch, partition: int, conclusion: str,
+) -> None:
+    expected, allowed_skips, digest = inventory.required_jobs(ROOT)
+    monkeypatch.setattr(qualification, "required_jobs", lambda root: (expected, allowed_skips, digest))
+    backend["jobs"] = [
+        dict(id=index, name=name, status="completed", conclusion="success")
+        for index, name in enumerate(sorted(expected), 1)
+    ]
+    target = f"agent-dispatch (partition {partition}/3)"
+    assert target in expected
+    if conclusion == "missing":
+        backend["jobs"] = [row for row in backend["jobs"] if row["name"] != target]
+    else:
+        next(row for row in backend["jobs"] if row["name"] == target)["conclusion"] = conclusion
+    with pytest.raises(workflows.VerificationError, match="required.*row"):
+        _qualify()
 
 
 CandidateValidationError = inventory.CandidateValidationError

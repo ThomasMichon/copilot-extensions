@@ -674,3 +674,26 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   deployment clean room is inapplicable to CI-only scheduling; the next real
   required workflow run is the available external venue. No installed runtime,
   source activation or rollout changed.
+
+### 2026-10-17 - Partition-aware promotion qualification
+
+- Native CI run 39054907434 exercised all three dispatch partitions, but both
+  platform promotion-contract lanes caught a coupled consumer still expecting
+  the former single-plugin matrix. The same two inventory tests failed;
+  this is caused by the scheduling change, not an accepted pre-existing failure.
+- Qualification now statically reads the helper's literal partition map, requires
+  every partition's actual job name and binds normalized workflow plus helper
+  bytes into the qualification receipt. Candidate Python is never imported or
+  executed to discover this inventory. Unknown matrix shapes, malformed or
+  duplicated declarations, missing rows and failed/cancelled partitions refuse.
+- Both platform selectors now include helper-only changes. Unit/consumer tests
+  compare the real helper matrix with qualification's exact row names, exercise
+  each partition's omission/failure/cancellation, and check source identity,
+  LF/CRLF equivalence and non-execution. Fresh current-head review and complete
+  native CI remain required; no deadline or coverage guard is weakened.
+- Isolated qualification/partition/runner/materialization/workflow and receipt
+  consumers passed 331 tests and 75 subtests, with eleven explicit native/Bash
+  skips. The final matrix/selector contract passed fifteen tests; changed
+  Python lint and the thirteen-plugin install contract passed. A separate
+  deployment clean room remains inapplicable to CI-only scheduling; the fresh
+  normal workflow is the required external proof.

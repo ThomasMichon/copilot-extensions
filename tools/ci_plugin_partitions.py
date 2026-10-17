@@ -9,6 +9,7 @@ import re
 
 _PLUGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 _FILES_PER_GROUP = 25
+_SMOKE_PARTITIONS = {"agent-dispatch": 3}
 
 
 def smoke_matrix(plugins: object) -> list[dict]:
@@ -20,7 +21,7 @@ def smoke_matrix(plugins: object) -> list[dict]:
         raise ValueError("duplicate plugin names")
     rows = []
     for plugin in plugins:
-        count = 3 if plugin == "agent-dispatch" else 1
+        count = _SMOKE_PARTITIONS.get(plugin, 1)
         for index in range(count):
             rows.append({
                 "plugin": plugin, "partition": index, "partitions": count,

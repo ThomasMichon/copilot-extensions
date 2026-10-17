@@ -1,6 +1,7 @@
 """Derive required executed rows from the candidate's canonical CI aggregate."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import re
 from pathlib import Path
@@ -14,6 +15,49 @@ _NON_CANDIDATE = {
     "pr-gate": "github.event_name == 'pull_request'",
     "coverage-guided-selection-integration": "inputs.promotion_run == ''",
 }
+
+
+def _smoke_rows(root: Path, plugins: set[str]) -> tuple[list[str], str]:
+    """Read candidate scheduling data without executing candidate Python."""
+    try:
+        text = regular(root, Path("tools/ci_plugin_partitions.py")).read_bytes().decode("utf-8")
+        text = text.replace("\r\n", "\n")
+        if "\r" in text:
+            raise ValueError("unsupported lone carriage return")
+        module = ast.parse(text)
+        declarations = [
+            node.value for node in module.body
+            if (
+                isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "_SMOKE_PARTITIONS"
+                        for target in node.targets)
+            ) or (
+                isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                and node.target.id == "_SMOKE_PARTITIONS"
+            )
+        ]
+        declaration = declarations[0] if len(declarations) == 1 else None
+        if not isinstance(declaration, ast.Dict):
+            raise ValueError("expected one literal partition mapping")
+        keys = [ast.literal_eval(key) for key in declaration.keys]
+        counts = ast.literal_eval(declaration)
+        if len(keys) != len(set(keys)) or any(
+            not isinstance(key, str) or key not in plugins
+            or type(count) is not int or not 2 <= count <= 256
+            for key, count in counts.items()
+        ):
+            raise ValueError("invalid or duplicate partition declaration")
+        rows = [
+            plugin if count == 1 else f"{plugin} (partition {index + 1}/{count})"
+            for plugin in sorted(plugins)
+            for count in [counts.get(plugin, 1)]
+            for index in range(count)
+        ]
+        if not rows or len(rows) > 256:
+            raise ValueError("smoke matrix exceeds the supported job inventory")
+    except (OSError, UnicodeError, SyntaxError, ValueError, TypeError) as error:
+        raise CandidateValidationError("canonical smoke partition inventory is unreadable") from error
+    return rows, text
 
 
 def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
@@ -41,6 +85,7 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
         raise CandidateValidationError("canonical CI heavy-plugin declaration is unavailable")
     expected: set[str] = set()
     allowed_skips: set[str] = set()
+    digest = hashlib.sha256(text.encode("utf-8"))
     for identifier in [*needs, "promotion-gate", *_NON_CANDIDATE]:
         block = jobs.get(identifier)
         if block is None:
@@ -64,6 +109,23 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
                 if "plugin: ${{ fromJson(needs.discover.outputs.smoke) }}" not in block:
                     raise CandidateValidationError("canonical smoke job no longer uses discovered suites")
                 values = sorted(plugins - {heavy[1]})
+            elif identifier == "smoke" and axis == "name":
+                if (
+                    name != "${{ matrix.name }}"
+                    or not re.search(
+                        r"(?m)^      matrix:\n"
+                        r"        include: \$\{\{ fromJson\(needs\.discover\.outputs\.smoke_matrix\) \}\}\n"
+                        r"(?=    \S)", block,
+                    )
+                    or 'SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE")'
+                    not in jobs["discover"]
+                    or 'echo "smoke_matrix=$SMOKE_MATRIX" >> "$GITHUB_OUTPUT"'
+                    not in jobs["discover"]
+                ):
+                    raise CandidateValidationError("canonical smoke job no longer uses discovered partitions")
+                values, partition_source = _smoke_rows(root, plugins - {heavy[1]})
+                digest.update(b"\0tools/ci_plugin_partitions.py\0")
+                digest.update(partition_source.encode("utf-8"))
             elif identifier == "full" and axis == "plugin":
                 entries = re.search(r"(?m)^        plugin:\n((?:          - [a-z][a-z0-9-]*\n)+)", block)
                 values = re.findall(r"(?m)^          - ([a-z][a-z0-9-]*)$", entries[1]) if entries else []
@@ -82,4 +144,4 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
         if not rows or expected.intersection(rows) or len(set(rows)) != len(rows):
             raise CandidateValidationError("canonical CI qualification rows are empty or duplicated")
         expected.update(rows)
-    return expected, allowed_skips, hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return expected, allowed_skips, digest.hexdigest()

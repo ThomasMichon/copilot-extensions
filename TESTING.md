@@ -643,6 +643,11 @@ reporting/cleanup reached the job deadline. Partition-contract tests exercise
 the actual runner's file-selection boundary, native helper CLI, complete
 inventory and workflow/gate wiring; empty or invalid partitions refuse rather
 than silently falling back to a different suite.
+Promotion qualification derives every required partition name from the helper's
+literal `_SMOKE_PARTITIONS` mapping without executing candidate Python. Its
+receipt binds the normalized workflow and helper bytes. Missing, unsuccessful,
+duplicate or unsupported rows still refuse qualification; both native promotion
+contract lanes also select changes to this scheduling helper.
 
 Agent-index's fleet-ingress tests select the same-checkout `fleet-manager[auth]`
 distribution explicitly during development preparation. Its runtime metadata

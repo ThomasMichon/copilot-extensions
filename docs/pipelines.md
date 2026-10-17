@@ -89,6 +89,10 @@ Each portfolio invocation retains its own 120-second deadline and existing
 exhaustive-test exclusions; selectors do not filter the prerequisite coverage
 guard. Missing, duplicate, nonliteral or platform-divergent partition metadata
 refuses qualification instead of collapsing the portfolio under one deadline.
+The canonical smoke portfolio similarly derives every plugin partition from
+`tools/ci_plugin_partitions.py`'s literal scheduling map without importing
+candidate code. Qualification requires each executed partition, and its
+workflow digest binds normalized bytes from both the workflow and that helper.
 
 Validator bootstrap starts with a fresh venv and private empty UV cache. It
 runs the candidate's actual `seasoned_uv.py --registry-only` with the same

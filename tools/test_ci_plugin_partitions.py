@@ -25,6 +25,17 @@ def test_matrix_changes_only_dispatch_parallelism():
     assert smoke_matrix([]) == []
 
 
+def test_candidate_qualification_requires_exactly_the_actual_smoke_matrix_names():
+    from candidate_qualification_inventory import required_jobs
+    from materialized_candidate_inventory import python_suites
+
+    plugins = python_suites(REPO) - {"agent-worktrees"}
+    actual = {row["name"] for row in smoke_matrix(sorted(plugins))}
+    required, _, _ = required_jobs(REPO)
+    assert required & (actual | plugins) == actual
+    assert len(actual) == len(plugins) + 2
+
+
 @pytest.mark.parametrize("plugins", [None, "agent-dispatch", [False], ["../outside"], ["same", "same"]])
 def test_invalid_matrix_refuses_instead_of_omitting_work(plugins):
     with pytest.raises(ValueError):
@@ -101,3 +112,9 @@ def test_workflow_matrix_keeps_every_partition_required_and_existing_deadlines()
     assert "tools/test_ci_plugin_partitions.py" in next(
         step["run"] for step in smoke["steps"] if step.get("name") == "Test CI partition contract"
     )
+    selectors = [
+        step["run"] for job in jobs.values() for step in job.get("steps", [])
+        if step.get("id") == "python-artifact-builder"
+    ]
+    assert len(selectors) == 2
+    assert all("'^tools/(test_)?ci_plugin_partitions\\.py$'" in command for command in selectors)
