@@ -13,6 +13,8 @@ import uuid
 import httpx
 
 from .client_transport import default_idempotent_retries
+from .client_errors import DispatchError, DispatchUpgradeRequired
+from .steering import steer_request_fingerprint, steer_wake_message
 
 
 class SteeringClientMixin:
@@ -72,6 +74,7 @@ class SteeringClientMixin:
         wake: bool = True,
         message: str | None = None,
         expected_status: str | None = None,
+        expected_revision: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict:
         """Submit an answer and ask the coordinator to resume the task owner.
@@ -93,7 +96,16 @@ class SteeringClientMixin:
         coordinator that doesn't yet dedup on this key must never be
         retried, or the "ambiguous timeout" becomes a guaranteed duplicate.
         """
-        key = idempotency_key or uuid.uuid4().hex
+        guarded = expected_revision is not None
+        if guarded:
+            self._require_steering_acceptance()
+            message = steer_wake_message(task_id, message)
+        key = idempotency_key or (
+            "card:" + steer_request_fingerprint(
+                fields=fields, sender=sender, wake_requested=wake, wake_message=message,
+                expected_status=expected_status, expected_revision=expected_revision,
+            ) if guarded else uuid.uuid4().hex
+        )
         payload = {
             "fields": fields,
             "sender": sender,
@@ -102,12 +114,36 @@ class SteeringClientMixin:
             "expected_status": expected_status,
             "idempotency_key": key,
         }
+        if guarded:
+            payload["expected_revision"] = expected_revision
+        path = f"/tasks/{task_id}/steer" + ("/guarded" if guarded else "")
         attempts = default_idempotent_retries() + 1
         delay = 0.1
-        checked_capability = False
+        checked_capability = guarded
         for attempt in range(attempts):
             try:
-                return self._unwrap(self._http.post(f"/tasks/{task_id}/steer", json=payload))
+                result = self._unwrap(self._http.post(path, json=payload))
+                if guarded:
+                    receipt = result.get("steer_receipt") if isinstance(result, dict) else None
+                    accepted = self._steer_acceptance(receipt, task_id, key)
+                    if (
+                        accepted.get("steering_revision") != expected_revision
+                        or accepted.get("request_fingerprint") != steer_request_fingerprint(
+                            fields=fields, sender=sender, wake_requested=wake,
+                            wake_message=message, expected_status=expected_status,
+                            expected_revision=expected_revision,
+                        )
+                    ):
+                        raise DispatchError(
+                            502, f"no verifiable steering acceptance for request {key!r}; inspect its receipt",
+                        )
+                return result
+            except DispatchError as exc:
+                if guarded and exc.status_code in (404, 405) and exc.detail in (
+                    "Not Found", "Method Not Allowed",
+                ):
+                    raise DispatchUpgradeRequired("coordinator lacks guarded steering acceptance") from exc
+                raise
             except httpx.TimeoutException:
                 if attempt == attempts - 1:
                     raise
@@ -118,6 +154,38 @@ class SteeringClientMixin:
                 time.sleep(delay)
                 delay = min(delay * 2, 1.0)
         raise AssertionError("unreachable")  # pragma: no cover
+
+    def _require_steering_acceptance(self) -> None:
+        version = self.health().get("steering_acceptance")
+        if type(version) is not int or version < 1:
+            raise DispatchUpgradeRequired("coordinator lacks guarded steering acceptance")
+
+    @staticmethod
+    def _steer_acceptance(receipt: object, task_id: str, request_id: str) -> dict:
+        accepted = receipt.get("acceptance") if isinstance(receipt, dict) else None
+        wake = receipt.get("wake") if isinstance(receipt, dict) else None
+        if not isinstance(accepted, dict) or (
+            accepted.get("request_id") != request_id or accepted.get("task_id") != task_id
+            or "wake_operation_id" not in accepted
+            or (wake is not None and not isinstance(wake, dict))
+            or (
+                (wake.get("id") if isinstance(wake, dict) else None)
+                != accepted.get("wake_operation_id")
+            )
+        ):
+            raise DispatchError(
+                502, f"no verifiable steering acceptance for request {request_id!r}; inspect its receipt",
+            )
+        return accepted
+
+    def steer_receipt(self, task_id: str, request_id: str) -> dict:
+        """Inspect this exact request's acceptance, consumption and original wake."""
+        self._require_steering_acceptance()
+        receipt = self._unwrap(
+            self._http.get(f"/tasks/{task_id}/steer-receipt", params={"request_id": request_id})
+        )
+        self._steer_acceptance(receipt, task_id, request_id)
+        return receipt
 
     def steer_take(
         self, task_id: str, worker_id: str, *, all_pending: bool = False

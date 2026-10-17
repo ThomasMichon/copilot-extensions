@@ -2260,8 +2260,12 @@ agent-dispatch card set <id> \
 agent-dispatch list --status started        # awaiting_steer=true rows are "needs you"
 agent-dispatch card show <id>
 
-# The operator answers; --wake nudges the owning worktree to resume (default on):
-agent-dispatch steer submit <id> --field decision=Proceed
+# Answer the exact card/owner snapshot returned by card show:
+agent-dispatch steer submit <id> --field decision=Proceed \
+  --expected-revision <steering_revision> --idempotency-key <request-id>
+
+# Inspect this request's acceptance, consumption and original wake independently:
+agent-dispatch steer receipt <id> <request-id>
 
 # The resumed worker drains all answers and continues toward its goal:
 agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "sender": ...}]}
@@ -2276,7 +2280,22 @@ agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "
   their first option by default, so a producer can put its recommendation first
   while still offering the alternatives. Conditions are one level deep: their
   source must be an unconditional choice, and the expected value must be one of
-  that choice's declared options.
+  that choice's declared options. The owner stamps an opaque card `revision`
+  on every post, including byte-identical replacements at the same timestamp.
+  Task reads and `card show` expose a separate opaque `steering_revision`
+  covering the card and owner/session/incarnation/status/awaiting-input basis;
+  routine heartbeat and saved-draft updates do not invalidate it.
+- **Atomic card acceptance.** Pass that exact `steering_revision` as
+  `--expected-revision`. Both native Tasks and Maintenance form actions forward
+  the owner-reported value. The coordinator compares it inside the same SQLite
+  transaction that inserts the answer, clears the draft, changes task state and
+  queues the wake. A changed card or owner is a conflict before any of those
+  effects. A fresh read followed by an unguarded write is not equivalent.
+  SDK callers use `DispatchClient.steer(expected_revision=...)`; the SDK requires
+  `/health` capability `steering_acceptance: 1` and writes only to the guarded
+  endpoint. An old owner, or downgrade after the probe, fails explicitly without
+  falling back to a legacy write. Direct/manual unguarded steering retains its
+  existing advanced-guidance semantics.
 - **`steer submit`** appends the operator's answer to the task's append-only steer
   inbox and clears `awaiting_steer`; it is **not** worker-owned (the operator, or a
   surface acting for them, answers). After persistence, the coordinator asks
@@ -2291,8 +2310,19 @@ agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "
   landed and committed (a live-reproduced failure: an operator's answer was
   already recorded while Picker still reported delivery failure). `steer`
   carries a caller-supplied-or-generated `idempotency_key`; the coordinator
-  recognizes a retry with the same key and returns the already-committed
-  result unchanged instead of appending a second answer.
+  binds that key to the complete canonical answer, sender, expected status/
+  revision and wake intent/message. An exact retry is recognized before the
+  stale-card check, even after consumption, a new card or an ownership change;
+  a different payload or unverifiable pre-upgrade key conflicts instead of
+  returning a false acknowledgement. Existing rows migrate without fabricated
+  acceptance receipts. Native guarded submissions derive a stable key when
+  none is supplied; explicit keys support cross-client recovery.
+  The response's task is the current snapshot, while `steer_receipt.acceptance`
+  is the immutable original acceptance. The CLI exposes it as `receipt`.
+  `consumed_at` independently reports the worker's actual take, and `wake`/
+  `wake_status` observe only that request's original wake operation, never a
+  later task wake. Pending/delivered/stale delivery is not consumption;
+  `resume_requested` for a cold body is not a delivered wake.
   `DispatchClient.steer()` retries only a genuine `httpx.TimeoutException`
   (never any other failure) up to `AGENT_DISPATCH_HTTP_IDEMPOTENT_RETRIES`
   times (default 2), reusing the same key across attempts.

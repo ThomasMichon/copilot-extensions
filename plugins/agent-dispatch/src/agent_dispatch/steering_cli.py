@@ -51,6 +51,7 @@ def _cmd_card_show(args: argparse.Namespace) -> int:
             "card": task.get("card"),
             "awaiting_steer": task.get("awaiting_steer"),
             "card_draft": task.get("card_draft"),
+            "steering_revision": task.get("steering_revision"),
             "steers": steers,
         }
     )
@@ -99,12 +100,20 @@ def _cmd_steer(args: argparse.Namespace) -> int:
             wake=args.wake,
             message=args.message,
             expected_status=args.expected_status,
+            expected_revision=getattr(args, "expected_revision", None),
+            idempotency_key=getattr(args, "idempotency_key", None),
         )
         woken = result.pop("steer_woken", None)
         wake_status = result.pop("steer_wake_status", None)
+        receipt = result.pop("steer_receipt", None)
         if args.wake and wake_status is None:
             wake_status = "unsupported"
-    return _core()._emit({"task": result, "woken": woken, "wake_status": wake_status})
+    return _core()._emit({"task": result, "woken": woken, "wake_status": wake_status, "receipt": receipt})
+
+
+def _cmd_steer_receipt(args: argparse.Namespace) -> int:
+    with _core()._client(args) as client:
+        return _core()._emit(client.steer_receipt(args.task_id, args.request_id))
 
 def _cmd_steer_take(args: argparse.Namespace) -> int:
     """Consume pending steering for a task the worker owns."""
@@ -175,12 +184,25 @@ def register_steering_commands(sub) -> None:
         "current status doesn't match this (a stale cached row)",
     )
     ssm.add_argument(
+        "--expected-revision",
+        help="require the exact owner-reported card/ownership revision atomically",
+    )
+    ssm.add_argument(
+        "--idempotency-key",
+        help="stable request identity; an exact retry returns its original acceptance receipt",
+    )
+    ssm.add_argument(
         "--no-wake",
         dest="wake",
         action="store_false",
         help="do not send an agent-bridge wake nudge to the owning worktree",
     )
     ssm.set_defaults(func=_core()._cmd_steer, wake=True)
+
+    receipt = ssub.add_parser("receipt", help="read exact-request acceptance, consumption and wake delivery")
+    receipt.add_argument("task_id")
+    receipt.add_argument("request_id")
+    receipt.set_defaults(func=_cmd_steer_receipt)
 
     stk = ssub.add_parser("take", help="consume the next pending steer for a task you own (the wake-side read); identity auto-resolved from CWD")
     stk.add_argument("task_id")

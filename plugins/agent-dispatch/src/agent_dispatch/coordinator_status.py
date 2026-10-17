@@ -96,6 +96,7 @@ def register_status_routes(
             # otherwise record a second, duplicate answer (see
             # client_steering.py's steer()).
             "steer_idempotency_key": True,
+            "steering_acceptance": 1,
             "task_categories": 1,
             "exact_dedup_lookup": 1,
         }

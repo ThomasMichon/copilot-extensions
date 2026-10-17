@@ -521,15 +521,17 @@ def test_submit_steer_idempotency_key_dedups_a_retry(q):
         t.id, fields={"f": "value"}, sender="operator", idempotency_key="key-1"
     )
     second = q.submit_steer(
-        t.id, fields={"f": "a different value"}, sender="operator", idempotency_key="key-1"
+        t.id, fields={"f": "value"}, sender="operator", idempotency_key="key-1"
     )
 
     assert first.awaiting_steer is False
     assert second.awaiting_steer is False
     log = q.steer_log(t.id)
     assert len(log) == 1
-    # The retry's (different) field value is never applied -- only the
-    # original, already-committed submission's fields are recorded.
+    with pytest.raises(TaskError, match="request key conflicts"):
+        q.submit_steer(
+            t.id, fields={"f": "a different value"}, sender="operator", idempotency_key="key-1",
+        )
     assert log[0]["fields"] == {"f": "value"}
 
 

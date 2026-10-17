@@ -210,6 +210,14 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
             # this exact column after our PRAGMA snapshot.
             if "duplicate column name" not in str(exc).lower():
                 raise
+    for name in ("request_fingerprint", "acceptance", "wake_operation_id"):
+        if name in task_steer_columns:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE task_steer ADD COLUMN {name} TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     conn.execute(            "CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)"
     )
     # A client-side retry of an ambiguous (already-committed-but-the-

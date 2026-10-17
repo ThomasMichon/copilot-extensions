@@ -17,6 +17,7 @@ compatibility when ``queue.py`` re-exports them.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass, field
@@ -236,6 +237,19 @@ class Task:
     monitor_kind: str | None = None
     monitor_not_before: float | None = None
     category: str = "work"
+
+    @property
+    def steering_revision(self) -> str:
+        """Card/owner CAS basis; routine heartbeat and draft writes do not change it."""
+        basis = {
+            "task_id": self.id, "card": self.card, "owner": self.owner,
+            "owner_session_id": self.owner_session_id, "generation": self.generation,
+            "attempts": self.attempts, "claimed_at": self.claimed_at,
+            "status": self.status, "awaiting_steer": self.awaiting_steer,
+        }
+        return hashlib.sha256(
+            json.dumps(basis, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Task:

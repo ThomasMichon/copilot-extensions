@@ -41,7 +41,7 @@
     {
       "key": "steer", "label": "Steer — read the card & answer", "kind": "form",
       "fields_from": "card.request_input", "title_from": "card.title", "body_from": "card.body",
-      "run": ["agent-dispatch", "steer", "submit", "{task_id}", "{fields}", "--expected-status", "{status}"],
+      "run": ["agent-dispatch", "steer", "submit", "{task_id}", "{fields}", "--expected-status", "{status}", "--expected-revision", "{steering_revision}"],
       "when": {"group": "Blocked"}
     },
     {

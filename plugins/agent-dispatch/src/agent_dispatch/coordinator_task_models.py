@@ -199,6 +199,7 @@ class SteerBody(BaseModel):
     wake: bool = True
     message: str | None = None
     expected_status: str | None = None
+    expected_revision: str | None = None
     idempotency_key: str | None = None
 
 
