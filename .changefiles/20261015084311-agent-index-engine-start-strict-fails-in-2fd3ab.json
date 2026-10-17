@@ -1,9 +1,0 @@
-{
-  "comment": "'agent-index engine start --strict' fails instead of starting the engine inside a caller's Job that forbids breakaway; the installer's start-now uses it.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

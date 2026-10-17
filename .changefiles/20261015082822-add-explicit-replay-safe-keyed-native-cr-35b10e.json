@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit replay-safe keyed native creation for exact provider-exec instances without fabricating worktrees.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

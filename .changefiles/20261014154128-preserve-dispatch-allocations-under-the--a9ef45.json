@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve dispatch allocations under the owner record lock for exact automatic workspace cleanup while retaining explicit operator cleanup semantics",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

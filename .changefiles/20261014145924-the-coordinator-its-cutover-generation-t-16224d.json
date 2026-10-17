@@ -1,9 +1,0 @@
-{
-  "comment": "The coordinator, its cutover generation, the supervisor, its self-update successor and the self-deploy launch through the shared spawn_daemon primitive and keep an append-only stdio log under the runtime root.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

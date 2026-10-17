@@ -1,9 +1,0 @@
-{
-  "comment": "The installer refuses to publish a runtime slot's completion marker when the payload hash can't be computed.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

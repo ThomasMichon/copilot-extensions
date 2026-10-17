@@ -1,9 +1,0 @@
-{
-  "comment": "update runs runtime and module installers under a deadline that owns their whole process tree (kill-on-close Job on Windows, own session on POSIX) and judges success by the runtime's deploy-manifest receipt; reconcile plan steps are bounded too.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

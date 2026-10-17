@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve hidden lifecycle installer stdout and stderr across Windows native dispatch",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

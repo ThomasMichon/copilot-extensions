@@ -1,9 +1,0 @@
-{
-  "comment": "Materialize a closed non-editable dependency graph in deferred SSH snapshots",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Compose optional budget advice without changing model qualification or explicit choices.",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

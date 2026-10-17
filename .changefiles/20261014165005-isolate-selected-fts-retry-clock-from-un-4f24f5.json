@@ -1,9 +1,0 @@
-{
-  "comment": "Isolate selected FTS retry clock from unrelated subprocess polling sleeps",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

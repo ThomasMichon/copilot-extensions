@@ -1,9 +1,0 @@
-{
-  "comment": "The logon auto-start's start-now goes through Ensure-ServiceRunning / Ensure-EngineRunning (spawn_daemon) instead of a PowerShell Start-Process of the launcher; both ensure paths now apply service.env / engine.env like the launchers do.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

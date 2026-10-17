@@ -1,9 +1,0 @@
-{
-  "comment": "Cover explicit deferred-seed parser options and unchanged ordinary Resolve ownership defaults.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
