@@ -452,9 +452,13 @@ The automatic fallback gives native/manual review **five minutes from the
 triggering PR event's `updated_at` timestamp**, without API polling. Queue time
 counts toward that grace: a run queued for five minutes does not occupy a runner
 for another five. Invalid/future event timestamps fail before requesting review.
-After any remaining grace, it checks the live PR once. It skips closed/draft/retargeted PRs,
-pending Copilot reviews, completed reviews of the current diff, and requests
-still inside their five-minute grace period. Completed reviews must be newer
+It first checks live eligibility, without waiting when the PR is already
+closed/draft/retargeted/superseded, pending Copilot review, or reviewed for the
+current diff. Only an unresolved request holds a runner for the remaining grace;
+read time also counts toward that interval. After a wait it refreshes the entire
+eligibility snapshot before any write. A run that arrives after the grace needs
+only one snapshot, not a second read or a delay. Requests still inside their own
+five-minute grace period also suppress a nudge. Completed reviews must be newer
 than the latest base-retarget/reopen event. Identity checks accept the observed
 `Copilot` and `copilot-pull-request-reviewer[bot]` aliases only for API users
 typed `Bot`; the review write retains the canonical app login. A run superseded by a newer push
