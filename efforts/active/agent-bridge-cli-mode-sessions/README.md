@@ -909,10 +909,12 @@ requires fresh current-head CI and review.
 
 ### 2026-10-17 - Ordinary native recovery merged
 
-PR #7002 merged to `dev` as `143620e4dc` after current-head CI passed,
-including the required PR gate. The current-head Copilot `Comment` reported
-zero open findings; it retained a full-agentic startup-timeout warning and
-used the Lite fallback, not a completed full agentic review. The two addressed
+PR #7002 merged to `dev` as
+[`143620e4dc`](https://github.com/ThomasMichon/copilot-extensions/commit/143620e4dc2c7a26c0af39a7dc8a126bfc9d6e86)
+after current-head CI passed, including the required PR gate. The current-head
+Copilot Lite fallback `Comment` reported zero open findings. The full agentic
+review never started before its timeout, so that result does not establish a
+completed full review or rule out additional findings. The two addressed
 alias/profile threads were resolved with their implementation and regression
 evidence.
 
