@@ -43,6 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy')) {
     $lifecycleArgs = @($Action)
@@ -814,7 +815,7 @@ if ($SrcVersion) {
 function Get-SourceRuntimeIdentity {
     param([string]$Payload = $PluginDir, [string]$ExpectedVersion = '')
     $py = $null
-    foreach ($candidate in 'python3', 'python') {
+    foreach ($candidate in 'python3', 'python', 'py') {
         $command = Get-Command $candidate -ErrorAction SilentlyContinue
         if ($command -and $command.Source -notmatch 'WindowsApps') { $py = $command.Source; break }
     }
@@ -823,14 +824,10 @@ function Get-SourceRuntimeIdentity {
         '--payload', $Payload, '--package-version', $PackageVersion,
         '--plugin', 'agent-machines', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
-    $previous = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $result = @(& $py @arguments 2>&1)
-        $code = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previous }
-    $detail = ($result | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-    if ($code -ne 0) { throw "Source runtime identity validation failed: $detail" }
+    $nativeError = ''
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "Source runtime identity validation failed: $detail$nativeError" }
     return $detail.Trim()
 }
 

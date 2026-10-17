@@ -9,14 +9,12 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "init.ps1"
@@ -110,8 +108,7 @@ def test_policy_calls_preserve_native_isolation_separator_and_exit(tmp_path: Pat
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     source = INSTALLER.read_text(encoding="utf-8")
-    helper = re.search(r"(?ms)^function Invoke-Hidden \{.*?^\}", source)
-    assert helper
+    helper = ". '" + str(INSTALLER.parent / "versioned_runtime_native.ps1") + "'\n"
     calls = [
         line.strip() for line in source.splitlines()
         if line.strip().startswith("Invoke-Hidden ") and "installer_dependency_policy.py" in line
@@ -127,7 +124,7 @@ def test_policy_calls_preserve_native_isolation_separator_and_exit(tmp_path: Pat
         f"raise SystemExit({exit_code})\n", encoding="utf-8",
     )
     script = (
-        "$ErrorActionPreference='Stop'\n" + helper.group(0) + "\n"
+        "$ErrorActionPreference='Stop'\n" + helper + "\n"
         f"$VenvPython='{sys.executable}'\n$PSScriptRoot='{scripts}'\n"
         f"$PluginDir='{tmp_path / 'plugin with spaces'}'\n"
         f"$libDir='{tmp_path / 'library with spaces'}'\n"

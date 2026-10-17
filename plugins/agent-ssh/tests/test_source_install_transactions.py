@@ -98,7 +98,7 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 def _payload(tmp_path: Path, plugin: str) -> tuple[Path, dict]:
     payload = tmp_path / "payload"
     (payload / "scripts").mkdir(parents=True)
-    for source in _scripts(plugin).glob("versioned_runtime*.py"):
+    for source in _scripts(plugin).glob("versioned_runtime*.*"):
         shutil.copyfile(source, payload / "scripts" / source.name)
     for suffix in ("ps1", "sh"):
         source = _scripts(plugin) / f"{_entry(plugin)}.{suffix}"
@@ -153,6 +153,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $PluginDir = {_ps(payload)}
 $ScriptDir = Join-Path $PluginDir 'scripts'
+. (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
 $InstallDir = {_ps(tmp_path / 'install')}
 $LocalBin = {_ps(tmp_path / 'bin')}
 $SrcVersion = '{VERSION}'

@@ -267,6 +267,7 @@ def _prelude(ext: str, engine: Path = ENGINE) -> str:
         "function Write-Warn { param($Msg) Write-ServiceWarn $Msg }\n"
         "function Write-Ok { param($Msg) }\nfunction Start-Sleep { param($Seconds) }\n"
         f". '{engine / 'installer-engine.ps1'}'\n"
+        f". '{PLUGIN / 'scripts' / 'versioned_runtime_native.ps1'}'\n"
         f"$PluginDir = '{PLUGIN}'\n"
         f". '{PLUGIN / 'scripts' / 'source-runtime.ps1'}'\n"
     )
@@ -773,6 +774,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_native.ps1",
     ):
         assert (snapshot / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
     for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
@@ -1117,7 +1119,7 @@ def test_native_dev_generation_dependency_failure_preserves_working_runtime(tmp_
     base, helper = Path(sys._base_executable), PLUGIN / "scripts/versioned_runtime.py"
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-        "versioned_runtime_source.py", "versioned_runtime.py",
+        "versioned_runtime_source.py", "versioned_runtime.py", "versioned_runtime_native.ps1",
     ):
         shutil.copyfile(helper.with_name(name), tmp_path / name)
     if ext == "ps1":

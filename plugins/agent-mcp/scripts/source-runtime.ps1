@@ -9,16 +9,17 @@ function Get-SourceRuntimeIdentity {
         '--payload', $Payload, '--package-version', $PackageVersion,
         '--plugin', 'agent-mcp', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
+    $nativeError = ''
     $previousErrorAction = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $result = @(& $py @arguments 2>&1)
+        $result = @(Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError))
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousErrorAction
     }
     $detail = ($result | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-    if ($code -ne 0) { throw "Source runtime identity validation failed (exit ${code}): $detail" }
+    if ($code -ne 0) { throw "Source runtime identity validation failed (exit ${code}): $detail$nativeError" }
     return $detail.Trim()
 }
 
