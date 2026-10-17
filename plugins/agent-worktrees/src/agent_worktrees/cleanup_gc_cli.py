@@ -11,6 +11,7 @@ from pathlib import Path
 from . import finalize as fin, git_ops, output, prune, reap_cli, sessions, tracking
 from . import claimant as claimant_mod
 from . import config as cfg
+from .retirement_safety import retirement_blocker
 
 
 def _core():
@@ -42,7 +43,7 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("cleanup", help="List and clean orphaned worktrees")
     p.add_argument("--clean", action="store_true")
     p.add_argument("--worktree-id", default=None, help="Clean a single worktree by ID (non-interactive, re-checks prune-safety; pair with --json for the picker's per-item progress)")
-    p.add_argument("--force", action="store_true", help="With --worktree-id: reap even if prune-safety would skip it (still refuses an active session)")
+    p.add_argument("--force", action="store_true", help="With --worktree-id: override content checks (never active sessions, open PRs, or held resource obligations)")
     p.add_argument("--automatic", action="store_true", help="With --worktree-id and without --force: preserve dispatch allocations for their owner conclusion")
     p.add_argument("--json", action="store_true", help="With --worktree-id: emit a single JSON result object")
     p.add_argument("--include-unused", action="store_true", help="Also clean truly-empty worktrees (no commits, zero conversation turns)")
@@ -242,11 +243,13 @@ def _revalidate_cleanup_safety(
       (lock order: ``FinalizeLock`` then ``_RecordLock`` -- never reversed).
     - **Forced** (`force=True`): mirrors ``reap_one --force``'s documented,
       narrower escape hatch -- skips ``cleanup_disposition`` entirely (dirty/
-      WIP/claims/follow-ups/branch-merge are NOT re-checked), but still
+      WIP/follow-ups/branch-merge are NOT re-checked), but still
       refreshes liveness fresh, under the lock, via the *same* liveness-read
       code path as the non-forced contract (closing the gap where ``--force``
       used to trust a stale pre-lock ``active_paths`` snapshot). Liveness checks
-      and execution-space authority never yield to ``--force``.
+      and execution-space authority never yield to ``--force``. Open PRs and
+      held outbound resource obligations also block both forced removal and
+      retirement of a missing checkout.
       The same sidecar lock fences identity changes through forced removal.
 
     A worktree with no on-disk path (``GONE``) re-proves the branch-merged
@@ -318,6 +321,11 @@ def _revalidate_cleanup_safety(
                 return RevalidationResult(
                     False, "worktree became active since the initial scan",
                     "active")
+
+            if force or fresh_info.state == git_ops.WorktreeState.GONE:
+                blocker = retirement_blocker(latest)
+                if blocker is not None:
+                    return RevalidationResult(False, blocker.reason, blocker.bucket)
 
             if force:
                 failures, warnings = _do_reap(latest, fresh_info)
@@ -482,8 +490,10 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         include_conversations = getattr(args, "include_conversations", False)
 
         if info.state == git_ops.WorktreeState.GONE:
-            # Directory missing -- verify branch content is on master first.
-            if rec.branch and not git_ops.is_branch_merged(
+            blocker = retirement_blocker(rec)
+            if blocker is not None:
+                skip_reason = blocker.reason
+            elif rec.branch and not git_ops.is_branch_merged(
                 rec.branch,
                 upstream,
                 cwd=repo.anchor,

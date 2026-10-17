@@ -4375,6 +4375,11 @@ def _reap_worktree(
     warnings: list[str] = []
     failures = 0
 
+    from .retirement_safety import retirement_blocker
+    blocker = retirement_blocker(rec)
+    if blocker is not None:
+        return 1, [f"Cannot retire {rec.worktree_id}: {blocker.reason}"]
+
     if not rec.checkout_managed:
         if not tracking.retire_record(rec, tracking_path):
             # pr-attribution-codenames Phase 2 follow-up: a contended
