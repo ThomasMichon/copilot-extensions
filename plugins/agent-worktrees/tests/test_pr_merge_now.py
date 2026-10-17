@@ -48,7 +48,8 @@ def _self_merge_flow():
 class _FakeProvider:
     name = "github"
 
-    def __init__(self, err="", auto_err="unsupported", review_gate=None, live_head=""):
+    def __init__(self, err="", auto_err="unsupported", review_gate=None, live_head="",
+                 merge_pending=False, confirmation_error=False):
         self._live_head = live_head
         self._err = err
         self._auto_err = auto_err
@@ -57,6 +58,8 @@ class _FakeProvider:
         self.auto_calls = []
         self.complete_calls = []
         self.review_gate_calls = []
+        self._merge_pending = merge_pending
+        self._confirmation_error = confirmation_error
 
     def merge_pull(self, repo, number, *, squash=True, admin=False,
                    api_base="", token=None, delete_source_branch=True,
@@ -65,6 +68,8 @@ class _FakeProvider:
                                admin=admin,
                                delete_source_branch=delete_source_branch,
                                expected_head_sha=expected_head_sha))
+        if not self._err and expected_head_sha:
+            self._live_head = expected_head_sha
         return self._err
 
     def enable_auto_merge(self, repo, number, *, squash=True,
@@ -94,7 +99,12 @@ class _FakeProvider:
         return self._auto_err
 
     def get_pull(self, repo, number, *, api_base="", token=None):
-        return prov.PullResult(number=number, head_sha=self._live_head)
+        if self.calls and self._confirmation_error:
+            raise prov.ProviderError("completion unavailable")
+        return prov.PullResult(
+            number=number, head_sha=self._live_head,
+            merged=bool(self.calls) and not self._merge_pending,
+        )
 
     def pull_review_gate(self, repo, number, *, api_base="", token=None):
         self.review_gate_calls.append(dict(repo=repo, number=number))
@@ -143,6 +153,54 @@ def test_now_self_merge_calls_merge_pull_squash_admin(monkeypatch, capsys):
     rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True, expected_head_sha="")]
+
+
+def test_normal_merge_queue_admission_is_not_reported_as_merged(monkeypatch, capsys):
+    import json
+
+    fake = _FakeProvider(merge_pending=True)
+    _patch_provider(monkeypatch, fake)
+    assert m._pr_merge_now(_args(json=True), _prcfg(), _self_merge_flow(), apply=True) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["action"] == "merge-pending"
+    assert result["applied"] is True and result["merged"] is False
+    assert result["reminder"]["verb"] == "pr-watch"
+    assert len(fake.calls) == 1
+
+
+def test_normal_merge_unreadable_completion_never_claims_landed(monkeypatch, capsys):
+    import json
+
+    fake = _FakeProvider(confirmation_error=True)
+    _patch_provider(monkeypatch, fake)
+    assert m._pr_merge_now(_args(json=True), _prcfg(), _self_merge_flow(), apply=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["applied"] is True and result["merged"] is False
+    assert result["completion_verified"] is False
+    assert "completion unavailable" in result["error"]
+
+
+def test_normal_merge_completion_with_wrong_head_is_not_success(monkeypatch, capsys):
+    import json
+    from agent_worktrees import pr_cli
+
+    fake = _FakeProvider(live_head="a" * 40)
+    read = fake.get_pull
+
+    def changed(repo, number, **kwargs):
+        if fake.calls:
+            return prov.PullResult(number=number, head_sha="b" * 40, merged=True)
+        return read(repo, number, **kwargs)
+
+    fake.get_pull = changed
+    _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head", lambda *args: "a" * 40)
+    assert m._pr_merge_now(
+        _args(json=True), _prcfg(), _self_merge_flow(), apply=True, config=object(),
+    ) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["merged"] is False and result["completion_verified"] is False
+    assert "different or unavailable head" in result["error"]
 
 
 def test_now_blocking_review_never_uses_admin_bypass(monkeypatch):
@@ -318,9 +376,9 @@ def test_now_adopts_a_moved_head_only_when_it_is_the_worktrees_own(monkeypatch, 
     assert fake.calls[0]["expected_head_sha"] == expected
 
 
-def test_now_merges_against_the_recorded_head_when_the_live_head_is_unreadable(monkeypatch):
-    """A malformed provider read (here, bad JSON) is no usage error: the merge
-    goes ahead against the recorded expectation."""
+def test_now_attempts_recorded_head_but_cannot_confirm_unreadable_completion(monkeypatch, capsys):
+    """A malformed initial read still permits a pinned attempt, not a false
+    completed-merge receipt when the subsequent read also fails."""
     from agent_worktrees import pr_cli
 
     fake = _FakeProvider()
@@ -329,7 +387,8 @@ def test_now_merges_against_the_recorded_head_when_the_live_head_is_unreadable(m
     monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head",
                         lambda config, repo, number, provider: "just-pushed-sha")
     rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True, config=object())
-    assert rc == 0 and fake.calls[0]["expected_head_sha"] == "just-pushed-sha"
+    assert rc == 1 and fake.calls[0]["expected_head_sha"] == "just-pushed-sha"
+    assert "completion lookup failed" in capsys.readouterr().out
 
 
 def test_now_omits_match_head_commit_without_config(monkeypatch):

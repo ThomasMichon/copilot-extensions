@@ -1113,6 +1113,10 @@ class TestGitHubProvider:
             github_required_checks, "verified_merge_head",
             lambda *args, **kwargs: kwargs["expected_head_sha"] or "a" * 40,
         )
+        monkeypatch.setattr(
+            github_required_checks, "_protected_merge_head",
+            lambda *args, **kwargs: kwargs["expected_head_sha"] or "a" * 40,
+        )
 
     def test_observe_head_uses_server_date(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -1460,9 +1464,9 @@ class TestGitHubProvider:
         assert captured["env"]["GH_TOKEN"] == "tok"
         assert res.state == "open"
 
-    def test_merge_pull_squash_admin_builds_args(self, monkeypatch, passed_admin_checks):
-        # pr-merge --now: a submitter self-merge is a squash merge, admin past
-        # the non-blocking gate, and deletes the branch by default (safe --
+    def test_merge_pull_squash_prefers_normal_when_admin_allowed(self, monkeypatch, passed_admin_checks):
+        # pr-merge --now tries a protected squash merge first, even when
+        # a configured admin fallback is allowed, and deletes the branch (safe --
         # finalize/pr-complete verify a merged PR against the tracked record's
         # own head_sha, never the live remote branch).
         from agent_worktrees.providers import github
@@ -1477,7 +1481,7 @@ class TestGitHubProvider:
         assert err == ""
         a = captured["args"]
         assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
-        assert "--squash" in a and "--admin" in a
+        assert "--squash" in a and "--admin" not in a
         assert "--delete-branch" in a
 
     def test_merge_pull_delete_source_branch_false_omits_flag(self, monkeypatch):
@@ -1511,7 +1515,7 @@ class TestGitHubProvider:
         assert "--match-head-commit" in a
         assert a[a.index("--match-head-commit") + 1] == "deadbeef"
 
-    def test_admin_merge_pins_verified_head_when_not_given(self, monkeypatch, passed_admin_checks):
+    def test_normal_merge_pins_discovered_head_when_admin_allowed(self, monkeypatch, passed_admin_checks):
         from agent_worktrees.providers import github
         captured = {}
         monkeypatch.setattr(
