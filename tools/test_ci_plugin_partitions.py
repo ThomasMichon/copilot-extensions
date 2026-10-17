@@ -3,6 +3,7 @@
 from collections import Counter
 import importlib.util
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -109,9 +110,23 @@ def test_workflow_matrix_keeps_every_partition_required_and_existing_deadlines()
     assert "timeout" not in command and " -k " not in command and " --guards" not in command
     resolve = next(step["run"] for step in jobs["discover"]["steps"] if step.get("id") == "set")
     assert 'python tools/ci_plugin_partitions.py matrix "$SMOKE"' in resolve
-    assert "tools/test_ci_plugin_partitions.py" in next(
-        step["run"] for step in smoke["steps"] if step.get("name") == "Test CI partition contract"
-    )
+    assert not any("test_ci_plugin_partitions.py" in step.get("run", "") for step in smoke["steps"])
+    for identifier in ("test-runner-linux", "test-runner-windows"):
+        job = jobs[identifier]
+        selector = next(step for step in job["steps"] if step.get("id") == "runner-contracts")
+        expression = re.search(r"grep -Eq\s*\\\n\s*'([^']+)'", selector["run"])
+        assert expression is not None
+        for path in (
+            "tools/ci_plugin_partitions.py", "tools/test_ci_plugin_partitions.py",
+            "tools/run-plugin-tests.py", "tools/test_run_plugin_tests.py", ".github/workflows/ci.yml",
+        ):
+            assert re.search(expression[1], path), (identifier, path)
+        assert not re.search(expression[1], "docs/unrelated.md")
+        contract = next(step for step in job["steps"] if step.get("name") == "Test runner admission and isolation")
+        assert contract["if"] == "steps.runner-contracts.outputs.run == 'true'"
+        assert contract["run"].count("tools/test_ci_plugin_partitions.py") == 1
+        assert "continue-on-error" not in contract
+        assert identifier in jobs["pr-gate"]["needs"] and identifier in jobs["promotion-gate"]["needs"]
     selectors = [
         step["run"] for job in jobs.values() for step in job.get("steps", [])
         if step.get("id") == "python-artifact-builder"

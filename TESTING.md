@@ -643,6 +643,11 @@ reporting/cleanup reached the job deadline. Partition-contract tests exercise
 the actual runner's file-selection boundary, native helper CLI, complete
 inventory and workflow/gate wiring; empty or invalid partitions refuse rather
 than silently falling back to a different suite.
+These contracts execute in both required native test-runner lanes, independently
+of the selected plugin smoke matrix. Their changed-path selectors cover the
+partition helper/tests, contained runner/tests and CI workflow, so scheduling-only
+changes cannot bypass the complete/disjoint coverage and runner-compatibility
+checks.
 Promotion qualification derives every required partition name from the helper's
 literal `_SMOKE_PARTITIONS` mapping without executing candidate Python. Its
 receipt binds the normalized workflow and helper bytes. Missing, unsuccessful,

@@ -701,3 +701,10 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   single grep expression. It now reads both literal `-e` expressions and
   retains all existing positive/negative scope assertions, adding helper/test
   paths and rejecting their backup-file siblings on both platforms.
+- Current-head review then identified scheduling-only changes could omit the
+  smoke matrix entirely, skipping the focused completeness/runner contract.
+  Move that suite into both existing required native runner lanes, extending
+  their selectors for helper/test-only changes. Reuse existing dependency
+  preparation, job budgets and aggregate dependencies; do not add a new job,
+  dependency or advisory check. The workflow contract proves that independent
+  route for helper, test, runner and workflow changes.
