@@ -1,5 +1,5 @@
 {
-  "comment": "Ship complete installation-context wheel fragments and shared native command-line typing used by explicit repair.",
+  "comment": "Ship complete installation-context wheel fragments and shared native command-line typing used by explicit repair; make resident-row parity guards independent of wall-clock second boundaries.",
   "changes": [
     {
       "plugin": "agent-bridge",

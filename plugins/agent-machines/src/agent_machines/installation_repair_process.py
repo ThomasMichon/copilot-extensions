@@ -125,7 +125,7 @@ def run_action(
         if terminated:
             return
         if job is not None:
-            job.close()
+            job.terminate_and_wait(5)
         elif os.name != "nt":
             try:
                 os.killpg(process.pid, signal.SIGKILL)

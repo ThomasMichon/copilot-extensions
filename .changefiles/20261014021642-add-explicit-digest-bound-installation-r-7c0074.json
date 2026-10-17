@@ -1,5 +1,5 @@
 {
-  "comment": "Add explicit digest-bound installation repair with ordinary host admission and independent readiness",
+  "comment": "Add explicit digest-bound installation repair with ordinary host admission, bound command interpreters, confirmed Windows Job teardown and independent readiness",
   "changes": [
     {
       "plugin": "agent-machines",

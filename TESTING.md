@@ -430,6 +430,11 @@ The admitted executable is passed as an absolute argv path. A native POSIX
 relative-PATH case separates the conductor and payload working directories and
 places a different executable at the payload-relative path; real plan/apply
 must still invoke the admitted interpreter.
+POSIX payload commands bind supported `sh`/`bash` shebang interpreters, bypassing
+`env` lookup after the working-directory change and refusing unsupported forms.
+Both command and script relative-PATH cases exercise real plan/apply. Native
+Windows Job teardown confirms zero active members, including an exited
+installer's redirected descendant, before releasing the repair lock.
 Post-install probes also require fresh owner admission before readiness is
 accepted, including the final selected module. Binding drift or cancellation
 retains the completed installer result but rejects stale readiness and blocks

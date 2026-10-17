@@ -114,7 +114,19 @@ def _argv(invocation: Invocation, platform: Platform) -> list[str]:
         if not interpreter:
             raise RepairAdmissionError("repair requires an existing Bash interpreter")
         return [interpreter, str(invocation.target), *invocation.arguments]
-    return [str(invocation.target), *invocation.arguments]
+    with invocation.target.open("rb") as stream:
+        shebang = stream.readline(256).rstrip(b"\r\n")
+    if shebang in (b"#!/usr/bin/env sh", b"#!/usr/bin/env bash"):
+        interpreter = shutil.which(shebang.rsplit(b" ", 1)[1].decode("ascii"))
+    elif shebang in (
+        b"#!/bin/sh", b"#!/bin/bash", b"#!/usr/bin/sh", b"#!/usr/bin/bash",
+    ):
+        interpreter = os.fsdecode(shebang[2:])
+    else:
+        raise RepairAdmissionError("repair command has an unsupported interpreter declaration")
+    if not interpreter:
+        raise RepairAdmissionError("repair requires the declared command interpreter")
+    return [interpreter, str(invocation.target), *invocation.arguments]
 
 
 def _environment(owner: OwnerBinding, *, readonly: bool) -> dict[str, str]:

@@ -201,6 +201,64 @@ def test_relative_path_executes_admitted_interpreter_not_payload_twin(
     assert (home / "agent-example-base.ready").read_text() == "ready"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX command interpreter execution")
+@pytest.mark.parametrize("shebang", ["#!/usr/bin/env sh", "#!/usr/bin/env bash"])
+def test_payload_command_binds_interpreter_before_changing_cwd(
+    repair_fixture, tmp_path, monkeypatch, shebang,
+):
+    home, _, payload, _, _ = repair_fixture
+    name = shebang.rsplit(" ", 1)[1]
+    interpreter = shutil.which(name)
+    assert interpreter
+    conductor = tmp_path / "conductor"
+    admitted = conductor / "relative-bin" / name
+    admitted.parent.mkdir(parents=True)
+    shutil.copyfile(interpreter, admitted)
+    admitted.chmod(0o755)
+    twin = payload / "relative-bin" / name
+    twin.parent.mkdir()
+    twin.write_text("#!/bin/sh\nexit 96\n", encoding="utf-8")
+    twin.chmod(0o755)
+    target = payload / "bin" / "agent-example"
+    target.parent.mkdir()
+    target.write_text(
+        (payload / "scripts" / "action.sh").read_text().replace(
+            "#!/usr/bin/env bash", shebang,
+        ).replace('state="$HOME/${2//\\//-}.ready"',
+                  'state="$HOME/agent-example-base.ready"'),
+        encoding="utf-8",
+    )
+    target.chmod(0o755)
+    declaration = payload / "installer-readiness.json"
+    value = json.loads(declaration.read_text())
+    for module in value["modules"]:
+        for actions in (module["installer"], module["readiness"]["invocations"]):
+            for platform in ("linux", "wsl", "macos"):
+                actions[platform].pop("path")
+                actions[platform].update(kind="payload-command", command="agent-example")
+    write_json(declaration, value)
+    monkeypatch.chdir(conductor)
+    monkeypatch.setenv("PATH", "relative-bin")
+    plan = invoke(repair_fixture, selection=("base",))
+    assert plan["outcomes"][0]["observedBefore"]["state"] == "not-ready"
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"], selection=("base",))
+    assert result["status"] == "ready" and result["requiredSatisfied"]
+    assert result["outcomes"][0]["installer"] == {"status": "exited", "exitCode": 0}
+    assert (home / "agent-example-base.ready").read_text() == "ready"
+
+
+@pytest.mark.parametrize("shebang", [
+    "#!/usr/bin/env sh -e", "#!/usr/bin/env -S bash", "#!relative/sh",
+    "#!/usr/bin/python3", "not a script",
+])
+def test_payload_command_refuses_unsupported_interpreter_forms(tmp_path, shebang):
+    target = tmp_path / "agent-example"
+    target.write_text(shebang + "\n", encoding="utf-8")
+    action = Invocation(kind="payload-command", target=target, arguments=())
+    with pytest.raises(RepairAdmissionError, match="unsupported interpreter declaration"):
+        repair_api._admit_invocation(action, Platform.LINUX)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows CMD contract")
 @pytest.mark.parametrize("readonly", [True, False])
 def test_native_cmd_preserves_payload_path_and_argument_spaces(tmp_path, readonly):
@@ -214,6 +272,74 @@ def test_native_cmd_preserves_payload_path_and_argument_spaces(tmp_path, readonl
     )
     assert result.status == "exited" and result.exit_code == 0
     assert result.stdout.decode().splitlines() == ["[first value]", "[last\\]"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows Job teardown and lock ordering")
+def test_windows_exited_installer_reaps_redirected_descendant_before_unlock(
+    tmp_path, monkeypatch,
+):
+    import ctypes
+    from ctypes import wintypes
+    from agent_procutil import JobHandle
+
+    pid_file = tmp_path / "descendant.pid"
+    child = (
+        "import os,time; from pathlib import Path; "
+        f"Path({str(pid_file)!r}).write_text(str(os.getpid())); time.sleep(60)"
+    )
+    parent = (
+        "import subprocess,sys,time; from pathlib import Path; "
+        "from agent_procutil import no_window_kwargs; "
+        f"subprocess.Popen([sys.executable,'-c',{child!r}],stdin=subprocess.DEVNULL,"
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**no_window_kwargs()); "
+        f"p=Path({str(pid_file)!r}); deadline=time.monotonic()+8\n"
+        "while not p.exists() and time.monotonic()<deadline: time.sleep(.02)\n"
+        "assert p.exists()\n"
+    )
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    original = JobHandle.terminate_and_wait
+    original_spawn = process_api.spawn_sync_in_kill_on_close_job
+    parents = []
+    confirmed = []
+
+    def capture_spawn(*args, **kwargs):
+        process, job = original_spawn(*args, **kwargs)
+        parents.append(process)
+        return process, job
+
+    def confirm_before_unlock(job, timeout_seconds):
+        assert parents[0].poll() == 0
+        handle = kernel.OpenProcess(0x100000, False, int(pid_file.read_text()))
+        assert handle, ctypes.get_last_error()
+        try:
+            assert kernel.WaitForSingleObject(handle, 0) == 258
+            with pytest.raises(RepairAdmissionError, match="already active"):
+                with RestartJournal(tmp_path).locked():
+                    pytest.fail("apply lock released before descendant teardown")
+            original(job, timeout_seconds)
+            assert job.handle is None
+            # Zero active Job members can precede final process-object signaling.
+            assert kernel.WaitForSingleObject(handle, 5000) == 0
+            confirmed.append(True)
+        finally:
+            kernel.CloseHandle(handle)
+
+    monkeypatch.setattr(process_api, "spawn_sync_in_kill_on_close_job", capture_spawn)
+    monkeypatch.setattr(JobHandle, "terminate_and_wait", confirm_before_unlock)
+    with RestartJournal(tmp_path).locked():
+        result = run_action(
+            [sys.executable, "-c", parent], cwd=tmp_path, environment=os.environ,
+            timeout=10, readonly=True,
+        )
+        assert confirmed == [True]
+    assert result.status == "exited" and result.exit_code == 0
+    with RestartJournal(tmp_path).locked():
+        pass
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX signal cleanup")
