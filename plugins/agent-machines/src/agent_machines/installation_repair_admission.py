@@ -149,6 +149,22 @@ def _load(path: Path) -> dict[str, object]:
     return value
 
 
+def _legacy_root(invocation: Mapping[str, object], home: Path) -> Path:
+    legacy = invocation.get("legacyRuntimeRoot", invocation.get("runtimeRoot"))
+    if not isinstance(legacy, str) or not _LEGACY.fullmatch(legacy):
+        raise RepairAdmissionError("repair owner has no supported declared legacy root")
+    return home / legacy
+
+
+def _runtime_claim(root: Path, home: Path) -> Path | None:
+    invocation_path = root / "payload-invocation.json"
+    try:
+        invocation_path.lstat()
+    except FileNotFoundError:
+        return None
+    return _legacy_root(_load(invocation_path), home)
+
+
 def _binding(
     installation: PluginInstallation, *, source: str, home: Path,
     project_root: Path, environment: Mapping[str, str],
@@ -176,10 +192,7 @@ def _binding(
             not isinstance(payload_environment, str) or not _ENVIRONMENT.fullmatch(payload_environment)
         ):
             raise RepairAdmissionError("repair owner payload-root environment is invalid")
-        legacy = invocation.get("legacyRuntimeRoot", invocation.get("runtimeRoot"))
-        if not isinstance(legacy, str) or not _LEGACY.fullmatch(legacy):
-            raise RepairAdmissionError("repair owner has no supported declared legacy root")
-        legacy_root = home / legacy
+        legacy_root = _legacy_root(invocation, home)
         mode_data = context.probe_legacy_entrypoint(
             legacy_root=legacy_root, payload_root=root, plugin_id=installation.plugin_id,
             copilot_home=home / ".copilot", project_root=project_root,
@@ -225,6 +238,8 @@ def admit_host(
     installations: list[PluginInstallation] = []
     bindings: dict[str, OwnerBinding] = {}
     refused: dict[str, str] = {}
+    legacy_claims: dict[Path, set[str]] = {}
+    unresolved_claims: set[str] = set()
     for source in sorted(activation.decisions):
         active = active_owners.get(source)
         if active is None:
@@ -253,7 +268,14 @@ def admit_host(
                 ),
             )
             installations.append(installation)
-            # Non-runtime payloads need discovery, not a new executable owner binding.
+            try:
+                legacy_root = _runtime_claim(root, home)
+            except (RepairAdmissionError, OSError):
+                unresolved_claims.add(source)
+                raise
+            if legacy_root is not None:
+                legacy_claims.setdefault(legacy_root, set()).add(installation.owner_id)
+            # Runtime ownership is independent of eligibility for repair execution.
             manifest_path = root / "plugin.json"
             if not manifest_path.exists():
                 manifest_path = root / ".claude-plugin" / "plugin.json"
@@ -274,12 +296,9 @@ def admit_host(
     for owner_id, binding in tuple(bindings.items()):
         if binding.mode != "ordinary" or binding.legacy_root is None:
             continue
-        writers = {
-            peer.installation.owner_id
-            for peer in bindings.values()
-            if peer.mode == "ordinary" and peer.legacy_root == binding.legacy_root
-        }
-        if len(writers) > 1:
+        if unresolved_claims:
+            bindings[owner_id] = replace(binding, refusal="ordinary-legacy-ownership-unresolved")
+        elif len(legacy_claims.get(binding.legacy_root, set())) > 1:
             bindings[owner_id] = replace(binding, refusal="ordinary-legacy-writer-ambiguous")
     return HostAdmission(
         report=discover_modules(installations), bindings=bindings, refused=refused,
@@ -290,5 +309,10 @@ def admit_host(
             },
             "owners": [bindings[key].evidence() for key in sorted(bindings)],
             "refused": refused,
+            "legacyClaims": [
+                {"root": str(root), "owners": sorted(owners)}
+                for root, owners in sorted(legacy_claims.items())
+            ],
+            "unresolvedLegacyClaims": sorted(unresolved_claims),
         }),
     )

@@ -745,8 +745,11 @@ def test_installation_repair_distinct_sources_refuse_shared_legacy_writer(repair
     assert not list(home.glob("*.ready"))
 
 
+@pytest.mark.parametrize("peer_mode", [
+    "repairable", "no-readiness", "no-readiness-or-protocol", "no-protocol", "invalid-root",
+])
 def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_writer(
-    repair_fixture, monkeypatch,
+    repair_fixture, monkeypatch, peer_mode,
 ):
     home, project, payload, _, _ = repair_fixture
     peer = payload.parent / "agent-peer"
@@ -755,7 +758,13 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
         path = peer / name
         value = json.loads(path.read_text().replace("agent-example", "agent-peer"))
         if name == "payload-invocation.json":
-            value["legacyRuntimeRoot"] = ".agent-example"
+            value["legacyRuntimeRoot"] = (
+                "../escape" if peer_mode == "invalid-root" else ".agent-example"
+            )
+            if peer_mode in ("no-readiness-or-protocol", "no-protocol"):
+                value.pop("noSelfProvisionEnv")
+        elif name == "plugin.json" and peer_mode.startswith("no-readiness"):
+            value.pop("installerReadiness")
         write_json(path, value)
     manifest = payload.parent / ".claude-plugin" / "marketplace.json"
     value = json.loads(manifest.read_text())
@@ -766,12 +775,18 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
     value["enabledPlugins"]["agent-peer@fixture"] = True
     write_json(settings, value)
     host = admit_host(project, home=home)
-    assert not host.refused and not host.report.findings
-    assert len(host.bindings) == 2
+    assert bool(host.refused) == (peer_mode in ("no-protocol", "invalid-root"))
+    assert not host.report.findings
+    binding_count = 2 if peer_mode == "repairable" else 1
+    assert len(host.bindings) == binding_count
     assert len({owner.installation.provenance.source_fingerprint
                 for owner in host.bindings.values()}) == 1
-    assert len({owner.installation.owner_id for owner in host.bindings.values()}) == 2
-    assert all(owner.refusal == "ordinary-legacy-writer-ambiguous"
+    assert len({owner.installation.owner_id for owner in host.bindings.values()}) == binding_count
+    refusal = (
+        "ordinary-legacy-ownership-unresolved" if peer_mode == "invalid-root"
+        else "ordinary-legacy-writer-ambiguous"
+    )
+    assert all(owner.refusal == refusal
                for owner in host.bindings.values())
     monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("executed"))
     modules = [module.qualified_id for module in host.report.modules]
@@ -779,7 +794,8 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
     result = repair_api.repair(
         project, home=home, modules=modules, apply=True, expected_plan_digest=plan["planDigest"],
     )
-    assert len(result["outcomes"]) == 4 and result["status"] == "incomplete"
+    assert len(result["outcomes"]) == (2 if peer_mode.startswith("no-readiness") else 4)
+    assert result["status"] == "incomplete"
     assert not any(row["attempted"] for row in result["outcomes"])
     assert not list(home.glob("*.ready"))
 
