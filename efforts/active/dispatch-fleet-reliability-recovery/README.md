@@ -1095,3 +1095,17 @@ requested contract.
   consumer cases pass after the transport change.
 - No deadlines, skips, production ownership checks or process-tree custody were
   weakened. Fresh published-head CI and review are still required before merge.
+
+### 2026-10-16 - Preserve schema rejection and explicit fixture encoding
+
+- The proposed claim-key coercion is intentionally not applied: GitHub and ADO
+  marker parsing and script-provider decoding already require finite numeric
+  timestamps and nonempty string claim IDs/labels before reduction. Coercing
+  malformed ownership evidence would weaken that admission contract.
+- Fifteen new boundary cases verify null, container, nonnumeric, boolean and
+  nonfinite sort fields are rejected before they reach ordering. All pass.
+- Workflow and generated-text fixture reads in the runner contract tests now
+  explicitly use UTF-8 rather than the host locale. All 17 affected workflow,
+  preparation and native artifact-reader cases pass; fatal lint passes.
+- The current review's three encoding observations share this one repair.
+  Publication still needs a fresh current-head review and CI before merge.

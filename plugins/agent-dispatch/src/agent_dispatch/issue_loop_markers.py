@@ -152,6 +152,7 @@ def _ownership_key(reservation: dict[str, Any]) -> tuple[Any, ...]:
 
 
 def _claim_order(reservation: dict[str, Any]) -> tuple[Any, ...]:
+    """Order snapshots that have passed the providers' marker-schema boundary."""
     return (
         reservation.get("at", 0), reservation.get("task_id", ""),
         reservation.get("label", ""), json.dumps(reservation, sort_keys=True),

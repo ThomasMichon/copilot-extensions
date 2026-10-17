@@ -565,7 +565,7 @@ def test_ci_matrix_only_shards_dispatch_when_selected():
 
 
 def test_ci_runner_contract_jobs_install_real_pytest_timeout():
-    jobs = yaml.safe_load((SCRIPT.parent.parent / ".github/workflows/ci.yml").read_text())["jobs"]
+    jobs = yaml.safe_load((SCRIPT.parent.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
     steps = [
         step for job in jobs.values() for step in job.get("steps", [])
         if step.get("name") == "Test runner admission and isolation"
@@ -581,7 +581,7 @@ def test_actual_ci_smoke_matrix_preserves_required_gate_for_each_shard(
     monkeypatch, index, result,
 ):
     root = SCRIPT.parent.parent
-    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
     discovery = jobs["discover"]
     discover_run = next(step["run"] for step in discovery["steps"] if step.get("id") == "set")
     assert "--list --ci-matrix" in discover_run
@@ -612,7 +612,7 @@ def test_actual_ci_smoke_matrix_preserves_required_gate_for_each_shard(
             exec(compile(code, "required-pr-gate", "exec"), {})
         assert failure.value.code == 1
     for path in (root / ".github/workflows/validate-and-promote.yml",):
-        assert "--shard-" not in path.read_text()
+        assert "--shard-" not in path.read_text(encoding="utf-8")
     assert "--shard-" not in jobs["full"]["steps"][-1]["run"]
 
 
@@ -689,7 +689,7 @@ def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, 
     assert len(probes) == 2 and len(installs) == 1
     assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
     assert ("-e" in installs[0]) is has_project
-    assert (environment / ".dep-fingerprint").read_text() == "fixture"
+    assert (environment / ".dep-fingerprint").read_text(encoding="utf-8") == "fixture"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX creation permissions")
@@ -946,10 +946,10 @@ Path({str(streams)!r}).write_text(json.dumps({{
     assert not visible, "runner child or external terminal host surfaced a window"
     assert not focused, "runner child or external terminal host stole focus"
     assert completed.returncode == 0, completed.stderr
-    captured = json.loads(streams.read_text())
+    captured = json.loads(streams.read_text(encoding="utf-8"))
     assert captured["returncode"] == 0, captured["stderr"]
-    assert json.loads(result.read_text())["returncode"] == (124 if timeout else 17), captured
-    identity = json.loads(receipt.read_text())
+    assert json.loads(result.read_text(encoding="utf-8"))["returncode"] == (124 if timeout else 17), captured
+    identity = json.loads(receipt.read_text(encoding="utf-8"))
     assert not identity["window"]
     if timeout:
         assert "wall-clock limit exceeded" in captured["stderr"]

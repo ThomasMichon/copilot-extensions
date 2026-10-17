@@ -14,6 +14,7 @@ import pytest
 
 from agent_dispatch import procutil
 from agent_dispatch import repository_github_auth
+from agent_dispatch.issue_loop_markers import _parse_marker, validate_marker_payload
 from agent_dispatch.repository_issue_loops import (
     GitHubProvider,
     _forge_provider_for,
@@ -43,6 +44,20 @@ def _reservation(**overrides):
         "issue": 7,
         **overrides,
     }
+
+
+@pytest.mark.parametrize("field,value", [
+    ("at", None), ("at", []), ("at", {}), ("at", "7300"),
+    ("at", True), ("at", float("nan")), ("at", float("inf")),
+    ("task_id", None), ("task_id", []), ("task_id", {}), ("task_id", 7),
+    ("label", None), ("label", []), ("label", {}), ("label", 7),
+])
+def test_nonorderable_claim_fields_are_rejected_before_ownership_reduction(field, value):
+    payload = _reservation(**{"state": "claimed", "task_id": "task-real", field: value})
+    assert validate_marker_payload(payload, issue_number=7) is None
+    assert _parse_marker(
+        _marker(payload), author="issue-bot", expected_author="issue-bot", issue_number=7,
+    ) is None
 
 
 def test_edited_claim_round_trips_into_an_empty_coordinators_selection():
