@@ -64,6 +64,20 @@ rather than as a successful refresh. The existing `auto_fast_forward` policy
 disables opportunistic anchor movement during creation without preventing
 remote-ref-based worktree creation.
 
+### Session worktree names
+
+Seeded and unseeded session creation use the same timestamp and four-character
+hexadecimal suffix. The platform is appended only when the logical machine name
+does not already end in that environment (`example-wsl`, not
+`example-wsl-wsl`). Windows accepts either `-win` or `-windows` as the existing
+environment suffix.
+
+Remote prompt admission keeps its request and seed identities in a durable
+receipt, separate from the generated worktree name. Replaying the same request
+recovers that receipt's original allocation. Existing worktrees and historical
+UUID-suffixed admissions retain their exact names, including during creation
+repair and paired-knowledge recovery.
+
 ### Replay-safe programmatic creation
 
 `create --creation-key <opaque-key> --json` binds one logical request to its

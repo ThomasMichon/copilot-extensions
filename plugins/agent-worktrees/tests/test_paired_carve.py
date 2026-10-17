@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import types
 
+import pytest
+
 import agent_worktrees.__main__ as m
 from agent_worktrees import knowledge_plugins as kp
 from agent_worktrees import local_cache_refresh as lcr
@@ -91,7 +93,14 @@ class TestCarvePairedKnowledge:
         )
         assert out is None
 
-    def test_worktree_class_carves_and_cross_stamps(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("machine,platform,prefix", [
+        ("test", "windows", "test-win"),
+        ("test-wsl", "wsl", "test-wsl"),
+        ("test-wsl", "wsl", "test-wsl-wsl"),
+    ])
+    def test_worktree_class_carves_and_cross_stamps(
+        self, monkeypatch, tmp_path, machine, platform, prefix,
+    ):
         _common_patches(monkeypatch, tmp_path)
         k_anchor = tmp_path / "knowledge"
         k_anchor.mkdir()
@@ -136,24 +145,25 @@ class TestCarvePairedKnowledge:
         )
         monkeypatch.setattr(m.git_ops, "create_worktree", _create_worktree)
 
+        harness_id = f"{prefix}-20260806-ab"
         stamp = m._carve_paired_knowledge(
-            _config(machine="test"), harness_id="test-win-20260806-ab",
-            timestamp="20260806", suffix="ab", plat="windows",
-            plat_short="win",
+            _config(machine=machine), harness_id=harness_id,
+            timestamp="20260806", suffix="ab", plat=platform,
+            plat_short="win" if platform == "windows" else platform,
         )
         # Harness stamp.
         assert stamp is not None
         assert stamp["pair_kind"] == "worktree"
         assert stamp["pair_role"] == "harness"
         assert stamp["pair_id"] == "20260806-ab"
-        assert stamp["pair_ref"] == "test/citadel-knowledge/test-win-20260806-ab-k"
+        assert stamp["pair_ref"] == f"{machine}/citadel-knowledge/{harness_id}-k"
         # A knowledge worktree was carved.
-        assert carved["branch"] == "worktree/test-win-20260806-ab-k"
+        assert carved["branch"] == f"worktree/{harness_id}-k"
         assert carved["start_point"] == "origin/main"
         # Knowledge tracking record written, cross-stamped back to harness.
         knowledge_tracking = tmp_path / ".citadel-knowledge" / "worktrees"
         krec = tk.load_record_by_id(
-            "test-win-20260806-ab-k",
+            f"{harness_id}-k",
             tracking_path=knowledge_tracking,
         )
         assert krec is not None
@@ -171,8 +181,8 @@ class TestCarvePairedKnowledge:
         # "built-in" default.
         assert krec.codename_source == "built-in"
         assert krec.pair_id == "20260806-ab"
-        assert krec.pair_ref == "test/citadel-harness/test-win-20260806-ab"
-        assert not (tmp_path / "test-win-20260806-ab-k.yaml").exists()
+        assert krec.pair_ref == f"{machine}/citadel-harness/{harness_id}"
+        assert not (tmp_path / f"{harness_id}-k.yaml").exists()
 
     def test_non_worktree_class_pairs_anchor(self, monkeypatch, tmp_path):
         _common_patches(monkeypatch, tmp_path)

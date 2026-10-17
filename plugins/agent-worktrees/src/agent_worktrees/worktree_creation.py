@@ -49,6 +49,7 @@ from . import (
 )
 from . import config as cfg
 from .launch_progress import step
+from .worktree_naming import session_worktree_id
 
 
 class LaunchSeedStagingFailure(RuntimeError):
@@ -224,7 +225,7 @@ def _carve_paired_knowledge(
         }
 
     # Worktree-class knowledge -> carve its paired worktree.
-    knowledge_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}-k"
+    knowledge_id = f"{harness_id}-k"
     knowledge_branch = f"worktree/{knowledge_id}"
     knowledge_wt_root = cfg.derive_worktree_root(knowledge_anchor)
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
@@ -627,14 +628,15 @@ def _create_worktree_core(
     plat = cfg.detect_platform()
     plat_short = "win" if plat == "windows" else plat
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    suffix = secrets.token_hex(2)
-    if allocation is not None:
+    if allocation is None:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        suffix = secrets.token_hex(2)
+    else:
         timestamp, suffix = allocation
         if (
             kind != "session"
             or re.fullmatch(r"\d{8}-\d{6}", timestamp) is None
-            or re.fullmatch(r"[0-9a-f]{32}", suffix) is None
+            or re.fullmatch(r"[0-9a-f]{4}|[0-9a-f]{32}", suffix) is None
         ):
             raise ValueError("Invalid admitted worktree allocation")
     if kind == "system":
@@ -642,7 +644,10 @@ def _create_worktree_core(
         slug = _slugify(name or owner or "daemon")
         worktree_id = f"sys-{slug}-{timestamp}-{suffix}"
     else:
-        worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
+        worktree_id = session_worktree_id(
+            config.machine, plat, timestamp, suffix,
+            legacy=allocation is not None and len(suffix) == 32,
+        )
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
     if owner_ref:
