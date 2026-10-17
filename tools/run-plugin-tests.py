@@ -72,8 +72,12 @@ RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 EXTERNAL_TEST_ROOTS = {
     "worktree-manager": Path("worktree-manager"),
     "payload-invocation": Path("libs/payload-invocation"),
+    "runtime-source": Path("libs/versioned-runtime"),
 }
-EXTERNAL_TEST_DEPENDENCIES = {"payload-invocation": ("pyyaml>=6.0.3",)}
+EXTERNAL_TEST_DEPENDENCIES = {
+    "payload-invocation": ("pyyaml>=6.0.3",),
+    "runtime-source": ("pyyaml>=6.0.3",),
+}
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
 

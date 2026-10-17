@@ -1368,7 +1368,9 @@ def test_sh_pid_fallback_lock_reports_contention_as_75(tmp_path: Path) -> None:
     action = (
         "export COPILOT_EXT_NO_FLOCK=1 COPILOT_EXT_NO_PYFLOCK=1 COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=1\n"
         'mkdir -p "$INSTALL_DIR"\n'
-        'MSYS=winsymlinks:nativestrict ln -s "$$" "$INSTALL_DIR/.install.lock.pid"\n'
+        'if ! MSYS=winsymlinks:nativestrict ln -s "$$" "$INSTALL_DIR/.install.lock.pid"; then\n'
+        '    echo NOSYMLINK; exit 0\n'
+        'fi\n'
         '[[ -L "$INSTALL_DIR/.install.lock.pid" ]] || { echo NOSYMLINK; exit 0; }\n'
         "rc=0; _enter_install_lock || rc=$?\n"
         'echo "RC=$rc"\n'

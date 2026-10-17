@@ -453,8 +453,10 @@ tests run. Combine it with `-k` to preserve a diagnostic lane's exact test
 roster without collecting the full plugin suite.
 
 Explicit out-of-plugin targets use the same bounded runner and admission lease:
-`worktree-manager` selects that product's tests, and `payload-invocation` selects
-`libs/payload-invocation/tests`. `--all` remains scoped to plugin suites.
+`worktree-manager` selects that product's tests, `payload-invocation` selects
+`libs/payload-invocation/tests`, and `runtime-source` selects the source
+preparation/identity/native-consumer contracts in `libs/versioned-runtime/tests`.
+`--all` remains scoped to plugin suites.
 The payload suite's PowerShell contracts require a real `pwsh`; when it is absent
 from the isolation container, run that target through the host's contained runner
 rather than counting skipped PowerShell contracts as validation.

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-16
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Plugin Service Model](../../../visions/plugin-services/README.md#managed-runtime-deployment), [Runtime Assembly](../../../visions/plugin-services/runtime-assembly/README.md#selected-development-source-assembly), [Installer](../../../visions/installer/README.md#independent-runtime-source-selection), [Clean-room Validation](../../../visions/clean-room-validation/README.md#independent-source-installation)
 - **Umbrella issue:** #7028
 - **Sub-issues:** #3905 (existing source-materialization gap), #7029 (source selection and immutable generations), #7030 (deployment boundary and adapters)
@@ -80,8 +80,8 @@ with private host identifiers redacted. Implementation choices below marked
 ## Plan
 
 ### Phase 0 - Review the intent and plan
-- [ ] Land the vision amendments and this canonical proposal through repository review.
-- [ ] Confirm issue/slice ownership and preserve the existing dependency campaigns.
+- [x] Land the vision amendments and this canonical proposal through repository review.
+- [x] Confirm issue/slice ownership and preserve the existing dependency campaigns.
 
 ### Phase 1 - Reproduce direct-dev installation in the clean room
 - [ ] Extend the existing Tier-P rig with a credential-free, source-install scenario using a recorded clean merged dev commit.
@@ -151,3 +151,15 @@ onto one branch.
 - Tracked future exclusive plugin sourcing separately in #7031.
 - Confirmed Docker is reachable on a WSL host; no native runtime policy, marketplace settings or running services were changed.
 - Implementation remains gated on the proposal PR merging.
+
+### 2026-10-16 - Reviewed proposal and clean-room slice
+- Proposal PR #7053 received an exact-head Copilot approval with no findings and successful checks, then merged as `41c1e787ae`.
+- Pulled the owning worktree forward and selected Phase 1. The effort remains open; proposal merge is not implementation completion.
+- Began a credential-free Tier-P source-install scenario using the actual Agent Bridge installer from an exact merged dev commit.
+
+### 2026-10-16 - First source-install witness
+- The fresh container installed merged dev commit `41c1e787ae` through the real Agent Bridge installer without Copilot credentials.
+- The first assertion failed because the selected generation was only `0.4.1-dev3`, without a source identity.
+- Inspection found shared-library imports resolving into the checkout and generated metadata/cache files written there. Moving the source checkout made the installed import fail with `ModuleNotFoundError: credential_relay`.
+- This narrows the current manifestation of #3905: editable canonical references can hide the dependency until the checkout is unavailable. The fix must materialize a non-editable closure outside the source, not merely make the initial installer exit successfully.
+- Began canonical source preparation and a source-qualified runtime identity that preserves the original package version; native Windows unit/initializer coverage currently passes, while full source-install acceptance remains open.

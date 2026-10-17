@@ -445,6 +445,7 @@ if (-not $SrcVersion) {
     Write-Fail 'Cannot determine plugin version from pyproject.toml (required for the versioned runtime).'
     exit 1
 }
+$PackageVersion = $SrcVersion
 $VersionedRuntime = $true
 $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
 if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
@@ -486,6 +487,31 @@ function Get-BootstrapPython {
         if ($c) { return $c.Source }
     }
     return $null
+}
+
+function Initialize-SourceRuntime {
+    $metadata = Join-Path $PluginDir 'runtime-source.json'
+    try {
+        [System.IO.File]::GetAttributes($metadata) | Out-Null
+    } catch [System.IO.FileNotFoundException] {
+        return
+    } catch [System.IO.DirectoryNotFoundException] {
+        return
+    }
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Source runtime selection requires a bootstrap Python interpreter' }
+    $version = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
+        --payload $PluginDir --package-version $PackageVersion --plugin agent-bridge
+    if ($LASTEXITCODE -ne 0) { throw 'Source runtime identity validation failed' }
+    $script:SrcVersion = ('' + $version).Trim()
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else {
+        Join-Path $VenvDir 'bin/python'
+    }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
 }
 
 function Remove-PluginBuildArtifacts {
@@ -760,7 +786,7 @@ function Get-PayloadHash {
         $entries = [System.Collections.Generic.List[string]]::new()
         # pyproject.toml plus its declared `readme`, which setuptools embeds in
         # the installed distribution metadata.
-        foreach ($meta in @('pyproject.toml', 'README.md')) {
+        foreach ($meta in @('pyproject.toml', 'README.md', 'runtime-source.json')) {
             $mp = Join-Path $base $meta
             if (Test-Path -LiteralPath $mp) {
                 $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($mp))).Replace('-', '').ToLower()
@@ -1596,6 +1622,17 @@ function Write-DeployManifest {
     # $PayloadHash: the transaction's once-computed Get-PayloadHash value, so
     # the manifest records the same content the slot was admitted/built for.
     param([string]$PayloadHash = '')
+    $fields = @{}
+    if ($SrcVersion -ne $PackageVersion -or (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source runtime manifest requires a bootstrap Python interpreter' }
+        $json = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
+            --payload $PluginDir --package-version $PackageVersion --plugin agent-bridge `
+            --expected-runtime-version $SrcVersion --format json
+        if ($LASTEXITCODE -ne 0) { throw 'Source runtime identity changed before manifest publication' }
+        $data = $json | ConvertFrom-Json
+        foreach ($property in $data.PSObject.Properties) { $fields[$property.Name] = $property.Value }
+    }
     $sourcePathOverride = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { '' }
     Write-DeployManifestShared `
         -Service 'agent-bridge' `
@@ -1606,7 +1643,8 @@ function Write-DeployManifest {
         -GetSourceKind ${function:Get-SourceKind} `
         -GetGitInfo ${function:Get-GitInfo} `
         -SourcePathOverride $sourcePathOverride `
-        -VersionOverride $SrcVersion `
+        -VersionOverride $PackageVersion `
+        -AdditionalFields $fields `
         -PayloadHash $PayloadHash
 }
 
@@ -3365,6 +3403,7 @@ function Invoke-Update {
 # -- Dispatch ----------------------------------------------------------------
 
 try {
+    Initialize-SourceRuntime
     switch ($Action) {
         'install'   { Invoke-Install }
         'uninstall' { Invoke-Uninstall }

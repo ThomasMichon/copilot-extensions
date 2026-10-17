@@ -156,6 +156,27 @@ scenarios/<name>/
 report shape (`cr-report.json`) keeps its historical top-level keys and adds an
 `env{}` snapshot and a classified `jams[]` array.
 
+### Merged-development source installation
+
+`merged-dev-runtime` is a credential-free Tier-P reference scenario for Agent
+Bridge. It pins a clean merged dev commit, prepares its canonical vendor
+closure outside the checkout, invokes the real installer, and checks the
+source-qualified completed generation and installed command. It then makes
+the checkout unavailable and verifies installed imports and command use.
+The final stage confirms the qualified build is actually serving through
+authenticated health, routed PID/start-time identity and its running marker.
+The selected commit must contain the source preparation/installer support.
+
+```bash
+CR_SOURCE_COMMIT=<full-merged-commit> ./run.sh --scenario merged-dev-runtime \
+  --name-suffix source-proof --pass-env CR_SOURCE_COMMIT run
+```
+
+Use a fresh name suffix for an independent fresh-machine witness. The
+manifest's `auth.copilot: none` prevents host-token lookup or injection.
+The report records the actual source commit and runtime generation; a
+successful preparation or installer exit alone is not the acceptance result.
+
 ### Windows arm — `run.ps1 -Os windows`
 
 The runner has a **Windows counterpart** that harmonizes the clean-room across

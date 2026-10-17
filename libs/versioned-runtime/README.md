@@ -222,6 +222,26 @@ Cell receipt/reservation, native-shell failure, same-version retry and
 release-before-settlement checks:
 `python tools/run-plugin-tests.py agent-index -k cell_construction`.
 
+## Merged-source runtime identities
+
+`versioned_runtime_source.py` is the optional plugin-side identity adapter for
+non-editable, merged-source payloads. It distinguishes original package
+version, full Git commit/tree, materialized first-party assembly hash and
+runtime generation. It is separate from editable development claims and does
+not grant installation ownership or release attestation.
+
+The adapter verifies the plugin/package identity, canonical assembly bytes
+and any caller-pinned runtime selection. Malformed or changed metadata
+refuses installation rather than falling back to the ordinary package slot.
+Agent Bridge is the initial native installer consumer; the synchronizer
+ships the same helper to every runtime plugin without changing their default
+installation behavior. Standalone distributions retain their existing core
+runtime-resource family because they do not consume plugin source metadata.
+
+Source preparation and the metadata contract are documented at
+[`prepare_runtime_source`](../../tools/prepare_runtime_source.md). The
+`runtime-source` bounded test target covers the producer and native consumers.
+
 ## Create-once completion publication
 
 `mark_complete(root, version, *, payload_hash=None, pid=None)` publishes a

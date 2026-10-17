@@ -297,6 +297,7 @@ if [[ -z "$SRC_VERSION" ]]; then
     echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
     exit 1
 fi
+PACKAGE_VERSION="$SRC_VERSION"
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 # === end install-contract:v3 versioned-venv ===
 
@@ -597,6 +598,18 @@ _bootstrap_python() {
     return 1
 }
 
+_initialize_source_runtime() {
+    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    local py
+    py="$(_bootstrap_python)" || {
+        _fail "Source runtime selection requires a bootstrap Python interpreter"
+        return 1
+    }
+    SRC_VERSION="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+        --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-bridge)" || return 1
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+}
+
 _uv_source_paths() {
     # The [tool.uv.sources] `path = "..."` dependencies one pyproject.toml ($1)
     # declares, resolved relative to that project's own directory (as uv
@@ -703,6 +716,7 @@ _compute_payload_hash() {
             [[ -f pyproject.toml ]] && sha256sum pyproject.toml 2>/dev/null
             # The declared project `readme`, embedded in installed metadata.
             [[ -f README.md ]] && sha256sum README.md 2>/dev/null
+            [[ -f runtime-source.json ]] && sha256sum runtime-source.json
             _payload_tree_digests "$PLUGIN_DIR/src" src
             _payload_tree_digests "$PLUGIN_DIR/libs" libs lib
             local __lib
@@ -1294,7 +1308,16 @@ _source_kind() {
 
 _write_deploy_manifest() {
     local source_path="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-    write_deploy_manifest "agent-bridge" "agent-bridge" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "$source_path" "$SRC_VERSION"
+    local fields="" py
+    if [[ "$SRC_VERSION" != "$PACKAGE_VERSION" ||
+        -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+        py="$(_bootstrap_python)" || return 1
+        fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" \
+            --plugin agent-bridge \
+            --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || return 1
+    fi
+    write_deploy_manifest "agent-bridge" "agent-bridge" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "$source_path" "$PACKAGE_VERSION"
 }
 
 _install_systemd_unit() {
@@ -2674,6 +2697,8 @@ do_update() {
 }
 
 # -- Dispatch ----------------------------------------------------------------
+
+_initialize_source_runtime || exit 1
 
 case "$ACTION" in
     install)   do_install ;;

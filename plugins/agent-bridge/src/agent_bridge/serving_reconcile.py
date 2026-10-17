@@ -28,11 +28,19 @@ class ServingReconcileError(RuntimeError):
 
 
 def compare_serving_version(running: str, target: str) -> str:
+    from .source_build import is_source_build_version
+
     try:
         left, right = Version(running), Version(target)
     except (InvalidVersion, TypeError) as exc:
         raise ServingReconcileError("serving version could not be verified") from exc
-    return "current" if left == right else "older" if left < right else "newer"
+    if left == right:
+        return "current"
+    if is_source_build_version(target) or (
+        is_source_build_version(running) and left.public == right.public
+    ):
+        return "different-source"
+    return "older" if left < right else "newer"
 
 
 def existing_auth_token(root: Path) -> str:
@@ -257,7 +265,7 @@ def reconcile_serving(args: argparse.Namespace) -> None:
             )
             if state == "newer":
                 raise ServingReconcileError("serving daemon is newer than the selected runtime")
-            if state == "older":
+            if state in ("older", "different-source"):
                 if getattr(args, "probe_serving", False):
                     code = 10
                 else:

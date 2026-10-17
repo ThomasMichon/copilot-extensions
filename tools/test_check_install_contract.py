@@ -706,18 +706,35 @@ if ($Failure) {
     assert result.stdout.splitlines() == [path.parent.parent.name for path, _ in helpers]
 
 
-def _working_bash() -> str | None:
-    candidates = [os.environ.get("CE_TEST_BASH"), shutil.which("bash")]
+def _bash_environment(bash: str) -> dict[str, str]:
+    environment = dict(os.environ)
     if os.name == "nt":
+        executable = Path(bash)
+        environment["PATH"] = os.pathsep.join((
+            str(executable.parent), str(executable.parent.parent / "usr" / "bin"),
+            environment.get("PATH", ""),
+        ))
+    return environment
+
+
+def _working_bash() -> str | None:
+    candidates = [os.environ.get("CE_TEST_BASH")]
+    if os.name == "nt":
+        git = shutil.which("git")
+        if git:
+            candidates.append(str(Path(git).parent.parent / "bin" / "bash.exe"))
         candidates.append(r"C:\Program Files\Git\bin\bash.exe")
+    candidates.append(shutil.which("bash"))
     for candidate in filter(None, candidates):
         try:
             probe = subprocess.run(
-                [candidate, "-c", "echo ok"], capture_output=True, text=True, timeout=30,
+                [candidate, "-c", 'probe() { printf "%s" "$1"; }; probe "quoted value"'],
+                capture_output=True, text=True, timeout=30, env=_bash_environment(candidate),
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
         except (OSError, subprocess.TimeoutExpired):
             continue
-        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+        if probe.returncode == 0 and probe.stdout == "quoted value":
             return candidate
     return None
 
@@ -761,7 +778,7 @@ def test_every_shipped_shell_helper_reports_its_writer_status(
         '#!/usr/bin/env bash\ntouch "$STUB_MARK"\nexit "${STUB_RC:-0}"\n', encoding="utf-8", newline="\n"
     )
     stub.chmod(0o755)
-    env = {**os.environ, "STUB_PY": stub.as_posix(), "STUB_RC": str(writer_rc)}
+    env = {**_bash_environment(bash), "STUB_PY": stub.as_posix(), "STUB_RC": str(writer_rc)}
     if hash_fails:
         env["STUB_HASH_FAIL"] = "1"
     values = {"VERSIONED_RUNTIME": "1", "SRC_VERSION": "1.2.3", "PAYLOAD_HASH": "deadbeef"}
@@ -789,6 +806,7 @@ def test_every_shipped_shell_helper_reports_its_writer_status(
         )
         result = subprocess.run(
             [bash, "-c", script], capture_output=True, text=True, env=env, timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         status = result.stdout.strip().rpartition("RC=")[2]
         should_fail = writer_rc != 0 or (hash_fails and computes_hash)
@@ -844,6 +862,8 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
         )
         result = subprocess.run(
             [bash, "-c", script], capture_output=True, text=True, timeout=60,
+            env=_bash_environment(bash),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
         rc, _, out = line.partition(" OUT=")

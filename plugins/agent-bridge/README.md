@@ -590,6 +590,13 @@ flow, independent of Copilot CLI extension activation.
 Use [`agent-bridge-troubleshooting`](skills/agent-bridge-troubleshooting/SKILL.md)
 for wedged dispatches, resume issues, relay/auth failures, and repair drills.
 
+The native installers also accept
+[prepared merged-source payloads](../../tools/prepare_runtime_source.md).
+These use a source-qualified immutable runtime generation without changing
+the package version or Copilot's plugin-content source. The `runtime-source`
+bounded suite exercises the actual Windows and POSIX identity/manifest
+functions; this optional source path does not change ordinary installation.
+
 ## Docs
 
 | Document | Description |

@@ -2291,6 +2291,17 @@ Run the installer from the marketplace plugin dir → marketplace takes over;
 takes over. Switching is an explicit act: invoke the installer from the other
 location. `status` always reports the current `source.kind`.
 
+An explicitly prepared merged-source payload may additionally carry
+`runtime-source.json`. Agent Bridge's native installers consume this optional
+identity to select a distinct immutable generation while retaining the
+original package version in `source.version`; `runtime_version` and
+`runtime_source` identify its deployed source assembly. Source-kind inference
+and installation ownership are unchanged. Other installers retain their
+ordinary package-version behavior until they adopt this boundary.
+See the [source preparation tool](../tools/prepare_runtime_source.md) for the
+single owner of preparation syntax and metadata semantics. Preparing this
+payload does not change Copilot's plugin-content source or disable hooks.
+
 > **Self-stage caveat (#935).** When the `install-contract:v4 self-stage` prologue
 > re-execs out of the marketplace payload, the installer's *live* path is a
 > throwaway `~/.<name>/.install-stage/…` dir — which would read as `local`. The

@@ -43,7 +43,10 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 CANONICAL = REPO / "libs" / "versioned-runtime" / "versioned_runtime.py"
 VRT_NAME = "versioned_runtime.py"
-COMPONENT_NAMES = ("versioned_runtime_leases.py", "versioned_runtime_construction.py")
+COMPONENT_NAMES = (
+    "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    "versioned_runtime_source.py",
+)
 DEPENDENCY_POLICY = REPO / "libs" / "installer-engine" / "installer_dependency_policy.py"
 DEPENDENCY_CONFIG = DEPENDENCY_POLICY.with_name("installer_dependency_config.py")
 

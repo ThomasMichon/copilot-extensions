@@ -70,7 +70,10 @@ INSTALLER_ENGINE_SYNC = Path(__file__).resolve().parent / "sync-installer-engine
 # docs/patterns/README.md § "Runtime installs are immutable and versioned".
 VERSIONED_MARKER = "install-contract:v3 versioned-venv"
 VERSIONED_RUNTIME_FILE = "versioned_runtime.py"
-VERSIONED_RUNTIME_COMPONENTS = ("versioned_runtime_leases.py", "versioned_runtime_construction.py")
+VERSIONED_RUNTIME_COMPONENTS = (
+    "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    "versioned_runtime_source.py",
+)
 # The one canonical source of the primitive. Every Python runtime plugin's
 # scripts/versioned_runtime.py is vendored byte-identically from here by
 # tools/sync-versioned-runtime.py; this check enforces it (drift => run sync).
