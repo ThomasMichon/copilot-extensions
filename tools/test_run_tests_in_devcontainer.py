@@ -116,6 +116,7 @@ def test_selection_staging_passes_only_validated_data_over_stdin(monkeypatch):
     ("fixture", "plugins/fixture"),
     ("worktree-manager", "worktree-manager"),
     ("payload-invocation", "libs/payload-invocation"),
+    ("runtime-source", "libs/versioned-runtime"),
 ])
 def test_selection_uses_the_same_plugin_roots_as_the_contained_runner(tmp_path, plugin, relative_root):
     tests = tmp_path / relative_root / "tests"

@@ -122,3 +122,10 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
   22 exhaustive cases deselected, 18.72 seconds. The pilot CLI also refuses
   an absent suite before planning so no-evidence full fallback cannot
   become a successful no-suite skip. The hosted deadline proof remains open.
+- 2026-10-17: reconciled the shared test-root map with the merged
+  `runtime-source` target from #7080, preserving its dependency declaration
+  and native CI lanes. Added it to the direct/container root consistency
+  regression. The rebased required runner/selection portfolio passed
+  (649 passed, 22 skipped, 22 exhaustive cases deselected); the unchanged
+  target also passed in a network-disconnected devcontainer (58 passed,
+  39 platform skips). These Linux results do not replace native Windows CI.
