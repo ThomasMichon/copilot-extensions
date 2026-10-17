@@ -507,6 +507,25 @@ def test_default_scoped_operation_uses_contained_capture(monkeypatch):
     assert provider._gh("issue", "edit", "7").stdout == "{}"
     assert calls[0][0] == ["gh", "issue", "edit", "7"]
     assert calls[0][1]["env"] == {"GH_TOKEN": "synthetic-only"}
+    assert calls[0][1]["timeout"] == repository_github_auth._TIMEOUT_SECONDS == 30
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, OSError, subprocess.SubprocessError])
+def test_scoped_forge_capture_failures_suppress_runtime_details(monkeypatch, error_type):
+    monkeypatch.setattr(
+        "agent_dispatch.repository_issue_loops.repository_environment",
+        lambda *_args, **_kwargs: {"GH_TOKEN": "synthetic-only"},
+    )
+
+    def capture(*_args, **_kwargs):
+        raise error_type("synthetic-secret")
+
+    monkeypatch.setattr(procutil, "run_background_capture", capture)
+    provider = GitHubProvider("issue-bot", repository="example/project", auth="repository")
+    with pytest.raises(RuntimeError) as failure:
+        provider._gh("issue", "edit", "7")
+    assert str(failure.value) == "Repository GitHub command failed"
+    assert failure.value.__suppress_context__ and failure.value.__cause__ is None
 
 
 def test_repository_command_preserves_real_child_cwd_and_fixed_capture_options(tmp_path):

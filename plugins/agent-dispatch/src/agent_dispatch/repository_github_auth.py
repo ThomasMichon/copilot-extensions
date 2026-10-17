@@ -28,7 +28,7 @@ def run_repository_command(
         raise ValueError("Repository GitHub command received unsupported process options")
     try:
         result = procutil.run_background_capture(argv, timeout=timeout, env=env, cwd=cwd)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, RuntimeError):
         raise RuntimeError("Repository GitHub command failed") from None
     if result is None:
         raise RuntimeError("Repository GitHub command unavailable or timed out")

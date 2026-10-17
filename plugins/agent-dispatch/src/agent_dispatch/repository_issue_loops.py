@@ -34,7 +34,7 @@ from .issue_loop_markers import (
     _parse_marker,
     latest_reservations as _latest_reservations,
 )
-from .repository_github_auth import repository_environment, run_repository_command, validate_auth
+from .repository_github_auth import _TIMEOUT_SECONDS, repository_environment, run_repository_command, validate_auth
 from .repository_issue_selection import eligible_issues, validate_issue_numbers
 from .repository_issue_declarations import expand_repository_issue_loop as expand_repository_issue_loop
 from .repository_issue_task_contracts import (
@@ -560,7 +560,7 @@ class GitHubProvider:
             )
             from .procutil import no_window_kwargs
 
-            options.update(timeout=30, **no_window_kwargs())
+            options.update(timeout=_TIMEOUT_SECONDS, **no_window_kwargs())
         completed = self.runner(
             ["gh", *args],
             check=False, capture_output=True, text=True,

@@ -1124,3 +1124,16 @@ requested contract.
 - The separate Copilot agentic-review startup check timed out; that advisory
   failure is not a required-CI verdict. Current-head CI and a passing review
   remain separate gates; neither is bypassed.
+
+### 2026-10-17 - Sanitize forge capture failures at the adapter boundary
+
+- The command adapter also sanitizes expected runtime failures from contained
+  capture during a forge operation, outside authentication probes. Three
+  regressions verify runtime, OS and subprocess errors cannot expose their
+  original detail or exception context.
+- Provider operations and credential probes now share the same existing
+  30-second constant. A real adapter-boundary assertion retains that exact
+  value; no timeout becomes configurable or increases.
+- Complete source-safety/provider coverage passes 535 tests in 66.42 seconds;
+  fatal lint and whitespace checks pass. Publication still owes fresh
+  current-head CI and review.
