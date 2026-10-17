@@ -203,8 +203,10 @@ with implementation tests; standalone compatibility remains first-class.
   The final consumer uses a versioned read backed by the same configuration
   loader and registered-current-space predicate. Provenance is captured only
   in memory; no new identity setting, record migration or mutation-policy change
-  is introduced. Older/unversioned or detected-only responses offer no derived authority. Final protocol
-  and native-consumer validation are reopened until this contract is exercised.
+  is introduced. Older/unversioned or detected-only responses offer no derived
+  authority. Explicit configured identities from unscoped source projects still
+  require consumer-side execution-space qualification; scoped source registries
+  retain their existing current-space fence.
 - Final protocol producer/config/fence selection passed 384 tests; Bridge
   configured-binding/legacy/older-peer selection passed 351. The actual source
   CLI and Bridge consumer passed a real subprocess/cwd-change/nested-resolver
@@ -219,3 +221,7 @@ with implementation tests; standalone compatibility remains first-class.
   A separate publication-metadata authorization review remains outstanding; do
   not rewrite published history automatically or equate source-content review
   with completion of that broader gate.
+- Full owner collection passed; the monolithic native owner guard run hit its
+  unchanged 300-second group budget after progressing without reported assertion
+  failures. Complete that guard portfolio in bounded selections before treating
+  the required validation gate as satisfied; do not increase limits or omit cases.
