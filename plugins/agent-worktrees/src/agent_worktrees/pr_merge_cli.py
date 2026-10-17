@@ -455,7 +455,7 @@ def _pr_merge_now(
                 print(_json.dumps({
                     "repo": args.repo, "pr": args.pr, "action": "merge-pending",
                     "applied": True, "merged": False, "flow_profile": flow.profile,
-                    "completion_verified": not observation_error, "reminder": rem.as_dict(),
+                    "completion_verified": False, "reminder": rem.as_dict(),
                     **({"error": observation_error} if observation_error else {}),
                 }))
             else:
@@ -475,6 +475,7 @@ def _pr_merge_now(
                     "action": "merge",
                     "applied": True,
                     "merged": True,
+                    **({"completion_verified": True} if getattr(provider, "name", "") == "github" else {}),
                     "bypassed_review_gate": bypass_review_gate,
                     "flow_profile": flow.profile,
                     "reminder": rem.as_dict(),

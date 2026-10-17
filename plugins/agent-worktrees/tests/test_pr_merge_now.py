@@ -164,6 +164,7 @@ def test_normal_merge_queue_admission_is_not_reported_as_merged(monkeypatch, cap
     result = json.loads(capsys.readouterr().out)
     assert result["action"] == "merge-pending"
     assert result["applied"] is True and result["merged"] is False
+    assert result["completion_verified"] is False
     assert result["reminder"]["verb"] == "pr-watch"
     assert len(fake.calls) == 1
 
@@ -413,6 +414,7 @@ def test_now_json_success_shape(monkeypatch, capsys):
     assert rc == 0
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["applied"] is True
+    assert out["merged"] is True and out["completion_verified"] is True
     assert out["action"] == "merge"
     assert out["reminder"]["profile"] == "pr-self-merge"
 
