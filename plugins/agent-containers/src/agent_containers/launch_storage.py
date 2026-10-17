@@ -29,6 +29,7 @@ def executable_directory(auth_env: str) -> str:
 
 def directory_guard(
     directory: str, *, create: bool = False, require_ram: bool = True,
+    missing_ok: bool = False,
 ) -> str:
     """Validate before reading stdin; pin subsequent relative writes by cwd."""
     if not directory.startswith("/") or posixpath.normpath(directory) != directory:
@@ -72,4 +73,22 @@ def directory_guard(
     )
     if require_ram:
         script += 'test "$(stat -f -c %T -- .)" = tmpfs || refuse_launch_storage\n'
+    if missing_ok:
+        script = (
+            "set -eu\n"
+            f"for ancestor in {shlex.join(list(reversed(ancestors)))}; do\n"
+            'test ! -L "$ancestor" || { '
+            "echo 'refusing symlinked launch cleanup storage' >&2; exit 1; }\n"
+            "done\n"
+            f"if test -e {quoted}; then\n" + script + "fi\n"
+        )
     return script
+
+
+def preparation_guard(user: str) -> str:
+    directory = launch_directory(user)
+    executable = executable_root_for_launch_dir(directory)
+    return (
+        directory_guard(executable, require_ram=False, missing_ok=True)
+        + directory_guard(directory, create=True)
+    )

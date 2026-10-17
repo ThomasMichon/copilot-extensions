@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -30,6 +31,7 @@ from .launch_storage import (
     executable_directory,
     executable_root_for_launch_dir,
     launch_directory,
+    preparation_guard,
 )
 
 log = logging.getLogger("agent-containers")
@@ -435,7 +437,7 @@ def write_remote_env(container: str, user: str, values: dict[str, str]) -> str |
     written = _run([
         "docker", "exec", "-i", "-u", user, container,
         "sh", "-c",
-        directory_guard(launch_dir, create=True) +
+        preparation_guard(user) +
         abandoned_cleanup_script(launch_dir, executable_root_for_launch_dir(launch_dir)) + "\n" +
         f"set -C; cat > {shlex.quote(remote_path.rsplit('/', 1)[1])}",
     ], input_text=payload)
@@ -453,6 +455,21 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> bo
     _validate_target(container, user)
     executable = executable_directory(remote_path)
     try:
+        parent = posixpath.dirname(remote_path)
+        guard = directory_guard(
+            parent,
+            require_ram=remote_path.startswith(launch_directory(user) + "/"),
+            missing_ok=True,
+        )
+        executable_parent = posixpath.dirname(executable)
+        if executable_parent != parent:
+            guard += directory_guard(executable_parent, require_ram=False, missing_ok=True)
+        checked = _run([
+            "docker", "exec", "-u", user, container, "sh", "-c", guard,
+        ])
+        if checked.returncode:
+            log.warning("Refusing unsafe SSH launch cleanup storage in %s", container)
+            return False
         result = _run([
             "docker", "exec", "-u", user, container,
             "rm", "-f", remote_path,
@@ -487,7 +504,7 @@ def cleanup_remote_envs(container: str, user: str) -> None:
     result = _run([
         "docker", "exec", "-u", user, container,
         "sh", "-c",
-        directory_guard(launch_dir, create=True) +
+        preparation_guard(user) +
         abandoned_cleanup_script(launch_dir, executable_root_for_launch_dir(launch_dir)),
     ])
     if result.returncode != 0:

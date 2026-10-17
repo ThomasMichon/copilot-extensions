@@ -168,7 +168,8 @@ def test_session_host_original_ram_handle_removes_both_roots(
     auth_directory.mkdir(mode=0o700)
     (auth_directory / "auth.env").write_text("synthetic-only")
     executable = Path(launch_storage.executable_directory(owner))
-    executable.mkdir(mode=0o700, parents=True)
+    for directory in (executable.parent.parent, executable.parent, executable):
+        directory.mkdir(mode=0o700)
     (executable / "copilot").write_text("nonsecret wrapper")
     monkeypatch.setattr(
         cli, "_trusted_session_host_context",
@@ -287,3 +288,32 @@ def test_executable_root_mapping_does_not_require_a_synthetic_owner(
     assert launch_storage.executable_root_for_launch_dir(directory) == expected
     assert launch_storage.executable_directory(directory + "/abc.env") == expected + "/abc.env.d"
     assert launch_storage.executable_directory(directory + "/abc.env.d/auth.env") == expected + "/abc.env.d"
+
+
+@pytest.mark.parametrize("unsafe", ["symlink", "permissions"])
+def test_unsafe_executable_root_blocks_reaping_staging_and_cleanup(
+    tmp_path: Path, ram_root: Path, local_transport: list,
+    monkeypatch: pytest.MonkeyPatch, unsafe: str,
+) -> None:
+    owner = ssh_transport.write_remote_env("fixture", "user", {"SETTING": "ordinary"})
+    assert owner is not None
+    executable = Path(launch_storage.executable_directory(owner))
+    executable.parent.parent.mkdir(mode=0o700)
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o700)
+    if unsafe == "symlink":
+        executable.parent.symlink_to(outside, target_is_directory=True)
+    else:
+        executable.parent.mkdir(mode=0o755)
+    executable.mkdir(mode=0o700)
+    sentinel = executable / "copilot"
+    sentinel.write_text("must remain")
+    assert ssh_transport.cleanup_remote_env("fixture", "user", owner) is False
+    assert Path(owner).exists()
+    assert sentinel.read_text() == "must remain"
+    with pytest.raises(RuntimeError, match="Failed to stage"):
+        ssh_transport.write_remote_env("fixture", "user", {"SECRET": "synthetic-only"})
+    with pytest.raises(RuntimeError, match="Could not clear abandoned"):
+        ssh_transport.cleanup_remote_envs("fixture", "user")
+    assert list(ram_root.rglob("*.env")) == [Path(owner)]
+    assert sentinel.read_text() == "must remain"
