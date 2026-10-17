@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import activity, config as cfg, disposition_history, git_ops, handoff_trace
 from . import permissions, procs, sessions, tracking
-from .retirement_safety import retirement_blocker
+from .retirement_safety import retirement_blocker, same_pair
 
 
 def reap_worktree(
@@ -17,7 +17,30 @@ def reap_worktree(
     repo: cfg.RepoConfig,
     tracking_path: Path,
 ) -> tuple[int, list[str]]:
-    """Remove one checkout under the caller's finalization and record locks."""
+    """Reload and fence responsibility under the caller's finalization lock."""
+    path = tracking_path / f"{rec.worktree_id}.yaml"
+    try:
+        with tracking._RecordLock(path, require_sidecar=True):
+            latest = tracking.load_record(path)
+            if (
+                latest.worktree_path != rec.worktree_path
+                or latest.branch != rec.branch
+                or latest.checkout_managed != rec.checkout_managed
+                or not same_pair(rec, latest)
+            ):
+                return 1, [f"Cannot retire {rec.worktree_id}: checkout identity changed; retry cleanup"]
+            return _reap_locked(latest, info, repo, tracking_path)
+    except (OSError, ValueError) as exc:
+        return 1, [f"Cannot retire {rec.worktree_id}: {exc}"]
+
+
+def _reap_locked(
+    rec: tracking.WorktreeRecord,
+    info: git_ops.WorktreeStateInfo,
+    repo: cfg.RepoConfig,
+    tracking_path: Path,
+) -> tuple[int, list[str]]:
+    """Keep the responsibility fence through removal and record retirement."""
     warnings: list[str] = []
     failures = 0
     blocker = retirement_blocker(rec)
