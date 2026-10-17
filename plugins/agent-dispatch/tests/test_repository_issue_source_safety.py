@@ -428,6 +428,7 @@ def test_exit_confirmation_requires_identity_and_custody_after_signaling(changes
 @pytest.mark.parametrize("error", [
     subprocess.TimeoutExpired(["synthetic-command"], 1, output="synthetic-secret"),
     OSError("synthetic-secret"),
+    RuntimeError("synthetic-secret"),
 ])
 def test_credential_probe_errors_do_not_expose_captured_credentials(monkeypatch, error):
     def runner(*_args, **_kwargs):
@@ -438,6 +439,39 @@ def test_credential_probe_errors_do_not_expose_captured_credentials(monkeypatch,
         provider._gh("issue", "edit", "7")
     assert "synthetic-secret" not in str(failure.value)
     assert failure.value.__suppress_context__
+
+
+@pytest.mark.parametrize("stage,description", [
+    ("account", "account selection"),
+    ("credential", "credential retrieval"),
+    ("identity", "credential identity verification"),
+])
+@pytest.mark.parametrize("failure", ["unavailable", "os-error", "subprocess-error"])
+def test_default_probe_failures_retain_safe_stage_context(
+    monkeypatch, stage, description, failure,
+):
+    monkeypatch.setattr(procutil, "agent_worktrees_launch_prefix", lambda: ["scoped-owner"])
+    operations = []
+
+    def capture(argv, **_kwargs):
+        current = probe_fixture.operation(argv[1:])
+        operations.append(current)
+        if current == stage:
+            if failure == "unavailable":
+                return None
+            error = OSError if failure == "os-error" else subprocess.SubprocessError
+            raise error("synthetic-secret")
+        assert current in {"account", "credential", "identity"}, "forge mutation reached"
+        value = "synthetic-token" if current == "credential" else "issue-bot"
+        return subprocess.CompletedProcess(argv, 0, value, "")
+
+    monkeypatch.setattr(procutil, "run_background_capture", capture)
+    provider = GitHubProvider("issue-bot", repository="example/project", auth="repository")
+    with pytest.raises(RuntimeError) as error:
+        provider._gh("issue", "edit", "7")
+    assert str(error.value) == f"Repository GitHub authentication failed during {description}"
+    assert error.value.__suppress_context__ and error.value.__cause__ is None
+    assert operations == ["account", "credential", "identity"][:operations.index(stage) + 1]
 
 
 def test_scoped_operation_failure_does_not_echo_credentials(monkeypatch):

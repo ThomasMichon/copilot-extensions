@@ -68,7 +68,7 @@ def repository_environment(
                 argv, capture_output=True, text=True, check=False,
                 timeout=_TIMEOUT_SECONDS, env=env, **procutil.no_window_kwargs(),
             )
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError, RuntimeError):
             raise RuntimeError(
                 f"Repository GitHub authentication failed during {operation}"
             ) from None

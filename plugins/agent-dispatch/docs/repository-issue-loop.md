@@ -92,6 +92,9 @@ code without echoing arguments or credential-bearing output.
 The command adapter forwards `cwd`, environment and timeout to the contained
 capture runner. That runner owns fixed text capture and headless process-tree
 flags; incompatible or unknown process options refuse before execution.
+Authentication probe failures identify account selection, credential retrieval
+or identity verification even when the contained runner reports a timeout or
+unavailable command, without exposing the original exception or output.
 
 Azure DevOps work-item discovery has no natural per-repo boundary the way a
 GitHub `owner/name` repository does: an Azure DevOps `organization/project`

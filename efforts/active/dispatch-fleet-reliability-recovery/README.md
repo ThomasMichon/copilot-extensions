@@ -1109,3 +1109,18 @@ requested contract.
   preparation and native artifact-reader cases pass; fatal lint passes.
 - The current review's three encoding observations share this one repair.
   Publication still needs a fresh current-head review and CI before merge.
+
+### 2026-10-17 - Preserve safe authentication-stage diagnostics
+
+- Contained command failures surface as `RuntimeError`. Authentication requests
+  now wrap that specific runner failure with the same sanitized stage context
+  already used for OS/subprocess failures, rather than losing the failed stage.
+- Ten regression cases cover injected runtime errors and the default adapter's
+  unavailable, OS-error and subprocess-error paths at account selection,
+  credential retrieval and identity verification. Each error suppresses its
+  original context and stops before any forge mutation.
+- The complete source-safety suite passes 339 tests in 22.70 seconds; fatal
+  lint and whitespace checks pass. No timeout or fail-closed behavior changed.
+- The separate Copilot agentic-review startup check timed out; that advisory
+  failure is not a required-CI verdict. Current-head CI and a passing review
+  remain separate gates; neither is bypassed.
