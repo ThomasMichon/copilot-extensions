@@ -206,6 +206,30 @@ def test_schedule_metadata_retains_all_scopes_defaults_and_labels_in_declaration
     assert component["labels"] == ["first", "shared", "second", "default"]
 
 
+@pytest.mark.parametrize("schedules", [[], "not-a-list", {}])
+def test_invalid_schedule_container_remains_a_discovery_error_not_routing_metadata(tmp_path, schedules):
+    from agent_dispatch.registrar import load_declaration
+
+    document = {
+        "name": "invalid-ticks", "kind": "schedule",
+        "spec": {"schedules": schedules, "default_repo": "example/default", "labels": ["not-an-entry"]},
+    }
+    with pytest.raises(RegistrarError, match="non-empty list of objects"):
+        load_declaration(document)
+    source = tmp_path / "source"
+    source.mkdir()
+    path = source / "invalid.json"
+    original = json.dumps(document).encode()
+    path.write_bytes(original)
+    rd.add_pointer("invalid-schedule", source, owner="repo:source")
+    data = catalog()
+    assert any("non-empty list of objects" in error for error in data["summary"]["errors"])
+    assert any(row["group"] == "Discovery errors" for row in data["entries"])
+    assert all(row["title"] != "invalid-ticks" for row in data["entries"])
+    assert any(row["id"] == "template:worker-pool" for row in data["entries"])
+    assert path.read_bytes() == original
+
+
 @pytest.mark.parametrize("key", ["repository_issue_loop", "effort_driver_loop"])
 def test_composed_emitter_metadata_reads_its_own_nested_routing(key):
     from agent_dispatch.registrar import ProfileDeclaration

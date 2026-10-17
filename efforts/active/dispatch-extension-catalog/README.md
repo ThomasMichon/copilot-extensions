@@ -295,3 +295,23 @@ automation activation still require their applicable operational authorization.
   170 tests. Changed Python lint, the 13-plugin install contract and all
   non-widened source-module ceilings passed. No service, source activation,
   installed update or live external process was used as a success claim.
+
+### 2026-10-17 - Rejected schedule regression and independent CI blocker
+
+- Updated-head review suggested a missing `replace` import; the existing
+  `from dataclasses import dataclass, replace` and file-backed discovery tests
+  disprove that finding. No duplicate import was added.
+- The suggested empty schedule shape is also rejected by the owning registrar:
+  an explicitly supplied schedules collection must be a non-empty object list.
+  Added a regression through real source discovery proving empty or malformed
+  containers remain visible errors, never fabricated routing metadata, while
+  healthy templates and original source bytes remain intact. Activation and
+  schedule validation behavior are unchanged.
+- The contained catalog/instance, discovery and registry selection passed
+  173 tests after correcting the test's initial unsupported fixture assumption.
+- Required guards encountered the separately tracked native POSIX PowerShell
+  timeout in #7020 (run 39026318754, job 117377895225). Recorded the exact
+  recurrence and native-venue limitation there. That issue is not an accepted
+  flake or waiver: no timeout increase, test skip, forced retry or CI bypass.
+  Normal updated-head checks remain an independent merge gate, not proof that
+  the native timeout was diagnosed or fixed.
