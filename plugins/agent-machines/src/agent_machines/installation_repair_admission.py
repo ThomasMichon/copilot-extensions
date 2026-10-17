@@ -251,13 +251,16 @@ def admit_host(
         active = active_owners.get(source)
         if active is None:
             refused[source] = "enabled-payload-not-attributable"
+            unresolved_claims.add(source)
             continue
         roots = {entry.root for entry in active.live_roots}
         if len(roots) != 1:
             refused[source] = "enabled-payload-root-ambiguous"
+            unresolved_claims.add(source)
             continue
         root = next(iter(roots)).absolute()
         clean = ordinary_environment(environment, home=home, payload=root)
+        claim_resolved = False
         try:
             ordinary(root, directory=True)
             resolved = context.resolve_payload_source(
@@ -275,11 +278,8 @@ def admit_host(
                 ),
             )
             installations.append(installation)
-            try:
-                legacy_root = _runtime_claim(root, home)
-            except (RepairAdmissionError, OSError):
-                unresolved_claims.add(source)
-                raise
+            legacy_root = _runtime_claim(root, home)
+            claim_resolved = True
             if legacy_root is not None:
                 legacy_claims.setdefault(legacy_root, set()).add(installation.owner_id)
             # Runtime ownership is independent of eligibility for repair execution.
@@ -292,14 +292,20 @@ def admit_host(
                 installation, source=source, home=home, project_root=project_root,
                 environment=environment,
             )
+            if binding.legacy_root != legacy_root:
+                unresolved_claims.add(source)
+                raise RepairAdmissionError("runtime ownership claim changed during admission")
             previous = bindings.get(installation.owner_id)
             if previous is not None and previous.evidence() != binding.evidence():
                 refused[source] = "enabled-owner-binding-ambiguous"
+                unresolved_claims.add(source)
                 bindings.pop(installation.owner_id, None)
             else:
                 bindings[installation.owner_id] = binding
         except (RepairAdmissionError, context.InstallationContextError, OSError):
             refused[source] = "enabled-owner-admission-refused"
+            if not claim_resolved:
+                unresolved_claims.add(source)
     for owner_id, binding in tuple(bindings.items()):
         if binding.mode != "ordinary" or binding.legacy_root is None:
             continue

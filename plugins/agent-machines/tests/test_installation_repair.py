@@ -12,6 +12,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_machines import installation_repair as repair_api
+from agent_machines import installation_repair_admission as admission_api
 from agent_machines.installation_repair_admission import (
     RepairAdmissionError, admit_host, ordinary_environment,
 )
@@ -760,7 +761,8 @@ def _directory_alias(path: Path, target: Path) -> None:
 
 @pytest.mark.parametrize("peer_mode", [
     "repairable", "no-readiness", "no-readiness-or-protocol", "no-protocol", "invalid-root",
-    "aliased-roots", "aliased-ancestor",
+    "aliased-roots", "aliased-ancestor", "mixed-scope-roots", "missing-provenance",
+    "missing-enabled-payload",
 ])
 def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_writer(
     repair_fixture, monkeypatch, peer_mode,
@@ -787,8 +789,21 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
     write_json(manifest, value)
     settings = project / ".github" / "copilot" / "settings.json"
     value = json.loads(settings.read_text())
-    value["enabledPlugins"]["agent-peer@fixture"] = True
+    peer_source = (
+        "agent-peer@missing" if peer_mode == "missing-provenance"
+        else "agent-absent@fixture" if peer_mode == "missing-enabled-payload"
+        else "agent-peer@fixture"
+    )
+    value["enabledPlugins"][peer_source] = True
     write_json(settings, value)
+    if peer_mode in ("mixed-scope-roots", "missing-provenance"):
+        marketplace = "missing" if peer_mode == "missing-provenance" else "fixture"
+        installed = home / ".copilot" / "installed-plugins" / marketplace / "agent-peer"
+        shutil.copytree(peer, installed)
+        if peer_mode == "mixed-scope-roots":
+            write_json(home / ".copilot" / "settings.json", {
+                "enabledPlugins": {"agent-peer@fixture": True},
+            })
     if peer_mode == "aliased-roots":
         shared = home / "shared-runtime"
         shared.mkdir()
@@ -801,7 +816,12 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
         home = alias
     host = admit_host(project, home=home)
     aliased = peer_mode.startswith("aliased-")
-    assert bool(host.refused) == (aliased or peer_mode in ("no-protocol", "invalid-root"))
+    unresolved_peer = peer_mode in (
+        "mixed-scope-roots", "missing-provenance", "missing-enabled-payload",
+    )
+    assert bool(host.refused) == (
+        aliased or unresolved_peer or peer_mode in ("no-protocol", "invalid-root")
+    )
     assert not host.report.findings
     binding_count = 0 if aliased else 2 if peer_mode == "repairable" else 1
     assert len(host.bindings) == binding_count
@@ -811,7 +831,7 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
                 for owner in host.bindings.values()}) == int(binding_count > 0)
     assert len({owner.installation.owner_id for owner in host.bindings.values()}) == binding_count
     refusal = (
-        "ordinary-legacy-ownership-unresolved" if peer_mode == "invalid-root"
+        "ordinary-legacy-ownership-unresolved" if peer_mode == "invalid-root" or unresolved_peer
         else "ordinary-legacy-writer-ambiguous"
     )
     assert all(owner.refusal == refusal
@@ -830,10 +850,45 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
     result = repair_api.repair(
         project, home=home, modules=modules, apply=True, expected_plan_digest=plan["planDigest"],
     )
-    assert len(result["outcomes"]) == (2 if peer_mode.startswith("no-readiness") else 4)
+    assert len(result["outcomes"]) == (
+        2 if peer_mode.startswith("no-readiness") or unresolved_peer else 4
+    )
     assert result["status"] == "incomplete"
     assert not any(row["attempted"] for row in result["outcomes"])
     assert not list(home.glob("*.ready"))
+
+
+def test_installation_repair_disabled_unavailable_peer_does_not_poison_census(repair_fixture):
+    home, project, _, _, _ = repair_fixture
+    settings = project / ".github" / "copilot" / "settings.json"
+    value = json.loads(settings.read_text())
+    value["enabledPlugins"]["agent-absent@fixture"] = False
+    write_json(settings, value)
+    host = admit_host(project, home=home)
+    assert not host.refused and len(host.bindings) == 1
+    assert all(owner.refusal is None for owner in host.bindings.values())
+
+
+def test_installation_repair_census_binding_disagreement_refuses_execution(
+    repair_fixture, monkeypatch,
+):
+    from dataclasses import replace
+
+    home, project, _, _, _ = repair_fixture
+    original = admission_api._binding
+
+    def changed(*args, **kwargs):
+        return replace(original(*args, **kwargs), legacy_root=home / ".different")
+
+    monkeypatch.setattr(admission_api, "_binding", changed)
+    monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("executed"))
+    host = admit_host(project, home=home)
+    assert not host.bindings
+    assert host.refused == {"agent-example@fixture": "enabled-owner-admission-refused"}
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert result["status"] == "incomplete"
+    assert not any(row["attempted"] for row in result["outcomes"])
 
 
 def test_installation_repair_cycle_refuses_before_any_invocation(repair_fixture, monkeypatch):

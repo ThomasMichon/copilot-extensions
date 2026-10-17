@@ -152,6 +152,8 @@ repair rather than guessing an installer. A legacy runtime root must have one
 qualified plugin owner, even when the competing plugins share a marketplace.
 All enabled runtimes contribute ownership claims independently of readiness or
 repair eligibility; an unverifiable runtime declaration blocks ordinary repair.
+Enabled peers with ambiguous roots or unavailable provenance also make that
+census incomplete; unrelated selected owners cannot install past the uncertainty.
 Existing runtime roots and ancestors must be ordinary, unlinked directories;
 a missing ordinary root remains eligible for first installation.
 Validated active-core cells may be
