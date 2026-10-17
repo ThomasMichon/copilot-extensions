@@ -442,6 +442,8 @@ Linux connection, acceptance, channel I/O and peer observation use native pollin
 without the `FD_SETSIZE` ceiling; invalid descriptors remain explicit refusals.
 Peer-exit custody without a native Windows API requires Linux; missing native
 polling or an unsupported backend refuses explicitly as unavailable.
+An occupied native listener name refuses as `Refusal.UNAVAILABLE` on either
+platform without replacing the existing endpoint.
 
 Native channels retain peer process custody independently of frame contents:
 

@@ -16,11 +16,13 @@ from typing import Any
 from .private_protocol import Deadline, PeerIdentity, Refusal, deadline_lock
 from .private_peer import PeerProcess
 from .private_windows_native import (
+    BROKEN_PIPE,
     DWORD,
     INVALID_HANDLE,
     IO_INCOMPLETE,
     IO_PENDING,
     NOT_FOUND,
+    NO_DATA,
     OPERATION_ABORTED,
     OVERLAPPED,
     PIPE_CONNECTED,
@@ -58,7 +60,8 @@ _retained: list[_Operation] = []
 _retained_lock = threading.Lock()
 _RETENTION_CAP = 32
 _slots = threading.BoundedSemaphore(_RETENTION_CAP)
-_TERMINAL = (0, OPERATION_ABORTED, 109, 232)
+_CLOSED_ERRORS = (BROKEN_PIPE, NO_DATA)
+_TERMINAL = (0, OPERATION_ABORTED, *_CLOSED_ERRORS)
 
 
 def _reap() -> None:
@@ -179,14 +182,14 @@ class WindowsChannel:
                 return 0
             if not ok and error != IO_PENDING:
                 completed = True
-                refuse(Refusal.CLOSED if error in (109, 232) else Refusal.IO)
+                refuse(Refusal.CLOSED if error in _CLOSED_ERRORS else Refusal.IO)
             while True:
                 deadline.remaining()
                 ok, transferred, error = operation.result()
                 if error in _TERMINAL:
                     completed = True
                     if not ok:
-                        refuse(Refusal.CLOSED if error in (109, 232) else Refusal.IO)
+                        refuse(Refusal.CLOSED if error in _CLOSED_ERRORS else Refusal.IO)
                     deadline.remaining()
                     return transferred
                 if error != IO_INCOMPLETE:

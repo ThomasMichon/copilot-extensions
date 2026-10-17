@@ -234,9 +234,10 @@ class UnixListener:
         except PrivateIPCError:
             self.close()
             raise
-        except OSError:
+        except OSError as exc:
             self.close()
-            raise PrivateIPCError(Refusal.IO) from None
+            reason = Refusal.UNAVAILABLE if exc.errno == errno.EADDRINUSE else Refusal.IO
+            raise PrivateIPCError(reason) from None
 
     def accept(
         self, deadline: Deadline, *, expected: PeerIdentity | None = None,

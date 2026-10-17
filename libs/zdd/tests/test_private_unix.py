@@ -319,8 +319,9 @@ def test_listener_never_replaces_occupied_endpoint(tmp_path: Path) -> None:
     first = UnixListener(path)
     try:
         inode = path.stat().st_ino
-        with pytest.raises(PrivateIPCError):
+        with pytest.raises(PrivateIPCError) as caught:
             UnixListener(path)
+        assert caught.value.reason is Refusal.UNAVAILABLE
         assert path.stat().st_ino == inode
         assert path.stat().st_mode & 0o777 == 0o600
     finally:
