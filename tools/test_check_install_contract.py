@@ -679,6 +679,9 @@ function Get-PayloadHash {
     if ($Failure -eq 'hash') { return '' }
     return ('a' * 64)
 }
+function Assert-SourceRuntime {}
+function Assert-SourceRuntimeIdentity {}
+function Test-SourceRuntimeUnchanged {}
 function Complete-RuntimeConstruction([string]$PayloadHash) {
     if ($PayloadHash -notmatch '^[0-9a-f]{64}$') { throw 'hash-refused' }
     if ($Failure -eq 'writer') { throw 'writer-refused' }
@@ -745,6 +748,9 @@ _SH_HARNESS = """set -euo pipefail
 {globals}
 _fail() {{ :; }}; err() {{ :; }}; warn() {{ :; }}; ok() {{ :; }}; info() {{ :; }}
 _warn() {{ :; }}; _ok() {{ :; }}; _info() {{ :; }}
+_assert_source_runtime() {{ :; }}
+_assert_source_runtime_identity() {{ :; }}
+_source_runtime_unchanged() {{ :; }}
 _bootstrap_python() {{ echo "$STUB_PY"; }}
 _payload_hash() {{ [[ -z "${{STUB_HASH_FAIL:-}}" ]] || return 1; echo deadbeef; }}
 _runtime_construction_complete() {{
