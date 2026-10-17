@@ -19,8 +19,10 @@ Runtime enabling and production rollout retain their existing gates.
 
 ## Ordered implementation
 
-- [ ] Land the adopting harness's reviewed default intent, then the generic
+- [x] Land the adopting harness's reviewed default intent, then the generic
   Runtime Assembly/engine amendments and this plan, before external realization.
+  The generic amendment and plan merged in #7066; adopter intent cleared its
+  own review gate first. Neither merge enables a runtime.
 - [ ] Extend the existing authority seam with an authenticated adopting-policy
   input. Its default requires no private approval file, invented provider or
   extra controller. Establish the actual existing release/configuration

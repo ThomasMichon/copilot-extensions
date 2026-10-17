@@ -196,7 +196,9 @@ shared mutable venv is presumed acceptable.
 The delivered dependency reductions, helper investigation and compatibility
 boundary have cleared review. This is not approval to enable a production
 artifact fast path. The remaining engine-profile application (#6737) depends on
-#4876's still-open Phase 2 item to publish authority-approved exact profiles.
+#4876's authenticated authority integration and actual permitted exact closures.
+Release-profile publication is required for artifact-mode acceptance, not a
+prerequisite for the independently verified source mode approved in #7066.
 The selection contract's design merged in #6795; actual approval adapters,
 feed-compatible closures and Phase 3 consumer admission remain open. Do not
 invent a substitute resolver here. Held construction merged in #6598; that is
@@ -217,8 +219,10 @@ their open implementations. The effort and retained runtime/state stay open.
 The next stretch follows the operator-approved
 [zero-configuration default](zero-configuration-defaults.md). A harness-supplied
 policy reaches the same authority seam for release and source modes; hand-built
-adopter approval files are not the default integration. Review the amended
-intent and plan before enabling that authority adapter or a native consumer.
+adopter approval files are not the default integration. The amended intent and
+plan merged in #7066. The next implementation boundary is the authenticated
+adopting-policy/source adapter and its actual governed closure, not another
+profile-record API or a competing admission constructor.
 
 ## Journal
 
@@ -643,3 +647,36 @@ intent and plan before enabling that authority adapter or a native consumer.
   campaign and the existing construction/admission/input-generator owners.
   The inert API's caller-provided approval map is not an implemented default;
   ordinary users must not have to construct that map themselves.
+
+### 2026-10-17 - Zero-configuration plan reviewed and merged
+- #7066 merged to `dev` as `1d18d3a05` after current-head Copilot review and
+  successful CI `38986244874`; all 42 actual check contexts completed without
+  failures. The earlier approving review found a conflicting automatic-GPU
+  definition; that definition now consistently follows authority capability
+  policy. The final review used the Lite lane because the full agentic review
+  could not obtain a runner before its timeout. Its three remaining suggestions
+  were optional wording changes, considered and explained on their resolved
+  threads; there were no open Medium/High findings.
+- Re-read the canonical effort and default sub-plan after merge. Closed only
+  the ordered review gate and transitioned this retained worktree from Phase 5
+  to Phase 4. The parent campaign remains Active; no implementation, platform
+  acceptance, accepted owner transfer or production rollout is inferred.
+- Continued the authority integration trace: the existing shared
+  `installer_dependency_policy.py` owns configured UV resolution, stronger
+  seasoning and private retained input/configuration comparison, but has no
+  exact-profile approval-source adapter. The record API remains repository-only.
+  Existing promotion validators bind first-party source/manifest/wheel content;
+  they do not by themselves authorize a consumer runtime closure.
+- Keep #6941's contributor-owned candidate inputs and #6707's constructor/
+  admission work intact. Establish a disjoint authenticated-policy and
+  exact-closure integration contract with those existing owners before native
+  application under #6737. Do not turn the missing contract into a self-approved
+  JSON loader, replace the original drafts, or make source mode wait for
+  artifact publication.
+- The operator selected "Keep coordinating with the existing owner; leave its
+  admission implementation untouched" rather than taking over #6707. Requested
+  the explicit adapter handoff on the original PR. Its published source
+  codename did not resolve through the available managed-worktree lookup;
+  that is not evidence of abandonment or permission to create a replacement.
+  Native integration remains blocked on an accepted owner contract, with
+  responsibility retained here and no completed transfer claimed.
