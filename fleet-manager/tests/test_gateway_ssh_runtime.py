@@ -2,10 +2,12 @@ from copy import deepcopy
 from dataclasses import FrozenInstanceError, dataclass
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +16,7 @@ from fleet_manager.gateway_ssh_runtime import (
     plan_gateway_ssh, reconcile_gateway_ssh,
 )
 from fleet_manager.planning import PlanError, canonical, digest
+import fleet_manager.gateway_ssh_runtime as runtime
 
 
 def fingerprint(raw):
@@ -183,6 +186,16 @@ def test_real_fixed_owner_repairs_only_managed_projection_then_stale_plan_is_ine
     assert fresh.to_dict()["state"] == "unchanged"
     assert reconcile_gateway_ssh(fresh, authority=authority, owner=owner).state == "unchanged"
     assert owner.calls.count("reconcile") == 1
+
+
+def test_float_rounding_never_expands_the_owner_operation_budget(tmp_path, monkeypatch):
+    plan, authority, owner = setup(tmp_path)
+    instant = math.nextafter(256.0, 0.0)
+    assert (instant + 30) - instant > 30
+    monkeypatch.setattr(runtime, "time", SimpleNamespace(
+        time=time.time, monotonic=lambda: instant,
+    ))
+    assert reconcile_gateway_ssh(plan, authority=authority, owner=owner).state == "reconciled"
 
 
 def test_plan_and_observation_do_not_retain_mutable_aliases():

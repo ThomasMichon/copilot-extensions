@@ -301,7 +301,7 @@ def reconcile_gateway_ssh(plan: GatewaySSHPlan, *, authority: GatewaySSHAuthorit
         left = deadline - time.monotonic()
         if left <= 0:
             raise TimeoutError
-        return left
+        return min(float(OPERATION_SECONDS), left)
 
     stage = "target-authentication"
     try:
