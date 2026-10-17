@@ -165,6 +165,9 @@ implementation and validation choices remain proposed means.
 - [x] Provide owner-atomic card/ownership steering acceptance, exact-request
   replay and distinct acceptance/consumption/original-wake receipts through
   the existing HTTP, SDK, CLI and native contributions.
+- [ ] Review and implement the bounded terminal receipt/recovery and
+  draft-provenance contract below through generic contributions and existing
+  owner APIs; retain independent graphical adoption and cross-client proof.
 - [ ] Reuse the existing command-emitter task-output contract for mapped
   external records. Extend only demonstrated gaps in stable record identity,
   column/field mapping, deduplication and acceptance receipts.
@@ -206,6 +209,10 @@ All items below are **agent-recommended acceptance checks** for execution.
 - [ ] Feed identical owner-backed source/task/steering fixtures to independent
   graphical and terminal consumers. Assert semantic parity, including structured
   inputs and failure/unknown states, without requiring matching layouts.
+- [ ] Exercise terminal full-result presentation, restart and vanished-card
+  recovery with the original request identity. Race draft Save/Reset against
+  card replacement and another client's edit; prove no stale restore, overwrite,
+  duplicate answer or wrong-owner receipt, including older-owner refusal.
 - [ ] Exercise mapped-record emission with missing/renamed columns, stable
   source identity, paging, repeated polls and lost responses. Prove malformed
   records remain visible and retries do not duplicate accepted work.
@@ -341,6 +348,121 @@ Keep this a focused path-gated contract suite, not a required exhaustive matrix.
 Instantiation requires separate first-touch/save/edit/publication/retry and
 provenance-preservation coverage through the real CLI. Record platform and live
 venue limitations explicitly; source merge is not promotion or installed proof.
+
+### Bounded terminal steering contract for review
+
+This section is **agent-recommended, proposed behavior**, not a claim that
+Manager already implements receipt or draft parity. It closes the existing
+Tasks-pane vision's `Immediate acceptance, visible delivery` intent and the
+parent dispatch vision's independent consumer contract. It follows the
+patterns' independent-installation, installation-provenance, cross-platform
+and fail-loud requirements. No new service or dispatch-specific Manager backend
+is proposed.
+
+**Established delta.** Native task forms already forward the owner revision,
+but the generic form transport truncates successful output and shows only its
+first line. Configuration actions already retain full output in a scrollable
+result screen; reuse that command/result machinery rather than another renderer.
+The task evidence command does not include steering acceptance or original-wake
+receipts. Local drafts are keyed only by task ID and restore only values.
+Manager's Save/Reset helpers currently construct dispatch commands directly;
+the owner draft API accepts no card or draft revision. A stale form can therefore
+save into a replacement card or clear another client's newer draft. A local
+revision label alone cannot close that owner-side race.
+
+**Contribution and transport boundary.** Extend the existing attributed pivot
+action/form declaration only where needed to select full-result presentation,
+declare draft operations and expose receipt recovery. Provider-owned command
+argv remain provider-owned, resolved by the same runtime and installation
+context as the originating contribution. Move native task draft commands into
+that declaration instead of adding SDK/HTTP imports or more hardcoded dispatch
+commands to Manager. No shell interpolation, new command resolver or implicit
+provider execution while browsing. Ordinary actions, configuration previews,
+progress streams and non-durable forms retain their existing behavior.
+Malformed or unsupported declarations remain attributable incompatibilities,
+not permission to invoke a less guarded command.
+
+**Full results, not inferred delivery.** Present complete provider output and
+literal failures as plain scrollable text through the existing asynchronous
+command transport. A short footer may summarize it but must not be the only
+result. Transport completion, durable acceptance, current original-wake delivery
+and actual answer consumption are separate facts. Preserve provider request/
+task/owner references; neither exit zero nor a later task wake proves that a
+particular answer was consumed. No UI wait for worker startup, automatic wake
+retry, new poller or invented task state.
+
+**Original-request recovery.** Before a guarded submit can leave the client,
+durably retain its exact request identity and immutable submission context in
+the existing local draft/recovery mechanism. Bind it to the originating
+installation/provider, machine/queue scope, contribution/action, task and card/
+ownership revision, plus the complete submitted wire values and sender/wake
+intent. A crash after persistence but before execution is still uncertain,
+not proof of acceptance. Do not regenerate a different key from a later default,
+new selected machine, refreshed card or changed sender.
+
+Recovery remains reachable after restart and when the original question or
+bounded board row disappears; an editable current-card action is not its only
+entry point. Reuse the owning CLI's exact-request receipt query for explicit,
+read-only Check receipt. An identical retry, when offered, preserves the entire
+original request and its consent boundary; never rebind it to a replacement
+card. Missing, failed, unsupported or unverifiable receipt reads preserve the
+original uncertainty and values. They do not authorize a new send. Cancel or
+closing a retry/result cannot delete that uncertainty. A verified acceptance
+may retire the editable draft but must retain reachable owner-backed evidence;
+a failed subprocess alone never establishes that persistence failed.
+
+The local record is recoverable client context, not a second acceptance
+authority, task registry or cross-client draft store. Stored argv/context are
+data, not executable authority: recovery must resolve the current attributed
+provider and supported action again and verify the original installation/scope.
+Unavailable or changed providers expose a read-only diagnostic rather than
+running arbitrary saved commands or rerouting to another queue.
+
+**Bound drafts and safe Save/Reset.** Keep unsent editable drafts distinct from
+locked submitted/uncertain answers. Restore values only when installation,
+queue, task, action/schema and owner-issued card revision match. Changed-card,
+wrong-scope, corrupt and legacy unbound drafts stay visibly recoverable as
+previous values, never silently populate a new question or get deleted by its
+Reset. Preserve conditional hidden values without submitting inactive fields.
+Report local persistence failure before dismissing a form whose only recovery
+copy could otherwise be lost.
+
+For shared drafts, extend the existing owner draft lifecycle rather than create
+another store. Guard Save and Reset transactionally by the expected card/
+ownership revision and the observed draft revision, including explicit absence.
+Return attributable revision/provenance so two clients can detect concurrent
+edits; do not overwrite or clear a newer draft blindly. Guarded routes must
+refuse an older owner or a downgrade without an unguarded fallback. Legacy
+unguarded calls remain a documented compatibility surface, not proof of safe
+cross-client adoption. Saving never submits steering, clears awaiting-input,
+resumes a task or enqueues a wake. A conflict retains local values and names the
+need to refresh; Reset reports which local and owner copies actually changed.
+
+**Evidence and compatibility.** Reuse owner steering history and exact receipt
+reads to make accepted answers inspectable from either Tasks or Maintenance,
+including consumption and each answer's original wake. Historical rows without
+verifiable acceptance remain explicitly legacy/unknown. No association by title,
+most recent wake or current card. Preserve current remote ownership and
+read-only routing; unsupported peers must not resemble an empty history.
+Keep historical managed-contribution ownership fingerprints unchanged; update
+current attributed templates through their existing migration path.
+
+**Implementation acceptance.** Exercise both native contributions and one
+non-dispatch form through the actual Manager parser/runtime and rendered
+terminal screen. Prove output beyond the old truncation boundary, plain-text
+rendering, responsive execution, visible literal errors and no worker-startup
+wait. Through an isolated real CLI/HTTP owner, lose a response after commit,
+restart, replace/remove the card and exclude the task from the board; recover
+only the original acceptance/consumption/wake with zero duplicate writes.
+Include same-answer retry cancellation and unavailable/changed provider scope.
+Race guarded draft Save/Reset against card/owner replacement and another
+client's edit. Cover legacy/corrupt local drafts, local-write failure, unknown
+contracts and older/downgraded owners without auto-send or value loss.
+Preserve configuration, ordinary guidance, native choice/multiline/conditional
+inputs and historical trust guards. Keep focused path-gated contracts in required
+CI and larger matrices in the existing exhaustive lane. Native Windows/Linux
+and first-touch/restart evidence, normal review/CI/release and separately
+authorized installed proof remain distinct obligations.
 
 ## Journal
 
@@ -855,3 +977,20 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   #6379, #4959 and #6283 ownership. Template instantiation, process/evaluator
   proof, mapped-record production, promotion and authorized installed proof
   remain open; this effort is Active.
+
+### 2026-10-17 - Terminal receipt and draft-provenance contract proposed
+
+- The graphical-adoption progress record merged in #7148 after exact-head
+  approval and complete successful normal CI, including the required aggregate.
+  Re-read the Plan and Validation Plan; #7141 and the parent effort stay open.
+- Added the bounded proposed terminal contract above before implementation.
+  Reuse existing full-output configuration presentation and contributed command
+  transport, retaining exact uncertain requests independently of the current
+  board/card. Local recovery context is not an acceptance authority.
+- The continued draft trace found an owner-side race as well as local
+  provenance loss: Save/Reset have no card or shared-draft precondition.
+  The contract requires transactional owner guards and contribution-owned
+  operations, not just a local fingerprint or more dispatch code in Manager.
+- This is a reviewed-intent candidate only. No runtime, template, installed
+  queue, service, source activation or rollout changed. Implementation,
+  cross-client acceptance and all remaining production/release gates stay open.
