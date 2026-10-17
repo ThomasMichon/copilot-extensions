@@ -102,7 +102,7 @@ implementation and validation choices remain proposed means.
 
 ### Phase 1 - Reconcile owners and review the delta
 
-- [ ] Re-read #6379, #4959 and #6283 and their current source before carving
+- [x] Re-read #6379, #4959 and #6283 and their current source before carving
   issues; retain existing owners and exclude already delivered behavior.
 - [ ] Inventory built-in template mappings, provider declarations, setup
   examples and contributed catalogs; classify reusable templates separately
@@ -155,7 +155,7 @@ implementation and validation choices remain proposed means.
 
 ### Phase 5 - Mapped sources and client semantic parity
 
-- [ ] Expose existing registrar/task-source facts through the same owning
+- [x] Expose existing registrar/task-source facts through the same owning
   projection consumed by graphical and terminal clients; avoid a new registry
   or a UI-owned state machine.
 - [ ] Establish a common acceptance matrix for source applicability,
@@ -217,6 +217,127 @@ workflow engine. Exact schemas and paths remain subject to Phase 1 review.
 Implementation is authorized after amended-plan review and merge. External
 adapter specifics stay with their owner. Production migration, deployment and
 automation activation still require their applicable operational authorization.
+
+### Bounded template contract for Phase 1 review
+
+This section is **agent-recommended, proposed behavior**, not documentation of
+an implemented provider format. It realizes the existing vision's
+`discoverable-extension-templates` and `extend-any-declaration` intent.
+It follows the patterns' independent-installation, source-isolation,
+installation-provenance and fail-loud requirements. It adds neither a runtime
+service nor a second template/configuration registry.
+
+**Discovery declarations.** A provider supplies one explicit versioned JSON
+index. The proposed homes are `dispatch-templates.json` at a verified plugin
+payload root, `templates/index.json` within each existing repository
+agent-dispatch configuration layer, and `templates/index.json` beneath the
+current installation's registrar state root for user-local contributions.
+These are inert homes outside active registrar declaration directories.
+An index points at existing provider-owned fragments instead of copying their
+configuration into a catalog. The initial shape is:
+
+```json
+{
+  "schema": "agent-dispatch.template-index",
+  "version": 1,
+  "templates": [
+    {
+      "id": "record-source",
+      "title": "Mapped record source",
+      "description": "Create ordinary tasks through a configured source adapter.",
+      "kind": "emitter",
+      "declaration": "recipes/record-source.json",
+      "requirements": ["Configure an adapter command and stable record identity."]
+    }
+  ]
+}
+```
+
+The declaration path is relative to the index directory, with the verified
+provider root as its containment boundary. Version 1 admits only JSON
+objects/fragments, portable nonempty IDs, bounded text and a supported
+registrar kind or `composite`. Unknown schema/version, duplicate IDs, invalid
+values, unreadable files, and paths escaping that boundary produce attributable
+findings. Do not execute provider commands, expand arbitrary directories or
+interpret requirements prose as executable policy while browsing. Absence of
+an optional index is normal; failure to establish its source is not.
+
+**Roots and applicability.** Reuse one current activation report across catalog
+sources and plugin templates. Enumerate every `ActivePlugin.live_roots` value
+with its own root kind and applicability, not just the compatibility `root`.
+Use current proven-active values; stale/unavailable activation evidence does
+not authorize an additional root. Repository discovery reuses registered
+repository identities and declared roots, including existing repo pointers,
+without requiring an active registrar pointer merely to browse inert material.
+An arbitrary directory pointer is not a canonical repository identity.
+Canonical/legacy selection and installation marketplace overlays use
+`repo_config.layered_repo_surface_dirs`; no new blanket local-wins rule.
+Retain separate layer/root variants with their provenance instead of silently
+choosing or merging them. Optional repository integration stays optional for
+a standalone installation: report unavailable/partial discovery, never install
+a sibling or return a falsely complete empty catalog.
+
+**Identity and revision.** Preserve all existing built-in `template:<key>` IDs,
+their revisions and `global:` recipe references, deriving them from
+`POOL_TEMPLATE` and `GLOBAL_RECIPES`. New IDs qualify provider identity,
+installation/source scope, root/layer variant and the provider's local ID.
+Names alone cannot collide with or replace a built-in. A revision detects
+changes to the index entry, declaration and resolution context; it is neither
+an activation receipt nor a running-state assertion. Equal file bytes at
+different dependency roots do not establish equivalent templates. Discovery
+exposes requirements, provenance, applicability, revision, resolution state
+and supported actions without forwarding executable specs or environment values
+as ordinary component metadata.
+
+**Discovery before instantiation.** The first implementation slice is
+read-only discovery. New provider rows must have `instantiable: false`, a
+specific unsupported reason and no Instantiate/Save action. Existing built-in
+actions stay intact: `save_instance` currently accepts built-in template IDs
+and rejects unmaterialized `extends`. Reporting an available fragment must not
+pretend that this command already accepts a new qualified template ID.
+Clients use owner-supplied capability facts rather than guessing from `kind`.
+
+The subsequent instantiation slice extends that same save lifecycle. It must
+re-resolve the selected qualified source/revision before persistence and
+materialize through the existing recipe parameter/deep-merge authority, not
+introduce another substitution language or UI-only form engine. Preserve the
+current advanced declaration and repository-root fields. Unsupported or
+ambiguous dependencies remain non-instantiable until proven safe. Relative
+resource meaning must survive materialization: existing inherited
+`emitter.spec.cwd` handling alone does not prove reviewer command paths or
+repository-derived worker identity. Resolve those cases with #4959's owner,
+or refuse the affected action explicitly; never rebase them silently onto the
+user-local destination.
+
+Instances retain immutable source provenance, stable IDs, optimistic edit
+revisions, equivalent-request retries, collision/dependency validation,
+Save-only, explicit publication consent and partial-failure receipts.
+Provider updates never rewrite existing drafts or active snapshots
+automatically. Activation remains pending until the existing supervisor's
+independent observation; no new producer, supervisor or authentication store.
+
+**Finding/action scope.** Add template-discovery completeness and attributable
+findings to the owning catalog without changing registrar authority.
+Inert-template findings disable the affected new template action, not an
+unrelated existing source toggle or local-instance edit. Existing registrar,
+stored-draft, publication and component-metadata failures retain their current
+mutation refusals. Do not append unrelated inert findings to a shared error
+collection that currently disables every toggle, or relax existing safeguards
+to accommodate the new catalog rows.
+
+**Implementation acceptance.** The discovery slice must use isolated builtin,
+enabled/disabled multi-root plugin, repository-layer and user-local fixtures.
+Compare identities, applicability, revisions and explicit partial/error states;
+include same-byte/different-root templates, duplicate entries, stale roots,
+unsupported versions, path escapes and a standalone installation without
+repository integration. Through the real catalog CLI and existing Manager
+contribution, prove that healthy rows survive, unsupported rows offer no
+mutation, unrelated controls retain their original authority, and browsing
+leaves source/state bytes unchanged with no queue, service or provider command.
+Keep this a focused path-gated contract suite, not a required exhaustive matrix.
+Instantiation requires separate first-touch/save/edit/publication/retry and
+provenance-preservation coverage through the real CLI. Record platform and live
+venue limitations explicitly; source merge is not promotion or installed proof.
 
 ## Journal
 
@@ -359,3 +480,46 @@ automation activation still require their applicable operational authorization.
   Python lint passed. This is a real source-attribution coupling, not a
   pre-existing failure or waiver.
   Fresh-head review and the complete required CI gate remain open.
+
+### 2026-10-17 - Shared catalog source merged; template contract next
+
+- #7128 merged to `dev` at 13:45Z as
+  `f2e3cf6027d4698d72dab9ba60f51008888000c7`. The exact final head
+  `eebfaed91872e21d6776581feb80b2f26c8ae4a2` had a current Copilot
+  approving verdict with no open issues and complete successful normal CI,
+  including `PR gate (required check)`. The aggregate's full name matters:
+  a filter for only `PR gate` incorrectly omits that completed check.
+- Source delivery includes versioned catalog/component metadata, ordered
+  routing scopes and labels, observed leaf provenance, publication/draft
+  separation, per-row metadata error isolation, null-compatible producer
+  selection and economical terminal details. No new registrar or workflow
+  engine was introduced.
+- The normal final-head guards passed independently after the substantive
+  fixes. That does not diagnose or close the earlier native PowerShell
+  timeout in #7020. No check bypass, forced retry, timeout increase or
+  skipped regression was used.
+- Re-read this effort after merge. Existing instance lifecycle and source
+  projection are foundations, not completion of provider template discovery,
+  instantiation, status/history/steering parity or mapped-record production.
+  Normal promotion and authorized installed proof remain open; no updater,
+  source activation or fleet cutover was run.
+- Preserve the existing configuration/composition/remote owners. Next stretch:
+  review the bounded inert-template discovery/instantiation contract using
+  verified provider roots and existing repository layers, retaining legacy
+  template identities and truthful unsupported/ambiguous states. Atomic
+  steering acceptance is separately tracked in #7141.
+
+### 2026-10-17 - Inert template discovery contract proposed
+
+- Added the bounded contract above for review before implementing provider
+  discovery: explicit inert indexes, verified multi-root/layer provenance,
+  qualified identity/revision, truthful unsupported actions and scoped errors.
+  Built-in IDs and the current instance lifecycle remain the compatibility floor.
+- Split read-only discovery from provenance-safe instantiation. Current save
+  support is deliberately not advertised for external fragments; inheritance
+  and relative-path gaps stay with #4959 rather than being hidden by a copy.
+- Reconciled with the existing dispatch vision and architecture patterns.
+  The contract names isolated real-CLI/Manager acceptance obligations, including
+  missing optional repository integration and unchanged unrelated controls.
+  No provider format, source registration, service or installed payload changed.
+- Both the parent effort and its remaining validation/rollout gates stay open.
