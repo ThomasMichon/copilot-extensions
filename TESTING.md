@@ -426,6 +426,12 @@ and ignored child dispositions. The same file covers executable
 admission failure without execution and binding drift during an initially-ready
 probe and required-dependent blocker propagation after optional prerequisite
 binding refusal; source-content admission is shared by planning and actual invocation.
+Post-install probes also require fresh owner admission before readiness is
+accepted, including the final selected module. Binding drift or cancellation
+retains the completed installer result but rejects stale readiness and blocks
+dependents. The eight cancellation-boundary and three post-install drift cases
+use a 60-second native Windows item budget after a real PowerShell probe exceeded
+30 seconds; POSIX item limits and production deadlines remain unchanged.
 
 The first-use items in
 `plugins/agent-machines/tests/test_payload_provisioning_powershell.py` separate

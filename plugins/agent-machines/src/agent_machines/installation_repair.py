@@ -454,6 +454,17 @@ def _repair(
         outcome.after = after
         if after.reason == "readiness-interrupted":
             interrupted = True
+            continue
+        try:
+            _readmit_owner(
+                project_root, modules, platform, plan_digest, module.owner.owner_id, home,
+            )
+        except KeyboardInterrupt:
+            outcome.after = Observation("unknown", "owner-revalidation-interrupted")
+            interrupted = True
+        except RepairAdmissionError:
+            outcome.after = Observation("unknown", "owner-binding-changed")
+            execution_halted = True
     required_satisfied = not interrupted and not execution_halted and all(
         _satisfies(outcome.module, outcome.observed) and not outcome.restart_required
         and not outcome.blocked_by

@@ -217,8 +217,10 @@ def test_installation_repair_refreshes_dependent_after_native_prerequisite(
 
 
 @pytest.mark.parametrize("stage", ["admission", "closure", "hashing", "readiness"])
+@pytest.mark.parametrize("boundary", ["post-install", "dependent"])
+@pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_installation_repair_revalidation_cancellation_retains_completed_outcomes(
-    repair_fixture, monkeypatch, stage,
+    repair_fixture, monkeypatch, stage, boundary,
 ):
     home, _, _, _, _ = repair_fixture
     target = {
@@ -226,14 +228,21 @@ def test_installation_repair_revalidation_cancellation_retains_completed_outcome
         "hashing": "_binding_inputs", "readiness": "_invoke",
     }[stage]
     original = getattr(repair_api, target)
+    passed_post_install = False
 
     def interrupted(*args, **kwargs):
+        nonlocal passed_post_install
         if (home / "agent-example-base.ready").exists() and (
             stage != "readiness" or (
-                kwargs["readonly"] and args[0].module_id == "agent-example/child"
+                kwargs["readonly"] and args[0].module_id == (
+                    "agent-example/base" if boundary == "post-install" else "agent-example/child"
+                )
             )
         ):
-            raise KeyboardInterrupt
+            if boundary == "dependent" and stage != "readiness" and not passed_post_install:
+                passed_post_install = True
+            else:
+                raise KeyboardInterrupt
         return original(*args, **kwargs)
 
     monkeypatch.setattr(repair_api, target, interrupted)
@@ -243,15 +252,60 @@ def test_installation_repair_revalidation_cancellation_retains_completed_outcome
     assert result["interrupted"] and result["status"] == "incomplete"
     assert not result["requiredSatisfied"]
     assert base["attempted"] and base["installer"] == {"status": "exited", "exitCode": 0}
-    assert base["observedAfter"]["state"] == "ready"
     assert not child["attempted"] and child["installer"] is None
     assert child["observedBefore"]["state"] == "not-ready"
-    assert child["observedAfter"] == {
+    cancelled = base if boundary == "post-install" else child
+    assert cancelled["observedAfter"] == {
         "state": "unknown",
         "reason": "readiness-interrupted" if stage == "readiness"
         else "owner-revalidation-interrupted",
     }
+    if boundary == "post-install":
+        assert child["observedAfter"] is None
+        assert child["blockedBy"] == [base["module"]]
+    else:
+        assert base["observedAfter"]["state"] == "ready"
     assert not (home / "agent-example-child.ready").exists()
+
+
+@pytest.mark.parametrize("selection,changed_module", [
+    (("base",), "base"), (("child",), "child"), (("child",), "base"),
+])
+@pytest.mark.timeout(60 if os.name == "nt" else 30)
+def test_installation_repair_refuses_binding_changed_during_post_install_readiness(
+    repair_fixture, monkeypatch, selection, changed_module,
+):
+    home, _, payload, _, _ = repair_fixture
+    original = repair_api._invoke
+    final_module = "agent-example/" + changed_module
+
+    def changing(module, owner, platform, *, readonly, timeout):
+        result = original(module, owner, platform, readonly=readonly, timeout=timeout)
+        if (
+            readonly and module.module_id == final_module
+            and (home / (module.module_id.replace("/", "-") + ".ready")).exists()
+        ):
+            manifest = payload / "plugin.json"
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            value["version"] = "1.0.1"
+            write_json(manifest, value)
+        return result
+
+    monkeypatch.setattr(repair_api, "_invoke", changing)
+    plan = invoke(repair_fixture, selection=selection)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"], selection=selection)
+    assert result["status"] == "incomplete" and not result["requiredSatisfied"]
+    assert not result["interrupted"]
+    outcome = next(row for row in result["outcomes"] if row["module"].endswith(final_module))
+    assert outcome["attempted"]
+    assert outcome["installer"] == {"status": "exited", "exitCode": 0}
+    assert outcome["observedAfter"] == {"state": "unknown", "reason": "owner-binding-changed"}
+    assert (home / (final_module.replace("/", "-") + ".ready")).exists()
+    if selection == ("child",) and changed_module == "base":
+        child = result["outcomes"][-1]
+        assert not child["attempted"] and child["installer"] is None
+        assert child["blockedBy"] == [outcome["module"]]
+        assert not (home / "agent-example-child.ready").exists()
 
 
 def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixture):
