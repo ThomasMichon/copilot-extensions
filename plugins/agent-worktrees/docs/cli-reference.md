@@ -43,6 +43,12 @@ scoped keys retain their binding and checkout resolution.
 An explicit `--session-id` still selects the session's project before any
 scalar read; the shortcut does not change that targeting contract.
 
+`get execution-identity` emits the versioned
+[configured execution-identity contract](execution-identity.md), rather than a
+machine-name scalar. It distinguishes explicit registered authority from
+hostname detection and unavailable/invalid bindings without introducing a new
+configuration setting.
+
 ## Session machine identity
 
 For entry-path-independent WSL installation identity, use

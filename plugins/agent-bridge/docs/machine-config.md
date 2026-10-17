@@ -161,8 +161,8 @@ the registered keys, including the native Windows entry.
 
 For a topology using explicit spaces, start or adopt bridge from the registered
 source worktree. Bridge derives the daemon's key from that project's existing
-machine configuration through Worktrees' authority-checking `get machine`
-command, using the same-installation peer launcher. There is no second bridge
+machine configuration through Worktrees' versioned `get execution-identity`
+read, using the same-installation peer launcher. There is no second bridge
 machine setting to maintain. Direct daemon launch captures the stable source
 repository before detach and working-directory changes. Adoption records that
 source repository automatically as `topologies.<profile>.source_repo`, so a
@@ -181,6 +181,9 @@ in the adopted topology and match the actual daemon platform. Contradictory
 adopted sources, missing bindings, authority-command errors and platform
 mismatches fail explicitly. Hostnames, display labels, physical-host grouping,
 SSH aliases and ambient owner-reference variables do not select a local space.
+Only the recognized versioned contract with explicit configured-machine
+provenance can supply a derived key. An older scalar `get machine` result is
+never sufficient, even when a detected hostname happens to equal a registry key.
 
 Standalone bridge operation does not require Worktrees. Unscoped/legacy topology
 retains its existing behavior, and an existing `local_execution_space` selector
@@ -193,8 +196,9 @@ Local-agent/provider-only configurations with no machine inventory do not select
 an execution space at all: a residual legacy selector is inert in that mode,
 and no registered-space authority is inferred from it.
 An optional Worktrees installation that has not registered the source project
-does not supersede an existing valid standalone selector. Once project discovery
-succeeds, a refused machine-authority read is an error, never a legacy fallback.
+or cannot offer the versioned binding does not supersede an existing valid
+standalone selector. A compatible machine-authority refusal is an error, never
+a legacy fallback.
 Keys cannot contain whitespace, path separators or reference delimiters, and
 must be unique without regard to case.
 

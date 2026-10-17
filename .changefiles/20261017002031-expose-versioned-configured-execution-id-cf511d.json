@@ -1,0 +1,9 @@
+{
+  "comment": "Expose versioned configured execution identity for optional Bridge derivation without hostname-based authority",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

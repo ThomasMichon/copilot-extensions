@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -45,6 +46,42 @@ def _query(prefix: list[str], args: list[str], cwd: Path | None) -> subprocess.C
         ) from exc
 
 
+def _read_identity(prefix: list[str], args: list[str], cwd: Path | None) -> tuple[str | None, str]:
+    """Only the versioned configured-binding contract can provide authority."""
+    from . import agent_registry
+
+    result = _query(prefix, [*args, "get", "execution-identity"], cwd)
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return None, "compatible execution-identity reader unavailable"
+    if (
+        not isinstance(data, dict)
+        or data.get("schema") != "agent-worktrees.execution-identity"
+        or type(data.get("version")) is not int or data["version"] != 1
+    ):
+        return None, "compatible execution-identity reader unavailable"
+    binding = str(cwd) if cwd is not None else " ".join(args)
+    if result.returncode or data.get("status") == "refused":
+        raise ExecutionIdentityError(
+            f"Source-project machine binding {binding!r} was refused: "
+            + str(data.get("reason") or "execution authority unavailable")
+        )
+    if data.get("status") == "unavailable":
+        return None, str(data.get("reason") or "source binding unavailable")
+    if (
+        data.get("status") != "ready"
+        or data.get("configured") is not True
+        or not isinstance(data.get("source"), str)
+        or data["source"] not in {"project-machine-config", "global-machine-config"}
+        or not isinstance(data.get("machine"), str) or not data["machine"]
+        or not isinstance(data.get("project"), str) or not data["project"]
+        or data.get("platform") != agent_registry._detect_platform()
+    ):
+        raise ExecutionIdentityError(f"Source-project machine binding {binding!r} returned invalid authority")
+    return data["machine"], ""
+
+
 def resolve_execution_space(cfg, machines: dict) -> str | None:
     """Resolve once per roster build; never persist a derived machine key."""
     from . import agent_registry
@@ -62,17 +99,23 @@ def resolve_execution_space(cfg, machines: dict) -> str | None:
     identities: dict[str, set[str]] = {}
     origin = getattr(cfg, "_source_worktree", None)
     root = source_repository(Path(origin)) if origin is not None else None
-    bound_origin = False
     unresolved_targets: set[str] = set()
     if prefix:
+        readings: dict[tuple[tuple[str, ...], Path | None], tuple[str | None, str]] = {}
+
+        def read(args: list[str], cwd: Path | None) -> tuple[str | None, str]:
+            signature = (tuple(args), cwd)
+            if signature not in readings:
+                readings[signature] = _read_identity(prefix, args, cwd)
+            return readings[signature]
+
         sources: list[tuple[list[str], Path | None]] = []
         if root is not None:
-            project = _query(prefix, ["get", "project"], root)
-            if project.returncode == 0:
+            key, reason = read([], root)
+            if key is not None:
                 sources.append(([], root))
-                bound_origin = True
             else:
-                unresolved_targets.add(str(root))
+                unresolved_targets.add(f"{root}: {reason}")
         if not sources:
             for profile_name, profile in cfg.topologies.items():
                 source_repo = getattr(profile, "source_repo", None)
@@ -105,18 +148,10 @@ def resolve_execution_space(cfg, machines: dict) -> str | None:
                 continue
             seen.add(signature)
             binding = str(cwd) if cwd is not None else " ".join(args)
-            if not bound_origin:
-                project = _query(prefix, [*args, "get", "project"], cwd)
-                if project.returncode:
-                    unresolved_targets.add(binding)
-                    continue
-            result = _query(prefix, [*args, "get", "machine"], cwd)
-            if result.returncode:
-                raise ExecutionIdentityError(
-                    f"Source-project machine binding {binding!r} was refused; verify its configured "
-                    "machine and current execution platform: " + result.stderr.strip()
-                )
-            key = result.stdout.strip()
+            key, reason = read(args, cwd)
+            if key is None:
+                unresolved_targets.add(f"{binding}: {reason}")
+                continue
             try:
                 agent_registry._detect_local_machine(machines, key)
             except ValueError as exc:

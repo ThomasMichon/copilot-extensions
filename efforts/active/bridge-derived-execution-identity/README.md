@@ -71,8 +71,8 @@ is context for existing machine authority, not a new runtime code dependency.
   authority; update the directly affected configuration documentation and changefile.
 
 ### Phase 3 — Validate, land and close
-- [x] Complete targeted then required contained plugin gates, lint and install-contract validation.
-- [x] Complete REVIEW.md self-check, documentation-impact review and public source-diff privacy scan.
+- [ ] Complete targeted then required contained plugin gates, lint and install-contract validation.
+- [ ] Complete REVIEW.md self-check, documentation-impact review and public privacy scan.
 - [ ] Land the implementation through normal review/check/role gates; re-read this
   effort, resolve its checklists and land the Done/archive delta.
 - [ ] Release effort focus and finalize the source worktree; report release status
@@ -88,7 +88,7 @@ is context for existing machine authority, not a new runtime code dependency.
   ambiguous, platform-mismatched and contradictory bindings fail closed.
 - [x] Standalone no-sibling and deliberate legacy-selector compatibility cases.
 - [x] Fresh isolated configuration/startup check without touching a shared daemon.
-- [x] Targeted tests followed by required contained plugin suites, ruff F/E9 and
+- [ ] Targeted tests followed by required contained plugin suites, ruff F/E9 and
   `check-install-contract`; stage new files before wrapper snapshots.
 - [x] Record exercised validation tiers and explicit reasons for unavailable
   clean-room/external lanes; no deployment implied by unit success.
@@ -198,3 +198,24 @@ with implementation tests; standalone compatibility remains first-class.
   registered source project does not invalidate an existing standalone selector;
   a bound machine-authority refusal still blocks. These regressions and the
   current identity/startup/reader/SSH/native-peer selection passed 548 tests.
+- An unversioned machine-name scalar cannot certify configured rather than
+  detected identity, including a hostname that happens to equal a registry key.
+  The final consumer uses a versioned read backed by the same configuration
+  loader and registered-current-space predicate. Provenance is captured only
+  in memory; no new identity setting, record migration or mutation-policy change
+  is introduced. Older/unversioned or detected-only responses offer no derived authority. Final protocol
+  and native-consumer validation are reopened until this contract is exercised.
+- Final protocol producer/config/fence selection passed 384 tests; Bridge
+  configured-binding/legacy/older-peer selection passed 351. The actual source
+  CLI and Bridge consumer passed a real subprocess/cwd-change/nested-resolver
+  check against existing explicit machine configuration, without a selector or
+  configuration/runtime write. Full Worktrees collection passed all 416 files.
+  Bridge guards passed 234 tests with 8 normal skips; contracts validate 2
+  contracts/154 fixtures, and install/docs/version/F/E9 gates pass.
+- Configuration-tier selection lives with machine identity; the configuration
+  loader only captures ephemeral provenance and directly re-exports the existing
+  shared platform detector. Its module remains below the unchanged size ceiling.
+- Public source-content and implementation-commit attribution checks are clean.
+  A separate publication-metadata authorization review remains outstanding; do
+  not rewrite published history automatically or equate source-content review
+  with completion of that broader gate.

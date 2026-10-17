@@ -193,6 +193,22 @@ def _requires_scoped_identity(entries: dict[str, MachineEntry], *names: str) -> 
         raise ExecutionSpaceError(str(exc)) from exc
 
 
+def _require_registered_current_space(config: Any, current: MachineEntry | None) -> str:
+    if current is None or not current.execution_platform or config.machine != current.key:
+        raise ExecutionSpaceError(
+            "owned mutation requires the current registered execution-space key "
+            "in machine configuration"
+        )
+    from .config import detect_platform
+
+    platform = detect_platform()
+    if current.execution_platform != platform or getattr(config, "platform", None) != platform:
+        raise ExecutionSpaceError(
+            "configured execution-space key and platform must match the current execution platform"
+        )
+    return platform
+
+
 def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = True) -> bool:
     """Return whether an owner is local; reject ambiguous legacy scope names."""
     entries = registry_for_config(config)
@@ -203,18 +219,7 @@ def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = Tru
         raise ExecutionSpaceError(str(exc)) from exc
     explicit = _requires_scoped_identity(entries, config.machine, owner)
     if explicit:
-        if current is None or not current.execution_platform or config.machine != current.key:
-            raise ExecutionSpaceError(
-                "owned mutation requires the current registered execution-space key "
-                "in machine configuration"
-            )
-        from .config import detect_platform
-
-        platform = detect_platform()
-        if current.execution_platform != platform or getattr(config, "platform", None) != platform:
-            raise ExecutionSpaceError(
-                "configured execution-space key and platform must match the current execution platform"
-            )
+        _require_registered_current_space(config, current)
         if target is None or not target.execution_platform or (canonical_ref and owner != target.key):
             raise ExecutionSpaceError(
                 f"legacy owner identity {owner!r} is not an explicit execution-space key"

@@ -43,13 +43,22 @@ def source(tmp_path, monkeypatch):
     return root
 
 
+def _identity_packet(key="native-a", **updates):
+    return {
+        "schema": "agent-worktrees.execution-identity", "version": 1,
+        "status": "ready", "configured": True, "source": "project-machine-config",
+        "machine": key, "project": "project", "platform": agent_registry._detect_platform(),
+        **updates,
+    }
+
+
 def _authority(monkeypatch, key="native-a", *, error=""):
     calls = []
 
     def query(prefix, args, cwd):
         calls.append((args, cwd))
-        value = "project" if args[-1] == "project" else key
-        return subprocess.CompletedProcess(prefix + args, 1 if error else 0, value, error)
+        value = _identity_packet(key, **({"status": "refused", "reason": error} if error else {}))
+        return subprocess.CompletedProcess(prefix + args, 1 if error else 0, json.dumps(value), error)
 
     monkeypatch.setattr(execution_identity, "_query", query)
     return calls
@@ -98,6 +107,39 @@ def test_legacy_selector_cannot_override_authority(source, monkeypatch):
     assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-a"
 
 
+@pytest.mark.parametrize("raw", [
+    "native-a",
+    json.dumps({"machine": "native-a"}),
+    json.dumps({"schema": "agent-worktrees.execution-identity", "version": 2, "machine": "native-a"}),
+])
+def test_old_or_unknown_reader_cannot_grant_detected_identity(source, monkeypatch, raw):
+    monkeypatch.setattr(
+        execution_identity, "_query",
+        lambda *args: subprocess.CompletedProcess([], 0, raw, ""),
+    )
+    cfg = ServiceConfig()
+    cfg._source_worktree = source
+    with pytest.raises(execution_identity.ExecutionIdentityError, match="Missing source-project execution binding"):
+        execution_identity.resolve_execution_space(cfg, _spaces())
+    cfg.local_execution_space = "native-b"
+    assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-b"
+
+
+@pytest.mark.parametrize("updates", [
+    {"configured": False}, {"source": "detected"}, {"source": []},
+    {"platform": "wsl"}, {"project": ""}, {"machine": []},
+])
+def test_compatible_ready_response_requires_configured_binding(source, monkeypatch, updates):
+    monkeypatch.setattr(
+        execution_identity, "_query",
+        lambda *args: subprocess.CompletedProcess([], 0, json.dumps(_identity_packet(**updates)), ""),
+    )
+    cfg = ServiceConfig(local_execution_space="native-b")
+    cfg._source_worktree = source
+    with pytest.raises(execution_identity.ExecutionIdentityError, match="invalid authority"):
+        execution_identity.resolve_execution_space(cfg, _spaces())
+
+
 def test_missing_sibling_preserves_valid_standalone_and_legacy(source, monkeypatch):
     monkeypatch.setattr(session_lifecycle_cli, "_agent_worktrees_launch_prefix", lambda: None)
     cfg = ServiceConfig()
@@ -130,9 +172,9 @@ def test_local_only_legacy_config_needs_no_machine_inventory_or_peer(tmp_path, m
 
 def test_authority_refusal_does_not_become_legacy_success(source, monkeypatch):
     def query(prefix, args, cwd):
-        if args[-1] == "project":
-            return subprocess.CompletedProcess([], 0, "project", "")
-        return subprocess.CompletedProcess([], 1, "", "configured execution-space platform mismatch")
+        return subprocess.CompletedProcess([], 1, json.dumps(_identity_packet(
+            status="refused", reason="configured execution-space platform mismatch",
+        )), "")
 
     monkeypatch.setattr(execution_identity, "_query", query)
     cfg = ServiceConfig(local_execution_space="native-a")
@@ -151,7 +193,7 @@ def test_adopted_source_survives_neutral_cwd_and_recomputes_config(
     cfg._source_worktree = tmp_path
     calls = _authority(monkeypatch)
     assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-a"
-    assert calls == [(["get", "project"], source), (["get", "machine"], source)]
+    assert calls == [(["get", "execution-identity"], source)]
     _authority(monkeypatch, "native-b")
     assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-b"
 
@@ -175,8 +217,7 @@ def test_declared_control_project_precedes_topology_storage_repository(source, t
     calls = _authority(monkeypatch)
     assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-a"
     assert calls == [
-        (["--project", "control-project", "get", "project"], None),
-        (["--project", "control-project", "get", "machine"], None),
+        (["--project", "control-project", "get", "execution-identity"], None),
     ]
 
 
@@ -190,15 +231,17 @@ def test_unregistered_optional_project_preserves_valid_legacy_selector(source, t
 
     def query(prefix, args, cwd):
         calls.append(args)
-        assert args[-1] == "project"
-        return subprocess.CompletedProcess([], 1, "", "project is not registered")
+        assert args[-1] == "execution-identity"
+        return subprocess.CompletedProcess([], 0, json.dumps(_identity_packet(
+            status="unavailable", reason="project-not-registered",
+        )), "")
 
     monkeypatch.setattr(execution_identity, "_query", query)
     assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-b"
     cfg.local_execution_space = None
     with pytest.raises(execution_identity.ExecutionIdentityError, match="Unresolved sources"):
         execution_identity.resolve_execution_space(cfg, _spaces())
-    assert calls == [["get", "project"], ["get", "project"]]
+    assert calls == [["get", "execution-identity"], ["get", "execution-identity"]]
 
 
 @pytest.mark.parametrize("relative", [False, True])
@@ -224,7 +267,9 @@ def test_conflicting_adopted_sources_fail_closed(source, tmp_path, monkeypatch):
     cfg._source_worktree = tmp_path
 
     def query(prefix, args, cwd):
-        return subprocess.CompletedProcess([], 0, "native-a" if cwd == source else "native-b", "")
+        return subprocess.CompletedProcess([], 0, json.dumps(_identity_packet(
+            "native-a" if cwd == source else "native-b",
+        )), "")
 
     monkeypatch.setattr(execution_identity, "_query", query)
     with pytest.raises(execution_identity.ExecutionIdentityError, match="different execution spaces") as error:

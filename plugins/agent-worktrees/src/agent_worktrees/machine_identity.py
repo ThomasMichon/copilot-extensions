@@ -23,12 +23,26 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from typing import Any
 
 from machine_transport import MachineEntry, machine_entries_to_topology, machine_name, resolve_identity
 from machine_transport import resolve_machine_selection, split_machine_environment
 from machine_transport import is_local_machine as _mt_is_local_machine
 
 from . import config as cfg
+
+
+def configured_machine_binding(
+    machine_raw: dict, global_raw: dict, capture: dict[str, str] | None = None,
+) -> Any:
+    """Select the existing configured tier and optionally capture its provenance."""
+    value = machine_raw.get("machine") or global_raw.get("machine")
+    if capture is not None:
+        capture["source"] = (
+            "project-machine-config" if machine_raw.get("machine")
+            else "global-machine-config" if global_raw.get("machine") else "detected"
+        )
+    return value
 
 
 def resolve_execution_machine(

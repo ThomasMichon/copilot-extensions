@@ -64,6 +64,7 @@ _GET_KEYS: dict[str, str] = {
     "src-dir": "Source root (parent of repos)",
     "config-dir": "Per-project config directory (~/.{project})",
     "machine": "Machine name from config",
+    "execution-identity": "Versioned configured execution identity (JSON)",
     "platform": "Platform (win/wsl/linux)",
     "project": "Project name",
     "owner-ref": "This worktree's qualified claim ref "
@@ -385,6 +386,10 @@ def cmd_get(args: argparse.Namespace) -> int:
             session_cwd = None
             _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(None)
 
+    if key == "execution-identity":
+        from .execution_identity_read import cmd_get_execution_identity
+
+        return cmd_get_execution_identity()
     try:
         config = cfg.load_config(
             include_control_plane_related_pr=key in _PR_GRAFT_DEPENDENT_KEYS

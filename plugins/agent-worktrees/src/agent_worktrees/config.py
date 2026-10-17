@@ -23,7 +23,7 @@ import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
 from machine_transport import find_machine_entry as _mt_find_machine_entry
 from machine_transport import machine_name  # noqa: F401 (re-export)
-from machine_transport import detect_platform as _detect_execution_platform
+from machine_transport import detect_platform
 from machine_transport import find_machine_metadata as _mt_find_machine_metadata
 from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
@@ -748,11 +748,6 @@ def render_copilot_instructions(
     )
 
 
-def detect_platform() -> str:
-    """Detect the current platform: 'windows', 'wsl', or 'linux'."""
-    return _detect_execution_platform()
-
-
 def _home() -> Path:
     """Cross-platform home directory, with a sandbox-root override.
 
@@ -868,6 +863,7 @@ def _load_config_uncached(
     *,
     include_control_plane_related_pr: bool = True,
     project: str | None = None,
+    _machine_binding: dict[str, str] | None = None,
 ) -> Config:
     """Load and parse the layered project config.
 
@@ -908,6 +904,8 @@ def _load_config_uncached(
             avoid resolving the same active-plugin corpus twice.
         project: Explicit project identity. When supplied, it overrides legacy
             machine/global ``repo_name`` values for this load.
+        _machine_binding: Internal per-load provenance capture; never a YAML
+            setting and never persisted.
 
     Returns:
         Parsed Config object.
@@ -954,7 +952,8 @@ def _load_config_uncached(
         or global_raw.get("platform")
         or detect_platform()
     )
-    configured_machine = machine_raw.get("machine") or global_raw.get("machine")
+    from .machine_identity import configured_machine_binding
+    configured_machine = configured_machine_binding(machine_raw, global_raw, _machine_binding)
     machine = configured_machine or detect_machine()
     srcroot = machine_raw.get("srcroot") or global_raw.get("srcroot") or ""
 
