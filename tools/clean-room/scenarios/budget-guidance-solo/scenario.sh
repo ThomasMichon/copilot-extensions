@@ -8,6 +8,16 @@ cr_init
 
 phase 0 "fresh credential-free environment and candidate source"
 envdump
+if ! capture "python-prerequisite" -- python3 -I -c \
+    'import sys; sys.exit("Python 3.10+ is required") if sys.version_info < (3, 10) else print(sys.version)'; then
+    jam "pythonpath" "scenario requires Python 3.10+" "use the documented base-image toolchain"
+    cr_finalize
+fi
+if ! capture "node-prerequisite" -- node -e \
+    'if (Number(process.versions.node.split(".")[0]) < 20) { console.error("Node.js 20+ is required"); process.exit(1); } console.log(process.versions.node);'; then
+    jam "npm-registry" "scenario requires Node.js 20+" "use the documented base-image toolchain"
+    cr_finalize
+fi
 SOURCE="${CR_HARNESS_MOUNT:-}"
 if [ -z "$SOURCE" ] || [ ! -f "$SOURCE/plugins/budget-guidance/scripts/install.sh" ]; then
     jam "path-binstub" "candidate source is absent" "pass --harness-mount <candidate checkout>"

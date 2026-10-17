@@ -285,6 +285,13 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Clean-room prerequisite clarity
+
+- Addressed source-review findings by declaring the scenario's standard Bash
+  utilities and enforcing Python 3.10+/Node.js 20+ before installation. Older
+  toolchains stop with a classified prerequisite diagnostic rather than
+  appearing to fail an otherwise valid plugin contract.
+
 ### 2026-10-16 - Credential-free isolated installation proof
 
 - Added the Tier-P/F1 `budget-guidance-solo` scenario using the established

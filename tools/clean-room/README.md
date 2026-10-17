@@ -180,7 +180,9 @@ successful preparation or installer exit alone is not the acceptance result.
 ### Credential-free budget-guidance snapshot
 
 The Tier-P/F1 `budget-guidance-solo` scenario requires no Copilot or forge
-authentication. From the candidate repository root:
+authentication. It requires Python 3.10+, Node.js 20+, and the standard Bash
+utilities declared in its manifest; version gates run before installation.
+From the candidate repository root:
 
 ```bash
 bash tools/clean-room/run.sh --scenario budget-guidance-solo \
