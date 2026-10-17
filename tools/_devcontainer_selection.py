@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from plugin_test_selection import load_selection
+from plugin_test_selection import load_selection, resolve_plugin_root
 
 Canonicalize = Callable[[str], str]
 
@@ -42,8 +42,10 @@ def read_selection(
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     plugin = payload.get("plugin") if isinstance(payload, dict) else None
     if not isinstance(plugin, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", plugin):
-        raise ValueError("selection must name a valid plugin")
-    selection = load_selection(Path(path), plugin, repo / "plugins" / plugin)
+        raise ValueError(
+            "selection plugin must match [a-z0-9]+(-[a-z0-9]+)*, for example agent-dispatch"
+        )
+    selection = load_selection(Path(path), plugin, resolve_plugin_root(repo, plugin))
     return json.dumps(selection.as_dict()).encode("utf-8")
 
 

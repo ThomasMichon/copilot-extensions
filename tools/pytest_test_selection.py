@@ -18,8 +18,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     path = config.getoption("--exact-selection")
     if path is None:
         return
+    plugin = config.getoption("--selection-plugin")
+    if not isinstance(plugin, str) or not plugin.strip():
+        raise pytest.UsageError("--exact-selection requires a nonempty --selection-plugin")
     try:
-        selection = load_selection(path, config.getoption("--selection-plugin"), Path.cwd())
+        selection = load_selection(path, plugin, Path.cwd())
     except (OSError, ValueError) as error:
         raise pytest.UsageError(f"invalid exact test selection: {error}") from error
     available = {item.nodeid for item in items}

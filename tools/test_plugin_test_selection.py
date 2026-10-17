@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import venv
 from pathlib import Path
@@ -50,17 +51,20 @@ def selection_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[
     def fixture_python(*_args, **_kwargs) -> Path:
         environment = tmp_path / "venv"
         venv.EnvBuilder(with_pip=False, system_site_packages=True).create(environment)
-        site = (
-            environment / "Lib/site-packages" if os.name == "nt"
-            else environment / f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+        python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        result = subprocess.run(
+            [str(python), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+            capture_output=True, text=True, check=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
+        site = Path(result.stdout.strip())
         # The parent may use a user-installed pytest, which the isolated HOME
         # intentionally hides. Expose its read-only runtime, not host state.
         (site / "test-runtime.pth").write_text(
             "\n".join(path for path in sys.path if path and Path(path).is_dir()) + "\n",
             encoding="utf-8",
         )
-        return environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        return python
 
     monkeypatch.setattr(runner, "_ensure_venv", fixture_python)
     return tmp_path, path
@@ -154,6 +158,20 @@ def test_exact_nested_suite_never_uses_the_ordinary_no_suite_skip(selection_fixt
         "fixture", "unused", reinstall=False, kexpr=None, limits=runner.Limits(),
         plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25, selection_file=path,
     ) == 0
+
+
+@pytest.mark.parametrize("plugin", [None, "", "   "])
+def test_exact_pytest_option_requires_a_targeted_plugin_name(selection_fixture, plugin):
+    from tools import pytest_test_selection
+
+    _, path = selection_fixture
+
+    class Config:
+        def getoption(self, option):
+            return {"--exact-selection": path, "--selection-plugin": plugin}[option]
+
+    with pytest.raises(pytest.UsageError, match="requires a nonempty --selection-plugin"):
+        pytest_test_selection.pytest_collection_modifyitems(Config(), [])
 
 
 @pytest.mark.parametrize("arguments", [

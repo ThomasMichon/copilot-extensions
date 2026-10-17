@@ -111,6 +111,26 @@ def test_selection_staging_passes_only_validated_data_over_stdin(monkeypatch):
     assert calls[0][1]["timeout"] == 30
 
 
+@pytest.mark.parametrize("plugin,relative_root", [
+    ("fixture", "plugins/fixture"),
+    ("worktree-manager", "worktree-manager"),
+    ("payload-invocation", "libs/payload-invocation"),
+])
+def test_selection_uses_the_same_plugin_roots_as_the_contained_runner(tmp_path, plugin, relative_root):
+    tests = tmp_path / relative_root / "tests"
+    tests.mkdir(parents=True)
+    (tests / "test_app.py").write_text("def test_value(): pass\n", encoding="utf-8")
+    manifest = tmp_path / "selection.json"
+    manifest.write_text(json.dumps({
+        "version": 1, "plugin": plugin, "nodes": ["tests/test_app.py::test_value"],
+        "files": [], "include_guards": True,
+    }), encoding="utf-8")
+    payload = wrapper._selection.read_selection(
+        [plugin, "--selection-file", str(manifest)], wrapper._canonicalize_flag, tmp_path,
+    )
+    assert json.loads(payload)["plugin"] == plugin
+
+
 def test_network_enabled_preparation_never_runs_or_needs_the_selection(monkeypatch, tmp_path):
     commands = []
     monkeypatch.setattr(

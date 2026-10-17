@@ -56,7 +56,10 @@ import tomllib
 from pathlib import Path
 
 from seasoned_uv import run_uv_install
-from plugin_test_selection import TestSelection, load_selection, validate_test_file
+from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
+from plugin_test_selection import (
+    TestSelection, load_selection, resolve_plugin_root, validate_test_file,
+)
 from plugin_test_containment import (
     ContainmentError,
     Limits,
@@ -70,11 +73,6 @@ PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
-EXTERNAL_TEST_ROOTS = {
-    "worktree-manager": Path("worktree-manager"),
-    "payload-invocation": Path("libs/payload-invocation"),
-    "runtime-source": Path("libs/versioned-runtime"),
-}
 EXTERNAL_TEST_DEPENDENCIES = {
     "payload-invocation": ("pyyaml>=6.0.3",),
     "runtime-source": ("pyyaml>=6.0.3",),
@@ -152,9 +150,7 @@ from _admission_protocol import acquire as _acquire_admission  # noqa: E402
 
 
 def _plugin_dir(name: str) -> Path:
-    if name in EXTERNAL_TEST_ROOTS:
-        return REPO / EXTERNAL_TEST_ROOTS[name]
-    return PLUGINS / name
+    return resolve_plugin_root(REPO, name, plugins_root=PLUGINS)
 
 
 def _has_suite(name: str) -> bool:

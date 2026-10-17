@@ -5,19 +5,36 @@ import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+EXTERNAL_TEST_ROOTS = {
+    "worktree-manager": Path("worktree-manager"),
+    "payload-invocation": Path("libs/payload-invocation"),
+    "runtime-source": Path("libs/versioned-runtime"),
+}
+
+
+def resolve_plugin_root(repo: Path, name: str, *, plugins_root: Path | None = None) -> Path:
+    if name in EXTERNAL_TEST_ROOTS:
+        return repo / EXTERNAL_TEST_ROOTS[name]
+    return (repo / "plugins" if plugins_root is None else plugins_root) / name
+
 
 def validate_test_file(plugin_root: Path, value: str) -> Path:
     path = PurePosixPath(value)
     candidate = plugin_root / value
-    if (
+    invalid = (
         not value or "\\" in value or "\x00" in value
         or path.is_absolute() or ".." in path.parts
         or path.as_posix() != value
-        or not candidate.resolve().is_relative_to((plugin_root / "tests").resolve())
-        or candidate.resolve() != candidate.absolute()
-        or not candidate.is_file()
-        or not candidate.name.startswith("test_") or candidate.suffix != ".py"
-    ):
+    )
+    if not invalid:
+        resolved = candidate.resolve()
+        tests_root = (plugin_root / "tests").resolve()
+        invalid = (
+            not resolved.is_relative_to(tests_root)
+            or resolved != candidate.absolute() or not candidate.is_file()
+            or not candidate.name.startswith("test_") or candidate.suffix != ".py"
+        )
+    if invalid:
         raise ValueError(f"test file must be an existing, unlinked tests/test_*.py: {value}")
     return candidate
 
@@ -36,10 +53,8 @@ class TestSelection:
         }
 
     def collection_files(self, plugin_root: Path) -> tuple[Path, ...]:
-        return tuple(sorted({
-            validate_test_file(plugin_root, value)
-            for value in (*self.files, *(node.split("::", 1)[0] for node in self.nodes))
-        }))
+        values = set(self.files) | {node.split("::", 1)[0] for node in self.nodes}
+        return tuple(sorted(validate_test_file(plugin_root, value) for value in sorted(values)))
 
 
 def load_selection(path: Path, plugin: str, plugin_root: Path) -> TestSelection:
