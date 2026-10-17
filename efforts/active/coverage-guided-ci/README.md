@@ -557,11 +557,14 @@ risk wedging everything").
 
 ### Phase 5 — Generalize beyond `agent-worktrees`
 - [ ] Execute the existing selector for the `agent-dispatch` required PR lane,
-      with a bounded cross-cutting smoke floor and unchanged outer deadlines.
+      with a bounded cross-cutting smoke floor and the unchanged twelve-minute
+      [`ci.yml`](../../../.github/workflows/ci.yml) job deadline.
       Proposal and acceptance gates:
       [`dispatch-pr-selection.md`](dispatch-pr-selection.md).
-      This bounded slice does not activate the unrelated shadow consumers or
-      take over standalone Fleet Manager baseline enrollment.
+      This bounded slice does not activate the unrelated
+      [Phase 4 shadow consumer](#phase-4--rollout-replace-agent-worktrees-collect-only-tier)
+      or take over standalone Fleet Manager baseline enrollment
+      ([#6783](https://github.com/ThomasMichon/copilot-extensions/pull/6783)).
 - [ ] Assess whether other plugins would benefit from diff-scoped selection
       over their current smoke/full split (no plugin besides
       `agent-worktrees` is currently collect-only-gated, so this phase is

@@ -16,6 +16,10 @@ than smoke: total job wall time, even when every test passes, can exceed its
 twelve-minute outer deadline.
 Keep that deadline unchanged. Full promotion/manual validation remains
 independent and exhaustive.
+The current job deadline and full/manual lanes are configured in
+[`ci.yml`](../../../.github/workflows/ci.yml); the independent promotion
+portfolio is configured in
+[`validate-and-promote.yml`](../../../.github/workflows/validate-and-promote.yml).
 
 ## Proposed execution contract
 
@@ -31,7 +35,8 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
   [`debt.py`](../../../tools/coverage_guided_selection/debt.py) and
   [`decide.py`](../../../tools/coverage_guided_selection/decide.py).
   Do not create a parallel name-filter selection policy.
-- Always execute structural guards plus a bounded cross-cutting smoke set
+- Always execute structural guards (`@pytest.mark.guard`, selected by the
+  existing runner's `--guards` option) plus a bounded cross-cutting smoke set
   derived from the baseline's measured coverage and test costs through the
   existing [weighted-set-cover curation](../../../tools/coverage_guided_selection/fallback.py).
   Union that floor with attributed
@@ -39,7 +44,11 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
 - Make smoke/debt budgets explicit and report the baseline generation,
   fallback reason, selected node IDs, predicted cost and coverage breadth.
   Measure actual complete invocation time, including preparation and cleanup.
-- Execute exact pytest node IDs through the existing contained runner.
+- Execute exact pytest node IDs through the existing
+  [contained runner](../../../tools/run-plugin-tests.py), which enforces
+  [isolated state roots and bounded child-process execution](../../../tools/plugin_test_containment.py).
+  Its invocation and isolation contract are documented in
+  [`TESTING.md`](../../../TESTING.md).
   Validate paths and selected-node existence; stale, malformed, absent or
   empty evidence must never silently mean a successful zero-test run.
   Preserve the selector's visible broader fallback where no usable baseline
@@ -50,7 +59,10 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
   is irrelevant.
 - Pilot only `agent-dispatch` PRs. Keep push, manual, promotion and other
   plugin lanes on their existing portfolio unless separately reviewed.
-  Leave Fleet Manager collector/admission work with its existing owner.
+  Leave Fleet Manager collector/admission work in
+  [#6783](https://github.com/ThomasMichon/copilot-extensions/pull/6783) with
+  its existing owner. The unrelated shadow-only rollout remains in
+  [Phase 4](README.md#phase-4--rollout-replace-agent-worktrees-collect-only-tier).
 
 ## Plan and validation
 
