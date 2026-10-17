@@ -143,3 +143,62 @@ def _parse_marker(
     if validated is None:
         return None
     return {**validated, "comment_author": author}
+
+
+def latest_reservations(issue: Any) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for reservation in issue.reservations:
+        loop = reservation.get("loop")
+        if not isinstance(loop, str):
+            continue
+        current = latest.get(loop)
+        state = reservation.get("state")
+        if current is None:
+            # Providers edit trusted comments in place; the overwritten
+            # predecessor need not appear in a fresh ownership snapshot.
+            if state in {"reserved", "claimed", "released"}:
+                latest[loop] = reservation
+            continue
+        if reservation.get("occurrence", -1) < current.get("occurrence", -1):
+            continue
+        if (
+            reservation.get("occurrence", -1) > current.get("occurrence", -1)
+            and state in {"claimed", "released"}
+        ):
+            latest[loop] = reservation
+            continue
+        if state == "reserved":
+            if (
+                current.get("state") == "released"
+                or reservation.get("occurrence", -1) > current.get("occurrence", -1)
+            ):
+                latest[loop] = reservation
+            continue
+        if (
+            reservation.get("occurrence") != current.get("occurrence")
+            or reservation.get("issue") != current.get("issue")
+        ):
+            continue
+        if (
+            state == "claimed" and current.get("state") == "released"
+            and (
+                current.get("task_id") != reservation.get("task_id")
+                or current.get("label") != reservation.get("label")
+            )
+        ):
+            # Comment creation order survives edits and label reconfiguration.
+            latest[loop] = reservation
+            continue
+        if reservation.get("label") != current.get("label"):
+            continue
+        if state == "claimed" and current.get("state") == "reserved":
+            latest[loop] = reservation
+        elif state == "released":
+            if current.get("state") == "reserved" and reservation.get("task_id") is None:
+                latest[loop] = reservation
+            elif (
+                current.get("state") == "claimed"
+                and reservation.get("task_id") == current.get("task_id")
+            ):
+                latest[loop] = reservation
+    return latest

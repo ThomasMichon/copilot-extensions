@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+import yaml
 
 SCRIPT = Path(__file__).resolve().parent / "run-plugin-tests.py"
 _previous_path = sys.path.copy()
@@ -375,6 +376,232 @@ def test_explicit_empty_selection_is_not_a_guard_success(monkeypatch, tmp_path):
     assert calls[0][0][-1] == str(Path("tests") / "test_empty.py")
     assert "--timeout=30" in calls[0][0]
     assert 0 < calls[0][1]["limits"].wall_seconds <= 60
+
+
+@pytest.mark.parametrize("size", [0, 1, 2, 7])
+@pytest.mark.parametrize("count", [1, 2, 4, 6])
+def test_file_shards_are_deterministic_complete_and_disjoint(tmp_path, monkeypatch, size, count):
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    files = [tests / f"test_{index:02}.py" for index in range(size)]
+    for path in files:
+        path.touch()
+    monkeypatch.setattr(Path, "rglob", lambda _self, _pattern: iter(reversed(files)))
+    authoritative = [path for group in runner._test_file_groups("example", 2) for path in group]
+    shards = [
+        [path for group in runner._test_file_groups(
+            "example", 2, shard_index=index, shard_count=count,
+        ) for path in group]
+        for index in range(1, count + 1)
+    ]
+    assert sorted(path for shard in shards for path in shard) == authoritative == sorted(files)
+    for index, shard in enumerate(shards):
+        assert all(not set(shard) & set(other) for other in shards[index + 1:])
+    assert shards == [sorted(files)[offset::count] for offset in range(count)]
+
+
+def test_sharding_partitions_the_selected_file_set(selectable_tests):
+    chosen = ("tests/test_unrelated.py", "tests/nested/test_child.py")
+    shards = [
+        runner._test_file_groups(
+            "example", 25, test_files=chosen, shard_index=index, shard_count=2,
+        ) for index in (1, 2)
+    ]
+    assert [path.relative_to(selectable_tests.parent).as_posix()
+            for shard in shards for group in shard for path in group] == sorted(chosen)
+
+
+@pytest.mark.parametrize("index,count", [
+    (0, 2), (3, 2), (1, 0), (-1, 2), (1, -2), (True, 2), (1, 1.5),
+])
+def test_invalid_shards_refuse_before_preparation(selectable_tests, monkeypatch, index, count):
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_a, **_kw: pytest.fail("prepared invalid shard"))
+    with pytest.raises(ValueError, match="shard"):
+        runner.run_plugin(
+            "example", "unused", reinstall=False, kexpr=None,
+            limits=runner.Limits(), plugin_timeout=60, test_timeout=10,
+            max_files_per_subsuite=25, shard_index=index, shard_count=count,
+        )
+
+
+@pytest.mark.parametrize("arguments", [
+    ["example", "--shard-index", "1"],
+    ["example", "--shard-count", "2"],
+    ["example", "--shard-index", "0", "--shard-count", "2"],
+    ["example", "--shard-index", "3", "--shard-count", "2"],
+    ["example", "--shard-index", "1", "--shard-count", "0"],
+    ["example", "--shard-index", "1.5", "--shard-count", "2"],
+    ["example", "other", "--shard-index", "1", "--shard-count", "2"],
+    ["example", "--prepare-only", "--shard-index", "1", "--shard-count", "2"],
+    ["example", "--list", "--shard-index", "1", "--shard-count", "2"],
+    ["example", "--ci-matrix"],
+    ["example", "other", "--list-test-files"],
+])
+def test_invalid_shard_cli_is_an_error_before_execution(arguments, monkeypatch):
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_a, **_kw: pytest.fail("prepared invalid CLI"))
+    with pytest.raises(SystemExit) as error:
+        runner.main(arguments)
+    assert error.value.code == 2
+
+
+def test_sharded_runner_preserves_contained_pytest_contract(selectable_tests, monkeypatch):
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_a, **_kw: Path(sys.executable))
+    calls = []
+    monkeypatch.setattr(runner, "run_contained", lambda command, **kw: calls.append((command, kw)) or 0)
+    assert runner.run_plugin(
+        "example", "unused", reinstall=False, kexpr=None,
+        limits=runner.Limits(), plugin_timeout=60, test_timeout=10,
+        max_files_per_subsuite=25, shard_index=2, shard_count=2,
+    ) == 0
+    command, options = calls[0]
+    assert command[-1] == str(Path("tests") / "test_selected.py")
+    assert "--timeout=10" in command
+    assert options["cwd"] == selectable_tests.parent
+    assert options["env"]["HOME"] != os.environ.get("HOME")
+    assert str(options["sandbox"]) in next(arg for arg in command if arg.startswith("--basetemp="))
+    assert options["limits"].wall_seconds <= 60
+    assert sum(arg.endswith(".py") for arg in command) == 1
+
+
+def test_empty_shard_cannot_fall_back_to_running_every_test(selectable_tests, monkeypatch):
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_a, **_kw: pytest.fail("prepared empty shard"))
+    monkeypatch.setattr(runner, "run_contained", lambda *_a, **_kw: pytest.fail("ran empty shard"))
+    assert runner.run_plugin(
+        "example", "unused", reinstall=False, kexpr=None,
+        test_files=("tests/test_selected.py",), limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,
+        shard_index=2, shard_count=2,
+    ) == 0
+
+
+def test_sharded_pytest_runs_real_isolated_fixtures_without_collecting_other_files(
+    selectable_tests, monkeypatch,
+):
+    (selectable_tests / "conftest.py").write_text(
+        "import pytest\n"
+        "@pytest.fixture\n"
+        "def owned_fixture(tmp_path):\n"
+        "    return tmp_path\n",
+        encoding="utf-8",
+    )
+    (selectable_tests / "test_selected.py").write_text(
+        "import os\nfrom pathlib import Path\n"
+        "def test_isolated(owned_fixture):\n"
+        f"    sandbox = Path(os.environ[{containment.SANDBOX_ENV!r}])\n"
+        "    assert owned_fixture.is_relative_to(sandbox)\n"
+        "    assert Path(os.environ['HOME']).is_relative_to(sandbox)\n"
+        "    assert 'GH_TOKEN' not in os.environ\n",
+        encoding="utf-8",
+    )
+    for name in ("nested/test_child.py", "test_unrelated.py"):
+        (selectable_tests / name).write_text(
+            "raise AssertionError('another shard was collected')\n", encoding="utf-8",
+        )
+    monkeypatch.setenv("GH_TOKEN", "synthetic-must-be-scrubbed")
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_a, **_kw: Path(sys.executable))
+    assert runner.run_plugin(
+        "example", "unused", reinstall=False, kexpr=None,
+        limits=runner.Limits(), plugin_timeout=60, test_timeout=10,
+        max_files_per_subsuite=25, shard_index=2, shard_count=2,
+    ) == 0
+
+
+def test_cli_forwards_shard_selectors_to_the_contained_runner(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path)
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "unused")
+    monkeypatch.setattr(runner, "_acquire_admission", lambda *_a: None)
+    calls = []
+    monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: calls.append(kw) or 0)
+    assert runner.main(["example", "--shard-index", "2", "--shard-count", "2"]) == 0
+    assert calls[0]["shard_index"] == calls[0]["shard_count"] == 2
+    assert calls[0]["test_files"] == ()
+    assert not calls[0]["guards"] and not calls[0]["allow_explicit_tiers"]
+
+
+@pytest.mark.parametrize("count", [1, 2, 4])
+def test_real_dispatch_file_manifest_shards_cover_authoritative_set_exactly_once(capsys, count):
+    complete = [path for group in runner._test_file_groups("agent-dispatch", 25)
+                for path in group]
+    manifests = []
+    for index in range(1, count + 1):
+        assert runner.main([
+            "agent-dispatch", "--list-test-files",
+            "--shard-index", str(index), "--shard-count", str(count),
+        ]) == 0
+        manifests.append(json.loads(capsys.readouterr().out))
+    tests = runner._plugin_dir("agent-dispatch") / "tests"
+    combined = [path for manifest in manifests for path in manifest]
+    assert sorted(combined) == [
+        path.relative_to(tests).as_posix() for path in complete
+    ]
+    assert len(set(combined)) == len(combined)
+
+
+def test_ci_matrix_only_shards_dispatch_when_selected():
+    assert runner._ci_matrix(["example"]) == {"include": [
+        {"plugin": "example", "shard_index": 1, "shard_count": 1},
+    ]}
+    assert runner._ci_matrix(["agent-dispatch", "example"]) == {"include": [
+        {"plugin": "agent-dispatch", "shard_index": 1, "shard_count": 4},
+        {"plugin": "agent-dispatch", "shard_index": 2, "shard_count": 4},
+        {"plugin": "agent-dispatch", "shard_index": 3, "shard_count": 4},
+        {"plugin": "agent-dispatch", "shard_index": 4, "shard_count": 4},
+        {"plugin": "example", "shard_index": 1, "shard_count": 1},
+    ]}
+    assert runner._ci_matrix([]) == {"include": []}
+
+
+def test_ci_runner_contract_jobs_install_real_pytest_timeout():
+    jobs = yaml.safe_load((SCRIPT.parent.parent / ".github/workflows/ci.yml").read_text())["jobs"]
+    steps = [
+        step for job in jobs.values() for step in job.get("steps", [])
+        if step.get("name") == "Test runner admission and isolation"
+    ]
+    assert steps
+    for step in steps:
+        assert "pytest-timeout" in step["run"].split("&&", 1)[0]
+
+
+@pytest.mark.parametrize("index", [1, 2, 3, 4])
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled"])
+def test_actual_ci_smoke_matrix_preserves_required_gate_for_each_shard(
+    monkeypatch, index, result,
+):
+    root = SCRIPT.parent.parent
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
+    discovery = jobs["discover"]
+    discover_run = next(step["run"] for step in discovery["steps"] if step.get("id") == "set")
+    assert "--list --ci-matrix" in discover_run
+    assert discovery["outputs"]["smoke_matrix"] == "${{ steps.set.outputs.smoke_matrix }}"
+    smoke = jobs["smoke"]
+    assert smoke["strategy"]["matrix"] == "${{ fromJson(needs.discover.outputs.smoke_matrix) }}"
+    assert smoke["strategy"]["fail-fast"] is False
+    assert "agent-dispatch" in smoke["timeout-minutes"] and "&& 12 || 8" in smoke["timeout-minutes"]
+    execution = next(step["run"] for step in smoke["steps"] if step.get("name", "").startswith("Test "))
+    assert "--shard-index ${{ matrix.shard_index }}" in execution
+    assert "--shard-count ${{ matrix.shard_count }}" in execution
+    assert "--test-file" not in execution and "--guards" not in execution and "-k " not in execution
+    matrix = runner._ci_matrix(["agent-dispatch"])["include"]
+    assert {row["shard_index"] for row in matrix} == {1, 2, 3, 4}
+    shard_results = {row["shard_index"]: "success" for row in matrix}
+    shard_results[index] = result
+    assert "smoke" in jobs["pr-gate"]["needs"]
+    assert "always()" in jobs["pr-gate"]["if"]
+    gate = jobs["pr-gate"]["steps"][0]
+    assert gate["env"]["NEEDS_JSON"] == "${{ toJson(needs) }}"
+    code = gate["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    aggregate = "success" if all(value == "success" for value in shard_results.values()) else result
+    monkeypatch.setenv("NEEDS_JSON", json.dumps({"smoke": {"result": aggregate}}))
+    if result == "success":
+        exec(compile(code, "required-pr-gate", "exec"), {})
+    else:
+        with pytest.raises(SystemExit) as failure:
+            exec(compile(code, "required-pr-gate", "exec"), {})
+        assert failure.value.code == 1
+    for path in (root / ".github/workflows/validate-and-promote.yml",):
+        assert "--shard-" not in path.read_text()
+    assert "--shard-" not in jobs["full"]["steps"][-1]["run"]
 
 
 def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):

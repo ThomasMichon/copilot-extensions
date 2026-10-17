@@ -28,7 +28,13 @@ from .ado_discovery_scope import (
 )
 from .gitea_connection import validate_gitea_connection
 from .gitea_provider import GiteaProvider
-from .issue_loop_markers import _marker, _marker_plain, _parse_marker
+from .issue_loop_markers import (
+    _marker,
+    _marker_plain,
+    _parse_marker,
+    latest_reservations as _latest_reservations,
+)
+from .repository_github_auth import repository_environment, run_repository_command, validate_auth
 from .repository_issue_selection import eligible_issues, validate_issue_numbers
 from .repository_issue_declarations import expand_repository_issue_loop as expand_repository_issue_loop
 from .repository_issue_task_contracts import (
@@ -59,7 +65,7 @@ _KNOWN_KEYS = frozenset(
     }
 )
 _FORGE_KEYS = (
-    frozenset({"provider", "producer_login", "discovery_scope", "api_base", "token_env"})
+    frozenset({"provider", "producer_login", "discovery_scope", "api_base", "token_env", "auth"})
     | SCRIPT_FORGE_KEYS
 )
 _SUPPORTED_FORGE_PROVIDERS = frozenset({"github", "azure-devops", "gitea", "script"})
@@ -243,6 +249,7 @@ def validate_config(
             "repository-issue-loop forge.producer_login: expected a non-empty string"
         )
     provider_name = forge.get("provider")
+    github_auth = validate_auth(forge)
     discovery_scope = validate_discovery_scope(forge, provider=provider_name)
     gitea_connection = validate_gitea_connection(forge, provider=provider_name)
     script_config = validate_script_forge_config(
@@ -427,6 +434,7 @@ def validate_config(
             "provider": forge.get("provider"),
             "producer_login": producer_login,
             "discovery_scope": discovery_scope,
+            **github_auth,
             **(gitea_connection or {}),
             **(script_config or {}),
         },
@@ -521,28 +529,48 @@ class GitHubProvider:
     def __init__(
         self,
         expected_login: str,
-        runner: Callable[..., Any] = subprocess.run,
+        runner: Callable[..., Any] | None = None,
+        *,
+        repository: str | None = None,
+        auth: str = "ambient",
     ):
         if not expected_login:
             raise ValueError("expected_login must be non-empty")
         self.expected_login = expected_login
-        self.runner = runner
+        self.runner = runner or (run_repository_command if auth == "repository" else subprocess.run)
+        if auth not in {"ambient", "repository"} or (auth == "repository" and not repository):
+            raise ValueError("repository authentication requires a repository")
+        self.repository = repository or ""
+        self.auth = auth
         self._verified_repos: set[str] = set()
 
     def _gh(self, *args: str) -> Any:
+        options = {}
+        if self.auth == "repository":
+            options["env"] = repository_environment(
+                self.repository, self.expected_login, runner=self.runner,
+            )
+            from .procutil import no_window_kwargs
+
+            options.update(timeout=30, **no_window_kwargs())
         completed = self.runner(
             ["gh", *args],
             check=False,
             capture_output=True,
             text=True,
+            **options,
         )
         if int(completed.returncode) != 0:
+            if self.auth == "repository":
+                raise RuntimeError("Repository GitHub operation failed")
             raise RuntimeError(
                 f"GitHub operation failed: {str(completed.stderr or '').strip()}"
             )
         return completed
 
     def _verify_identity(self, repo: str, *, allow_cache: bool = True) -> None:
+        if self.auth == "repository" and repo != self.repository:
+            raise RuntimeError("GitHub repository differs from the scoped authentication target")
         if allow_cache and repo in self._verified_repos:
             return
         login = str(self._gh("api", "user", "--jq", ".login").stdout or "").strip()
@@ -1160,7 +1188,9 @@ def _forge_provider_for(
     provider_name = forge["provider"]
     producer_login = forge["producer_login"]
     if provider_name == "github":
-        return GitHubProvider(producer_login)
+        return GitHubProvider(
+            producer_login, repository=config["repo"], auth=forge.get("auth", "ambient"),
+        )
     if provider_name == "azure-devops":
         return AzureDevOpsProvider(
             producer_login, discovery_scope=forge.get("discovery_scope")
@@ -1175,46 +1205,6 @@ def _forge_provider_for(
         return build_provider(forge, producer_login=producer_login, repo_root=cwd)
     raise RegistrarError(
         f"repository-issue-loop forge.provider: unsupported provider {provider_name!r}")
-
-
-def _latest_reservations(issue: Issue) -> dict[str, dict[str, Any]]:
-    latest: dict[str, dict[str, Any]] = {}
-    for reservation in issue.reservations:
-        loop = reservation.get("loop")
-        if not isinstance(loop, str):
-            continue
-        current = latest.get(loop)
-        state = reservation.get("state")
-        if state == "reserved":
-            if (
-                current is None
-                or current.get("state") == "released"
-                or reservation.get("occurrence", -1)
-                > current.get("occurrence", -1)
-            ):
-                latest[loop] = reservation
-            continue
-        if current is None:
-            continue
-        if (
-            reservation.get("occurrence") != current.get("occurrence")
-            or reservation.get("issue") != current.get("issue")
-            or reservation.get("label") != current.get("label")
-        ):
-            continue
-        if state == "claimed" and current.get("state") == "reserved":
-            latest[loop] = reservation
-        elif state == "released":
-            if current.get("state") == "reserved" and reservation.get(
-                "task_id"
-            ) is None:
-                latest[loop] = reservation
-            elif (
-                current.get("state") == "claimed"
-                and reservation.get("task_id") == current.get("task_id")
-            ):
-                latest[loop] = reservation
-    return latest
 
 
 def _eligible(

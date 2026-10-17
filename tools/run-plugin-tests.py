@@ -343,10 +343,26 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     return py
 
 
+def _validate_shard(index: int, count: int) -> None:
+    if type(index) is not int or type(count) is not int or not 1 <= index <= count:
+        raise ValueError("shard selectors require integers with 1 <= shard-index <= shard-count")
+
+
+def _ci_matrix(plugins: list[str]) -> dict[str, list[dict[str, str | int]]]:
+    return {"include": [
+        {"plugin": name, "shard_index": index, "shard_count": count}
+        for name in plugins
+        for count in [4 if name == "agent-dispatch" else 1]
+        for index in range(1, count + 1)
+    ]}
+
+
 def _test_file_groups(
     name: str, max_files: int, *, filtered: bool = False,
     test_files: tuple[str, ...] = (),
+    shard_index: int = 1, shard_count: int = 1,
 ) -> list[list[Path]]:
+    _validate_shard(shard_index, shard_count)
     tests = _plugin_dir(name) / "tests"
     if test_files:
         files = []
@@ -367,6 +383,9 @@ def _test_file_groups(
         files.sort()
     else:
         files = sorted(tests.rglob("test_*.py"))
+    files = files[shard_index - 1::shard_count]
+    if not files and shard_count > 1:
+        return []
     if filtered and files:
         return [files]
     return partition(files, max_files) or [[]]
@@ -388,15 +407,21 @@ def run_plugin(
     allow_explicit_tiers: bool = False,
     allow_host_state: bool = False,
     test_files: tuple[str, ...] = (),
+    shard_index: int = 1,
+    shard_count: int = 1,
 ) -> int:
+    _validate_shard(shard_index, shard_count)
     if test_files and prepare_only:
         raise ValueError("--test-file cannot be combined with --prepare-only")
     groups = _test_file_groups(
         name, max_files_per_subsuite, filtered=bool(guards or kexpr),
-        test_files=test_files,
+        test_files=test_files, shard_index=shard_index, shard_count=shard_count,
     )
     if not _has_suite(name):
         print(f"[SKIP] {name}: no test suite")
+        return 0
+    if not groups:
+        print(f"[PASS] {name}: empty shard {shard_index}/{shard_count}")
         return 0
     if prepare_only:
         # Builds/updates the venv ONLY -- never imports a single test
@@ -512,6 +537,12 @@ def main(argv: list[str] | None = None) -> int:
         help="collect only this plugin-relative tests/test_*.py file (repeatable; "
              "requires exactly one named plugin)",
     )
+    ap.add_argument("--shard-index", type=int, default=None,
+                    help="one-based file shard index (requires --shard-count)")
+    ap.add_argument("--shard-count", type=int, default=None,
+                    help="number of disjoint sorted-file shards (requires --shard-index)")
+    ap.add_argument("--list-test-files", action="store_true",
+                    help="print the selected test-file manifest as JSON without preparing or running tests")
     ap.add_argument("--guards", action="store_true",
                     help="run only @pytest.mark.guard tests (fast structural/contract checks)")
     ap.add_argument("--collect-only", dest="collect_only", action="store_true",
@@ -540,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--list", dest="list_only", action="store_true",
                     help="print the resolved target plugins as a JSON array and exit "
                          "(feeds a CI matrix); honors --all/--changed/names and --exclude")
+    ap.add_argument("--ci-matrix", action="store_true",
+                    help="with --list, expand agent-dispatch into four CI file shards")
     ap.add_argument("--pre-push", action="store_true",
                     help="hook mode: skip (exit 0) if uv is absent instead of failing")
     ap.add_argument("--timeout", "--subsuite-timeout", dest="subsuite_timeout",
@@ -595,6 +628,15 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(
                 "--allow-host-state requires --allow-explicit-tiers"
             )
+        if (args.shard_index is None) != (args.shard_count is None):
+            raise ValueError("--shard-index and --shard-count must be supplied together")
+        shard_index = 1 if args.shard_index is None else args.shard_index
+        shard_count = 1 if args.shard_count is None else args.shard_count
+        _validate_shard(shard_index, shard_count)
+        if args.ci_matrix and not args.list_only:
+            raise ValueError("--ci-matrix requires --list")
+        if args.list_only and (args.shard_index is not None or args.list_test_files):
+            raise ValueError("--list cannot be combined with file manifests or shard selectors")
     except ValueError as exc:
         ap.error(str(exc))
 
@@ -609,8 +651,25 @@ def main(argv: list[str] | None = None) -> int:
     if excluded:
         targets = [t for t in targets if t not in excluded]
 
+    if args.shard_index is not None or args.list_test_files:
+        if len(targets) != 1 or args.prepare_only:
+            ap.error("file shards and manifests require exactly one executing plugin")
+    if args.test_file and (len(targets) != 1 or args.prepare_only):
+        ap.error("--test-file requires exactly one plugin and cannot be used with --prepare-only")
     if args.list_only:
-        print(json.dumps(targets))
+        print(json.dumps(_ci_matrix(targets) if args.ci_matrix else targets))
+        return 0
+    if args.list_test_files:
+        name = targets[0]
+        try:
+            groups = _test_file_groups(
+                name, args.max_files_per_sub_suite, test_files=tuple(args.test_file),
+                shard_index=shard_index, shard_count=shard_count,
+            )
+        except ValueError as exc:
+            ap.error(str(exc))
+        tests = _plugin_dir(name) / "tests"
+        print(json.dumps([path.relative_to(tests).as_posix() for group in groups for path in group]))
         return 0
 
     if not targets:
@@ -682,6 +741,8 @@ def main(argv: list[str] | None = None) -> int:
                     allow_explicit_tiers=args.allow_explicit_tiers,
                     allow_host_state=args.allow_host_state,
                     test_files=tuple(args.test_file),
+                    shard_index=shard_index,
+                    shard_count=shard_count,
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)

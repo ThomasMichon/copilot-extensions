@@ -1036,7 +1036,7 @@ jobs:
           PYTHONPATH: libs/single-instance-lease/src
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout pyyaml "setuptools>=83.0.0" wheel &&
           python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_environment_admission.py
@@ -1386,7 +1386,7 @@ jobs:
           PYTHONPATH: libs/single-instance-lease/src
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout pyyaml "setuptools>=83.0.0" wheel &&
           python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_environment_admission.py
@@ -1442,6 +1442,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       smoke: ${{ steps.set.outputs.smoke }}
+      smoke_matrix: ${{ steps.set.outputs.smoke_matrix }}
       heavy: ${{ steps.set.outputs.heavy }}
       standalone_service: ${{ steps.set.outputs.standalone_service }}
     steps:
@@ -1469,9 +1470,11 @@ jobs:
           fi
           FULL=$(python tools/run-plugin-tests.py $MODE --list)
           SMOKE=$(python tools/run-plugin-tests.py $MODE --exclude "$HEAVY_PLUGIN" --list)
+          MATRIX=$(python tools/run-plugin-tests.py $MODE --exclude "$HEAVY_PLUGIN" --list --ci-matrix)
           echo "Full set:  $FULL"
           echo "Fast set:  $SMOKE"
           echo "smoke=$SMOKE" >> "$GITHUB_OUTPUT"
+          echo "smoke_matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           if echo "$FULL" | python -c "import json,sys,os; sys.exit(0 if os.environ['HEAVY_PLUGIN'] in json.load(sys.stdin) else 1)"; then
             echo "heavy=true" >> "$GITHUB_OUTPUT"
           else
@@ -1479,7 +1482,7 @@ jobs:
           fi
 
   smoke:
-    name: ${{ matrix.plugin }}
+    name: ${{ matrix.shard_count > 1 && format('{0} ({1}/{2})', matrix.plugin, matrix.shard_index, matrix.shard_count) || matrix.plugin }}
     needs: discover
     if: needs.discover.outputs.smoke != '[]' && needs.discover.outputs.smoke != ''
     runs-on: ubuntu-latest
@@ -1489,8 +1492,7 @@ jobs:
     timeout-minutes: ${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}
     strategy:
       fail-fast: false
-      matrix:
-        plugin: ${{ fromJson(needs.discover.outputs.smoke) }}
+      matrix: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}
     steps:
       - uses: actions/checkout@v4
       - name: Fetch Agent Bridge contract provenance
@@ -1501,7 +1503,9 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test ${{ matrix.plugin }}
-        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+        run: >-
+          python tools/run-plugin-tests.py ${{ matrix.plugin }}
+          --shard-index ${{ matrix.shard_index }} --shard-count ${{ matrix.shard_count }}
       - name: Test shared SSH proxy contracts
         if: matrix.plugin == 'agent-bridge'
         # ssh-manager is now consumed as a `uv`-editable canonical

@@ -728,6 +728,15 @@ see
 
 ## Automated workflows reference
 
+The per-plugin `ci.yml` smoke matrix partitions the complete ordinary
+`agent-dispatch` test-file set into four deterministic, disjoint shards using
+`run-plugin-tests.py`'s authoritative discovery. Both retain the existing
+12-minute job limit and contained runner contract. The required `PR gate`
+depends on the entire fail-fast-disabled smoke matrix, not one representative
+shard. Other plugins remain single-job; manual full validation and the
+promotion workflow's full/coverage runs remain unsharded. This changes execution
+distribution, not selection authority, required checks, or release policy.
+
 Every workflow under `.github/workflows/`, what triggers it, and what it
 does. Grouped by role; see each file's own header comment for full
 rationale and any known limitations.
