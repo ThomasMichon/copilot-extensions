@@ -8,17 +8,19 @@ import stat
 import time
 from pathlib import Path
 
-from . import managed_runtime as runtime
-
 
 def _integrity_budget(deadline: float | None) -> None:
     if deadline is not None and time.monotonic() >= deadline:
-        raise runtime.ManagedRuntimeLockTimeout("managed runtime integrity deadline expired")
+        from .managed_runtime import ManagedRuntimeLockTimeout
+
+        raise ManagedRuntimeLockTimeout("managed runtime integrity deadline expired")
 
 
 def _tree_digest(
     root: Path, *, excluded: frozenset[str] = frozenset(), deadline: float | None = None
 ) -> str:
+    from . import managed_runtime as runtime
+
     _integrity_budget(deadline)
     digest = hashlib.sha256()
     for current, directories, files in os.walk(

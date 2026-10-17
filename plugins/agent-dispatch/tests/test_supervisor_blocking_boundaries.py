@@ -151,6 +151,62 @@ def test_progress_snapshot_collection_and_final_writer_do_not_block_master():
         daemon.shutdown()
 
 
+@pytest.mark.parametrize("failure", [KeyError("private-detail"), AssertionError("private-detail")])
+def test_failed_progress_worker_does_not_abort_next_reconciliation(caplog, failure):
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unit", machine="host")]), "host", launcher=FakeLauncher(),
+        companion_controller=FakeCompanionController(),
+    )
+    calls = []
+
+    def publish(frame):
+        calls.append(frame["phase"])
+        if len(calls) == 1:
+            raise failure
+
+    daemon._progress_callback = publish
+    try:
+        daemon._phase("first")
+        with pytest.raises(type(failure)):
+            daemon._progress_future.result(2)
+        assert daemon.reconcile_once().started == ["unit"]
+        daemon._progress_future.result(2)
+        assert calls[-1] == "complete"
+        assert calls.count("first") == 1
+        assert "progress-worker-unavailable" in caplog.text
+        assert "private-detail" not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("active_deadline", [None, 100.025, 0.0])
+def test_receipt_inventory_without_active_deadline_receives_forward_budget(monkeypatch, active_deadline):
+    controller = FakeCompanionController()
+    observed = []
+
+    def inventory(adopted, *, deadline, operation_budget, **kwargs):
+        observed.append((adopted, deadline, operation_budget))
+        expected = active_deadline if active_deadline is not None else time.monotonic() + operation_budget
+        assert deadline == pytest.approx(expected)
+        return {"pending"}
+
+    controller.request_receipt_inventory = inventory
+    controller.receipt_futures = lambda: ()
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", launcher=FakeLauncher(),
+        companion_controller=controller, reconcile_call_budget=0.05,
+    )
+    monkeypatch.setattr("agent_dispatch.supervisor_reconcile.time.monotonic", lambda: 100.0)
+    try:
+        daemon._reconcile_deadline = active_deadline
+        daemon._reconcile_companion_receipts({"adopted"})
+        expected = active_deadline if active_deadline is not None else 100.05
+        assert observed == [({"adopted"}, expected, 0.05)]
+        assert daemon._managed_uncertain == {"pending"}
+    finally:
+        daemon.shutdown()
+
+
 def test_shutdown_refreshes_children_scheduled_by_finishing_inventory(tmp_path, monkeypatch):
     from agent_dispatch import supervisor_daemon
 

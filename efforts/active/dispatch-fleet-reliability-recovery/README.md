@@ -688,3 +688,35 @@ requested contract.
   timeout and cleanup assertions are retained rather than enlarged.
   Fresh publication/review/complete CI remain required. Native keeper/adopter
   and live deployment acceptance are still separate open gates.
+
+### 2026-10-17 - Recover failed progress workers without extending active budgets
+
+- Fresh review `5555601881` exposes two High boundaries. An unexpected optional
+  callback exception survives in its future and is rethrown on the next master
+  phase; inventory called without an active cycle receives an already-expired
+  deadline. Three fail-first cases reproduce both defects.
+- Completed progress-worker failures now use the existing sanitized, throttled
+  warning path before the latest frame starts another worker. Consumed callback
+  work is not replayed. All receipt adapters share a forward call budget only
+  when no cycle deadline exists; an existing deadline is preserved, even when
+  already expired. The five focused recovery/deadline cases pass.
+- The integrity extraction also has a real import-order defect: importing
+  `managed_integrity` first fails with a partially initialized module. Isolated
+  fresh module imports reproduce it. Runtime dependencies are now resolved only
+  when their functions execute, preserving the exported helpers, digest checks
+  and exact timeout exception class. Both import orders pass.
+- Registry-wide publication readback is retained deliberately. A new cross-scope
+  regression proves an unknown write's immutable old machine/environment target
+  is read back before a changed target is published. Applying current daemon
+  filters could mistake that old write or a cross-scope ID collision for absence.
+  One bounded publication worker still owns this read, off the master.
+- Removed the unconditional passing native-lock trace print; failure diagnostics,
+  subprocess evidence, lock assertions and deadlines remain unchanged.
+- Integrated bounded receipt/scheduling, supervisor boundary/recovery and managed
+  runtime/retention/companion coverage passes 297 cases with two platform skips
+  in 561.47 seconds. The contained wrapper exits zero with its host-state guard
+  enabled, including actual native materialization, readiness, rollback and stop.
+  Import-contract isolation covers both fresh module orders; no install/bootstrap
+  behavior changed, so a separate fresh-box provision was not run for this fix.
+  Publication, fresh review and complete CI remain required. No source result
+  closes independent native recovery or rollout.

@@ -77,7 +77,10 @@ class BoundedReconciliation:
                     return
                 self._progress_worker_active = False
             if previous is not None and previous.done() and not previous.cancelled():
-                previous.result()
+                try:
+                    previous.result()
+                except Exception as exc:
+                    self._warn_progress_failure("progress-worker-unavailable", exc)
             if self._progress_executor is None:
                 self._progress_executor = ThreadPoolExecutor(
                     max_workers=1, thread_name_prefix="dispatch-progress",
@@ -358,12 +361,16 @@ class BoundedReconciliation:
 
     def _reconcile_companion_receipts(self, adopted: set[str]) -> None:
         controller = self._companion()
+        deadline = (
+            self._reconcile_deadline if self._reconcile_deadline is not None
+            else time.monotonic() + self._reconcile_call_budget
+        )
         inventory = getattr(controller, "request_receipt_inventory", None)
         if callable(inventory):
             try:
                 self._managed_uncertain.update(inventory(
                     adopted, inventory_executor=self._inventory_pool(), executor=self._receipt_pool(),
-                    deadline=self._reconcile_deadline or time.monotonic(),
+                    deadline=deadline,
                     operation_budget=self._reconcile_call_budget,
                     cycle_tag=self._reconcile_token,
                     availability_executor=self._provider_pool(),
@@ -376,8 +383,7 @@ class BoundedReconciliation:
             try:
                 self._managed_uncertain.update(bounded(
                     adopted, executor=self._receipt_pool(),
-                    deadline=self._reconcile_deadline if self._reconcile_deadline is not None
-                    else time.monotonic() + self._reconcile_call_budget,
+                    deadline=deadline,
                 ))
             finally:
                 self._probe_inflight.update(controller.receipt_futures())
@@ -389,7 +395,7 @@ class BoundedReconciliation:
             self._probe_inflight.add(self._receipt_reconcile_future)
         try:
             self._receipt_reconcile_future.result(timeout=max(
-                0.0, (self._reconcile_deadline or time.monotonic()) - time.monotonic(),
+                0.0, deadline - time.monotonic(),
             ))
         except TimeoutError:
             if self._receipt_reconcile_future.done():

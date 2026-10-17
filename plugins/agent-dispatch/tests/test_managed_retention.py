@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import shutil
@@ -110,6 +111,23 @@ def _subprocess_test_environment() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(path_entries)
     return env
+
+
+@pytest.mark.parametrize("first", ["managed_integrity", "managed_runtime"])
+def test_managed_integrity_cold_import_order_preserves_contract(tmp_path, monkeypatch, first):
+    import agent_dispatch
+
+    for name in ("managed_integrity", "managed_runtime"):
+        monkeypatch.delitem(sys.modules, f"agent_dispatch.{name}")
+        monkeypatch.delattr(agent_dispatch, name)
+    importlib.import_module(f"agent_dispatch.{first}")
+    integrity = importlib.import_module("agent_dispatch.managed_integrity")
+    runtime = importlib.import_module("agent_dispatch.managed_runtime")
+    assert integrity._tree_digest is runtime._tree_digest
+    assert integrity._integrity_budget is runtime._integrity_budget
+    assert len(integrity._tree_digest(tmp_path)) == 64
+    with pytest.raises(runtime.ManagedRuntimeLockTimeout, match="integrity deadline expired"):
+        integrity._integrity_budget(0)
 
 
 @pytest.mark.parametrize("kind", ["preparation", "process", "other-environment", "foreign-domain"])
@@ -1170,7 +1188,6 @@ def test_managed_retention_root_lock_serializes_real_materialization_process(
         while not marker.exists() and worker.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
         assert marker.exists(), trace.read_text() if trace.exists() else "interpreter not entered"
-        print(f"actual materialization startup:\n{trace.read_text()}", flush=True)
         plugin_identity = _plugin_identity(_authority(_registration(h.plugin))[0])
         other_registration = _registration(_project(tmp_path / "unrelated-plugin"))
         other_identity = _plugin_identity(_authority(other_registration)[0])

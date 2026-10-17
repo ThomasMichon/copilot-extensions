@@ -277,3 +277,36 @@ def test_unknown_publication_generation_is_read_back_before_new_target():
         assert client.writes == [["old"]]
         publisher.poll(client, [new], executor=pool, deadline=time.monotonic() + 1)
         assert client.writes == [["old"], ["new"]]
+
+
+def test_publication_readback_retains_unknown_target_across_scope_changes():
+    from agent_dispatch.supervisor_daemon_registration_publish import BoundedDeclarationPublisher
+
+    class Client:
+        def __init__(self):
+            self.rows = {}
+            self.writes = []
+
+        def list_registrations(self, **kwargs):
+            assert kwargs == {"include_paused": True}
+            return list(self.rows.values())
+
+        def register_registration(self, kind, spec, **kwargs):
+            self.writes.append((kwargs["machine"], kwargs["env"]))
+            self.rows[kwargs["reg_id"]] = {
+                "id": kwargs["reg_id"], "kind": kind, "spec": spec,
+                "machine": kwargs["machine"], "env": kwargs["env"],
+            }
+            if len(self.writes) == 1:
+                raise TimeoutError("response lost")
+
+    client = Client()
+    publisher = BoundedDeclarationPublisher()
+    old = _reg("declared:one", machine="old-host", env="old-env")
+    new = _reg("declared:one", machine="new-host", env="new-env")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        publisher.poll(client, [old], executor=pool, deadline=time.monotonic() + 1)
+        publisher.poll(client, [new], executor=pool, deadline=time.monotonic() + 1)
+        assert client.writes == [("old-host", "old-env")]
+        publisher.poll(client, [new], executor=pool, deadline=time.monotonic() + 1)
+        assert client.writes == [("old-host", "old-env"), ("new-host", "new-env")]

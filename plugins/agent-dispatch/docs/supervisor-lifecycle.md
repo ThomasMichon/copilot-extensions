@@ -46,6 +46,11 @@ confirmed. Earlier in-flight registry results are discarded, and cached registry
 rows remain suppressed during that wait. A changed declaration cannot submit a
 concurrent publication batch.
 Publication is metadata mirroring, not authority to replay task execution.
+Publication readback is deliberately registry-wide: an uncertain write retains
+its captured target even when its machine/environment differs from the next
+declaration. A scoped absence must not replay that older write or mistake an
+ID collision in another scope for a confirmed withdrawal. This read remains in
+the single tracked publication worker, never on the master.
 
 Each withdrawn receipt has one durable `*.reconcile-operation.json` record tied
 to its exact process receipt and selected launch generation. `pending`, `timeout`
@@ -89,6 +94,8 @@ partial scheduling cannot be reported as a clean drain.
 Completed legacy reconciliation futures are cleared on success or failure;
 only genuinely pending work is retained. A worker-raised timeout is surfaced as
 a failed operation, not mistaken for a still-running wait.
+Receipt reconciliation invoked outside an active cycle uses a forward call
+budget; an existing cycle deadline, including an expired one, is not extended.
 Shutdown retires bounded executors and clears their active references even when
 work misses the grace window. A failed successor spawn can reclaim the singleton
 and create usable replacement pools; original futures and publication/receipt
@@ -146,6 +153,10 @@ drains old-generation status I/O within the existing grace window before stoppin
 any managed unit. If publication remains unresolved, it retains both the singleton
 and running units without arming spawn cooldown; it may hand off once publication
 settles.
+An unexpected exception escaping the optional progress worker is classified and
+logged when its completed future is collected. It cannot abort the next master
+phase; the newest frame starts a replacement worker without replaying a consumed
+publication.
 Independent watchdog invocation,
 custody/recovery and native platform proof remain integration gates of the
 tracked #5301/#5655 objectives. This slice neither implements a second watchdog nor
