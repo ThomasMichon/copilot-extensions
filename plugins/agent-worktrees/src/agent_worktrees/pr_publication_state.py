@@ -99,10 +99,11 @@ def provisional_lease(pr, remote: str, branch: str, cwd: str) -> str | None:
 
 def unpublished(pr: tracking.PRRecord | None) -> bool:
     """Identify a provisional entry with no publication or provider evidence."""
+    # head_sha is the saved lease; remote/head/rewrite identities bind destination.
     return pr is not None and pr.state == "creating" and pr.number is None and not any(
-        getattr(pr, name) for name in (
-            "url", "base_sha", "head_sha", "patch_id", "rewrite_owner",
-            "rewrite_identity", "remote", "head_repo", "head_identity", "head_owner",
-            "head_observed_at", "head_observed_api_base", "attribution_head", "closed_at",
+        (
+            pr.url, pr.base_sha, pr.head_sha, pr.patch_id, pr.rewrite_owner,
+            pr.rewrite_identity, pr.remote, pr.head_repo, pr.head_identity, pr.head_owner,
+            pr.head_observed_at, pr.head_observed_api_base, pr.attribution_head, pr.closed_at,
         )
     )
