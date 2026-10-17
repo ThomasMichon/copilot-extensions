@@ -1,0 +1,9 @@
+{
+  "comment": "Keep opaque instruction-copy regressions aligned with timed and legacy launch progress",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

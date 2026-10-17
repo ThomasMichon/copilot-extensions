@@ -315,6 +315,17 @@ function Remove-BudgetBuildArtifacts {
     }
 }
 
+function Get-BudgetProcutilSource {
+    $source = Join-Path $PluginDir 'libs/agent-procutil'
+    if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
+        $source = Join-Path $PluginDir '../../libs/agent-procutil'
+    }
+    if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
+        throw 'Owning agent-procutil source is missing'
+    }
+    return (Resolve-Path -LiteralPath $source).Path
+}
+
 function Install-BudgetGuidancePackage {
     param(
         [Parameter(Mandatory = $true)][string]$Python,
@@ -324,30 +335,24 @@ function Install-BudgetGuidancePackage {
 
     $pipSources = @($Dependencies) + @($Source)
     foreach ($root in $pipSources) { Remove-BudgetBuildArtifacts -Root $root }
-    $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+    $uvCommand = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     if ($uvCommand) {
-        $uvResult = 1
         try {
-            & $uvCommand.Source pip install --python $Python @Dependencies $Source --quiet 2>&1 | Out-Null
-            $uvResult = $LASTEXITCODE
+            & $Python -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') `
+                --uv $uvCommand.Source -- --python $Python @pipSources --quiet 2>&1 |
+                ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) { Write-Fail "Canonical dependency installation exited $LASTEXITCODE" }
+            return $LASTEXITCODE -eq 0
         } catch {
-            Write-Step 'uv package install could not start -- falling back to python -m pip'
+            Write-Fail "Canonical dependency installation failed: $_"
+            return $false
         } finally {
             foreach ($root in $pipSources) { Remove-BudgetBuildArtifacts -Root $root }
         }
-        if ($uvResult -eq 0) { return $true }
-        if ($uvResult -ne 1) {
-            Write-Step "uv package install exited $uvResult -- falling back to python -m pip"
-        }
     }
-
-    foreach ($root in $pipSources) { Remove-BudgetBuildArtifacts -Root $root }
-    try {
-        & $Python -m pip install --quiet @pipSources 2>&1 | Out-Null
-        return $LASTEXITCODE -eq 0
-    } finally {
-        foreach ($root in $pipSources) { Remove-BudgetBuildArtifacts -Root $root }
-    }
+    Write-Fail 'uv is required; unrestricted pip fallback is not supported'
+    return $false
 }
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -413,7 +418,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
-    Invoke-VersionedMarkComplete
+    if (-not (Invoke-VersionedMarkComplete)) { return $false }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
@@ -462,12 +467,11 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
-       mark-complete before the link is swapped), then the active link's
-       python, then a real base python via the `py` launcher -- avoiding the
+       Uses the active link's python or a real base python via the `py`
+       launcher, never the candidate owned by construction -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
+    foreach ($d in @($LinkDir)) {
+        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
@@ -475,7 +479,36 @@ function Get-BootstrapPython {
     }
     foreach ($cand in 'python3', 'python') {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
-        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
+        if ($c -and $c.Source -notmatch 'WindowsApps') {
+            $exe = (& $c.Source -I -c "import sys; print(sys.executable)" 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
+        }
+    }
+    $uv = Get-Command uv -ErrorAction SilentlyContinue
+    if ($uv) {
+        foreach ($arguments in @(
+            'python find 3.11',
+            'run --no-project --python 3.11 python -I -c "import sys; print(sys.executable)"'
+        )) {
+            $psi = New-Object Diagnostics.ProcessStartInfo
+            $psi.FileName = $uv.Source
+            $psi.Arguments = $arguments
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $process = [Diagnostics.Process]::Start($psi)
+            $out = $process.StandardOutput.ReadToEndAsync()
+            $err = $process.StandardError.ReadToEndAsync()
+            $process.WaitForExit()
+            [Threading.Tasks.Task]::WaitAll($out, $err)
+            $base = $out.Result.Trim()
+            $code = $process.ExitCode
+            $process.Dispose()
+            if ($code -eq 0 -and $base -and (Test-Path -LiteralPath $base -PathType Leaf)) {
+                return $base
+            }
+        }
     }
     return $null
 }
@@ -492,6 +525,9 @@ function Get-PayloadHash {
             Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
                 Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
         }
+        if (-not (Test-Path (Join-Path $libs 'agent-procutil/pyproject.toml'))) {
+            $parts += Get-Content (Join-Path (Get-BudgetProcutilSource) 'pyproject.toml') -Raw
+        }
         $joined = [string]::Join("`n", $parts)
         $sha = [System.Security.Cryptography.SHA256]::Create()
         $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
@@ -504,12 +540,18 @@ function Invoke-VersionedSlotClean {
        --allow-existing` over a corpse (#935); the current/active slot is never
        tossed (link-name derived from $LinkDir so the guard works per plugin).
        No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
 }
 
 function Invoke-VersionedMarkComplete {
@@ -517,14 +559,9 @@ function Invoke-VersionedMarkComplete {
        so "marker present" == "healthy, complete build". A crashed / watchdog-
        killed install never reaches here, leaving its slot markerless and thus
        tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) { return }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
+    if (-not $VersionedRuntime) { return $true }
+    Complete-RuntimeConstruction -PayloadHash (Get-PayloadHash)
+    return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -686,18 +723,22 @@ function Invoke-Stamp {
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
-    $procutil = Join-Path $PluginDir 'libs/agent-procutil'
-    if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
-        $procutil = Join-Path $PluginDir '../../libs/agent-procutil'
-    }
-    if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
-        Write-Fail 'Owning agent-procutil source is missing'; exit 1
-    }
+    $procutil = Get-BudgetProcutilSource
     $snapshotLib = Join-Path $snapTmp 'libs/agent-procutil'
     if (-not (Test-Path $snapshotLib)) {
         New-Item -ItemType Directory -Path (Join-Path $snapTmp 'libs') -Force | Out-Null
         Copy-Item -LiteralPath $procutil -Destination $snapshotLib -Recurse -Force
     }
+    $projectPath = Join-Path $snapTmp 'pyproject.toml'
+    $project = [IO.File]::ReadAllText($projectPath)
+    $section = '(?ms)(^\[tool\.uv\.sources\]\s*\r?\n)(.*?)(?=^\[|\z)'
+    $project = [regex]::Replace($project, $section, {
+        param($match)
+        $match.Groups[1].Value + [regex]::Replace(
+            $match.Groups[2].Value, '(?m)^agent-procutil\s*=.*$',
+            'agent-procutil = { path = "libs/agent-procutil" }')
+    })
+    [IO.File]::WriteAllText($projectPath, $project, $utf8NoBom)
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
@@ -790,6 +831,9 @@ foreach ($h in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswi
 }
 Write-Ok "Session-start hook: $BinHookDir\bootstrap-check.ps1"
 
+Invoke-VersionedSlotClean
+try {
+if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -841,13 +885,7 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
-$procutil = Join-Path $PluginDir 'libs/agent-procutil'
-if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
-    $procutil = Join-Path $PluginDir '../../libs/agent-procutil'
-}
-if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
-    Write-Fail 'Owning agent-procutil source is missing'; exit 1
-}
+$procutil = Get-BudgetProcutilSource
 $vendoredDependencies = @($procutil)
 $pkgInstalled = Install-BudgetGuidancePackage `
     -Python $VenvPython `
@@ -860,6 +898,7 @@ if (-not $pkgInstalled) {
 }
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 Write-Ok 'Package installed: budget-guidance'
+}
 
 # Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
 if (-not (Invoke-VersionedActivate)) { exit 1 }
@@ -933,5 +972,8 @@ if ($pathDirs -contains $LocalBin) {
 
 Write-Host ''
 Write-Host '=== budget-guidance install complete ===' -ForegroundColor Cyan
+} finally {
+    Stop-RuntimeConstruction
+}
 Write-Host '  Try: budget-guidance --version' -ForegroundColor DarkGray
 exit 0

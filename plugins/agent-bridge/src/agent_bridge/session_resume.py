@@ -73,9 +73,29 @@ class _SessionResumeMixin:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
+        if session.target.type == "remote-acp":
+            from .remote_acp_sessions import connect_remote_session
+            async with session._lifecycle_lock:
+                if session.status != SessionStatus.STOPPED or not session.acp_session_id:
+                    raise ValueError("Remote resume requires a stopped durable session")
+                resumed = await connect_remote_session(
+                    self, session.agent_name.removeprefix("remote-acp:"),
+                    cwd=session.target.cwd or "/",
+                    remote_session_id=session.acp_session_id, session=session,
+                )
+            if drain:
+                await self._drain_pending_prompts(resumed)
+            return resumed
+
         async with session._lifecycle_lock:
             from .acquisition_gates import assert_resume_allowed
             assert_resume_allowed(self._db, session)
+            if self._db.execute_read(
+                "SELECT 1 FROM provider_embodiments WHERE session_id=? LIMIT 1",
+                (session_id,),
+            ):
+                # Creation identity survives an interrupted acknowledgement too.
+                allow_recreate = False
             core = _core()
             if session.status != SessionStatus.STOPPED:
                 raise ValueError(
@@ -168,7 +188,8 @@ class _SessionResumeMixin:
                             await asyncio.wait_for(
                                 client.load_session(
                                     cwd=(
-                                        session.target.cwd
+                                        _venue_workspace_cwd(session.target)
+                                        or session.target.cwd
                                         or _default_cwd(session.target)
                                     ),
                                     session_id=session.acp_session_id,
@@ -181,7 +202,8 @@ class _SessionResumeMixin:
                             resumed_acp_id = await asyncio.wait_for(
                                 client.new_session(
                                     cwd=(
-                                        session.target.cwd
+                                        _venue_workspace_cwd(session.target)
+                                        or session.target.cwd
                                         or _default_cwd(session.target)
                                     ),
                                     mcp_servers=session.mcp_servers,
@@ -442,6 +464,8 @@ class _SessionResumeMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        if session.target.type == "remote-acp":
+            raise ValueError("Remote ACP history is loaded through explicit stop/resume, not process resync")
         if not session.acp_session_id:
             raise RuntimeError(
                 f"Session {session_id} has no ACP session ID -- cannot resync"

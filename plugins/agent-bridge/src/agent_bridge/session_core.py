@@ -64,8 +64,10 @@ class _SessionCoreMixin:
         live_stall_interrupt_after_s: float = 900.0,
         session_host_unexpected_reap_seconds: float = 60.0,
         session_host_active_reap_seconds: float = 0.0,
+        remote_acp_targets: dict | None = None,
     ) -> None:
         self._db = db
+        self._remote_acp_targets = dict(remote_acp_targets or {})
         self._sessions: dict[str, Session] = {}
         self._resolver: Any | None = None
         # Session-Host mode is now the ONLY mode (dotfiles#1478): every local and
@@ -290,6 +292,8 @@ class _SessionCoreMixin:
                 },
             },
         )
+        from .provider_creation import assert_resume_placement
+        assert_resume_placement(self._db, session.session_id, persisted, refreshed)
         session.target = refreshed
         self._db.update_session_target(
             session.session_id,
@@ -704,6 +708,8 @@ class _SessionCoreMixin:
     @staticmethod
     def _capture_progress(session: Session, event_type: str, data: dict) -> None:
         """Update a session's structured progress from a captured event (#46.3)."""
+        if data.get("history_replay") is True:
+            return
         # Every ACP frame is fresh output -- stamp it so liveness reflects the
         # real event stream, not just turn boundaries (#145).
         session.last_output_at = time.time()
@@ -961,10 +967,15 @@ class _SessionCoreMixin:
         """
         if ref in self._sessions:
             return ref
-        for sid, session in self._sessions.items():
-            if session.acp_session_id == ref:
-                return sid
-        return None
+        matches = [
+            sid for sid, session in self._sessions.items()
+            if session.acp_session_id == ref
+        ]
+        if len(matches) > 1 and any(
+            self._sessions[sid].target.type == "remote-acp" for sid in matches
+        ):
+            return None
+        return matches[0] if matches else None
 
     def get_session(self, session_id: str) -> Session | None:
         return self._sessions.get(self._resolve_ref(session_id) or session_id)
@@ -974,4 +985,3 @@ class _SessionCoreMixin:
         if status:
             sessions = [s for s in sessions if s.status.value == status]
         return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
-

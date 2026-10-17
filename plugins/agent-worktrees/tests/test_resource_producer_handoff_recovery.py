@@ -11,7 +11,7 @@ from test_resource_producer import absence, bind, call, reserve
 from test_resource_producer import owner as owner
 
 from agent_worktrees import claim_handoffs as handoffs
-from agent_worktrees import claim_providers, tracking
+from agent_worktrees import claim_providers, config as cfg, tracking
 from agent_worktrees import resource_producer as producer
 from agent_worktrees.producer_handoff import _immutable_metadata
 
@@ -249,6 +249,105 @@ def test_resource_producer_immutable_comparison_retains_optional_fields():
     assert _immutable_metadata({**metadata, "allocation_epoch": "other"}) != (
         _immutable_metadata(metadata)
     )
+
+
+@pytest.fixture(params=[False, True], ids=["historical-consumer", "qualified-consumer"])
+def historical_producer(tmp_path, monkeypatch, request):
+    anchor, namespace = tmp_path / "anchor", tmp_path / "trees"
+    anchor.mkdir()
+    (anchor / "machines.yaml").write_text("machines: {}\n", encoding="utf-8")
+    records = tmp_path / "state" / "worktrees"
+    records.mkdir(parents=True)
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="example-host", platform="wsl", repo_name="p",
+        repos={"p": cfg.RepoConfig(anchor=str(anchor), worktree_root=str(namespace))},
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: records.parent)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: records)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    monkeypatch.setattr(handoffs, "registry_path", lambda: tmp_path / "handoffs.yaml")
+    monkeypatch.setattr(handoffs.claim_history, "record_bundle_transfer", lambda *a, **k: None)
+    for name in ("owner", "consumer"):
+        checkout = namespace / name
+        checkout.mkdir(parents=True)
+        tracking.create_new_record(
+            name, f"worktree/{name}", str(checkout), "p", "example-host", "wsl", records,
+        )
+    path = records / "owner.yaml"
+    old_ref = "example-host/p/owner"
+    pending = call(path, "reserve", {
+        "kind": "container", "namespace": "raw-resource", "recovery": {"endpoint": "opaque"},
+    }, ref=old_ref)
+    assert pending.get("ok"), pending
+    permit = call(path, "begin", {"token": pending["token"]}, ref=old_ref)
+    assert permit.get("ok"), permit
+    bound = call(path, "bind", {
+        "token": pending["token"], "allocation_fence": permit["allocation_fence"],
+        "identity": {"immutable_id": "full-id", "daemon": "opaque"},
+    }, ref=old_ref)
+    assert bound.get("ok"), bound
+    (anchor / "machines.yaml").write_text(
+        "machines:\n  example-host: {}\n  example-host-wsl: {}\n", encoding="utf-8",
+    )
+    config = replace(config, machine="example-host-wsl")
+    bundle, _ = handoffs.offer(
+        old_ref, f"{config.machine if request.param else 'example-host'}/p/consumer",
+        [bound["ref"]], machine=config.machine,
+    )
+    return path, bundle, bound
+
+
+@pytest.mark.guard
+def test_historical_producer_real_offer_accept_and_accepted_retry(historical_producer):
+    path, bundle, bound = historical_producer
+    result = handoffs.accept(
+        bundle.bundle_id, actor="example-host-wsl/p/consumer", machine="example-host-wsl",
+    )
+    assert result.state == "accepted"
+    consumer_path = path.with_name("consumer.yaml")
+    source = tracking.load_record(path)
+    consumer = tracking.load_record(consumer_path)
+    assert source.machine == consumer.machine == "example-host"
+    assert source.resources[0].producer["phase"] == "transferred"
+    assert source.resources[0].state == "released"
+    assert consumer.resources[0].producer == bound["producer"]
+    before = (path.read_bytes(), consumer_path.read_bytes(), handoffs.registry_path().read_bytes())
+    assert handoffs.accept(
+        bundle.bundle_id, actor="example-host-wsl/p/consumer", machine="example-host-wsl",
+    ).state == "accepted"
+    assert before == (path.read_bytes(), consumer_path.read_bytes(), handoffs.registry_path().read_bytes())
+
+
+@pytest.mark.parametrize("role", ["owner", "consumer"])
+@pytest.mark.parametrize("violation", ["platform", "machine", "namespace"])
+@pytest.mark.guard
+def test_historical_producer_foreign_context_retains_exact_ledgers(
+    historical_producer, role, violation,
+):
+    path, bundle, _ = historical_producer
+    target = path.with_name(role + ".yaml")
+    record = tracking.load_record(target)
+    changes = (
+        {"platform": "windows"} if violation == "platform" else
+        {"machine": "foreign-host-wsl"} if violation == "machine" else
+        {"worktree_path": str(path.parent / "foreign" / record.worktree_id)}
+    )
+    record = replace(record, **changes)
+    tracking.save_record(record, target)
+    paths = (path, path.with_name("consumer.yaml"), handoffs.registry_path())
+    before = {item: item.read_bytes() for item in paths}
+    with pytest.raises(handoffs.ClaimHandoffError):
+        handoffs.offer(
+            bundle.source, bundle.consumer, [snapshot["ref"] for snapshot in bundle.claims],
+            machine="example-host-wsl",
+        )
+    with pytest.raises(handoffs.ClaimHandoffError):
+        handoffs.accept(
+            bundle.bundle_id, actor="example-host-wsl/p/consumer", machine="example-host-wsl",
+        )
+    assert before == {item: item.read_bytes() for item in paths}
 
 
 def test_resource_producer_accepted_retry_never_recreates_missing_consumer_claim(

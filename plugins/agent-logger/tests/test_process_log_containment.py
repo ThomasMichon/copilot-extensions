@@ -217,8 +217,8 @@ def test_process_log_copy_root_churn_stops_before_further_publication(
         root.symlink_to(outside, target_is_directory=True)
         swapped = True
 
-    def needs_copy(before: os.stat_result, path: Path) -> bool:
-        result = original_needs_copy(before, path)
+    def needs_copy(before: os.stat_result, path: Path, destination) -> bool:
+        result = original_needs_copy(before, path, destination)
         if timing == "before_open" and not swapped:
             swap()
         return result
@@ -266,10 +266,11 @@ def test_process_log_copy_hands_off_same_live_directory(
                 live = False
 
     def observed_copy(
-        directory: filesystem.ArchiveDirectory, dest: Path, before: os.stat_result,
+        directory: filesystem.ArchiveDirectory, destination, before: os.stat_result,
     ) -> tuple[int, int, list[Path]]:
         assert live
         assert directory is boundaries[0]
+        assert destination.path == tmp_path / "destination"
         assert (before.st_dev, before.st_ino) == (tmp_path.stat().st_dev, tmp_path.stat().st_ino)
         return 0, 0, []
 

@@ -61,7 +61,8 @@ class CutoverError(Exception):
 class _Handle(Protocol):
     """Minimal surface the orchestrator needs from a spawned daemon process."""
 
-    pid: int
+    @property
+    def pid(self) -> int | None: ...
 
     def terminate(self) -> None: ...
 
@@ -149,7 +150,13 @@ class CutoverOrchestrator:
         clock: Callable[[], float] = time.monotonic,
         routing_mod: Any = routing,
         drain_before_publish: bool = False,
+        expected_old: Endpoint | None = None,
+        on_published: Callable[[Endpoint], None] | None = None,
     ) -> None:
+        if expected_old is not None and refuse_old is None:
+            raise ValueError("an expected predecessor also requires a publication refusal guard")
+        if on_published is not None and expected_old is None:
+            raise ValueError("publication notification requires an observed predecessor")
         self.config_dir = Path(config_dir)
         self.bind = bind
         self.version = version
@@ -162,6 +169,8 @@ class CutoverOrchestrator:
         self.clock = clock
         self.routing = routing_mod
         self.drain_before_publish = drain_before_publish
+        self.expected_old = expected_old
+        self.on_published = on_published
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
@@ -405,7 +414,7 @@ class CutoverOrchestrator:
                 kwargs["state"] = "conditional-" + kwargs["state"]
             kwargs["publication_witness"] = publication_witness
             kwargs["new_process_start_time"] = new_process_start_time
-            kwargs["requires_writer_reconciliation"] = self.drain_before_publish
+            kwargs["requires_writer_reconciliation"] = self.drain_before_publish or self.expected_old is not None
             return breadcrumb.write_breadcrumb(self.config_dir, **kwargs)
 
         spawn_passive = conditional.spawn if conditional else self.spawn_passive
@@ -458,6 +467,10 @@ class CutoverOrchestrator:
             old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
         old = conditional.old if conditional else self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
+        if self.expected_old is not None and old != self.expected_old:
+            result.error = "selected predecessor differs from the observed serving daemon"
+            result.steps.append(f"refused: {result.error}")
+            return result
         if self.drain_before_publish:
             selected_raw = (
                 selection_table.get("active") or selection_table.get("previous")
@@ -484,7 +497,7 @@ class CutoverOrchestrator:
         # undrain the stranded old daemon). started_at is threaded through every
         # later update so the record keeps its original timestamp.
         old_dict = (
-            old.to_dict() if conditional and old is not None else
+            old.to_dict() if (conditional or self.expected_old is not None) and old is not None else
             {"bind": old.bind, "port": old.port} if old is not None else None
         )
         started_at = write_breadcrumb(
@@ -510,10 +523,10 @@ class CutoverOrchestrator:
                 error=result.error, started_at=started_at,
             )
             return result
+        from .diagnostics import process_start_time
+
         new_pid = getattr(handle, "pid", None)
         if type(new_pid) is int and new_pid > 0:
-            from .diagnostics import process_start_time
-
             new_process_start_time = process_start_time(new_pid)
         result.steps.append(f"spawned passive pid={new_pid if new_pid is not None else '?'} "
                             f"port={new_port}")
@@ -528,7 +541,7 @@ class CutoverOrchestrator:
 
         def mark_drain_started() -> None:
             nonlocal drain_started
-            if self.routing.read_table(self.config_dir) != selection_table:
+            if self.drain_before_publish and self.routing.read_table(self.config_dir) != selection_table:
                 raise CutoverError("predecessor route changed before drain")
             drain_started = True
 
@@ -540,7 +553,19 @@ class CutoverOrchestrator:
                     state="started", old=old_dict,
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
-            if not self._await_health(new_port, health_timeout, poll, health_check):
+            healthy = self._await_health(new_port, health_timeout, poll, health_check)
+            if self.expected_old is not None:
+                new_pid = getattr(handle, "pid", None)
+                captured_start = getattr(handle, "process_start_time", None)
+                new_process_start_time = (
+                    captured_start if isinstance(captured_start, str)
+                    else process_start_time(new_pid) if new_pid else None
+                )
+                write_breadcrumb(
+                    state="started", old=old_dict, new_port=new_port,
+                    new_pid=new_pid, started_at=started_at,
+                )
+            if not healthy:
                 # The durable signal that is otherwise missing: a record that
                 # the new daemon never bound its port -- the failure that, left
                 # untraced, strands a client re-dialing a dead advertised port.
@@ -553,6 +578,9 @@ class CutoverOrchestrator:
                     f"within {health_timeout:.0f}s"
                 )
             result.steps.append("new daemon healthy")
+            if self.expected_old is not None:
+                if not new_pid or not new_process_start_time:
+                    raise CutoverError("healthy successor native identity unavailable")
             self._emit(
                 lifecycle.CUTOVER_NEW_BOUND, lifecycle.OK, port=new_port,
                 detail={"pid": getattr(handle, "pid", None)},
@@ -609,9 +637,12 @@ class CutoverOrchestrator:
                             "lock_deadline": conditional.routing_deadline(),
                             "process_start_time": candidate.process_start_time,
                         }
+                    elif self.expected_old is not None:
+                        conditional_kwargs = {"process_start_time": new_process_start_time}
                     publication = self.routing.publish_active_with_previous_guarded(
                         self.config_dir, bind=self.bind, port=new_port,
-                        pid=getattr(handle, "pid", None), version=self.version,
+                        pid=new_pid if self.expected_old is not None else getattr(handle, "pid", None),
+                        version=self.version,
                         demote_existing=True, expected_active=old_for_cas,
                         refuse_current=conditional.refuse_current if conditional else self.refuse_old,
                         **conditional_kwargs,
@@ -620,7 +651,7 @@ class CutoverOrchestrator:
                         published, _ = publication
                         conditional.new = published
                         result.serving_endpoint = published
-                    if self.drain_before_publish:
+                    if self.drain_before_publish or self.expected_old is not None:
                         new_for_cas = (
                             publication[0]
                             if isinstance(publication, tuple) and len(publication) == 2
@@ -682,6 +713,10 @@ class CutoverOrchestrator:
                 return result
             flipped = True
             phase = "flipped"
+            if self.on_published is not None:
+                if not isinstance(new_for_cas, Endpoint):
+                    raise CutoverError("successor publication notification lacks an exact endpoint")
+                self.on_published(new_for_cas)
             if self.drain_before_publish and not isinstance(new_for_cas, Endpoint):
                 raise CutoverError("guarded publication did not return the exact successor endpoint")
             result.steps.append("routing table flipped -> new active")
@@ -709,6 +744,7 @@ class CutoverOrchestrator:
                     self._drain_old(
                         old, result, drain_timeout=drain_timeout, force=force,
                         conditional=conditional,
+                        on_drain=mark_drain_started if self.expected_old is not None else None,
                     )
 
                 # Verify-before-retire GATE: re-confirm the new daemon is still
@@ -813,7 +849,7 @@ class CutoverOrchestrator:
                     f"post-commit conditional error ({type(exc).__name__})" if conditional
                     else f"post-commit error (new daemon is live): {exc}"
                 )
-                result.ok = conditional is None
+                result.ok = conditional is None and self.expected_old is None
                 if conditional:
                     result.serving_endpoint = None
                 log.error("Cutover post-commit error: %s", result.error)
@@ -823,7 +859,7 @@ class CutoverOrchestrator:
                         new_port=new_port, new_pid=new_pid, started_at=started_at,
                         error=result.error,
                     )
-                elif self.drain_before_publish:
+                elif self.drain_before_publish or self.expected_old is not None:
                     write_breadcrumb(
                         state="committed", old=old_dict,
                         new_port=new_port, new_pid=new_pid, started_at=started_at,
@@ -842,7 +878,7 @@ class CutoverOrchestrator:
             )
             if conditional:
                 conditional.rollback(handle, result, flipped=flipped)
-            elif self.drain_before_publish:
+            elif self.drain_before_publish or self.expected_old is not None:
                 self._rollback(
                     old, handle, new_port, result, flipped=flipped,
                     expected_old=old_for_cas, expected_new=new_for_cas,
@@ -862,7 +898,9 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                     error=result.error,
                 )
-            elif result.ok or (conditional and result.rolled_back):
+            elif result.ok or (
+                (conditional or self.expected_old is not None) and result.rolled_back
+            ):
                 breadcrumb.clear_breadcrumb(self.config_dir)
             else:
                 state = "rolled_back" if result.rolled_back else phase
@@ -909,46 +947,11 @@ class CutoverOrchestrator:
         conditional: PreparedCutover | None = None,
         on_drain: Callable[[], None] | None = None,
     ) -> None:
-        from zdd import lifecycle
+        from .cutover_drain import _drain_old
 
-        self._emit(lifecycle.DRAIN, lifecycle.BEGIN, port=old.port)
-        if conditional:
-            drain_res = conditional.drain_predecessor(drain_timeout)
-        else:
-            drain = self.make_client(old.base_url).drain
-            if on_drain is not None:
-                on_drain()
-            drain_res = drain(timeout=drain_timeout, poll=1.0, force=force)
-        result.drain = drain_res
-        result.steps.append(
-            f"old drained clean={drain_res.get('clean')} forced={drain_res.get('forced')}"
-        )
-        if not drain_res.get("drained") or (
-            self.drain_before_publish and (
-                drain_res.get("drained") is not True
-                or drain_res.get("clean") is not True
-                or drain_res.get("forced") is not False
-            )
-        ):
-            busy_work = drain_res.get(
-                "busy_sessions_count" if conditional else "busy_sessions"
-            )
-            self._emit(
-                lifecycle.DRAIN, lifecycle.FAIL, port=old.port,
-                detail={"busy_sessions": busy_work},
-            )
-            if conditional:
-                raise CutoverError(
-                    f"conditional predecessor drain incomplete (busy: {busy_work}); "
-                    "retirement refused"
-                )
-            raise CutoverError(
-                f"old daemon did not drain (busy: {busy_work})"
-                + ("" if self.drain_before_publish else "; rerun with force to proceed")
-            )
-        self._emit(
-            lifecycle.DRAIN, lifecycle.OK, port=old.port,
-            detail={"clean": drain_res.get("clean"), "forced": drain_res.get("forced")},
+        _drain_old(
+            self, old, result, drain_timeout=drain_timeout, force=force,
+            conditional=conditional, on_drain=on_drain,
         )
 
     def _adopt_relay(

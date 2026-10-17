@@ -17,6 +17,10 @@ description: |
 2. Read `docs/session-quota.md` beneath this skill's owning plugin root for the
    SDK helper and bounded capture contract. Use `acquire_session_quota` with the
    exact expected session ID when the host exposes an existing SDK session.
+   When the host also knows the expected GitHub login and HTTPS origin, use
+   `acquire_verified_session_quota` to bracket the quota read with public,
+   credential-free session status checks. A match is observed, not an atomic
+   account/quota binding; never generalize it to a third-party provider account.
    When that surface is absent, report unsupported; do not invent a tool.
 3. Inspect a minimal, credential-free capture with the exact payload command
    from the budget-guidance session command catalog:

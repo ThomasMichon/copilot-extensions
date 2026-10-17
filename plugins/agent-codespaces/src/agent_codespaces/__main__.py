@@ -881,7 +881,7 @@ def main(argv: list[str] | None = None) -> int:
     # installer (option 1 in that doc), never import it directly.
     dev_release_p = sub.add_parser(
         "dev-release",
-        help="Release the mutable `dev` version slot and restore the machine's "
+        help="Release development runtime ownership and restore the machine's "
         "real deployment (current-version -> whatever was active before "
         "dev mode was claimed).",
     )
@@ -4746,14 +4746,14 @@ def _run_versioned_runtime(*args: str, json_output: bool = False) -> subprocess.
 
 
 def _cmd_dev_release(args: argparse.Namespace) -> int:
-    """Release the mutable `dev` version slot (mutable-dev-slot.md).
+    """Restore and release the claimed development runtime (mutable-dev-slot.md).
 
     Restores `current-version` to whatever was active before dev mode was
     claimed. Reachable from the DEPLOYED CLI (no source checkout required) --
     the whole point of staging versioned_runtime.py at RUNTIME_DIR.
     """
     owner = args.owner or _resolve_dev_slot_owner()
-    release_args = ["dev-release", "--owner", owner]
+    release_args = ["dev-release", "--owner", owner, "--restore"]
     if args.force:
         release_args.append("--force")
     try:
@@ -4772,15 +4772,11 @@ def _cmd_dev_release(args: argparse.Namespace) -> int:
     if not record:
         print("dev-release: no dev-slot claim was held (nothing to release)")
         return 0
-    previous_version = record.get("previous_version")
+    previous_version = record.get("restored_version")
     if not previous_version:
         print("dev-release: released the claim, but no previous_version was "
               "recorded to restore -- current-version left untouched")
         return 0
-    activate = _run_versioned_runtime("activate", previous_version, "--no-link")
-    if activate.returncode != 0:
-        print(activate.stderr.strip() or activate.stdout.strip(), file=sys.stderr)
-        return 1
     print(f"dev-release: released; current-version -> {previous_version}")
     return 0
 

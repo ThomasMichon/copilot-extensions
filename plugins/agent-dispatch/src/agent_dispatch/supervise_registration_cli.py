@@ -37,6 +37,7 @@ def register_supervise_commands(sub) -> None:
     p.add_argument("--headless-agent", default="task-worker", metavar="AGENT")
     p.add_argument("--charter", metavar="AGENT", help="optional .github/agents/<charter>.agent.md behavior overlay -- passed as Copilot's own --agent flag on the launched session, independent of the venue targeted by --headless-agent")
     p.add_argument("--ci-repair-bindings", metavar="JSON", help="explicit allowed CI repair venue/charter/workspace selections")
+    p.add_argument("--restricted-worker", metavar="JSON", help="trusted provider command and pinned dispatch-only container projection")
     p.add_argument("--ci-repair-admission-command", metavar="JSON", help="independent launch-time CI provenance/policy/auth admission argv")
     p.add_argument("--verify-timeout", type=int, default=0)
     p.add_argument("--interval", type=float, default=30.0)
@@ -76,6 +77,7 @@ def register_supervise_commands(sub) -> None:
         help="forbid a task carrying this label from posting a request_input steering card at all (repeatable) -- enforced coordinator-side; default is permissive, so name a label here only for a task type with no human to hand a card to (an evaluator-owned auto-reviewer, a batch log writer, an Adjudication Board worker)",
     )
     rp.add_argument("--headless-agent", metavar="AGENT")
+    rp.add_argument("--restricted-worker", metavar="JSON")
     rp.add_argument("--charter", metavar="AGENT")
     rp.add_argument("--evaluator", metavar="SPEC")
     rp.add_argument("--evaluator-ref")

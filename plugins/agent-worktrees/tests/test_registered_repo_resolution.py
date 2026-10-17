@@ -130,18 +130,33 @@ def test_registered_only_native_cli_first_touch(tmp_path):
     assert registry.read_bytes() == before
 
 
+@pytest.mark.guard
 def test_registry_git_probe_uses_canonical_headless_options(monkeypatch):
     options = {"creationflags": 123}
     calls = []
-    monkeypatch.setattr(repos, "no_window_kwargs", lambda: options)
+    monkeypatch.setattr(repos.git_ops, "no_window_kwargs", lambda: options)
+    selectors = (
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+    )
+    for name in selectors:
+        monkeypatch.setenv(name, "unrelated")
+    monkeypatch.setenv("REGISTRY_PROBE_SENTINEL", "retained")
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, "main\n", "")
 
-    monkeypatch.setattr(repos.subprocess, "run", run)
+    monkeypatch.setattr(repos.git_ops.subprocess, "run", run)
     assert repos._git("fixture", "branch", "--show-current").stdout == "main\n"
-    assert calls == [(
-        ["git", "-C", "fixture", "branch", "--show-current"],
-        {"capture_output": True, "text": True, "timeout": 60, **options},
-    )]
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == ["git", "-C", "fixture", "branch", "--show-current"]
+    assert {key: value for key, value in kwargs.items() if key != "env"} == {
+        "cwd": None, "capture_output": True, "text": True,
+        "encoding": "utf-8", "errors": "replace", "timeout": 60, **options,
+    }
+    env = kwargs["env"]
+    assert set(env).isdisjoint(selectors)
+    assert env["REGISTRY_PROBE_SENTINEL"] == "retained"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"

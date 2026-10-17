@@ -286,17 +286,9 @@ def _current_environment(
     if not _path_is_fully_qualified(profile_value):
         _fail("The canonical operating-system user profile must be absolute.")
     profile = canonical_path(profile_value, must_exist=True)
-    selected_wsl = (
-        None
-        if selected_platform == "windows"
-        else (
-            wsl_distro
-            if wsl_distro is not None
-            else environment.get("WSL_DISTRO_NAME") or None
-        )
+    selected_wsl = None if selected_platform == "windows" else _resolve_wsl_distribution(
+        profile, environment=environment, explicit=wsl_distro,
     )
-    if selected_wsl is not None and not isinstance(selected_wsl, str):
-        _fail("wslDistro must be a string or null.")
     return (
         {
             "platform": selected_platform,

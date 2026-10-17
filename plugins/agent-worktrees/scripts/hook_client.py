@@ -19,7 +19,6 @@ import socket
 import stat
 import subprocess
 import sys
-import tempfile
 import time
 from functools import cache
 from pathlib import Path
@@ -192,6 +191,7 @@ def _enrich_session_payload(payload: dict) -> dict:
     enriched = dict(payload)
     enriched["_agentWorktrees"] = {
         "pluginVersion": _plugin_version(),
+        "commandCatalog": _command_catalog_context(),
         "environment": {
             key: value
             for key, value in os.environ.items()
@@ -217,37 +217,13 @@ def _session_launch_key(payload: dict) -> str:
     return _RUNTIME.session_launch_key(payload)
 
 
-def _additional_context(raw: str) -> str:
-    try:
-        value = json.loads(raw)
-    except (TypeError, ValueError):
-        return ""
-    context = value.get("additionalContext") if isinstance(value, dict) else None
-    return context.strip() if isinstance(context, str) else ""
-
-
 def _read_bounded_text(path: Path, limit: int = _MAX_RESPONSE) -> str | None:
-    try:
-        metadata = path.lstat()
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size > limit
-            or _is_link_or_reparse(path)
-        ):
-            return None
-        with path.open("rb") as handle:
-            raw = handle.read(limit + 1)
-    except OSError:
-        return None
-    if len(raw) > limit:
-        return None
-    try:
-        return raw.decode("utf-8-sig")
-    except UnicodeError:
-        return None
+    return _RUNTIME.read_bounded_text(path, limit=limit)
 
 
-def _registration_context(payload: dict, home: Path) -> str:
+def _snapshot_context(
+    payload: dict, home: Path, *, snapshot_name: str,
+) -> str:
     launch_key = _session_launch_key(payload)
     if not launch_key:
         return ""
@@ -255,7 +231,7 @@ def _registration_context(payload: dict, home: Path) -> str:
     if runtime is None:
         return ""
     root = runtime / ".session-context"
-    json_path = root / f"register-session-{launch_key}.json"
+    json_path = root / f"{snapshot_name}-{launch_key}.json"
     try:
         raw = _read_bounded_text(json_path)
         state = json.loads(raw) if raw is not None else None
@@ -264,20 +240,29 @@ def _registration_context(payload: dict, home: Path) -> str:
             and state.get("launchKey") == launch_key
             and isinstance(state.get("output"), str)
         ):
-            return _additional_context(state["output"])
+            return _RUNTIME.additional_context(state["output"])
     except (OSError, UnicodeError, ValueError, TypeError):
         pass
 
-    legacy_path = root / f"register-session-{launch_key}"
+    legacy_path = root / f"{snapshot_name}-{launch_key}"
     raw = _read_bounded_text(legacy_path)
     if raw is None:
         return ""
     stored_key, separator, output = raw.partition("\n")
     return (
-        _additional_context(output)
+        _RUNTIME.additional_context(output)
         if separator and stored_key == launch_key
         else ""
     )
+
+
+def _registration_context(payload: dict, home: Path) -> str:
+    return _snapshot_context(payload, home, snapshot_name="register-session")
+
+
+def _machine_context(payload: dict, home: Path) -> str:
+    context = _snapshot_context(payload, home, snapshot_name="machine-context")
+    return _RUNTIME.machine_context(context, hostname=socket.gethostname())
 
 
 def _command_catalog_context() -> str:
@@ -357,11 +342,48 @@ def _is_link_or_reparse(path: Path) -> bool:
     )
 
 
+def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
+    registration = _registration_context(enriched, home)
+    contexts = []
+    if registration.startswith(_COMMAND_CATALOG_HEADING):
+        contexts.append(registration)
+    else:
+        metadata = enriched.get("_agentWorktrees")
+        catalog = metadata.get("commandCatalog") if isinstance(metadata, dict) else None
+        if not isinstance(catalog, str) or not catalog.startswith(_COMMAND_CATALOG_HEADING):
+            catalog = _command_catalog_context()
+        for context in (catalog, registration):
+            if context and context not in contexts:
+                contexts.append(context)
+    if decision_context and decision_context not in contexts:
+        contexts.append(decision_context)
+    machine = _machine_context(enriched, home)
+    marker = _RUNTIME.guidance_marker(enriched)
+    content = _GUIDANCE_HEADER + "\n\n".join([*contexts, machine]) + "\n" + marker
+    if len(content.encode("utf-8")) > _SESSION_GUIDANCE_MAX_BYTES:
+        content = (
+            _GUIDANCE_HEADER
+            + "Current agent-worktrees session guidance was omitted because "
+            "it exceeded the bounded file budget. Treat guidance as "
+            "unavailable for this session-start invocation.\n\n"
+            + machine + "\n" + marker
+        )
+    elif not contexts:
+        content = (
+            _GUIDANCE_HEADER
+            + "No current agent-worktrees session guidance was available. "
+            "Treat guidance as unavailable for this session-start invocation.\n\n"
+            + machine + "\n" + marker
+        )
+    return content
+
+
 def _write_session_guidance(
     payload: dict,
     *,
     home: Path | None = None,
     decision_context: str = "",
+    claim_launch: bool = True,
 ) -> bool:
     home = home or Path.home()
     session_id = payload.get("sessionId")
@@ -370,38 +392,11 @@ def _write_session_guidance(
         or not _SESSION_IDENTIFIER.fullmatch(session_id)
     ):
         return False
-
     enriched = (
         payload
         if isinstance(payload.get("_agentWorktrees"), dict)
         else _enrich_session_payload(payload)
     )
-    registration = _registration_context(enriched, home)
-    contexts = []
-    if registration.startswith(_COMMAND_CATALOG_HEADING):
-        contexts.append(registration)
-    else:
-        catalog = _command_catalog_context()
-        for context in (catalog, registration):
-            if context and context not in contexts:
-                contexts.append(context)
-    if decision_context and decision_context not in contexts:
-        contexts.append(decision_context)
-    content = _GUIDANCE_HEADER + "\n\n".join(contexts) + "\n"
-    if len(content.encode("utf-8")) > _SESSION_GUIDANCE_MAX_BYTES:
-        content = (
-            _GUIDANCE_HEADER
-            + "Current agent-worktrees session guidance was omitted because "
-            "it exceeded the bounded file budget. Treat guidance as "
-            "unavailable for this session-start invocation.\n"
-        )
-    elif not contexts:
-        content = (
-            _GUIDANCE_HEADER
-            + "No current agent-worktrees session guidance was available. "
-            "Treat guidance as unavailable for this session-start invocation.\n"
-        )
-
     try:
         copilot_root = home / ".copilot"
         copilot_root.mkdir(exist_ok=True)
@@ -427,26 +422,11 @@ def _write_session_guidance(
         if _is_link_or_reparse(target_dir):
             return False
         target = target_dir / "session-guidance.instructions.md"
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="\n",
-            dir=target_dir,
-            prefix=".session-guidance.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-            handle.write(content)
-        if os.name != "nt":
-            temporary.chmod(0o600)
-        os.replace(temporary, target)
-        return True
+        return _RUNTIME.write_guidance(
+            target, lambda: _guidance_content(enriched, home, decision_context),
+            enriched, claim_launch=claim_launch,
+        )
     except (OSError, RuntimeError, ValueError):
-        try:
-            temporary.unlink()
-        except (OSError, UnboundLocalError):
-            pass
         return False
 
 
@@ -973,6 +953,7 @@ def main(argv: list[str] | None = None) -> int:
             decision_context = result.get("additionalContext")
             _write_session_guidance(
                 payload,
+                claim_launch=False,
                 decision_context=(
                     decision_context
                     if isinstance(decision_context, str)

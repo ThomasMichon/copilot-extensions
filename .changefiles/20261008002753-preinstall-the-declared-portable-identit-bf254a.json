@@ -1,0 +1,13 @@
+{
+  "comment": "Preinstall the declared portable identity dependency in both isolated plugin runtime installers.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ from dataclasses import replace
 
 from machine_transport import default_shell_for_env_name as _default_shell_for_env_name
 from machine_transport import find_machine_entry
+from machine_transport import normalize_environment, resolve_machine_selection
 from machine_transport import resolve_ssh_target as _resolve_ssh_target
 from machine_transport import wrap_remote_command as _wrap_remote_command
 
@@ -27,6 +28,12 @@ def _emit_plan(*args, **kwargs):
 # Picker env labels (engine: "Win" | "WSL" | "Linux") -> machines.yaml ssh
 # environment names.
 _ENV_LABEL_TO_NAME = {"win": "windows", "wsl": "wsl", "linux": "linux"}
+
+
+def _entry_for_environment(
+    entries: dict[str, cfg.MachineEntry], name: str, environment: str | None = None,
+) -> cfg.MachineEntry | None:
+    return resolve_machine_selection(entries, name, environment, allow_physical_context=True).entry
 
 
 def _load_remote_machines(
@@ -79,6 +86,7 @@ def _load_remote_machines(
 def _try_machine_handoff(
     config: cfg.Config,
     machine_name: str,
+    remote_args: list[str] | None = None,
 ) -> int | None:
     """Handle --machine flag for a remote machine.
 
@@ -104,11 +112,16 @@ def _try_machine_handoff(
 
     ssh_alias, shell = _resolve_ssh_target(entry)
     project = cfg.project_name()
+    try:
+        remote_command = _remote_launch_command(shell, project, remote_args)
+    except ValueError as exc:
+        output.err(str(exc))
+        return 2
     _emit_plan(
         {
             "action": "remote",
             "ssh_alias": ssh_alias,
-            "remote_command": _wrap_remote_command(shell, project),
+            "remote_command": remote_command,
             "machine": entry.key,
             "display_name": entry.display_name,
         }
@@ -150,6 +163,14 @@ def _in_ssh_session() -> bool:
     )
 
 
+def _remote_launch_command(shell: str, project: str, args: list[str] | None) -> str:
+    if not args:
+        return _wrap_remote_command(shell, project)
+    from .remote_seed_launch import shell_command
+
+    return shell_command(shell, [project, *args])
+
+
 def _emit_remote_plan_for_env(
     config: cfg.Config,
     machine_display: str,
@@ -166,16 +187,19 @@ def _emit_remote_plan_for_env(
         return None
 
     try:
-        entry = find_machine_entry(entries, machine_display, reject_ambiguous=True)
+        normalize_environment(env_label)
+    except ValueError:
+        return None
+    try:
+        selection = resolve_machine_selection(
+            entries, machine_display, env_label, allow_physical_context=True,
+        )
+        want, entry = selection.target.environment, selection.entry
     except ValueError as exc:
         return output._json_error(str(exc))
     if entry is None or not entry.ssh_environments:
         return None
 
-    requested_environment = bool((env_label or "").strip())
-    want = _ENV_LABEL_TO_NAME.get((env_label or "").lower())
-    if requested_environment and not want:
-        return None
     ssh_alias = ""
     shell = ""
     if want:
@@ -200,8 +224,10 @@ def _emit_remote_plan_for_env(
         plan.update(machine=entry.key, display_name=f"{entry.display_name} {env_label}".strip())
         _emit_plan(plan)
         return 0
-    remote_command = " ".join([project, *remote_args]) if remote_args else project
-    remote_command = _wrap_remote_command(shell, remote_command)
+    try:
+        remote_command = _remote_launch_command(shell, project, remote_args)
+    except ValueError as exc:
+        return output._json_error(str(exc), exit_code=2)
     display = f"{entry.display_name} {env_label}".strip()
     _emit_plan(
         {
@@ -220,12 +246,14 @@ def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
     return _resolve_ssh_target(entry)[0]
 
 
-def _machine_key_for_display(config: cfg.Config, name: str) -> str:
+def _machine_key_for_display(
+    config: cfg.Config, name: str, environment: str | None = None,
+) -> str:
     """Resolve a picker machine label (display name / key / alias / hostname) to its key."""
     repo = config.default_repo
     try:
         entries = cfg.load_machines_yaml(repo.anchor)
     except (FileNotFoundError, ValueError):
         return name
-    entry = find_machine_entry(entries, name, reject_ambiguous=True)
+    entry = _entry_for_environment(entries, name, environment)
     return entry.key if entry is not None else name

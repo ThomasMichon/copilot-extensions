@@ -61,14 +61,13 @@ DEFAULT_RATE_LIMIT_HOURS = 6
 # `issues: labeled` event itself, is what actually fires it.
 FILED_ISSUE_NUMBERS: list[str] = []
 
-# The three control jobs that surround this one in validate-and-promote.yml --
+# The admission/reporting control jobs in validate-and-promote.yml --
 # never treat their own failure (or this job's own in-progress/null
 # conclusion) as a signal to report on. Keep in sync with the workflow file's
 # actual job `name:` values.
 SKIP_JOB_NAMES = frozenset(
     {
         "gate (confirm this is a dev commit)",
-        "Promote dev -> main",
         "report failure (Phase 1 watchdog; detection + dedup only, no fix attempt)",
     }
 )

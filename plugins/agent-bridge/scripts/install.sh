@@ -270,6 +270,11 @@ if [[ -z "$PORT" ]]; then
 fi
 RELAY_PORT=9857   # integrated credential relay (in-process with the bridge)
 SYSTEMD_UNIT="agent-bridge.service"
+# `python -I -c "$_NEW_SESSION_PY" <python> <args...>` runs `<python> <args...>`
+# in a new session (setsid, then exec in place, so $! stays the service's pid;
+# not under COPILOT_EXTENSIONS_TEST_CONTAINED=1, whose runner owns the tree).
+# It needs only the runtime interpreter, so it also works without setsid(1).
+_NEW_SESSION_PY=$'import os, sys\nif os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":\n    try:\n        os.setsid()\n    except (AttributeError, OSError):\n        pass\nos.execv(sys.argv[1], sys.argv[1:])'
 
 # === install-contract:v3 versioned-venv (agent-bridge: venv-as-symlink) ===
 # Immutable per-version runtime (#581): build the venv into versions/<version>
@@ -469,28 +474,18 @@ _scrub_payload_build_artifacts() {
 
 _uv_pip_install_resilient() {
     local scrub_dir="$1"; shift
-    local out delay
-    _scrub_payload_build_artifacts "$scrub_dir"
-    if out="$(uv pip install "$@" 2>&1)"; then
+    local INSTALLER_ENGINE_BEFORE_ATTEMPT=_scrub_payload_build_artifacts
+    local INSTALLER_ENGINE_BEFORE_ATTEMPT_ARGUMENT="$scrub_dir"
+    local out rc=0
+    if out="$(invoke_uv_pip_install_resilient uv "$@" 2>&1)"; then
         _scrub_payload_build_artifacts "$scrub_dir"
         printf '%s\n' "$out"
         return 0
+    else
+        rc=$?
     fi
-    for delay in 3 6 10; do
-        if ! test_is_sre_module_mismatch "$out"; then
-            break
-        fi
-        _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        sleep "$delay"
-        _scrub_payload_build_artifacts "$scrub_dir"
-        if out="$(uv pip install "$@" 2>&1)"; then
-            _scrub_payload_build_artifacts "$scrub_dir"
-            printf '%s\n' "$out"
-            return 0
-        fi
-    done
     printf '%s\n' "$out" >&2
-    return 1
+    return "$rc"
 }
 
 # A venv is only healthy when BOTH its python binary and pyvenv.cfg exist --
@@ -754,63 +749,29 @@ _payload_unchanged_since_admission() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). Returns
-    # non-zero when the primitive REFUSES (e.g. the incomplete slot is selected
-    # or still in use): building over it would mutate a live/selected slot in
-    # place, so the caller must not proceed (#5472). No-op in legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    local out rc=0
-    out="$("$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1)" || rc=$?
-    if [[ -n "$out" ]]; then printf '%s\n' "$out" | sed 's/^/  ...    /'; fi
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Runtime slot versions/$SRC_VERSION could not be safely prepared (exit $rc); refusing to build over it in place"
-        return 1
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
     fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then SLOT_ADMISSION=reuse; else SLOT_ADMISSION=construct; fi
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via the slot's own python (or any bootstrap python).
-    # A refused publication fails the caller (#5472).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py=""
-    if [[ -x "$VENV_DIR/bin/python" ]]; then
-        py="$VENV_DIR/bin/python"
-    else
-        py="$(_bootstrap_python)" || py=""
-    fi
-    if [[ -z "$py" ]]; then
-        _fail "No python available to publish the completion marker for runtime slot versions/$SRC_VERSION"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    # The transaction's payload fingerprint fixed before admission (see
-    # _payload_hash) -- never recomputed here; callers that built the slot
-    # first confirm the sources still hash to it
-    # (_payload_unchanged_since_admission).
-    local ph
-    ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    # A refused publication (e.g. conflicting completion evidence for this
-    # numbered version) must fail the install, never be swallowed (#5472).
-    local out rc=0
-    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
-    if [[ -n "$out" ]]; then printf '%s\n' "$out" | sed 's/^/  ...    /'; fi
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to publish the completion marker for runtime slot versions/$SRC_VERSION (exit $rc)"
-        return 1
-    fi
+    _runtime_construction_complete "$actual_hash"
 }
 
 _slot_admission() {
@@ -879,7 +840,7 @@ _guard_published_slot() {
         construct) return 1 ;;
         reuse)
             if [[ "$(_versioned_current)" == "$SRC_VERSION" ]]; then
-                _ok "agent-bridge $SRC_VERSION already installed and healthy (content match) -- no-op (no stop, no rebuild)."
+                _ok "agent-bridge $SRC_VERSION content matched -- reusing the immutable runtime slot."
                 return 0
             fi
             return 1 ;;
@@ -1458,6 +1419,11 @@ deploy_binstub() {
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
     done
+    # Native service callers use the Python resolver without a payload or PATH.
+    mkdir -p "$INSTALL_DIR/scripts"
+    for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py; do
+        cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/scripts/$r" || return 1
+    done
     if ! $PUBLISH_GLOBAL_BINSTUBS; then
         _ok "Scoped install keeps the global compatibility binstub unchanged"
         return 0
@@ -1540,19 +1506,176 @@ do_stamp() {
 
 # Cross-process install serialization (ce#776/#777 follow-up; ce#802 review): a
 # second install/update of the same version must not rebuild the venv over an
-# in-flight one (the racing rebuild that yields a DOA slot, dotfiles#1612). flock
-# $INSTALL_DIR/.install.lock via fd 8, held for the whole build; the OS drops it
-# when this process exits, so a crash never strands it. `flock -w` bounds the
-# wait -> on timeout DEFER (the in-flight install lands the version). Degrades to
-# lock-free when flock is absent or the lock file can't be opened. The direct
-# (nohup) daemon start closes fd 8 (8>&-) so a launched daemon never inherits and
-# holds the lock; systemd-launched and python-cutover (close_fds) daemons don't.
-_enter_install_lock() {
-    mkdir -p "$INSTALL_DIR" 2>/dev/null || true
-    { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 0   # can't open -> lock-free
-    command -v flock >/dev/null 2>&1 || return 0                  # no flock -> lock-free
-    flock -w 150 8 || return 1                                    # held whole window -> defer
+# in-flight one (the racing rebuild that yields a DOA slot, dotfiles#1612). An
+# exclusive lock on $INSTALL_DIR/.install.lock -- flock on fd 8, or a pid-symlink
+# fallback where flock is unavailable -- is held for the whole build. It FAILS
+# CLOSED: a run never proceeds unlocked. Returns 0 when acquired, 75 when another
+# install held it for the whole wait (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC,
+# default 150s; the caller reports "blocked by lock", never success), and 1 on a
+# lock fault. The OS drops the flock when this process exits; a dead owner's pid
+# symlink is reaped. The direct (nohup) daemon start closes fd 8 (8>&-) so a
+# launched daemon never inherits and holds the lock; systemd-launched and
+# python-cutover (close_fds) daemons don't.
+__install_lock_link=""
+__install_lock_fd=""
+
+_install_lock_timeout() {
+    local __t="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-}"
+    case "$__t" in
+        ''|*[!0-9]*) __t=150 ;;
+    esac
+    [[ "$__t" -gt 0 ]] 2>/dev/null || __t=150
+    printf '%s' "$__t"
+}
+
+_exit_install_lock() {
+    # Runs from EXIT traps: never fail, even if the lock state was never set.
+    if [[ -n "${__install_lock_link:-}" ]]; then
+        local __owner
+        __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+        [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
+        __install_lock_link=""
+    elif [[ -n "${__install_lock_fd:-}" ]]; then
+        flock -u "$__install_lock_fd" 2>/dev/null || true
+        exec 8>&-
+        __install_lock_fd=""
+    fi
     return 0
+}
+
+_enter_install_lock() {
+    local __timeout
+    __timeout="$(_install_lock_timeout)"
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || return 1
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
+        { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
+        # Only a lock conflict maps to 75; any other flock failure is a fault.
+        local __frc=0
+        flock -E 75 -w "$__timeout" 8 || __frc=$?
+        if [[ "$__frc" -ne 0 ]]; then
+            exec 8>&-
+            [[ "$__frc" -eq 75 ]] && return 75
+            return 1
+        fi
+        __install_lock_fd=8
+        return 0
+    fi
+    # No flock binary (macOS, minimal images): take the same flock(2) lock on
+    # .install.lock through Python, so this run still excludes flock-based and
+    # PowerShell (FileShare.None) installers. The lock belongs to fd 8's open
+    # file description and outlives the short-lived Python process.
+    local __py="" __c
+    for __c in python3 python; do
+        command -v "$__c" >/dev/null 2>&1 && { __py="$(command -v "$__c")"; break; }
+    done
+    if [[ -n "$__py" && "${COPILOT_EXT_NO_PYFLOCK:-}" != "1" ]]; then
+        { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
+        local __prc=0
+        "$__py" -c '
+import sys, time
+try:
+    import fcntl
+except ImportError:
+    sys.exit(3)
+deadline = time.monotonic() + float(sys.argv[1])
+while True:
+    try:
+        fcntl.flock(8, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        sys.exit(0)
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            sys.exit(75)
+        time.sleep(0.25)
+    except OSError:
+        sys.exit(1)
+' "$__timeout" || __prc=$?
+        if [[ "$__prc" -eq 0 ]]; then
+            __install_lock_fd=8
+            return 0
+        fi
+        exec 8>&-
+        [[ "$__prc" -eq 3 ]] || { [[ "$__prc" -eq 75 ]] && return 75; return 1; }
+    fi
+    # Last resort, no flock(2) available at all: a pid symlink. It excludes
+    # only other installers that also lack flock(2).
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __now __held=0
+    __deadline=$(( $(date +%s) + __timeout ))
+    until ln -s "$$" "$__link" 2>/dev/null; do
+        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
+            # Contention only when another install was actually seen holding
+            # the lock; a path that could never be created or attributed is a
+            # lock fault.
+            [[ "$__held" -eq 1 ]] && return 75
+            return 1
+        fi
+        __owner="$(readlink "$__link" 2>/dev/null || true)"
+        if [[ -z "$__owner" ]]; then
+            # The link vanished after the failed `ln -s`, or the path is not a
+            # symlink this lock can attribute. Never unlink here: creators are
+            # not serialized by the reap mutex. Retry; an unattributable path
+            # fails closed at the deadline.
+            __held=0
+            sleep 0.1
+            continue
+        fi
+        case "$__owner" in
+            *[!0-9]*) __live=0 ;;
+            *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
+        esac
+        # Contention means the latest look found a live holder; a stale owner
+        # whose recovery cannot proceed is a fault at the deadline.
+        __held="$__live"
+        if [[ "$__live" == 1 ]]; then
+            sleep 1
+        elif ln -s "$$" "$__link.reap" 2>/dev/null; then
+            # `ln -s` into a directory at the reap path creates a child and
+            # succeeds without taking the mutex, so two contenders could both
+            # "recover". Only our own pid link at the reap path is the mutex.
+            if [[ ! -L "$__link.reap" || "$(readlink "$__link.reap" 2>/dev/null || true)" != "$$" ]]; then
+                [[ -L "$__link.reap/$$" ]] && rm -f "$__link.reap/$$"
+                return 1
+            fi
+            # Serialized stale-owner recovery: unlink only while the link still
+            # holds the exact owner judged stale and that owner is still dead.
+            __now="$(readlink "$__link" 2>/dev/null || true)"
+            if [[ -n "$__now" && "$__now" == "$__owner" ]]; then
+                case "$__now" in
+                    *[!0-9]*) rm -f "$__link" ;;
+                    *) kill -0 "$__now" 2>/dev/null || rm -f "$__link" ;;
+                esac
+            fi
+            rm -f "$__link.reap"
+        else
+            # Another contender is reaping. A reap mutex whose owner died
+            # mid-reap is never reclaimed automatically; the run fails closed
+            # at its deadline until the stale .reap link is removed.
+            sleep 0.1
+        fi
+    done
+    # `ln -s` into an existing directory creates a child and succeeds: accept
+    # only our own pid link at the lock path itself.
+    if [[ ! -L "$__link" || "$(readlink "$__link" 2>/dev/null || true)" != "$$" ]]; then
+        [[ -L "$__link/$$" ]] && rm -f "$__link/$$"
+        return 1
+    fi
+    __install_lock_link="$__link"
+    return 0
+}
+
+_require_install_lock() {
+    # Acquire the install lock for this run or exit: 75 (blocked by lock) when
+    # another install held it the whole wait, 1 on a lock fault. Never proceeds
+    # unlocked and never reports a skipped run as success.
+    local __rc=0
+    _enter_install_lock || __rc=$?
+    if [[ "$__rc" -eq 75 ]]; then
+        _fail "Another agent-bridge install held the install lock ($INSTALL_DIR/.install.lock) for $(_install_lock_timeout)s -- this run changed nothing (blocked by lock); rerun once it finishes"
+        exit 75
+    elif [[ "$__rc" -ne 0 ]]; then
+        _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) -- refusing to proceed unlocked"
+        exit 1
+    fi
+    trap _exit_install_lock EXIT
 }
 
 _install_slot_build() {
@@ -1562,8 +1685,6 @@ _install_slot_build() {
     # #935: toss an INCOMPLETE prior slot first so we never `uv venv
     # --allow-existing` over a half-built corpse (the current/active slot is
     # never tossed). No-op in legacy mode.
-    _versioned_slot_clean || exit 1
-
     # Create venv via uv
     if ! _venv_healthy "$VENV_DIR"; then
         if [[ -x "$VENV_DIR/bin/python" ]]; then
@@ -1707,10 +1828,7 @@ do_install() {
 
     # Serialize concurrent installers (ce#776/#777 follow-up): wait for any
     # in-flight install; on timeout defer -- it lands the version.
-    if ! _enter_install_lock; then
-        _warn "Another agent-bridge install is in progress -- deferring this run. No-op."
-        return 0
-    fi
+    _require_install_lock
 
     # Immutable-slot admission (#5472, ce#776/#777): a published same-version
     # slot whose content matches and is already active is a no-op; one whose
@@ -1721,6 +1839,7 @@ do_install() {
         _write_deploy_manifest
         return 0
     fi
+    _versioned_slot_clean || exit 1
 
     mkdir -p "$INSTALL_DIR"
     if $PUBLISH_GLOBAL_BINSTUBS; then
@@ -1926,7 +2045,7 @@ do_start() {
     # should only ever see this during an actual start attempt, never while
     # an already-healthy daemon or a forward route is correctly left alone.
     _write_update_marker
-    trap _clear_update_marker EXIT
+    trap '_clear_update_marker; _exit_install_lock' EXIT
 
     _step "Starting agent-bridge..."
 
@@ -1946,10 +2065,12 @@ do_start() {
         _warn "systemd start did not activate the service (rc=$systemd_start_rc) -- falling back to direct start"
     fi
 
-    # Direct start -- launch the resolved slot interpreter. Close fd 8 (8>&-) so
-    # a daemon launched during do_install/do_update never inherits and holds the
-    # install lock (ce#802).
-    nohup "$rt_py" -m agent_bridge start > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
+    # Direct start -- launch the resolved slot interpreter in a session of its
+    # own, so an installer deadline that kills the installer's session never
+    # takes the service with it. Close fd 8 (8>&-) so a daemon launched during
+    # do_install/do_update never inherits and holds the install lock (ce#802).
+    nohup "$rt_py" -I -c "$_NEW_SESSION_PY" "$rt_py" -m agent_bridge start \
+        > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     sleep 2
@@ -2202,7 +2323,6 @@ _update_core() {
         fi
         if ! _venv_healthy "$VENV_DIR"; then
             _step "Building runtime slot versions/$SRC_VERSION..."
-            _versioned_slot_clean || return 1
             if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
                 _uv_venv_resilient "$VENV_DIR" --allow-existing || { _fail "Venv build failed (versions/$SRC_VERSION)"; return 1; }
             fi
@@ -2335,6 +2455,25 @@ _update_core() {
     return 0
 }
 
+_reconcile_serving_runtime() {
+    local rc=0
+    "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --probe-serving --health-timeout 180 || rc=$?
+    [[ "$rc" != 0 ]] || return 0
+    if [[ "$rc" != 10 ]]; then
+        _fail "Serving runtime reconcile failed (probe exit $rc); completed slot left unchanged."
+        return 1
+    fi
+    trap '_clear_update_marker; _exit_install_lock' EXIT
+    _write_update_marker
+    rc=0
+    "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --health-timeout 180 || rc=$?
+    _clear_update_marker
+    if [[ "$rc" != 0 ]]; then
+        _fail "Serving runtime reconcile failed; completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
+        return 1
+    fi
+}
+
 do_update() {
     echo ""
     echo "=== agent-bridge update ==="
@@ -2350,15 +2489,13 @@ do_update() {
 
     # Serialize concurrent installers (see do_install): don't rebuild the venv
     # over an in-flight install/update. Defer on timeout.
-    if ! _enter_install_lock; then
-        _warn "Another agent-bridge install/update is in progress -- deferring. No-op."
-        return 0
-    fi
+    _require_install_lock
 
     # Immutable-slot admission (#5472) -- BEFORE the update marker, the drain,
     # or any stop, so a no-op or a refused update never disturbs the live
     # daemon. See do_install.
     if _guard_published_slot; then
+        _reconcile_serving_runtime || return 1
         _write_deploy_manifest
         return 0
     fi
@@ -2380,7 +2517,7 @@ do_update() {
     # error under `set -euo pipefail`.
     if [[ "$active_forward" != true ]]; then
         _write_update_marker
-        trap _clear_update_marker EXIT
+        trap '_clear_update_marker; _exit_install_lock' EXIT
     fi
 
     local predecessor_signature=""
@@ -2443,10 +2580,12 @@ do_update() {
         cutover=true
     fi
 
+    _versioned_slot_clean || exit 1
+
     # Stop the running instance before the in-place reinstall, UNLESS we are
     # doing a cutover (which keeps the old daemon up and retires it afterward).
     # Either way, drain first so in-flight turns get a chance to settle.
-    if [[ "$was_running" == true && "$cutover" == false ]]; then
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 && "$was_running" == true && "$cutover" == false ]]; then
         if ! _update_lifecycle_drain_stop "$predecessor_signature" "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"; then
             was_running=false
         fi
@@ -2463,9 +2602,8 @@ do_update() {
             # build), so the previous slot is still active. Discard the half-built
             # new slot (unless it IS the active one) and restart the previous
             # version if the classic path stopped it.
-            if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "$prev_version" ]]; then
-                rm -rf "$INSTALL_DIR/versions/$SRC_VERSION"
-            fi
+            # The attached construction owner reclaims the failed candidate
+            # after rollback, under the canonical cleanup and selector guards.
             if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
                 _update_lifecycle_start "$predecessor_signature" "Restarting the previous version..." || was_running=false
             fi

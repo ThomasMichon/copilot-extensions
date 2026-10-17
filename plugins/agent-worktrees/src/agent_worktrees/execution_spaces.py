@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from machine_transport.registry import MachineEntry, find_machine_entry, machine_name
+from machine_transport.registry import MachineEntry, find_machine_entry, machine_name, resolve_machine_selection
+from machine_transport import split_machine_environment
 
 
 class ExecutionSpaceError(RuntimeError):
@@ -51,7 +52,7 @@ def detect_legacy_machine(entries: dict[str, MachineEntry], hostname: str) -> st
     return hostname
 
 
-def canonicalize_legacy_config(config: Any) -> Any:
+def canonicalize_legacy_config(config: Any, *, configured: bool = False) -> Any:
     from . import config as cfg
 
     repo = config.repos.get(config.repo_name)
@@ -61,15 +62,23 @@ def canonicalize_legacy_config(config: Any) -> Any:
         entries = cfg.load_machines_yaml(repo.anchor, config=config)
     except FileNotFoundError:
         return config
-    selected = find_machine_entry(
-        entries, config.machine, reject_ambiguous=True,
-        execution_platform=cfg.detect_platform(),
-    )
-    return replace(config, machine=selected.key) if selected and selected.legacy_key else config
+    selected = resolve_machine_selection(entries, config.machine, cfg.detect_platform())
+    entry = selected.entry
+    if (
+        configured and entry is not None and not entry.execution_platform
+        and cfg.detect_platform() != "wsl"
+        and not split_machine_environment(config.machine).environment
+    ):
+        return config
+    if entry is not None and (configured or entry.legacy_key):
+        return replace(config, machine=entry.key)
+    if configured and not entries and selected.target.environment:
+        return replace(config, machine=selected.target.logical_machine)
+    return config
 
 
 def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None, str, str | None]:
-    from . import config as cfg, tracking
+    from . import config as cfg, legacy_wsl_record_locality, tracking
 
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None or not parsed.is_qualified:
@@ -77,6 +86,9 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
             None, "",
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
         )
+    legacy = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config)
+    if legacy is not None:
+        return legacy, parsed.worktree_id, None
     try:
         local = require_owner_identity(parsed.machine, config)
     except ExecutionSpaceError as exc:
@@ -95,23 +107,51 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
 
 
 def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, output: Any) -> None:
-    from . import config as cfg, obligations, tracking
+    from . import config as cfg, legacy_wsl_record_locality, obligations, tracking
 
     require_record_mutation(record, config)
     try:
         owner = record.owner_claim_ref
-        if owner is None or not owner.is_qualified or owner.machine != config.machine:
+        if owner is None or not owner.is_qualified:
             return
-        parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
+        if owner.machine == config.machine:
+            parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
+            legacy_parent = False
+        else:
+            parent_path = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(owner, config)
+            legacy_parent = parent_path is not None
+            if parent_path is None:
+                return
         if not parent_path.exists():
             return
         with tracking._RecordLock(parent_path, require_sidecar=True):
             parent = tracking.load_record(parent_path)
-            require_record_mutation(parent, config)
+            if legacy_parent and legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(
+                owner, config,
+            ) != parent_path:
+                return
+            receiving_config = project_record_config(parent)
+            require_record_mutation(parent, receiving_config)
+            caller = resolve_machine_selection(
+                registry_for_config(config), config.machine, cfg.detect_platform(),
+            )
+            caller_key = caller.entry.key if caller.entry is not None else config.machine
+            if not require_owner_identity(caller_key, receiving_config):
+                raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             child_ref = tracking.format_claim_ref(config.machine, config.repo_name, worktree_id)
             settled = tracking.settle_resource_claim(
                 parent, child_ref, obligations.AT_REST, save=False,
             )
+            if settled is None:
+                current_child = tracking.parse_claim_ref(child_ref)
+                for claim in parent.resources:
+                    if claim.kind == "worktree" and legacy_wsl_record_locality.claim_refs_equivalent(
+                        tracking.parse_claim_ref(claim.ref), current_child, config=config,
+                    ):
+                        settled = tracking.settle_resource_claim(
+                            parent, claim.ref, obligations.AT_REST, save=False,
+                        )
+                        break
             if settled is not None:
                 tracking.save_record(parent, parent_path)
         if settled is not None:
@@ -195,7 +235,39 @@ def require_record_mutation(record: Any, config: Any) -> None:
 
     if record is None:
         return
-    if not _requires_scoped_identity(registry_for_config(config), config.machine, record.machine):
+    require_current_execution_space(config)
+    entries = registry_for_config(config)
+    from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
+
+    legacy_path = None
+    if (
+        getattr(record, "repo", "") and getattr(record, "worktree_id", "")
+        and getattr(record, "platform", "") in ("wsl", "windows", "linux")
+    ):
+        legacy_ref = tracking.parse_claim_ref(
+            tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+        )
+        legacy_path = resolve_legacy_wsl_owner_ref(legacy_ref, config)
+    if legacy_path is not None:
+        proven = tracking.load_record(legacy_path)
+        if any(
+            getattr(record, field, None) != getattr(proven, field, None)
+            for field in ("repo", "worktree_id", "machine", "platform", "worktree_path")
+        ):
+            raise ExecutionSpaceError("record snapshot identity/platform does not match its proven ledger")
+        if record.owner_ref and any(entry.execution_platform for entry in entries.values()):
+            owner = tracking.parse_claim_ref(record.owner_ref)
+            if owner is None or not owner.is_qualified:
+                raise ExecutionSpaceError("owned record has an unqualified owner reference")
+            if (
+                resolve_legacy_wsl_owner_ref(owner, config) is None
+                and not require_owner_identity(owner.machine, config)
+            ):
+                raise ExecutionSpaceError(
+                    "cross-space parent ownership remains unsupported; settlement is blocked"
+                )
+        return
+    if not _requires_scoped_identity(entries, config.machine, record.machine):
         return
     if not require_owner_identity(record.machine, config):
         raise ExecutionSpaceError(

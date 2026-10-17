@@ -919,16 +919,8 @@ def test_claims_add_owner_ref_uses_owner_project_readiness(
     owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
     path = owner_wt_dir / "wt-borrower.yaml"
     before = path.read_bytes()
-    ambient_config = type("Config", (), {
-        "machine": "anomalous-potato",
-        "repo_name": "provider",
-        "readiness": "ready",
-    })()
-    owner_config = type("Config", (), {
-        "machine": "anomalous-potato",
-        "repo_name": "example-web",
-        "readiness": "blocked",
-    })()
+    ambient_config = m.cfg.load_project_config("provider")
+    owner_config = m.cfg.load_project_config("example-web")
     monkeypatch.setattr(m.cfg, "load_config", lambda: ambient_config)
     monkeypatch.setattr(
         m.cfg, "load_project_config", lambda name, **kwargs: owner_config
@@ -938,7 +930,7 @@ def test_claims_add_owner_ref_uses_owner_project_readiness(
         "coordination_readiness",
         lambda config: (
             _blocked_readiness()
-            if config.readiness == "blocked"
+            if config.repo_name == owner_config.repo_name
             else state_root.CoordinationReadiness(
                 True,
                 "ready",

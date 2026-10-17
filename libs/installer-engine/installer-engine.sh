@@ -11,6 +11,53 @@
 # `dev`, kept byte-identical by `tools/sync-installer-engine.py`. In the
 # shipped artifact, plugins never source this file across plugin boundaries.
 
+INSTALLER_ENGINE_DEPENDENCY_POLICY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/installer_dependency_policy.py"
+
+remove_install_runtime_content() {
+    # The caller holds the transaction lock; retain its inode and staged owners.
+    local root="${1:-}" entry name home
+    while [[ "$root" != "/" ]]; do
+        case "$root" in
+            */) root="${root%/}" ;;
+            */.) root="${root%.}" ;;
+            *) break ;;
+        esac
+    done
+    if [[ -z "$root" || ! -d "$root" || -L "$root" ]]; then
+        printf '%s\n' 'Runtime purge requires a real install directory, not a link' >&2
+        return 1
+    fi
+    root="$(CDPATH= cd -P -- "$root" && printf '%s.' "$PWD")" || return 1
+    root="${root%.}"
+    if [[ "$root" == "/" ]]; then
+        printf '%s\n' 'Refusing to purge a filesystem root' >&2
+        return 1
+    fi
+    if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
+        home="$(CDPATH= cd -P -- "$HOME" && printf '%s.' "$PWD")" || return 1
+        home="${home%.}"
+        if [[ "$root" == "$home" ]]; then
+            printf '%s\n' 'Refusing to purge a user home' >&2
+            return 1
+        fi
+    fi
+    if [[ ! -r "$root" || ! -x "$root" ]]; then
+        printf '%s\n' 'Runtime purge requires a readable and searchable install directory' >&2
+        return 1
+    fi
+    for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
+        [[ -e "$entry" || -L "$entry" ]] || continue
+        name="${entry##*/}"
+        case "$name" in
+            .install.lock|.install.lock.pid|.install.lock.pid.reap|.install-stage) continue ;;
+        esac
+        if ! rm -rf -- "$entry"; then
+            printf 'Runtime purge failed while removing: %s\n' "$entry" >&2
+            return 1
+        fi
+    done
+}
+
 invoke_native_capture() {
     local output rc
     output="$("$@" 2>&1)"; rc=$?
@@ -29,15 +76,38 @@ test_is_venv_corruption() {
 invoke_uv_pip_install_resilient() {
     local uv_cmd="$1"; shift
     local payload_dir="${INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB:-}"
+    local before_attempt="${INSTALLER_ENGINE_BEFORE_ATTEMPT:-}"
+    local before_argument="${INSTALLER_ENGINE_BEFORE_ATTEMPT_ARGUMENT:-}"
+    if [[ -n "$before_attempt" ]] && ! declare -F "$before_attempt" >/dev/null; then
+        printf '%s\n' 'Installer before-attempt callback is not a shell function' >&2
+        return 1
+    fi
+    local policy_python="" previous="" arg
+    for arg in "$@"; do
+        if [[ "$previous" == "--python" && -x "$arg" ]]; then
+            policy_python="$arg"
+            break
+        fi
+        previous="$arg"
+    done
+    if [[ -z "$policy_python" ]]; then
+        policy_python="$(command -v python3 || command -v python || true)"
+    fi
+    if [[ -z "$policy_python" || ! -f "$INSTALLER_ENGINE_DEPENDENCY_POLICY" ]]; then
+        printf '%s\n' 'dependency-seasoning: bootstrap Python or canonical policy helper is unavailable' >&2
+        return 1
+    fi
     local out rc delay
-    out="$("$uv_cmd" pip install "$@" 2>&1)"; rc=$?
+    if [[ -n "$before_attempt" ]]; then "$before_attempt" "$before_argument" || return $?; fi
+    out="$("$policy_python" -I "$INSTALLER_ENGINE_DEPENDENCY_POLICY" --uv "$uv_cmd" -- "$@" 2>&1)"; rc=$?
     for delay in 3 6 10; do
         if [[ $rc -eq 0 ]] || ! test_is_sre_module_mismatch "$out"; then
             break
         fi
         _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
         sleep "$delay"
-        out="$("$uv_cmd" pip install "$@" 2>&1)"; rc=$?
+        if [[ -n "$before_attempt" ]]; then "$before_attempt" "$before_argument" || return $?; fi
+        out="$("$policy_python" -I "$INSTALLER_ENGINE_DEPENDENCY_POLICY" --uv "$uv_cmd" -- "$@" 2>&1)"; rc=$?
     done
     if [[ $rc -eq 0 && -n "$payload_dir" ]]; then
         rm -rf "$payload_dir/build" "$payload_dir"/*.egg-info 2>/dev/null || true

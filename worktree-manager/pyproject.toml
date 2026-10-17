@@ -2,6 +2,9 @@
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [project]
 name = "copilot-extensions-worktree-manager"
 version = "0.1.0-dev97"
@@ -134,7 +137,7 @@ agent-update-telemetry = { path = "../libs/update-telemetry", editable = true }
 worktree-manager = "worktree_manager.__main__:console_entry"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "setuptools>=83.0.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -148,6 +151,7 @@ target-version = "py310"
 line-length = 99
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
     "guard: fast structural and contract checks",
     "contract(name): behavioral contract attribution",

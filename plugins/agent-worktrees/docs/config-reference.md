@@ -56,6 +56,14 @@ that carries no in-repo config.
 
 ## Execution-space identity
 
+Launch selectors accept both `--machine example-host --environment WSL` and
+`--machine example-host-wsl`. The suffix decomposes into physical host
+`example-host` and environment `wsl`; it does not make the native Windows
+execution space local to its guest. Conflicting requests such as
+`example-host-wsl` with `Win` are rejected. Historical worktree records retain
+their machine and separately recorded platform rather than being relabeled
+merely because a launch used a logical key.
+
 A machine registry entry opts into independent execution-space identity with
 `execution_platform: windows`, `wsl` or `linux`. Its registry key is canonical;
 `physical_host` is optional grouping metadata, not registry or ownership
@@ -181,7 +189,7 @@ repos:
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `srcroot` | string | `""` | Source root — parent directory of your repos. |
-| `machine` | string | auto-detected | Machine key (matches `machines.yaml`). |
+| `machine` | string | auto-detected | Local execution identity; native configured values remain unchanged, while WSL resolves a guest identity with `-wsl`. |
 | `platform` | string | auto-detected | `windows` \| `wsl` \| `linux`. Selects which platform-keyed command map applies. |
 | `repo_name` | string | `""` | Which `repos.<name>` is the default repo. Optional when exactly one repo is defined. |
 | `headless` | bool | `false` | CLI-only project: the bare binstub lists worktrees instead of launching an interactive Copilot session. |
@@ -198,6 +206,48 @@ Explicit `resolve --machine` targets use the same identity matching as local
 operations: the current key, hostname, identity alias, or display name selects
 a local launch when the requested environment is native. A same-host WSL or
 other-environment target still uses its configured transport.
+
+### Execution machine identity
+
+Registries declaring `execution_platform` require an explicitly configured
+execution-space key; hostname detection and legacy guest suffix inference do
+not select that authority. The configured key and actual platform must satisfy
+the execution-space mutation fence.
+
+For legacy registries without execution-space declarations,
+`machine` resolves machine-local > global > OS hostname. Repository config
+does not override that precedence. Windows and native Linux retain the winning
+configured string, or the OS hostname when unconfigured: there is no
+alias-to-key ownership migration. Direct native topology detection retains its
+existing `alias`-or-key result. WSL maps through topology keys and always uses
+`<host>-wsl`, adding the suffix
+only once, including when a local/global setting still names the host.
+Qualification follows the actual execution environment, not an inherited
+`platform` path-selection override.
+
+Related-repo availability compares topology-equivalent keys, hostnames, and
+identity aliases without rewriting `config.machine` or the declared routing
+target. This applies to local/machine loci, container availability, and doctor
+checks even when native config retains its raw hostname.
+
+Host and guest entries may share a raw `hostname`; the guest's hostname lookup
+is qualified. Key/hostname/alias conflicts fail closed. `display_name` is human
+metadata and may be shared between entries; unique legacy display lookups remain
+compatible without shadowing identity fields. Explicitly selecting a duplicated
+display label fails with an instruction to use an identity field.
+Missing guest entries produce a warning and retain the qualified key only if it
+is not already owned by a native entry; a collision fails closed. Optional null
+hostname/alias/display-name labels are treated as absent. Machine context may borrow host metadata
+without treating the host as local. With no topology, context still emits the
+execution identity. `ssh.environments[].alias` is an independently configured
+transport name and is never rewritten or used as execution identity.
+Detection/config loading does not migrate historical worktree or claim owners.
+In legacy registries, an old native-host ownership label can resolve locally
+only through its exact trusted WSL worktree record: project, worktree id,
+platform and configured checkout namespace must match. Claim lookup, liveness
+and handoff checks share this record-scoped exception. It does not make a
+native machine target local or relax registered execution-space authority.
+Machine-context warnings go to stderr; stdout remains one JSON hook response.
 
 ### Same-machine AHP sessions
 

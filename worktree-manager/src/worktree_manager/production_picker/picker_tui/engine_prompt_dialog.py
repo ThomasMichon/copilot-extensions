@@ -11,7 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from .engine_focus import FocusGroup
-from .field_widgets import compose_field
+from .seed_prompt_field import compose_seed_prompt
 
 class PromptDlgScreen(ModalScreen[bool]):
     """Lean modal prompt composer ("Resume prompt…"): a free-text field plus
@@ -35,17 +35,20 @@ class PromptDlgScreen(ModalScreen[bool]):
         Binding("q", "cancel", show=False),
     ]
 
-    def __init__(self, title: str, hint: str) -> None:
+    def __init__(self, title: str, hint: str, *, seed_refusal: str | None = None) -> None:
         super().__init__()
         self._title = title
         self._hint = hint
+        self._seed_refusal = seed_refusal
         self.seed_prompt = ""            # set on Confirm
-        self._prompt_widgets, self._prompt_rec = compose_field(
-            {"name": "prompt", "type": "textarea"}, 0)
+        self._prompt_widgets, self._prompt_rec = compose_seed_prompt()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="prompt-frame"):
-            yield Static(self._hint, id="prompt-hint")
+            yield Static(
+                self._hint + "\nUp/Down: seed history at text boundaries; Ctrl+Up/Down: anywhere.",
+                id="prompt-hint",
+            )
             yield from self._prompt_widgets
             yield FocusGroup(
                 [("confirm", "Confirm"), ("cancel", "Cancel")],
@@ -71,6 +74,8 @@ class PromptDlgScreen(ModalScreen[bool]):
     def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
         confirmed = event.value == "confirm"
         if confirmed:
+            if not self._prompt_rec["primary"].remember(refusal_reason=self._seed_refusal):
+                return
             self.seed_prompt = self._collect_prompt()
         self.dismiss(confirmed)
 

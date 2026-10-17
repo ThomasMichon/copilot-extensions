@@ -1,0 +1,48 @@
+{
+  "captured_from": {
+    "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 38,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "eecdc1270435a31537d8325ea6219fd0cb000a49",
+    "source_sha256": "72719d714e157e2c6b956ce375b4d5ef5bbdf93913ba0dcde2bf54c8ec6ff2dd"
+  },
+  "response": {
+    "protocol_version": 38,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 37,
+    "metadata_version": 1,
+    "render_wall_goal_seconds": 2,
+    "live_wall_wait_seconds": 10,
+    "legacy_cold_request_blocks": true,
+    "caller_expiry_releases_holder": false
+  },
+  "requests": {
+    "render": {
+      "method": "GET",
+      "path": "/api/v1/worktrees",
+      "params": {
+        "render": "true"
+      }
+    },
+    "refresh": {
+      "method": "GET",
+      "path": "/api/v1/worktrees",
+      "params": {
+        "refresh": "true"
+      }
+    }
+  },
+  "cold_projection": {
+    "groups": {},
+    "discovery": {
+      "version": 1,
+      "freshness": "unknown",
+      "completeness": "unknown",
+      "refresh_pending": true,
+      "warming": true
+    }
+  }
+}

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
+import sys
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -22,6 +26,182 @@ _COMMANDS = (
     "session-sync",
 )
 _HARNESS_TIMEOUT_SECONDS = 20
+
+
+def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
+    """Emulate UV's package effects offline, not runtime construction or health."""
+    fixture = tmp_path / "offline-uv"
+    fixture.mkdir()
+    for name in ("PyYAML",):
+        distribution = metadata.distribution(name)
+        target = fixture / name
+        for file in distribution.files or ():
+            if ".." in file.parts or file.suffix == ".pyc":
+                continue
+            source = Path(distribution.locate_file(file))
+            if source.is_file():
+                destination = target / file
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+        assert any(target.rglob("METADATA")), name
+    # The double copies local source instead of building wheels; setuptools is
+    # build-only here, while every runtime import still uses real package code.
+    build_info = fixture / "setuptools" / "setuptools-83.0.0.dist-info"
+    build_info.mkdir(parents=True)
+    (build_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: setuptools\nVersion: 83.0.0\n",
+        encoding="utf-8",
+    )
+    calls = fixture / "installs.jsonl"
+    driver = fixture / "driver.py"
+    driver.write_text(
+        f"""#!{sys._base_executable}
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+import venv
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+fixture = Path({str(fixture)!r})
+root = Path({str(tmp_path)!r})
+args = sys.argv[1:]
+if args == ['--version']:
+    print('uv 0.12.5 (offline test fixture)')
+    raise SystemExit(0)
+if args[:1] == ['venv']:
+    target = Path(args[1])
+    assert target.resolve().is_relative_to(root.resolve())
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
+    raise SystemExit(0)
+assert args[:2] == ['pip', 'install'], args
+if '--show-settings' in args:
+    assert not any(a == '--quiet' or re.fullmatch('-q+', a) for a in args)
+    print('''PipInstallSettings {{ settings: PipSettings {{
+    index_locations: IndexLocations {{ indexes: [], flat_index: [], }},
+    exclude_newer: ExcludeNewer {{ global: None, package: ExcludeNewerPackage({{}}), }},
+}}, }}''')
+    raise SystemExit(0)
+assert '--reinstall' in args and '--quiet' in args
+assert '--no-deps' not in args and '--no-build-isolation' not in args
+cutoff = datetime.fromisoformat(args[args.index('--exclude-newer') + 1].replace('Z', '+00:00'))
+assert cutoff <= datetime.now(timezone.utc) - timedelta(days=7)
+python = Path(args[args.index('--python') + 1])
+assert python.resolve().is_relative_to(root.resolve())
+result = subprocess.run(
+    [str(python), '-I', '-c', 'import sysconfig; print(sysconfig.get_paths()["purelib"])'],
+    capture_output=True, text=True, check=True, timeout=20,
+    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+)
+site = Path(result.stdout.strip())
+assert site.resolve().is_relative_to(root.resolve())
+if 'setuptools>=83.0.0' in args:
+    source = fixture / 'setuptools'
+elif 'pyyaml>=6.0' in args:
+    source = fixture / 'PyYAML'
+else:
+    sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
+    assert len(sources) == 1, args
+    project = sources[0]
+    assert project.resolve().is_relative_to(root.resolve())
+    metadata = tomllib.loads((project / 'pyproject.toml').read_text())['project']
+    name = metadata['name']
+    version = metadata['version']
+    source = project / 'src'
+    assert source.is_dir()
+    info = site / (name.replace('-', '_') + '-' + version + '.dist-info')
+    info.mkdir(exist_ok=True)
+    (info / 'METADATA').write_text('Metadata-Version: 2.1\\nName: ' + name + '\\nVersion: ' + version + '\\n')
+    if name == 'agent-logger' and os.name != 'nt':
+        launcher = python.parent / 'agent-logger'
+        launcher.write_text('#!' + str(python) + '\\nfrom agent_logger.__main__ import main\\nraise SystemExit(main())\\n')
+        launcher.chmod(0o755)
+shutil.copytree(source, site, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
+with (fixture / 'installs.jsonl').open('a') as log:
+    log.write(json.dumps(args) + '\\n')
+""",
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        # A batch wrapper would interpret `>` in version requirements as
+        # redirection before Python receives the install/probe arguments.
+        command = fixture / "uv.exe"
+        launcher = fixture / "launcher.cs"
+        launcher.write_text(
+            r"""
+using System;
+using System.Diagnostics;
+using System.Linq;
+class Launcher {
+    static string Quote(string value) {
+        return "\"" + value.Replace("\"", "\\\"") + "\"";
+    }
+    static int Main(string[] args) {
+        var info = new ProcessStartInfo(@"__PYTHON__",
+            String.Join(" ", new[] { @"__DRIVER__" }.Concat(args).Select(Quote)));
+        info.UseShellExecute = false;
+        info.CreateNoWindow = true;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+        using (var process = Process.Start(info)) {
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            process.WaitForExit();
+            Console.Out.Write(output.Result);
+            Console.Error.Write(error.Result);
+            return process.ExitCode;
+        }
+    }
+}
+""".replace("__PYTHON__", sys._base_executable.replace('"', '""'))
+            .replace("__DRIVER__", str(driver).replace('"', '""')),
+            encoding="utf-8",
+        )
+        compiler_shell = shutil.which("powershell.exe")
+        assert compiler_shell is not None
+        subprocess.run(
+            [compiler_shell, "-NoProfile", "-Command",
+             f"Add-Type -Path '{launcher}' -OutputAssembly '{command}' "
+             "-OutputType ConsoleApplication"],
+            env=env, capture_output=True, text=True, check=True, timeout=20,
+        )
+    else:
+        command = fixture / "uv"
+        shutil.copyfile(driver, command)
+        command.chmod(0o755)
+    env["PATH"] = f"{fixture}{os.pathsep}{env['PATH']}"
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        selected = subprocess.run(
+            [shell, "-NoProfile", "-Command",
+             "(Get-Command uv -CommandType Application | Select-Object -First 1).Source"],
+            env=env, capture_output=True, text=True, check=True, timeout=20,
+        )
+        assert Path(selected.stdout.strip()) == command, "installer must select offline UV"
+    probe = subprocess.run(
+        [str(command), "pip", "install", "--show-settings", "setuptools>=83.0.0"],
+        env=env, capture_output=True, text=True, check=True, timeout=20,
+    )
+    assert probe.stdout.startswith("PipInstallSettings {")
+    assert not calls.exists()
+    return calls
+
+
+def _assert_complete_runtime(home: Path) -> None:
+    root = home / ".agent-logger"
+    version = (root / "current-version").read_text(encoding="utf-8").strip()
+    slot = root / "versions" / version
+    marker = json.loads((slot / ".install-complete.json").read_text(encoding="utf-8"))
+    assert marker["version"] == version
+    assert re.fullmatch(r"[0-9a-f]{64}", marker["payload_hash"])
+    assert (slot / "pyvenv.cfg").is_file()
+    assert not (root / ".venv").exists(), "runtime selection is marker-only"
+    python = slot / "Scripts" / "python.exe" if os.name == "nt" else slot / "bin" / "python"
+    assert python.is_file()
 
 
 def _isolated_install_env(home: Path) -> dict[str, str]:
@@ -72,6 +252,7 @@ def _stage_payload(tmp_path: Path) -> Path:
     staged_libs.mkdir(parents=True, exist_ok=True)
     for lib in (
         "installer-engine",
+        "versioned-runtime",
         "config-migrate",
         "agent-procutil",
         "dropin-registry",
@@ -82,28 +263,50 @@ def _stage_payload(tmp_path: Path) -> Path:
     return payload
 
 
-def _host_pip_index_url() -> str | None:
-    """Read a configured pip index-url straight from the well-known SYSTEM
-    config path, bypassing any per-process env-var sandboxing (this test's
-    own containment wrapper, or a caller's, may redirect `PROGRAMDATA`/
-    `APPDATA` env vars, but not the actual OS install location). Generic
-    and identifier-free: any host with a governed/offline pip feed
-    configured this standard way benefits, not just one particular venue.
-    """
-    candidates = (
-        Path(r"C:\ProgramData\pip\pip.ini"),
-        Path("/etc/pip.conf"),
-        Path("/etc/xdg/pip/pip.conf"),
+def _stage_release_payload(tmp_path: Path) -> Path:
+    publisher = _stage_payload(tmp_path)
+    repository = _PLUGIN_ROOT.parents[1]
+    roster_path = Path(".github") / "plugin" / "marketplace.json"
+    roster = json.loads((repository / roster_path).read_text(encoding="utf-8"))
+    roster["plugins"] = [
+        entry for entry in roster["plugins"] if entry["name"] == "agent-logger"
+    ]
+    assert len(roster["plugins"]) == 1
+    staged_roster = tmp_path / roster_path
+    staged_roster.parent.mkdir(parents=True)
+    staged_roster.write_text(json.dumps(roster), encoding="utf-8")
+    payload = tmp_path / "release" / "agent-logger"
+    shutil.copytree(publisher, payload)
+    # A shipped snapshot must own its library graph, not retain DEV references
+    # that escape to ../../libs after its original publisher disappears.
+    previous_path = sys.path[:]
+    try:
+        materializer = runpy.run_path(str(repository / "tools" / "materialize_main.py"))
+        log = materializer["materialize_uv_editable_ref_into"](
+            source_consumer_dir=publisher,
+            dest_consumer_dir=payload,
+            canonical_root=tmp_path,
+            dest_root=tmp_path,
+        )
+        log += materializer["mie"].materialize_ref_into(
+            source_consumer_dir=publisher,
+            dest_consumer_dir=payload,
+            canonical_root=tmp_path,
+            dest_root=tmp_path,
+        )
+    finally:
+        sys.path[:] = previous_path
+    assert not any(line.startswith("SKIP ") for line in log), log
+    source_paths = re.findall(
+        r'path\s*=\s*"([^"]+)"',
+        (payload / "pyproject.toml").read_text(encoding="utf-8"),
     )
-    for candidate in candidates:
-        try:
-            text = candidate.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        match = re.search(r"(?m)^\s*index-url\s*=\s*(\S+)\s*$", text)
-        if match:
-            return match.group(1)
-    return None
+    assert source_paths
+    for source in source_paths:
+        library = (payload / source).resolve()
+        assert library.is_relative_to(payload.resolve())
+        assert (library / "pyproject.toml").is_file()
+    return payload
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
@@ -164,7 +367,7 @@ def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
         timeout=30,
         check=False,
     )
-    assert delegated.returncode == 1
+    assert delegated.returncode == 1, delegated.stdout + delegated.stderr
     assert "runtime not provisioned" in delegated.stderr
 
 
@@ -223,7 +426,7 @@ def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None
         timeout=30,
         check=False,
     )
-    assert delegated.returncode == 1
+    assert delegated.returncode == 1, delegated.stdout + delegated.stderr
     assert "runtime not provisioned" in delegated.stderr
 
 
@@ -376,54 +579,15 @@ def test_posix_snapshot_uses_self_staged_payload_not_original() -> None:
     assert "COPILOT_PLUGIN_STAGED_FROM" not in publisher
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
-# Regression (coverage-guided-ci's full-matrix local validation pass,
-# 2026-10-04): this test's own `subprocess.run(..., timeout=420)` call
-# already anticipates needing up to 420s "to absorb a genuinely fresh
-# package resolution/build under shared-machine contention" -- but with no
-# `@pytest.mark.timeout` override, `run-plugin-tests.py`'s own blanket
-# 30s-per-test pytest-timeout default fires first and kills it on any real
-# (non-instant, contended) run, well before that 420s internal ceiling is
-# ever reached. Same class of false-positive `test_first_install_bootstrap
-# .py::test_posix_lean_provision_installs_resolver_and_launchers_reenter_
-# runtime` already hit and fixed the same way: give real headroom above
-# the test's own internal subprocess ceiling, not a global timeout bump
-# that would mask an actual hang in a lighter test elsewhere.
+# Keep the existing per-test ceiling above the native provisioning subprocess.
 @pytest.mark.timeout(450)
 def test_provision_publishes_durable_compatibility_wrappers(
     tmp_path: Path,
 ) -> None:
-    payload = _stage_payload(tmp_path)
+    payload = _stage_release_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
-    # This test-runner's own pytest process runs from inside a managed venv
-    # (`.test-venvs/.../agent-logger`), which can leave `PYTHONHOME`/
-    # `PYTHONPATH` set to THAT venv's own paths. `install.ps1 provision`
-    # here builds a genuinely fresh, independent venv via `uv` -- an
-    # inherited `PYTHONHOME`/`PYTHONPATH` pointing at a different
-    # interpreter's site-packages can corrupt import resolution inside a
-    # nested build-isolation venv (observed: `setuptools._distutils_hack`
-    # failing to import `distutils.core` while building a local path
-    # dependency's wheel). Strip both so this test builds its OWN
-    # standalone runtime cleanly, matching how a real end-user's
-    # (non-venv-nested) shell invokes this same script.
-    # This test's own isolated HOME/USERPROFILE/LOCALAPPDATA (above) is
-    # layered on top of the run-plugin-tests.py containment wrapper's OWN
-    # sandboxing of HOME/APPDATA/PROGRAMDATA (see
-    # `tools/plugin_test_containment.py::_ROOT_ENV`) -- so the real
-    # `pip config get global.index-url` / pip.ini discovery that
-    # `install.ps1`'s `Ensure-UvIndex` (and `install.sh`'s POSIX
-    # equivalent) normally use to bridge a governed/offline venue's pip
-    # feed to uv can no longer find the real config via env vars, even
-    # though it exists on the actual host. Various venues legitimately
-    # block the public PyPI CDN (`files.pythonhosted.org`) while allowing
-    # an internal feed proxy -- `_host_pip_index_url()` reads the standard
-    # SYSTEM pip config file directly (unaffected by env-var sandboxing)
-    # and is fully generic/identifier-free, so prefer its result here
-    # explicitly.
-    internal_index = _host_pip_index_url()
-    if internal_index and not (env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")):
-        env["UV_DEFAULT_INDEX"] = internal_index
+    calls = _offline_uv(tmp_path, env)
     if os.name == "nt":
         powershell = shutil.which("pwsh") or shutil.which("powershell")
         assert powershell is not None
@@ -444,25 +608,22 @@ def test_provision_publishes_durable_compatibility_wrappers(
     provision = subprocess.run(
         command,
         env=env,
+        cwd=payload,
         capture_output=True,
         text=True,
-        # 180s comfortably covers a warm-index install; raised to 420s to
-        # absorb a genuinely fresh package resolution/build under shared-
-        # machine contention (competing test-runner load), which the
-        # UV_DEFAULT_INDEX fix above already makes reachable but not
-        # instant.
         timeout=420,
         check=False,
     )
-    assert provision.returncode == 0, provision.stderr
+    assert provision.returncode == 0, provision.stdout + provision.stderr
     snapshot = Path(
         (home / ".agent-logger" / "payload-dir").read_text(encoding="utf-8").strip()
     )
     assert snapshot.is_dir()
     assert wrapper.is_file()
+    assert calls.is_file()
+    _assert_complete_runtime(home)
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
 # Regression (coverage-guided-ci's full-matrix local validation pass,
 # 2026-10-04): same class as `test_provision_publishes_durable_compatibility_
 # wrappers` above -- two sequential subprocess.run calls (timeout=60,
@@ -470,7 +631,7 @@ def test_provision_publishes_durable_compatibility_wrappers(
 # pytest-timeout default. Real headroom above the combined internal ceiling.
 @pytest.mark.timeout(520)
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
-    payload = _stage_payload(tmp_path)
+    payload = _stage_release_payload(tmp_path)
     home = tmp_path / "home"
     version = next(
         line.split('"')[1]
@@ -478,9 +639,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         if line.startswith("version = ")
     )
     env = _isolated_install_env(home)
-    internal_index = _host_pip_index_url()
-    if internal_index and not (env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")):
-        env["UV_DEFAULT_INDEX"] = internal_index
+    calls = _offline_uv(tmp_path, env)
 
     if os.name == "nt":
         powershell = shutil.which("pwsh") or shutil.which("powershell")
@@ -518,12 +677,22 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         check=False,
     )
     assert stamped.returncode == 0, stamped.stderr
+    assert not calls.exists(), "stamp must defer dependency installation"
+    assert not (home / ".agent-logger" / ".venv").exists()
 
     snapshot = Path(
         (home / ".agent-logger" / "payload-dir").read_text(encoding="utf-8").strip()
     )
     assert (snapshot / "scripts" / "installer-engine.sh").is_file()
     assert (snapshot / "scripts" / "installer-engine.ps1").is_file()
+    for component in (
+        "versioned_runtime.py",
+        "versioned_runtime_leases.py",
+        "versioned_runtime_construction.py",
+        "installer_dependency_policy.py",
+        "installer_dependency_config.py",
+    ):
+        assert (snapshot / "scripts" / component).is_file(), component
     assert '. "$SCRIPT_DIR/installer-engine.sh"' in (
         snapshot / "scripts" / "install.sh"
     ).read_text(encoding="utf-8")
@@ -532,18 +701,22 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     ).read_text(encoding="utf-8")
 
     shutil.rmtree(payload)
+    shutil.rmtree(tmp_path / "plugins")
     shutil.rmtree(tmp_path / "libs")
 
     provision = subprocess.run(
         invoke,
         env=env,
+        cwd=snapshot,
         capture_output=True,
         text=True,
         timeout=420,
         check=False,
     )
-    assert provision.returncode == 0, provision.stderr
+    assert provision.returncode == 0, provision.stdout + provision.stderr
     assert f"agent-logger {version}" in provision.stdout
+    assert calls.is_file()
+    _assert_complete_runtime(home)
 
 
 # Regression (coverage-guided-ci's full-matrix local validation pass,
@@ -676,10 +849,10 @@ def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> No
 # --------------------------------------------------------------------------- #
 #
 # A dependency declared only in pyproject.toml is NOT enough for either
-# installer: both install the main package with --no-deps (a bare path
-# dependency name like "agent-plugin-activation" has no index entry to
-# resolve against), so each vendored lib needs its own explicit install step
-# BEFORE that final --no-deps install. This was missed for three new libs
+# installer: each vendored lib needs an explicit, source-attributable install
+# before the main package's seasoned dependency resolution. A bare dependency
+# name without its declared local mapping must not resolve from an unaged cache.
+# This was missed for three new libs
 # when schema v3's registered-project trust gate was added (confirmed live:
 # a fresh install produced a package that raised `ModuleNotFoundError: No
 # module named 'plugin_activation'` on every CLI invocation). These tests
@@ -700,7 +873,7 @@ def _vendored_path_dependencies() -> dict[str, str]:
     (``path = "../../libs/<dir>", editable = true`` --
     vendor-pointer-generalization effort, Phase 1) -- a lib converted to the
     latter still needs its own explicit install step ahead of this
-    installer's final ``--no-deps`` install, exactly like a real copy does."""
+    installer's final package install, exactly like a real copy does."""
     sources_match = re.search(
         r"\[tool\.uv\.sources\](.*?)(?:\n\[|\Z)", _PYPROJECT_TEXT, re.DOTALL
     )
@@ -721,8 +894,10 @@ _VENDORED_LIB_DIRS = sorted(_vendored_path_dependencies().values())
 
 def _install_sh_lib_positions() -> dict[str, int]:
     text = _INSTALL_SH.read_text(encoding="utf-8")
-    no_deps_marker = text.index('--no-deps "${PLUGIN_DIR}"')
-    body = text[:no_deps_marker]
+    main_marker = text.index(
+        'invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" "${PLUGIN_DIR}"'
+    )
+    body = text[:main_marker]
     positions = {}
     for lib in _VENDORED_LIB_DIRS:
         index = body.find(f"libs/{lib}")
@@ -733,8 +908,8 @@ def _install_sh_lib_positions() -> dict[str, int]:
 
 def _install_ps1_lib_positions() -> dict[str, int]:
     text = _INSTALL_PS1.read_text(encoding="utf-8")
-    no_deps_marker = text.index("'--no-deps', \"$PluginDir\"")
-    body = text[:no_deps_marker]
+    main_marker = text.index("-Arguments @('--python', $VenvPython, \"$PluginDir\", '--quiet')")
+    body = text[:main_marker]
     positions = {}
     for lib in _VENDORED_LIB_DIRS:
         index = body.find(f"Dir = '{lib}'")
@@ -746,11 +921,11 @@ def _install_ps1_lib_positions() -> dict[str, int]:
 @pytest.mark.parametrize(
     "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
 )
-def test_installers_install_every_pyproject_vendored_lib_before_no_deps(
+def test_installers_install_every_pyproject_vendored_lib_before_main_package(
     positions_fn,
 ) -> None:
     """Every ``[tool.uv.sources]`` path dependency in pyproject.toml gets an
-    explicit install step, in both installers, before the final --no-deps
+    explicit install step, in both installers, before the final seasoned
     main-package install (asserted by ``_install_*_positions`` itself
     raising if a lib's install step is missing entirely)."""
     positions_fn()
@@ -765,9 +940,8 @@ def test_installers_install_plugin_activation_after_its_own_transitive_deps(
     """plugin_activation imports dropin_registry and plugin_resolve at module
     load time, so its own install step must come after both of theirs --
     installing it first would leave its own dependencies briefly
-    unresolvable mid-install (uv resolves each --no-build-isolation install
-    independently, so this is about avoiding an inconsistent partial state,
-    not a hard uv failure)."""
+    unresolvable mid-install. Every step still resolves its transitive and
+    isolated build dependencies through the canonical seasoning policy."""
     positions = positions_fn()
     assert positions["plugin-activation"] > positions["dropin-registry"]
     assert positions["plugin-activation"] > positions["plugin-resolve"]

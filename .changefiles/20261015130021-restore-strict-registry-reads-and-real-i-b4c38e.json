@@ -1,0 +1,9 @@
+{
+  "comment": "Restore strict registry reads and real isolated writer assertions in the home-isolation regression fixture",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

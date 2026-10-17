@@ -1,0 +1,13 @@
+{
+  "comment": "Reconcile historical project commands and finish local profiles through the narrow Manager owner",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

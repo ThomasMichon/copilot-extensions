@@ -69,19 +69,46 @@ Exit code is 0 on success, non-zero on error; errors print to stderr.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import errno
 import json
-import math
 import os
 import platform
 import re
 import shutil
 import stat
 import sys
-import threading
 import time
 from pathlib import Path
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
+
+
+_runtime_components = globals().get("_retained_runtime_components", {})
+
+
+def _runtime_component(name: str):
+    if name not in _runtime_components:
+        source = Path(__file__).with_name(name + ".py")
+        spec = importlib.util.spec_from_file_location(__name__ + "_" + name, source)
+        if spec is None or spec.loader is None:
+            raise FileNotFoundError(f"Runtime component is unavailable: {name}")
+        component = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = component
+        spec.loader.exec_module(component)
+        _runtime_components[name] = component
+    return _runtime_components[name]
+
+
+_leases = _runtime_component("versioned_runtime_leases")
+ConstructionTimeout = _leases.ConstructionTimeout
+RetentionTimeout = _leases.RetentionTimeout
+_construction_owners = _leases._construction_owners
+_ownership_key = _leases._ownership_key
+construction_lease = _leases.construction_lease
+_publication_lease = _leases._publication_lease
+_cleanup_lease = _leases._cleanup_lease
+_kernel_lease = _leases._kernel_lease
+
 
 CURRENT_LINK = "current"
 VERSIONS_DIR = "versions"
@@ -358,9 +385,16 @@ def _remove_link(link: Path) -> None:
 
 
 def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
-             replace_nonlink: bool = False, link_free: bool = False) -> Path:
+             replace_nonlink: bool = False, link_free: bool = False,
+             dev_owner: str | None = None) -> Path:
     """Publish selectors while the target is pinned against concurrent cleanup."""
     with retention_lease(root, version), _publication_lease(root):
+        if is_dev_generation(version):
+            claim = _require_dev_owner(root, dev_owner)
+            if not is_complete(root, version):
+                raise RuntimeError("development generation activation requires completed construction")
+            claim["selected_generation"] = version
+            _write_dev_claim(root, claim)
         return _activate(
             root, version, link_name=link_name,
             replace_nonlink=replace_nonlink, link_free=link_free,
@@ -1016,6 +1050,9 @@ def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str)
     claim = read_dev_claim(root, strict=True)
     if claim is not None:
         protected.add(DEV_VERSION)
+        selected = claim.get("selected_generation")
+        if selected:
+            protected.add(selected)
         previous = claim.get("previous_version")
         if isinstance(previous, str) and previous:
             protected.add(previous)
@@ -1060,6 +1097,27 @@ def dev_claim_path(root: Path) -> Path:
     return root / DEV_CLAIM_FILE
 
 
+def is_dev_generation(version: str) -> bool:
+    return bool(re.fullmatch(r"dev-[0-9a-f]{32}", version))
+
+
+def _require_dev_owner(root: Path, owner: str | None) -> dict:
+    claim = read_dev_claim(root, strict=True)
+    if not owner or claim is None or claim["owner"] != owner:
+        raise RuntimeError("development generation requires its current canonical claim owner")
+    return claim
+
+
+def _write_dev_claim(root: Path, record: dict) -> None:
+    path = dev_claim_path(root)
+    tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
+    try:
+        tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def _validate_dev_previous_version(previous) -> None:
     if previous is not None and (
         not isinstance(previous, str) or
@@ -1092,6 +1150,11 @@ def read_dev_claim(root: Path, *, strict: bool = False) -> dict | None:
         return None
     if strict:
         _validate_dev_previous_version(data.get("previous_version"))
+        selected = data.get("selected_generation")
+        if selected is not None and (
+            not isinstance(selected, str) or not is_dev_generation(selected)
+        ):
+            raise ValueError(f"invalid dev generation ownership evidence: {path}")
     return data
 
 
@@ -1132,21 +1195,37 @@ def _claim_dev(root: Path, owner: str, *, host: str | None = None,
             else previous_version
         ),
     }
+    if same_owner_reclaim and existing.get("selected_generation"):
+        record["selected_generation"] = existing["selected_generation"]
     root.mkdir(parents=True, exist_ok=True)
-    path = dev_claim_path(root)
-    tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
-    tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    _write_dev_claim(root, record)
     return record
 
 
-def release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
+def release_dev(root: Path, owner: str, *, force: bool = False,
+                restore: bool = False, link_name: str = CURRENT_LINK) -> dict | None:
     """Settle a dev claim under the same selector guard as cleanup."""
-    with _publication_lease(root):
-        return _release_dev(root, owner, force=force)
+    from contextlib import ExitStack
+
+    previous = None
+    with ExitStack() as held:
+        if restore:
+            claim = read_dev_claim(root, strict=True)
+            if claim is not None and claim["owner"] != owner and not force:
+                raise DevClaimConflict(claim)
+            previous = claim.get("previous_version") if claim else None
+            if previous:
+                held.enter_context(retention_lease(root, previous))
+        held.enter_context(_publication_lease(root))
+        return _release_dev(
+            root, owner, force=force, restore=restore,
+            previous=previous, link_name=link_name,
+        )
 
 
-def _release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
+def _release_dev(root: Path, owner: str, *, force: bool = False,
+                 restore: bool = False, previous: str | None = None,
+                 link_name: str = CURRENT_LINK) -> dict | None:
     """Release ``owner``'s claim on the ``dev`` slot.
 
     Returns the released claim record (so the caller can read
@@ -1162,6 +1241,14 @@ def _release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
         return None
     if existing.get("owner") != owner and not force:
         raise DevClaimConflict(existing)
+    if restore:
+        if existing.get("previous_version") != previous:
+            raise RuntimeError("development rollback claim changed during release")
+        if previous:
+            if not is_complete(root, previous):
+                raise RuntimeError("development rollback target is not a completed runtime")
+            _activate(root, previous, link_name=link_name, link_free=True)
+            existing["restored_version"] = previous
     try:
         dev_claim_path(root).unlink()
     except FileNotFoundError:
@@ -1257,7 +1344,7 @@ def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> 
 
 
 def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
-                  pid: int | None = None) -> Path:
+                  pid: int | None = None, dev_owner: str | None = None) -> Path:
     """Publish numbered completion once, preserving exact reuse byte-for-byte.
 
     Call only after isolated health gating. Existing malformed evidence or
@@ -1284,6 +1371,8 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
     dest = marker_path(root, version)
     with _kernel_lease(root, version, kind="retention", shared=True):
         with _publication_lease(root):
+            if is_dev_generation(version):
+                _require_dev_owner(root, dev_owner)
             if version == DEV_VERSION:
                 if read_dev_claim(root, strict=True) is None:
                     raise RuntimeError("completion publication requires an explicit dev claim")
@@ -1360,54 +1449,6 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-class ConstructionTimeout(TimeoutError):
-    """The construction owner did not release its kernel lease in budget."""
-
-
-class RetentionTimeout(TimeoutError):
-    """Cleanup or publication did not release kernel ownership in budget."""
-
-
-_construction_owners = threading.local()
-
-
-def _ownership_key(root: Path, version: str) -> tuple[int, str, str]:
-    return os.getpid(), os.path.normcase(str(root.resolve())), version.lower()
-
-
-@contextmanager
-def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
-                       poll_interval: float = 0.05):
-    """Hold exclusive construction ownership for one installation/version.
-
-    This is an installer-facing Python primitive, not a shell acquire/release
-    command: the descriptor must remain in the process doing construction.
-    Recheck ``check_admission`` inside the context before any slot writes.
-    Release before unrelated reconciliation or activation/cutover locking.
-
-    POSIX uses flock; Windows uses a nonblocking LockFileEx byte lock. Closing
-    the descriptor (including process death) releases ownership. The persistent
-    lock file is never unlinked: replacing it could create a second lock inode.
-    No PID file, stale timestamp, or mkdir fallback grants ownership.
-
-    This does not pin a completed candidate against GC or replace a repair's
-    outer cutover guard. Those protocols remain separate adoption prerequisites.
-    """
-    with _kernel_lease(
-        root, version, kind="construction", shared=False,
-        timeout=timeout, poll_interval=poll_interval,
-    ):
-        owners = getattr(_construction_owners, "keys", None)
-        if owners is None:
-            owners = _construction_owners.keys = set()
-        key = _ownership_key(root, version)
-        owners.add(key)
-        try:
-            yield
-        finally:
-            owners.remove(key)
-
-
 @contextmanager
 def retention_lease(root: Path, version: str, *, payload_hash: str | None = None,
                     timeout: float = 60.0, poll_interval: float = 0.05):
@@ -1433,135 +1474,65 @@ def retention_lease(root: Path, version: str, *, payload_hash: str | None = None
         yield vdir
 
 
-def _publication_lease(root: Path, *, timeout: float = 60.0):
-    return _kernel_lease(root, "selectors", kind="publication", shared=False, timeout=timeout)
+def construction_session(root: Path, version: str, *, payload_hash: str,
+                         link_name: str = CURRENT_LINK, dev_owner: str | None = None) -> int:
+    component = _runtime_component("versioned_runtime_construction")
+    runtime = component.RuntimeOperations(
+        version_dir=version_dir,
+        _load_unique_json=_load_unique_json,
+        current_version=current_version,
+        _is_link=_is_link,
+        LAST_KNOWN_GOOD_FILE=LAST_KNOWN_GOOD_FILE,
+        retention_lease=retention_lease,
+        construction_lease=construction_lease,
+        check_admission=check_admission,
+        ADMIT_CONSTRUCT=ADMIT_CONSTRUCT,
+        ADMIT_REUSE=ADMIT_REUSE,
+        is_dev_generation=is_dev_generation,
+        _require_dev_owner=_require_dev_owner,
+        mark_complete=mark_complete,
+        slot=slot,
+        discard_failed_candidate=discard_failed_candidate,
+    )
+    return component.construction_session(
+        runtime, root, version, payload_hash=payload_hash, link_name=link_name, dev_owner=dev_owner,
+    )
 
 
-@contextmanager
-def _cleanup_lease(root: Path, version: str, *, allow_construction_owner: bool = False):
-    owns_construction = _ownership_key(root, version) in getattr(_construction_owners, "keys", ())
-    if owns_construction and not allow_construction_owner:
-        yield False
-        return
-    construction = nullcontext() if owns_construction else construction_lease(root, version, timeout=0)
-    # Catch acquisition contention only; storage failures and errors in the
-    # cleanup body propagate rather than appearing as a harmless busy slot.
-    from contextlib import ExitStack
-    with ExitStack() as stack:
-        try:
-            stack.enter_context(construction)
-            stack.enter_context(_kernel_lease(
-                root, version, kind="retention", shared=False, timeout=0,
-            ))
-            stack.enter_context(_publication_lease(root, timeout=0))
-        except (ConstructionTimeout, RetentionTimeout):
-            yield False
-            return
-        yield True
+def construction_shell_helpers(shell: str) -> str:
+    return _runtime_component("versioned_runtime_construction").construction_shell_helpers(shell)
 
 
-@contextmanager
-def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
-                  timeout: float = 60.0, poll_interval: float = 0.05):
-    import hashlib
+def discard_failed_candidate(root: Path, version: str, *,
+                             link_name: str = CURRENT_LINK, validate=None) -> bool:
+    """Delete only an unfinished candidate held by this construction owner.
 
-    if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", version):
-        raise ValueError(f"{kind} version must be a single ordinary slot name")
-    if version.endswith("."):
-        raise ValueError(f"{kind} version must not end in a dot")
-    if not math.isfinite(timeout) or timeout < 0:
-        raise ValueError(f"{kind} timeout must be finite and non-negative")
-    if not math.isfinite(poll_interval) or poll_interval <= 0:
-        raise ValueError(f"{kind} poll interval must be finite and positive")
+    ``validate`` can enforce an installation-cell ownership receipt while all
+    cleanup guards are held. It must raise on changed or unowned evidence.
+    This operation never removes completion evidence or recreates an empty slot.
+    """
+    if _ownership_key(root, version) not in getattr(_construction_owners, "keys", ()):
+        raise RuntimeError("failed candidate cleanup requires held construction ownership")
+    with _cleanup_lease(root, version, allow_construction_owner=True) as admitted:
+        if not admitted:
+            raise RuntimeError(f"failed candidate cleanup is busy: {version}")
+        vdir = version_dir(root, version)
+        if not os.path.lexists(vdir):
+            return False
+        if not vdir.is_dir() or _is_link(vdir):
+            raise RuntimeError(f"failed candidate is not an ordinary directory: {vdir}")
+        # Malformed/linked completion evidence is also immutable evidence, not
+        # permission to reclaim a candidate under a failed-build label.
+        if os.path.lexists(marker_path(root, version)):
+            raise RuntimeError(f"failed candidate has completion evidence: {version}")
+        if version.lower() in _gc_protected_versions(root, None, True, link_name):
+            raise RuntimeError(f"failed candidate is selected or in use: {version}")
+        if validate is not None:
+            validate(vdir)
+        if not _remove_slot(vdir, label="failed construction"):
+            raise RuntimeError(f"could not remove failed candidate: {vdir}")
+        return True
 
-    # Case aliases share ownership, including on case-insensitive POSIX volumes.
-    key = hashlib.sha256(version.lower().encode("utf-8")).hexdigest()
-    lock_dir = root / f".{kind}-leases"
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = lock_dir / (key + ".lock")
-    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(lock_path, flags, 0o600)
-    try:
-        opened = os.fstat(fd)
-        named = os.lstat(lock_path)
-        if (not stat.S_ISREG(named.st_mode) or
-                (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
-            raise OSError(f"{kind} lease path is not the opened ordinary file")
-        if os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
-            import msvcrt
-
-            class Overlapped(ctypes.Structure):
-                _fields_ = [
-                    ("Internal", ctypes.c_size_t), ("InternalHigh", ctypes.c_size_t),
-                    ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD),
-                    ("hEvent", wintypes.HANDLE),
-                ]
-
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.LockFileEx.argtypes = [
-                wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
-                wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped),
-            ]
-            kernel.LockFileEx.restype = wintypes.BOOL
-            kernel.UnlockFileEx.argtypes = [
-                wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
-                wintypes.DWORD, ctypes.POINTER(Overlapped),
-            ]
-            kernel.UnlockFileEx.restype = wintypes.BOOL
-            handle = msvcrt.get_osfhandle(fd)
-            overlapped = Overlapped()
-
-            def try_lock():
-                flags = 1 | (0 if shared else 2)  # fail immediately; exclusive
-                if not kernel.LockFileEx(handle, flags, 0, 1, 0, ctypes.byref(overlapped)):
-                    raise ctypes.WinError(ctypes.get_last_error())
-
-            def unlock():
-                if not kernel.UnlockFileEx(handle, 0, 1, 0, ctypes.byref(overlapped)):
-                    raise ctypes.WinError(ctypes.get_last_error())
-
-            def is_busy(exc):
-                return exc.winerror == 33  # ERROR_LOCK_VIOLATION
-        else:
-            import fcntl
-
-            def try_lock():
-                mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
-                fcntl.flock(fd, mode | fcntl.LOCK_NB)
-
-            def unlock():
-                fcntl.flock(fd, fcntl.LOCK_UN)
-
-            def is_busy(exc):
-                return exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                try_lock()
-                break
-            except OSError as exc:
-                if not is_busy(exc):
-                    raise
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    timeout_type = ConstructionTimeout if kind == "construction" else RetentionTimeout
-                    raise timeout_type(
-                        f"Timed out waiting for {kind} of versions/{version}; "
-                        "the lease owner is not identified by the surviving lock file"
-                    ) from exc
-                time.sleep(min(poll_interval, remaining))
-        try:
-            named = os.lstat(lock_path)
-            if (not stat.S_ISREG(named.st_mode) or
-                    (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
-                raise OSError(f"{kind} lease path changed while waiting")
-            yield
-        finally:
-            unlock()
-    finally:
-        os.close(fd)
 
 #: Admission decision states. A caller branches on these, never guesses from
 #: `is_complete` alone, because "incomplete" is itself two different cases
@@ -2187,8 +2158,17 @@ def main(argv: list[str] | None = None) -> int:
                     help="if the slot exists but lacks a valid completion marker "
                          "(a failed/partial prior build), remove it first so a "
                          "fresh venv is built (dotfiles #935)")
+    session_parser = sub.add_parser(
+        "construction-session", help="hold an attached installer construction/retention lifetime",
+    )
+    session_parser.add_argument("version")
+    session_parser.add_argument("--payload-hash", required=True)
+    session_parser.add_argument("--dev-owner", default=None)
+    shell_parser = sub.add_parser("construction-shell", help="render the canonical pipe adapter")
+    shell_parser.add_argument("--shell", choices=("ps1", "sh"), required=True)
     ap = sub.add_parser("activate", help="publish current-version -> <version>")
     ap.add_argument("version")
+    ap.add_argument("--dev-owner", default=None)
     ap.add_argument("--replace-nonlink", action="store_true",
                     help="POSIX first-migration: if the link path is a real dir "
                          "(legacy venv), move it aside to <name>.legacy-<ts> before "
@@ -2228,6 +2208,7 @@ def main(argv: list[str] | None = None) -> int:
     mp.add_argument("--payload-hash", default=None,
                     help="record the source payload hash for change detection")
     mp.add_argument("--pid", type=int, default=None)
+    mp.add_argument("--dev-owner", default=None)
     ip = sub.add_parser("is-complete",
                         help="exit 0 iff versions/<version> has a valid marker")
     ip.add_argument("version")
@@ -2249,7 +2230,7 @@ def main(argv: list[str] | None = None) -> int:
                      help="the caller's current source fingerprint, typically "
                           "from 'fingerprint'")
 
-    dcp = sub.add_parser("dev-claim", help="claim the mutable dev slot")
+    dcp = sub.add_parser("dev-claim", help="claim development runtime ownership")
     dcp.add_argument("--owner", required=True,
                      help="claimant ref (e.g. a worktree/session owner ref)")
     dcp.add_argument("--host", default=None)
@@ -2258,11 +2239,13 @@ def main(argv: list[str] | None = None) -> int:
                           "(typically the current-version at claim time)")
     dcp.add_argument("--force", action="store_true",
                      help="override a live claim held by a different owner")
-    drp = sub.add_parser("dev-release", help="release the mutable dev slot")
+    drp = sub.add_parser("dev-release", help="release development runtime ownership")
     drp.add_argument("--owner", required=True)
     drp.add_argument("--force", action="store_true",
                      help="release even if held by a different owner "
                           "(operator / finalize-time force-release)")
+    drp.add_argument("--restore", action="store_true",
+                    help="restore the completed predecessor before settling the claim")
     sub.add_parser("dev-status", help="print the current dev-slot claim (or null)")
 
     args = p.parse_args(argv)
@@ -2270,13 +2253,20 @@ def main(argv: list[str] | None = None) -> int:
     link_name: str = args.link_name
 
     try:
-        if args.cmd == "slot":
+        if args.cmd == "construction-session":
+            return construction_session(
+                root, args.version, payload_hash=args.payload_hash, link_name=link_name,
+                dev_owner=args.dev_owner,
+            )
+        elif args.cmd == "construction-shell":
+            print(construction_shell_helpers(args.shell))
+        elif args.cmd == "slot":
             _emit(str(slot(root, args.version, link_name=link_name,
                            clean_incomplete=args.clean_incomplete)), args.json)
         elif args.cmd == "activate":
             vdir = activate(root, args.version, link_name=link_name,
                             replace_nonlink=args.replace_nonlink,
-                            link_free=args.no_link)
+                            link_free=args.no_link, dev_owner=args.dev_owner)
             _emit({"activated": args.version, "path": str(vdir)}
                   if args.json else str(vdir), args.json)
         elif args.cmd == "current":
@@ -2315,7 +2305,8 @@ def main(argv: list[str] | None = None) -> int:
             _emit({"removed": removed} if args.json else removed, args.json)
         elif args.cmd == "mark-complete":
             dest = mark_complete(root, args.version,
-                                 payload_hash=args.payload_hash, pid=args.pid)
+                                 payload_hash=args.payload_hash, pid=args.pid,
+                                 dev_owner=args.dev_owner)
             _emit({"marked": args.version, "path": str(dest)}
                   if args.json else str(dest), args.json)
         elif args.cmd == "is-complete":
@@ -2340,7 +2331,10 @@ def main(argv: list[str] | None = None) -> int:
                                force=args.force)
             _emit(record if args.json else record, args.json)
         elif args.cmd == "dev-release":
-            record = release_dev(root, args.owner, force=args.force)
+            record = release_dev(
+                root, args.owner, force=args.force,
+                restore=args.restore, link_name=link_name,
+            )
             _emit(record if args.json else (record or {}), args.json)
         elif args.cmd == "dev-status":
             record = read_dev_claim(root)

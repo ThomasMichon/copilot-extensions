@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -10,7 +11,95 @@ from pathlib import Path
 
 import pytest
 
-from test_install_engine_adoption import ENGINE, PLUGIN, environment, function, run_ps
+from test_install_engine_adoption import (
+    ENGINE, PLUGIN, REPO, construction_bundle, environment, function, run_ps,
+)
+
+
+def stage_index_policy_sources(repository: Path, *, materialized: bool) -> Path:
+    """Publish the real owner metadata and its complete local dependency closure."""
+    payload = repository / "plugins/agent-index"
+    for relative in (
+        "plugin.json", "pyproject.toml",
+        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py",
+    ):
+        destination = payload / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(PLUGIN / relative, destination)
+    policy = runpy.run_path(str(payload / "scripts/installer_dependency_policy.py"))
+    pending = [(PLUGIN, payload)]
+    seen = set()
+    while pending:
+        source, destination = pending.pop()
+        if source in seen:
+            continue
+        seen.add(source)
+        project = policy["_toml"](source / "pyproject.toml")
+        for declarations in project.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            for declaration in declarations if isinstance(declarations, list) else [declarations]:
+                if "path" not in declaration:
+                    continue
+                library = (source / declaration["path"]).resolve()
+                target = (destination / declaration["path"]).resolve()
+                assert library.is_relative_to(REPO.resolve())
+                assert target.is_relative_to(repository.resolve())
+                shutil.copytree(
+                    library, target, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(
+                        "__pycache__", "*.pyc", ".pytest_cache", "build", "dist", "*.egg-info",
+                    ),
+                )
+                pending.append((library, target))
+    if materialized:
+        previous_path = sys.path[:]
+        try:
+            release = runpy.run_path(str(REPO / "tools/materialize_main.py"))
+            report = release["materialize_uv_editable_ref_into"](
+                source_consumer_dir=PLUGIN, dest_consumer_dir=payload, canonical_root=REPO,
+            )
+        finally:
+            sys.path[:] = previous_path
+        assert not any(message.startswith("SKIP ") for message in report), report
+    roster = json.loads((REPO / ".github/plugin/marketplace.json").read_text(encoding="utf-8"))
+    entry = next(entry for entry in roster["plugins"] if entry["name"] == "agent-index")
+    publication = repository / ".github/plugin/marketplace.json"
+    publication.parent.mkdir(parents=True)
+    publication.write_text(
+        json.dumps({"name": roster["name"], "plugins": [entry]}), encoding="utf-8",
+    )
+    roots = policy["_anchor_roots"]()
+    assert payload.resolve() in roots
+    policy["_check_project"](payload, roots, set())
+    return payload
+
+
+def engine_construction_fixture(tmp_path):
+    """Keep acquisition fixtures attached to the canonical construction protocol."""
+    for source in (REPO / "libs/versioned-runtime").glob("versioned_runtime*.py"):
+        shutil.copy2(source, tmp_path / source.name)
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, tmp_path / name)
+    return f"""
+function Get-BootstrapPython {{ '{sys._base_executable}' }}
+function Get-PayloadHash {{ 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }}
+function New-IndexVenv {{
+    param($Dir,$Python,$PythonCmd,$PreferSignedPython)
+    if ($Python -eq 'fixture_python') {{ return $true }}
+    & '{sys._base_executable}' -I -m venv --without-pip $Dir
+    if ($LASTEXITCODE -ne 0) {{ throw 'Fixture venv creation failed' }}
+    & '{sys._base_executable}' -I -c 'import os, pathlib, sys; root = pathlib.Path(sys.argv[1]); expected = pathlib.Path(sys.argv[2]); expected.parent.mkdir(exist_ok=True); expected.symlink_to(root / "bin/python") if os.name != "nt" and not expected.exists() else None' $Dir $Python
+    if ($LASTEXITCODE -ne 0) {{ throw 'Fixture interpreter layout failed' }}
+    $site = & $Python -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))'
+    if ($LASTEXITCODE -ne 0) {{ throw 'Fixture site discovery failed' }}
+    Set-Content (Join-Path $site 'torch.py') ''
+    Set-Content (Join-Path $site 'agent_index.py') ''
+    $app = Join-Path $site 'agent_index_engine'
+    New-Item -ItemType Directory $app | Out-Null
+    Set-Content (Join-Path $app '__init__.py') ''
+    Set-Content (Join-Path $app 'app.py') ''
+    return $true
+}}
+"""
 
 
 @pytest.mark.parametrize("fallback", [False, True])
@@ -22,29 +111,21 @@ def test_posix_stamp_and_new_activation_share_publication_not_build_descriptor(t
     root = tmp_path / "runtime"
     root.mkdir()
     (root / "current-version").write_text("0.9.0")
+    (root / "versions/0.9.0").mkdir(parents=True)
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
-    (scripts / "versioned_runtime.py").write_text(
-        "import pathlib, sys\n"
-        "a=sys.argv\n"
-        "if 'activate' in a:\n"
-        " pathlib.Path(a[a.index('--root')+1], 'current-version').write_text(a[a.index('activate')+1])\n"
-    )
+    construction_bundle(scripts)
     pkg = tmp_path / "new"
     pkg.mkdir()
     (pkg / "pyproject.toml").write_text('[project]\nversion = "2.0.0"\n')
     venv = root / "versions/2.0.0"
-    (venv / "bin").mkdir(parents=True)
-    py = venv / "bin/python"
-    py.write_text(f"#!/bin/sh\nexec '{sys.executable}' \"$@\"\n")
-    py.chmod(0o755)
     definitions = "\n".join(function(name, "sh") for name in (
         "_with_index_advisory_lock", "_with_index_build_lock", "_with_index_publication_lock",
         "_index_publication_fresh", "_version_lt", "_bootstrap_python", "_find_python",
         "_versioned_activate", "_write_index_stamp_file", "deploy_binstub", "do_stamp", "_write_manifest",
-        "_ensure_runtime", "_test_index_venv",
+        "_ensure_runtime", "_test_index_venv", "_versioned_slot_clean", "_versioned_mark_complete",
     ))
     prelude = f"""
 set -uo pipefail
@@ -63,12 +144,18 @@ _ok() {{ :; }}; _skip() {{ :; }}; _step() {{ :; }}; _warn() {{ echo "$*" >&2; }}
 _fail() {{ echo "$*" >&2; }}
 _source_kind() {{ echo local; }}
 _runtime_origin_under() {{ return 0; }}
+_bootstrap_python() {{ echo '{sys._base_executable}'; }}
+_payload_hash() {{ printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }}
 """
     checked, ready, attempted = (tmp_path / name for name in ("checked", "ready", "attempted"))
     worker = tmp_path / "new.sh"
     worker.write_text(prelude + f"""
 SRC_VERSION=2.0.0
 PLUGIN_DIR='{pkg}'
+VENV_PYTHON="$VENV_DIR/bin/python"
+_versioned_slot_clean || exit 97
+'{sys._base_executable}' -I -m venv --without-pip "$VENV_DIR" || exit 97
+_versioned_mark_complete || exit 97
 echo ready > '{ready}'
 deadline=$((SECONDS + 10))
 while [[ ! -f '{checked}' ]]; do ((SECONDS < deadline)) || exit 97; sleep 0.02; done
@@ -89,7 +176,6 @@ _find_python() {{ echo '{sys.executable}'; }}
 _ensure_uv() {{ return 0; }}
 _ensure_uv_index() {{ :; }}
 _new_index_venv() {{ return 1; }}
-_versioned_slot_clean() {{ :; }}
 _stop() {{ _version_lt 1.0.0 0.9.0; }}
 _ensure_runtime
 """
@@ -119,7 +205,7 @@ _version_lt() {{
         stdout, stderr = child.communicate(timeout=25)
     assert result.returncode == (1 if boundary == "preparation" else 0), result.stderr
     assert child.returncode == 0, stdout + stderr
-    assert (root / "current-version").read_text() == "2.0.0"
+    assert (root / "current-version").read_bytes() == b"2.0.0\n"
     assert (root / "payload-dir").read_text().strip() == str(pkg)
     assert json.loads((root / "deploy-manifest.json").read_text())["source"]["version"] == "2.0.0"
     # Direct stale stamp/launcher callers may not overwrite the winning payload.
@@ -199,23 +285,28 @@ exit 47
     assert (root / "payload-origin").read_text() == str(origin)
 
 
-def test_rejected_discoverable_uv_uses_pip_for_cli_server_and_engine(tmp_path):
+def test_rejected_discoverable_uv_refuses_unseasoned_cli_server_and_engine(tmp_path):
     from test_installer_publication_and_health import publication_fixture
 
     definitions, root = publication_fixture(tmp_path)
-    package = tmp_path / "package"
-    (package / "src").mkdir(parents=True)
-    broken = tmp_path / ("broken-uv.cmd" if os.name == "nt" else "broken-uv")
+    package = stage_index_policy_sources(tmp_path / "source-repository", materialized=True)
+    (package / "src").mkdir()
+    construction_bundle(package / "scripts")
+    definitions = definitions.replace(
+        f"$PSScriptRoot = '{tmp_path}'", f"$PSScriptRoot = '{package / 'scripts'}'",
+    )
+    broken = tmp_path / ("uv.cmd" if os.name == "nt" else "uv")
     calls = tmp_path / "uv-calls"
     broken.write_text(
         f'@echo off\r\necho %*>>"{calls}"\r\nexit /b 47\r\n' if os.name == "nt" else
         f'#!/bin/sh\necho "$*" >> "{calls}"\nexit 47\n'
     )
     broken.chmod(0o755)
+    construction = engine_construction_fixture(tmp_path)
     server = function("Install-ServerVenv", "ps1").replace(
         "Join-Path $serverVenvDir 'Scripts\\python.exe'", "'fixture_python'",
     )
-    result = run_ps(tmp_path, definitions + function("Install-Runtime", "ps1") +
+    result = run_ps(package / "scripts", definitions + function("Install-Runtime", "ps1") +
                     server + function("Install-Engine", "ps1") + f"""
 $PkgSrcDir = '{package / "src"}'
 $PluginDir = '{package}'
@@ -225,25 +316,35 @@ $VenvPython = 'fixture_python'; $LinkPython = $VenvPython; $LinkDir = $VenvDir
 $EngineHome = '{tmp_path / "engine"}'
 $EngineVenv = Join-Path $EngineHome 'venv'
 $EngineVenvPython = 'fixture_python'
+{construction}
+$PSScriptRoot = '{package / "scripts"}'
+# No native bare uv may escape to the host after discovery rejected the shim.
+$env:PATH = '{tmp_path}'
 $realEnsure = ${{function:Ensure-Uv}}
 function Get-Command {{
     [CmdletBinding()]param($Name, $CommandType)
     if ($Name -eq 'uv') {{ return [pscustomobject]@{{ Source='{broken}' }} }}
     if ($Name -in @('python','python3','py')) {{ return [pscustomobject]@{{ Source='{sys.executable}' }} }}
-    throw "unexpected executable lookup: $Name"
+    return Microsoft.PowerShell.Core\\Get-Command $Name -ErrorAction SilentlyContinue
 }}
 function Ensure-Uv {{
     param($InstallRoot)
     return (& $realEnsure -InstallRoot $InstallRoot -AcquireIfMissing $false)
 }}
 function fixture_python {{
-    if ($args.Count -ge 2 -and $args[0] -eq '-m' -and $args[1] -eq 'pip') {{
-        Add-Content '{tmp_path / "pip-calls"}' ($args -join ' ')
+    if ($args[0] -ne '-I' -or $args[1] -ne (Join-Path $PSScriptRoot 'installer_dependency_policy.py')) {{
+        throw 'unrestricted package installation attempted'
     }}
-    $global:LASTEXITCODE = 0
+    $policyArgs = @($args)
+    # PowerShell consumes -- at a function boundary; restore the native argv.
+    if ($policyArgs[4] -ne '--') {{
+        $policyArgs = @($policyArgs[0..3]) + @('--') + @($policyArgs[4..($policyArgs.Count - 1)])
+    }}
+    Add-Content '{tmp_path / "policy-calls"}' ($policyArgs -join ' ')
+    $policyArgs[3] = '{broken}'
+    & '{sys._base_executable}' @policyArgs
 }}
 function Invoke-IndexUvPipInstall {{ throw 'rejected uv was rediscovered for packages' }}
-function New-IndexVenv {{ param($Dir,$Python,$PythonCmd,$PreferSignedPython) return $true }}
 function Test-IndexVenv {{ param($Dir,$Python) return $false }}
 function Resolve-Zdd {{ return '{package}' }}
 function Resolve-VendoredLib {{ param($LibName) return '{package}' }}
@@ -251,13 +352,31 @@ function Get-ActivationRole {{ return 'client' }}
 function Get-SignedBasePython {{ return $null }}
 function Invoke-VersionedSlotClean {{ }}
 function Remove-ConsoleTrampolines {{ param($VenvDir) }}
-Install-Runtime
+try {{ Install-Runtime; throw 'CLI accepted rejected uv' }} catch {{
+    if ($_ -notmatch 'zdd install failed') {{ throw }}
+}}
 if ($script:UvCommand) {{ throw 'broken uv was accepted' }}
-if (-not (Install-ServerVenv -InstallRole host -PythonCmd fixture_python)) {{ throw 'server pip fallback failed' }}
-if (-not (Install-Engine -Upgrade)) {{ throw 'engine pip fallback failed' }}
+if (Install-ServerVenv -InstallRole host -PythonCmd fixture_python) {{ throw 'server accepted rejected uv' }}
+$engineFailed = $false
+try {{ $engineFailed = -not (Install-Engine -Upgrade) }} catch {{
+    if ($_ -notmatch 'construction aborted') {{ throw }}
+    $engineFailed = $true
+}}
+if (-not $engineFailed) {{ throw 'engine accepted rejected uv' }}
+if (Test-Path (Join-Path $EngineHome 'current-version')) {{ throw 'failed engine was selected' }}
+if (@(Get-ChildItem (Join-Path $EngineHome 'versions') -Directory).Count) {{ throw 'failed candidate was retained' }}
 """)
     assert result.returncode == 0, result.stderr
-    pip_calls = (tmp_path / "pip-calls").read_text().splitlines()
-    assert len(pip_calls) == 12
-    assert sum("[store,server]" in call for call in pip_calls) == 1
-    assert calls.read_text().splitlines() == ["--version", "--version"]
+    policy_calls = (tmp_path / "policy-calls").read_text().splitlines()
+    assert len(policy_calls) == 2
+    assert all("installer_dependency_policy.py --uv uv -- --python" in call for call in policy_calls)
+    uv_calls = calls.read_text().splitlines()
+    assert uv_calls.count("--version") == 2
+    settings_calls = [call for call in uv_calls if "--show-settings" in call]
+    assert len(settings_calls) >= len(policy_calls)
+    assert all("pip install" in call for call in settings_calls)
+    for call in policy_calls:
+        target = call.split("--python ", 1)[1].split(" ", 1)[0]
+        assert any(f"--python {target}" in probe for probe in settings_calls)
+    assert all(call == "--version" or "--show-settings" in call for call in uv_calls)
+    assert "dependency-seasoning: UV seasoning configuration probe failed" in result.stdout

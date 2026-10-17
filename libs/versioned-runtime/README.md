@@ -21,26 +21,32 @@ immutable and versioned".
 Unlike the other `libs/*` entries, this is **not** an installable package and has
 **no `pyproject.toml`**. The primitive must run at *install time* via the
 bootstrapping system python — **before any venv exists** — so it deliberately
-stays out of every runtime venv (no vendored-lib fan-out) and ships as a plain
-`scripts/versioned_runtime.py` file inside each Python-runtime plugin, so a
-marketplace-installed plugin is self-contained.
+stays out of runtime dependency resolution and ships as plain stdlib files:
+`versioned_runtime.py` owns slot identity/admission and selectors;
+`versioned_runtime_leases.py` owns kernel construction/retention/publication
+ownership; `versioned_runtime_construction.py` owns the finite attached protocol
+and shell adapters. The protocol receives explicit typed runtime operations,
+never reverse-imports a compatibility root. Each marketplace payload carries the
+complete adjacent family and is independently usable before any venv exists.
 
 Because plugins are pulled **independently** from the marketplace, the file
 cannot be a shared runtime import — it must physically exist in each plugin. So
 this canonical copy is **vendored (synced) byte-identically** into every Python
-runtime plugin's `scripts/` dir.
+runtime plugin's `scripts/` dir. The synchronizer and install-contract guard
+verify each companion as well as the entry file.
 
 The standalone `agent-index-service` and thin `fleet-manager` distributions also
 consume this exact primitive, without introducing a plugin or a second
 maintained source mirror. The shared `standalone_build.py` setuptools hooks
-copy the canonical file into wheel build output; each sdist carries the same
+copy the canonical family into wheel build output; each sdist carries the same
 primitive and helper bytes so a subsequent wheel build needs no repository
 checkout. The source bootstrap supports root-level and nested service project
 directories, rejects ambiguous/linked helper selection, and refuses conflicting
 included resources rather than preferring stale copies.
 Required inputs are explicit: a detected canonical library directory requires
-both canonical files, even when included copies exist. Those copies are optional
-byte-equality comparisons in a checkout; outside it, both sdist files are required.
+entry, companion and build-helper files, even when included copies exist. Those
+copies are optional byte-equality comparisons in a checkout; outside it, the
+complete sdist family is required.
 Wheel/sdist byte-equality tests and wheel RECORD bind the generated resource to the package
 artifact. Existing plugin bootstrap scripts remain self-contained and unchanged.
 The index staging adapter uses only its own installed resource, never a
@@ -56,12 +62,10 @@ Slot resolution is completion-marker strict: `current-version`,
 duplicate keys are invalid. Python readers accept valid fields in any order,
 while shell resolvers recognize the canonical field order emitted by
 `mark_complete`. Cleanup refuses an incomplete selected numbered slot with distinct-generation
-health-repair guidance, even when its recorded owner has exited. Only the mutable
-dev exception may rebuild its incomplete current slot when no live process owns
-it, atomically detaching stale references before removal. On hosts without
-reliable process enumeration (for example macOS without `/proc`), current dev
-cleanup fails conservatively unless an explicit
-`running-version.json` ownership record proves its owner is gone. Tier-3
+health-repair guidance, even when its recorded owner has exited. Legacy `dev`
+cleanup retains its process-evidence safeguards for compatibility, but new
+explicit development refreshes build distinct `dev-<generation>` slots and
+never rewrite the working environment. Tier-3
 fallback uses the same numeric-token ordering in Python, POSIX shell, and
 PowerShell, so development versions such as `dev10` sort after `dev9` without
 `packaging` or GNU `sort -V`.
@@ -88,13 +92,19 @@ this exclusive construction lease. Hold it through construction, isolated health
 gating, and publication only; release before unrelated reconciliation or
 activation/cutover coordination. A repair's outer cutover guard remains required.
 
-This API is not yet wired into shell installers. A separate `acquire` command
-that exits could not retain kernel ownership for a subsequent shell build.
-Installer adoption must also acquire candidate/rollback retention before
-construction release; construction ownership alone does not protect a ready
-candidate or authorize rewriting a published slot. Existing installer lock schemes are
-not interchangeable with this protocol until all contenders on that path adopt
-the same lock.
+Shell installers use `construction-shell --shell ps1|sh` to obtain the canonical
+attached-pipe adapter. Its finite `construction-session` supervisor holds kernel
+ownership while the caller installs dependencies. Completion rechecks the
+payload fingerprint and transfers to retention before releasing construction;
+the caller settles that retention after selection/reconciliation. Failure or
+pipe EOF reclaims only the owned unfinished candidate. Cleanup refusals remain
+errors, and an aborted constructor cannot report success. This is not a daemon
+or an `acquire` command that exits before the build it supposedly protects.
+The POSIX adapter supports stock macOS Bash 3.2 as well as newer Bash. Its
+private channel preserves caller descriptors and chains outer exit cleanup only
+after construction settlement. `INT` and `TERM` terminate through that same
+settlement rather than releasing an outer install lock or returning to a builder.
+The scoped native macOS CI lane exercises the stock `/bin/bash` lifecycle.
 
 Focused native-process tests:
 `python tools/run-plugin-tests.py agent-bridge -k construction_lease`.
@@ -158,14 +168,59 @@ ordinary builders release construction before joining cutover. Retention does
 not grant installation-cell provenance or transaction authority. The cell
 `release_runtime_slot` operation remains narrower: it can remove only an exact
 receipt-only reservation, never an owned runtime candidate or rollback slot.
-Shell-installer adoption remains separate Phase 3 work; old installers that
-do not hold construction or retention do not
-gain protection merely because this primitive ships.
+The Agent Index cell lifecycle holds construction across reservation,
+dependency installation, isolated health and completion publication. It
+transfers to candidate retention before releasing construction, then retains
+candidate/current/rollback references through selection settlement. Dependency
+installation goes through the canonical installer-engine UV wrapper; absence
+of UV refuses rather than falling back to unrestricted pip.
+
+`discard_failed_candidate(root, version, *, link_name="current", validate=None)` requires the
+caller's live construction ownership and takes exclusive retention and
+selector-publication ownership before deleting. It never recreates a slot.
+Selected/in-use candidates and any completion evidence (including malformed
+evidence) refuse. A receipt-validation callback runs inside those guards and
+must raise for foreign or changed evidence. Storage/cleanup denial raises.
+The cell adapter additionally holds receipt governance locks, validates the
+snapshot/ownership digest and exact namespace/install generations, and refuses
+cell completion evidence. This is distinct from receipt-only reservation
+release. Exception cleanup preserves the original construction error and
+reports a separate cleanup refusal; a retry revalidates and removes a prior
+unpublished candidate before reserving a clean slot.
+
+The independently shipped shell installers enroll the same attached construction
+lifetime and skip dependency writes on exact completed reuse. Existing
+installation-cell adapters retain receipt/governance validation in addition to
+kernel ownership; a copied helper alone never grants receipt authority.
+
+## Claim-owned development generations
+
+An explicit development refresh uses a new `dev-<32 lowercase hex digits>`
+generation, with editable source but immutable completed dependency content.
+`construction-session`, `mark-complete`, and `activate` accept `--dev-owner`
+and require that owner to match the current canonical `dev-claim.json`.
+Losing ownership refuses completion/publication. Activation also requires valid
+completion and records the selected generation in the claim under the selector
+guard. Same-owner reclaims retain that generation and the original rollback
+target; GC protects both while claimed.
+
+`dev-release --owner <owner> --restore` pins the original predecessor, validates
+its completion, restores selection and settles the claim under the publication
+guard. A failed restore retains ownership and leaves the working generation
+selected. Legacy claims and ordinary `release_dev(..., restore=False)` remain
+compatible. New installers never refresh an existing `versions/dev` environment.
+See [`claim-owned development generations`](../../docs/patterns/mutable-dev-slot.md).
 
 Focused native-process tests:
 `python tools/run-plugin-tests.py agent-bridge -k runtime_retention`.
 Five smoke cases run in the existing changed-plugin guard lane; the broader
 process, death, and ordering matrix runs in the full/manual promotion portfolio.
+
+Failed-construction native-process checks:
+`python tools/run-plugin-tests.py agent-bridge -k failed_construction`.
+Cell receipt/reservation, native-shell failure, same-version retry and
+release-before-settlement checks:
+`python tools/run-plugin-tests.py agent-index -k cell_construction`.
 
 ## Create-once completion publication
 

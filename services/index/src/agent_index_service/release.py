@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.tags import parse_tag
 from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
@@ -40,6 +41,7 @@ _SCHEMA = "agent-index-service.release"
 _DISTRIBUTIONS = frozenset({
     "agent-index-service", "agent-index", "agent-zdd", "agent-procutil", "agent-dropin-registry",
 })
+_FLEET_DISTRIBUTIONS = _DISTRIBUTIONS | {"fleet-manager"}
 _FIELDS = {
     "schema", "schema_version", "source_commit", "service_version", "core_version",
     "config_schema_version", "artifacts",
@@ -47,6 +49,7 @@ _FIELDS = {
 _ARTIFACT_FIELDS = {"distribution", "version", "file", "sha256"}
 _LIMIT = 1024 * 1024
 _MEMBER_LIMIT = 64 * 1024 * 1024
+_NATIVE_MEMBER_LIMIT = 256 * 1024 * 1024
 _TOTAL_LIMIT = 256 * 1024 * 1024
 _ARCHIVE_LIMIT = 512 * 1024 * 1024
 _ENTRY_LIMIT = 10000
@@ -61,11 +64,20 @@ class ReleaseError(ValueError):
     """The bundle or pinned descriptor violates the release contract."""
 
 
+def _distributions(profile: str) -> frozenset[str]:
+    if profile == "native":
+        return _DISTRIBUTIONS
+    if profile == "fleet":
+        return _FLEET_DISTRIBUTIONS
+    raise ReleaseError("release profile must be native or fleet")
+
+
 @dataclass(frozen=True)
 class _Wheel:
     artifact: dict[str, str]
     requirements: tuple[Requirement, ...]
     extras: frozenset[str]
+    requires_python: str = ""
 
 
 def _text(value: Any, label: str) -> str:
@@ -154,7 +166,10 @@ def _member_path(name: str, *, directory: bool = False) -> None:
         raise ReleaseError(f"unsafe wheel member path: {name!r}")
 
 
-def _record(archive: zipfile.ZipFile, entries: list[zipfile.ZipInfo], directory: str) -> None:
+def _record(
+    archive: zipfile.ZipFile, entries: list[zipfile.ZipInfo], directory: str, *,
+    native: bool = False,
+) -> None:
     """Validate wheel RECORD per PyPA, with explicit verifier resource limits.
 
     Regular files require hashes of sha256 strength or better and sizes.
@@ -162,6 +177,7 @@ def _record(archive: zipfile.ZipFile, entries: list[zipfile.ZipInfo], directory:
     Directory ZIP entries carry no payload and need not appear in RECORD.
     """
     record_name = f"{directory}/RECORD"
+    member_limit = _NATIVE_MEMBER_LIMIT if native else _MEMBER_LIMIT
     records = [entry for entry in entries if entry.filename.rsplit("/", 1)[-1] == "RECORD"]
     if len(records) != 1 or records[0].filename != record_name:
         raise ReleaseError("wheel requires exactly one RECORD in its dist-info directory")
@@ -173,7 +189,7 @@ def _record(archive: zipfile.ZipFile, entries: list[zipfile.ZipInfo], directory:
         mode = stat.S_IFMT(entry.external_attr >> 16)
         if mode not in {0, stat.S_IFDIR if entry.is_dir() else stat.S_IFREG}:
             raise ReleaseError("wheel members must be regular files or directories")
-        if entry.file_size > _MEMBER_LIMIT or (entry.is_dir() and entry.file_size):
+        if entry.file_size > member_limit or (entry.is_dir() and entry.file_size):
             raise ReleaseError("wheel exceeds member decompression limit")
         if not entry.is_dir():
             files[entry.filename] = entry
@@ -228,7 +244,7 @@ def _record(archive: zipfile.ZipFile, entries: list[zipfile.ZipInfo], directory:
             while block := stream.read(256 * 1024):
                 count += len(block)
                 total += len(block)
-                if count > _MEMBER_LIMIT or total > _TOTAL_LIMIT:
+                if count > member_limit or total > _TOTAL_LIMIT:
                     raise ReleaseError("wheel exceeds streaming decompression limit")
                 if hasher is not None:
                     hasher.update(block)
@@ -240,7 +256,11 @@ def _record(archive: zipfile.ZipFile, entries: list[zipfile.ZipInfo], directory:
             raise ReleaseError(f"RECORD digest mismatch: {name}")
 
 
-def _metadata(stream: BinaryIO, filename: str, digest: str) -> _Wheel:
+def _metadata(
+    stream: BinaryIO, filename: str, digest: str, *,
+    distributions: frozenset[str] = _DISTRIBUTIONS,
+    native: bool = False,
+) -> _Wheel:
     try:
         project, file_version, build, tags = parse_wheel_filename(filename)
     except InvalidWheelFilename as exc:
@@ -266,12 +286,12 @@ def _metadata(stream: BinaryIO, filename: str, digest: str) -> _Wheel:
             or _version(info_version, "dist-info version") != str(file_version)
         ):
             raise ReleaseError("dist-info identity does not match wheel filename")
-        _record(archive, entries, directory)
+        _record(archive, entries, directory, native=native)
         message = _message(archive, metadata[0])
         wheel_message = _message(archive, wheel[0])
     name = canonicalize_name(_text(message.get("Name"), "metadata Name"))
     version = _version(message.get("Version"), "metadata Version")
-    if name not in _DISTRIBUTIONS:
+    if name not in distributions:
         raise ReleaseError(f"unknown bundled distribution: {name}")
     if name != project or version != str(file_version):
         raise ReleaseError("wheel filename/project/version identity mismatch")
@@ -317,13 +337,21 @@ def _metadata(stream: BinaryIO, filename: str, digest: str) -> _Wheel:
     normalized_extras = frozenset(canonicalize_name(extra) for extra in extras)
     if len(normalized_extras) != len(extras):
         raise ReleaseError("duplicate Provides-Extra declaration")
+    requires_python = str(message.get("Requires-Python", ""))
+    try:
+        SpecifierSet(requires_python)
+    except InvalidSpecifier as exc:
+        raise ReleaseError("invalid Requires-Python metadata") from exc
     return _Wheel(
         {"distribution": name, "version": version, "file": filename, "sha256": digest},
-        tuple(requirements), normalized_extras,
+        tuple(requirements), normalized_extras, requires_python,
     )
 
 
-def _wheel(root: Path, filename: str) -> _Wheel:
+def _wheel(
+    root: Path, filename: str, *, distributions: frozenset[str] = _DISTRIBUTIONS,
+    native: bool = False,
+) -> _Wheel:
     path = root / _filename(filename)
     before = _stat(path)
     if before.st_size > _ARCHIVE_LIMIT:
@@ -336,15 +364,40 @@ def _wheel(root: Path, filename: str) -> _Wheel:
         for block in iter(lambda: stream.read(256 * 1024), b""):
             digest.update(block)
         stream.seek(0)
-        result = _metadata(stream, filename, digest.hexdigest())
+        result = _metadata(
+            stream, filename, digest.hexdigest(), distributions=distributions, native=native,
+        )
         _unchanged(before, os.fstat(stream.fileno()))
     _unchanged(before, _stat(path))
     return result
 
 
-def _dependencies(wheels: dict[str, _Wheel]) -> None:
-    if set(wheels) != _DISTRIBUTIONS:
-        raise ReleaseError("bundle must contain exactly the five required distributions")
+def inspect_wheel(path: Path, *, distributions: frozenset[str], native: bool = False) -> dict:
+    """Reuse bounded RECORD/metadata validation for an explicitly permitted wheel set.
+
+    Does not resolve dependencies, execute wheel code or attest acquisition trust.
+    """
+    try:
+        wheel = _wheel(_root(path.parent), path.name, distributions=distributions, native=native)
+        return {
+            "artifact": wheel.artifact,
+            "requires_dist": [str(req) for req in wheel.requirements],
+            "provides_extra": sorted(wheel.extras),
+            "requires_python": wheel.requires_python,
+        }
+    except (
+        OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError, zlib.error,
+    ) as exc:
+        raise ReleaseError(f"cannot inspect wheel: {type(exc).__name__}") from exc
+
+
+def _dependencies(wheels: dict[str, _Wheel], profile: str) -> None:
+    if set(wheels) != _distributions(profile):
+        raise ReleaseError(
+            "bundle must contain exactly the "
+            + ("five" if profile == "native" else "six")
+            + " required distributions"
+        )
     for wheel in wheels.values():
         for requirement in wheel.requirements:
             target = canonicalize_name(requirement.name)
@@ -379,18 +432,32 @@ def _dependencies(wheels: dict[str, _Wheel]) -> None:
     }
     if not {"agent-zdd", "agent-procutil", "agent-dropin-registry"} <= unconditional:
         raise ReleaseError("core must declare the bundled shared-library requirements")
+    if profile == "fleet":
+        for wheel, dependency, extras in (
+            (service, "agent-index", {"store", "server", "fleet"}),
+            (core, "fleet-manager", {"auth"}),
+        ):
+            if "fleet" not in wheel.extras or not any(
+                canonicalize_name(req.name) == dependency
+                and req.marker is not None and str(req.marker) == 'extra == "fleet"'
+                and extras <= {canonicalize_name(extra) for extra in req.extras}
+                for req in wheel.requirements
+            ):
+                raise ReleaseError(f"fleet profile requires an explicit {dependency} extra dependency")
 
 
-def _assemble(wheels: list[_Wheel], commit: str) -> dict[str, Any]:
+def _assemble(wheels: list[_Wheel], commit: str, profile: str) -> dict[str, Any]:
     by_name: dict[str, _Wheel] = {}
     for wheel in wheels:
         name = wheel.artifact["distribution"]
         if name in by_name:
             raise ReleaseError(f"duplicate bundled distribution: {name}")
         by_name[name] = wheel
-    _dependencies(by_name)
+    _dependencies(by_name, profile)
     return {
-        "schema": _SCHEMA, "schema_version": 1, "source_commit": commit,
+        "schema": _SCHEMA, "schema_version": 1 if profile == "native" else 2,
+        **({"profile": profile} if profile == "fleet" else {}),
+        "source_commit": commit,
         "service_version": by_name["agent-index-service"].artifact["version"],
         "core_version": by_name["agent-index"].artifact["version"],
         "config_schema_version": 1,
@@ -398,17 +465,20 @@ def _assemble(wheels: list[_Wheel], commit: str) -> dict[str, Any]:
     }
 
 
-def build_descriptor(bundle: Path, *, source_commit: str) -> dict:
-    """Read five wheels and return normalized schema 1 without writing files.
+def build_descriptor(bundle: Path, *, source_commit: str, profile: str = "native") -> dict:
+    """Read the explicitly selected first-party closure without writing files.
 
     source_commit is supplied provenance, not an attestation of release approval.
     All immediate .whl artifacts participate; third-party wheels are rejected.
     """
     commit = _commit(source_commit)
+    distributions = _distributions(profile)
     try:
         root = _root(bundle)
         filenames = sorted(path.name for path in root.iterdir() if path.suffix.lower() == ".whl")
-        return _assemble([_wheel(root, name) for name in filenames], commit)
+        return _assemble(
+            [_wheel(root, name, distributions=distributions) for name in filenames], commit, profile,
+        )
     except (
         OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError, zlib.error,
     ) as exc:
@@ -428,13 +498,16 @@ def _reject_constant(value: str) -> None:
     raise ReleaseError(f"invalid JSON constant: {value}")
 
 
-def verify_descriptor(path: Path, *, expected_source_commit: str) -> dict:
+def verify_descriptor(
+    path: Path, *, expected_source_commit: str, profile: str = "native",
+) -> dict:
     """Verify pinned revision, exact schema, wheel bytes/metadata and requirements.
 
     expected_source_commit must come from the trusted release controller. Hashes
     do not authenticate the descriptor or prove main-release or migration safety.
     """
     expected = _commit(expected_source_commit)
+    distributions = _distributions(profile)
     try:
         before = _stat(path)
         with path.open("rb") as stream:
@@ -447,32 +520,39 @@ def verify_descriptor(path: Path, *, expected_source_commit: str) -> dict:
         descriptor = _keys(json.loads(
             text.decode("utf-8"), object_pairs_hook=_unique_object,
             parse_constant=_reject_constant,
-        ), _FIELDS, "descriptor")
-        if descriptor["schema"] != _SCHEMA or any(
-            type(descriptor[key]) is not int or descriptor[key] != 1
-            for key in ("schema_version", "config_schema_version")
+        ), _FIELDS | ({"profile"} if profile == "fleet" else set()), "descriptor")
+        if (
+            descriptor["schema"] != _SCHEMA
+            or type(descriptor["schema_version"]) is not int
+            or descriptor["schema_version"] != (1 if profile == "native" else 2)
+            or type(descriptor["config_schema_version"]) is not int
+            or descriptor["config_schema_version"] != 1
+            or profile == "fleet" and descriptor["profile"] != profile
         ):
             raise ReleaseError("unsupported descriptor/config schema")
         if _commit(descriptor["source_commit"]) != expected:
             raise ReleaseError("descriptor source_commit does not match trusted revision")
         artifacts = descriptor["artifacts"]
-        if not isinstance(artifacts, list) or len(artifacts) != len(_DISTRIBUTIONS):
-            raise ReleaseError("descriptor requires exactly five artifacts")
+        if not isinstance(artifacts, list) or len(artifacts) != len(distributions):
+            raise ReleaseError(
+                "descriptor requires exactly " + ("five" if profile == "native" else "six")
+                + " artifacts"
+            )
         root = _root(path.parent)
         wheels: list[_Wheel] = []
         for raw in artifacts:
             artifact = _keys(raw, _ARTIFACT_FIELDS, "artifact")
-            if _text(artifact["distribution"], "artifact distribution") not in _DISTRIBUTIONS:
+            if _text(artifact["distribution"], "artifact distribution") not in distributions:
                 raise ReleaseError("unexpected artifact distribution")
             version = _version(artifact["version"], "artifact version")
             digest = artifact["sha256"]
             if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
                 raise ReleaseError("sha256 must be exactly 64 lowercase hexadecimal characters")
-            wheel = _wheel(root, _filename(artifact["file"]))
+            wheel = _wheel(root, _filename(artifact["file"]), distributions=distributions)
             if wheel.artifact != {**artifact, "version": version}:
                 raise ReleaseError("artifact digest or wheel identity does not match descriptor")
             wheels.append(wheel)
-        result = _assemble(wheels, expected)
+        result = _assemble(wheels, expected, profile)
         if (
             _version(descriptor["service_version"], "service_version") != result["service_version"]
             or _version(descriptor["core_version"], "core_version") != result["core_version"]

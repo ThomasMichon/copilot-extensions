@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import artifact_builder_cli as cli
@@ -21,8 +24,267 @@ PINS = {"setuptools": "84.0.0", "wheel": "0.46.0", "packaging": "25.0"}
 HASHES = {name: ("a" * 64,) for name in PINS}
 
 
+@pytest.mark.parametrize(
+    "workflow",
+    sorted(path.name for path in (Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml")),
+)
+def test_workflow_root_uv_resolvers_use_canonical_seasoning(workflow):
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
+    resolver = re.compile(r"(?:^|\n|&&|;)\s*uv\s+(?:run|pip\s+install|tool\s+(?:run|install))\b")
+    for job_name, job in document.get("jobs", {}).items():
+        for step in job.get("steps", []):
+            cwd = step.get(
+                "working-directory",
+                job.get("defaults", {}).get("run", {}).get(
+                    "working-directory", document.get("defaults", {}).get("run", {}).get("working-directory", "."),
+                ),
+            )
+            if cwd not in (".", "./"):
+                continue
+            assert not resolver.search(step.get("run", "")), (
+                workflow, job_name, step.get("name"), "root has no pyproject seasoning policy",
+            )
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "payload-cwd-contract.yml"])
+def test_workflow_host_pytest_provisioning_is_seasoned(workflow):
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
+    job_names = (
+        ["windows-python-artifact-builder", "test-runner-linux", "test-runner-windows",
+         "installation-context-windows",
+         "coverage-guided-selection-integration"]
+        if workflow == "ci.yml" else ["linux", "windows"]
+    )
+    for job_name in job_names:
+        consumers = 0
+        for step in document["jobs"][job_name]["steps"]:
+            run = step.get("run", "")
+            if "python -m pytest" not in run:
+                continue
+            consumers += 1
+            provision = "python tools/seasoned_uv.py --uv uv -- --system pytest"
+            assert provision in run, (job_name, step.get("name"))
+            assert run.index(provision) < run.index("python -m pytest")
+            assert "--no-deps" not in run
+            assert "--no-build-isolation" not in run
+        assert consumers
+
+
+def test_ci_python_floor_preserves_interpreter_and_hash_contract():
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    steps = document["jobs"]["checks"]["steps"]
+    index = next(i for i, step in enumerate(steps)
+                 if step.get("name") == "Promotion artifact compatibility (Python 3.10 floor)")
+    floor = steps[index]
+    assert steps[index - 1]["uses"] == steps[index + 1]["uses"] == "actions/setup-python@v5"
+    assert steps[index - 1]["with"]["python-version"] == "3.10"
+    assert steps[index + 1]["with"]["python-version"] == "3.12"
+    assert steps[index - 1]["if"] == floor["if"] == steps[index + 1]["if"]
+    assert floor["timeout-minutes"] == 2
+    run = floor["run"]
+    assert (
+        "python tools/seasoned_uv.py --uv uv -- --system "
+        "--only-binary :all: --require-hashes -r tools/artifact_validation_requirements.txt &&"
+    ) in run
+    assert "python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml tomli &&" in run
+    assert "python -m pytest -q tools/test_promotion_python_artifacts.py" in run
+    assert "--no-config" not in run
+    assert "--index-url" not in run
+
+
+@pytest.mark.parametrize("changed", [
+    "tools/seasoned_public_feed.py",
+    "worktree-manager/scripts/picker-snapshot/install.py",
+    "tools/seasoned_uv.py",
+    "tools/dependency_age.py",
+    "tools/check-dependency-age.py",
+    "libs/installer-engine/installer_dependency_policy.py",
+    "plugins/demo/pyproject.toml",
+    ".github/actions/package-lock.json",
+    "tools/artifact_validation_requirements.txt",
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+])
+def test_ci_dependency_policy_changes_trigger_age_guard(changed):
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    step = next(step for step in document["jobs"]["checks"]["steps"]
+                if step.get("id") == "dependency-age")
+    expression = re.search(r"grep -Eq\s*\\\n\s*'([^']+)'", step["run"])
+    assert expression is not None
+    assert re.search(expression.group(1), changed), changed
+
+
+def _artifact_scope(job_name: str) -> tuple[dict, str]:
+    root = Path(__file__).resolve().parents[1]
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
+    detector = next(step for step in jobs[job_name]["steps"]
+                    if step.get("id") == "python-artifact-builder")
+    expression = re.search(r"grep -Eq\s*\\\n\s*'([^']+)'", detector["run"])
+    assert expression is not None
+    return jobs, expression.group(1)
+
+
+def test_windows_source_contracts_use_the_existing_second_budget_without_dropping_cases():
+    jobs, _ = _artifact_scope("checks")
+    builder = jobs["windows-python-artifact-builder"]
+    candidate = jobs["promotion-candidate-windows"]
+    assert builder["timeout-minutes"] == candidate["timeout-minutes"] == 5
+    assert candidate["needs"] == "windows-python-artifact-builder"
+    composed = next(step for step in builder["steps"]
+                    if step.get("name") == "Composed promotion artifact contracts (Windows)")
+    source = next(step for step in candidate["steps"]
+                  if step.get("name") == "Source-owned qualification and publication contracts (Windows)")
+    assert source["if"] == "needs.windows-python-artifact-builder.outputs.run == 'true'"
+    assert " -k " not in source["run"]
+    for name in (
+        "test_qualify_promotion_candidate.py", "test_promotion_source_identity.py",
+        "test_reuse_promotion_artifacts.py", "test_publish_candidate_artifacts.py",
+        "test_promotion_source_alias.py", "test_release_publication_boundary.py",
+        "test_rollback_release.py",
+    ):
+        assert composed["run"].count("tools/" + name) == 0
+        assert source["run"].count("tools/" + name) == 1
+    for name in (
+        "test_promotion_control.py", "test_promotion_python_artifacts.py",
+        "test_promotion_wheel_sources.py", "test_promotion_workflow_adapter.py",
+    ):
+        assert composed["run"].count("tools/" + name) == 1
+    for gate in ("pr-gate", "promotion-gate"):
+        assert {"windows-python-artifact-builder", "promotion-candidate-windows"} <= set(jobs[gate]["needs"])
+
+
+@pytest.mark.parametrize("job_name", ["checks", "windows-python-artifact-builder"])
+@pytest.mark.parametrize("changed", [
+    ".gitattributes", "plugins/demo/.gitattributes", "libs/library/src/.gitattributes",
+    "worktree-manager/.gitattributes", "tools/.gitattributes",
+    ".changefiles/source-bump.json", ".github/plugin/marketplace.json",
+    "plugins/demo/src/demo/__init__.py", "plugins/demo/pyproject.toml",
+    "plugins/demo/plugin.json", "plugins/demo/libs/library/README.md",
+    "plugins/demo/packaged-assets.json", "plugins/demo/docs/copied.md",
+    "libs/library/src/library/__init__.py", "libs/library/pyproject.toml", "libs/library/LICENSE",
+    "worktree-manager/bin/launch-session.sh", "fleet-manager/pyproject.toml",
+    "services/index/pyproject.toml", "services/dispatch/src/service.py",
+    "docs/patterns/entity-relationship-model.md",
+    *("tools/" + name + ".py" for name in (
+        "materialize_main", "materialize_installer_engine", "materialize_launch_wrapper_assets",
+        "nested_uv_editable_ref", "uv_editable_ref", "installer_engine_ref",
+        "launch_wrapper_assets_ref", "standalone_consumers", "accumulate_bumps", "changefile",
+        "seasoned_uv", "materialized_candidate_inventory", "validate_materialized_candidate",
+        "test_validate_materialized_candidate", "promotion_candidate", "promotion_control",
+        "build_python_artifacts", "artifact_builder_cli", "build_toolchain_lock",
+        "public_toolchain_source", "seasoned_public_feed", "governed_feed_trust",
+        "promotion_python_artifacts", "publish_python_artifacts", "promotion_artifact_readiness",
+        "test_promotion_python_artifacts", "test_public_toolchain_source",
+    )),
+])
+def test_ci_artifact_scope_covers_source_and_recipe_inputs(job_name: str, changed: str) -> None:
+    _, expression = _artifact_scope(job_name)
+    assert re.search(expression, changed), (job_name, changed)
+
+
+@pytest.mark.parametrize("job_name", ["checks", "windows-python-artifact-builder"])
+@pytest.mark.parametrize("changed", [
+    "README.md", "TESTING.md", "docs/unrelated.md", "efforts/active/example/README.md",
+    "libs-sibling/library/pyproject.toml", "services/other/pyproject.toml",
+    ".gitattributes.backup", "docs/.gitattributes.backup",
+    "tools/materialize_main.py.backup", "tools/unrelated.py",
+])
+def test_ci_artifact_scope_excludes_unrelated_paths(job_name: str, changed: str) -> None:
+    _, expression = _artifact_scope(job_name)
+    assert not re.search(expression, changed), (job_name, changed)
+
+
+def test_ci_artifact_scope_covers_local_recipe_import_closure() -> None:
+    root = Path(__file__).resolve().parents[1]
+    pending = [
+        "materialize_main", "build_python_artifacts", "promotion_python_artifacts",
+        "publish_python_artifacts", "promotion_artifact_readiness",
+        "materialized_candidate_inventory", "validate_materialized_candidate",
+    ]
+    visited: set[str] = set()
+    _, expression = _artifact_scope("checks")
+    while pending:
+        module = pending.pop()
+        path = root / "tools" / f"{module}.py"
+        if module in visited or not path.is_file():
+            continue
+        visited.add(module)
+        assert re.search(expression, path.relative_to(root).as_posix()), module
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                pending.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                pending.append(node.module)
+
+
+def test_ci_artifact_scope_covers_declared_canonical_copies() -> None:
+    root = Path(__file__).resolve().parents[1]
+    _, expression = _artifact_scope("checks")
+    sources: set[str] = set()
+    for declaration in (root / "plugins").rglob("*assets.json"):
+        manifest = json.loads(declaration.read_text(encoding="utf-8"))
+        sources.update(f"{manifest['canonicalDir']}/{name}" for name in manifest["files"])
+    for path in (root / "plugins").rglob("*.md"):
+        with path.open(encoding="utf-8") as stream:
+            pointer = re.match(r"<!--\s*VENDOR_POINTER:\s*source=(\S+)\s+kind=file\s*-->", stream.readline())
+        if pointer:
+            sources.add(pointer.group(1))
+    assert sources
+    assert all(re.search(expression, source) for source in sources), sorted(sources)
+
+
+def test_ci_artifact_scopes_keep_existing_bounded_platform_recipes() -> None:
+    jobs, linux = _artifact_scope("checks")
+    _, windows = _artifact_scope("windows-python-artifact-builder")
+    assert linux == windows
+    for job_name, step_name in (
+        ("checks", "Governed Python artifact build/toolchain-lock guard tests"),
+        ("checks", "Promotion artifact compatibility (Python 3.10 floor)"),
+        ("windows-python-artifact-builder", "Composed promotion artifact contracts (Windows)"),
+    ):
+        step = next(step for step in jobs[job_name]["steps"] if step.get("name") == step_name)
+        assert step["if"] == "steps.python-artifact-builder.outputs.run == 'true'"
+        assert "tools/test_promotion_python_artifacts.py" in step["run"]
+        assert "continue-on-error" not in step
+        if "3.10" in step_name:
+            assert "materialized_producer_verifier_roundtrip" in step["run"]
+    candidate = jobs["promotion-candidate-windows"]
+    assert candidate["needs"] == "windows-python-artifact-builder"
+    step = next(step for step in candidate["steps"]
+                if step.get("name") == "Native candidate readiness and retry contracts (Windows)")
+    assert step["if"] == "needs.windows-python-artifact-builder.outputs.run == 'true'"
+    assert "tools/test_promotion_artifact_readiness.py" in step["run"]
+    assert "tools/test_promotion_candidate_retry.py" in step["run"]
+    assert "continue-on-error" not in candidate
+
+
+@pytest.mark.parametrize("workflow,job_name,step_name", [
+    ("ci.yml", "checks", "Required source metadata contract tests"),
+    ("source-attribution-departures.yml", "refresh-departed-source-attribution", "Install locked metadata parser without lifecycle scripts"),
+    ("workflow-lockdown-guard.yml", "source-attribution", "Install locked metadata parser without lifecycle scripts"),
+    ("workflow-lockdown-guard.yml", "refresh-source-attribution", "Install locked metadata parser without lifecycle scripts"),
+])
+def test_workflow_action_parsers_use_existing_npm_owner(workflow, job_name, step_name):
+    root = Path(__file__).resolve().parents[1]
+    document = yaml.safe_load((root / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
+    step = next(step for step in document["jobs"][job_name]["steps"] if step.get("name") == step_name)
+    assert step.get("working-directory", ".") == "."
+    assert step["run"].splitlines()[0] == (
+        "python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions "
+        "--health-module commonmark --health-module parse5"
+    )
+    assert not re.search(r"\bnpm\s+(?:ci|install)\b", step["run"])
+
+
 @pytest.fixture
 def isolated(monkeypatch):
+    monkeypatch.setattr(btl, "run_uv_install", lambda uv, args, **kwargs: btl.subprocess.run(
+        [uv, "pip", "install", *args], **kwargs,
+    ))
     monkeypatch.setattr(
         public, "_opaque_index_identity",
         lambda value: hashlib.sha256(value.encode()).hexdigest(),
@@ -62,6 +324,24 @@ def isolated(monkeypatch):
 
     monkeypatch.setattr(btl.subprocess, "run", run)
     return calls
+
+
+def test_macos_construction_lane_uses_stock_shell_and_required_gate():
+    root = Path(__file__).resolve().parents[1]
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
+    job = jobs["construction-macos"]
+    assert job["runs-on"] == "macos-latest"
+    assert "construction-macos" in jobs["pr-gate"]["needs"]
+    assert "continue-on-error" not in job
+    step = next(step for step in job["steps"] if step.get("name", "").startswith("Native Bash"))
+    assert step["env"]["VERSIONED_RUNTIME_TEST_BASH"] == "/bin/bash"
+    assert step["env"]["VERSIONED_RUNTIME_TEST_SOURCE"].endswith(
+        "/libs/versioned-runtime/versioned_runtime.py"
+    )
+    assert 'test "${BASH_VERSINFO[0]}" -eq 3' in step["run"]
+    assert "tools/seasoned_uv.py" in step["run"]
+    assert "--noconftest" in step["run"]
+    assert "test_failed_construction.py" in step["run"]
 
 
 def test_public_toolchain_pins_and_reuses(tmp_path, monkeypatch, isolated):

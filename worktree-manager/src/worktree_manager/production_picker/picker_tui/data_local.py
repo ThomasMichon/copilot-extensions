@@ -14,9 +14,10 @@ import socket
 
 from machine_transport import (
     AmbiguousMachineError,
-    find_machine_entry,
     is_local_machine,
     local_execution_platform,
+    resolve_machine_selection,
+    is_observed_local_name,
 )
 
 from worktree_manager import engine_client
@@ -73,9 +74,13 @@ def is_local(machine: str, env: str) -> bool:
     single ``(machine, env)`` pair rather than the whole roster.
 
     The ``env``-gate and hostname tuple fast path stay Picker-specific.
-    Logical entries use the shared platform-aware lookup through ``roster``;
-    legacy native entries and registry outages retain the shared
-    ``is_local_machine`` compatibility behavior.
+    Every readable roster uses the shared platform-aware lookup through
+    ``roster``, including unscoped native/guest pairs. Registry outages retain
+    the shared ``is_local_machine`` fallback with the actual guest context.
+    An empty roster uses that same fallback for case-insensitive observed
+    native hostnames, not just the exact-case hostname tuple fast path.
+    An unregistered configured native name also retains its self fallback when
+    the entire readable roster is legacy/unscoped; guest and scoped targets do not.
     """
     matches_raw_local = (machine, env) == LOCAL
     if not machine or env != LOCAL[1]:
@@ -90,16 +95,30 @@ def is_local(machine: str, env: str) -> bool:
         return False
     except (FileNotFoundError, ValueError, KeyError):
         entries = {}
-    if any(m.execution_platform for m in entries.values()):
+    if entries:
+        actual = local_execution_platform()
         try:
-            target = find_machine_entry(entries, machine, reject_ambiguous=True)
+            target = resolve_machine_selection(
+                entries, machine, actual,
+            ).entry
             local = roster.local_entry(
-                entries, config.machine, LOCAL[0], local_execution_platform(),
+                entries, config.machine, LOCAL[0], actual,
             )
         except ValueError:
             return False
+        if (
+            target is None and actual in ("windows", "linux")
+            and machine.casefold() == (config.machine or "").casefold()
+            and not any(entry.execution_platform for entry in entries.values())
+        ):
+            return True
         if target is None and local is None:
             return matches_raw_local
+        if target is None and local is not None:
+            return is_observed_local_name(
+                machine, config_machine=config.machine, entries=entries,
+                environment=actual, real_hostname=LOCAL[0],
+            )
         return target is not None and target is local
     if matches_raw_local:
         return True
@@ -115,6 +134,7 @@ def is_local(machine: str, env: str) -> bool:
         # e.g. ``host.example.test`` vs. a registry entry's short
         # ``hostname: host``.
         real_hostname=LOCAL[0],
+        guest=local_execution_platform() == "wsl",
     )
 
 

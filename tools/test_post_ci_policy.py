@@ -121,7 +121,7 @@ def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
     assert "main-gate" not in ci["jobs"]
     gate = host["jobs"]["main-gate"]
     assert gate["name"] == "main source gate"
-    assert gate["permissions"] == {"contents": "read"}
+    assert gate["permissions"] == {"contents": "read", "actions": "read"}
     assert gate["timeout-minutes"] == 2
     assert "needs" not in gate
     assert gate["steps"][-1]["env"] == {
@@ -131,12 +131,15 @@ def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
         "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
         "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
         "PR_COMMITS": "${{ github.event.pull_request.commits }}",
+        "HEAD_REPOSITORY": "${{ github.event.pull_request.head.repo.full_name }}",
+        "TARGET_REPOSITORY": "${{ github.repository }}",
+        "GH_TOKEN": "${{ github.token }}",
     }
     checkout, fetch = gate["steps"][:2]
     assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0}
-    assert checkout["if"] == fetch["if"]
-    assert "github.event.pull_request.user.login == github.repository_owner" in checkout["if"]
-    assert "!startsWith(github.event.pull_request.head.ref, 'release/promote-')" in checkout["if"]
+    assert checkout["if"] == "github.event.pull_request.user.login == github.repository_owner"
+    assert "github.event.pull_request.user.login == github.repository_owner" in fetch["if"]
+    assert "!startsWith(github.event.pull_request.head.ref, 'release/promote-')" in fetch["if"]
     assert fetch["env"] == {"HEAD_SHA": "${{ github.event.pull_request.head.sha }}"}
     assert 'fetch --no-tags --no-recurse-submodules origin "$HEAD_SHA"' in fetch["run"]
     assert "checkout" not in fetch["run"]
@@ -316,6 +319,9 @@ def baseline_fixture(tmp_path):
     baseline = candidate / "tools/module-size-baseline.json"
     baseline.parent.mkdir()
     baseline.write_text("{}\n", encoding="utf-8")
+    (baseline.parent / "promotion_control.py").write_bytes(
+        (ROOT / "tools/promotion_control.py").read_bytes(),
+    )
     other = candidate / "source.py"
     other.write_text("value = 1\n", encoding="utf-8")
     git_run("add", ".")
@@ -388,7 +394,7 @@ def test_real_main_gate_rejects_baseline_automation(baseline_fixture, branch):
 
 
 @pytest.mark.parametrize("shape,expected", [
-    ("promotion", True), ("foreign-promotion", False), ("workflow", True),
+    ("unowned-promotion", False), ("foreign-promotion", False), ("workflow", True),
     ("mixed", False), ("state", True), ("state-plus-source", False),
 ])
 def test_trusted_main_gate_preserves_admitted_shapes(baseline_fixture, shape, expected):
@@ -412,8 +418,13 @@ def test_trusted_main_gate_preserves_admitted_shapes(baseline_fixture, shape, ex
         f'cd "{candidate.as_posix()}"\n{host["jobs"]["main-gate"]["steps"][-1]["run"]}',
         HEAD_REF=branch, PR_AUTHOR=author, REPO_OWNER="owner",
         BASE_SHA=base, HEAD_SHA=head, PR_COMMITS="1",
+        HEAD_REPOSITORY="example/project", TARGET_REPOSITORY="example/project",
     )
     assert (result.returncode == 0) is expected, result.stdout + result.stderr
+    if shape == "unowned-promotion":
+        # A prefix alone is no longer authority; authenticated positive owning
+        # runs and actual control-byte comparisons are exercised by the boundary tests.
+        assert "owning run/base" in result.stderr
 
 
 @pytest.mark.parametrize("valid", [True, False])

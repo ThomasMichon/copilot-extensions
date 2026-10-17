@@ -1,0 +1,25 @@
+{
+  "operation": "rehydrate-manager-progress",
+  "events": [
+    {
+      "event": "agent_message",
+      "data": {"text": "PROGRESS: build=failed"}
+    },
+    {
+      "event": "agent_message",
+      "data": {"text": "PROGRESS: build=ok", "history_replay": true}
+    }
+  ],
+  "expected": {
+    "progress": {"build": "failed"},
+    "historical_output_is_fresh": false
+  },
+  "captured_from": {
+    "commit": "1f8c7242444df382d4649d292cd118a164d982c2",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 38,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+    "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
+    "source_sha256": "30ae8988e1ad5215aaed4b3b2e5c00121f8cfa3e72b9a7ae1ca89ff3905273c9"
+  }
+}

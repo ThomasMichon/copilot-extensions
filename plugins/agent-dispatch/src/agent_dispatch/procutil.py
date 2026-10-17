@@ -63,6 +63,7 @@ __all__ = [
     "terminate_process_tree",
     "terminate_ssh_process_tree",
     "runtime_root",
+    "spawn_dispatch_daemon",
     "windowless_daemon_kwargs",
     "windowless_python",
     "windowless_python_env",
@@ -705,6 +706,44 @@ def runtime_root() -> Path:
     is **never** under the Copilot plugin payload. Safe as a daemon's working
     directory and as a spawn ``cwd``."""
     return install_dir()
+
+
+def spawn_dispatch_daemon(
+    argv: list[str],
+    *,
+    log_name: str,
+    env: dict[str, str] | None = None,
+    console_children: bool = True,
+    cwd: Path | None = None,
+) -> subprocess.Popen:
+    """Launch a long-lived agent-dispatch process through ``spawn_daemon``.
+
+    Runs from the runtime root (or ``cwd``), breaks away from a kill-on-close
+    Job around the caller, and appends stdout/stderr to ``<runtime root>/
+    <log_name>`` so a startup crash leaves a traceback.
+    ``console_children=True`` (the coordinator and supervisor, which keep
+    shelling out to console programs) keeps one hidden console those children
+    inherit; a process without recurring console children passes ``False``.
+    Raises ``OSError`` when the launch fails.
+    """
+    from agent_procutil import spawn_daemon
+
+    root = Path(os.path.abspath(runtime_root()))
+    root.mkdir(parents=True, exist_ok=True)
+    words: list[str] = []
+    for arg in argv[3:5]:
+        if str(arg).startswith("-"):
+            break
+        words.append(str(arg))
+    return spawn_daemon(
+        argv,
+        cwd=cwd or root,
+        log_path=root / log_name,
+        env=env,
+        console_children=console_children,
+        # The subcommand only: later arguments may carry a credential.
+        display=" ".join(["agent_dispatch", *words]),
+    )
 
 
 def relocate_off_payload() -> None:

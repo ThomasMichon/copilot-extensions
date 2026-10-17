@@ -1,0 +1,9 @@
+{
+  "comment": "Batch observation read-fixture seeding to keep native validation within its unchanged budget",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

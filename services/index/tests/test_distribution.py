@@ -14,19 +14,21 @@ from packaging.version import Version
 from agent_index_service import __version__
 
 
-def test_normal_wheel_metadata_and_console_program(tmp_path):
+def test_normal_wheel_metadata_and_console_program(distribution_root):
     source = Path(__file__).resolve().parents[1]
-    build = tmp_path / "build-source"
+    build = distribution_root / "build-source"
     build.mkdir()
     for name in ("pyproject.toml", "README.md", "setup.py", "_build_runtime_resource.py", "MANIFEST.in"):
         shutil.copy2(source / name, build / name)
     canonical = source.parent.parent / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    primitive = distribution_root / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive.parent.mkdir(parents=True)
     shutil.copy2(canonical, primitive)
+    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+        shutil.copy2(canonical.with_name(name), primitive.with_name(name))
     shutil.copy2(canonical.with_name("standalone_build.py"), primitive.with_name("standalone_build.py"))
     shutil.copytree(source / "src", build / "src", ignore=shutil.ignore_patterns("__pycache__"))
-    output = tmp_path / "wheel"
+    output = distribution_root / "wheel"
     output.mkdir()
     result = subprocess.run(
         [sys.executable, "-c",
@@ -48,7 +50,15 @@ def test_normal_wheel_metadata_and_console_program(tmp_path):
         core_requirements = [
             Requirement(req) for req in requirements if Requirement(req).name == "agent-index"
         ]
-        assert len(core_requirements) == 2
+        assert len(core_requirements) == 3
+        assert {
+            tuple(sorted(requirement.extras)) for requirement in core_requirements
+        } == {(), ("server", "store"), ("fleet", "server", "store")}
+        fleet_requirement = next(req for req in core_requirements if "fleet" in req.extras)
+        assert fleet_requirement.marker is not None
+        assert fleet_requirement.marker.evaluate({"extra": "fleet"})
+        assert not fleet_requirement.marker.evaluate({"extra": "native"})
+        assert not fleet_requirement.marker.evaluate({"extra": ""})
         for requirement in core_requirements:
             assert not requirement.specifier.contains("0.1.0.dev210", prereleases=True)
             assert not requirement.specifier.contains("0.10.11.dev1", prereleases=True)

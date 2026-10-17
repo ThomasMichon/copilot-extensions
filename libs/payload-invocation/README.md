@@ -46,6 +46,15 @@ which must preserve legacy behavior for absent/false policy and fail closed
 instead of falling back when namespaced evidence is requested, malformed, or
 blocked.
 
+### Test isolation
+
+Copied runtime fixtures materialize the selected consumer's declared dependencies
+into the copied payload. Their import paths contain only staged sources, never
+canonical checkout libraries. The Worktrees import/version regression also runs
+without Python site initialization, loading only the external YAML dependency
+explicitly; missing staged transport dependencies cannot be hidden by an ambient
+editable installation.
+
 ### Source-qualified command binding
 
 `catalogBinding: true` opts a required-context runtime into the additive

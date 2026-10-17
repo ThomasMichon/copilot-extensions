@@ -1,0 +1,9 @@
+{
+  "comment": "Restore registered receiving-project configuration in the claims readiness regression fixture",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

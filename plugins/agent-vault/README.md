@@ -26,6 +26,16 @@ they receive attributable installation context.
 3. **Install KeePassXC** with `keepassxc-cli` on PATH (or at `C:\Program Files\KeePassXC\keepassxc-cli.exe` on Windows).
 4. **Point the CLI at a database** with `KPDB`, a named vault, or a repo-local `.agent-vault.json`.
 
+## Runtime removal
+
+The installer's `uninstall` action serializes with install/update and keeps vault
+state by default. Explicit `-Purge` / `--purge` removes runtime/config contents,
+but retains the transaction-lock files and `.install-stage` coordination;
+the install directory may remain. Normal self-staging reap removes dead-owner
+stages on later invocations.
+An uninstall preview neither takes the transaction lock nor removes contents;
+normal transient payload self-staging still applies.
+
 ## Configuration
 
 Fast single-vault setup:

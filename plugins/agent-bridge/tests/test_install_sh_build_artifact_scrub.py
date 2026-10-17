@@ -25,8 +25,12 @@ anything -- but the wrapper does not scrub again itself on that path.
 from __future__ import annotations
 
 import os
+import importlib.util
+import json
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -55,10 +59,56 @@ def _resolve_bash() -> str | None:
     return shutil.which("bash", path=filtered)
 _BASH = _resolve_bash()
 
-pytestmark = pytest.mark.skipif(
-    _BASH is None or os.name == "nt",
-    reason="a POSIX bash environment is not available",
-)
+def _owned_plugin_fixture(tmp_path: Path) -> Path:
+    repository = tmp_path / "repository"
+    plugin_dir = repository / "plugins" / "agent-bridge"
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True)
+    # Minimal release-shaped projects avoid copying dev-only editable paths.
+    # Trust comes from the helper's publisher/roster graph, not install inputs.
+    manifest = {
+        "name": "agent-bridge",
+        "version": "1.0.0",
+        "repository": "https://github.com/ThomasMichon/copilot-extensions",
+    }
+    (plugin_dir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    roster = repository / ".github" / "plugin" / "marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(json.dumps({
+        "name": "copilot-extensions",
+        "plugins": [{
+            "name": manifest["name"], "version": manifest["version"],
+            "source": "plugins/agent-bridge",
+        }],
+    }), encoding="utf-8")
+    (plugin_dir / "pyproject.toml").write_text(
+        '[project]\nname = "agent-bridge"\nversion = "1.0.0"\n'
+        'dependencies = ["ssh-manager", "agent-procutil", "agent-dropin-registry"]\n'
+        '[tool.uv.sources]\n'
+        'ssh-manager = { path = "../../libs/ssh-manager" }\n'
+        'agent-procutil = { path = "libs/agent-procutil" }\n'
+        'agent-dropin-registry = { path = "libs/dropin-registry" }\n',
+        encoding="utf-8",
+    )
+    for name, source in (
+        ("ssh-manager", repository / "libs" / "ssh-manager"),
+        ("agent-procutil", plugin_dir / "libs" / "agent-procutil"),
+        ("agent-dropin-registry", plugin_dir / "libs" / "dropin-registry"),
+    ):
+        source.mkdir(parents=True)
+        (source / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\nversion = "1.0.0"\n',
+            encoding="utf-8",
+        )
+    shutil.copyfile(
+        _ENGINE_SH.with_name("installer_dependency_policy.py"),
+        scripts / "installer_dependency_policy.py",
+    )
+    shutil.copyfile(
+        _ENGINE_SH.with_name("installer_dependency_config.py"),
+        scripts / "installer_dependency_config.py",
+    )
+    return plugin_dir
 
 
 def _extract_sh_functions(source: Path, *names: str) -> str:
@@ -74,13 +124,52 @@ def _extract_sh_functions(source: Path, *names: str) -> str:
 def _run_harness(
     plugin_dir: Path, uv_stub_body: str, extra_script: str
 ) -> subprocess.CompletedProcess:
+    if _BASH is None or os.name == "nt":
+        pytest.skip("a POSIX bash environment is not available")
+    fake_bin = plugin_dir / "bin"
+    fake_bin.mkdir()
+    # Shell functions are invisible to the policy's UV subprocess; keep the
+    # physical settings probe separate from install residue/counter events.
+    uv = fake_bin / "uv"
+    uv.write_text(
+        "#!/bin/sh\n"
+        "for arg do\n"
+        '    if [ "$arg" = "--show-settings" ]; then\n'
+        "        cat <<'SETTINGS'\n"
+        "PipInstallSettings { settings: PipSettings {\n"
+        "    index_locations: IndexLocations { indexes: [], flat_index: [], },\n"
+        "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\n"
+        "}, }\n"
+        "SETTINGS\n"
+        "        exit 0\n"
+        "    fi\n"
+        "done\n"
+        + f"{shlex.quote(sys.executable)} -c "
+        + shlex.quote(
+            "import datetime, sys; args = sys.argv[1:]; "
+            "assert args[:2] == ['pip', 'install']; "
+            "assert '--quiet' in args and '--reinstall' in args; "
+            "cutoff = datetime.datetime.fromisoformat(args[args.index('--exclude-newer') + 1].replace('Z', '+00:00')); "
+            "assert cutoff <= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)"
+        )
+        + ' "$@" || exit 99\n'
+        + uv_stub_body
+        + '\nuv "$@"\n',
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    policy = plugin_dir / "scripts" / "installer_dependency_policy.py"
+    if not policy.is_file():
+        policy = _ENGINE_SH.with_name("installer_dependency_policy.py")
     harness = plugin_dir / "harness.sh"
     harness.write_text(
         "#!/bin/sh\nset -eu\n"
         f'PLUGIN_DIR="{plugin_dir}"\n'
+        f"INSTALLER_ENGINE_DEPENDENCY_POLICY={shlex.quote(str(policy))}\n"
         + _extract_sh_functions(
             _ENGINE_SH,
             "test_is_sre_module_mismatch",
+            "invoke_uv_pip_install_resilient",
         )
         + "\n\n"
         + _extract_sh_functions(
@@ -90,11 +179,10 @@ def _run_harness(
         )
         + """
 _warn() { echo "WARN: $*" >&2; }
+sleep() { :; }
 
 """
-        + uv_stub_body
-        + "\n\n"
-        + extra_script
+        + extra_script.replace("fake-python", shlex.quote(sys.executable))
         + "\n",
         encoding="utf-8",
     )
@@ -103,7 +191,8 @@ _warn() { echo "WARN: $*" >&2; }
         [_BASH, str(harness)],
         capture_output=True,
         text=True,
-        env=os.environ,
+        env={**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
+        cwd=plugin_dir,
         timeout=20,
         check=True,
     )
@@ -114,6 +203,64 @@ def _seed_build_residue(plugin_dir: Path) -> None:
     (plugin_dir / "build" / "lib" / "some_pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
     (plugin_dir / "some_pkg.egg-info").mkdir()
     (plugin_dir / "some_pkg.egg-info" / "PKG-INFO").write_text("stub\n", encoding="utf-8")
+
+
+def test_fixture_local_sources_have_canonical_ownership(tmp_path: Path) -> None:
+    plugin_dir = _owned_plugin_fixture(tmp_path)
+    helper = plugin_dir / "scripts" / "installer_dependency_policy.py"
+    spec = importlib.util.spec_from_file_location("fixture_dependency_policy", helper)
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    roots = policy._anchor_roots()
+    expected = {
+        plugin_dir.resolve(),
+        (plugin_dir.parents[1] / "libs" / "ssh-manager").resolve(),
+        (plugin_dir / "libs" / "agent-procutil").resolve(),
+        (plugin_dir / "libs" / "dropin-registry").resolve(),
+    }
+    assert set(roots) == expected
+    for source in expected:
+        policy._check_requirement(str(source), tmp_path, roots, set())
+    uv_script = tmp_path / "uv.py"
+    uv_script.write_text(
+        f"#!{sys.executable}\n"
+        "import datetime, sys\n"
+        "arguments = sys.argv[1:]\n"
+        "assert arguments[:2] == ['pip', 'install']\n"
+        "if '--show-settings' in arguments:\n"
+        "    print('PipInstallSettings { settings: PipSettings {\\n"
+        "    index_locations: IndexLocations { indexes: [], flat_index: [], },\\n"
+        "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\\n"
+        "}, }')\n"
+        "    sys.exit(0)\n"
+        "assert '--reinstall' in arguments and '--quiet' in arguments\n"
+        "cutoff = datetime.datetime.fromisoformat(arguments[arguments.index('--exclude-newer') + 1].replace('Z', '+00:00'))\n"
+        "assert cutoff <= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)\n"
+        "print('INSTALL:0')\n",
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        uv = tmp_path / "uv.cmd"
+        uv.write_text(
+            f'@echo off\n"{sys.executable}" "{uv_script}" %*\n', encoding="utf-8"
+        )
+    else:
+        uv = tmp_path / "uv"
+        uv_script.rename(uv)
+        uv.chmod(0o755)
+    for source in expected:
+        result = subprocess.run(
+            [sys.executable, "-I", str(helper), "--uv", str(uv), "--",
+             "--python", sys.executable, str(source), "--quiet"],
+            cwd=plugin_dir, capture_output=True, text=True, timeout=20,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "INSTALL:0"
+    unrelated = plugin_dir.parent / "unrelated-plugin"
+    unrelated.mkdir()
+    with pytest.raises(policy.DependencyPolicyError, match="outside"):
+        policy._check_requirement(str(unrelated), tmp_path, roots, set())
 
 
 def test_successful_install_scrubs_build_and_egg_info(tmp_path: Path) -> None:
@@ -321,10 +468,8 @@ def test_local_vendored_source_dir_is_also_scrubbed(tmp_path: Path) -> None:
     the same setuptools src-layout and accumulate the identical stale
     build/egg-info residue -- a ``$PLUGIN_DIR``-only scrub never reaches it,
     so passing the actual source dir must scrub that tree too."""
-    plugin_dir = tmp_path / "plugin"
-    plugin_dir.mkdir()
-    vendored_dir = tmp_path / "ssh-manager"
-    vendored_dir.mkdir()
+    plugin_dir = _owned_plugin_fixture(tmp_path)
+    vendored_dir = plugin_dir.parents[1] / "libs" / "ssh-manager"
     _seed_build_residue(vendored_dir)
     _seed_src_layout_egg_info(vendored_dir)
     uv_stub = """
@@ -349,12 +494,13 @@ def test_local_vendored_source_dir_scrub_does_not_touch_unrelated_plugin_dir(
 ) -> None:
     """The vendored-source scrub is additive, not a replacement: $PLUGIN_DIR
     residue unrelated to the vendored install must be left alone."""
-    plugin_dir = tmp_path / "plugin"
-    plugin_dir.mkdir()
+    plugin_dir = _owned_plugin_fixture(tmp_path)
     unrelated = plugin_dir / "unrelated.txt"
     unrelated.write_text("keep me\n", encoding="utf-8")
-    vendored_dir = tmp_path / "ssh-manager"
-    vendored_dir.mkdir()
+    untouched_plugin = plugin_dir.parent / "unrelated-plugin"
+    untouched_plugin.mkdir()
+    _seed_build_residue(untouched_plugin)
+    vendored_dir = plugin_dir.parents[1] / "libs" / "ssh-manager"
     _seed_build_residue(vendored_dir)
     uv_stub = """
 uv() { echo 'Installed 1 package'; return 0; }
@@ -370,6 +516,8 @@ fi
     assert "EXIT:0" in result.stdout
     assert not (vendored_dir / "build").exists()
     assert unrelated.exists()
+    assert (untouched_plugin / "build" / "lib" / "some_pkg" / "mod.py").exists()
+    assert (untouched_plugin / "some_pkg.egg-info" / "PKG-INFO").exists()
 
 
 def test_transitively_resolved_lib_under_payload_libs_dir_is_also_scrubbed(
@@ -391,14 +539,11 @@ def test_transitively_resolved_lib_under_payload_libs_dir_is_also_scrubbed(
     repeatedly, self-reintroducing after every manual hot-patch. The scrub
     must reach every immediate child of ``libs/`` unconditionally, not only
     the libs an explicit scrub_dir call site happens to name."""
-    plugin_dir = tmp_path / "plugin"
-    plugin_dir.mkdir()
+    plugin_dir = _owned_plugin_fixture(tmp_path)
     procutil_dir = plugin_dir / "libs" / "agent-procutil"
-    procutil_dir.mkdir(parents=True)
     _seed_build_residue(procutil_dir)
     _seed_src_layout_egg_info(procutil_dir)
     dropin_dir = plugin_dir / "libs" / "dropin-registry"
-    dropin_dir.mkdir(parents=True)
     _seed_build_residue(dropin_dir)
     # The stub `uv` asserts the residue is already gone by the time it's
     # invoked (not merely by the time the wrapper returns) -- proving the

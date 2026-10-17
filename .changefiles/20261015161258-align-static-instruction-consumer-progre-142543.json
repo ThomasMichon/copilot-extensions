@@ -1,0 +1,9 @@
+{
+  "comment": "Align native standalone instruction preflight assertions with framed launch events and bound fixture copying without changing deadlines.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

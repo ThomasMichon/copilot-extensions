@@ -103,6 +103,7 @@ def test_actual_session_hook_stamps_only_metadata(
     scripts = gate.parent
     payload = scripts.parent
     for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py", "versioned_runtime.py",
+                 "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                  "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     (payload / "plugin.json").write_text('{"name":"agent-index","version":"9.9.9"}')

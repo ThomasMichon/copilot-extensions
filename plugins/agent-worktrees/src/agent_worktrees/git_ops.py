@@ -50,13 +50,11 @@ _REPOSITORY_CONTEXT_ENV = frozenset({
 })
 
 
-def repository_identity_env() -> dict[str, str]:
-    """Return ambient process state without inherited Git context.
-
-    Repository identity probes supply their checkout via ``git -C``; inherited
-    repo/config-selection vars are removed so they cannot override it (others remain).
+def repository_identity_env(environment: dict[str, str] | None = None) -> dict[str, str]:
+    """Remove inherited Git context; probes supply their checkout via ``git -C``.
+    Other environment variables remain unchanged.
     """
-    env = env_scrub.scrub_python_runtime_env(os.environ.copy())
+    env = env_scrub.scrub_python_runtime_env(dict(os.environ if environment is None else environment))
     for name in list(env):
         upper = name.upper()
         if (
@@ -158,6 +156,7 @@ def git(
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
+    auth_acquisition: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a git command with consistent error handling.
 
@@ -176,21 +175,27 @@ def git(
             disable to internal git ops). #3707.
         kill_tree: If True (real timeout), kill the whole tree on a stall -- :mod:`push_timeout`.
         isolated_repository: Ignore inherited Git repo/config selectors; use cwd.
+        auth_acquisition: Record update-auth use only after this acquisition child runs.
     Returns:
         CompletedProcess with stdout/stderr as strings.
     """
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
     env = repository_identity_env() if isolated_repository else os.environ.copy()
+    from .update_auth_context import repository_environment, run_acquisition
+    env = repository_environment(env)
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
-    if kill_tree and timeout is not None:
-        result = push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
-    else:
-        result = subprocess.run(
+
+    def execute():
+        if kill_tree and timeout is not None:
+            return push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
+        return subprocess.run(
             cmd, cwd=cwd, capture_output=capture, text=True,
             encoding="utf-8", errors="replace", env=env, timeout=timeout,
             **no_window_kwargs(),
         )
+
+    result = run_acquisition(execute, repository=True) if auth_acquisition else execute()
     if check and result.returncode != 0:
         raise GitError(cmd, result.returncode, result.stderr.strip())
     return result
@@ -288,12 +293,15 @@ class FastForwardResult:
     - ``orphan``      -- no merge base with upstream; skipped.
     - ``gone``        -- the worktree path/.git is missing; skipped.
     - ``ff-failed``   -- the fast-forward merge itself failed; skipped.
+
+    ``fetch_error``: the requested fetch failed (compared to the last-known ref).
     """
 
     updated: bool
     reason: str
     behind: int = 0
     ahead: int = 0
+    fetch_error: str | None = None
 
 
 @dataclass
@@ -683,20 +691,20 @@ DEFAULT_FETCH_TIMEOUT = 30.0
 
 
 def fetch(
-    remote: str, *, cwd: str | Path, timeout: float | None = DEFAULT_FETCH_TIMEOUT
+    remote: str, *, cwd: str | Path, timeout: float | None = DEFAULT_FETCH_TIMEOUT,
+    isolated_repository: bool = False,
 ) -> None:
     """Fetch from a remote (auto-authenticating cross-account remotes; #29).
 
-    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`) so an
-    unreachable remote can't hang the caller indefinitely: a stall past the
-    bound is surfaced as a :class:`GitError` (returncode 124, the timeout
-    convention), which every current caller already handles as a best-effort
-    fetch failure. Pass ``timeout=None`` for the historical unbounded behavior.
+    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`): a stall past it is a
+    :class:`GitError` (returncode 124), a best-effort fetch failure to every caller;
+    ``timeout=None`` is unbounded.
     """
     try:
         git(
             *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet",
-            cwd=cwd, timeout=timeout,
+            cwd=cwd, timeout=timeout, isolated_repository=isolated_repository,
+            auth_acquisition=True,
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(
@@ -746,52 +754,50 @@ def fast_forward_worktree(
     function never rebases, never creates a merge commit, and never discards
     local commits.  When ``do_fetch`` is True the remote is fetched first so
     the ahead/behind comparison and fast-forward target are against the
-    freshest upstream; a fetch failure (e.g. offline) is non-fatal and the
-    comparison falls back to the already-known upstream ref.
+    freshest upstream; a fetch failure (e.g. offline) is non-fatal: it falls back to
+    the already-known upstream ref and the result carries ``fetch_error``.
     """
     path = Path(worktree_path)
     if not path.exists() or not (path / ".git").exists():
         return FastForwardResult(updated=False, reason="gone")
 
     upstream = f"{remote}/{default_branch}"
-
+    fetch_error: str | None = None
     if do_fetch and has_remote(remote, cwd=path):
         try:
             fetch(remote, cwd=path)
-        except Exception:
-            # Offline or auth failure -- compare against the local upstream ref.
-            pass
+        except Exception as exc:
+            # Offline or auth failure: compare against the local upstream ref, but report it.
+            fetch_error = str(getattr(exc, "stderr", "") or exc).strip() or type(exc).__name__
+
+    def _result(updated: bool, reason: str, **counts: int) -> FastForwardResult:
+        return FastForwardResult(updated=updated, reason=reason, fetch_error=fetch_error, **counts)
 
     if not ref_exists(upstream, cwd=path):
-        return FastForwardResult(updated=False, reason="no-upstream")
-
+        return _result(False, "no-upstream")
     if not is_clean(cwd=path):
-        return FastForwardResult(updated=False, reason="dirty")
+        return _result(False, "dirty")
 
     branch = _get_current_branch_safe(path)
     if branch is None:
-        return FastForwardResult(updated=False, reason="detached")
+        return _result(False, "detached")
 
     mb = git("merge-base", upstream, branch, cwd=path, check=False)
     if mb.returncode != 0:
-        return FastForwardResult(updated=False, reason="orphan")
+        return _result(False, "orphan")
     merge_base = mb.stdout.strip()
 
     ahead = _rev_count(f"{merge_base}..{branch}", cwd=path)
     behind = _rev_count(f"{branch}..{upstream}", cwd=path)
 
     if ahead > 0:
-        return FastForwardResult(
-            updated=False,
-            reason="diverged" if behind > 0 else "ahead",
-            ahead=ahead, behind=behind,
-        )
+        return _result(False, "diverged" if behind > 0 else "ahead", ahead=ahead, behind=behind)
     if behind == 0:
-        return FastForwardResult(updated=False, reason="up-to-date")
+        return _result(False, "up-to-date")
 
     if not merge_ff(upstream, cwd=path):
-        return FastForwardResult(updated=False, reason="ff-failed", behind=behind)
-    return FastForwardResult(updated=True, reason="updated", behind=behind)
+        return _result(False, "ff-failed", behind=behind)
+    return _result(True, "updated", behind=behind)
 
 
 def worktree_suffix(worktree_id: str) -> str:
@@ -1368,20 +1374,10 @@ def _auth_config_args_for_url(url: str) -> list[str]:
 
 
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
-    """Build ``-c http.extraheader=...`` args to auth as the remote's owner.
-
-    Returns ``[]`` when no override is needed or possible (non-GitHub remote,
-    ``gh`` unavailable, owner is not an authenticated ``gh`` account, or the
-    owner **is** the active ``gh`` account).
-
-    The override exists for the cross-account case: the repo is owned by a
-    different account than the active ``gh`` account, so a plain push would
-    403. But when the owner *is* the active account, the default credential
-    helper already authenticates correctly; injecting the active account's
-    ``gh`` OAuth token would *override* that helper with a token that may lack
-    push scope, turning a working push into a 403 (#900). So skip injection in
-    that case and let the credential helper do its job.
-    """
+    """Use legacy cross-account headers only outside auth-managed update scopes."""
+    from .update_auth_context import managed_repository
+    if managed_repository():
+        return []
     url = _remote_url(remote, cwd=cwd)
     if not url:
         return []

@@ -60,12 +60,12 @@ def _is_parent_python_variable(name: str, *, windows: bool) -> bool:
     return candidate in _PYTHON_PARENT_ENV
 
 
-def _engine_environment() -> dict[str, str]:
+def _engine_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
     """Build a clean environment for the independently installed engine."""
     windows = os.name == "nt"
     env = {
         key: value
-        for key, value in os.environ.items()
+        for key, value in (os.environ if environment is None else environment).items()
         if not _is_parent_python_variable(key, windows=windows)
     }
     env["PYTHONUTF8"] = "1"
@@ -639,7 +639,7 @@ def resolve_launch_plan(
     args = ["resolve", "--json"]
     require_staging = bool(seed) or bool(defer_new_seed)
     if require_staging:
-        args.append("--stage-launch-seed")
+        args += ["--stage-launch-seed", "--require-native-seed"]
     if base:
         args.append("--base")
     elif new:
@@ -669,9 +669,12 @@ def resolve_launch_plan(
         )
     except EngineError as e:
         detail = _engine_error_detail(e)
-        if require_staging and "unrecognized arguments" in detail and "--stage-launch-seed" in detail:
+        if require_staging and "unrecognized arguments" in detail and any(
+            flag in detail for flag in ("--stage-launch-seed", "--require-native-seed")
+        ):
             raise EngineFeatureUnavailable(
-                "the installed engine predates staged launch-prompt ownership; "
+                "the installed engine predates staged launch-prompt ownership "
+                "with an atomic native-transport fence; "
                 "update agent-worktrees before launching this prompt"
             ) from e
         if (

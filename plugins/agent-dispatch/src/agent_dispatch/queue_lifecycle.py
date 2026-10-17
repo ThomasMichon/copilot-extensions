@@ -57,6 +57,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
         worker_id: str,
         *,
         owner_session_id: str | None = None,
+        expected_owner_session_id: str | None = None,
+        expected_generation: int | None = None,
         now: float | None = None,
     ) -> Task:
         """Move a ``claimed`` task to ``started`` (owner must match)."""
@@ -81,6 +83,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
             idempotent_replay=True,
             reject_if_held=True,
             start_acquisition_authority=authority,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_generation=expected_generation,
         )
 
     def complete(

@@ -402,6 +402,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
 
+    guest_parser = subparsers.add_parser("guest-register")
+    guest_parser.add_argument("--distribution", required=True)
+    guest_status_parser = subparsers.add_parser("guest-status")
+    guest_status_parser.add_argument("--distribution")
+
     source_parser = subparsers.add_parser("source-id")
     source_parser.add_argument("--source-json")
     source_parser.add_argument("--source-file")
@@ -666,7 +671,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if hasattr(arguments, "legacy_probe_json")
             else None
         )
-        if arguments.action == "source-id":
+        if arguments.action == "guest-register":
+            result = register_guest_environment(arguments.distribution)
+        elif arguments.action == "guest-status":
+            result = inspect_guest_environment(distribution=arguments.distribution)
+        elif arguments.action == "source-id":
             if descriptor is None:
                 _fail("source-id requires --source-json or --source-file.")
             result = source_identity(
@@ -896,6 +905,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.write("\n")
         if arguments.action == "probe-legacy" and not result["allowMutation"]:
             return 3
+        if arguments.action == "guest-status" and result["status"] != "ready":
+            return 1
         return 0
     except InstallationContextError as error:
         print(f"installation-context: {error}", file=sys.stderr)

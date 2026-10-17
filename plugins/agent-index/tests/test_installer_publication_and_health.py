@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from test_install_engine_adoption import FAKE_PYTHON, environment, function, run_ps
+from test_install_engine_adoption import environment, function, run_ps
 
 
 @pytest.mark.parametrize("failure", ["filesystem", "probe"])
@@ -207,9 +207,12 @@ def test_posix_actual_interpreter_health_and_repair(tmp_path, mode):
         "#!/usr/bin/env bash\n"
         f'echo "$*" >> "{log}"\n'
         '[[ "$1" == venv && "$3" == --allow-existing && "$#" == 3 ]] || exit 97\n'
-        'mkdir -p "$2/bin"; echo fixture > "$2/pyvenv.cfg"\n'
-        f"printf '%s' {shlex.quote(FAKE_PYTHON)} > \"$2/bin/python\"\n"
-        'chmod +x "$2/bin/python"\n',
+        f"exec {shlex.quote(sys._base_executable)} -I -c "
+        + shlex.quote(
+            "import pathlib, sys, venv; root = pathlib.Path(sys.argv[1]); "
+            "python = root / 'bin/python'; python.unlink(missing_ok=True); "
+            "venv.EnvBuilder(with_pip=False, symlinks=True).create(root)"
+        ) + ' "$2"\n',
         encoding="utf-8",
     )
     uv.chmod(0o755)
@@ -220,6 +223,7 @@ set -euo pipefail
 . '{Path(__file__).resolve().parents[3] / "libs/installer-engine/installer-engine.sh"}'
 _warn() {{ echo "$*" >&2; }}
 UV_COMMAND='{uv}'
+VENV_DIR='{directory}'
 if _test_index_venv '{directory}' '{python}'; then initial=healthy; else initial=invalid; fi
 echo "$initial"
 _new_index_venv '{directory}' '{python}' forbidden-base 1
@@ -240,6 +244,7 @@ def test_posix_bad_created_venv_fails_explicitly(tmp_path):
         pytest.skip("native POSIX bash is unavailable")
     directory = tmp_path / "venv"
     script = f"""
+VENV_DIR='{directory}'
 {function("_test_index_venv", "sh")}
 {function("_new_index_venv", "sh")}
 _warn() {{ echo "$*" >&2; }}

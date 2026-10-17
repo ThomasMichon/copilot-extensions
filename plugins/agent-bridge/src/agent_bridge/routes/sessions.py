@@ -21,8 +21,6 @@ from ..attention_wait import (
     evaluate_owned_attention,
 )
 from ..models import (
-    AnswerAskUserRequest,
-    AnswerPermissionRequest,
     AttentionReason,
     AttentionWaitResponse,
     CursorAckRequest,
@@ -64,6 +62,9 @@ from .prompts import (  # noqa: F401 -- preserved public route imports
     submit_native_bound_prompt,
     submit_prompt,
 )
+from .answers import (  # noqa: F401 -- preserved public route imports
+    answer_ask_user, answer_permission, router as answer_router,
+)
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
@@ -72,6 +73,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
 router.include_router(prompt_router)
+router.include_router(answer_router)
 
 # Sentinel cursor key for callers with no caller_id -- keeps delivery_cursors'
 # primary key non-null while giving anonymous callers a shared resume point.
@@ -632,6 +634,30 @@ async def start_session(req: StartSessionRequest, request: Request):
                 detail="parity start fault refuses another active managed "
                 f"session: {active[0]}",
             )
+
+    if agent_name and agent_name.startswith("remote-acp:"):
+        from ..remote_acp_sessions import connect_remote_session
+        if (
+            req.worktree_id or req.creation_key or req.provider_instance
+            or req.copilot_args or req.env or req.mcp_servers
+            or req.model or req.effort or req.parity_fault
+        ):
+            raise HTTPException(422, "Remote ACP target does not launch local resources")
+        try:
+            remote = await connect_remote_session(
+                mgr, agent_name.removeprefix("remote-acp:"),
+                cwd=req.target_dir or "/", caller_id=req.caller_id,
+                caller_session_id=req.caller_session_id,
+                remote_session_id=req.remote_session_id,
+            )
+        except (ValueError, PermissionError, ConnectionError):
+            raise HTTPException(422, "Remote ACP target/connection refused") from None
+        return StartSessionResponse(
+            session_id=remote.session_id, name=remote.name, status=remote.status,
+            caller_session_id=remote.caller_session_id,
+        )
+    if req.remote_session_id is not None:
+        raise HTTPException(422, "remote_session_id requires a configured remote ACP target")
 
     # Caller-affinity reuse: if the caller supplies a caller_id (e.g. a
     # Neuron-Forge worktree GUID) and an alive session already exists for
@@ -1452,61 +1478,6 @@ async def interrupt_turn(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     return _session_info(session)
-
-
-@router.post("/{session_id}/ask-user")
-async def answer_ask_user(
-    session_id: str, req: AnswerAskUserRequest, request: Request,
-):
-    """Answer a parked ``ask_user`` elicitation, unblocking the agent's turn.
-
-    Resolves the session's pending ACP ``elicitation/create`` for the given
-    tool call with the human's answer. ``409`` if no matching request is
-    outstanding (already answered, withdrawn, or never asked).
-    """
-    mgr: SessionManager = request.app.state.session_manager
-    try:
-        resolved = await mgr.answer_ask_user(
-            session_id, req.tool_call_id, req.content, action=req.action,
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    if not resolved:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"No pending ask_user for tool call {req.tool_call_id} "
-                f"on session {session_id}"
-            ),
-        )
-    return {"status": "answered"}
-
-
-@router.post("/{session_id}/permission")
-async def answer_permission(
-    session_id: str, req: AnswerPermissionRequest, request: Request,
-):
-    """Resolve the currently parked correlated permission request."""
-    mgr: SessionManager = request.app.state.session_manager
-    try:
-        resolved = await mgr.answer_permission(
-            session_id, req.request_id, req.option_id
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    if not resolved:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"No pending permission request {req.request_id} "
-                f"on session {session_id}"
-            ),
-        )
-    return {"status": "answered"}
 
 
 @router.post("/{session_id}/resume", response_model=SessionInfo)

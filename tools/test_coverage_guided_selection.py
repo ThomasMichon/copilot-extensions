@@ -724,6 +724,88 @@ class TestFetchBaselineAsset:
 class TestPlanChunks:
     """Fast, pure-function tests for `_plan_chunks` -- no real subprocess."""
 
+    @pytest.mark.parametrize("use_cli", [False, True])
+    @pytest.mark.parametrize("explicit_limit", [None, 7])
+    def test_default_and_explicit_batches_keep_all_evidence_and_timeout(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        use_cli: bool,
+        explicit_limit: int | None,
+    ) -> None:
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        paths = [str(Path("tests") / f"test_{index:02d}.py") for index in range(25)]
+        for path in paths:
+            (tmp_path / path).write_text("def test_x(): pass\n")
+        calls: list[list[str]] = []
+
+        def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            assert kwargs["timeout"] == 300.0
+            chunk = json.loads(args[-7])
+            calls.append(chunk)
+            Path(args[-2]).write_text(json.dumps({
+                "durations": {path: 0.1 for path in chunk},
+                "tiers": {path: "T1" for path in chunk},
+                "coverage": {"src/shared.py": {"1": chunk}},
+            }))
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        monkeypatch.setattr(baseline_mod.subprocess, "run", run)
+        if use_cli:
+            monkeypatch.chdir(tmp_path)
+            argv = ["tests", "--cov-source", "src", "--plugin", "fixture",
+                    "--out", "baseline.json", "--measured-commit", "tested-source"]
+            if explicit_limit is not None:
+                argv.extend(["--max-files-per-chunk", str(explicit_limit)])
+            assert baseline_mod.main(argv) == 0
+            result = json.loads((tmp_path / "baseline.json").read_text())
+        else:
+            options = {} if explicit_limit is None else {
+                "max_files_per_chunk": explicit_limit,
+            }
+            result = baseline_mod.collect_baseline(
+                cwd=tmp_path, test_path="tests", cov_source="src",
+                plugin="fixture", measured_commit="tested-source", **options,
+            )
+        assert [len(chunk) for chunk in calls] == (
+            [5, 5, 5, 5, 5] if explicit_limit is None else [7, 7, 7, 4]
+        )
+        assert [path for chunk in calls for path in chunk] == paths
+        assert set(result["tests"]) == set(paths)
+        assert result["coverage"]["src/shared.py"]["1"] == paths
+        assert all(test["portfolio_tier"] == "T1" for test in result["tests"].values())
+        assert result["measured_commit"] == "tested-source"
+
+    @pytest.mark.parametrize("times_out", [False, True])
+    def test_later_batch_failure_never_retries_or_returns_partial_evidence(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, times_out: bool,
+    ) -> None:
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        for index in range(25):
+            (tests_dir / f"test_{index:02d}.py").write_text("def test_x(): pass\n")
+        calls = 0
+
+        def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            nonlocal calls
+            calls += 1
+            assert kwargs["timeout"] == 300.0
+            if calls == 2:
+                if times_out:
+                    raise subprocess.TimeoutExpired(args, 300.0, output="incomplete")
+                return subprocess.CompletedProcess(args, 1, "failed batch", "")
+            assert calls == 1
+            Path(args[-2]).write_text(json.dumps({"durations": {}, "coverage": {}}))
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        monkeypatch.setattr(baseline_mod.subprocess, "run", run)
+        with pytest.raises(baseline_mod.BaselineCollectionError):
+            baseline_mod.collect_baseline(
+                cwd=tmp_path, test_path="tests", cov_source="src", plugin="fixture",
+            )
+        assert calls == 2
+
     def test_small_suite_stays_a_single_unsplit_chunk(self, tmp_path: Path) -> None:
         tests_dir = tmp_path / "tests"
         tests_dir.mkdir()
@@ -1376,13 +1458,15 @@ def test_collect_baseline_with_project_dir_resolves_real_plugin_dependencies() -
                 assert test_id in result["tests"]
 
 
+@pytest.mark.parametrize("max_files_per_chunk", [None, 2])
 def test_collect_baseline_chunks_a_large_suite_and_merges_the_results(
     tmp_path: Path,
+    max_files_per_chunk: int | None,
 ) -> None:
     # Real, opt-in end-to-end proof of the chunking fix this effort's
     # agent-mcp enrollment surfaced the need for: constructs a synthetic
-    # suite larger than `max_files_per_chunk` (forced down to 2 here, so
-    # this stays fast) with a module shared across every test file, and
+    # suite larger than the default or an explicit smaller chunk limit,
+    # with a module shared across every test file, and
     # confirms `collect_baseline` genuinely runs more than one pytest
     # process (not just one covering everything) yet still returns a
     # single, correctly merged baseline -- every test's own duration
@@ -1403,7 +1487,7 @@ def test_collect_baseline_chunks_a_large_suite_and_merges_the_results(
 
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
-    test_names = [f"test_chunk_{i}.py" for i in range(5)]
+    test_names = [f"test_chunk_{i}.py" for i in range(6)]
     for name in test_names:
         (tests_dir / name).write_text(
             "import sys\n"
@@ -1415,13 +1499,16 @@ def test_collect_baseline_chunks_a_large_suite_and_merges_the_results(
             "    assert shared_line()\n"
         )
 
+    options = {} if max_files_per_chunk is None else {
+        "max_files_per_chunk": max_files_per_chunk,
+    }
     result = baseline_mod.collect_baseline(
         cwd=tmp_path,
         test_path="tests",
         cov_source="src",
         plugin="chunking-regression",
         timeout_s=60.0,
-        max_files_per_chunk=2,
+        **options,
     )
 
     assert len(result["tests"]) == len(test_names), (

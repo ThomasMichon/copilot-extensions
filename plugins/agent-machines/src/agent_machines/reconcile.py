@@ -67,6 +67,7 @@ class Plan:
     package_authorities: list[dict[str, Any]] = field(default_factory=list)
     removals: list[dict[str, Any]] = field(default_factory=list)
     authority_decisions: list[dict[str, Any]] = field(default_factory=list)
+    managed_keys: dict[str, list[str]] = field(default_factory=dict)
 
 
 _RUNTIME_CHECK_TIMEOUT = 60
@@ -443,6 +444,12 @@ def plan(
     """Build a read-only restore plan for ``machine`` (no mutation)."""
     plat = plat or current_platform()
     resolved = resolve_union(packages, machine, accepted_machines)
+    settings_keys: set[str] = set()
+    for disposition, payload, _ in collect_contributions(resolved, "copilot.settings"):
+        if disposition in ("ensure-present", "enforce"):
+            settings_keys.update(payload)
+        elif disposition == "ensure-absent" and payload.get("enabledPlugins"):
+            settings_keys.add("enabledPlugins")
     surfaces: dict[str, ManagedSurface] = {}
     for pkg in resolved:
         for key, spec in pkg.manage.items():
@@ -535,6 +542,7 @@ def plan(
             for identity, contributors in sorted(removals.items())
         ],
         authority_decisions=authority_decisions,
+        managed_keys={"copilot.settings": sorted(settings_keys)},
     )
 
 
@@ -551,6 +559,7 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
         "resources": p.resources,
         "removals": p.removals,
         "authority_decisions": p.authority_decisions,
+        "managed_keys": p.managed_keys,
     }
 
 

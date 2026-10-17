@@ -76,9 +76,7 @@ class Source:
 
     ``machine``/``env`` are the logical roster key and short env label, matching
     this module's ``machines()`` identities for filtering and local detection.
-    ``display_machine`` is cosmetic physical-host grouping only. Existing
-    local and remote machine sources share the ``machine-ssh`` kind; ``local``
-    records whether enumeration runs in-process rather than over SSH.
+    ``display_machine`` groups hosts cosmetically; ``local`` selects in-process enumeration.
     """
 
     def __init__(self, machine, env, argv, *, local=False, ready=True,
@@ -88,7 +86,7 @@ class Source:
                  venue=None, capabilities=None, resolve_argv=None,
                  connect_argv=None, display_machine=None):
         self.machine = machine        # canonical logical key from machines.yaml
-        self.display_machine = display_machine or machine
+        self.display_machine = display_machine or roster.physical_machine(machine)
         self.env = env                # Win | WSL | Linux
         self.argv = argv              # subprocess argv (None for the local src)
         self.local = local
@@ -786,7 +784,7 @@ def machines(sources=None):
     """
     return [
         (f"{s.display_machine} {s.env}", s.machine, s.env, s.ready)
-        for s in (sources if sources is not None else _build_sources())
+        for s in roster.presentation_sources(sources if sources is not None else _build_sources())
         if s.source_kind == SOURCE_KIND_MACHINE_SSH
     ]
 
@@ -801,6 +799,8 @@ def source_tabs(sources=None):
                 else source.source_label
             ),
             "machine": source.machine,
+            "physical_machine": source.display_machine,
+            "machine_label": source.display_machine,
             "env": source.env,
             "ready": source.ready,
             "local": source.local,
@@ -813,7 +813,7 @@ def source_tabs(sources=None):
             "venue": dict(source.venue),
             "capabilities": dict(source.capabilities),
         }
-        for source in (sources if sources is not None else _build_sources())
+        for source in roster.presentation_sources(sources if sources is not None else _build_sources())
     ]
 
 

@@ -5,7 +5,22 @@ machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
 container venues.
 
+An explicitly configured, already-running remote ACP server is also a client
+target: see [experimental remote ACP](docs/remote-acp.md) for the neutral
+qualified HTTP/2/SSE + WebSocket profile, scoped authentication, headless
+approval contract, and connection-only ownership boundary.
+
 Supports **Windows** and **Linux/WSL** (macOS planned).
+
+Both installers co-deploy the canonical Python runtime resolver and its lease
+and construction companions into the Bridge installation's `scripts/` directory,
+alongside the existing native-shell resolver deployment in `bin/`. Native
+service worktree-owner launches therefore do not require an interactive `PATH`
+or a helper inside the Worktrees installation. Legacy owner selection still
+requires a completed runtime slot and refuses retired installation ownership;
+installation-cell launches retain same-cell provenance validation. This does
+not change runtime selection, provision a missing owner, or adopt another
+marketplace's runtime.
 
 Internal owner-driven deployment and service restart accept optional
 `conditional`/`routing_dir` keyword arguments using the shared
@@ -14,6 +29,70 @@ This bypasses caller configuration, legacy recovery and force-reaping, and
 refuses legacy daemons without an authoritative effective-config snapshot.
 Production capture/attestation is not yet wired; ordinary explicit cutover is
 unchanged. Anonymous health and authenticated control remain distinct contracts.
+
+An installer `update` reusing the selected completed slot separately checks the
+daemon actually serving. Healthy/current serving is a no-op; a healthy, adopted
+older daemon uses ordinary guarded cutover from the unchanged slot. The
+installer-internal `deploy --reconcile-serving` mode retains the observed
+PID/start reference, rechecks the predecessor at publication and authenticated
+control, and confirms native exit without force-reaping. It requires the existing
+control credential and never generates, repairs or rotates one. Missing, damaged,
+unhealthy or changed ownership fails explicitly; an inactive installation or
+forwarded route is not started locally. This mode neither repairs stale
+cutovers nor substitutes for the effective-config conditional-repair contract.
+A reconcile failure does not publish a success manifest or fall back to
+stop/rebuild.
+Rollback validates the captured older predecessor rather than requiring the
+target version and permits undrain only after that same native process is
+verified at its restored route. A local-to-forwarded ownership change is a
+refusal, not the initial forwarded-installation no-op. Native predecessor exit
+is confirmed before the cutover lock and durable breadcrumb are released;
+unresolved retirement or retained cutover evidence also blocks a later
+healthy/current shortcut without attempting automatic recovery.
+The installers first use `--reconcile-serving --probe-serving` read-only:
+exit 0 means no transition, exit 10 identifies an older serving daemon, and
+other exits fail. Only exit 10 acquires the existing reference-counted
+`update-in-progress` marker around a freshly guarded reconcile, with cleanup
+on success or failure. Current, inactive and forwarded no-ops remain marker-free.
+Health observation and control probe the routed client address, including IPv6;
+the captured predecessor's client never retries a connection into a replacement.
+A previous-only route after graceful shutdown is inactive only when its native
+process has verifiably exited or is absent and the route stays unchanged.
+Permission failures, reused/live PIDs and retained cutover evidence still refuse
+without repair. Supported bind addresses are checked against local OS binding,
+not a literal-address list; native process and health ownership checks remain.
+The successor CLI worker writes a fresh per-launch PID/native-birth receipt.
+Reconcile retains that worker's native reference, separately from a broker or
+virtual-environment launch handle, and matches its existing health slot PID,
+slot ownership and birth before publication and retirement. A same-version
+unrelated responder is not a successful launch. Cleanup uses identity-verified
+graceful control, never a broker-PID tree kill; uncertain cleanup retains its
+receipt and writer-reconciliation breadcrumb. Failure before drain admission
+leaves the predecessor's raw route and any operator-owned drain unchanged.
+Promotion and verify-before-retire reject a draining successor. Cleanup's
+identity probe retains unready health payloads without weakening ordinary health
+readiness checks. Watchdog replacement strips the one-shot launch ID rather than
+replaying a receipt identity into a replacement process.
+The passive serving worker also reads only the existing credential: a missing,
+empty or malformed file after the parent's check fails without regeneration.
+Ordinary daemon startup retains its create-capable credential loader.
+Publication is recorded separately from the current route. Rollback must
+non-forcingly drain a successor that may have accepted work before requesting
+its shutdown, even if another owner has since replaced its route. A busy or
+unverified successor is retained with reconciliation evidence; never-published
+passive cleanup does not acquire a drain gate.
+If published cleanup fails after closing an initially open admission gate,
+it reopens only that gate, after fresh native-worker and exact active-publication
+checks. Both the undrain acknowledgement and fresh health must confirm admission
+is open. A pre-existing or unknown drain is not reopened, and changed ownership
+refuses compensation. The original cleanup failure and reconciliation evidence
+remain even when admission is successfully restored.
+After draining a published successor, rollback revalidates the captured
+predecessor's native identity and health before successor shutdown, and probes
+again before restoring routing. Predecessor shutdown also requires its own
+verified drain gate to remain closed. Confirmed clean guarded rollback clears
+its transient breadcrumb inside the transaction so a fresh update can retry;
+uncertain cleanup or retirement retains reconciliation evidence.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`
@@ -117,6 +196,13 @@ command target of a manifest withdraws that dynamic namespace without a daemon
 restart. Bad entries warn but do not block valid peers. `agent-bridge doctor`
 lists every provider finding with the exact entry, target, and cleanup or
 re-registration remedy.
+
+An exact ready provider-exec instance can opt into replay-safe native creation
+with `create <agent> --creation-key <key> --provider-instance` (HTTP protocol
+36). It retains one native result without allocating or fabricating a worktree.
+Ordinary keyed creation remains local-worktree-only. See
+[session creation contracts](docs/session-acquisition.md#exact-provider-instance-creation)
+for pending/terminal recovery and the separate first-prompt boundary.
 
 ### Namespace reader observations
 

@@ -515,9 +515,11 @@ def test_conditional_post_flip_route_winner_prevents_rollback_and_retirement(cas
 def test_conditional_post_flip_lock_contention_retains_generations_and_recovery(case):
     root, _, events, _, snapshot, request, orch = case
     acquired, release = threading.Event(), threading.Event()
+    contention_started = []
 
     def hold():
         with routing._routing_lock(root):
+            contention_started.append(time.monotonic())
             acquired.set()
             assert release.wait(5)
 
@@ -532,7 +534,6 @@ def test_conditional_post_flip_lock_contention_retains_generations_and_recovery(
             return response
 
     try:
-        started = time.monotonic()
         result = orch.run(
             conditional=replace(
                 request,
@@ -542,7 +543,7 @@ def test_conditional_post_flip_lock_contention_retains_generations_and_recovery(
                 ),
             )
         )
-        assert time.monotonic() - started < 1
+        assert time.monotonic() - contention_started[0] < 1
     finally:
         release.set()
         thread.join(2)
@@ -556,9 +557,11 @@ def test_native_routing_thread_contention_has_bounded_owner_outcome(case, post_s
     root, old, events, _, snapshot, request, orch = case
     acquired = threading.Event()
     release = threading.Event()
+    contention_started = []
 
     def hold():
         with routing._routing_lock(root):
+            contention_started.append(time.monotonic())
             acquired.set()
             assert release.wait(5)
 
@@ -576,10 +579,9 @@ def test_native_routing_thread_contention_has_bounded_owner_outcome(case, post_s
     else:
         thread.start()
         assert acquired.wait(2)
-    started = time.monotonic()
     try:
         result = orch.run(conditional=request, health_timeout=0)
-        assert time.monotonic() - started < 1
+        assert time.monotonic() - contention_started[0] < 1
     finally:
         release.set()
         thread.join(2)

@@ -138,6 +138,11 @@ after shutdown. Use its context manager or `close()` to release the reference;
 closed references reject waiting. References remain local to their creating
 process: a forked child refuses wait/close/context entry before touching a
 possibly orphaned inherited lock or its parent's native reference.
+`allow_exited=True` permits an identity-matched, already-exited kernel object
+only for read-only inactive-state observation. The default still requires a
+live object. This opt-in is not late retirement evidence: graceful control must
+retain the live reference captured before shutdown. A caller recognizing an
+absent PID must distinguish native absence from permission or identity errors.
 
 Windows validates creation time through the captured query/synchronization
 handle, without requesting termination rights. Linux reuses canonical pidfd
@@ -160,6 +165,41 @@ a fresh port, health-gate it, flip the routing table, drain the old daemon, then
 retire it. The sequence is reversible up to an explicit commit point, with
 rollback and commit-forward (if the old endpoint is unreachable, it commits to
 the healthy new one rather than stranding clients).
+
+An ordinary adopter may supply `expected_old=Endpoint(...)` together with
+`refuse_old`. The selected predecessor must equal that observation before port
+selection or passive spawn: listener fallback to another endpoint (or to no
+endpoint) is a refusal, never an implicit cold start. The refusal callback
+still fences publication; the expectation alone does not grant ownership,
+provide effective-config capture or authorize retirement.
+This opt-in also guards rollback publication against the exact captured
+predecessor or published successor and confirms successor exit before restoring
+the predecessor. The health callback must recognize each endpoint's own identity
+and version, including an older predecessor. Its client must confirm predecessor
+retirement before `shutdown()` returns, raising if native exit is unconfirmed.
+Post-commit failures retain full predecessor identity and a writer-reconciliation
+breadcrumb; keeping a healthy successor serving does not make retirement
+successful. Callers without `expected_old` retain the existing behavior.
+The candidate handle may represent a brokered worker: after the health gate the
+orchestrator refreshes its worker PID and captured `process_start_time` (when
+provided) before guarded publication. The adopter must retain and validate the
+actual worker's native reference separately from any launch handle. A startup
+failure before publication or drain admission cleans up only that owned
+candidate, without rewriting or undraining an untouched predecessor.
+An `on_published` callback may accompany `expected_old`; it receives the exact
+guarded successor endpoint before predecessor drain/retirement. An adopter can
+therefore retain the fact that its candidate may have served work even after
+routing changes, and require a non-forcing drain before rollback disposal.
+Callers without this callback retain their existing behavior.
+Guarded restoration re-probes predecessor health after confirmed successor exit,
+not a cached pre-cleanup liveness result. A confirmed clean rollback in the
+expected-predecessor transaction clears its breadcrumb before releasing custody;
+uncertain cleanup, restoration, undrain or retirement keeps its evidence.
+If the confirmed-exited successor retracted its own active route during
+shutdown, rollback can restore the predecessor only while `active` is absent
+and `previous` still exactly identifies that successor. Recheck that condition
+inside the publication fence; an unrelated active or previous owner is not
+authority to restore over it.
 
 #### Conditional owner operation (partial lifecycle support)
 

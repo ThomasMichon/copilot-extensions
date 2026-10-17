@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; runtime auth interface proposed, isolated storage merged; integration/lifecycle open
+- **Status:** Active; identity prerequisite merged; provider/enrollment/integration/lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -174,6 +174,32 @@ the underlying provider session permits it; it is not periodic human presence
 validation. Actual provider challenges and revocation remain binding, and the
 dead-man switch is explicit opt-in rather than a default session timeout.
 
+Later operator clarification, public-safe summary:
+
+- Deliver repeatable configuration-driven cold setup, in-place update/migration
+  and rollback, not merely one fleet installation.
+- The local CLI supplies bootstrap and recovery before a Gateway exists.
+  Once ready, the Gateway is the central service for local clients.
+- The Gateway subscribes to the user's configuration repository and can
+  self-update. Private configuration need not have CI; local validation or
+  explicit user approval gates major reconfiguration.
+- The actual local background service is the tunnel-connected fresh-token
+  responder on logged-in provider machines. Evaluate the existing credential
+  owner before adding another service.
+
+[Configuration lifecycle](configuration-lifecycle.md) elaborates these
+requirements without changing #6240/#6424/#6030 ownership or authorizing live
+activation. Portable bootstrap/recovery is explicit; ordinary clients still do
+not install a local deployment manager or become another coordinator.
+
+After the reviewed proposal actually merged, the operator directed verbatim:
+
+> Great. Start driving the work
+
+This authorizes driving the reviewed implementation, beginning with an isolated
+verifier prerequisite. It does not select live trust roots, enroll principals,
+transfer another campaign's active source ownership or authorize deployment.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -210,6 +236,14 @@ All detailed slices are **agent-recommended** and remain subject to review.
   with no installation or update from Copilot hooks.
 - [ ] Prove thin client installation has no controller/container-manager effects;
   keep ordinary standalone services usable outside the integrated profile.
+- [ ] Realize the [configuration lifecycle](configuration-lifecycle.md) with
+  existing release/client/deployment owners: cold bootstrap, no-op repeats,
+  ordered migrations, interrupted-step recovery and data-compatible rollback.
+- [ ] Supply Gateway configuration subscription and approved self-update,
+  with local validation/approval of major changes rather than private-repo CI.
+- [ ] Compose an installed authenticated credential responder through the
+  existing credential owner's lifecycle; maintain its channel independently
+  of an interactive client invocation.
 
 ### Phase 2 - One authority, isolated execution
 - [ ] Implement identified command admission, content-bound idempotency,
@@ -229,13 +263,30 @@ All detailed slices are **agent-recommended** and remain subject to review.
   coordinator lifetime; all integrated roles share one lifecycle implementation.
 
 ### Phase 2a - Gateway/index vertical slice
-- [ ] Review the [slice contract](gateway-index-slice.md) and coordinate #6443,
-  #6383 and retained fleet/auth/deployment owners before runtime changes.
-- [ ] Review the shared [runtime authentication interface](runtime-authentication.md)
-  under #5789/#6443, then agree exact records/provider support and exclusive
-  implementation scopes before wiring consumers.
+- [x] Review the [slice contract](gateway-index-slice.md) (#6449).
+- [ ] Maintain exclusive interface/source coordination with #6383 and retained
+  fleet/auth/deployment owners; inventory unpublished prototypes before replacing
+  their implementation.
+- [x] Review the shared [runtime authentication interface](runtime-authentication.md)
+  under #5789/#6443.
+- [ ] Agree exact auth records/provider support and exclusive implementation
+  scopes before wiring consumers.
+  The first isolated verification prerequisite has its own new module, optional
+  JOSE dependency and proof tests; enrollment, scoped policy and resident
+  consumers remain separate gates. See the
+  [implemented API boundary](../../../fleet-manager/docs/runtime-authentication.md).
+- [ ] Review and implement the selected
+  [Windows/Entra application adapter](runtime-authentication.md#selected-windowsentra-application-adapter)
+  with the retained auth owner: actual broker/API proof compatibility,
+  provider renewal and scoped enrollment, without changing management/SSH.
 - [ ] Supply the resident role-selected Gateway and fixed-service index route
   using the existing release, offer/request and operation/receipt contracts.
+  Source implementation and signed-grant index ingress landed in #6809.
+  Released image closure and actual provider/enrollment remain required before
+  treating this as a serving deployment.
+  The explicit six-distribution first-party fleet image profile landed in #6871,
+  without changing native defaults or activating roles. Containing release and
+  actual image/model assembly remain open.
 - [ ] Authenticate and authorize client/node/controller principals, service
   generations and corpus/source grants at admission and backend execution.
 - [ ] Route correlated source-credential requests to an authorized subscribed
@@ -243,6 +294,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   outcomes.
 - [ ] Wire explicit index CLI Gateway transport and detached-worker credential
   consumption without changing unselected native/SSH behavior.
+  The opt-in CLI/worker/source adapters landed in #6809 with installed-process
+  and real Git/HTTPS fixtures; released consumer adoption and real source refresh
+  remain part of the live proof below.
 - [ ] Prove the real CLI/Gateway/container/controller path, independently
   persistent index state and scoped negative cases before any native offload.
 
@@ -330,6 +384,335 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-16 - Immutable-release index fixture repair prepared
+- Normal promotion #6938 merged `6b2fa0ac2887a8fda669dfb8356e5c6083f6729d`
+  and published artifacts, but final immutable-main CI failed. This is not
+  qualified rollout readiness; no runtime update or deployment followed.
+- Under #6237/#6383, reserved only the real-wheel index-service fixture.
+  Both hosted platforms failed its implicit assumption that the repository Core
+  version is pre-seam. Promoted Core `0.10.33.dev1` is correctly compatible.
+- The fixture now explicitly builds temporary negative Core `0.10.11.dev1`
+  and positive `0.10.12.dev1` wheels, requires rejection specifically of the Core
+  dependency, and retains real native/fleet bundle verification. No repository
+  version, dependency floor, verifier, admission policy or deadline changes.
+- Native contained smoke: 479 passed, 3 reported skips. A second canonical
+  contained real-wheel execution supplied exact immutable-release metadata for
+  all six projects, observed Core `0.10.33-dev1` and service `0.1.2-dev1` before
+  fixture construction, and passed the actual negative/positive native/fleet
+  contract. It did not mutate source inputs, wheels after verification or a
+  deployed runtime. This adds no repeated native matrix to required CI.
+- Full first-machine clean-room and live deployment are not exercised by this
+  test-only repair; current-head hosted review/CI and the next actual materialized
+  candidate remain gates. Shared control, authority-corpus and other consumer
+  repairs retain their existing owners. The full Plan remains open.
+
+### 2026-10-15 - Explicit fleet index image closure landed
+- #6871 merged at `9e0b58c9153fbf7c21d2c45fac243ef65635a5f0`,
+  `2026-10-15T20:04:18Z`, after exact-head Copilot APPROVED with zero findings
+  and green required CI, including hosted Linux/Windows service and runner lanes.
+  Managed post-merge sync advanced cleanly to the verified merge.
+- Corrected this slice's still-pending changefile consumer to `services/index`.
+  The promotion planner ignores the legacy `agent-index-service` CLI alias;
+  read-only planning reproduced the skipped entry before the correction and
+  recognizes the canonical standalone consumer afterward. No version was edited.
+- Under #6383/#6443, added an opt-in fleet release/image profile with exactly six
+  first-party wheels, including `fleet-manager`, and explicit auth-extra closure.
+  Native schema-1 defaults and candidate staging remain independent; fleet
+  descriptors/contexts use schema 2 and cannot opt a native caller into fleet.
+- Context preparation still verifies bytes, RECORDs, target tags and the full
+  locked offline dependency closure. The installed probe checks actual fleet
+  imports before reporting validation. Engine/model provisioning, enrollment,
+  runtime secrets and public exposure are not image preparation.
+- Unit/controller smoke: 479 passed, 3 reported skips. This includes the image
+  contracts, CLI preparation, immutable tar capture and actual repository-built
+  native/fleet wheel metadata. Runner contracts: 69 passed, 1 reported skip;
+  lint, install contract and module ceilings passed.
+- Validation exposed a preparation failure where retained source/override
+  topology made a Windows relative path 261 characters despite its normalized
+  104-character target existing. Repository-local disposable override placement
+  fixes that real preparation path without changing dependency policy. Split the
+  native alias fixture by alias and disabled unrelated pytest plugin autoload;
+  real contained execution and the original deadlines/assertions remain.
+- Fresh context roots and real wheel builds exercise first-touch packaging,
+  not a clean Linux image or installed fleet import/query proof. Those live
+  tiers remain pending reviewed release availability and authorized image
+  assembly; retained release/auth/deployment owners are unchanged. No Gateway
+  was enrolled/deployed and no incumbent state was copied or retired.
+- This realizes the reviewed integrated-product packaging intent while preserving
+  standalone independence and source-trust boundaries. Documentation impact:
+  standalone service README, test guide and this effort. The full Plan and
+  Validation Plan remain open after this prerequisite.
+
+### 2026-10-15 - Integrated Gateway prepared for review
+- #6809 merged into `dev` at `4af4857c64bdb01e8123b06c18a61183cb4f6bd0`
+  on `2026-10-15T14:49:33Z`, after required current-head CI run `38748829158`
+  and the actual `5a161765db` review's clean Comment with zero open findings.
+  Hosted Linux agent-index completed successfully, including the real raw/TLS
+  and renewable-source boundary cases. This closes the reviewed source slice,
+  not the Windows provider/enrollment, governed image/model closure, installed
+  responder, managed deployment or real-corpus validation gates.
+  Next integration slice: explicitly selected fleet-capable image artifact
+  closure, preserving the native five-distribution image and independent engine
+  boundary; coordinate its release/descriptor contract with #6383/#6240/#6030.
+- The current-head overview identified arbitrary synchronous source-provider
+  exceptions bypassing the narrow sanitization tuple. Provider-only result
+  capture now translates every ordinary callback failure into a static
+  credential-unavailable refusal without attaching its diagnostic or exception
+  context. The owned worker copies context variables, joins on success/failure,
+  and propagates process-control exceptions. All 29 renewable-source cases pass,
+  including real Git/HTTPS refresh, arbitrary/CalledProcessError diagnostics,
+  cancellation, interruption, context preservation and worker cleanup.
+- Current upstream placement now permits a snapshot inside the checkout but
+  outside every admitted project/resource. Reconciled that safer existing
+  contract with the retained long-path filesystem handling; all 164 policy
+  cases and both projection synchronizers pass. Hosted Windows found the
+  runner fixture still requiring the superseded outside-checkout location.
+  It now checks the actual outside-every-source boundary and requires both
+  manifests to be exercised; real relative metadata rename assertions remain.
+  The complete native runner suite passes 54 cases with two platform skips.
+  No runtime limit, source attribution or dependency-age gate was relaxed.
+- Closed the raw-TCP admission gap before TLS: all accepted connections share
+  a 32-peer cap, TLS and first headers share an absolute five-second deadline,
+  and shutdown aborts/reaps even peers withholding ClientHello. The maintained
+  asyncio TLS upgrade precedes Uvicorn/ASGI, without a cleartext route or new
+  lifecycle owner. Real raw TCP overflow, timeout, partial ClientHello,
+  plaintext denial, disconnect, shutdown, combined deadline and authenticated
+  recovery join the existing cold-store/TLS regressions: 39 cases pass on native
+  Windows under unchanged containment budgets. Current-head hosted Linux proof
+  and a fresh full-PR verdict remain merge gates. Fresh model-backed deployment
+  and actual Windows provider/enrollment remain independent production gates;
+  these synthetic-issuer/inference fixtures do not satisfy them.
+- Retained review identified ambient Git ref/fetch selection, tag collisions
+  in renewable branch lookup and parent-relative Windows config prefixing.
+  Renewable defaults now ignore those native environment settings; exact
+  `show-ref --verify` remote refs are commit-pinned without ambiguous revision
+  lookup. Real HTTPS Git tests retain colliding ordinary and fully qualified
+  tag names across remote branch deletion. All 21 renewable-source cases
+  pass. Native Windows config tests preserve both parent-relative selection
+  forms and their stricter cutoff; four Windows retention/config cases pass.
+  Regenerated all eight installer-policy consumers; the 13-plugin install
+  contract passes. At that point raw-TCP/pre-TLS admission was still an
+  implementation gate; the subsequent real raw-socket coverage above closes
+  the local gap without treating header-only coverage as equivalent.
+- A retained review also found backend-subject revocation applied only after
+  disclosure/delegation. Revoked subjects are now refused before grant signing
+  or contact and excluded from advertised support. Real receipt-revocation
+  regressions record both outbound POSTs and signed execution grants: revoked
+  subject yields zero of each, while admission-key/result-key cases retain
+  their independent receipt checks. All three pass under real TLS.
+- Further review found ambient GitHub API destination selection in renewable
+  mode and unexpected provider diagnostics escaping the resident controller.
+  Renewable HTTP ignores that ambient override while explicit API selection
+  and native behavior remain intact. Provider-only asynchronous result
+  collection normalizes ordinary errors to signed `UNAVAILABLE` replies,
+  preserving cancellation/process-control propagation and timeout bounds.
+  Actual client-origin/header regressions pass with no credential-bearing
+  request to the ambient alternate destination. Real step/serve regressions
+  cover synchronous/asynchronous ValueError, CalledProcessError and KeyError,
+  non-leaking resident survival and cancellation; 15 provider/timeout cases
+  and all 20 renewable-source cases pass locally. Review/CI remain open.
+- The rebased head actually launched native hosted CI. Three failures exposed
+  a newly source-bound fleet dependency missing from declaration-audit consumer
+  attribution, a Linux-fast fixture responder exceeding the unchanged admission
+  rate, and an admission-failure guard still selecting the former fleet step.
+  The audit now follows the exact plugin runner's literal first-party source
+  binding with containment/identity checks and revocation regressions, not a
+  name whitelist. The one-request responder polls below the existing rate and
+  stops after its reply. Failure propagation follows the relocated coverage
+  step's declared cross-platform Bash shell, not a mismatched PowerShell probe
+  or a WSL launcher. The 118 age-audit cases, 80 CI-scope cases and four real
+  acquisition deadline cases pass locally. Hosted aggregate/current review
+  remain gates; no failed job is waived.
+- Rebase consumed the canonical dependency-seasoning adapter. Native first-touch
+  preparation exposed missing standalone runtime build resources in the
+  index test consumer, then real Windows editable-metadata and long snapshot
+  path failures. The consumer now retains the existing versioned-runtime
+  resource closure, and canonical retention uses short same-volume editable
+  staging plus native extended filesystem paths for copy/TOML/cleanup. UV
+  arguments, configured resolver, seven-day seasoning and attribution remain
+  unchanged. Real UV/setuptools preparation and the snapshot-local installed
+  consumer now pass; native copy/cleanup and metadata-rename regressions pass.
+  All 151 dependency-policy cases pass, followed by 52 runner passes/two
+  platform skips. Snapshot publication/order/consumer coverage retains every
+  assertion and the unchanged native child deadlines. The earlier full command
+  stopped at an exact mocked no-resource kwargs assertion, updated to verify the
+  explicit empty resource tuple on unrelated plugins; its runner-only rerun
+  passes without rerunning the already successful policy portfolio.
+- The next actual review found incomplete initial headers at the index TLS
+  ingress and independently budgeted credential-worker SDK calls. The ingress
+  now selects a deadline-bearing Uvicorn H11 protocol; real 32-peer initial and
+  keep-alive TLS partial-header cases recover capacity and permit authorized
+  queries. One acquisition deadline now reaches challenge/session, submission,
+  polling and acknowledgement, with a pre-submission expiry check. Five real
+  or clock-controlled regressions cover slow connection, polling, ack and no
+  late provider work. Required Gateway selection passes 113 cases in 58.48
+  seconds; complete scoped ingress passes 33 in 105.68 seconds. No deadline or
+  guard is relaxed.
+- Remaining native index files finish in disjoint bounded batches, including
+  engine-adoption's 16 passes/eight skips. The earlier monolithic invocation
+  still exceeded its unchanged aggregate deadline; these partitioned results
+  do not claim that invocation now passes. The published head became conflicting
+  with advancing `dev`, so its absent hosted CI is not a successful fleet lane.
+  Rebase and current-head hosted CI/review remain gates before merge.
+- Hostname resolution now runs in one isolated, request-owned system-resolver
+  subprocess, killed and reaped at the absolute deadline. Numeric endpoints
+  bypass resolution; TLS retains the original hostname for SNI/verification.
+  Actual stalled resolver processes across two requests are reaped, Gateway
+  slots recover and shutdown remains bounded. Real named-backend TLS succeeds
+  while a resolved address with a mismatched certificate hostname refuses.
+  The complete native fleet-manager suite passes; the exact required Gateway
+  partition passes 108 cases in 52.31 seconds under its unchanged 120-second
+  limit. Headless/lint/module-size gates pass. Current-head hosted review/CI,
+  production provider/enrollment, managed deployment and parity remain open.
+- The current #6809 head's hosted CI passed, but its new review identified
+  omitted backend receipt revocations and hostname resolution outside the
+  absolute deadline. Both receipt checks now consume configured revocations;
+  three real TLS regressions refuse revoked admission keys/subjects and a
+  revoked result key after valid admission. The hostname-resolution correction
+  above closes the corresponding local implementation gate, not review or
+  production readiness.
+- Snapshot-test granularity now separates independent engine/library identity
+  changes from publication ordering and consumer closure; all three native
+  cases pass with the original 25-second child deadline. The remaining 12
+  native installer files pass 172 cases with 38 skips. The larger disjoint
+  remaining batch still reached its unchanged 900-second aggregate limit
+  without completed-suite evidence; finish smaller disjoint batches rather
+  than raising limits or claiming a full native pass.
+- Follow-up review exposed ambient Git remote selection, unbounded upstream
+  response I/O and direct SDK origin normalization. Renewable connectors now
+  ignore ambient remote selection while native/explicit selection is retained;
+  both index calls share the incoming absolute deadline and interrupt their
+  owned upstream sockets; direct discovery stores its normalized origin.
+  Real regressions exercise two remotes, slow response headers/bodies and
+  trailing-slash DPoP requests. Exact Gateway lanes pass 102 and four cases;
+  focused source/lifecycle contracts pass 37, CI/promotion guards 113.
+- Preserved both native fleet matrices in the promotion aggregate as well as
+  the PR gate. The HTTPS Git fixture selects OpenSSL only on Windows and uses
+  the host's supported TLS backend elsewhere, without disabling CA verification.
+- Full native index validation exposed an unmocked promoted-search fixture,
+  corrected with the adjacent tests' explicit synthetic search engine. Its
+  three drain cases pass. The subsequent full attempt passed the first 302
+  cases with 13 skips but did not pass overall: native installer snapshot
+  invocation exceeds its existing 25-second child deadline. That failure and
+  the remaining portfolio require diagnosis; no full-suite or live-ready claim
+  is made.
+- Published #6809 through the managed PR flow. Its first review identified
+  slow-drip request admission, expiry during credential acknowledgement and
+  deleted-branch freshness gaps. Added absolute request shutdown, post-ack expiry
+  refusal and owned-refspec pruning with real TLS/HTTP Git regressions.
+- Hosted guards also caught engine module growth, dynamic runner routing and an
+  outdated dev-extra assertion. Moved credential policy to its existing source
+  component, used static hosted Linux/Windows jobs sharing exact partition/step
+  aliases, and retained both optional-fleet and legacy-stdio dependency checks.
+  No guard, deadline or required coverage was relaxed. Focused corrections pass:
+  three new TLS cases, two real Git cases, 99 Gateway cases, four process cases,
+  51 CI-route/partition guards and the explicit dependency guard. Current-head
+  hosted CI and review remain publication gates, not assumed from local passes.
+- Integrated the merged shared identity verifier and current upstream storage,
+  artifact and runner contracts. The resident slice uses the shared ES256/P-256
+  access-token and DPoP profile; independent receipt and recipient trust remain.
+- All six exact required native fleet partitions passed at their unchanged
+  120-second limits: planner 356, storage 183, artifacts 83 with six platform
+  skips, client distribution 30, Gateway 96 and separate processes four.
+  The full-marker exclusions and required aggregate remain unchanged.
+- Required runner/admission contracts passed 148 with four platform skips and
+  19 explicit exhaustive deselections. Real Gateway/source-credential consumer
+  tests passed 47; the exact standalone-service smoke lane passed 394 with two
+  skips. Install contracts report zero violations.
+- An accidental unfiltered standalone-service invocation was terminated by its
+  explicitly supplied 120-second containment limit, without an assertion failure.
+  It was not the required smoke lane; the correct lane subsequently passed.
+  This does not claim exhaustive standalone-service validation.
+- Unit and simple installed-package process/TLS/source-refresh E2E were exercised.
+  Full first-machine clean-room and live production-provider/container validation
+  remain open: this slice provides explicit runtime seams, not an installer or
+  provider enrollment, and no approved production identity has been provisioned.
+- The Windows/Entra amendment is a reviewable application-boundary plan under
+  #6804 with the retained #5789 auth owner, not a provider implementation.
+  API/resource registration is conditional on selecting that OAuth flow.
+  Existing management/SSH authentication remains unchanged; no directory
+  application, consent, enrollment or production issuer was created.
+- Review, hosted CI, provider interoperability, release closure, lifecycle and
+  actual managed deployment remain open. No prototype cutover or live activation
+  follows from these local results; the parent effort remains Active.
+
+### 2026-10-14 - Worker-local refresh and independent source materialization prepared
+
+- Explicit source policy references now survive standalone composition into
+  detached workers. An opted-in source never consults ambient `gh` accounts or
+  environment tokens. The credential consumer bounds one request and polling,
+  verifies the sealed reply and acknowledges before returning token material.
+  The issuer/custodian still owns reference renewal and production enrollment.
+- Paced HTTP requests/retries acquire fresh credentials; Git uses URL-scoped
+  child configuration without secret argv, persistent config, helpers, prompts
+  or redirects. A failed fetch cannot memoize stale remote state as success.
+  Fresh materialization rejects unrelated/non-bare source directories.
+- Real verified HTTPS plus the installed Git HTTP backend exercised independent
+  file/commit ingestion, remote revision and credential renewal, and revoked
+  credential refusal before a stale cursor. This exposed and corrected a
+  missing Git header-name bug that mocked subprocess inspection had not caught.
+- Contained source regressions passed 27 cases, the real Git boundary one,
+  standalone configuration six, and real Gateway worker/loader three.
+  Providers and issuers remain synthetic fixtures. Shared-auth owner agreement,
+  current-artifact full validation, publication, actual provider enrollment and
+  managed container/corpus/model parity remain open; no deployment was activated.
+- The whole native selection passed 682 tests with six platform skips and eight
+  full-tier deselections in 254.81 seconds under the existing 600-second local
+  runner default. This does **not** satisfy the required CI lane's 120-second
+  budget. Independent profiling retained all cases: the unchanged non-Gateway
+  portfolio passed 586 with six skips in 116.79 seconds under 120 seconds;
+  the 96 Gateway cases passed in 78.43 seconds. A coverage-preserving native
+  lane partition or equivalent measured optimization is still required before
+  publication; neither a deadline increase nor a passing manual run is a waiver.
+
+### 2026-10-14 - Cold-store execution integrated; delivery gates remain open
+- Reconciled the retained resident Gateway draft with the newer release,
+  observation and authentication proposals without changing those owners'
+  implementations. Removed the measured ineligible legacy ID-partition adapter.
+- Index ingress now consumes #6650's source-aware native search and existing
+  read/drain fences. The contained HTTP/TLS/store selection passed 31 cases,
+  including omitted/denied scope, canonical commit descendants, one-use
+  admission, passive/draining and dirty/unselected refusal. Embedding inference
+  remains a fixture, not real-model or live container evidence.
+- Native standalone configuration composes explicit cold layout with the
+  optional fleet policy, rejecting implicit store adoption. Built wheel
+  metadata retains ordinary native dependencies and adds only the selected
+  fleet extra. Targeted installed configuration/distribution checks passed
+  seven cases; the initial smoke run exposed the newly added extra's expected
+  metadata assertion, which was corrected rather than waived.
+- Development preparation selects the same-checkout fleet dependency without
+  an escaping standalone-project path or a vendored Gateway. Its focused
+  dependency-preparation contract passed. The broader native runner exposed
+  the distinct timeout-tree receipt gap tracked in #6779; an isolated pass is
+  not root-cause proof or an accepted-flake exception.
+- Independent Gateway/controller process cases pass within unchanged deadlines
+  after removing a test-framework import from the fixture role bootstrap.
+  The initial full selection's two readiness failures remain recorded; full
+  current-artifact validation and normal review/CI are still required.
+- The retained Ed25519 content-bound proof draft is not RFC 9449 DPoP.
+  Coordinated #6443/#6743 before publishing or activating admission against the
+  reviewed shared authentication seam. No real issuer, provider enrollment,
+  refreshable ingestion credentials or source/chunk parity is claimed.
+- Index image #6433 still prepares the native five-wheel bundle, not the fleet
+  artifact/provenance closure. Normal release, source/materialization support,
+  real model execution, managed deployment and prototype reconciliation remain
+  open. No incumbent database transfer or live Gateway replacement occurred.
+
+### 2026-10-13 - Gateway/index intent merged; resident slice started
+- #6449 squash-merged into `dev` at `2026-10-13T07:50:36Z`, commit
+  `0b8012bd4f544b6601546ad61cd15a62d5f7988b`. Current-head owner-authored Comment
+  review had no valid unresolved Medium/High finding after evidence-backed
+  resolution of a false header-hierarchy claim; both required checks and the
+  complete CI rollup passed. No review/check gate was bypassed.
+- Re-read the canonical Plan and advanced already-merged private plan history
+  with a retained backup, preserving newer unrelated effort milestones.
+- Started a bounded resident Gateway/auth/SDK/subscribed credential-controller
+  implementation under the integrator's exclusive package scope. Coordinator
+  retains git/publication, index-consumer wiring and live-venue proof. Existing
+  installation, ledger, auth-prototype and deployment owners retain their work.
+- No production Gateway enrollment, old-Gateway replacement or native data
+  migration follows from this proposal milestone; the full slice remains open.
 
 ### 2026-10-12 - Gateway/index ownership assigned
 - Operator explicitly assigned the end-to-end new Gateway/index integration
@@ -1029,3 +1412,165 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   lock/sleep and reconnect are not invented human-presence requirements.
   Captured the full clarification verbatim and added longevity/challenge/
   revocation/opt-in validation obligations.
+- #6732 actually merged at `2026-10-14T19:32:26Z`, commit
+  `f660fcb02adda309bfbfe59f3e39daf3945b633b`. Its final head
+  `dc51c7b66d3a04044b2d61c6da9a5a3bfe1f16d4` received actual Copilot APPROVED
+  review `5523090951`, zero findings (Balanced effort) and no inline comments.
+  Natural CI `38618214730` completed successfully before merge; all 25 observed
+  checks succeeded or legitimately skipped. Queued jobs were waited out without
+  rerun, cancellation, runner repair or CI/review bypass.
+- Re-read the full parent Plan/Validation after actual merge. Only the shared
+  auth proposal review item closes; exact provider/record/source assignments,
+  implementation, integration and every full validation/adoption gate stay open.
+  The default long-lived provider-session presence and opt-in/off dead-man
+  behavior are reviewed intent, not implemented or deployed authentication.
+- Managed pull-forward safely aborted on the two-commit squash-history conflict.
+  Verified a clean workspace, only published commits and exact owned-file equality
+  with the confirmed merge; retained a backup and dropped only that published
+  prefix onto the fetched base. No unpublished work or claim was discarded.
+  Continuing work remains in the full effort's owned worktree, not finalized.
+- Next is agreement on the proposed DTO/provider support and exclusive source
+  scopes with #5789/#6443/#3761/#352, followed by the bounded verifier/admission
+  contract slice. Proposal review does not enroll a principal, select live keys,
+  change a provider session policy or authorize a Gateway deployment.
+
+### 2026-10-14 - Isolated identity verifier implementation started
+- The operator authorized driving implementation after actual proposal merge.
+  Rechecked current #5789/#6443 reservations, open fleet PRs and #6424 shared
+  metadata ownership, then reserved only new verifier/test/doc paths and the
+  directly coupled optional dependency/isolation assertions. No reserved
+  resident Gateway, enrollment, provider, index or lifecycle source was edited.
+- Implemented explicit `jwt-pop-v1` ES256/P-256 access-token and DPoP
+  verification using maintained `joserfc`, including public-key thumbprints,
+  strict token/proof parsing, request/key/token binding and an atomic bounded
+  nonce-epoch replay fence. It returns immutable non-secret request evidence,
+  not a principal enrollment, grant or reusable authorization token.
+- Default client dependencies remain empty. The optional capability is loaded
+  only when explicitly requested. Real fresh installed-wheel diagnostics prove
+  that the default client runs without JOSE; explicit verification without the
+  capability refuses rather than downgrading.
+- Unit and simple process E2E: focused identity/client-isolation selection
+  passes 64; the full contained native portfolio passes 666 with six platform
+  skips in 74.69 seconds under the unchanged 120-second deadline. Tests exercise
+  real synthetic issuer/proof keys, invalid signatures/claims/bindings,
+  concurrent replay, live-capacity refusal, expiry/rollback and a replacement
+  process rejecting the old nonce epoch. Many-day valid token/proof renewal
+  introduces no Gateway presence timer. Touched lint and install-contract
+  validation pass.
+- The first full run exposed the metadata test's prior two-extra whitelist;
+  updated it for the explicit new extra while preserving empty default
+  requirements and independently checking both crypto extras. A subsequent
+  candidate refresh prevents a cached installed test package from masking
+  source changes. No test deadline or assertion was waived.
+- Clean-room/live external deployment tiers were not exercised: this is an
+  unintegrated verification library with no installer, listener, trust
+  enrollment or selected identity-provider adapter. Existing fresh-wheel
+  install/removal and a standard-library-only capability refusal are exercised;
+  hosted native-platform validation and actual PR review remain pending.
+- This closes part of machine-fleet `authenticated-scoped-and-revocable`
+  intent, using the reviewed common boundary without a daemon or per-UX auth
+  engine. Policy/enrollment, provider challenge/revocation semantics, scoped
+  query/delegation/credential delivery and encrypted role transport still need
+  their own owner-agreed implementation and proofs. No full Plan/Validation
+  item closes; the parent effort stays Active.
+- First PR review found a real concurrency defect: request timestamps could be
+  admitted out of completion order and produce a false clock-rollback refusal.
+  Replaced per-request timestamps with a required trusted owner clock sampled
+  under the lock before verification and at atomic admission. Trust/token/proof
+  validity is rechecked at that final sample, so slow verification cannot
+  admit expired evidence. Added real-crypto reverse-completion and delayed
+  expiry regressions. Revised focused verification passes 66, and the full
+  contained portfolio passes 670 with six skips in 87.26 seconds under the
+  unchanged 120-second deadline; lint and install-contract gates pass.
+  Re-review and current-head hosted CI remain pending; the earlier review is
+  not a passing verdict.
+- The corrected verifier head received genuine Copilot APPROVED review with
+  zero open findings. Hosted validation then exposed a reproducible Windows
+  120-second portfolio timeout at the existing 1024-event retention test.
+  One unchanged-head reproduction confirmed it; no further blind rerun or
+  deadline increase was used. The separate index-suite job's eight-minute
+  cancellation recovered on its single targeted rerun.
+- Narrowed the retention test's expensive setup, not its acceptance boundary:
+  generate the valid history through the real API and real in-memory SQLite,
+  back it up to a real temporary database, then exercise the exact last-valid/
+  first-expired cursor, overflow, retry and reopen against ordinary durable
+  disk transactions. The literal 1024 bound, production `synchronous=FULL`,
+  actual crash/process tests, test selection and 120-second deadline remain.
+  An attempted WAL-only fixture did not improve timing and was discarded.
+- Revised focused crypto/retention/crash contracts pass 69 in 4.82 seconds;
+  exact retention preparation/overflow takes 0.75 seconds instead of 10-12
+  on the same local host. Full unchanged-coverage portfolio passes 670 with
+  six skips in 72.23 seconds. This improvement still needs current-head
+  hosted native validation and re-review; local timing is not that proof.
+
+### 2026-10-15 - Gateway adapter consumes the shared identity prerequisite locally
+
+- The #6443/#6383 integration workspace locally merges the pinned #6743
+  dependency and replaces its unpublished content-bound Ed25519 network proof
+  with the shared `IdentityVerifier`. The shared verifier, its documentation
+  and its proof tests remain byte-identical to the dependency head.
+  Publication and activation remain gated on that dependency's actual merge.
+- Actual verified TLS supplies the serving origin and fixed route; request
+  headers cannot choose the DPoP target. The protected challenge returns only
+  the single owner's nonce/profile. Restart invalidates old proofs and
+  reconnect obtains a new challenge without automatic operation redelivery.
+  Current enrollment determines roles/grants; token role/source/generation
+  fields cannot override it. Provider-permitted credential longevity is not
+  shortened by a universal Gateway session-age cap.
+- P-256 identity/proof keys are separate from Ed25519 Gateway/controller
+  receipt keys, release trust and RSA credential recipients. Global
+  pre-verification and independent enrolled-principal request budgets refuse
+  exhaustion explicitly. External trust acquisition/currentness, real issuer
+  enrollment and actual provider permissions/revocation remain owner obligations.
+- The actual selected native collection contains 757 items. Six disjoint
+  planner/storage/artifact/client-distribution/Gateway/Gateway-process
+  partitions contain 356/182/89/30/96/4 items, with zero missing, extra or
+  duplicate items. All retain the 120-second suite deadline, existing full
+  marker policy and native job limits; the required PR aggregate depends on
+  the complete fleet matrix. Combined portfolios exceeded that budget, so
+  composition was partitioned rather than raising deadlines or removing tests.
+- Contained native results: 356, 182, 83, 30, 96 and four passes respectively;
+  six artifact-platform skips are unchanged. Each partition completes within
+  its unchanged bound. Scope guards, changed-Python lint and whitespace checks
+  pass. The shared dependency reconciliation separately passes 69 focused
+  identity/retention/artifact contracts.
+- Simple end-to-end evidence includes real TLS queries, sealed credential
+  delivery, per-request proof renewal, external credential-reference loading
+  and separate Gateway/backend/controller/worker processes with restart.
+  A first combined run observed an unexplained backend fixture startup timeout
+  under its existing ten-second bound. Diagnostic entry/import/config/bind
+  markers are retained; focused and complete process-lane runs pass without
+  increasing that bound. This is not a diagnosed fix or accepted flake.
+- Clean-room deployment/bootstrap and live external-venue evidence remain
+  pending: there is no approved production issuer/enrollment, composed released
+  role closure or managed deployment for this slice. Fresh fixture keys and
+  volumes are not substitutes for those proofs. No parent Plan or Validation
+  Plan item closes, and no existing service or prototype is replaced.
+
+### 2026-10-15 - Shared identity owner preserves current upstream retention
+
+- The optimized candidate subsequently received exact-head Copilot APPROVED
+  with zero open findings and passing hosted checks, but could not merge after
+  a concurrent upstream retention-test change. Consulted rather than choosing
+  between the overlapping approaches unilaterally; the operator selected
+  `preserve-upstream`.
+- Rebased onto current `dev` and dropped this slice's fixture optimization.
+  The retention test now matches upstream exactly, including its existing
+  small/full portfolio and valid-history setup. The optional JOSE extra,
+  verifier, real-crypto regressions and client-isolation assertions remain.
+  The previous fixture timing describes a superseded experiment, not the final
+  source. Revalidation and exact-new-head review/CI are required before merge;
+  an approval or green check on the earlier head is not carried forward.
+- Rebased full validation passes 672 with six skips in 161.01 seconds under
+  the existing full/manual budget. The exact preserved upstream required
+  selection separately passes 664 with six skips and eight full-matrix
+  deselections in 107.47 seconds under its unchanged 120-second deadline.
+  Updated the product README's test command to match that canonical upstream
+  split; no test, marker, workflow or budget is changed by this slice.
+  Touched lint, install-contract validation and exact upstream retention-file
+  equality pass.
+
+- #6743 merged at `2026-10-15T03:55:59Z`. The Gateway integration consumes
+  the accepted verifier without changing its implementation. Its earlier local
+  retention preparation is superseded by the exact current upstream test;
+  no alternative fixture optimization is carried forward.

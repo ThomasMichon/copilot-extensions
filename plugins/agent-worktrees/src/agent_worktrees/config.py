@@ -23,11 +23,14 @@ import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
 from machine_transport import find_machine_entry as _mt_find_machine_entry
 from machine_transport import machine_name  # noqa: F401 (re-export)
+from machine_transport import detect_platform as _detect_execution_platform
+from machine_transport import find_machine_metadata as _mt_find_machine_metadata
 from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
 from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
+from . import machine_instructions
 from .codename_config import CodenameConfig, parse_codename
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
@@ -67,6 +70,10 @@ MARKETPLACE_OVERLAYS_DIR = CANONICAL_INREPO_CONFIG_DIR / "marketplaces"
 # a target repo is computed on demand by ``load_config``. Lives at
 # ``~/.agent-worktrees/config.yaml`` (the shared runtime root).
 GLOBAL_CONFIG_FILENAME = "config.yaml"
+
+class ProjectNotRegisteredError(ValueError):
+    """No repository registration resolved for the requested local project."""
+
 
 @dataclass(frozen=True)
 class CopilotProfile:
@@ -708,81 +715,42 @@ def find_machine_entry(
     the explicit ``hostname`` field lets a machine keyed by a friendly name still
     be found by its raw COMPUTERNAME. Returns None if no entry matches.
     """
-    return _mt_find_machine_entry(entries, name)
+    return _mt_find_machine_entry(entries, name, reject_ambiguous=True)
 
 
-def detect_machine(repo_dir: str | Path | None = None) -> str:
-    """Auto-detect machine name from hostname.
+def find_machine_metadata(
+    entries: dict[str, MachineEntry], name: str,
+) -> MachineEntry | None:
+    """Guest identity may borrow host metadata, never host execution ownership."""
+    return _mt_find_machine_metadata(entries, name)
 
-    If *repo_dir* is provided, reads ``machines.yaml`` and matches
-    the COMPUTERNAME against machine keys, the explicit ``hostname`` field, and
-    aliases (exact match). Returns the canonical name (alias if set, otherwise
-    key). Falls back to the raw hostname if no registry is available.
-    """
-    hostname = socket.gethostname().lower()
 
-    if repo_dir is not None:
-        try:
-            entries = load_machines_yaml(repo_dir)
-            from .execution_spaces import detect_legacy_machine
-            return detect_legacy_machine(entries, hostname)
-        except FileNotFoundError:
-            pass  # no registry -- fall through to raw hostname
+def detect_machine(
+    repo_dir: str | Path | None = None, *, value: str | None = None,
+) -> str:
+    """Local execution name; preserve native aliases, qualify WSL guest keys."""
+    from .machine_identity import resolve_execution_machine
 
-    return hostname
+    return resolve_execution_machine(
+        value if value is not None else socket.gethostname().lower(),
+        guest=detect_platform() == "wsl", configured=value is not None,
+        load_entries=(lambda: load_machines_yaml(repo_dir)) if repo_dir is not None else None,
+    )
 
 
 def render_copilot_instructions(
-    entry: MachineEntry, project: str = "",
+    entry: MachineEntry, project: str = "", *, machine: str = "",
 ) -> str:
-    """Render the content of ``machine.instructions.md`` for a machine.
-
-    Detects the current platform and includes it along with the
-    deployment environment (SSH alias) so agents know their exact
-    identity for service deployments.  When *project* is provided,
-    includes project and binstub metadata.
-    """
-    plat = detect_platform()
-
-    # Find the SSH alias matching the current platform
-    deploy_env = ""
-    for ssh_env in entry.ssh_environments:
-        if ssh_env.name == plat:
-            deploy_env = ssh_env.alias
-            break
-
-    lines = [
-        f"Machine: {entry.display_name}",
-        f"Hostname: {entry.key}",
-        f"Environment: {entry.environment}",
-        f"Platform: {plat}",
-    ]
-    if deploy_env:
-        lines.append(f"Deployment environment: {deploy_env}")
-    if entry.role:
-        lines.append(f"Role: {entry.role}")
-    if entry.description:
-        lines.append(f"Description: {entry.description}")
-    if entry.capabilities:
-        lines.append(f"Capabilities: {', '.join(entry.capabilities)}")
-    if project:
-        lines.append(f"Project: {project}")
-        lines.append(f"Binstub: {project}")
-    return "\n".join(lines) + "\n"
+    """Render machine context through the public platform-detection seam."""
+    return machine_instructions.render_copilot_instructions(
+        entry, project, machine=machine, platform=detect_platform(),
+        hostname=socket.gethostname(),
+    )
 
 
 def detect_platform() -> str:
     """Detect the current platform: 'windows', 'wsl', or 'linux'."""
-    if sys.platform == "win32":
-        return "windows"
-    # WSL detection
-    try:
-        with open("/proc/version") as f:
-            if "microsoft" in f.read().lower():
-                return "wsl"
-    except OSError:
-        pass
-    return "linux"
+    return _detect_execution_platform()
 
 
 def _home() -> Path:
@@ -986,11 +954,8 @@ def _load_config_uncached(
         or global_raw.get("platform")
         or detect_platform()
     )
-    machine = (
-        machine_raw.get("machine")
-        or global_raw.get("machine")
-        or detect_machine()
-    )
+    configured_machine = machine_raw.get("machine") or global_raw.get("machine")
+    machine = configured_machine or detect_machine()
     srcroot = machine_raw.get("srcroot") or global_raw.get("srcroot") or ""
 
     # Active project / default repo name.
@@ -1086,7 +1051,7 @@ def _load_config_uncached(
         repos[name] = _build_repo_config(merged, anchor, str(worktree_root))
 
     if not repos:
-        raise ValueError(
+        raise ProjectNotRegisteredError(
             f"No repo could be resolved for project {repo_name or '?'!r}.\n"
             f"Checked machine-local config ({path}) and the repos registry "
             f"({registry_paths.registry_path('repos.yaml', legacy_root=legacy_install_dir())}).\n"
@@ -1166,7 +1131,41 @@ def _load_config_uncached(
     )
     from .execution_spaces import canonicalize_legacy_config
 
-    return canonicalize_legacy_config(config)
+    config = canonicalize_legacy_config(config, configured=bool(configured_machine))
+    # Explicit execution-space keys are not a migration surface.
+    if detect_platform() != "wsl":
+        return config
+    try:
+        entries = load_machines_yaml(config.default_repo.anchor, config=config)
+    except FileNotFoundError:
+        entries = {}
+    if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
+        if not configured_machine:
+            detect_machine(config.default_repo.anchor)
+        return config
+    # Resolve after the config-source binding is available, without calling
+    # load_machines_yaml's overlay fallback (which loads this config recursively).
+    identity_anchors = [config.default_repo.anchor]
+    if config.default_repo.stateless or config.default_repo.requires_external_state_root:
+        from . import state_root
+
+        identity_anchors = [
+            source.anchor for source in state_root.config_source_anchors(
+                config, base_anchor=config.default_repo.anchor,
+            )
+        ]
+    for anchor in identity_anchors:
+        root = Path(anchor)
+        if any((root / rel).is_file() for rel in (
+            Path(INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
+        )):
+            return replace(config, machine=detect_machine(
+                anchor, value=config.machine if configured_machine else None,
+            ))
+    else:
+        if machine_raw.get("machine") or global_raw.get("machine"):
+            return replace(config, machine=detect_machine(value=config.machine))
+    return config
 
 
 def load_config(

@@ -10,19 +10,29 @@ later install if setuptools' incremental-build mtime check decides nothing
 recipes_cli.py shipped this way and crash-looped a production daemon for
 ~8h. The Windows installer had the identical gap (an after-only scrub in the
 `finally` block): this module actually EXECUTES the extracted `$installPkg`
-scriptblock under `pwsh`, with stubbed `uv`/pip functions, to prove the fix
+scriptblock under `pwsh`, with native offline UV fixtures, to prove the fix
 works, not just that the source text is ordered a certain way.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+_FIXTURE_SPEC = importlib.util.spec_from_file_location(
+    "_dispatch_owned_fixtures", Path(__file__).with_name("test_installer_engine_adoption.py")
+)
+assert _FIXTURE_SPEC is not None and _FIXTURE_SPEC.loader is not None
+_FIXTURES = importlib.util.module_from_spec(_FIXTURE_SPEC)
+_FIXTURE_SPEC.loader.exec_module(_FIXTURES)
+LIBRARIES = _FIXTURES.LIBRARIES
+_stage_owned_source = _FIXTURES._stage_owned_source
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
 _PWSH = shutil.which("pwsh")
@@ -74,9 +84,76 @@ def _extract_install_pkg_block() -> str:
     raise AssertionError("unbalanced braces extracting $installPkg")
 
 
-def _run_harness(plugin_dir: Path, stub_body: str, extra_script: str) -> subprocess.CompletedProcess:
-    harness = plugin_dir / "harness.ps1"
+def _run_harness(
+    plugin_dir: Path, stub_body: str, extra_script: str, *,
+    have_uv: bool = True, block: str | None = None, repository: Path | None = None,
+) -> subprocess.CompletedProcess:
+    libraries = {
+        package: plugin_dir / "libs" / lib
+        for package, lib in LIBRARIES.items()
+        if (plugin_dir / "libs" / lib).is_dir()
+    }
+    if repository is not None:
+        libraries["agent-zdd"] = repository / "libs" / "zdd"
+    engine = _stage_owned_source(plugin_dir, libraries, repository=repository)
+    fixture_bin = plugin_dir / "fixture-bin"
+    fixture_bin.mkdir()
+    driver = fixture_bin / "uv-driver.ps1"
+    driver.write_text(
+        """if ($args -contains '--show-settings') {
+    Write-Output 'PipInstallSettings { settings: PipSettings {
+    index_locations: IndexLocations {
+        flat_index: [],
+    },
+    exclude_newer: ExcludeNewer {
+        global: None,
+        package: ExcludeNewerPackage({}),
+    },
+}, }'
+    exit 0
+}
+"""
+        + stub_body
+        + f"""
+$countPath = '{plugin_dir / "install-count.txt"}'
+$count = if (Test-Path $countPath) {{ [int](Get-Content $countPath) }} else {{ 0 }}
+[IO.File]::WriteAllText($countPath, [string]($count + 1))
+uv @args
+$code = $LASTEXITCODE
+$roots = @('{plugin_dir}') + @(Get-ChildItem '{plugin_dir / "libs"}' -Directory -ErrorAction SilentlyContinue | ForEach-Object {{ $_.FullName }})
+$roots += @($args | Where-Object {{ Test-Path -LiteralPath $_ -PathType Container }})
+foreach ($root in $roots) {{
+    foreach ($relative in @('build', 'some_pkg.egg-info', 'src/some_pkg.egg-info', 'some_vendored_pkg.egg-info', 'src/some_vendored_pkg.egg-info')) {{
+        New-Item -ItemType Directory -Path (Join-Path $root $relative) -Force | Out-Null
+    }}
+}}
+exit $code
+""",
+        encoding="utf-8",
+    )
+    uv = fixture_bin / ("uv.cmd" if os.name == "nt" else "uv")
+    uv.write_text(
+        f'@"{_PWSH}" -NoProfile -NonInteractive -File "{driver}" %*\n@exit /b %ERRORLEVEL%\n'
+        if os.name == "nt"
+        else f'#!/bin/sh\nexec "{_PWSH}" -NoProfile -NonInteractive -File "{driver}" "$@"\n',
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    env = os.environ.copy()
+    for key in tuple(env):
+        if key.startswith(("AGENT_", "COPILOT_PLUGIN_", "PYTHON", "UV_")):
+            env.pop(key)
+    env["PATH"] = str(fixture_bin)
+    env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
+    extracted = block if block is not None else _extract_install_pkg_block()
+    if not have_uv:
+        # Spy only the unresolved executable boundary; retain the real policy
+        # helper and both source-install/scrub calls.
+        assert extracted.count("--uv uv --") == 2
+        extracted = extracted.replace("--uv uv --", f"--uv '{uv}' --")
+    harness = engine / "harness.ps1"
     harness.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
         f'$PluginDir = "{plugin_dir}"\n'
         # Install-Runtime now builds from $BuildSrcDir (New-PluginBuildSnapshot's
         # durable per-version snapshot), never from the live $PluginDir -- see
@@ -84,14 +161,13 @@ def _run_harness(plugin_dir: Path, stub_body: str, extra_script: str) -> subproc
         # correctness, so point $BuildSrcDir at the same fixture directory
         # $installPkg's extracted block actually reads/writes.
         f'$BuildSrcDir = "{plugin_dir}"\n'
-        '$VenvPython = "python3"\n'
-        + stub_body
-        + "\n$UvCommand = if (Get-Command uv -ErrorAction SilentlyContinue) { 'uv' } else { $null }\n"
-        + f". '{_PLUGIN_ROOT.parents[1] / 'libs/installer-engine/installer-engine.ps1'}'\n"
+        f"$VenvPython = '{sys.executable}'\n"
+        + (f"$UvCommand = '{uv}'\n" if have_uv else "$UvCommand = $null\n")
+        + f". '{engine / 'installer-engine.ps1'}'\n"
         + "function Write-Warn { param($Message) Write-Host $Message }\n"
         + "function Start-Sleep { param($Seconds) }\n"
         + "\n\n"
-        + _extract_install_pkg_block()
+        + extracted
         + "\n\n"
         + extra_script
         + "\n",
@@ -99,9 +175,10 @@ def _run_harness(plugin_dir: Path, stub_body: str, extra_script: str) -> subproc
     )
     return subprocess.run(
         [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        cwd=plugin_dir,
         capture_output=True,
         text=True,
-        env=os.environ,
+        env=env,
         timeout=30,
         check=True,
     )
@@ -166,6 +243,7 @@ function uv {{
     extra = f"""
 $result = & $installPkg "{plugin_dir}"
 if ($result.Code -eq 0) {{ Write-Output "EXIT:0" }} else {{ Write-Output "EXIT:1" }}
+Write-Output $result.Output
 """
     result = _run_harness(plugin_dir, stub, extra)
     assert "EXIT:0" in result.stdout
@@ -177,19 +255,21 @@ if ($result.Code -eq 0) {{ Write-Output "EXIT:0" }} else {{ Write-Output "EXIT:1
         assert not (lib_dir / "src" / "some_vendored_pkg.egg-info").exists()
 
 
-def test_uv_branch_scrubs_before_and_after(tmp_path: Path) -> None:
+@pytest.mark.parametrize("code", [0, 23])
+def test_uv_branch_scrubs_before_and_after(tmp_path: Path, code: int) -> None:
     plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
     _seed_build_residue(plugin_dir)
-    stub = """
-function uv { Write-Output 'Installed 1 package'; $global:LASTEXITCODE = 0 }
+    stub = f"""
+function uv {{ Write-Output 'fixture install'; $global:LASTEXITCODE = {code} }}
 """
     extra = f"""
 $result = & $installPkg "{plugin_dir}"
-if ($result.Code -eq 0) {{ Write-Output "EXIT:0" }} else {{ Write-Output "EXIT:1" }}
+Write-Output "EXIT:$($result.Code)"
 """
     result = _run_harness(plugin_dir, stub, extra)
-    assert "EXIT:0" in result.stdout
+    assert f"EXIT:{code}" in result.stdout
+    assert (plugin_dir / "install-count.txt").read_text() == "1"
     assert not (plugin_dir / "build").exists()
     assert not (plugin_dir / "some_pkg.egg-info").exists()
 
@@ -241,21 +321,16 @@ if ($result.Code -eq 0) {{ Write-Output "EXIT:0" }} else {{ Write-Output "EXIT:1
     assert "residue still present" not in result.stderr
 
 
-def test_no_uv_fallback_rescrubs_between_the_two_pip_calls(tmp_path: Path) -> None:
-    """Regression: the no-uv fallback runs TWO sequential pip calls
-    (--force-reinstall --no-deps, then a plain install). The first call can
-    itself recreate build/egg-info residue before the second call's own
-    build starts -- confirm the second call sees a clean directory."""
+def test_unresolved_uv_branch_rescrubs_between_policy_calls(tmp_path: Path) -> None:
+    """The two policy-admitted UV calls must scrub between source builds."""
     plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
     _seed_build_residue(plugin_dir)
     marker = tmp_path / "second-call.json"
     stub = f"""
-function Get-Command {{ [CmdletBinding()] param($Name) return $null }}
-function python3 {{
+function uv {{
     param()
-    $args2 = $args
-    if ($args2 -contains '--force-reinstall') {{
+    if ([int](Get-Content "{plugin_dir / 'install-count.txt'}") -eq 1) {{
         New-Item -ItemType Directory -Force -Path "{plugin_dir}\\build\\lib\\some_pkg" | Out-Null
         New-Item -ItemType Directory -Force -Path "{plugin_dir}\\some_pkg.egg-info" | Out-Null
         $global:LASTEXITCODE = 0
@@ -266,16 +341,18 @@ function python3 {{
     $global:LASTEXITCODE = 0
 }}
 """
-    # python3 stands in for $VenvPython (set to "python3" above); Get-Command
-    # is stubbed out so the uv branch is never taken.
     extra = f"""
 $result = & $installPkg "{plugin_dir}"
 if ($result.Code -eq 0) {{ Write-Output "EXIT:0" }} else {{ Write-Output "EXIT:1" }}
 """
-    result = _run_harness(plugin_dir, stub, extra)
-    assert "EXIT:0" in result.stdout
+    extra += "\nWrite-Output $result.Output\n"
+    result = _run_harness(plugin_dir, stub, extra, have_uv=False)
+    assert "EXIT:0" in result.stdout, result.stdout + result.stderr
     assert marker.exists(), result.stdout + result.stderr
     assert marker.read_text(encoding="utf-8").strip() == "False"
+    assert (plugin_dir / "install-count.txt").read_text() == "2"
+    assert not (plugin_dir / "build").exists()
+    assert not (plugin_dir / "some_pkg.egg-info").exists()
 
 
 def _extract_zdd_preinstall_block() -> str:
@@ -344,16 +421,7 @@ def test_standalone_zdd_preinstall_scrubs_before_building(tmp_path: Path) -> Non
     (zdd_dir / "some_pkg.egg-info").mkdir()
 
     stub = f"""
-function Write-Ok {{ param($m) Write-Output "OK: $m" }}
-function Write-Fail {{ param($m) Write-Output "FAIL: $m" }}
-function Write-Skip {{ param($m) Write-Output "SKIP: $m" }}
-function Get-Command {{ [CmdletBinding()] param($Name) return $null }}
-function Resolve-Zdd {{ param($LibRoot) return "{zdd_dir}" }}
-$VenvPython = "python3"
-$PluginDir = "{plugin_dir}"
-$BuildSrcDir = "{plugin_dir}"
-$prevEAP = $ErrorActionPreference
-function python3 {{
+function uv {{
     param()
     if ((Test-Path "{zdd_dir}\\build") -or (Test-Path "{zdd_dir}\\some_pkg.egg-info")) {{
         [Console]::Error.WriteLine('residue still present at zdd install time')
@@ -363,18 +431,18 @@ function python3 {{
     $global:LASTEXITCODE = 0
 }}
 """
-    harness = plugin_dir / "harness.ps1"
-    harness.write_text(
-        stub + "\n\n" + _extract_zdd_preinstall_block() + "\n",
-        encoding="utf-8",
+    setup = f"""
+function Write-Ok {{ param($m) Write-Output "OK: $m" }}
+function Write-Fail {{ param($m) throw $m }}
+function Write-Skip {{ param($m) Write-Output "SKIP: $m" }}
+function Resolve-Zdd {{ param($LibRoot) return "{zdd_dir}" }}
+$prevEAP = $ErrorActionPreference
+"""
+    result = _run_harness(
+        plugin_dir, stub, "", block=setup + _extract_zdd_preinstall_block(),
     )
-    result = subprocess.run(
-        [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-        capture_output=True,
-        text=True,
-        env=os.environ,
-        timeout=30,
-    )
+    assert "OK: zdd" in result.stdout, result.stdout + result.stderr
+    assert (plugin_dir / "install-count.txt").read_text() == "1"
     assert "residue still present" not in result.stderr, result.stdout + result.stderr
     assert not (zdd_dir / "build").exists()
     assert not (zdd_dir / "some_pkg.egg-info").exists()
@@ -387,11 +455,12 @@ def test_standalone_zdd_preinstall_scrubs_external_resolved_path(tmp_path: Path)
     payload. $PluginDir/libs/* scrubbing never reaches that tree, so the
     standalone zdd pre-install must pass its own resolved $ZddDir to
     Remove-PluginBuildArtifacts's -ExtraDir explicitly."""
-    plugin_dir = tmp_path / "plugin"
-    plugin_dir.mkdir()
+    repository = tmp_path / "authoring"
+    plugin_dir = repository / "plugins" / "agent-dispatch"
+    plugin_dir.mkdir(parents=True)
     # Deliberately a SIBLING of plugin_dir, not nested under it -- not
     # reachable via $PluginDir/libs/* scrubbing at all.
-    external_zdd_dir = tmp_path / "external-checkout" / "libs" / "zdd"
+    external_zdd_dir = repository / "libs" / "zdd"
     (external_zdd_dir / "build" / "lib" / "zdd").mkdir(parents=True)
     (external_zdd_dir / "build" / "lib" / "zdd" / "__init__.py").write_text(
         "x = 1\n", encoding="utf-8"
@@ -399,16 +468,7 @@ def test_standalone_zdd_preinstall_scrubs_external_resolved_path(tmp_path: Path)
     (external_zdd_dir / "some_pkg.egg-info").mkdir()
 
     stub = f"""
-function Write-Ok {{ param($m) Write-Output "OK: $m" }}
-function Write-Fail {{ param($m) Write-Output "FAIL: $m" }}
-function Write-Skip {{ param($m) Write-Output "SKIP: $m" }}
-function Get-Command {{ [CmdletBinding()] param($Name) return $null }}
-function Resolve-Zdd {{ param($LibRoot) return "{external_zdd_dir}" }}
-$VenvPython = "python3"
-$PluginDir = "{plugin_dir}"
-$BuildSrcDir = "{plugin_dir}"
-$prevEAP = $ErrorActionPreference
-function python3 {{
+function uv {{
     param()
     if ((Test-Path "{external_zdd_dir}\\build") -or (Test-Path "{external_zdd_dir}\\some_pkg.egg-info")) {{
         [Console]::Error.WriteLine('external residue still present at zdd install time')
@@ -418,18 +478,19 @@ function python3 {{
     $global:LASTEXITCODE = 0
 }}
 """
-    harness = plugin_dir / "harness.ps1"
-    harness.write_text(
-        stub + "\n\n" + _extract_zdd_preinstall_block() + "\n",
-        encoding="utf-8",
+    setup = f"""
+function Write-Ok {{ param($m) Write-Output "OK: $m" }}
+function Write-Fail {{ param($m) throw $m }}
+function Write-Skip {{ param($m) Write-Output "SKIP: $m" }}
+function Resolve-Zdd {{ param($LibRoot) return "{external_zdd_dir}" }}
+$prevEAP = $ErrorActionPreference
+"""
+    result = _run_harness(
+        plugin_dir, stub, "", block=setup + _extract_zdd_preinstall_block(),
+        repository=repository,
     )
-    result = subprocess.run(
-        [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-        capture_output=True,
-        text=True,
-        env=os.environ,
-        timeout=30,
-    )
+    assert "OK: zdd" in result.stdout, result.stdout + result.stderr
+    assert (plugin_dir / "install-count.txt").read_text() == "1"
     assert "external residue still present" not in result.stderr, result.stdout + result.stderr
     assert not (external_zdd_dir / "build").exists()
     assert not (external_zdd_dir / "some_pkg.egg-info").exists()

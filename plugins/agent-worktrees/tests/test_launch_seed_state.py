@@ -65,8 +65,8 @@ def _settled_pair_receipt(path):
 @pytest.mark.parametrize(("name", "old_version"), [
     (name, version)
     for name in ("stage", "take", "restore", "finish", "remove")
-    for version in (1, 2, 3)
-] + [("remove", 4)])
+    for version in range(1, 5 if name in {"stage", "take", "remove"} else 4)
+])
 def test_seed_client_never_dials_pre_admission_daemon(tmp_path, monkeypatch, name, old_version):
     from agent_worktrees import locks, status_monitor_runtime
 
@@ -103,10 +103,7 @@ def test_seed_client_never_dials_pre_admission_daemon(tmp_path, monkeypatch, nam
         assert operations[name]() is not None
 
 
-@pytest.mark.parametrize("old_version", [3, 4])
-def test_remove_rejects_real_pre_receipt_daemon_without_direct_unlink_fallback(
-    tmp_path, monkeypatch, old_version,
-):
+def test_remove_rejects_real_v3_daemon_without_direct_unlink_fallback(tmp_path, monkeypatch):
     from agent_worktrees import locks, status_monitor_runtime
 
     path = _record(tmp_path)
@@ -118,14 +115,12 @@ def test_remove_rejects_real_pre_receipt_daemon_without_direct_unlink_fallback(
     server = tracking_write.start_server(lambda *args: called.append(args) or {"record_removed": True})
     server.start()
     old = tracking_write.rendezvous_fields(server)
-    old["tracking_write_verb_versions"] = {
-        **old["tracking_write_verb_versions"], "launch_seed_remove": old_version,
-    }
+    old["tracking_write_verb_versions"] = {**old["tracking_write_verb_versions"], "launch_seed_remove": 3}
     monkeypatch.setattr(locks, "read_lock", lambda *a: old)
     monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
     monkeypatch.setattr(tracking_write, "run_direct", lambda *a, **k: pytest.fail("direct unlink fallback forbidden"))
     try:
-        with pytest.raises(ValueError, match="verb version"):
+        with pytest.raises(ValueError, match="verb version 5"):
             state.remove(path, remove_record=True)
         assert called == []
         assert {file: file.read_bytes() for file in before} == before
@@ -238,6 +233,36 @@ def test_real_daemon_retains_failed_attempt_and_finishes_exactly_one_handoff(
         assert state.finish(path, second)["finished"]
         assert state.peek(path) is None
         assert state.finish(path, second)["finished"]
+    finally:
+        server.close()
+
+
+def test_real_daemon_reports_native_transport_refusal_without_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import locks, status_monitor_runtime
+
+    path = _record(tmp_path)
+    record = tracking.load_record(path)
+    record.execution_leg = tracking.ExecutionLegBinding(
+        provider="ahp", state="unknown", binding_revision=1, blob={},
+    )
+    tracking.save_record(record, path)
+    before = path.read_bytes()
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    endpoint = tracking_write.rendezvous_fields(server)
+    monkeypatch.setattr(locks, "read_lock", lambda *_args: endpoint)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(
+        tracking_write, "run_direct",
+        lambda *a, **kw: pytest.fail("a sent refusal must not fall back or retry"),
+    )
+    try:
+        with pytest.raises(state.NativeSeedTransportError, match="native execution leg"):
+            state.stage(path, kind="resume", text="accepted draft")
+        assert path.read_bytes() == before
+        assert not state.state_path(path).exists()
     finally:
         server.close()
 

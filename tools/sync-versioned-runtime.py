@@ -27,6 +27,7 @@ drifted (``tools/check-install-contract.py`` independently enforces the
 ``versioned_runtime.py`` half). A "Python runtime plugin" is one that ships a
 ``pyproject.toml`` **and** a runtime installer (``install.*`` or ``init.*``) --
 the exact set the install contract requires to carry the primitive.
+Both modes refuse linked destinations and ancestors before reading or writing.
 """
 from __future__ import annotations
 
@@ -35,10 +36,16 @@ import hashlib
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uv_editable_ref as uer
+
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 CANONICAL = REPO / "libs" / "versioned-runtime" / "versioned_runtime.py"
 VRT_NAME = "versioned_runtime.py"
+COMPONENT_NAMES = ("versioned_runtime_leases.py", "versioned_runtime_construction.py")
+DEPENDENCY_POLICY = REPO / "libs" / "installer-engine" / "installer_dependency_policy.py"
+DEPENDENCY_CONFIG = DEPENDENCY_POLICY.with_name("installer_dependency_config.py")
 
 # Canonical parameterized shell resolvers (uniform-runtime-resolution, #765). The
 # one marker-only way a binstub / hook / service launcher resolves the versioned
@@ -103,6 +110,9 @@ def main() -> int:
     if not CANONICAL.exists():
         print(f"canonical missing: {CANONICAL.relative_to(REPO)}", file=sys.stderr)
         return 1
+    if any(source.is_symlink() or not source.is_file() for source in (DEPENDENCY_POLICY, DEPENDENCY_CONFIG)):
+        print("canonical installer dependency policy component missing or linked", file=sys.stderr)
+        return 1
 
     plugins = _runtime_plugins()
     if not plugins:
@@ -113,8 +123,20 @@ def main() -> int:
     # into every runtime plugin, plus each opt-in plugin's resolver copies.
     pairs: list[tuple[bytes, Path]] = []
     canonical_bytes = CANONICAL.read_bytes()
+    policy_bytes = DEPENDENCY_POLICY.read_bytes()
+    config_bytes = DEPENDENCY_CONFIG.read_bytes()
+    component_bytes = {}
+    for name in COMPONENT_NAMES:
+        source = CANONICAL.with_name(name)
+        if source.is_symlink() or not source.is_file():
+            print(f"canonical runtime component missing or linked: {name}", file=sys.stderr)
+            return 1
+        component_bytes[name] = source.read_bytes()
     for plugin in plugins:
         pairs.append((canonical_bytes, plugin / "scripts" / VRT_NAME))
+        pairs.append((policy_bytes, plugin / "scripts" / DEPENDENCY_POLICY.name))
+        pairs.append((config_bytes, plugin / "scripts" / DEPENDENCY_CONFIG.name))
+        pairs.extend((data, plugin / "scripts" / name) for name, data in component_bytes.items())
 
     resolver_plugins = _resolver_plugins()
     resolver_bytes: dict[str, bytes] = {}
@@ -127,6 +149,12 @@ def main() -> int:
     for plugin in resolver_plugins:
         for name in RESOLVER_NAMES:
             pairs.append((resolver_bytes[name], plugin / "scripts" / name))
+
+    for _want_bytes, dest in pairs:
+        bad_destination = uer._find_symlinked_ancestor(dest, REPO.resolve())
+        if bad_destination is not None:
+            print(f"{bad_destination} is a symlink -- refusing", file=sys.stderr)
+            return 1
 
     drifted: list[str] = []
     written: list[str] = []

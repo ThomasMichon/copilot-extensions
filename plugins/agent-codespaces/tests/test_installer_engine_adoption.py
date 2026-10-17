@@ -98,7 +98,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
 def _function(ext: str, name: str) -> str:
     source = (PLUGIN / "scripts" / f"install.{ext}").read_text(encoding="utf-8")
     pattern = (
-        rf"(?ms)^{re.escape(name)}\(\) \{{.*?^\}}"
+        rf"(?ms)^{re.escape(name)}\(\) [{{(].*?^[}})]"
         if ext == "sh"
         else (rf"(?ms)^function {re.escape(name)} \{{.*?^\}}")
     )
@@ -111,23 +111,62 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
     path = tmp_path / f"harness.{ext}"
     path.write_text(script, encoding="utf-8")
     command = ["bash", str(path)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(path)]
-    return subprocess.run(
-        command,
-        env=env,
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=45,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            command, env=env, cwd=tmp_path, capture_output=True, text=True,
+            timeout=45, check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        log = tmp_path / "uv.jsonl"
+        calls = log.read_text() if log.is_file() else "no UV calls"
+        pytest.fail(f"native fixture timeout; UV calls: {calls}; stdout: {exc.stdout}; stderr: {exc.stderr}")
 
 
 def _fake_uv(tmp_path: Path) -> Path:
     driver = tmp_path / "uv-driver.py"
     driver.write_text(
-        """import json, os, sys
+        """import json, os, subprocess, sys, tomllib
 from pathlib import Path
 args = sys.argv[1:]
+if "--show-settings" in args:
+    print('''PipInstallSettings { settings: PipSettings {
+        index_locations: IndexLocations { indexes: [], flat_index: [], },
+        exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+    }, }''')
+    raise SystemExit(0)
+def unseasoned(arguments):
+    result = []
+    items = iter(arguments)
+    for argument in items:
+        if argument in ("--exclude-newer", "--config-file"):
+            next(items)
+        elif argument == "--config-setting":
+            assert next(items) == "editable_mode=compat"
+        elif argument != "--reinstall":
+            result.append(argument)
+    return result
+expected_sources = json.loads(os.environ.get("TEST_UV_EXPECTED_SOURCES", "{}"))
+if expected_sources and args[:2] == ["pip", "install"]:
+    config = Path(args[args.index("--config-file") + 1]).resolve()
+    private_root = config.parent
+    assert config.is_file() and not config.is_symlink()
+    assert private_root.name == "inputs"
+    assert private_root.parent.parent.samefile(Path(os.environ["TEMP"]))
+    if os.name != "nt":
+        assert private_root.stat().st_uid == os.getuid()
+        assert private_root.stat().st_mode & 0o077 == 0
+    for index, argument in enumerate(args):
+        source = Path(argument)
+        if not source.is_dir() or not (source / "pyproject.toml").is_file():
+            continue
+        project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+        original = Path(expected_sources[project["name"]])
+        assert source.resolve() != original.resolve()
+        assert any(parent.samefile(private_root) for parent in source.resolve().parents)
+        assert project == tomllib.loads((original / "pyproject.toml").read_text())["project"]
+        for member in original.rglob("*.py"):
+            assert (source / member.relative_to(original)).read_bytes() == member.read_bytes()
+        args[index] = str(original)
 log = Path(os.environ["TEST_UV_LOG"])
 history = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 with log.open("a") as stream:
@@ -139,9 +178,10 @@ mode = os.environ.get("TEST_UV_MODE", "ok")
 if mode == "fatal":
     print("permanent failure")
     raise SystemExit(23)
-count = sum(item == args for item in history)
+count = sum(unseasoned(item) == unseasoned(args) for item in history)
 if args[:2] == ["pip", "install"]:
-    if mode == "sre" and count < 2:
+    first = next((unseasoned(item) for item in history if item[:2] == ["pip", "install"]), unseasoned(args))
+    if mode == "sre" and unseasoned(args) == first and count < 2:
         print("SRE module mismatch")
         raise SystemExit(1)
     raise SystemExit(0)
@@ -151,19 +191,29 @@ if args[0] == "venv":
         print("requested Python unavailable")
         raise SystemExit(24)
     root.mkdir(parents=True, exist_ok=True)
-    (root / "bin").mkdir(exist_ok=True)
-    (root / "bin" / "python").touch()
-    (root / "Scripts").mkdir(exist_ok=True)
-    (root / "Scripts" / "python.exe").touch()
+    real_venv = os.environ.get("TEST_UV_REAL_VENV") == "1"
+    if real_venv:
+        subprocess.run(
+            [sys._base_executable, "-I", "-m", "venv", "--without-pip", "--copies", str(root)],
+            check=True,
+        )
+    else:
+        (root / "bin").mkdir(exist_ok=True)
+        (root / "bin" / "python").touch()
+        (root / "Scripts").mkdir(exist_ok=True)
+        (root / "Scripts" / "python.exe").touch()
     if mode == "missing-cfg" and count < 2:
+        (root / "pyvenv.cfg").unlink(missing_ok=True)
         raise SystemExit(0)
     if mode == "corrupt" and count < 2:
+        (root / "pyvenv.cfg").unlink(missing_ok=True)
         print("failed to locate pyvenv.cfg; exit code: 106")
         raise SystemExit(106)
     if mode == "sre" and count < 2:
         print("SRE module mismatch")
         raise SystemExit(1)
-    (root / "pyvenv.cfg").write_text("home = test")
+    if not real_venv:
+        (root / "pyvenv.cfg").write_text("home = test")
     raise SystemExit(0)
 raise SystemExit(2)
 """,
@@ -182,13 +232,26 @@ raise SystemExit(2)
     return uv
 
 
-def _prelude(ext: str) -> str:
+def _without_policy_arguments(arguments):
+    assert "--exclude-newer" in arguments and "--reinstall" in arguments
+    result = []
+    items = iter(arguments)
+    for argument in items:
+        if argument in ("--exclude-newer", "--config-file"):
+            next(items)
+        elif argument == "--config-setting":
+            assert next(items) == "editable_mode=compat"
+        elif argument != "--reinstall":
+            result.append(argument)
+    return result
+
+def _prelude(ext: str, engine: Path = ENGINE) -> str:
     if ext == "sh":
         return (
             "set -euo pipefail\n"
             '_warn() { echo "$*" >&2; }\n_fail() { echo "$*" >&2; }\n'
             "_step() { :; }\n_ok() { :; }\nsleep() { :; }\n"
-            f'. "{ENGINE / "installer-engine.sh"}"\n'
+            f'. "{engine / "installer-engine.sh"}"\n'
         )
     return (
         "$ErrorActionPreference = 'Stop'\n"
@@ -197,7 +260,7 @@ def _prelude(ext: str) -> str:
         "function Write-ServiceOk { param($Msg) }\n"
         "function Write-Warn { param($Msg) Write-ServiceWarn $Msg }\n"
         "function Write-Ok { param($Msg) }\nfunction Start-Sleep { param($Seconds) }\n"
-        f". '{ENGINE / 'installer-engine.ps1'}'\n"
+        f". '{engine / 'installer-engine.ps1'}'\n"
     )
 
 
@@ -377,39 +440,57 @@ def test_codespaces_deploy_venv_uses_shared_retry_and_fallback(tmp_path, ext, mo
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     env["TEST_UV_MODE"] = mode
-    slot = tmp_path / "slot"
+    env["TEST_UV_REAL_VENV"] = "1"
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "1.2.3"
     if ext == "sh":
         script = (
             _prelude(ext)
+            + _function(ext, "_versioned_slot_clean")
             + _function(ext, "deploy_venv")
             + f"""
+SCRIPT_DIR='{PLUGIN / "scripts"}'
+INSTALL_DIR='{root}'
+SRC_VERSION=1.2.3
+VERSIONED_RUNTIME=1
+LINK_DIR="$INSTALL_DIR/.venv"
 VENV_DIR='{slot}'
 VENV_PYTHON="$VENV_DIR/bin/python"
 UV_CMD='{uv}'
+_bootstrap_python() {{ printf '%s\\n' '{sys._base_executable}'; }}
+_payload_hash() {{ printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }}
 _assert_uv() {{ :; }}
 _ensure_uv_index() {{ :; }}
-_versioned_slot_clean() {{ :; }}
 deploy_venv
+# This stage-only test has not installed a package or earned completion.
+"$VENV_PYTHON" -I -c 'import pathlib, sys; assert sys.prefix != sys.base_prefix; assert pathlib.Path(sys.prefix).resolve() == pathlib.Path(sys.argv[1]).resolve()' "$VENV_DIR"
+construction_rc=0
+_runtime_construction_finish || construction_rc=$?
+[[ "$construction_rc" == 1 ]] || {{ echo 'Incomplete construction did not abort' >&2; exit 1; }}
+[[ ! -e "$VENV_DIR" ]] || {{ echo 'Aborted candidate remained' >&2; exit 1; }}
 """
         )
     else:
+        python_relative = "Scripts/python.exe" if os.name == "nt" else "bin/python"
         script = (
             _prelude(ext)
+            + _function(ext, "Test-PythonVenv")
             + _function(ext, "Deploy-Venv")
             + f"""
 $env:OS = 'Test'
 $VenvDir = '{slot}'
-$VenvPython = Join-Path $VenvDir 'Scripts/python.exe'
+$VenvPython = Join-Path $VenvDir '{python_relative}'
 $UvCommand = '{uv}'
 function Assert-Uv {{}}
 function Invoke-VersionedSlotClean {{ return $true }}
-function Test-PythonVenv {{ param($Dir, $Python) return Test-Path (Join-Path $Dir 'pyvenv.cfg') }}
 if (-not (Deploy-Venv)) {{ exit 1 }}
 if ($ErrorActionPreference -ne 'Stop') {{ throw 'preference leaked' }}
 """
         )
     result = _run(ext, script, tmp_path, env)
-    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+    log = tmp_path / "uv.jsonl"
+    assert log.exists(), result.stdout + result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
     assert calls[0] == ["venv", str(slot), "--python", "3.11", "--allow-existing"]
     assert len(calls) == (2 if mode in ("fatal", "fallback") else 3)
@@ -417,12 +498,109 @@ if ($ErrorActionPreference -ne 'Stop') {{ throw 'preference leaked' }}
         assert calls[-1] == ["venv", str(slot), "--allow-existing"]
     elif ext == "ps1":
         assert "retrying" in result.stderr
+    if ext == "sh":
+        assert not slot.exists()
+        assert not (root / "current-version").exists()
+        assert not (root / "last-known-good").exists()
+
+
+def _attributed_library_sources(tmp_path: Path, layout: str):
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        import materialize_main as mm
+    finally:
+        sys.path.pop(0)
+    repository = tmp_path / "publisher-repo"
+    payload = repository / "plugins" / PLUGIN.name
+    shutil.copytree(PLUGIN, payload, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    logs = mm.materialize_uv_editable_refs(repository, canonical_root=REPO)
+    skipped = [line for line in logs if line.startswith("SKIP")]
+    assert not skipped, "\n".join(skipped)
+    # Ordering/retry tests need the real attributed metadata graph, not the
+    # product's whole source corpus (artifact tests exercise that separately).
+    for manifest_path in list(payload.rglob("pyproject.toml")):
+        project = manifest_path.parent
+        for directory in project.iterdir():
+            if directory.is_dir() and directory.name not in ("libs", "scripts"):
+                shutil.rmtree(directory)
+        scripts = project / "scripts"
+        if scripts.is_dir():
+            for member in scripts.iterdir():
+                if member.name in (
+                    "install.sh", "install.ps1",
+                    "installer-engine.sh", "installer-engine.ps1",
+                    "installer_dependency_policy.py", "installer_dependency_config.py",
+                ):
+                    continue
+                if member.is_dir():
+                    shutil.rmtree(member)
+                else:
+                    member.unlink()
+        code = project / "src"
+        code.mkdir()
+        (code / "fixture_source.py").write_text("value = 'retained-source-contract'\n")
+    manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
+    standalone = repository / "snapshots" / manifest["version"]
+    if layout == "local":
+        shutil.copytree(payload, standalone)
+        logs = mm.materialize_installer_engine_ref_into(
+            source_consumer_dir=PLUGIN,
+            dest_consumer_dir=standalone,
+            canonical_root=REPO,
+            dest_root=repository,
+        )
+        skipped = [line for line in logs if line.startswith("SKIP")]
+        assert not skipped, "\n".join(skipped)
+    shutil.copytree(payload / "libs", repository / "libs")
+    shutil.rmtree(payload / "libs")
+    shutil.copyfile(PLUGIN / "pyproject.toml", payload / "pyproject.toml")
+    engine = repository / "libs" / "installer-engine"
+    engine.mkdir(parents=True, exist_ok=True)
+    for name in (
+        "installer-engine.sh", "installer-engine.ps1",
+        "installer_dependency_policy.py", "installer_dependency_config.py",
+    ):
+        shutil.copyfile(ENGINE / name, engine / name)
+    roster = repository / ".github" / "plugin" / "marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(
+        json.dumps({
+            "name": "copilot-extensions",
+            "plugins": [{
+                "name": manifest["name"],
+                "version": manifest["version"],
+                "source": f"plugins/{PLUGIN.name}",
+            }],
+        }),
+        encoding="utf-8",
+    )
+    if layout == "local":
+        payload, engine = standalone, standalone / "scripts"
+    project = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
+    sources = [
+        (payload / project["tool"]["uv"]["sources"][name]["path"]).resolve()
+        for name in PACKAGES[:-1]
+    ] + [payload]
+    assert all(source.is_relative_to(repository) for source in sources)
+    return engine, sources
+
+
+@pytest.fixture(scope="module")
+def attributed_library_sources(tmp_path_factory):
+    return {
+        layout: _attributed_library_sources(
+            tmp_path_factory.mktemp(f"codespaces-attributed-{layout}"), layout,
+        )
+        for layout in ("local", "canonical")
+    }
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 @pytest.mark.parametrize("editable", [False, True])
 @pytest.mark.parametrize("mode", ["sre", "fatal"])
-def test_codespaces_library_install_order_retry_and_errors(tmp_path, ext, editable, mode):
+def test_codespaces_library_install_order_retry_and_errors(
+    tmp_path, ext, editable, mode, attributed_library_sources,
+):
     if ext == "ps1" and PWSH is None:
         pytest.skip("pwsh unavailable")
     if ext == "sh" and os.name == "nt":
@@ -430,39 +608,53 @@ def test_codespaces_library_install_order_retry_and_errors(tmp_path, ext, editab
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     env["TEST_UV_MODE"] = mode
-    sources = []
-    for name in PACKAGES:
-        source = tmp_path / name
-        source.mkdir()
-        (source / "pyproject.toml").touch()
-        sources.append(source)
+    engine, sources = attributed_library_sources["canonical" if editable else "local"]
+    env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({
+        tomllib.loads((source / "pyproject.toml").read_text())["project"]["name"]: str(source)
+        for source in sources
+    })
+    python = Path(sys._base_executable)
     if ext == "sh":
-        script = _prelude(ext) + _function(ext, "_install_package_into")
+        script = _prelude(ext, engine) + _function(ext, "_install_package_into")
         script += f"\nUV_CMD='{uv}'\n"
         script += "".join(f"{var}='{path}'\n" for var, path in zip(VARIABLES, sources))
-        script += "_install_package_into target-python" + (" --editable\n" if editable else "\n")
+        script += f"_install_package_into '{python}'" + (" --editable\n" if editable else "\n")
     else:
-        script = _prelude(ext) + _function(ext, "Install-PackageInto")
+        script = _prelude(ext, engine) + _function(ext, "Install-PackageInto")
         script += (
             f"\n$UvCommand='{uv}'\nfunction Remove-ConsoleTrampolines {{ param($VenvDir) }}\n"
         )
         script += "".join(f"${var}='{path}'\n" for var, path in zip(PS_VARIABLES, sources))
-        script += "if (-not (Install-PackageInto -Python 'root/Scripts/python.exe'"
+        script += f"if (-not (Install-PackageInto -Python '{python}'"
         script += " -Editable" if editable else ""
         script += ")) { exit 1 }\n"
     result = _run(ext, script, tmp_path, env)
-    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+    log = tmp_path / "uv.jsonl"
+    assert log.exists(), result.stdout + result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
     if mode == "fatal":
         assert len(calls) == 1
         assert "permanent failure" in result.stderr
+        assert PACKAGES[0] in result.stderr
+        mode_args = ["--editable"] if editable else ["--reinstall-package", PACKAGES[0]]
+        assert _without_policy_arguments(calls[0]) == [
+            "pip", "install", "--python", str(python), *mode_args, str(sources[0]), "--quiet",
+        ]
+        if ext == "ps1":
+            assert "(exit 23)" in result.stderr
         return
-    assert len(calls) == 27
+    assert len(calls) == len(PACKAGES) + 2
+    calls = [_without_policy_arguments(args) for args in calls]
+    offset = 0
     for index, (package, source) in enumerate(zip(PACKAGES, sources)):
-        args = calls[index * 3]
-        assert calls[index * 3 : index * 3 + 3] == [args] * 3
+        args = calls[offset]
+        assert args[:4] == ["pip", "install", "--python", str(python)]
+        attempts = 3 if index == 0 else 1
+        assert calls[offset : offset + attempts] == [args] * attempts
         assert args[-2:] == [str(source), "--quiet"]
         assert args[4:-2] == (["--editable"] if editable else ["--reinstall-package", package])
+        offset += attempts
 
 
 def test_codespaces_canonical_reference_registration_and_release_materialization(tmp_path):
@@ -481,7 +673,8 @@ def test_codespaces_canonical_reference_registration_and_release_materialization
     shutil.copytree(PLUGIN, payload, ignore=shutil.ignore_patterns("tests", "__pycache__"))
     logs = mm.materialize_uv_editable_refs(tmp_path / "release", canonical_root=REPO)
     logs += mm.materialize_installer_engine_refs(tmp_path / "release", canonical_root=REPO)
-    assert not any(line.startswith("SKIP") for line in logs), logs
+    skipped = [line for line in logs if line.startswith("SKIP")]
+    assert not skipped, "\n".join(skipped)
     for ext in ("sh", "ps1"):
         ref = ier.find_engine_ref(payload / "scripts" / f"install.{ext}", ext)
         assert ref is not None and ier.is_local_ref(ref, payload)
@@ -493,9 +686,12 @@ def test_codespaces_canonical_reference_registration_and_release_materialization
         assert not spec.get("editable", False)
 
 
-@pytest.mark.skipif(PWSH is None, reason="pwsh unavailable")
-@pytest.mark.parametrize("materialized", [False, True])
-def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
+@pytest.fixture(scope="module", params=[False, True])
+def codespaces_stamped_snapshot(tmp_path_factory, request):
+    if PWSH is None:
+        pytest.skip("pwsh unavailable")
+    tmp_path = tmp_path_factory.mktemp("codespaces-stamped-snapshot")
+    materialized = request.param
     sys.path.insert(0, str(REPO / "tools"))
     try:
         import materialize_main as mm
@@ -507,7 +703,8 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
     if materialized:
         logs = mm.materialize_uv_editable_refs(stage, canonical_root=REPO)
         logs += mm.materialize_installer_engine_refs(stage, canonical_root=REPO)
-        assert not any(line.startswith("SKIP") for line in logs), logs
+        skipped = [line for line in logs if line.startswith("SKIP")]
+        assert not skipped, "\n".join(skipped)
     else:
         for lib in (
             "installer-engine",
@@ -523,6 +720,12 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
     _fake_uv(fake_bin)
+    if os.name == "nt":
+        (fake_bin / "py.cmd").write_text(
+            f'@echo {sys._base_executable}\n@exit /b 0\n', encoding="utf-8",
+        )
+    else:
+        (fake_bin / "python3").symlink_to(sys._base_executable)
     isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
     env["TEST_UV_MODE"] = "fatal"
     guard_installer_payload(payload)
@@ -557,6 +760,14 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
             else (". (Join-Path $PSScriptRoot 'installer-engine.ps1')")
         )
         assert expected in text.splitlines()
+    for name in (
+        "versioned_runtime.py",
+        "versioned_runtime_leases.py",
+        "versioned_runtime_construction.py",
+    ):
+        assert (snapshot / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
+    for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
+        assert (snapshot / "scripts" / name).read_bytes() == (ENGINE / name).read_bytes()
     project = tomllib.loads((snapshot / "pyproject.toml").read_text())
     for spec in project["tool"]["uv"]["sources"].values():
         library = snapshot / spec["path"]
@@ -569,6 +780,14 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
             assert (library / dependency["path"] / "pyproject.toml").is_file()
             assert not dependency.get("editable", False)
     stage.rename(tmp_path / "unavailable-source")
+    assert not (root / "current-version").exists()
+    assert not (tmp_path / "uv.jsonl").exists()
+    assert_installer_isolated(fake_bin)
+    return tmp_path, root, snapshot, fake_bin, env
+
+
+def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snapshot):
+    tmp_path, root, snapshot, fake_bin, env = codespaces_stamped_snapshot
     status = subprocess.run(
         [
             PWSH,
@@ -606,6 +825,11 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
             check=False,
         )
         assert status_sh.returncode == 0, status_sh.stdout + status_sh.stderr
+    assert_installer_isolated(fake_bin)
+
+
+def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
+    tmp_path, root, _snapshot, fake_bin, env = codespaces_stamped_snapshot
     first_use = subprocess.run(
         [
             PWSH,
@@ -629,6 +853,8 @@ def test_codespaces_stamp_snapshot_is_standalone(tmp_path, materialized):
     calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
     assert calls[0] == ["--version"], first_use.stdout + first_use.stderr
     assert any(call[0] == "venv" for call in calls)
+    assert not (root / "current-version").exists()
+    assert not list((root / "versions").glob("*/.install-complete.json"))
     assert_installer_isolated(fake_bin)
 
 
@@ -639,6 +865,9 @@ def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, u
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     slot = tmp_path / "slot"
+    slot.mkdir()
+    ownership = slot / ".runtime-slot-ownership.json"
+    ownership.write_text("reserved ownership", encoding="utf-8")
     if os.name == "nt":
         driver = tmp_path / "signed-python.py"
         driver.write_text(
@@ -694,10 +923,10 @@ if (-not $ok) {{ exit 1 }}
         if signed_rc:
             assert "after producing a usable venv" in result.stderr
     else:
-        assert result.returncode == 0, result.stdout + result.stderr
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        assert calls == [["venv", str(slot), "--python", "3.11", "--allow-existing"]]
-        assert "falling back to uv" in result.stderr
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not log.exists()
+        assert "construction aborted" in result.stderr
+    assert ownership.read_text(encoding="utf-8") == "reserved ownership"
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
@@ -806,7 +1035,7 @@ def test_codespaces_materialized_posix_stamp_and_first_use_are_local(tmp_path):
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
-def test_codespaces_dev_venv_uses_shared_retry_before_claiming(tmp_path, ext):
+def test_codespaces_dev_refuses_conflicting_claim_before_venv_writes(tmp_path, ext):
     if ext == "ps1" and PWSH is None:
         pytest.skip("pwsh unavailable")
     if ext == "sh" and os.name == "nt":
@@ -830,7 +1059,8 @@ _deploy_versioned_runtime_helper() {{ :; }}
 _resolve_dev_slot_owner() {{ echo 'owner'; }}
 _assert_uv() {{ :; }}
 _ensure_uv_index() {{ :; }}
-_run_versioned_runtime() {{ return 1; }}
+_bootstrap_python() {{ printf '%s\\n' '{sys._base_executable}'; }}
+_run_versioned_runtime() {{ return 2; }}
 do_dev
 """
         )
@@ -851,16 +1081,162 @@ function Resolve-DevSlotOwner {{ return 'owner' }}
 function Assert-Uv {{}}
 function Test-PythonVenv {{ param($Dir, $Python) return Test-Path (Join-Path $Dir 'pyvenv.cfg') }}
 function Invoke-VersionedRuntime {{ param($Arguments)
-    return @{{ ExitCode=1; Output='claim stopped' }}
+    return @{{ ExitCode=2; Output='claim stopped' }}
 }}
 if (-not (Invoke-Dev)) {{ exit 1 }}
 """
         )
     result = _run(ext, script, tmp_path, env)
     assert result.returncode != 0
-    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
-    expected = ["venv", str(root / "versions" / "dev"), "--python", "3.11", "--allow-existing"]
-    assert calls == [expected] * 3
+    assert not (tmp_path / "uv.jsonl").exists()
+    assert not (root / "versions").exists()
+
+
+@pytest.mark.parametrize("ext", ["sh", "ps1"])
+def test_native_dev_generation_dependency_failure_preserves_working_runtime(tmp_path, ext):
+    if ext == "sh" and os.name == "nt":
+        pytest.skip("native POSIX shell is unavailable")
+    if ext == "ps1" and PWSH is None:
+        pytest.skip("PowerShell is unavailable")
+    root = tmp_path / "runtime"
+    env = _env(tmp_path)
+    base, helper = Path(sys._base_executable), PLUGIN / "scripts/versioned_runtime.py"
+    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime.py"):
+        shutil.copyfile(helper.with_name(name), tmp_path / name)
+    if ext == "ps1":
+        # The extracted Windows entry point must consume the real host venv layout.
+        dev_function = _function(ext, "Invoke-Dev")
+        if os.name != "nt":
+            assert dev_function.count("'Scripts\\python.exe'") == 1
+            dev_function = dev_function.replace("'Scripts\\python.exe'", "'bin/python'")
+        script = (
+            _prelude(ext)
+            + _function(ext, "Invoke-VersionedRuntime")
+            + _function(ext, "Deploy-VersionedRuntimeHelper")
+            + _function(ext, "Test-PythonVenv")
+            + _function(ext, "Test-CodespacesRuntime")
+            + dev_function
+            + f"""
+$PSScriptRoot='{PLUGIN / "scripts"}'
+$InstallDir='{root}'
+$LocalBin='{tmp_path / "bin"}'
+$PluginDir='{tmp_path / "editable-source"}'
+$VersionedRuntime=$true
+$ServiceName='Codespaces'
+$Force=$false
+$UvCommand='fixture'
+$script:DependencyFailure=$false
+function Write-ServiceHeader {{ param($Msg) }}
+function Resolve-DevSlotOwner {{ 'fixture-owner' }}
+function Get-BootstrapPython {{ '{base}' }}
+function Get-PayloadHash {{ 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }}
+function Assert-Uv {{}}
+function Deploy-SelfProvisioningBinstub {{}}
+function Invoke-UvVenvResilient {{
+    param($VenvDir, $Arguments, $UvCommand)
+    & '{base}' -I -m venv --without-pip $VenvDir
+    return @{{ ExitCode=$LASTEXITCODE; Output='' }}
+}}
+function Install-PackageInto {{
+    param($Python, [switch]$Editable)
+    if (-not $Editable) {{ throw 'Development source was not selected editable' }}
+    $site = & $Python -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))'
+    Set-Content (Join-Path $site 'agent_codespaces.py') ''
+    Set-Content (Join-Path (Split-Path (Split-Path $Python)) 'partial-dependency') 'written'
+    return (-not $script:DependencyFailure)
+}}
+New-Item -ItemType Directory (Join-Path $InstallDir 'versions/1.0.0') -Force | Out-Null
+& '{base}' -I '{helper}' --root $InstallDir mark-complete 1.0.0 | Out-Null
+& '{base}' -I '{helper}' --root $InstallDir activate 1.0.0 --no-link | Out-Null
+if (-not (Invoke-Dev)) {{ throw 'Initial development build failed' }}
+$before = (Get-Content (Join-Path $InstallDir 'current-version') -Raw).Trim()
+if ($before -notlike 'dev-*') {{ throw 'Initial development build did not activate its generation' }}
+$good = Join-Path $InstallDir "versions/$before"
+$completion = [IO.File]::ReadAllText((Join-Path $good '.install-complete.json'))
+$prefix = [IO.File]::ReadAllText((Join-Path $good 'pyvenv.cfg'))
+$script:DependencyFailure=$true
+$failed=$false
+try {{ if (-not (Invoke-Dev)) {{ $failed=$true }} }} catch {{
+    if ($_ -notmatch 'construction aborted') {{ throw }}
+    $failed=$true
+}}
+if (-not $failed) {{ throw 'Selected dependency failure was swallowed' }}
+if ((Get-Content (Join-Path $InstallDir 'current-version') -Raw).Trim() -cne $before) {{ throw 'Working development selection changed' }}
+if ((Get-Content (Join-Path $InstallDir 'last-known-good') -Raw).Trim() -cne $before) {{ throw 'Last known good changed' }}
+if ([IO.File]::ReadAllText((Join-Path $good '.install-complete.json')) -cne $completion) {{ throw 'Working completion changed' }}
+if ([IO.File]::ReadAllText((Join-Path $good 'pyvenv.cfg')) -cne $prefix) {{ throw 'Working environment changed' }}
+if (@(Get-ChildItem (Join-Path $InstallDir 'versions') -Directory).Count -ne 2) {{ throw 'Failed development candidate remained' }}
+$script:DependencyFailure=$false
+if (-not (Invoke-Dev)) {{ throw 'Development retry failed' }}
+$after = (Get-Content (Join-Path $InstallDir 'current-version') -Raw).Trim()
+if ($after -eq $before) {{ throw 'Retry rewrote its predecessor' }}
+$claim = Get-Content (Join-Path $InstallDir 'dev-claim.json') -Raw | ConvertFrom-Json
+if ($claim.previous_version -ne '1.0.0' -or $claim.selected_generation -ne $after) {{ throw 'Development ownership or rollback drifted' }}
+& '{base}' -I '{root / "versioned_runtime.py"}' --root $InstallDir dev-release --owner fixture-owner --restore | Out-Null
+if ($LASTEXITCODE -ne 0) {{ throw 'Deployed release failed' }}
+if ((Get-Content (Join-Path $InstallDir 'current-version') -Raw).Trim() -ne '1.0.0') {{ throw 'Original release was not restored' }}
+if (Test-Path (Join-Path $InstallDir 'dev-claim.json')) {{ throw 'Restored claim remained open' }}
+"""
+        )
+    else:
+        script = (
+            _prelude(ext)
+            + _function(ext, "_run_versioned_runtime")
+            + _function(ext, "_deploy_versioned_runtime_helper")
+            + _function(ext, "_codespaces_runtime_healthy")
+            + _function(ext, "do_dev")
+            + f"""
+SCRIPT_DIR='{PLUGIN / "scripts"}'
+INSTALL_DIR='{root}'
+LOCAL_BIN='{tmp_path / "bin"}'
+PLUGIN_DIR='{tmp_path / "editable-source"}'
+SRC_VERSION=test
+SERVICE_NAME=Codespaces
+UV_CMD=fixture
+dependency_failure=0
+_header() {{ :; }}
+_resolve_dev_slot_owner() {{ printf '%s\\n' fixture-owner; }}
+_bootstrap_python() {{ printf '%s\\n' '{base}'; }}
+_payload_hash() {{ printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }}
+_assert_uv() {{ :; }}
+_ensure_uv_index() {{ :; }}
+deploy_binstub() {{ :; }}
+invoke_uv_venv_resilient() {{ '{base}' -I -m venv --without-pip "$2"; }}
+_install_package_into() {{
+    [[ "$2" == --editable ]] || return 91
+    site="$("$1" -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))')" || return 1
+    printf '\\n' > "$site/agent_codespaces.py"
+    printf written > "$(dirname "$(dirname "$1")")/partial-dependency"
+    [[ "$dependency_failure" == 0 ]]
+}}
+mkdir -p "$INSTALL_DIR/versions/1.0.0"
+'{base}' -I '{helper}' --root "$INSTALL_DIR" mark-complete 1.0.0 >/dev/null
+'{base}' -I '{helper}' --root "$INSTALL_DIR" activate 1.0.0 --no-link >/dev/null
+do_dev || exit 90
+before="$(cat "$INSTALL_DIR/current-version")"
+[[ "$before" == dev-* ]] || {{ echo 'Initial development build did not activate its generation' >&2; exit 103; }}
+good="$INSTALL_DIR/versions/$before"
+completion="$(cat "$good/.install-complete.json")"
+prefix="$(cat "$good/pyvenv.cfg")"
+dependency_failure=1
+if do_dev; then echo 'Selected dependency failure was swallowed' >&2; exit 92; fi
+[[ "$(cat "$INSTALL_DIR/current-version")" == "$before" ]] || exit 93
+[[ "$(cat "$INSTALL_DIR/last-known-good")" == "$before" ]] || exit 94
+[[ "$(cat "$good/.install-complete.json")" == "$completion" ]] || exit 95
+[[ "$(cat "$good/pyvenv.cfg")" == "$prefix" ]] || exit 96
+[[ "$(find "$INSTALL_DIR/versions" -mindepth 1 -maxdepth 1 -type d | wc -l)" == 2 ]] || exit 97
+dependency_failure=0
+do_dev || exit 98
+after="$(cat "$INSTALL_DIR/current-version")"
+[[ "$after" != "$before" ]] || exit 99
+'{base}' -I -c 'import json,sys; c=json.load(open(sys.argv[1])); assert c["previous_version"]=="1.0.0" and c["selected_generation"]==sys.argv[2]' "$INSTALL_DIR/dev-claim.json" "$after"
+'{base}' -I "$INSTALL_DIR/versioned_runtime.py" --root "$INSTALL_DIR" dev-release --owner fixture-owner --restore >/dev/null || exit 100
+[[ "$(cat "$INSTALL_DIR/current-version")" == 1.0.0 ]] || exit 101
+[[ ! -e "$INSTALL_DIR/dev-claim.json" ]] || exit 102
+"""
+        )
+    result = _run(ext, script, tmp_path, env)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX uv tool PATH")

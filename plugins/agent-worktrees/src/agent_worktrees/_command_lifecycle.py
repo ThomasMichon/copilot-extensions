@@ -227,10 +227,12 @@ def run_lifecycle(
         if timeout is not None and os.name == "nt":
             child, job = _procutil(Path(arguments["payload_root"])).spawn_sync_in_kill_on_close_job(
                 command, require_job=True, allow_breakaway=False,
-                env=environment, **no_window_kwargs(),
+                env=environment, stdout=sys.stdout, stderr=sys.stderr, **no_window_kwargs(),
             )
         else:
-            child = subprocess.Popen(command, env=environment, **no_window_kwargs())
+            child = subprocess.Popen(
+                command, env=environment, stdout=sys.stdout, stderr=sys.stderr, **no_window_kwargs(),
+            )
         while True:
             try:
                 result = child.wait(timeout=timeout)

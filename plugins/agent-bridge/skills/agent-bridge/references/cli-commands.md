@@ -143,6 +143,11 @@ blocks, and tool call summaries.
 # Orchestration seam: atomically capture the exact session this create owns
 <agent-bridge catalog argv[0]> create <agent-name> --prompt-file ./dispatch.md \
   --session-id-file ./created-session-id
+
+# Replay-safe native creation on an exact prepared provider-exec instance.
+# Requires protocol 36; establishes native identity without a first prompt.
+<agent-bridge catalog argv[0]> create <prepared-agent> \
+  --creation-key <opaque-key> --provider-instance
 ```
 
 `--session-id-file` is written immediately after the fresh session is created
@@ -150,7 +155,12 @@ and before the first prompt is streamed. Use it when a caller must bind later
 status, model, or result reads to this exact create rather than selecting a
 same-agent session from a broad listing.
 
-`create` always spawns a fresh session, bypassing caller reuse. For agents
+Without `--creation-key`, `create` spawns a fresh session, bypassing caller reuse.
+Keyed creation retains the original result; `--provider-instance` explicitly
+selects the no-worktree provider contract and requires that key. It cannot carry
+a creation prompt. See [session creation contracts](../../../docs/session-acquisition.md)
+for pending, changed-facts and terminal refusal behavior.
+For agents
 that allow only **one session at a time** — CodeSpaces share a single
 checkout — `create` **refuses** if a session already exists rather than
 silently latching onto it, and tells you to end the existing one first:
@@ -306,6 +316,9 @@ be discarded (or the cancel signature *persists* across sends). See the
 # behind your delivery cursor is (head/acked) -- without dumping the feed.
 <agent-bridge catalog argv[0]> status <session-id>
 <agent-bridge catalog argv[0]> status <session-id> --steps 5   # also show the last 5 collapsed steps
+# Exact full SessionInfo JSON (native/worktree/project/path and readiness facts).
+# Unlike compact status and resume acknowledgements, this is a full identity read.
+<agent-bridge catalog argv[0]> status <session-id> --full
 
 # Wait for a running session's current turn
 <agent-bridge catalog argv[0]> wait <session-id>
@@ -376,6 +389,7 @@ successor.
 
 ```bash
 agent-bridge service start      # start the daemon (no-op if already running) -- marketplace-isolation: allow service-management
+agent-bridge service start --direct  # installer use: skip systemd/the scheduled task, start through the job-surviving detached launch (never inside the caller's Job); non-zero exit if that is impossible or it never becomes healthy -- marketplace-isolation: allow service-management
 agent-bridge service stop       # stop the daemon (kills the worker + releases the port) -- marketplace-isolation: allow service-management
 agent-bridge service restart    # zero-downtime cutover to a fresh daemon generation (same code path as `deploy`: spawn passive -> health-gate -> flip -> drain -> retire) -- marketplace-isolation: allow service-management
 agent-bridge service status     # running state + bound port + PID -- marketplace-isolation: allow service-management

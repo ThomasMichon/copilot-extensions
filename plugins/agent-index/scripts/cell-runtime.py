@@ -23,7 +23,7 @@ import time
 import urllib.request
 import uuid
 import venv
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -219,15 +219,8 @@ def _atomic_bytes(path: Path, value: bytes, *, mode: int | None = None) -> None:
     os.replace(temporary, path)
 
 
-def _isolated_environment(
-    environment: dict[str, str] | None = None,
-) -> dict[str, str]:
-    value = dict(os.environ if environment is None else environment)
-    value.pop("PYTHONPATH", None)
-    value.pop("PYTHONHOME", None)
-    value["PYTHONUTF8"] = "1"
-    value["PYTHONDONTWRITEBYTECODE"] = "1"
-    return value
+def _isolated_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
+    return _cell_process_helpers().isolated_environment(environment)
 
 
 def _context_runner(payload_root: Path) -> Path:
@@ -1065,26 +1058,48 @@ def _validate_runtime_interpreter_layout(
     return resolved
 
 
+_process_helpers = None
+
+
+def _cell_process_helpers():
+    global _process_helpers
+    if _process_helpers is None:
+        source = Path(__file__).with_name("cell_runtime_processes.py")
+        spec = importlib.util.spec_from_file_location("cell_runtime_processes", source)
+        if spec is None or spec.loader is None:
+            raise CellError("cell runtime process helpers cannot be loaded")
+        component = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(component)
+        _process_helpers = component
+    return _process_helpers
+
+
 def _run_checked(
     command: list[str],
     *,
     environment: dict[str, str] | None = None,
     cwd: Path | None = None,
 ) -> None:
-    result = subprocess.run(
-        command,
-        env=environment,
-        cwd=cwd,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
+    _cell_process_helpers().run_checked(
+        command, error_type=CellError, environment=environment, cwd=cwd,
     )
-    if result.returncode != 0:
-        raise CellError(
-            f"command failed with exit {result.returncode}: "
-            + " ".join(shlex.quote(part) for part in command)
-        )
+
+
+def _load_versioned_runtime(payload_root: Path):
+    return _cell_process_helpers().load_versioned_runtime(
+        payload_root, error_type=CellError,
+        validate_chain=_assert_path_chain, validate_file=_assert_regular_file,
+    )
+
+
+def _install_runtime_dependency(
+    payload_root: Path, uv: str, interpreter: Path, source: Path, cwd: Path,
+) -> None:
+    _cell_process_helpers().install_dependency(
+        payload_root, uv, interpreter, source, cwd, error_type=CellError,
+        validate_file=_assert_regular_file, quote=_powershell_quote,
+        isolated_environment=_isolated_environment, execute=_run_checked,
+    )
 
 
 def _runtime_module_path(
@@ -1094,53 +1109,11 @@ def _runtime_module_path(
     environment: dict[str, str] | None = None,
     label: str,
 ) -> Path:
-    try:
-        result = subprocess.run(
-            [
-                str(interpreter),
-                "-I",
-                "-X",
-                "utf8",
-                "-c",
-                (
-                    "from pathlib import Path; import agent_index; "
-                    "print(Path(agent_index.__file__).resolve())"
-                ),
-            ],
-            cwd=slot,
-            env=_isolated_environment(environment),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    except OSError as exc:
-        raise CellError(
-            f"{label} is unusable; ownership-checked repair is required"
-        ) from exc
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        raise CellError(
-            f"{label} is unusable; ownership-checked repair is required"
-            + (f": {detail}" if detail else "")
-        )
-    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    if not lines:
-        raise CellError(
-            f"{label} did not report its package origin; "
-            "ownership-checked repair is required"
-        )
-    module_path = _absolute_path(lines[-1])
-    try:
-        module_path.relative_to(_absolute_path(slot))
-    except ValueError as exc:
-        raise CellError(
-            f"{label} imported agent_index outside the selected runtime slot"
-        ) from exc
-    _assert_path_chain(module_path, slot, f"{label} package origin")
-    _assert_regular_file(module_path, f"{label} package origin")
-    return module_path
+    return _cell_process_helpers().runtime_module_path(
+        interpreter, slot, environment=environment, label=label, error_type=CellError,
+        isolated_environment=_isolated_environment, absolute_path=_absolute_path,
+        validate_chain=_assert_path_chain, validate_file=_assert_regular_file,
+    )
 
 
 def _runtime_install_target(snapshot_root: Path, role: str | None) -> str:
@@ -1156,6 +1129,7 @@ def _build_runtime(
     marketplace_id: str,
     runtime_version: str,
     role: str | None,
+    policy_payload_root: Path | None = None,
 ) -> Path:
     # Reject before even a smoke build can create an environment.
     _runtime_install_target(snapshot_root, role)
@@ -1241,7 +1215,7 @@ def _build_runtime(
                 cwd=snapshot_root,
             )
         else:
-            venv.EnvBuilder(with_pip=True).create(slot)
+            raise CellError("uv is required; unrestricted pip fallback is not supported")
 
     if os.environ.get("AGENT_INDEX_CELL_BUILD_SMOKE") != "1":
         _validate_runtime_interpreter_layout(
@@ -1252,42 +1226,17 @@ def _build_runtime(
             label="runtime interpreter",
         )
         uv = shutil.which("uv")
+        if not uv:
+            raise CellError("uv is required; unrestricted pip fallback is not supported")
         sources = (
             snapshot_root / "libs" / "zdd",
             snapshot_root / "libs" / "agent-procutil",
             _runtime_install_target(snapshot_root, role),
         )
         for source in sources:
-            if uv:
-                _run_checked(
-                    [
-                        uv,
-                        "pip",
-                        "install",
-                        "--python",
-                        str(interpreter),
-                        str(source),
-                        "--quiet",
-                    ],
-                    environment=_isolated_environment(),
-                    cwd=snapshot_root,
-                )
-            else:
-                _run_checked(
-                    [
-                        str(interpreter),
-                        "-I",
-                        "-X",
-                        "utf8",
-                        "-m",
-                        "pip",
-                        "install",
-                        "--quiet",
-                        str(source),
-                    ],
-                    environment=_isolated_environment(),
-                    cwd=snapshot_root,
-                )
+            _install_runtime_dependency(
+                policy_payload_root or snapshot_root, uv, interpreter, source, snapshot_root,
+            )
     _validate_runtime_interpreter_layout(
         interpreter,
         slot,
@@ -3669,25 +3618,26 @@ def _complete_slot(
             label="completed runtime slot",
         )
         return interpreter
-    interpreter = _build_runtime(
-        snapshot_root,
-        slot,
-        marketplace_id=marketplace_id,
-        runtime_version=runtime_version,
-        role=role,
+    build_receipt = slot / ".install-complete.json"
+    if _lexists(build_receipt):
+        module = _load_installation_context(payload_root)
+        module._validated_build_completion(
+            build_receipt, runtime_version, module._snapshot_content_sha256(snapshot_root),
+        )
+        interpreter = _venv_python(slot)
+    else:
+        interpreter = _build_runtime(
+            snapshot_root, slot, marketplace_id=marketplace_id,
+            runtime_version=runtime_version, role=role, policy_payload_root=payload_root,
+        )
+        _write_runtime_profile(slot, marketplace_id, runtime_version, role)
+    _validate_runtime_profile(slot, marketplace_id, runtime_version, role)
+    _runtime_import_probe(
+        interpreter, validated, context, marketplace_id, runtime_version,
+        label="new runtime slot",
     )
-    _write_runtime_profile(
-        slot,
-        marketplace_id,
-        runtime_version,
-        role,
-    )
-    _write_build_receipt(
-        payload_root,
-        snapshot_root,
-        slot,
-        runtime_version,
-    )
+    if not _lexists(build_receipt):
+        _write_build_receipt(payload_root, snapshot_root, slot, runtime_version)
     _run_context(
         payload_root,
         "slot-complete",
@@ -3700,20 +3650,6 @@ def _complete_slot(
             snapshot_id=payload_version,
             runtime_version=runtime_version,
         ),
-    )
-    _validate_runtime_profile(
-        slot,
-        marketplace_id,
-        runtime_version,
-        role,
-    )
-    _runtime_import_probe(
-        interpreter,
-        validated,
-        context,
-        marketplace_id,
-        runtime_version,
-        label="completed runtime slot",
     )
     return interpreter
 
@@ -4174,7 +4110,7 @@ def _resume_selection_transaction(
     }
 
 
-def _provision_locked(
+def _provision_constructed(
     management_payload_root: Path,
     origin_payload_root: Path,
     context: Path,
@@ -4183,12 +4119,19 @@ def _provision_locked(
     version: str,
     validated: dict[str, Any],
     lock_token: str,
+    runtime,
+    lifecycle: ExitStack,
 ) -> dict[str, Any]:
     plugin_root = Path(str(validated["pluginRoot"]))
     environment = _cell_environment(validated, context, marketplace_id)
     role = _configured_role(environment)
     pending = _load_selection_transaction(plugin_root, context, marketplace_id)
     if pending is not None:
+        for reference in (pending.get("target"), pending.get("prior")):
+            if reference and reference.get("runtimeVersion"):
+                lifecycle.enter_context(runtime.retention_lease(
+                    plugin_root, reference["runtimeVersion"],
+                ))
         return _resume_selection_transaction(
             management_payload_root,
             context,
@@ -4207,33 +4150,62 @@ def _provision_locked(
         validated,
     )
     runtime_version = _profile_runtime_version(version, role)
-    _run_context(
-        management_payload_root,
-        "slot-provision",
-        *_context_arguments(
-            context,
-            marketplace_id,
-            origin_payload_root,
-            version,
-            durable_home,
-            snapshot_id=version,
-            runtime_version=runtime_version,
-        ),
-    )
     slot = Path(str(validated["versionsRoot"])) / runtime_version
-    _complete_slot(
-        management_payload_root,
-        origin_payload_root,
-        snapshot_root,
-        context,
-        marketplace_id,
-        durable_home,
-        version,
-        runtime_version,
-        slot,
-        validated,
-        role,
+    context_module = _load_installation_context(management_payload_root)
+    ownership_arguments = dict(
+        context=context, expected_marketplace_id=marketplace_id,
+        expected_plugin_id=PLUGIN_ID, snapshot_id=version,
+        runtime_version=runtime_version, expected_payload_root=origin_payload_root,
+        expected_payload_version=version, durable_home=durable_home,
     )
+
+    def discard(expected_digest: str | None = None) -> None:
+        ownership = slot / ".runtime-slot-ownership.json"
+        context_module.discard_failed_runtime_slot(
+            runtime=runtime, expected_ownership_sha256=expected_digest or hashlib.sha256(
+                ownership.read_bytes()
+            ).hexdigest(), expected_namespace_generation=validated["namespaceGeneration"],
+            expected_install_generation=validated["generation"], **ownership_arguments,
+        )
+
+    with runtime.construction_lease(plugin_root, runtime_version):
+        # Revalidate stale candidates under real ownership before replacing
+        # their receipt and dependency tree. Completed evidence is immutable.
+        if slot.exists() and not any(_lexists(slot / name) for name in (
+            ".install-complete.json", ".runtime-slot-completion.json",
+        )):
+            discard()
+        ownership_digest = None
+        try:
+            _run_context(
+                management_payload_root, "slot-provision",
+                *_context_arguments(
+                    context, marketplace_id, origin_payload_root, version, durable_home,
+                    snapshot_id=version, runtime_version=runtime_version,
+                ),
+            )
+            ownership_digest = hashlib.sha256(
+                (slot / ".runtime-slot-ownership.json").read_bytes()
+            ).hexdigest()
+            _complete_slot(
+                management_payload_root, origin_payload_root, snapshot_root,
+                context, marketplace_id, durable_home, version, runtime_version,
+                slot, validated, role,
+            )
+        except BaseException:
+            if slot.exists() and not any(_lexists(slot / name) for name in (
+                ".install-complete.json", ".runtime-slot-completion.json",
+            )):
+                try:
+                    discard(ownership_digest)
+                except Exception as cleanup_error:
+                    print(
+                        f"failed candidate cleanup refused: {cleanup_error}; "
+                        "preserving the original construction failure",
+                        file=sys.stderr,
+                    )
+            raise
+        lifecycle.enter_context(runtime.retention_lease(plugin_root, runtime_version))
     if _configured_role(environment) != role:
         raise CellError("configured role changed during runtime provisioning")
     transaction = _prepare_selection_transaction(
@@ -4260,6 +4232,33 @@ def _provision_locked(
         lock_token,
         transaction,
     )
+
+
+def _provision_locked(
+    management_payload_root: Path,
+    origin_payload_root: Path,
+    context: Path,
+    marketplace_id: str,
+    durable_home: Path,
+    version: str,
+    validated: dict[str, Any],
+    lock_token: str,
+) -> dict[str, Any]:
+    runtime = _load_versioned_runtime(management_payload_root)
+    plugin_root = Path(str(validated["pluginRoot"]))
+    with ExitStack() as lifecycle:
+        references = {runtime.current_version(plugin_root)}
+        last_good = plugin_root / runtime.LAST_KNOWN_GOOD_FILE
+        if _lexists(last_good):
+            _assert_regular_file(last_good, "last-known-good selector")
+            references.add(last_good.read_text(encoding="utf-8").strip())
+        for previous in references:
+            if previous:
+                lifecycle.enter_context(runtime.retention_lease(plugin_root, previous))
+        return _provision_constructed(
+            management_payload_root, origin_payload_root, context, marketplace_id,
+            durable_home, version, validated, lock_token, runtime, lifecycle,
+        )
 
 
 def provision(args: argparse.Namespace, payload_root: Path) -> dict[str, Any]:

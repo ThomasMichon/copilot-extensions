@@ -1473,6 +1473,7 @@ def test_lock_timeout_falls_back_without_assignment(
     assert "state is unavailable" in selected.warning
 
 
+@pytest.mark.guard
 def test_new_worktree_survives_optional_assignment_state_failure(
     assignment_home,
     tmp_path: Path,
@@ -1537,7 +1538,16 @@ def test_new_worktree_survives_optional_assignment_state_failure(
     )
 
     assert Path(result["worktree"]["path"]).exists()
-    assert _inner_command(result["launch"]["cmd"])[:3] == [
+    command = result["launch"]["cmd"]
+    assert command[1:command.index("--")] == [
+        "-m",
+        "agent_worktrees.launch_seed_exec",
+        "--record",
+        str(assignment_home[1] / f"{result['worktree']['id']}.yaml"),
+        "--admission-only",
+    ]
+    setup_command = _inner_command(command)
+    assert _inner_command(setup_command)[:3] == [
         "copilot",
         "--model",
         "model-0",

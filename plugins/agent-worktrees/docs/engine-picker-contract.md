@@ -20,6 +20,9 @@ Structured admission/status accepts only its protocol options and `--json`;
 ordinary resolve selectors, modifiers and positional Copilot arguments are
 rejected before reading or mutating target launch state. Exactly one nonempty
 protocol option is required; an empty value never enters ordinary resolve.
+Nonprotocol modifiers, including `--machine`, use the same structured
+launch-request error envelope and exit status 3 for both admission and status;
+they never enter ordinary or remote machine resolution.
 
 The target's existing tracking-write daemon owns admission and seed staging.
 Admission retains a text-free fingerprint and allocated worktree/intent IDs
@@ -45,6 +48,13 @@ and Resume must retain its requested worktree identity, including after the
 locked receipt reload.
 A target without the request capability rejects before mutation.
 ## Resident current-roster reads
+
+The separate [`record --worktree-id <exact-id> --json`](cli-reference.md#exact-durable-record-read)
+API reads one ground-owned durable record in the receiving project's tracking
+namespace. It is metadata, not a roster fallback, resident computation,
+live-state probe, or launch/takeover permission. Consumers needing an exact
+allocation identity may use it before roster publication; ordinary listing
+readers still must not scan tracking YAML or independently compute facts.
 
 The Manager requires `list --json --current`. Ordinary JSON/stream listings
 also select that authority while resident monitoring is enabled; explicit
@@ -131,8 +141,14 @@ Relay error frames carry `error.code`, `error.message` and Boolean
 timeouts, malformed transactions, incompatible capabilities and authentication
 failures are terminal for that load. The Manager retains labeled last-good
 rows but stops automatic CLI respawn for terminal errors until an explicit
-reload. Its own publication/heartbeat watchdog is terminal too. Neither
-classification authorizes daemon restart or caller-side fact computation.
+reload. The Manager separates its existing bounded source process/SSH startup
+budget (20 seconds by default) from two-second snapshot/update publication
+and five-second idle heartbeat deadlines. Only an admitted `begin` or `update`
+starts the transaction deadline; intermediate frames cannot extend it.
+Its own transient transport watchdog expiry permits cancellable reconnect
+with bounded backoff and visible failed/stale state. Explicit terminal peer
+errors remain terminal. Neither classification authorizes daemon restart,
+polling fallback or caller-side fact computation.
 
 Held projects remain demanded for the subscription lifetime; cancellation
 releases the subscription and resumes the ordinary bounded linger. Planned
@@ -351,7 +367,27 @@ An empty registry is cheap and does not trigger historical session discovery;
 explicit recovery and the resident reconciliation cursor own registry repair.
 Thus unrelated session history cannot multiply the cost of a resume check.
 
-The Manager requests `resolve --stage-launch-seed` for prompted requests.
+The Manager requests `resolve --stage-launch-seed --require-native-seed` for
+prompted requests. The latter is a capability handshake: engines without the
+native execution-leg fence reject it before allocation or staging. The fence
+itself is unconditional in current engines, including direct stage callers.
+Direct engine requests requiring this fence refuse remote/cross-environment
+dispatch before SSH admission; the capability requirement is never silently dropped.
+Launch-seed stage/take mutation protocol version 5 and structured
+`launch_request_stage` version 4 exclude older resident handlers that lack that
+fence, using the existing same-code fallback. Both retain launch-admission guards.
+
+Staging validates the actual execution leg while holding the same strict
+per-record lock that publishes the intent. Active, unknown, or opaque hosted
+bindings refuse staging without replacing pending intent. Execution-leg
+reservation and active/unknown publication acquire that same lock and refuse
+while a typed or legacy launch prompt is pending. Thus a concurrent native seed
+and hosted-provider activation have one winner, not two separately valid
+preflights. Seed handoff also validates the leg in its record transaction.
+Finishing the native handoff releases the pending-intent fence. An incompatible
+activation never silently consumes or discards the seed; recovery history is
+separate and does not reserve an execution leg.
+
 `launch.seed_pending: true`, `launch.seed_id` and `launch.seed_kind` identify
 the saved intent. The second resolve selects it with `--seed-id`, preserving
 New/Resume provenance without restaging text or inferring configured argv.

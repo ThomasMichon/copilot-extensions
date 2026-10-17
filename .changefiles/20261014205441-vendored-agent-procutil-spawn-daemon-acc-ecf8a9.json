@@ -1,0 +1,9 @@
+{
+  "comment": "Vendored agent-procutil: spawn_daemon accepts an optional stderr_log_path for daemons whose stderr is diagnosed from its own log.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

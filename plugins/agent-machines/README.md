@@ -527,10 +527,28 @@ Multi-machine packages belong in `all/` with an explicit `gate`.
 `<machine>` is the canonical topology key when an adopted repository provides a
 matching `machines.yaml` entry. The raw `platform.node()` host name (Windows
 `%COMPUTERNAME%`) is matched case-insensitively against the entry key plus its
-`hostname`, `alias`, and `display_name`; all four remain accepted for package
+`hostname` and `alias`; these remain accepted for package
 gates, `per-machine` overlays, nested module/resource gates, and machine
-directory selection. Ambiguous cross-entry matches fail before reconciliation.
-Without usable topology, the raw host name remains the standalone fallback.
+directory selection. Actual identity-field conflicts fail before reconciliation.
+`display_name` is metadata and may be duplicated, including between a host and
+its guest. Unique legacy display-name selectors/gates remain compatible unless
+they shadow an identity field; duplicated display names are not accepted as
+gates and cannot select a machine. Use a key, hostname, or alias instead.
+Native Windows and Linux retain the host identity. WSL defaults to `<host>-wsl`
+(never double-suffixed), with guest topology resolved separately even when its
+`hostname` is the Windows host name. Guest gates never accept the host's raw
+hostname or host-only labels. Without a guest topology entry the qualified
+identity remains usable, with a diagnostic instead of a host fallback.
+`--machine` is an explicit target selector and is not reinterpreted as the
+caller's local guest. SSH environment aliases remain independently configured
+transport labels. Existing durable ownership references are not rewritten.
+
+`discover.current_machine()` is the execution identity used by package discovery,
+not physical hardware inventory. Default library discovery and the standalone
+discovery module use the same resolver and accepted topology labels as the main
+CLI; their platform path-key comes from that resolver too. A diagnostic
+`raw: ...` label names the OS hostname only and does not grant it guest package
+scope. Explicit discovery target selectors remain unchanged.
 
 Machine identity uses the shared `machine_transport` owner model. Its read-only
 logical projection expands legacy Windows/WSL topology into `<base>` and
@@ -543,6 +561,12 @@ multiple eligible siblings. WSL gates accept its own logical key/profile aliases
 not the native key or shared physical hostname. No package, persisted registration,
 or repository topology is rewritten; move any WSL-specific package gates to the
 logical WSL key through normal repository maintenance.
+
+Across adopted repositories, duplicate logical keys must agree on execution
+platform and physical host. SSH connection details such as port, user and shell
+do not define machine identity; profile aliases are combined and still checked
+for cross-machine ambiguity. Legacy and explicit logical declarations can
+therefore coexist without requiring identical transport configuration.
 
 The canonical root is `.copilot-extensions/agent-machines/`. Legacy
 `.agent-machines/` and `.github/machine-state/` remain bounded fallbacks only
@@ -749,6 +773,17 @@ effective operations: ordered `ensure-present` floors, authority-resolved
 modules. `provenance_hash` hashes the complete resolved package union, including
 package authority. A change only to a losing enforce value therefore leaves the
 drift key stable but changes provenance.
+
+Plan JSON (also nested under `plan` in restore JSON) exposes `managed_keys`.
+Its `copilot.settings` list contains the sorted, unique top-level settings keys
+declared by applicable `ensure-present` and `enforce` contributions, including
+grouped declarations and per-machine overrides. Nonempty `ensure-absent`
+activation requests contribute `enabledPlugins`; other dispositions do not.
+The list is empty when no settings operations apply. It contains key names only,
+never desired values, and describes the selected repository/project scope, not
+live state or an `--only` restore filter. Compare it with surface `applied_keys`
+to check coverage; a removal-only key is reported as applied only when a live
+entry was actually removed.
 
 The top-level `resources:` list declares typed, identity-bearing machine state
 -- package-manager packages, canonical config files (whole-file or a marked

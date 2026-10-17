@@ -118,10 +118,30 @@ def test_task_worker_can_abandon_own_task_without_fleet_cleanup(worker):
     assert requests == [("POST", f"/tasks/{task_id}/abandon")]
 
 
+def test_task_worker_start_uses_only_projected_identity_and_does_not_renew(worker, capsys):
+    task_id, queue, requests = worker
+    assert cli.main(["start", task_id]) == 0
+    response = json.loads(capsys.readouterr().out)
+    assert "task_token" not in response
+    assert queue.get(task_id).owner_session_id == "native-worker"
+    assert requests == [("POST", f"/tasks/{task_id}/start")]
+
+
+def test_task_worker_client_import_keeps_server_stack_out_of_native_process():
+    child = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; from agent_dispatch.client import DispatchClient; "
+         "assert 'fastapi' not in sys.modules; "
+         "assert 'agent_dispatch.coordinator_auth' not in sys.modules"],
+        capture_output=True, text=True, timeout=20, creationflags=no_window_flags(),
+    )
+    assert child.returncode == 0, child.stderr
+
+
 @pytest.mark.parametrize("argv", [
     ["list"], ["health"], ["print-endpoint"], ["serve"], ["mcp"], ["watch"],
     ["_ensure-coordinator"], ["focus"], ["federation", "status"],
-    ["show", "another-task"], ["start", "TASK"],
+    ["show", "another-task"], ["start", "another-task"],
     ["show", "TASK", "--history"],
     ["progress", "TASK", "wrong", "--summary", "bad"],
     ["complete", "TASK", "wrong"],
@@ -255,8 +275,84 @@ def test_task_worker_projection_repr_never_contains_secret():
     assert "secret-grant" not in repr(worker)
 
 
+def test_task_worker_token_file_reloads_without_fleet_fallback(worker, monkeypatch, tmp_path):
+    task_id, _queue, requests = worker
+    secret_file = tmp_path / "task-token"
+    secret_file.write_text(os.environ["AGENT_DISPATCH_TASK_TOKEN"], encoding="utf-8")
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_TOKEN")
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", str(secret_file))
+    from agent_dispatch.task_worker_cli import task_worker
+
+    def send(request):
+        requests.append((request.method, request.url.path))
+        return httpx.Response(200, json={"id": task_id})
+
+    monkeypatch.setattr(TaskWorker, "client", lambda self: DispatchClient(
+        self.url, task_token=self.token, transport=httpx.MockTransport(send),
+    ))
+    assert cli.main(["show", task_id]) == 0
+    secret_file.write_text("rotated-grant\n", encoding="utf-8")
+    assert task_worker(cli.build_parser().parse_args(["show", task_id])).token == "rotated-grant"
+    secret_file.unlink()
+    assert cli.main(["show", task_id]) == 1
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("content", [
+    "", "x" * 8193, "two tokens", "one\ntwo", "\udcff", "\u00e9", "hidden\x00control",
+    "hidden\x7fcontrol",
+])
+def test_task_worker_token_file_invalid_is_closed(worker, monkeypatch, tmp_path, content, capsys):
+    task_id, _queue, requests = worker
+    secret_file = tmp_path / "task-token"
+    secret_file.write_bytes(content.encode("utf-8", errors="surrogateescape"))
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_TOKEN")
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", str(secret_file))
+    assert cli.main(["show", task_id]) == 1
+    assert "credential file" in capsys.readouterr().err
+    assert not requests
+
+
+@pytest.mark.parametrize("filename", ["", "relative-token"])
+def test_task_worker_token_file_path_is_absolute(worker, monkeypatch, filename):
+    task_id, _queue, requests = worker
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_TOKEN")
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", filename)
+    assert cli.main(["show", task_id]) == 1
+    assert not requests
+
+
+def test_task_worker_direct_and_file_credentials_conflict(worker, monkeypatch, tmp_path):
+    task_id, _queue, requests = worker
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", str(tmp_path / "not-read"))
+    assert cli.main(["show", task_id]) == 1
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN", "")
+    assert cli.main(["show", task_id]) == 1
+    assert not requests
+
+
+def test_task_worker_token_file_directory_is_closed(worker, monkeypatch, tmp_path):
+    task_id, _queue, requests = worker
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_TOKEN")
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", str(tmp_path))
+    assert cli.main(["show", task_id]) == 1
+    assert not requests
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX named-pipe contract")
+def test_task_worker_token_file_fifo_cannot_block(worker, monkeypatch, tmp_path):
+    task_id, _queue, requests = worker
+    fifo = tmp_path / "token-pipe"
+    os.mkfifo(fifo)
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_TOKEN")
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_TOKEN_FILE", str(fifo))
+    assert cli.main(["show", task_id]) == 1
+    assert not requests
+
+
 @pytest.mark.timeout(120)
-def test_task_worker_cli_over_real_http_process(tmp_path):
+@pytest.mark.parametrize("file_projection", [False, True])
+def test_task_worker_cli_over_real_http_process(tmp_path, file_projection):
     queue = RepoDefaultingQueue(tmp_path / "tasks.db")
     task = queue.create("real worker", repo=TEST_REPO, payload_inline="process payload")
     app = create_app(queue, token="fleet-test", control_token="control-test", enable_mcp=False)
@@ -298,6 +394,12 @@ def test_task_worker_cli_over_real_http_process(tmp_path):
                 "AGENT_DISPATCH_SHARED_URL": "http://127.0.0.1:1",
                 "AGENT_DISPATCH_FAILOVER_MACHINE": "unreachable-peer",
             }
+            env.pop("AGENT_DISPATCH_TASK_TOKEN_FILE", None)
+            if file_projection:
+                secret_file = tmp_path / "private-task-token"
+                secret_file.write_text("expired-or-invalid", encoding="utf-8")
+                env.pop("AGENT_DISPATCH_TASK_TOKEN")
+                env["AGENT_DISPATCH_TASK_TOKEN_FILE"] = str(secret_file)
             for command, expected in [
                 (["list"], 1),
                 (["show", "another-task"], 1),
@@ -308,6 +410,22 @@ def test_task_worker_cli_over_real_http_process(tmp_path):
                 (["complete", task.id, "--result-json", '{"process":true}'], 0),
                 (["show", task.id], 1),
             ]:
+                if file_projection and command == ["show", task.id] and expected == 0:
+                    denied = subprocess.run(
+                        [sys.executable, "-m", "agent_dispatch", *command],
+                        env=env, capture_output=True, text=True, timeout=20,
+                        creationflags=no_window_flags(),
+                    )
+                    assert denied.returncode == 1 and "401" in denied.stderr
+                    with DispatchClient(url, control_token="control-test") as trusted:
+                        renewed = trusted.task_grant(
+                            task.id, "worker", "process-worker",
+                            expected_generation=started.json()["generation"], expected_epoch=0,
+                        )
+                    replacement = tmp_path / "replacement-token"
+                    grant = renewed["task_token"]
+                    replacement.write_text(grant, encoding="utf-8")
+                    replacement.replace(secret_file)
                 child = subprocess.run(  # noqa: S603 -- fixed candidate CLI and test-owned arguments
                     [sys.executable, "-m", "agent_dispatch", *command],
                     env=env, capture_output=True, text=True, timeout=20,

@@ -18,7 +18,7 @@ def test_heartbeat_is_visible_before_stage_completion(monkeypatch):
     class Progress:
         def write(self, text):
             output.append(text)
-            if "still working" in text:
+            if " running " in text:
                 emitted.set()
             return len(text)
 
@@ -29,9 +29,10 @@ def test_heartbeat_is_visible_before_stage_completion(monkeypatch):
     monkeypatch.setattr(launch_progress, "HEARTBEAT_SECONDS", 0.01)
     with launch_progress.step("Projection preparation"):
         assert emitted.wait(2)
-        assert "finished" not in "".join(output)
+        assert " done " not in "".join(output)
     text = "".join(output)
-    assert "starting" in text and "still working" in text and "finished" in text
+    assert "starting" in text and " running " in text and " done " in text
+    assert "[elapsed " in text and "[duration " in text
 
 
 def test_failure_is_reported_without_swallowing_the_error(capsys):
@@ -77,3 +78,70 @@ def test_durable_heartbeat_precedes_completion(monkeypatch):
         assert all(event["state"] != "finished" for event in events)
     assert events[-1]["state"] == "finished"
     assert len({event["step_id"] for event in events}) == 1
+
+
+def test_legacy_adapter_keeps_start_elapsed_and_completion(monkeypatch):
+    emitted = threading.Event()
+    text = []
+
+    class Sink:
+        def write(self, value):
+            text.append(value)
+            if "still working" in value:
+                emitted.set()
+            return len(value)
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(launch_progress.output, "HumanOperation", None)
+    monkeypatch.setattr(launch_progress.activity, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(launch_progress, "HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(sys, "stderr", Sink())
+    with launch_progress.step("Fixture preparation"):
+        assert emitted.wait(2)
+    captured = "".join(text)
+    assert "[launch] Fixture preparation: starting" in captured
+    assert "still working (" in captured and "s elapsed)" in captured
+    assert "finished (" in captured
+
+
+def test_failed_output_start_keeps_activity_and_restores_context(monkeypatch):
+    from update_telemetry.human import current_operation
+
+    events = []
+
+    class Broken:
+        def write(self, value):
+            raise OSError("closed diagnostic stream")
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(launch_progress.activity, "log_event",
+                        lambda event, **fields: events.append(fields))
+    monkeypatch.setattr(sys, "stderr", Broken())
+    with pytest.raises(OSError, match="closed diagnostic stream"):
+        with launch_progress.step("Fixture preparation"):
+            pytest.fail("stage body must not run after output startup fails")
+    assert events[0]["state"] == "started"
+    assert current_operation() is None
+
+
+def test_failed_heartbeat_start_records_failure_and_restores_context(monkeypatch):
+    from update_telemetry.human import current_operation
+
+    events = []
+
+    def refuse(thread):
+        raise RuntimeError("heartbeat startup refused")
+
+    monkeypatch.setattr(launch_progress.activity, "log_event",
+                        lambda event, **fields: events.append(fields))
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    with pytest.raises(RuntimeError, match="heartbeat startup refused"):
+        with launch_progress.step("Fixture preparation"):
+            pytest.fail("stage body must not run after heartbeat startup fails")
+    assert [event["state"] for event in events] == ["started", "failed"]
+    assert events[-1]["error_type"] == "RuntimeError"
+    assert current_operation() is None

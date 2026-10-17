@@ -15,6 +15,73 @@ from machine_transport.registry import (
 from agent_worktrees import claims_cli, config as cfg, execution_spaces, tracking
 
 
+@pytest.mark.parametrize("actual", ["windows", "linux", "wsl"])
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize("field", ["platform", "machine", "worktree_path"])
+@pytest.mark.guard
+def test_snapshot_identity_must_match_the_actual_proven_record(
+    tmp_path, monkeypatch, actual, scoped, field,
+):
+    key = "example-host-wsl" if actual == "wsl" else "example-host"
+    entry = {"alias": "record-alias"}
+    if scoped:
+        entry.update(execution_platform=actual, physical_host="example-host")
+    (tmp_path / "machines.yaml").write_text(
+        yaml.safe_dump({"machines": {key: entry}}), encoding="utf-8",
+    )
+    directory = tmp_path / "project" / "worktrees"
+    directory.mkdir(parents=True)
+    namespace = tmp_path / "trees"
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine=key, platform=actual, repo_name="project",
+        repos={"project": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(namespace))},
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: directory.parent)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *args, **kwargs: config)
+    record = tracking.create_new_record(
+        "owned", "worktree/owned", str(namespace / "owned"),
+        "project", key, actual, directory,
+    )
+    before = record.yaml_path.read_bytes()
+    execution_spaces.require_record_mutation(replace(record, title="valid mutable snapshot"), config)
+    value = (
+        "windows" if actual != "windows" else "wsl"
+    ) if field == "platform" else (
+        "record-alias" if field == "machine" else str(tmp_path / "foreign" / "owned")
+    )
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="snapshot identity/platform"):
+        execution_spaces.require_record_mutation(replace(record, **{field: value}), config)
+    assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("actual", ["windows", "linux", "wsl"])
+def test_persisted_record_cannot_bypass_current_platform_mismatch(tmp_path, monkeypatch, actual):
+    (tmp_path / "machines.yaml").write_text(
+        f"machines:\n  local-space:\n    execution_platform: {actual}\n",
+        encoding="utf-8",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="local-space",
+        platform="windows" if actual != "windows" else "wsl", repo_name="project",
+        repos={"project": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"))},
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_args, **_kwargs: config)
+    directory = tmp_path / "project" / "worktrees"
+    directory.mkdir(parents=True)
+    checkout = tmp_path / "trees" / "owned"
+    checkout.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "project_dir", lambda *_args: directory.parent)
+    record = tracking.create_new_record(
+        "owned", "worktree/owned", str(checkout), "project", "local-space", actual, directory,
+    )
+    before = record.yaml_path.read_bytes()
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="platform"):
+        execution_spaces.require_record_mutation(record, config)
+    assert record.yaml_path.read_bytes() == before
+
+
 @pytest.mark.parametrize("platform,key", [("windows", "workstation"), ("wsl", "workstation-wsl")])
 def test_legacy_roster_projects_local_detection_and_live_registration_machine(
     platform, key, tmp_path, monkeypatch, capsys,
@@ -508,7 +575,7 @@ def test_parent_record_authority_is_rechecked_before_settlement(
         owner_ref=parent_ref, owner_claim_ref=tracking.parse_claim_ref(parent_ref),
     )
     parent = SimpleNamespace(
-        machine="workstation-wsl", worktree_id="wt-parent", owner_ref=None,
+        machine="workstation-wsl", worktree_id="wt-parent", owner_ref=None, repo="project",
     )
     parent_dir = tmp_path / "project"
     (parent_dir / "worktrees").mkdir(parents=True)

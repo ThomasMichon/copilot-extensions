@@ -507,11 +507,25 @@ def test_assignment_tcp_enqueue_latency_capacity_release_and_affinity(server_url
         wait_for(lambda: app.state.bus.subscriber_count == 0)
 
 
+@pytest.mark.guard
 def test_assignment_tcp_startup_and_reconnect_recover_unannounced_queue(server_url, app):
     bus = app.state.bus
     original = bus.subscribe
+    allow_initial_ready = threading.Event()
+    reconnect_waiting = threading.Event()
+    allow_reconnect = threading.Event()
+    connections = 0
 
     async def disconnectable(**kwargs):
+        nonlocal connections
+        connections += 1
+        if connections == 1:
+            while not allow_initial_ready.is_set():
+                await asyncio.sleep(0.005)
+        else:
+            reconnect_waiting.set()
+            while not allow_reconnect.is_set():
+                await asyncio.sleep(0.005)
         stream = original(**kwargs)
         try:
             async for event in stream:
@@ -533,18 +547,24 @@ def test_assignment_tcp_startup_and_reconnect_recover_unannounced_queue(server_u
         loop.start()
         try:
             wait_for(lambda: spawned == [first["id"]])
+            wait_for(lambda: loop.status()["reconciles"] >= 1)
+            assert loop.status()["reconciles"] == 1
+            allow_initial_ready.set()
             wait_for(lambda: loop.status()["state"] == "connected")
-            time.sleep(0.15)  # let the ready-triggered trailing read finish
+            wait_for(lambda: loop.status()["reconciles"] >= 2)
             bus.publish({"type": "test.disconnect"})
-            wait_for(lambda: loop.status()["state"] == "degraded")
+            assert reconnect_waiting.wait(3)
+            assert loop.status()["state"] != "connected"
             assert bus.subscriber_count == 0
             second = client.create("in gap", repo=TEST_REPO, target_machine="host-a")
-            time.sleep(0.1)
             assert spawned == [first["id"]]
+            allow_reconnect.set()
             wait_for(lambda: second["id"] in spawned)
             wait_for(lambda: loop.status()["state"] == "connected")
             assert spawned == [first["id"], second["id"]]
         finally:
+            allow_initial_ready.set()
+            allow_reconnect.set()
             assert loop.stop()
     wait_for(lambda: bus.subscriber_count == 0)
 
@@ -563,6 +583,7 @@ def test_assignment_health_reports_local_subscription_without_directory_read(
         assert health["events_keepalive_seconds"] == 10.0
 
 
+@pytest.mark.guard
 def test_assignment_runner_presence_not_blocked_by_spawn(monkeypatch, server_url):
     from agent_dispatch import config, satellite_work_intake
 
@@ -582,8 +603,8 @@ def test_assignment_runner_presence_not_blocked_by_spawn(monkeypatch, server_url
     try:
         assert intake.entered.wait(1)
         wait_for(lambda: len(beats) >= 4)
+        wait_for(lambda: runner.status()["assignment_intake"]["state"] == "connected")
         assert intake.count == 1
-        assert runner.status()["assignment_intake"]["state"] == "connected"
     finally:
         intake.block.set()
         runner.stop(timeout=2)

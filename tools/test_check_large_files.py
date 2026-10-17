@@ -47,6 +47,19 @@ def _write_bytes(repo: Path, rel: str, size: int) -> None:
     p.write_bytes(b"x" * size)
 
 
+def _stage_blob(repo: Path, name: str, size: int) -> None:
+    result = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"], cwd=repo,
+        input=b"x" * size, capture_output=True, check=True,
+    )
+    blob = result.stdout.decode("ascii").strip()
+    subprocess.run(
+        ["git", "-c", "core.protectNTFS=false", "update-index", "-z", "--index-info"], cwd=repo,
+        input=f"100644 {blob}\t{name}\0".encode("utf-8"),
+        capture_output=True, check=True,
+    )
+
+
 def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(repo / "tools" / SCRIPT.name), *extra],
@@ -400,8 +413,7 @@ def test_staged_mode_handles_a_digit_colon_filename_correctly(repo: Path):
     # be resolved as that exact path, not misparsed as git's own explicit
     # ":<stage>:<path>" revision syntax (which would silently check a
     # DIFFERENT path -- stage 0 of "large.json" -- instead).
-    _write_bytes(repo, "0:large.json", 2 * 1024 * 1024)
-    _git(repo, "add", "--", "0:large.json")
+    _stage_blob(repo, "0:large.json", 2 * 1024 * 1024)
 
     result = _run(repo, "--", "0:large.json")
 
@@ -414,8 +426,7 @@ def test_staged_mode_handles_a_magic_pathspec_shaped_filename(repo: Path):
     # signature (e.g. ":(literal)...") must still be resolved as that exact
     # path, not reinterpreted as the magic signature itself.
     name = ":(literal)large.json"
-    _write_bytes(repo, name, 2 * 1024 * 1024)
-    _git(repo, "--literal-pathspecs", "add", "--", name)
+    _stage_blob(repo, name, 2 * 1024 * 1024)
 
     result = _run(repo, "--", name)
 
@@ -558,7 +569,5 @@ def test_an_inherited_git_dir_does_not_redirect_the_check_elsewhere(repo: Path, 
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "big.json" in result.stdout
-
-
 
 

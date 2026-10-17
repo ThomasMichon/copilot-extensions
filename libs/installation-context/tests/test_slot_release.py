@@ -150,6 +150,76 @@ def test_successful_provision_leaves_only_immutable_ownership(runner, tmp_path):
     assert "unfinished reservation evidence" in refused.stderr
 
 
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("changed", ["namespace", "install"])
+def test_generation_bound_provision_refuses_receipt_drift(tmp_path, existing, changed):
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    if existing:
+        owned = _provision_slot_with_python(layout)
+        ownership = Path(owned["ownership"]).read_bytes()
+    receipt = Path(layout[changed])
+    value = json.loads(receipt.read_bytes())
+    value["generation"] += 1
+    _write_json(receipt, value)
+    before = receipt.read_bytes()
+    module = _load_python_module()
+    slot = Path(layout["plugin_root"]) / "versions" / "3.4.5"
+    with pytest.raises(module.InstallationContextError, match="receipt generations changed"):
+        module.provision_runtime_slot(
+            context=layout["install"], durable_home=layout["durable"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"], snapshot_id="1.0.0",
+            runtime_version="3.4.5", expected_namespace_generation=1,
+            expected_install_generation=2, expected_payload_root=layout["payload"],
+            expected_payload_version="1.0.0", environment={},
+        )
+    assert receipt.read_bytes() == before
+    if existing:
+        assert (slot / ".runtime-slot-ownership.json").read_bytes() == ownership
+    else:
+        assert not slot.exists()
+
+
+def test_generation_bound_provision_creates_and_reuses_matching_ownership(tmp_path):
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    module = _load_python_module()
+    arguments = dict(
+        context=layout["install"], durable_home=layout["durable"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"], snapshot_id="1.0.0",
+        runtime_version="3.4.5", expected_namespace_generation=1,
+        expected_install_generation=2, expected_payload_root=layout["payload"],
+        expected_payload_version="1.0.0", environment={},
+    )
+    first = module.provision_runtime_slot(**arguments)
+    before = Path(first["ownership"]).read_bytes()
+    second = module.provision_runtime_slot(**arguments)
+    assert first["slotChanged"] and not second["slotChanged"]
+    assert Path(second["ownership"]).read_bytes() == before
+
+
+@pytest.mark.parametrize("generations", [
+    {"expected_namespace_generation": 1},
+    {"expected_install_generation": 2},
+    {"expected_namespace_generation": True, "expected_install_generation": 2},
+    {"expected_namespace_generation": 1, "expected_install_generation": -1},
+])
+def test_generation_bound_provision_refuses_invalid_expectations(tmp_path, generations):
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    module = _load_python_module()
+    with pytest.raises(module.InstallationContextError):
+        module.provision_runtime_slot(
+            context=layout["install"], durable_home=layout["durable"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"], snapshot_id="1.0.0",
+            runtime_version="3.4.5", environment={}, **generations,
+        )
+    assert not (Path(layout["plugin_root"]) / "versions" / "3.4.5").exists()
+
+
 def test_python_hidden_reservation_is_published_before_ownership_and_rename(tmp_path, monkeypatch):
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)

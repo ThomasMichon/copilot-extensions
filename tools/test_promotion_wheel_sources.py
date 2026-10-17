@@ -5,6 +5,7 @@ import io
 import importlib.machinery
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -246,37 +247,75 @@ def test_runtime_metadata_cannot_change_candidate_install_behavior(tmp_path, mon
             artifacts.validate_wheel(archive, manifest["wheels"][0], source_dir=source)
 
 
-def test_validator_provisioning_never_exposes_release_authority():
+def test_validator_provisioning_never_exposes_release_authority(monkeypatch, tmp_path):
     import yaml
+    from seasoned_uv import prepare_uv_install
+    import installer_dependency_policy as policy
+    from _promotion_workflow_test_support import source_owned
+
     root = Path(__file__).resolve().parent.parent
     jobs = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())["jobs"]
+    probes = []
+
+    def settings_probe(command, **kwargs):
+        probes.append(command)
+        assert command[:4] == ["uv", "pip", "install", "--show-settings"]
+        return subprocess.CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
+            index_locations: IndexLocations { indexes: [], flat_index: [], },
+            exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+        }, }""", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", settings_probe)
+    prefix = (
+        "python reviewed-helpers/tools/seasoned_uv.py --registry-only --uv uv --"
+        if source_owned(jobs) else "python tools/seasoned_uv.py --registry-only --uv uv --"
+    )
     for job in ("build-python-artifacts", "python-artifacts", "promote", "publish-python-artifacts"):
         provision = next(
             step for step in jobs[job]["steps"]
-            if "uv pip install" in step.get("run", "") and "artifact_validation_requirements.txt" in step["run"]
+            if prefix in step.get("run", "")
+            and "artifact_validation_requirements.txt" in step["run"]
         )
         assert "--require-hashes" in provision["run"]
-        assert "--no-deps" in provision["run"] and "--only-binary :all:" in provision["run"]
+        assert "--trusted-source-root" not in provision["run"]
+        assert "--no-deps" not in provision["run"] and "--no-build-isolation" not in provision["run"]
+        assert "--only-binary :all:" in provision["run"]
         assert '--index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}"' in provision["run"]
+        invocation = provision["run"].replace("\\\n", "").split(prefix, 1)[1]
+        arguments = shlex.split(invocation)
+        relative = (
+            "reviewed-helpers/tools/artifact_validation_requirements.txt" if source_owned(jobs)
+            else "tools/artifact_validation_requirements.txt"
+        )
+        assert arguments[arguments.index("-r") + 1] == relative
+        requirements = tmp_path / relative
+        requirements.parent.mkdir(parents=True, exist_ok=True)
+        requirements.write_bytes((root / "tools/artifact_validation_requirements.txt").read_bytes())
+        admitted = prepare_uv_install("uv", arguments, cwd=tmp_path)
+        assert "--exclude-newer" in admitted and "--reinstall" in admitted
+        assert "--require-hashes" in admitted and "--only-binary" in admitted
         assert "secrets." not in json.dumps(provision)
         if job == "promote":
             assert provision["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert len(probes) == 4
 
 
 def test_promotion_actions_never_receive_or_persist_the_release_pat():
     import yaml
+    from _promotion_workflow_test_support import assert_source_owned_boundary, source_owned
     root = Path(__file__).resolve().parent.parent
-    job = yaml.safe_load(
+    jobs = yaml.safe_load(
         (root / ".github" / "workflows" / "validate-and-promote.yml").read_text(),
-    )["jobs"]["promote"]
+    )["jobs"]
+    job = jobs["promote"]
     assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
     for scope in ("pull-requests", "checks", "statuses"):
         assert job["permissions"][scope] == "read"
     allowed = {
         "Promote (push a candidate branch; report-only if push=false)",
         "Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)",
+        "Publish and read back exact-candidate artifacts before enabling merge",
         "Land the candidate branch on main via PR + squash-merge",
-        "Tag the real post-merge commit",
     }
     writers = set()
     for step in job["steps"]:
@@ -289,8 +328,19 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
     assert writers == allowed
     identity = next(step for step in job["steps"] if step.get("name") == "Configure git identity for the generated commit")
     assert "gh auth setup-git --hostname github.com" in identity["run"]
-    wait = next(step for step in job["steps"] if step.get("id") == "merged")
-    assert "APERTURE_RELEASE_TOKEN" not in json.dumps(wait)
+    merger = jobs["merge-promotion"]
+    assert "secrets." not in json.dumps(merger)
+    assert all("uses" not in step for step in merger["steps"])
+    wait = next(step for step in merger["steps"] if step.get("id") == "merged")
+    assert wait["env"]["PROMOTION_MERGE_TOKEN"] == "${{ github.token }}"
+    assert 'merge_token = os.environ.pop("PROMOTION_MERGE_TOKEN")' in wait["run"]
+    current = source_owned(jobs)
+    if current:
+        assert_source_owned_boundary(jobs)
+        assert 'qualified_run = json.loads(qualification.stdout)' in wait["run"]
+        assert 'qualified_run.get("conclusion") != "success"' in wait["run"]
+    assert wait["run"].count("env=read_env") == (4 if current else 3)
+    assert wait["run"].count("env=merge_env") == 1
     assert '"pr", "view"' in wait["run"] and '"pr", "checks"' in wait["run"]
 
 

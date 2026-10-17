@@ -132,6 +132,14 @@ relay-minted Azure bearer tokens into named env vars, and
 tokens represent. Ordinary user principals export the short alias (UPN local
 part); other principal types keep the reported identity string.
 
+### Installer reuse
+
+On both platforms, a healthy completed runtime with matching canonical payload
+admission skips venv construction, package installation and UV acquisition.
+Health failures, conflicting payloads and malformed completion evidence still
+refuse reuse. Fresh construction acquires UV only after canonical admission;
+an acquisition failure remains an error and the incomplete candidate is reclaimed.
+
 ### Repo provenance & the active-plugin config seam
 
 A repo's venue policy does **not** have to live in an adopted control-plane repo.
@@ -153,7 +161,10 @@ honored here:
   contributions are isolated from peers; indeterminate reads retain only their
   own last-known contribution. Runtime warnings are bounded and deduplicated;
   `agent-codespaces doctor` (or `doctor --json`) reports exhaustive findings and
-  precise remediation without deleting any entry.
+  precise remediation without deleting any entry. A combined provider scan
+  shares one fresh activation snapshot across declarations and compatibility
+  pointers; the next scan resolves activation again rather than caching it
+  across reloads.
 - **Precedence.** `load_merged_config` consumes provider configs at the **lowest
   precedence** — adopted-repo/cwd config always wins. Active plugin declarations
   precede compatibility `config.d` inputs.

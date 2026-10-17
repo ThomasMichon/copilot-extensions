@@ -9,10 +9,20 @@ from __future__ import annotations
 
 
 class SpawnTerminalClientMixin:
-    """``fail_spawn``/``settle_spawn``, mixed into ``DispatchClient``.
+    """``fail_spawn``/``settle_spawn``/``defer_spawn``, mixed into ``DispatchClient``.
 
     Relies on ``self._unwrap`` and ``self._http`` from the composing class.
     """
+
+    def defer_spawn(
+        self, key: str, *, detail: str | None = None,
+        expected_generation: int | None = None,
+    ) -> dict:
+        """Defer startup; generation fencing is for unclaimed restricted attempts only."""
+        payload: dict[str, object] = {"detail": detail}
+        if expected_generation is not None:
+            payload["expected_generation"] = expected_generation
+        return self._unwrap(self._http.post(f"/spawn-reservations/{key}/defer", json=payload))
 
     def fail_spawn(
         self,

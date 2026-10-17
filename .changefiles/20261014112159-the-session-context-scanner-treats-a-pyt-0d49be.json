@@ -1,0 +1,9 @@
+{
+  "comment": "The session-context scanner's output-free proof for Python hooks also rejects an aliased or passed-around print, a **kwargs print destination, an attribute .print call, and source that cannot be parsed (null bytes).",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

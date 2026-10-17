@@ -591,3 +591,95 @@ hiding the problem or silently dropping text.
   The narrowed current-base selection passes all five fast guard cases,
   including both real late-owner refusal branches; canonical fixture data
   and comments from #6726 are retained unchanged.
+- **2026-10-14** -- Narrowed repair #6730 merged as
+  `3fc5f5b1812c3cab05d26e33eb8d3551be30437c` after current-head Approved
+  review with zero findings and successful CI, workflow and attribution gates.
+  The separate first-install timeout #6727 already has an active diagnosis
+  owner and merged fixture-isolation repair #6734; do not duplicate that work
+  or infer Linux acceptance from its Windows checks. A newer containing full
+  run is still active and has exposed an agent-logger failure requiring its
+  own literal diagnosis. Immutable publication, authorized installed rollout,
+  delivered Picker conversation evidence and managed cleanup remain open.
+- **2026-10-14** -- Literal completed-job logs for full run `38633055933`
+  pin its validation snapshot to `ee4e6b0063dff7eafed04942feec10974de4f52c`,
+  before #6730. Its two negative-Resume mock failures therefore do not justify
+  another Worktrees patch. The separate agent-logger PowerShell classifier
+  timeout is already under active diagnosis in #6747; coordinated there and
+  retained normal release stewardship without duplicating its repair or
+  increasing a deadline. Preserve the original publication and delivered
+  conversation gates while following that canonical repair.
+- **2026-10-14** -- Logger harness isolation #6756 merged through its own
+  review and checks. The next full run, `38637663769`, pins
+  `c45b1430b53a387ddb588ab5c9708d35273393e5` and passes agent-logger, but
+  exposes a distinct create-plan project-scoping fixture failure. Claimed
+  #6759 after checking for an existing repair. Its record mock omitted fields
+  now consumed by the real creation path; derive a real `WorktreeRecord` from
+  the shared fixture and preserve the selected creation identity instead.
+  The unchanged selected-project versus stale-ambient-project assertions pass
+  in all four contained module cases. Mark the affected behavior as a fast
+  guard; production creation, authority and deferred admission remain unchanged.
+  This fixture-only repair does not exercise a new install or external venue;
+  normal full release and delivered Picker evidence remain separate gates.
+- **2026-10-14** -- Create-plan fixture repair #6763 merged as
+  `95d9d6b92208fa79f49fc424cface20602deab57` after its exact head received
+  Approved with zero findings and all required CI, workflow and attribution
+  gates succeeded. All four affected module cases and the selected fast guard
+  pass under the unchanged containment budgets. Resume normal containing
+  release stewardship; the separate artifact-ordering PR #6697 remains with
+  its active author and review. Neither fixture merge nor a source promotion
+  proves immutable asset publication, installed source identity or the still
+  outstanding delivered Picker New/cold Resume conversation contract.
+- **2026-10-14** -- Containing full run `38645036098` pins
+  `5d08c74d7185dcaf3b3f5c61af97c997576e427f` and passes the repaired
+  create-plan fixture, but exposes #6769: Git index discovery can consult a
+  FIFO `info/exclude` before the instruction publisher validates that input.
+  Strengthened the existing portable refusal test and reproduced its ordering
+  failure before the fix. Validate the Git-resolved exclude path before index
+  queries, retaining the original fresh read immediately before appending the
+  rule. No timeout, assertion or authority boundary is weakened.
+  The complete copy module passes 90 Windows cases with five native POSIX
+  skips and all 95 cases on native POSIX, including real FIFOs with no writer
+  and a fresh-exclude regression preserving independent ignore-rule changes.
+  The latter uses current-source dependencies after an older test cache proved
+  incompatible; no installed payload or source candidate was modified. Promote
+  the portable refusal cases and native FIFO cases to fast guards. Normal
+  review, containing publication and delivered Picker proof remain open.
+- **2026-10-14** -- FIFO ordering repair #6773 merged as
+  `23367596f6caabeee879df9bfb1813cdc6ad895c` after current-head Approved
+  with zero findings and successful full required CI, workflow and attribution
+  gates. A lost review-request response was checked against the provider before
+  any retry; the actual review ran on the unchanged candidate. Full run
+  `38647658802` still validated the older source and repeated the same FIFO
+  failure, so it is not evidence of a second regression. A newer normal full
+  run is queued. The separate dispatch reconnect fixture #6771 is owned by
+  active PR #6775; coordinated without copying its repair. Artifact-ordering
+  #6697 also remains with its active author. Continue through actual immutable
+  publication and the original installed Picker proof and cleanup gates.
+- **2026-10-14** -- Full run `38652751643` validates exact dev
+  `23367596f6caabeee879df9bfb1813cdc6ad895c` and clears the FIFO group,
+  then fails the optional-profile creation fallback assertion in #6780.
+  Canonical repair #6781 was already reserved and published by its existing
+  owner: the test must follow both real admission and setup command layers
+  before checking the unchanged Copilot model, environment and no-assignment
+  assertions. Follow that current-head review and CI without a competing patch.
+  The workflow's promotion job reports success only because its admission step
+  exits cleanly with `proceed=false` on the failed full suite; build, attestation
+  and publication are skipped. This is a correctly refused release, not a new
+  source promotion or immutable-asset receipt.
+- **2026-10-15** -- Canonical optional-profile fixture repair #6781 merged
+  as `2e1d19f58789254307fafaf42afc47c4b2de00b2` after its exact head received
+  Approved with zero findings and its checks completed successfully. A newer
+  normal full run is queued. Continue tracking its actual validated source and
+  publication result; dispatch reconnect #6775 and artifact ordering #6697
+  remain with their active owners. No updater or delivered Picker validation
+  has started, and the original completion gates remain open.
+- **2026-10-15** -- Full run `38658267992` validates
+  `2e1d19f58789254307fafaf42afc47c4b2de00b2`, clears the corrected fallback
+  case, then exposes #6784: a repository-probe test still mocks headless options
+  on the old direct caller rather than the shared `git_ops.git` owner.
+  Correct the test's seam and assert the complete current capture/timeout
+  options plus repository-identity environment isolation; production code
+  remains unchanged. All 21 registered-resolution and real inherited-Git-context
+  cases pass on Windows and native POSIX, including the native first-touch CLI
+  contract. Add the corrected probe to fast guards and retain the ordinary
+  review, full release, immutable publication and installed Picker proof gates.

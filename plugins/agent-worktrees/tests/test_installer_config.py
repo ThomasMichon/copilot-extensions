@@ -16,11 +16,35 @@ from agent_worktrees import config, repos
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
+def _powershell_path(path: Path, shell: str) -> str:
+    raw = str(path)
+    if os.name == "nt" or Path(shell).name.lower() != "powershell.exe":
+        return raw
+    converted = subprocess.run(
+        ["wslpath", "-w", raw],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return converted.stdout.strip() or raw
+
+
+def test_native_windows_powershell_path_does_not_require_wslpath(tmp_path, monkeypatch):
+    with monkeypatch.context() as native:
+        native.setattr(os, "name", "nt")
+        native.setattr(
+            subprocess, "run", lambda *_args, **_kwargs: pytest.fail("native paths need no wslpath"),
+        )
+        assert _powershell_path(tmp_path, "powershell.exe") == str(tmp_path)
+
+
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh", "bash"])
 def test_shell_scaffold_preserves_branch_authority(tmp_path, monkeypatch, shell):
     executable = shutil.which(shell)
     if not executable or (shell == "bash" and os.name == "nt"):
         pytest.skip(f"Native {shell} is unavailable")
+    if shell == "powershell.exe" and config.detect_platform() == "wsl":
+        pytest.skip("powershell.exe rewrites WSL paths into Windows-only UNC forms")
 
     anchor = tmp_path / "proj"
     project = tmp_path / "project-config"
@@ -56,13 +80,22 @@ def test_shell_scaffold_preserves_branch_authority(tmp_path, monkeypatch, shell)
             "$ErrorActionPreference = 'Stop'\n"
             "Set-StrictMode -Version Latest\n"
             "function Write-ServiceChanged {}\nfunction Write-ServiceSkipped {}\n"
-            "$RepoDir = $env:TEST_REPO\n$ProjectDir = $env:TEST_PROJECT\n"
-            "$InstallDir = $env:TEST_RUNTIME\n$ProjectName = 'proj'\n"
+            f"$RepoDir = '{_powershell_path(anchor, shell)}'\n"
+            f"$ProjectDir = '{_powershell_path(project, shell)}'\n"
+            f"$InstallDir = '{_powershell_path(runtime, shell)}'\n"
+            "$ProjectName = 'proj'\n"
             "$Force = $false\n" + function + "\nDeploy-Config test-machine\n"
         )
         script_path = tmp_path / "scaffold.ps1"
         script_path.write_text(script, encoding="utf-8")
-        argv = [executable, "-NoProfile", "-File", str(script_path)]
+        argv = [
+            executable,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+        ]
 
     def generate():
         proc = subprocess.run(
@@ -74,7 +107,7 @@ def test_shell_scaffold_preserves_branch_authority(tmp_path, monkeypatch, shell)
     path = project / "config.yaml"
     generated = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert "default_branch" not in generated["repos"]["proj"]
-    assert generated["repos"]["proj"]["anchor"] == str(anchor)
+    assert generated["repos"]["proj"]["anchor"] == _powershell_path(anchor, shell)
 
     entry = repos.RepoEntry(name="proj", repo_class="worktree")
     monkeypatch.setattr(

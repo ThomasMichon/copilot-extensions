@@ -9,8 +9,10 @@ retry."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -37,10 +39,44 @@ def _run_harness(
     exe = shutil.which(shell)
     if not exe:
         pytest.skip(f"{shell} is not installed")
-    delays_file_ps = str(delays_file).replace("\\", "\\\\")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    # UV is reached by the canonical Python policy across a process boundary.
+    # Settings probes exit before executing the install-only counter/SRE body.
+    uv_script = fake_bin / "uv.py"
+    uv_script.write_text(
+        f"#!{sys.executable}\n"
+        "import datetime, sys\n"
+        "from pathlib import Path\n"
+        "arguments = sys.argv[1:]\n"
+        "assert arguments[:2] == ['pip', 'install']\n"
+        "if '--show-settings' in arguments:\n"
+        "    print('PipInstallSettings { settings: PipSettings {\\n"
+        "    index_locations: IndexLocations { indexes: [], flat_index: [], },\\n"
+        "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\\n"
+        "}, }')\n"
+        "    sys.exit(0)\n"
+        "assert '--reinstall' in arguments and '--quiet' in arguments\n"
+        "cutoff = datetime.datetime.fromisoformat(arguments[arguments.index('--exclude-newer') + 1].replace('Z', '+00:00'))\n"
+        "assert cutoff <= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)\n"
+        + uv_stub_body,
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        (fake_bin / "uv.cmd").write_text(
+            f'@echo off\n"{sys.executable}" "{uv_script}" %*\n', encoding="utf-8"
+        )
+        uv_command = fake_bin / "uv.cmd"
+    else:
+        uv_script.rename(fake_bin / "uv")
+        (fake_bin / "uv").chmod(0o755)
+        uv_command = fake_bin / "uv"
+    delays_file_ps = str(delays_file)
+    policy = _INSTALL_PS1.with_name("installer_dependency_policy.py")
     harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
-        _extract_ps1_functions("Invoke-NativeCapture", "Test-IsSreModuleMismatch", "Invoke-UvPipInstallResilient")
+        f"$script:InstallerDependencyPolicy = '{policy}'\n"
+        + _extract_ps1_functions("Invoke-NativeCapture", "Test-IsSreModuleMismatch", "Invoke-UvPipInstallResilient")
         + f"""
 
 function Write-Warn {{ param([string]$m) Write-Host "WARN: $m" }}
@@ -49,18 +85,18 @@ function Write-Warn {{ param([string]$m) Write-Host "WARN: $m" }}
 # just the retry count.
 function Start-Sleep {{ param([int]$Seconds) Add-Content -LiteralPath '{delays_file_ps}' -Value $Seconds }}
 
-{uv_stub_body}
-
-{extra_script}
+{extra_script.replace('fake-python', str(sys.executable)).replace('Invoke-UvPipInstallResilient @(', f"Invoke-UvPipInstallResilient -UvCommand '{uv_command}' @(")}
 """,
         encoding="utf-8",
     )
     return subprocess.run(
         [exe, "-NoProfile", "-File", str(harness)],
+        cwd=tmp_path,
         check=True,
         capture_output=True,
         text=True,
         timeout=20,
+        env={**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
     )
 
 
@@ -74,22 +110,15 @@ def _delays(delays_file: Path) -> list[int]:
 def test_sre_mismatch_retries_then_succeeds(tmp_path: Path, shell: str) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
-    counter_file_ps = str(counter_file).replace("\\", "\\\\")
     delays_file = tmp_path / "delays.txt"
     uv_stub = f"""
-function uv {{
-    $countPath = '{counter_file_ps}'
-    $n = [int](Get-Content -LiteralPath $countPath)
-    $n += 1
-    Set-Content -LiteralPath $countPath -Value $n
-    if ($n -lt 3) {{
-        Write-Output 'AssertionError: SRE module mismatch'
-        $global:LASTEXITCODE = 1
-        return
-    }}
-    Write-Output 'Installed 1 package'
-    $global:LASTEXITCODE = 0
-}}
+count_path = Path({str(counter_file)!r})
+n = int(count_path.read_text(encoding='utf-8')) + 1
+count_path.write_text(str(n), encoding='utf-8')
+if n < 3:
+    print('AssertionError: SRE module mismatch')
+    sys.exit(1)
+print('Installed 1 package')
 """
     extra = """
 $result = Invoke-UvPipInstallResilient @('--python', 'fake-python', 'some-package', '--quiet')
@@ -110,17 +139,13 @@ Write-Host "OUT:$($result.Output)"
 def test_unrelated_failure_is_not_retried(tmp_path: Path, shell: str) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
-    counter_file_ps = str(counter_file).replace("\\", "\\\\")
     delays_file = tmp_path / "delays.txt"
     uv_stub = f"""
-function uv {{
-    $countPath = '{counter_file_ps}'
-    $n = [int](Get-Content -LiteralPath $countPath)
-    $n += 1
-    Set-Content -LiteralPath $countPath -Value $n
-    Write-Output 'error: network unreachable'
-    $global:LASTEXITCODE = 1
-}}
+count_path = Path({str(counter_file)!r})
+n = int(count_path.read_text(encoding='utf-8')) + 1
+count_path.write_text(str(n), encoding='utf-8')
+print('error: network unreachable')
+sys.exit(1)
 """
     extra = """
 $result = Invoke-UvPipInstallResilient @('--python', 'fake-python', 'some-package', '--quiet')
@@ -142,17 +167,13 @@ def test_persisting_sre_mismatch_still_fails_after_all_retries(
 ) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
-    counter_file_ps = str(counter_file).replace("\\", "\\\\")
     delays_file = tmp_path / "delays.txt"
     uv_stub = f"""
-function uv {{
-    $countPath = '{counter_file_ps}'
-    $n = [int](Get-Content -LiteralPath $countPath)
-    $n += 1
-    Set-Content -LiteralPath $countPath -Value $n
-    Write-Output 'AssertionError: SRE module mismatch'
-    $global:LASTEXITCODE = 1
-}}
+count_path = Path({str(counter_file)!r})
+n = int(count_path.read_text(encoding='utf-8')) + 1
+count_path.write_text(str(n), encoding='utf-8')
+print('AssertionError: SRE module mismatch')
+sys.exit(1)
 """
     extra = """
 $result = Invoke-UvPipInstallResilient @('--python', 'fake-python', 'some-package', '--quiet')

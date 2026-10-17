@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -58,6 +59,7 @@ class GoodCitizenSession:
         max_retries: int = _MAX_RETRIES,
         rate_remaining_threshold: int = _RATE_REMAINING_THRESHOLD,
         retry_statuses: set[int] | None = None,
+        request_headers: Callable[[], dict[str, str]] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.client = client or httpx.Client(
@@ -65,6 +67,7 @@ class GoodCitizenSession:
             headers=headers or {},
             transport=transport,
             timeout=timeout,
+            trust_env=request_headers is None,
         )
         self.owns_client = client is None
         self._min_interval_s = min_interval_s
@@ -76,6 +79,7 @@ class GoodCitizenSession:
         }
         self._last_request_at = 0.0
         self._etag_cache: dict[str, str] = {}
+        self._request_headers = request_headers
 
     def get_json(
         self,
@@ -126,13 +130,19 @@ class GoodCitizenSession:
             cache_key = self._cache_key(method, url_path, params) if etag else ""
             if etag and (cached_etag := self._etag_cache.get(cache_key)):
                 request_headers["If-None-Match"] = cached_etag
+            if self._request_headers is not None:
+                request_headers.update(self._request_headers())
             try:
+                redirect_policy = (
+                    {"follow_redirects": False} if self._request_headers is not None else {}
+                )
                 response = self.client.request(
                     method,
                     url_path,
                     params=params,
                     json=json,
                     headers=request_headers,
+                    **redirect_policy,
                 )
             except httpx.TimeoutException:
                 if retries >= self._max_retries:

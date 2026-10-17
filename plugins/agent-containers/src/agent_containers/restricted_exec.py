@@ -18,6 +18,7 @@ _NODE_CANDIDATES = (
     "/opt/node/bin/node",
 )
 _READLINK_CANDIDATES = ("/usr/bin/readlink", "/bin/readlink")
+_FLOCK_CANDIDATES = ("/usr/bin/flock", "/bin/flock")
 _CLEARED_ENV = (
     "BASH_ENV",
     "ENV",
@@ -111,6 +112,9 @@ def resolve_executable(
         probe = ["--noprofile", "--norc", "-c", "exit 0"]
     elif kind == "node":
         candidates = _NODE_CANDIDATES
+        probe = ["--version"]
+    elif kind == "flock":
+        candidates = _FLOCK_CANDIDATES
         probe = ["--version"]
     else:
         raise RestrictedExecError(f"unsupported restricted helper kind: {kind}")

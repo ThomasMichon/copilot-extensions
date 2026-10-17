@@ -1,0 +1,17 @@
+{
+  "comment": "Consume explicit renewable source credentials through Gateway and materialize independent remote Git sources",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

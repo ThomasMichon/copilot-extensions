@@ -20,53 +20,47 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from acp import PROTOCOL_VERSION, Client, RequestError, text_block
+from acp import PROTOCOL_VERSION, text_block
 from acp.client.connection import ClientSideConnection
 from acp.schema import (
     AcceptElicitationResponse,
     AgentMessageChunk,
     AgentPlanUpdate,
     AgentThoughtChunk,
-    AvailableCommandsUpdate,
     CancelElicitationResponse,
     ConfigOptionUpdate,
-    CreateTerminalResponse,
-    CurrentModeUpdate,
     DeclineElicitationResponse,
     EnvVariable,
     HttpHeader,
     HttpMcpServer,
     Implementation,
-    KillTerminalResponse,
     McpServerStdio,
     PermissionOption,
-    ReadTextFileResponse,
-    ReleaseTerminalResponse,
     RequestPermissionResponse,
     SessionInfoUpdate,
     SseMcpServer,
-    TerminalOutputResponse,
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
     ToolCallUpdate,
     UsageUpdate,
     UserMessageChunk,
-    WaitForTerminalExitResponse,
-    WriteTextFileResponse,
 )
 
 from . import __version__
+from .acp_callbacks import _BridgeClientImpl
 from .acp_subagents import (
     BG_TASK_AGENT_ID_RE as _BG_TASK_AGENT_ID_RE,
     BG_TASK_INACTIVE_STATUSES as _BG_TASK_INACTIVE_STATUSES,
     BG_TASK_LAUNCH_RE as _BG_TASK_LAUNCH_RE,
     BG_TASK_STATUS_RE as _BG_TASK_STATUS_RE,
     SubagentAttribution,
+    background_task_text,
     client_capabilities,
     subagent_event_meta,
 )
 from .procgroup import safe_killpg, terminate_windows_tree
+from .remote_acp_client import RemoteAcpClientMixin
 from .acp_preferences import (
     AcpPreferencesMixin, _ACP_MODEL_CONFIG_ID, _ACP_EFFORT_CONFIG_ID,
     _ACP_MODEL_ENV, _ACP_EFFORT_ENV, _ACP_PROPAGATE_OFF_ENV, _first_env,
@@ -173,112 +167,6 @@ async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
         await asyncio.wait_for(proc.wait(), timeout=3.0)
 
 
-class _BridgeClientImpl(Client):
-    """ACP Client callback implementation.
-
-    Routes session_update notifications to the owning AcpClient, which
-    in turn pushes events to the session's EventLog.
-    """
-
-    def __init__(self, owner: AcpClient) -> None:
-        self._owner = owner
-
-    async def request_permission(
-        self,
-        options: list[PermissionOption],
-        session_id: str,
-        tool_call: ToolCallUpdate,
-        **kwargs: Any,
-    ) -> RequestPermissionResponse:
-        return await self._owner._handle_permission_request(options, tool_call)
-
-    async def create_elicitation(
-        self, message: str, mode: Any, **kwargs: Any
-    ) -> AcceptElicitationResponse | DeclineElicitationResponse | CancelElicitationResponse:
-        """Handle an ``elicitation/create`` request (the agent's ``ask_user``).
-
-        Delegates to the owner, which surfaces the question as an
-        ``ask_user_request`` event and blocks on a human answer -- never
-        auto-answering.
-        """
-        return await self._owner._handle_elicitation(message, mode)
-
-    async def complete_elicitation(
-        self, elicitation_id: str, **kwargs: Any
-    ) -> None:
-        """Handle an ``elicitation/complete`` notification (agent withdrew it).
-
-        The agent no longer needs the answer (e.g. it cancelled the turn), so
-        drop the parked request without resolving it as an answer.
-        """
-        self._owner._withdraw_elicitation(elicitation_id)
-
-    async def session_update(
-        self,
-        session_id: str,
-        update: (
-            UserMessageChunk
-            | AgentMessageChunk
-            | AgentThoughtChunk
-            | ToolCallStart
-            | ToolCallProgress
-            | AgentPlanUpdate
-            | AvailableCommandsUpdate
-            | CurrentModeUpdate
-            | ConfigOptionUpdate
-            | SessionInfoUpdate
-            | UsageUpdate
-        ),
-        **kwargs: Any,
-    ) -> None:
-        self._owner._handle_session_update(update)
-
-    # Unsupported server-initiated requests -- reject cleanly
-    async def write_text_file(
-        self, content: str, path: str, session_id: str, **kw: Any
-    ) -> WriteTextFileResponse | None:
-        raise RequestError.method_not_found("fs/write_text_file")
-
-    async def read_text_file(
-        self, path: str, session_id: str, **kw: Any
-    ) -> ReadTextFileResponse:
-        raise RequestError.method_not_found("fs/read_text_file")
-
-    async def create_terminal(
-        self, command: str, session_id: str, **kw: Any
-    ) -> CreateTerminalResponse:
-        raise RequestError.method_not_found("terminal/create")
-
-    async def terminal_output(
-        self, session_id: str, terminal_id: str, **kw: Any
-    ) -> TerminalOutputResponse:
-        raise RequestError.method_not_found("terminal/output")
-
-    async def release_terminal(
-        self, session_id: str, terminal_id: str, **kw: Any
-    ) -> ReleaseTerminalResponse | None:
-        raise RequestError.method_not_found("terminal/release")
-
-    async def wait_for_terminal_exit(
-        self, session_id: str, terminal_id: str, **kw: Any
-    ) -> WaitForTerminalExitResponse:
-        raise RequestError.method_not_found("terminal/wait_for_exit")
-
-    async def kill_terminal(
-        self, session_id: str, terminal_id: str, **kw: Any
-    ) -> KillTerminalResponse | None:
-        raise RequestError.method_not_found("terminal/kill")
-
-    async def ext_method(self, method: str, params: dict) -> dict:
-        raise RequestError.method_not_found(method)
-
-    async def ext_notification(self, method: str, params: dict) -> None:
-        pass
-
-    def on_connect(self, conn: Any) -> None:
-        pass
-
-
 class ToolCallRecord:
     """Tracks a single tool call during a turn."""
 
@@ -371,7 +259,7 @@ def resolve_acp_model_config() -> dict[str, str]:
 
 
 
-class AcpClient(AcpPreferencesMixin):
+class AcpClient(RemoteAcpClientMixin, AcpPreferencesMixin):
     """Wraps a single Copilot CLI subprocess running in ACP mode.
 
     Handles the ACP protocol (initialize, session/new, session/prompt)
@@ -379,6 +267,8 @@ class AcpClient(AcpPreferencesMixin):
     """
 
     def _resolve_caller_preferences(self) -> dict[str, str]:
+        if self._remote_transport is not None:
+            return {}
         return resolve_acp_model_config()
 
     MAX_STDERR_LINES = 50
@@ -689,13 +579,14 @@ class AcpClient(AcpPreferencesMixin):
             timing_callback("session_new_mcp_build", time.monotonic() - started)
         started = time.monotonic()
         self._subagent_attr.reset()
-        result = await self._subagent_attr.call_with_meta(
+        result = await self._lifecycle_rpc(
             self._connection.new_session,
             cwd=cwd, mcp_servers=servers,
         )
         if timing_callback is not None:
             timing_callback("session_new_rpc", time.monotonic() - started)
         self._acp_session_id = result.session_id
+        await self._adopt_remote_session()
         # Set the session's model/effort now that it exists (dotfiles#790):
         # copilot ignores the ``--model`` launch flag in ``--acp`` mode, so the
         # model is chosen here against the advertised select options.
@@ -749,6 +640,8 @@ class AcpClient(AcpPreferencesMixin):
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
+        if self._remote_transport is not None and not self._remote_can_load:
+            raise PermissionError("Remote agent does not advertise session/load")
         self._cancel_out_of_turn()
         self._subagent_attr.reset()
         self._loading_session = True
@@ -760,7 +653,7 @@ class AcpClient(AcpPreferencesMixin):
             if timing_callback is not None:
                 timing_callback("session_load_mcp_build", time.monotonic() - started)
             started = time.monotonic()
-            result = await self._subagent_attr.call_with_meta(
+            result = await self._lifecycle_rpc(
                 self._connection.load_session,
                 cwd=cwd, session_id=session_id,
                 mcp_servers=servers,
@@ -772,6 +665,7 @@ class AcpClient(AcpPreferencesMixin):
             self._suppress_replay = True
             self._subagent_attr.reset_text_runs()
         self._acp_session_id = session_id
+        await self._adopt_remote_session()
         # Re-assert the model/effort on resume: a reloaded session may report
         # the agent's default in its config options (dotfiles#790).
         started = time.monotonic()
@@ -824,7 +718,7 @@ class AcpClient(AcpPreferencesMixin):
         host mode the event never fires, so behavior is unchanged.
         """
         prompt_fut = asyncio.ensure_future(
-            self._connection.prompt(
+            self._prompt_rpc(
                 session_id=self._acp_session_id,
                 prompt=[text_block(text)],
             )
@@ -849,6 +743,8 @@ class AcpClient(AcpPreferencesMixin):
 
     async def cancel_prompt(self) -> None:
         """Cancel the current prompt via ACP session/cancel."""
+        if self._remote_transport is not None:
+            self._remote_cancel_answers(deliver_cancel=True)
         if self._connection and self._acp_session_id and not self._prompt_complete:
             await self._connection.cancel(session_id=self._acp_session_id)
 
@@ -859,6 +755,8 @@ class AcpClient(AcpPreferencesMixin):
         alive across a frontend restart (goal 1: no inadvertent reaping). In
         the classic process-owning mode it tree-kills the child as before.
         """
+        if self._remote_transport is not None:
+            self._remote_cancel_answers()
         # Cancel any pending permission
         if self._pending_permission_future and not self._pending_permission_future.done():
             self._pending_permission_future.set_result(
@@ -1117,14 +1015,11 @@ class AcpClient(AcpPreferencesMixin):
         the same id, and the launch phrase has no ``status:`` field, so the two
         branches are mutually exclusive in practice.
         """
-        parts: list[str] = []
-        if content:
-            parts.extend(content)
-        if raw_output is not None:
-            parts.append(raw_output if isinstance(raw_output, str) else repr(raw_output))
-        if not parts:
+        if self._remote_transport is not None and self._loading_session:
             return
-        text = "\n".join(parts)
+        text = background_task_text(content, raw_output)
+        if not text:
+            return
 
         launched = False
         for match in _BG_TASK_LAUNCH_RE.finditer(text):
@@ -1244,6 +1139,9 @@ class AcpClient(AcpPreferencesMixin):
 
     def has_pending_permission(self, request_id: str) -> bool:
         """Whether ``request_id`` is the currently answerable permission."""
+        if self._remote_transport is not None:
+            entry = self._remote_answers.get(request_id)
+            return bool(self.is_running and entry and not entry["future"].done())
         return bool(
             request_id
             and request_id == self._pending_permission_id
@@ -1253,6 +1151,8 @@ class AcpClient(AcpPreferencesMixin):
 
     def resolve_permission(self, request_id: str, option_id: str) -> bool:
         """Resolve the current manual permission request with one offered option."""
+        if self._remote_transport is not None:
+            return self._remote_answer_permission(request_id, option_id)
         if not self.has_pending_permission(request_id):
             return False
         if option_id not in self._pending_permission_options:
@@ -1333,6 +1233,7 @@ class AcpClient(AcpPreferencesMixin):
         content: dict[str, Any] | None,
         *,
         action: str = "accept",
+        request_id: str | None = None,
     ) -> bool:
         """Resolve a parked ``ask_user`` elicitation with a human's answer.
 
@@ -1341,6 +1242,8 @@ class AcpClient(AcpPreferencesMixin):
         request was resolved, ``False`` if none was outstanding (already
         answered, withdrawn, or unknown tool call).
         """
+        if self._remote_transport is not None:
+            return self._remote_answer_form(tool_call_id, content, action, request_id)
         fut = self._pending_elicitations.get(tool_call_id)
         if fut is None or fut.done():
             return False
@@ -1375,6 +1278,11 @@ class AcpClient(AcpPreferencesMixin):
 
     def has_pending_elicitation(self, tool_call_id: str) -> bool:
         """Whether an unanswered ``ask_user`` request is parked for a tool call."""
+        if self._remote_transport is not None:
+            return any(
+                e["kind"] == "form" and e["tool_call_id"] == tool_call_id
+                and not e["future"].done() for e in self._remote_answers.values()
+            )
         fut = self._pending_elicitations.get(tool_call_id)
         return fut is not None and not fut.done()
 
@@ -1386,6 +1294,13 @@ class AcpClient(AcpPreferencesMixin):
         agent is blocked on and the host can answer it (the elicitation backstop,
         dotfiles#1275). Empty when nothing is parked.
         """
+        if self._remote_transport is not None:
+            return [
+                {**e["data"], "tool_call_id": e["tool_call_id"],
+                 "request_id": token, "decision_id": e["decision_id"]}
+                for token, e in self._remote_answers.items()
+                if e["kind"] == "form" and not e["future"].done()
+            ]
         out: list[dict[str, Any]] = []
         for tool_call_id, meta in self._pending_ask_user_meta.items():
             fut = self._pending_elicitations.get(tool_call_id)

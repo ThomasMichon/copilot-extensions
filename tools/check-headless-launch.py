@@ -70,6 +70,33 @@ production/script roots, unless the source line carries a comment containing
 ``relative/path.yaml:7  reason`` entry per line; JSON has no comment syntax,
 so this is its only escape hatch -- YAML may use either).
 
+**A fifth rule: a resident daemon launches through ``spawn_daemon``.** In an
+agent-procutil-adopting plugin's ``src``, a ``subprocess.Popen`` (or the bare
+imported ``Popen``) that detaches with ``detached_kwargs`` /
+``windowless_daemon_kwargs`` -- in the call itself or anywhere in its
+enclosing function -- is reported: a hand-rolled detached launch skips
+``agent_procutil.spawn_daemon``'s explicit cwd outside the payload, its log,
+and its Job breakaway handling. A detached child that is not a resident
+daemon (a waiter, a one-shot helper, a deliberately contained child) carries
+an inline ``# daemon-spawn: allow <why>`` comment on the ``Popen`` line, or a
+``relative/path.py::qualified.function  reason`` entry in
+``tools/daemon-spawn.allow``. That file is a shrink-only baseline: each entry
+covers exactly one launch in its function, an entry with no matching launch
+is itself reported, and every entry needs a reason.
+
+**A sixth rule: an installer never starts a daemon with a contained
+PowerShell launch.** In ``plugins/*/scripts/install*.ps1`` and
+``plugins/*/transports/*/scripts/install*.ps1``, a ``Start-Process`` of
+``conhost`` (the windowless host every PowerShell start-now uses) is
+reported: the child stays inside the installer's Job and dies with the SSH
+session or updater that ran it. Start a daemon now through the service's
+user-mode ensure path (``agent_procutil.spawn_daemon``), or WMI
+``Win32_Process.Create`` for a PowerShell-only daemon. A child the caller
+deliberately owns (a foreground supervisor that waits on it, or a warned
+last resort) carries ``# daemon-spawn: allow <why>`` on the statement or the
+comment line directly above it. Scheduled-task and Run-key registrations
+hand the lifetime to Windows and are not launches.
+
 Usage::
 
     python tools/check-headless-launch.py          # verify (CI / pre-push)
@@ -84,14 +111,18 @@ import json
 import re
 import sys
 import tokenize
+from collections import Counter
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
 HEADLESS_GUARD_ALLOWLIST = REPO / "tools" / "headless-guard.allow"
+DAEMON_SPAWN_ALLOWLIST = "tools/daemon-spawn.allow"  # relative to REPO
 
 _ALLOW = "headless-guard: allow"
+_DAEMON_ALLOW = "daemon-spawn: allow"
+_DETACH_HELPERS = frozenset({"detached_kwargs", "windowless_daemon_kwargs"})
 _UNSAFE_FLAG = "CREATE_NEW_CONSOLE"
 _CREATE_NEW_CONSOLE_VALUE = 0x00000010
 _FLAG_NAMES = frozenset({
@@ -272,6 +303,130 @@ def _find_unsuppressed_spawns(f: Path) -> tuple[str, list[tuple[int, str]]]:
     return text, sorted(set(finder.hits))
 
 
+def _own_scope_nodes(node: ast.AST):
+    """``node``'s descendants, not descending into nested scopes (function,
+    lambda and class bodies)."""
+    pending = list(ast.iter_child_nodes(node))
+    while pending:
+        sub = pending.pop()
+        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        yield sub
+        pending.extend(ast.iter_child_nodes(sub))
+
+
+def _subprocess_aliases(scope: ast.AST) -> tuple[set[str], set[str], set[str]]:
+    """(``subprocess`` aliases, ``Popen`` aliases, detach-helper aliases)
+    imported in ``scope``'s own body."""
+    modules: set[str] = set()
+    popens: set[str] = set()
+    helpers: set[str] = set()
+    for node in _own_scope_nodes(scope):
+        if isinstance(node, ast.Import):
+            modules.update(a.asname for a in node.names if a.name == "subprocess" and a.asname)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "subprocess":
+                popens.update(a.asname or a.name for a in node.names if a.name == "Popen")
+            helpers.update(a.asname for a in node.names if a.name in _DETACH_HELPERS and a.asname)
+    return modules, popens, helpers
+
+
+def _calls_detach_helper(node: ast.AST, helpers: frozenset[str] = _DETACH_HELPERS) -> bool:
+    """Whether ``node``'s own scope calls a detach helper.
+
+    Nested function and class bodies are separate scopes and are not searched,
+    so a helper inside an inner function never marks an outer launch.
+    """
+    for sub in _own_scope_nodes(node):
+        if isinstance(sub, ast.Call):
+            func = sub.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name in helpers:
+                return True
+    return False
+
+
+class _DetachedSpawnFinder(ast.NodeVisitor):
+    """Collect (lineno, qualname) for a raw ``Popen`` that detaches itself."""
+
+    def __init__(self, tree: ast.AST) -> None:
+        self.hits: list[tuple[int, str]] = []
+        self._names: list[str] = []
+        self._funcs: list[ast.AST] = []
+        # Aliases per lexical scope, each indexed before its body is visited (a
+        # function may precede the import it uses). As in Python, a scope sees
+        # its own imports and its enclosing functions' and module's, never a
+        # sibling's or an enclosing class body's.
+        modules, popens, helpers = _subprocess_aliases(tree)
+        self._alias_stack: list[tuple[tuple[set[str], set[str], set[str]], bool]] = [
+            (({"subprocess", *modules}, popens, {*_DETACH_HELPERS, *helpers}), False)
+        ]
+
+    def _scoped(self, node: ast.AST, *, func: bool) -> None:
+        self._names.append(node.name)  # type: ignore[attr-defined]
+        if func:
+            self._funcs.append(node)
+        self._alias_stack.append((_subprocess_aliases(node), not func))
+        self.generic_visit(node)
+        self._alias_stack.pop()
+        if func:
+            self._funcs.pop()
+        self._names.pop()
+
+    def _visible_aliases(self) -> list[tuple[set[str], set[str], set[str]]]:
+        *outer, innermost = self._alias_stack
+        return [aliases for aliases, is_class in outer if not is_class] + [innermost[0]]
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._scoped(node, func=False)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._scoped(node, func=True)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._scoped(node, func=True)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        visible = self._visible_aliases()
+        modules = set().union(*(scope[0] for scope in visible))
+        popens = set().union(*(scope[1] for scope in visible))
+        helpers = frozenset().union(*(scope[2] for scope in visible))
+        is_popen = (
+            (isinstance(func, ast.Attribute) and func.attr == "Popen"
+             and isinstance(func.value, ast.Name) and func.value.id in modules)
+            or (isinstance(func, ast.Name) and func.id in popens)
+        )
+        scope = self._funcs[-1] if self._funcs else None
+        if is_popen and (
+            _calls_detach_helper(node, helpers)
+            or (scope is not None and _calls_detach_helper(scope, helpers))
+        ):
+            self.hits.append((node.lineno, ".".join(self._names) or "<module>"))
+        self.generic_visit(node)
+
+
+def _load_daemon_spawn_allowlist(problems: list[str]) -> Counter[str]:
+    """Baseline entries; each one covers exactly one launch in its function."""
+    allowlist = REPO / DAEMON_SPAWN_ALLOWLIST
+    entries: Counter[str] = Counter()
+    if not allowlist.is_file():
+        return entries
+    for lineno, line in enumerate(allowlist.read_text(encoding="utf-8").splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, _, reason = stripped.partition(" ")
+        if "::" not in key or not reason.strip():
+            problems.append(
+                f"{DAEMON_SPAWN_ALLOWLIST}:{lineno}: expected "
+                "'relative/path.py::qualified.function  <reason>'"
+            )
+            continue
+        entries[key] += 1
+    return entries
+
+
 def _load_path_allowlist() -> set[str]:
     if not HEADLESS_GUARD_ALLOWLIST.is_file():
         return set()
@@ -282,6 +437,68 @@ def _load_path_allowlist() -> set[str]:
             continue
         entries.add(stripped.split(None, 1)[0])
     return entries
+
+
+# Rule 6: an installer's start-now PowerShell process launch of a daemon.
+_PS_INSTALLER_GLOBS = (
+    "plugins/*/scripts/install*.ps1",
+    "plugins/*/transports/*/scripts/install*.ps1",
+)
+_PS_START_PROCESS_RE = re.compile(r"(?<![\w-])Start-Process(?![\w-])", re.IGNORECASE)
+# conhost as any token of the statement (quoted, path-qualified or a variable
+# such as $conhost), wherever Start-Process's named or positional parameters
+# put it.
+_PS_CONHOST_TOKEN_RE = re.compile(
+    r"(?<![\w.-])['\"]?(?:[^\s'\"(),]*[\\/$])?conhost(?:\.exe)?['\"]?(?![\w.-])",
+    re.IGNORECASE,
+)
+_PS_DAEMON_ALLOW_RE = re.compile(r"#\s*" + re.escape(_DAEMON_ALLOW) + r"[ :]+\S")
+
+
+def _find_ps_conhost_launches(text: str) -> list[int]:
+    """1-based lines of unmarked ``Start-Process ... conhost`` statements.
+
+    A statement continues across trailing-backtick lines. It is allowed by a
+    ``# daemon-spawn: allow <why>`` comment on one of its lines or on the
+    comment line directly above it. Comments (including ``<# ... #>`` blocks)
+    and here-string bodies are not statements and are skipped.
+    """
+    lines = text.splitlines()
+    hits: list[int] = []
+    in_here_string = False
+    in_block_comment = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if in_block_comment:
+            in_block_comment = "#>" not in line
+            i += 1
+            continue
+        if stripped.startswith("<#"):
+            in_block_comment = "#>" not in stripped[2:]
+            i += 1
+            continue
+        if in_here_string:
+            in_here_string = not stripped.startswith(('"@', "'@"))
+            i += 1
+            continue
+        if stripped.endswith(('@"', "@'")):
+            in_here_string = True
+            i += 1
+            continue
+        end = i
+        while lines[end].rstrip().endswith("`") and end + 1 < len(lines):
+            end += 1
+        statement = " ".join(part.rstrip().rstrip("`") for part in lines[i:end + 1])
+        code = statement.split("#", 1)[0] if not stripped.startswith("#") else ""
+        if code and _PS_START_PROCESS_RE.search(code) and _PS_CONHOST_TOKEN_RE.search(code):
+            marked = any(_PS_DAEMON_ALLOW_RE.search(part) for part in lines[i:end + 1])
+            above = lines[i - 1].strip() if i else ""
+            if not marked and not (above.startswith("#") and _PS_DAEMON_ALLOW_RE.search(above)):
+                hits.append(i + 1)
+        i = end + 1
+    return hits
 
 
 # YAML-only heuristic: an unquoted or quoted scalar in VALUE position (after
@@ -463,18 +680,22 @@ def _find_flags(f: Path) -> tuple[str, list[tuple[int, str]]]:
     return text, sorted(set(finder.hits))
 
 
-def _allowed(lines: list[str], lineno: int) -> bool:
+def _allowed(lines: list[str], lineno: int, marker: str = _ALLOW) -> bool:
     line = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
+    comments: list[str] = []
     try:
-        tokens = tokenize.generate_tokens(io.StringIO(line).readline)
-        comments = [tok.string for tok in tokens if tok.type == tokenize.COMMENT]
+        for tok in tokenize.generate_tokens(io.StringIO(line).readline):
+            if tok.type == tokenize.COMMENT:
+                comments.append(tok.string)
     except (IndentationError, tokenize.TokenError):
-        return False
+        # A multiline call's opening line ends inside an open bracket: keep the
+        # comments tokenized before EOF.
+        pass
     for comment in comments:
         text = comment.removeprefix("#").strip()
-        if not text.startswith(_ALLOW):
+        if not text.startswith(marker):
             continue
-        suffix = text[len(_ALLOW):]
+        suffix = text[len(marker):]
         if not suffix or suffix[0] not in " :":
             continue
         reason = suffix.lstrip(" :").strip()
@@ -486,6 +707,7 @@ def _allowed(lines: list[str], lineno: int) -> bool:
 def verify() -> list[str]:
     problems: list[str] = []
     cache: dict[Path, tuple[str, list[tuple[int, str]], list[tuple[int, str]]]] = {}
+    detached: dict[Path, list[tuple[int, str]]] = {}
     parse_failures: set[Path] = set()
 
     def scan(f: Path) -> tuple[str, list[tuple[int, str]], list[tuple[int, str]]]:
@@ -498,6 +720,9 @@ def verify() -> list[str]:
             flags.visit(tree)
             spawns = _SpawnFinder(text)
             spawns.visit(tree)
+            daemons = _DetachedSpawnFinder(tree)
+            daemons.visit(tree)
+            detached[f] = sorted(daemons.hits)  # one hit per launch, even on one line
             result = (text, sorted(set(flags.hits)), sorted(set(spawns.hits)))
         except SyntaxError as exc:
             result = (text, [], [])
@@ -597,6 +822,53 @@ def verify() -> list[str]:
                     f"'{_ALLOW} <why>' (YAML) or list "
                     f"'{rel}:{lineno}  <why>' in "
                     "tools/headless-guard.allow (JSON)"
+                )
+
+    # Rule 5: a resident daemon launches through spawn_daemon (see module
+    # docstring); tools/daemon-spawn.allow is a shrink-only baseline.
+    daemon_allow = _load_daemon_spawn_allowlist(problems)
+    unmatched = Counter(daemon_allow)
+    for plugin in _adopting_plugins():
+        src = plugin / "src"
+        if not src.is_dir():
+            continue
+        for f in _iter_py(src):
+            text = scan(f)[0]
+            lines = text.splitlines()
+            rel = f.relative_to(REPO).as_posix()
+            for lineno, qualname in detached.get(f, []):
+                key = f"{rel}::{qualname}"
+                # An inline allowance never consumes a baseline entry.
+                if _allowed(lines, lineno, _DAEMON_ALLOW):
+                    continue
+                if unmatched[key] > 0:
+                    unmatched[key] -= 1
+                    continue
+                problems.append(
+                    f"{rel}:{lineno}: hand-rolled detached Popen in {qualname} -- launch a "
+                    "resident daemon with agent_procutil.spawn_daemon() (explicit cwd, "
+                    f"log, Job breakaway); mark a non-daemon child '# {_DAEMON_ALLOW} <why>'"
+                )
+    for key, count in sorted(unmatched.items()):
+        problems.extend(
+            f"tools/daemon-spawn.allow: stale entry {key} -- it no longer hand-rolls that "
+            "many detached Popen calls; remove one entry per migrated launch"
+            for _ in range(count)
+        )
+
+    # Rule 6: an installer starts a daemon now through the service's user-mode
+    # ensure path (or an escape such as WMI), never a contained Start-Process.
+    for pattern in _PS_INSTALLER_GLOBS:
+        for f in sorted(REPO.glob(pattern)):
+            rel = f.relative_to(REPO).as_posix()
+            text = f.read_text(encoding="utf-8-sig")
+            for lineno in _find_ps_conhost_launches(text):
+                problems.append(
+                    f"{rel}:{lineno}: installer starts a process through Start-Process conhost "
+                    "-- the child stays in the installer's Job and dies with an SSH session or "
+                    "updater; start a daemon through its user-mode ensure path "
+                    "(agent_procutil.spawn_daemon) or WMI Win32_Process.Create, or mark a "
+                    f"child the caller owns '# {_DAEMON_ALLOW} <why>'"
                 )
     return problems
 

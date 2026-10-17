@@ -1,0 +1,9 @@
+{
+  "comment": "Expose exact full session facts for identity-preserving resume consumers",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

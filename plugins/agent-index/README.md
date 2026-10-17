@@ -87,7 +87,12 @@ reporting an apparently empty or partially counted index.
 Complete service cells and standalone explicit-source native services keep
 their independently owned full host runtime; they do not acquire a duplicate
 sibling merely to match the legacy layout. The durable embedding venv retains
-its separate lifecycle. These runtimes retain
+its separate lifecycle, building into immutable engine slots before completed
+selection. Failed selected dependencies cannot replace the healthy engine;
+`engine-update` constructs a distinct repair generation. Engine dependency
+transactions include both the local base package and engine source, so isolated
+resolution and upgrades do not require the unpublished base on a package feed.
+These runtimes retain
 plugin-owned dependency/signature policy. PowerShell stamps are immutable,
 self-contained snapshots; see the
 [shared installer contract](../../docs/install-contract.md#shared-installer-engine-helpers-libsinstaller-engine)
@@ -266,6 +271,9 @@ non-mutating `inactive` result; before setup in an active repository it returns
 `setup_required`.
 - `agent-index role` — whether this machine is acting as `host` or `client`.
 - `agent-index engine status` — durable engine health, PID, endpoint, and venv.
+  A stale migrated selector with no selectable completed interpreter reports
+  `venv_python: null` and `provisioned: false`, retaining health and PID
+  diagnostics. Launches still refuse rather than falling back to the legacy venv.
 - `scripts/maintenance_tick.py` — a host-only deterministic maintenance body
   for agent-dispatch's script embodiment: health-checks the self-supervised
   service + durable engine, starts only what is down, then runs incremental

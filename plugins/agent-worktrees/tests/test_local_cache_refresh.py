@@ -61,9 +61,18 @@ def provider(root, home, name="demo", *, content=b'---\r\napplyTo: "**"\r\n---\r
     return template, root / static.NAMESPACE / "market" / name / "fallback.local.instructions.md"
 
 
-def test_copy_opaque_bytes_without_packaged_engine(copy_workspace, monkeypatch, capsys):
+@pytest.mark.guard
+@pytest.mark.parametrize("legacy_progress", [False, True], ids=["timed", "legacy"])
+def test_copy_opaque_bytes_without_packaged_engine(
+    copy_workspace, monkeypatch, capsys, legacy_progress,
+):
     root, home = copy_workspace
-    from agent_worktrees import installer
+    from agent_worktrees import installer, launch_progress
+
+    if legacy_progress:
+        monkeypatch.setattr(launch_progress.output, "HumanOperation", None)
+    else:
+        assert launch_progress.output.HumanOperation is not None
 
     monkeypatch.setattr(
         installer, "_payload_root",
@@ -84,8 +93,13 @@ def test_copy_opaque_bytes_without_packaged_engine(copy_workspace, monkeypatch, 
     captured = capsys.readouterr()
     assert not captured.out
     for stage in ("Preparing instruction projections", "Copying declared instructions"):
-        assert f"{stage}: starting" in captured.err
-        assert f"{stage}: finished" in captured.err
+        if legacy_progress:
+            assert f"{stage}: starting" in captured.err
+            assert f"{stage}: finished" in captured.err
+        else:
+            operation = f"launch/{stage.replace(' ', '-')}"
+            assert f"{operation} starting [elapsed " in captured.err
+            assert f"{operation} done [duration " in captured.err
 
 
 def test_overwrite_untracked_and_reconcile_disabled_sources(copy_workspace):
@@ -198,6 +212,7 @@ def test_invalid_declaration_version_preserves_previous_output(copy_workspace, v
     assert output.read_bytes() == previous
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("kind", ["settings", "declaration", "template", "exclude", "output"])
 def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, kind):
     root, home = copy_workspace
@@ -216,21 +231,33 @@ def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, k
     def file_stat(path, *args, **kwargs):
         value = original_stat(path, *args, **kwargs)
         if path == target:
-            return os.stat_result((stat.S_IFIFO | 0o600, *value[1:]))
+            return os.stat_result(
+                (stat.S_IFIFO | 0o600, *value[1:]),
+                {"st_file_attributes": getattr(value, "st_file_attributes", 0)},
+            )
         return value
 
     def read_bytes(path):
         assert path != target, "opened a nonregular input"
         return original_read(path)
 
+    original_git = static._git
+
+    def git(path, *args, **kwargs):
+        if kind == "exclude" and args[0] in ("ls-files", "diff", "check-ignore"):
+            pytest.fail("Git consulted ignore rules before rejecting a nonregular exclude")
+        return original_git(path, *args, **kwargs)
+
     monkeypatch.setattr(Path, "stat", file_stat)
     monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    monkeypatch.setattr(static, "_git", git)
     result = lcr.refresh_local_cache(root)
     assert result.status == "failed"
     assert "not a regular file" in result.detail
     assert original_read(output) == original_read(template)
 
 
+@pytest.mark.guard
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native POSIX FIFO unavailable")
 @pytest.mark.parametrize("kind", ["settings", "declaration", "template", "exclude"])
 def test_fifo_input_fails_without_waiting_for_a_writer(copy_workspace, kind):
@@ -250,6 +277,27 @@ def test_fifo_input_fails_without_waiting_for_a_writer(copy_workspace, kind):
     assert result.status == "failed"
     assert "not a regular file" in result.detail
     assert output.read_bytes() == previous
+
+
+@pytest.mark.guard
+def test_exclude_is_reread_after_index_queries(copy_workspace, monkeypatch):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    exclude = root / ".git" / "info" / "exclude"
+    original_git = static._git
+
+    def git(path, *args, **kwargs):
+        if args[0] == "ls-files":
+            exclude.write_text("/independent-rule/\n", encoding="utf-8")
+        return original_git(path, *args, **kwargs)
+
+    monkeypatch.setattr(static, "_git", git)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    assert exclude.read_text(encoding="utf-8").splitlines() == [
+        "/independent-rule/", "", f"/{static.NAMESPACE}/",
+    ]
+    assert output.read_bytes() == template.read_bytes()
 
 
 @pytest.mark.parametrize(

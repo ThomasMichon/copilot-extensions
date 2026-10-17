@@ -41,6 +41,12 @@ def _block(path: Path) -> str:
     return text[start : text.index(LOCK_END, start) + len(LOCK_END)]
 
 
+def _ps_cleanup() -> str:
+    tail = _text(PS_SCRIPT).rsplit("\n} finally {\n", 1)[1]
+    assert tail.endswith("\n}\n")
+    return tail[:-len("\n}\n")] + "\n"
+
+
 def _pwsh() -> str | None:
     return shutil.which("pwsh")
 
@@ -88,7 +94,11 @@ def test_powershell_lock_fails_closed_and_releases_in_finally() -> None:
     assert "exit 1" in failure
     tail = text[acquire:]
     assert "\ntry {\n" in tail
-    assert "} finally {\n    Exit-InstallLock\n}\n" in tail
+    cleanup = _ps_cleanup()
+    assert cleanup.startswith("    try {\n")
+    assert cleanup.endswith("    } finally {\n        Exit-InstallLock\n    }\n")
+    assert cleanup.index("Stop-RuntimeConstruction") < cleanup.index("Exit-InstallLock")
+    assert cleanup.count("Exit-InstallLock") == 1
     block = _block(PS_SCRIPT)
     assert "[System.IO.FileShare]::None" in block
     assert "return $false" in block
@@ -126,6 +136,7 @@ def _ps_holder(pwsh: str, lock: Path) -> subprocess.Popen[str]:
 def _run_ps_block(pwsh: str, install_dir: Path, body: str) -> subprocess.CompletedProcess[str]:
     script = (
         "Set-StrictMode -Version 2.0\n$ErrorActionPreference = 'Stop'\n"
+        "$script:McpInstallFailure = $null\n"
         "function Write-Fail { param([string]$Msg) Write-Output \"FAIL:$Msg\" }\n"
         f"$InstallDir = '{install_dir}'\n" + _block(PS_SCRIPT) + "\n" + body
     )
@@ -147,6 +158,44 @@ def test_powershell_lock_acquires_releases_and_reacquires(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().splitlines()[-1] == "True/True"
     assert (tmp_path / "rt" / ".install.lock").is_file()
+
+
+@pytest.mark.parametrize("primary_failure", [True, False])
+def test_powershell_lock_releases_when_construction_cleanup_throws(
+    tmp_path: Path, primary_failure: bool,
+) -> None:
+    pwsh = _pwsh()
+    if pwsh is None:
+        pytest.skip("pwsh not available")
+    result = _run_ps_block(pwsh, tmp_path / "rt", f"""
+function Stop-RuntimeConstruction {{
+    if (-not $script:InstallLockHandle) {{ throw 'lock-released-before-construction' }}
+    Write-Output 'cleanup-held=True'
+    throw 'construction-cleanup-failure'
+}}
+if (-not (Enter-InstallLock -TimeoutSec 1)) {{ throw 'lock-not-acquired' }}
+try {{
+    try {{ if (${str(primary_failure).lower()}) {{ throw 'install-body-failure' }} }} catch {{
+        $script:McpInstallFailure = $_
+        throw
+    }} finally {{
+{_ps_cleanup()}
+    }}
+}} catch {{ Write-Output "caught=$($_.Exception.Message)" }}
+Write-Output "released=$($null -eq $script:InstallLockHandle)"
+$reacquired = Enter-InstallLock -TimeoutSec 1
+Exit-InstallLock
+Write-Output "reacquired=$reacquired"
+""")
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.strip().splitlines()
+    warnings = [line for line in lines if "Runtime construction cleanup also failed:" in line]
+    assert bool(warnings) is primary_failure
+    expected = "install-body-failure" if primary_failure else "construction-cleanup-failure"
+    assert [line for line in lines if line not in warnings] == [
+        "cleanup-held=True", f"caught={expected}",
+        "released=True", "reacquired=True",
+    ]
 
 
 def test_powershell_lock_times_out_while_held(tmp_path: Path) -> None:

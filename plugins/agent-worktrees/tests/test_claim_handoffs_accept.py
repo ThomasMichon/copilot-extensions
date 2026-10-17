@@ -6,6 +6,7 @@ import argparse
 import json
 import subprocess
 import types
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -43,8 +44,8 @@ def _record(
         "machines: {}\n", encoding="utf-8",
     )
     (tmp_path / project / "config.yaml").write_text(json.dumps({
-        "repo_name": project, "machine": machine,
-        "repos": {project: {"anchor": str(wdir)}},
+        "repo_name": project, "machine": machine, "platform": "linux",
+        "repos": {project: {"anchor": str(wdir), "worktree_root": str(wdir.parent)}},
     }), encoding="utf-8")
     record = tracking.create_new_record(
         worktree_id,
@@ -63,6 +64,7 @@ def _record(
 
 @pytest.fixture
 def handoff_world(tmp_path, monkeypatch):
+    monkeypatch.setattr(claim_handoffs.cfg, "detect_platform", lambda: "linux")
     runtime = tmp_path / "runtime"
     monkeypatch.setattr(claim_handoffs.cfg, "_load_inrepo_config", lambda anchor: {})
     monkeypatch.setattr(claim_handoffs.cfg, "install_dir", lambda: runtime)
@@ -490,6 +492,65 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     assert [e["event"] for e in events] == ["released", "claimed"]
     assert events[0]["machine"] == remote_machine
     assert events[1]["machine"] == MACHINE
+
+
+@pytest.mark.parametrize("source_state", ["absent", "invalid", "dangling-config"])
+def test_remote_source_without_local_registration_keeps_fenced_ssh_leg(
+    handoff_world, monkeypatch, source_state,
+):
+    remote_machine = "remote-host"
+    world = _setup_bundle(handoff_world, source_machine=remote_machine)
+    store = _init_lease_store(handoff_world["tmp_path"], monkeypatch)
+    bundle = _offer_cross_machine(world, [claim.ref for claim in world["claims"]])
+    source_config = world["source_path"].parent.parent / "config.yaml"
+    world["source_path"].unlink()
+    source_config.unlink()
+    if source_state == "invalid":
+        source_config.write_text(
+            json.dumps({"machine": remote_machine, "repo_name": "source-project"}),
+            encoding="utf-8",
+        )
+    elif source_state == "dangling-config":
+        try:
+            source_config.symlink_to(source_config.parent / "missing-config.yaml")
+        except OSError as exc:
+            pytest.skip(f"host cannot create the contained symlink fixture: {exc}")
+    monkeypatch.setattr(
+        claim_handoff_accept_support.claimant, "resolve_machine_ssh",
+        lambda machine: ("remote-source-ssh", "bash") if machine == remote_machine else None,
+    )
+    real_run = subprocess.run
+    ssh_calls = []
+
+    def remote(argv, **kwargs):
+        if argv[0] != "ssh":
+            return real_run(argv, **kwargs)
+        fence = store.inspect("claim-handoff", bundle.bundle_id)
+        assert fence is not None and fence.record.holder == world["consumer"]
+        ssh_calls.append(argv)
+        accepted = replace(bundle, state="accepted")
+        claim_handoffs._save_registry(claim_handoffs.registry_path(), [accepted])
+        return subprocess.CompletedProcess(argv, 0, json.dumps(accepted.to_dict()), "")
+
+    monkeypatch.setattr(claim_handoff_accept_support.subprocess, "run", remote)
+    registry = claim_handoffs.registry_path()
+    before = {
+        path: path.read_bytes() for path in [registry, world["consumer_path"], world["child_path"]]
+    }
+    if source_state != "absent":
+        with pytest.raises(claim_handoffs.ClaimHandoffError, match="handoff record authority"):
+            claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+        assert ssh_calls == []
+        assert all(path.read_bytes() == content for path, content in before.items())
+    else:
+        accepted = claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+        assert accepted.state == "accepted"
+        assert len(ssh_calls) == 1 and "accept-source" in ssh_calls[0][-1]
+        assert tracking.load_record(world["child_path"]).owner_ref == world["consumer"]
+        assert {claim.ref for claim in tracking.load_record(world["consumer_path"]).resources} == {
+            claim.ref for claim in world["claims"]
+        }
+        assert not source_config.exists() and not world["source_path"].exists()
 
 
 def test_accept_cross_machine_remote_failure_leaves_state_unchanged_and_no_live_fence(

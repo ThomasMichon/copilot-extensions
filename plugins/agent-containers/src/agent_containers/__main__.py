@@ -135,14 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional container name; omitted clears all safely stale records",
     )
 
-    exec_p = sub.add_parser("exec", help="Run the ACP launch command in a container")
-    exec_p.add_argument("name", help="Container name")
-    exec_p.add_argument("--stdio", action="store_true", help="Attach stdio transport.")
-    exec_p.add_argument(
-        "--force", action="store_true",
-        help="Terminate a live SSH holder and take over this trusted container",
-    )
-    exec_p.add_argument("copilot_args", nargs="*", help="Extra copilot args (after --).")
+    from .dispatch_projection import add_exec_subparser
+    add_exec_subparser(sub)
 
     from .copilot_login import add_copilot_login_subparser as _add_copilot_login_subparser
     _add_copilot_login_subparser(sub)
@@ -272,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
     ns_recreate_p.add_argument("--timeout", type=float, default=600.0)
     from .workspace import add_workspace_subparsers
     add_workspace_subparsers(sub)
+    from .dispatch_projection import add_subparsers as add_dispatch_subparsers
+    add_dispatch_subparsers(sub)
 
     # --- relay-profile (declarative credential-relay seam for agent-bridge #892 Inc 2)
     sub.add_parser(
@@ -965,6 +961,10 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     stdio and the child (inherited pipes are unreliable under
     ``CREATE_NO_WINDOW`` on Windows).
     """
+    if getattr(args, "dispatch_binding_id", None) is not None or getattr(args, "expected_container_id", None) is not None:
+        from .dispatch_projection import launch_task
+
+        return launch_task(args, _exec_stdio)
     extra = resolve_extra_copilot_args(getattr(args, "copilot_args", None))
     target = resolve_live_exec_target(args.name, config=load_config())
 

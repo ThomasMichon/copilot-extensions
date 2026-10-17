@@ -650,6 +650,11 @@ class Config(ProcessLogArchiveConfig):
         self.home = home
         self.repo_config_path = repo_config_path
         self.repo_root = repo_root
+        if self.process_log_reclamation.enabled:
+            raise ValueError(
+                "process-log reclamation is not available: post-publication scheduling "
+                "and machine-local policy provenance are not wired"
+            )
 
     # -- resolved convenience accessors ---------------------------------
 

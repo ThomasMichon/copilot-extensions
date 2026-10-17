@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { probeSendRejection } from "../../../tools/clean-room/scenarios/agent-remote-driver-solo/fixtures/send-rejection-probe.mjs";
 
 const TOKEN = "test-token-123";
+const CONTROL_TOKEN = "test-control-token";
 
 async function withServer(fn, extraOpts = {}) {
   const calls = { send: [], abort: 0, order: [] };
@@ -16,6 +17,9 @@ async function withServer(fn, extraOpts = {}) {
       assert.equal(Object.hasOwn(options, "content"), false);
       calls.send.push(options);
       calls.order.push("send");
+      driverServer.control.observe({
+        id: `sent-${calls.send.length}`, type: "user.message", data: { source: options.source },
+      });
       return { accepted: true };
     },
     abort: async () => {
@@ -28,6 +32,7 @@ async function withServer(fn, extraOpts = {}) {
     getSessionId: () => "session-1",
     getPid: () => 4242,
     token: TOKEN,
+    controlToken: CONTROL_TOKEN,
     ...createSessionDriver(session),
     subscribe: (listener) => {
       listeners.add(listener);
@@ -35,10 +40,14 @@ async function withServer(fn, extraOpts = {}) {
     },
     ...extraOpts,
   });
+  driverServer.control.markReady();
   const port = await driverServer.listen();
   const base = `http://127.0.0.1:${port}`;
+  const lease = driverServer.control.rehook({
+    controlToken: CONTROL_TOKEN, target: driverServer.control.snapshot(), ownerId: "test-driver",
+  });
   try {
-    await fn({ base, calls, server: driverServer.server, emit: (event) => listeners.forEach((l) => l(event)) });
+    await fn({ base, calls, lease, server: driverServer.server, emit: (event) => listeners.forEach((l) => l(event)) });
   } finally {
     await driverServer.close();
   }
@@ -102,7 +111,7 @@ test("Tier-P scenario invokes the shared rejection probe and matches its manifes
 });
 
 test("POST /send maps HTTP content/mode to SDK prompt/mode and requires content", async () => {
-  await withServer(async ({ base, calls }) => {
+  await withServer(async ({ base, calls, lease }) => {
     const missing = await authed(`${base}/send`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -113,48 +122,59 @@ test("POST /send maps HTTP content/mode to SDK prompt/mode and requires content"
     const res = await authed(`${base}/send`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content: "hello", mode: "enqueue" }),
+      body: JSON.stringify({ content: "hello", mode: "enqueue", lease, sequence: 1 }),
     });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.ok, true);
     assert.deepEqual(body.result, { accepted: true });
-    assert.deepEqual(calls.send, [{ prompt: "hello", mode: "enqueue" }]);
+    assert.equal(calls.send.length, 1);
+    assert.equal(calls.send[0].prompt, "hello");
+    assert.equal(calls.send[0].mode, "enqueue");
+    assert.match(calls.send[0].source, /^agent-remote-driver-/);
   });
 });
 
 test("POST /send preserves the SDK default when HTTP mode is omitted", async () => {
-  await withServer(async ({ base, calls }) => {
+  await withServer(async ({ base, calls, lease }) => {
     const res = await authed(`${base}/send`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content: "use the default mode" }),
+      body: JSON.stringify({ content: "use the default mode", lease, sequence: 1 }),
     });
     assert.equal(res.status, 200);
-    assert.deepEqual(calls.send, [{ prompt: "use the default mode", mode: undefined }]);
+    assert.equal(calls.send.length, 1);
+    assert.equal(calls.send[0].prompt, "use the default mode");
+    assert.equal(calls.send[0].mode, undefined);
+    assert.match(calls.send[0].source, /^agent-remote-driver-/);
   });
 });
 
 test("POST /abort calls the driver's abort", async () => {
-  await withServer(async ({ base, calls }) => {
-    const res = await authed(`${base}/abort`, { method: "POST" });
+  await withServer(async ({ base, calls, lease }) => {
+    const res = await authed(`${base}/abort`, {
+      method: "POST", body: JSON.stringify({ lease, sequence: 1 }),
+    });
     assert.equal(res.status, 200);
     assert.equal(calls.abort, 1);
   });
 });
 
 test("POST /steer aborts then maps HTTP content to SDK prompt in immediate mode", async () => {
-  await withServer(async ({ base, calls }) => {
+  await withServer(async ({ base, calls, lease }) => {
     const res = await authed(`${base}/steer`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content: "stop and do this instead" }),
+      body: JSON.stringify({ content: "stop and do this instead", lease, sequence: 1 }),
     });
     assert.equal(res.status, 200);
     assert.deepEqual((await res.json()).result, { accepted: true });
     assert.equal(calls.abort, 1);
     assert.deepEqual(calls.order, ["abort", "send"]);
-    assert.deepEqual(calls.send, [{ prompt: "stop and do this instead", mode: "immediate" }]);
+    assert.equal(calls.send.length, 1);
+    assert.equal(calls.send[0].prompt, "stop and do this instead");
+    assert.equal(calls.send[0].mode, "immediate");
+    assert.match(calls.send[0].source, /^agent-remote-driver-/);
   });
 });
 

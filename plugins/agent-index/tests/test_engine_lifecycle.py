@@ -131,7 +131,7 @@ def test_subprocess_early_exit_raises(monkeypatch):
 
 
 @pytest.mark.skipif(not sys.platform.startswith("win"), reason="Windows priority-class spawn flag")
-def test_spawn_engine_forces_normal_priority_class_on_windows(monkeypatch):
+def test_spawn_engine_forces_normal_priority_class_on_windows(monkeypatch, tmp_path):
     """A worker that spawns a missing engine may itself be niced down (e.g.
     AGENT_INDEX_INDEXER_NICE) -- Windows child processes inherit the
     spawning process's priority class by default, which would otherwise
@@ -150,16 +150,109 @@ def test_spawn_engine_forces_normal_priority_class_on_windows(monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(lifecycle.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(lifecycle, "detached_kwargs", lambda: {"creationflags": 0x00000008})
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path))
 
     lifecycle._spawn_engine(_profile())
 
     _NORMAL_PRIORITY_CLASS = 0x00000020
     _DETACHED_PROCESS = 0x00000008
     assert captured["creationflags"] & _NORMAL_PRIORITY_CLASS
-    # Still ORed with whatever detached_kwargs() itself contributed, not
-    # overwritten.
+    # Still ORed with the shared launch's own detach flags, not overwritten.
     assert captured["creationflags"] & _DETACHED_PROCESS
+
+
+def test_spawn_engine_launches_through_spawn_daemon(monkeypatch, tmp_path):
+    """The per-reindex engine runs from the index data dir (never the caller's
+    cwd), logs its stdio per model at warning level, and does not break away:
+    the indexer that started it stops it."""
+    captured: dict = {}
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("AGENT_INDEX_ENGINE_LOG_LEVEL", raising=False)
+    monkeypatch.setattr(
+        lifecycle, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or object()
+    )
+
+    lifecycle._spawn_engine(_profile())
+
+    assert captured["cwd"] == tmp_path
+    assert captured["log_path"].parent == tmp_path / "logs"
+    assert captured["log_path"].name.startswith("engine-")
+    assert captured["breakaway"] is False
+    assert captured["env"]["AGENT_INDEX_ENGINE_LOG_LEVEL"] == "warning"
+
+
+@pytest.mark.parametrize("override", ["AGENT_INDEX_CONFIG", "AGENT_INDEX_CONFIG_ROOT"])
+def test_spawned_engine_reads_a_caller_relative_config(monkeypatch, tmp_path, override):
+    """The engine runs from the data dir, but a caller-relative config override
+    must still select the device its reader finds from the caller's cwd."""
+    import subprocess
+
+    caller = tmp_path / "caller"
+    (caller / "cfg").mkdir(parents=True)
+    (caller / "cfg" / "config.yaml").write_text("device: cpu\n", encoding="utf-8")
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("AGENT_INDEX_CONFIG", raising=False)
+    monkeypatch.delenv("AGENT_INDEX_CONFIG_ROOT", raising=False)
+    monkeypatch.setenv(override, "cfg/config.yaml" if override == "AGENT_INDEX_CONFIG" else "cfg")
+    captured: dict = {}
+    monkeypatch.setattr(
+        lifecycle, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or object()
+    )
+
+    lifecycle._spawn_engine(_profile())
+
+    assert captured["cwd"] == tmp_path / "data"
+    # Run the engine's own reader with the child's environment and cwd.
+    child = subprocess.run(
+        [sys.executable, "-c", "from agent_index.config import machine_device; print(machine_device())"],
+        cwd=captured["cwd"], env=captured["env"], capture_output=True, text=True, timeout=60,
+    )
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "cpu"
+
+
+def test_home_relative_path_overrides_keep_their_expansion(monkeypatch, tmp_path):
+    env = {"AGENT_INDEX_CONFIG": "~/cfg/config.yaml", "AGENT_INDEX_HOME": "state"}
+    monkeypatch.chdir(tmp_path)
+    lifecycle._anchor_relative_path_env(env)
+    assert env["AGENT_INDEX_CONFIG"] == "~/cfg/config.yaml"
+    assert env["AGENT_INDEX_HOME"] == str(tmp_path / "state")
+
+
+def test_home_relative_index_home_roots_the_engine_in_the_home(monkeypatch, tmp_path):
+    """`AGENT_INDEX_HOME="~/index-state"` must root the engine (cwd and stdio
+    log) under the user's home, not under `<caller>/~/...`."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for name in ("AGENT_INDEX_DATA_DIR", "AGENT_INDEX_STATE_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENT_INDEX_HOME", "~/index-state")
+    (tmp_path / "caller").mkdir()
+    monkeypatch.chdir(tmp_path / "caller")
+    captured: dict = {}
+    monkeypatch.setattr(
+        lifecycle, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or object()
+    )
+
+    lifecycle._spawn_engine(_profile())
+
+    data = home / "index-state" / "data"
+    assert captured["cwd"] == data
+    assert captured["log_path"].parent == data / "logs"
+
+
+def test_a_caller_relative_local_model_is_anchored_but_a_hub_id_is_not(monkeypatch, tmp_path):
+    (tmp_path / "models" / "local").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    local = {"AGENT_INDEX_MODEL": "models/local"}
+    hub = {"AGENT_INDEX_MODEL": "jinaai/jina-embeddings-v2-base-code"}
+    lifecycle._anchor_relative_path_env(local)
+    lifecycle._anchor_relative_path_env(hub)
+    assert local["AGENT_INDEX_MODEL"] == str(tmp_path / "models" / "local")
+    assert hub["AGENT_INDEX_MODEL"] == "jinaai/jina-embeddings-v2-base-code"
 
 
 def test_systemd_without_unit_raises():

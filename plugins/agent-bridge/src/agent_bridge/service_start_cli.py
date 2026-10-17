@@ -115,10 +115,19 @@ def _cmd_start(args: argparse.Namespace) -> None:
     from .winjob import setup_kill_on_close_job
 
     core = _core()
+    launch_id = getattr(args, "serving_launch_id", None)
+    passive = bool(getattr(args, "passive", False))
+    if launch_id and not passive:
+        raise ValueError("a serving launch identity requires passive startup")
     cfg = load_config()
     cfg = migrate_config(cfg)
     write_default_config(cfg)
-    token = load_or_create_auth_token()
+    if launch_id:
+        from .serving_reconcile import existing_auth_token
+
+        token = existing_auth_token(config_dir())
+    else:
+        token = load_or_create_auth_token()
 
     try:
         neutral = config_dir()
@@ -138,7 +147,6 @@ def _cmd_start(args: argparse.Namespace) -> None:
     if idle is not None:
         cfg.idle_shutdown_seconds = idle
 
-    passive = bool(getattr(args, "passive", False))
     if passive:
         cfg.enable_credential_relay = False
     elif core._active_endpoint_is_forward():
@@ -175,6 +183,10 @@ def _cmd_start(args: argparse.Namespace) -> None:
     # (False) means "run the normal startup reattach scan" -- the safe
     # default for anything that isn't this CLI's own --passive cutover spawn.
     app.state.passive = passive
+    if launch_id:
+        from .serving_candidate import record_worker
+
+        record_worker(config_dir(), launch_id)
 
     dynamic_port = _dynamic_bind_requested(cfg.port, explicit_port)
     requested_port = 0 if dynamic_port else (cfg.port if cfg.port > 0 else default_port())
@@ -244,6 +256,9 @@ def _cmd_status(args: argparse.Namespace) -> None:
     if getattr(args, "session_id", None):
         core._cmd_session_status(args)
         return
+    if getattr(args, "full", False):
+        print("[FAIL] status --full requires a session ID", file=sys.stderr)
+        sys.exit(2)
     client = core._get_client(ensure=False)
     base = getattr(client, "_base", "")
     try:
@@ -275,10 +290,12 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
 
     core = _core()
     client = core._get_client(ensure=False)
-    caller_id = core._caller_id_for(args)
     sid = args.session_id
     try:
-        st = client.get_session_status(sid, caller_id=caller_id)
+        if getattr(args, "full", False):
+            core._json_out(client.get_session(sid))
+            return
+        st = client.get_session_status(sid, caller_id=core._caller_id_for(args))
     except BridgeClientError as exc:
         if exc.status == 404:
             print(f"[FAIL] Session {sid} not found", file=sys.stderr)
@@ -339,8 +356,12 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
             print(f"             fields: {fields}")
         tcid = q.get("tool_call_id") or ""
         print(
-            f"             answer: `agent-bridge answer {sid} --field <key>=<value> …`"
-            + (f" (--tool-call-id {tcid})" if len(pending) > 1 else "")
+            f"             answer: `agent-bridge answer {sid} --field <key>=<value> …"
+            + (
+                f" --request-id {q['request_id']}" if q.get("request_id")
+                else (f" (--tool-call-id {tcid})" if len(pending) > 1 else "")
+            )
+            + "`"
         )
 
     k = getattr(args, "steps", 0) or 0
@@ -596,6 +617,7 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Start as a passive cutover instance: do NOT self-publish the routing table (the deploy orchestrator flips it after a health check) and do NOT bind the credential relay (the active daemon owns it until cutover completes).",
     )
+    start_p.add_argument("--serving-launch-id", help=argparse.SUPPRESS)
     start_p.set_defaults(func=_cmd_start)
 
     acp_connect_p = sub.add_parser(
@@ -639,6 +661,11 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
         "session_id",
         nargs="?",
         help="Session ID -- show that dispatch's compact status (state, in-flight tool + elapsed, cursor lag) instead of service health",
+    )
+    status_p.add_argument(
+        "--full",
+        action="store_true",
+        help="Emit the exact session's full SessionInfo as JSON instead of compact status",
     )
     status_p.add_argument(
         "--steps",

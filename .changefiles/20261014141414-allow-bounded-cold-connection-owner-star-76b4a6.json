@@ -1,0 +1,9 @@
+{
+  "comment": "Allow bounded cold Connection Owner startup, detect child exit before readiness, and report timeout diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

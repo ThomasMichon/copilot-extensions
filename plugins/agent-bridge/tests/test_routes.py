@@ -3353,7 +3353,7 @@ def test_worktree_discovery_crawl_is_single_flight() -> None:
 
     calls = {"n": 0}
 
-    async def _slow_crawl_agent(name, config, res, *, classify=True):
+    async def _slow_crawl_agent(name, config, res, *, epoch=None, classify=True):
         calls["n"] += 1
         await asyncio.sleep(0.2)  # simulate a slow / stuck `list`
         return []
@@ -3390,7 +3390,7 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
     resolver.agents = {"local": agent_cfg}
     cache._resolver = resolver
 
-    async def _crawl_agent(name, config, res, *, classify=True):
+    async def _crawl_agent(name, config, res, *, epoch=None, classify=True):
         return []
 
     async def _run() -> None:
@@ -3423,7 +3423,7 @@ def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
 
     seen_classify: list[bool] = []
 
-    async def _fake_crawl_agent(name, config, res, *, classify=True):
+    async def _fake_crawl_agent(name, config, res, *, epoch=None, classify=True):
         seen_classify.append(classify)
         return []
 
@@ -3438,12 +3438,8 @@ def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
     assert True in seen_classify, "backfill task must still request --classify"
 
 
-def test_stop_cancels_pending_classify_backfill() -> None:
-    """worktree-finality-and-obligations (Phase 5): ``stop()`` must cancel and
-    await any in-flight classify-backfill task (not just the periodic
-    ``_task``) -- otherwise a backfill scheduled by an on-demand request can
-    keep running (and mutating the cache) past application shutdown
-    (#discussion_r4004943069)."""
+def test_stop_cancels_classify_wrapper_but_retains_its_refresh_holder() -> None:
+    """Shutdown fences publication and cancels scheduling, not actual ownership."""
     import asyncio
 
     from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
@@ -3458,11 +3454,12 @@ def test_stop_cancels_pending_classify_backfill() -> None:
     cache._resolver = resolver
 
     started = asyncio.Event()
+    release = asyncio.Event()
 
-    async def _hanging_crawl_agent(name, config, res, *, classify=True):
+    async def _hanging_crawl_agent(name, config, res, *, epoch=None, classify=True):
         if classify:
             started.set()
-            await asyncio.sleep(10)  # would outlive the test if not cancelled
+            await release.wait()
         return []
 
     async def _run() -> None:
@@ -3470,8 +3467,14 @@ def test_stop_cancels_pending_classify_backfill() -> None:
             await asyncio.wait_for(cache.crawl_if_empty(), timeout=5)
             assert len(cache._backfill_tasks) == 1
             await asyncio.wait_for(started.wait(), timeout=5)
+            holder = cache._refresh.task
             await asyncio.wait_for(cache.stop(), timeout=5)
             assert len(cache._backfill_tasks) == 0
+            assert cache._refresh.task is holder
+            assert cache._refresh.pending
+            release.set()
+            await holder
+            assert not cache._refresh.pending
 
     asyncio.run(_run())
 

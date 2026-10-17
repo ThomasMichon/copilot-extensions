@@ -6,6 +6,12 @@ from worktree_manager import engine_client
 from worktree_manager.production_picker import context, engine_group_b
 
 
+def test_project_context_remains_unbound_outside_picker_ui_fixture() -> None:
+    assert context.project_bootstrap() is None
+    with pytest.raises(RuntimeError, match="not bound"):
+        context.project()
+
+
 def test_picker_bootstrap_reads_group_b_contract(monkeypatch):
     payload = {
         "version": 1,

@@ -726,7 +726,7 @@ def _installation_context_helper(
         raise ValueError(
             f"platform installation-context helper is missing for {plugin_name}"
         )
-    return required
+    return helper_py if helper_py.is_file() else required
 
 
 def _run_installation_mode_helper(
@@ -750,7 +750,7 @@ def _run_installation_mode_helper(
         "expected_plugin_id": plugin_name,
         "expected_payload_root": str(plugin_dir),
     }
-    if os.name == "nt":
+    if helper.suffix == ".ps1":
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if shell is None:
             raise ValueError(
@@ -787,7 +787,7 @@ def _run_installation_mode_helper(
             command.extend(["-Context", str(context)])
     else:
         command = [
-            sys.executable,
+            sys.executable, "-I", "-X", "utf8",
             str(helper),
             "probe-legacy",
             "--source-json",
@@ -821,7 +821,7 @@ def _run_installation_mode_helper(
         process = subprocess.run(
             command,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
             check=False,
             env=child_environment,
             timeout=15,
@@ -1634,6 +1634,36 @@ def build_uninstall_plan(
     return result
 
 
+def _run_plan_step(
+    argv: Sequence[str], update: dict[str, Any], log: Callable[[str], None],
+) -> int:
+    """Run one plan step under its installer deadline, killing its tree on expiry.
+
+    A step used to run unbounded, so a stalled installer (a hung resolve, a
+    wedged ``copilot plugin`` call) blocked the whole reconcile forever.
+    """
+    from .installer_run import run_installer
+    from .update_runtime import _installer_timeout
+
+    env = os.environ.copy()
+    for key in update.get("unset_environment", _RUNTIME_ENV_UNSET):
+        env.pop(str(key), None)
+    for key, value in update.get("environment", {}).items():
+        env[str(key)] = str(value)
+    service = str(update.get("service", "plugin"))
+    try:
+        deadline = _installer_timeout(service, env, core_installed_payload_dir(service))
+    except (OSError, ValueError) as error:
+        log(f"    {error}")
+        return 1
+    run = run_installer(argv, cwd=None, env=env, deadline_s=deadline,
+                        log=lambda line: log(f"    {line}"))
+    if run.rc is None:
+        log(f"    {run.status}")
+        return 124 if run.status.startswith("timed out") else 1
+    return run.rc
+
+
 def apply_uninstall_plan(
     *,
     home: Path | None = None,
@@ -1659,22 +1689,7 @@ def apply_uninstall_plan(
     _log = log or (lambda _m: None)
 
     def _default_runner(argv: Sequence[str], update: dict[str, Any]) -> int:
-        child_environment = os.environ.copy()
-        for key in update.get("unset_environment", _RUNTIME_ENV_UNSET):
-            child_environment.pop(str(key), None)
-        for key, value in update.get("environment", {}).items():
-            child_environment[str(key)] = str(value)
-        proc = subprocess.run(  # noqa: S603 -- argv from our own plan builder
-            list(argv),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=child_environment,
-        )
-        if proc.stdout:
-            for line in proc.stdout.splitlines():
-                _log(f"    {line}")
-        return proc.returncode
+        return _run_plan_step(argv, update, _log)
 
     plan = build_uninstall_plan(home=home, dry_run=dry_run)
     for diagnostic in plan.get("diagnostics", []):
@@ -2092,22 +2107,7 @@ def apply_plan(
     _log = log or (lambda _m: None)
 
     def _default_runner(argv: Sequence[str], update: dict[str, Any]) -> int:
-        child_environment = os.environ.copy()
-        for key in update.get("unset_environment", _RUNTIME_ENV_UNSET):
-            child_environment.pop(str(key), None)
-        for key, value in update.get("environment", {}).items():
-            child_environment[str(key)] = str(value)
-        proc = subprocess.run(  # noqa: S603 -- argv from our own plan builder
-            list(argv),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=child_environment,
-        )
-        if proc.stdout:
-            for line in proc.stdout.splitlines():
-                _log(f"    {line}")
-        return proc.returncode
+        return _run_plan_step(argv, update, _log)
 
     def _custom_runner(argv: Sequence[str], update: dict[str, Any]) -> int:
         assert runner is not None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -461,15 +462,28 @@ def _watch_boot() -> None:
     """Best-effort: spawn a detached ``agent-pull-requests serve`` if no
     daemon currently answers rendezvous. Windowless on Windows; races with
     another caller doing the same thing are harmless -- only one process
-    wins the rendezvous-file write/bind, callers just re-dial."""
-    from agent_procutil import detached_kwargs
+    wins the rendezvous-file write/bind, callers just re-dial.
 
-    subprocess.Popen(
+    Launched through the shared resident-daemon primitive: it runs from the
+    plugin's state directory (never the caller's cwd), breaks away from a
+    kill-on-close Job around the caller, and appends its stdout/stderr to
+    ``watch-daemon.log`` there. A Job that forbids breakaway still starts it
+    inside that Job, where it always ran before, as a logged degradation."""
+    from agent_procutil import spawn_daemon
+
+    from .watch_storage import state_dir
+
+    root = state_dir().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    # The child runs from ``root``: a relative override would resolve again there.
+    home = "AGENT_PULL_REQUESTS_HOME"
+    spawn_daemon(
         [sys.executable, "-m", "agent_pull_requests", "serve"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        **detached_kwargs(),
+        cwd=root,
+        log_path=root / "watch-daemon.log",
+        env_overrides={home: str(root)} if os.environ.get(home, "").strip() else None,
+        contained_fallback=True,
+        display="agent_pull_requests serve",
     )
 
 

@@ -17,6 +17,7 @@ import abc
 
 from ..config import AuthSpec
 from . import token_cache
+from credential_relay.http_auth import format_token_header
 
 
 class AuthInjector:
@@ -141,7 +142,7 @@ class TokenInjector(AuthInjector, abc.ABC):
         token = await self._get()
         if not token:
             return {}
-        return {self.spec.header: self.spec.format.format(token=token)}
+        return format_token_header(self.spec.header, self.spec.format, token)
 
     async def child_env(self) -> dict[str, str]:
         token = await self._get()

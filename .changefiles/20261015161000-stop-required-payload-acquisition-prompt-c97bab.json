@@ -1,0 +1,9 @@
+{
+  "comment": "Stop required payload acquisition promptly before advisory inventory and retirement",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -55,7 +55,7 @@ stays on the host and is resolved there.
 | zdd routing table | `~/.agent-index/active.json` | active service endpoint |
 | Legacy rendezvous | `~/.agent-index/run/endpoint.json` | fallback diagnostics |
 | Durable index/task data | `~/.agent-index/data/` | shared across service versions |
-| Durable engine runtime | `~/.agent-index/engine/.venv` | heavy embedding stack |
+| Durable engine runtime | `~/.agent-index/engine/versions/<version-or-repair>` | independently selected, completed heavy embedding stack |
 | Machine config | `~/.agent-index/config.yaml` or `AGENT_INDEX_CONFIG` | role, device, client endpoints |
 | Repo config | Checked-in defaults: `<repo>/.agent-index/config.yaml`; repo-local overlay: `<repo>/.copilot-extensions/agent-index/config.yaml` | corpus defaults, optional local indexer designation, and additive corpus overlays |
 

@@ -23,10 +23,9 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: All derived native copies
-        run: >-
-          uv run --with pytest python -m pytest -q --durations=15
-          libs/payload-invocation/tests/test_derived_diagnostic_cli.py
-          -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
+        run: |
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
@@ -46,7 +45,7 @@ jobs:
       - name: All derived native copies
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
-        run: >-
-          uv run --with pytest python -m pytest -q --durations=15
-          libs/payload-invocation/tests/test_derived_diagnostic_cli.py
-          -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
+        run: |
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"

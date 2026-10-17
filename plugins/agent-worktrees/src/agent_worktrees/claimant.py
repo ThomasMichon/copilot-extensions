@@ -28,11 +28,26 @@ import base64
 import json
 import os
 import subprocess
+import logging
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+from machine_transport import resolve_machine_selection, resolve_ssh_target
+
 from . import config as cfg
+from . import legacy_wsl_record_locality
 from . import machine_identity
 from . import tracking
+
+_LOG = logging.getLogger(__name__)
+
+
+def _record_platform_conflicts(record: tracking.WorktreeRecord) -> bool:
+    actual = cfg.detect_platform()
+    conflict = record.platform != actual
+    if conflict:
+        _LOG.warning("Claimant record platform conflicts with the actual execution context")
+    return conflict
 
 #: Escape hatch: set truthy to disable cross-machine SSH probing entirely, so a
 #: cross-machine owner always degrades to ``None`` (spare) without a network
@@ -154,12 +169,17 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
     if parsed is None:
         return None
     try:
-        this_machine = cfg.load_config().machine
-    except Exception:
-        this_machine = None
-    # Cross-machine (or an unknown local machine) -> not resolvable here.
-    if parsed.machine and this_machine and parsed.machine != this_machine:
+        config = cfg.load_config()
+        this_machine = config.machine
+    except Exception as exc:
+        _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
         return None
+    if not this_machine:
+        return None
+    # Cross-machine -> unresolvable, unless a record-scoped legacy WSL ref.
+    if parsed.machine and this_machine and parsed.machine != this_machine:
+        if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is None:
+            return None
     project = parsed.project
     if not project:
         # A bare (legacy same-repo) ref -> assume the active project.
@@ -184,6 +204,8 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
             anchor_rec = tracking.load_record(rec_path)
         except Exception:
             return True  # present but unreadable -> bias to sparing
+        if _record_platform_conflicts(anchor_rec):
+            return None
         if anchor_rec.worktree_path and not Path(anchor_rec.worktree_path).exists():
             return False  # the anchor checkout truly went away -> gone
         return True  # anchor present -> alive (permanent)
@@ -193,6 +215,8 @@ def local_claimant_alive(owner_ref: str) -> bool | None:
         owner_rec = tracking.load_record(rec_path)
     except Exception:
         return True  # record present but unreadable -> bias to sparing
+    if _record_platform_conflicts(owner_rec):
+        return None
     # Citadel E1b cascade (#877): a parent in a TERMINAL status (finalized /
     # orphaned) is done -- it no longer actively holds its outbound worktree
     # resources, so its children are orphans. Treat it as gone here so a
@@ -235,13 +259,22 @@ def resolve_claimant_alive(
     else:
         try:
             config = cfg.load_config()
-        except Exception:
-            # Can't resolve local identity -- fail open to local, matching
-            # the prior behavior of treating an unresolvable this_machine
-            # as "same machine" rather than risking an SSH probe.
-            same_machine = True
+        except Exception as exc:
+            _LOG.warning("Cannot establish actual claimant execution identity: %s", exc)
+            return None
         else:
-            same_machine = machine_identity.is_local_machine(parsed.machine, config)
+            same_machine = parsed.machine.casefold() == config.machine.casefold()
+            if not same_machine:
+                same_machine = (
+                    legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(parsed, config) is not None
+                )
+            if not same_machine:
+                from .execution_spaces import ExecutionSpaceError
+                try:
+                    same_machine = machine_identity.is_local_machine(parsed.machine, config)
+                except (ValueError, ExecutionSpaceError) as exc:
+                    _LOG.warning("Cannot establish claimant alias locality: %s", exc)
+                    return None
     if same_machine:
         return local_claimant_alive(owner_ref)
     if not allow_remote or os.environ.get(_NO_REMOTE_ENV):
@@ -269,21 +302,15 @@ def resolve_machine_ssh(machine_key: str) -> tuple[str, str] | None:
         entries = cfg.load_machines_yaml(config.default_repo.anchor)
     except Exception:
         return None
-    m = entries.get(machine_key)
-    # Case-insensitive fallback + alias match.
-    if m is None:
-        low = machine_key.lower()
-        for k, e in entries.items():
-            if k.lower() == low or (e.alias and e.alias.lower() == low):
-                m = e
-                break
+    try:
+        m = resolve_machine_selection(entries, machine_key).entry
+    except ValueError as exc:
+        _LOG.warning("Cannot resolve claimant machine alias: %s", exc)
+        return None
     if m is None or not getattr(m, "copilot", True) or not m.ssh_ready:
         return None
-    for env in m.ssh_environments:
-        if env.alias:
-            shell = env.shell or ("pwsh" if (env.name or "").lower() == "windows"
-                                  else "bash")
-            return (env.alias, shell)
+    if m.ssh_environments:
+        return resolve_ssh_target(m)
     if m.alias:
         return (m.alias, "bash")
     return None
@@ -353,6 +380,7 @@ def _remote_claimant_alive(
              "-o", f"ConnectTimeout={max(1, int(timeout))}",
              alias, remote_cmd],
             capture_output=True, text=True, timeout=timeout + 4,
+            **no_window_kwargs(),
         )
     except (subprocess.SubprocessError, OSError):
         return None

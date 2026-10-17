@@ -76,6 +76,23 @@ of another installation.
    Non-cell hosts retain supported user-global plugin commands, but consumers
    still invoke the selected installation's exact command. Installers never
    compete for a global generic plugin command last-writer-wins.
+   Legacy project shortcuts call the exact installed user-side `agent-worktrees`
+   binstub under the same resolved local-bin directory, carrying `--project`
+   and the caller's arguments. They do not embed a checkout or payload path.
+   Receipt-gated registration and update reconciliation migrate unchanged
+   historical payload-pinned shortcuts automatically. Checkout-to-marketplace
+   adoption additionally requires the same legacy runtime, plugin/repository,
+   project identity, and a deploy manifest naming the selected payload and
+   version; matching repository URLs alone do not authorize a transfer.
+   Edited, foreign, and ambiguous launchers remain protected. Cell-scoped
+   shortcuts continue to use their selected payload-local command.
+   User-side shortcut bytes contain no payload identity and therefore require an
+   ownership receipt; receipt-free recognition is limited to historical
+   payload-bearing templates. Native installers publish the successfully
+   activated runtime's manifest before shortcut registration or reconciliation.
+   Intact interrupted journals for either supported resolver complete against
+   their recorded owner and matching payload/user template after lineage
+   admission, before reconciliation migrates the recovered shortcut.
 7. Missing, ambiguous, or mismatched provenance fails closed. Same-cell sibling
    discovery is explicit, and a same-named peer from another cell is never
    selected through `PATH`, a wildcard installed-plugin scan, or a shared
@@ -247,6 +264,13 @@ attributable across later receipt generations so rollback is not stranded: its
 marker must still match the immutable snapshot sidecar and stable current cell
 identity, while the current namespace and install generations may advance but
 may not regress below the pinned values.
+
+Failed construction pins both receipt generations and the payload root/version
+across candidate cleanup and reprovisioning. The Python provisioning API accepts
+the paired `expected_namespace_generation` and `expected_install_generation`
+arguments and rechecks them under the receipt locks before reusing or creating
+ownership. A concurrent receipt publication invalidates the older constructor;
+it cannot adopt the newer receipt's candidate.
 
 Python and PowerShell publication prepare a hidden
 `<versionsRoot-parent>/.runtime-slot-<slot-digest>-<nonce>/` sibling outside
@@ -1177,6 +1201,76 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 > (`check-changefile-presence.py`) makes the same-version-drift case rare in
 > the first place, so `--force` stays a last resort.
 
+The explicit updater collects the engine, selected modules and other required
+registered runtime commands once after payload acquisition. Before launching
+any runtime installer, its `runtime_preflight` checks the whole selected set's
+installation ownership/root, machine gate, version/force decision, installer
+and interpreter availability, and effective deadline. Execution uses those
+collected arguments, environment snapshots and roots rather than repeating
+discovery after the engine has already changed. Required preflight failures
+name their targets and stop all runtime installation and local integration.
+Intentional exclusions and already-current runtimes do not require unused
+installers; existing module update/install fallback and cell-specific invocation
+contracts remain intact.
+
+This is a cheap configuration preflight, not dependency admission, a retained
+prepared candidate, or a readiness/activation transaction. The installers still
+own their combined construction and activation, live revalidation and recovery.
+The pull-free, cache-aware session-launch reconciler remains a separate path.
+
+Payload recovery attempts a target at most twice, with a 240-second attempt
+budget and a 120-second cap per command. A retry uses the remaining budget,
+re-inspects that target's installed payload and waits one second after an
+explicit connection/reset, temporary DNS, gateway or Windows sharing/lock
+failure. It does not revisit successfully acquired peers. A matching plugin's
+explicit "not installed" ledger error may instead select the existing
+activation-preserving install path; arbitrary failed updates no longer
+authorize an install fallback. The engine's own acquisition stays update-only.
+
+Authority, permissions, source-policy, integrity, certificate and unknown
+failures stop without automatic retry. Numeric OS errors use the same
+host-aware matchers as update outcome classification, including localized
+permission refusals. An install wrapper's OS error is terminal because it may
+be activation restoration failing, not a retryable spawn failure.
+The canonical activation-state owner first retries restoration itself once
+after one second for an explicit Windows sharing/lock error (32/33), including
+a wrapped state-read error. It reuses the original activation snapshot, not the
+post-install state, and never replays the command. Partial settings restoration
+is retained while inventory restoration is retried. Permission errors, malformed
+state and exhausted restoration still propagate as failures.
+Windows payload **updates** run in a required, non-breakaway Job through the
+existing process owner. On every exit, including an owner deadline, that owner
+terminates the Job and positively queries zero active processes, then drains
+and reaps the root within one thirty-second cleanup grace. That grace is
+reserved inside the remaining acquisition budget. Only a confirmed owner
+timeout may retry, within the same two-attempt limit; captured authority or
+integrity refusals still stop. A CLI exit code 124 alone is not proof of an
+owner deadline. Failed termination, accounting or output drain is an explicit
+cleanup failure and cannot license replay. Native spawn errors retain their
+codes and existing diagnostic/retry handling.
+The strict child receives the auth session's exact command-scoped environment,
+including an explicitly empty environment; it never substitutes global state
+for that snapshot. Auth usage is retained for a launched child even when
+cleanup fails, but a refused launch does not claim credential use. Post-launch
+I/O errors are cleanup failures, not retryable spawn contention.
+
+Install timeouts still stop because original-snapshot recovery custody is not
+durable across interruption. POSIX timeouts also stop: the current session
+owner intentionally permits detached daemons to survive and cannot attest the
+entire payload writer tree. Existing runtime-installer daemon/breakaway behavior
+is unchanged; the strict contract is opt-in for Windows payload updates.
+Retried failures remain advisory attempt history; the final required outcome
+decides the run. This is in-run recovery, not a persistent acquisition
+checkpoint or permission to retry combined runtime activation.
+
+From a source checkout on an interactive Windows desktop, run
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_update_payload_windowless.py`
+for the opt-in live launch regression. It observes two `pythonw.exe` parent
+cycles with real console descendants, requires no new visible windows or
+foreground transitions, forces owner deadlines and checks native child handles
+are signalled. A missing observable desktop is reported as unavailable, not
+headlessness proof. This host-dependent case is outside the fast guard lane.
+
 ### What the marketplace vendors (copied vs loaded)
 
 `copilot plugin update` copies the **entire git-tracked plugin folder** — the
@@ -1234,6 +1328,16 @@ paths, and any foreign plugin context are removed. A missing or invalid receipt
 blocks that plugin's mutation with an explicit diagnostic rather than falling
 through to an unattributed legacy root.
 
+Read-only launch preflight invokes the owning payload's portable
+`installation_context.py` with the running runtime's Python in isolated UTF-8
+mode, with explicit UTF-8 output decoding, including on Windows. Windows still
+requires its native helper to be present and uses it for older payloads without
+the portable helper. Probe failures
+remain explicit failures, never reasons to fall back to another authority.
+Pre-launch configuration omits foreign control-plane PR overlays, which do
+not participate in bootstrap-service selection; ordinary PR operations retain
+their full configuration.
+
 A plugin declares whether — and where — its runtime should be reconciled via a
 **`runtimeScope`** field in its `plugin.json`:
 
@@ -1249,6 +1353,13 @@ The same scope governs the unified `update` flow: `update` rebuilds a
 that enables the plugin, and
 reports any other machine as `SKIPPED (not allowed on this machine)` -- even
 under `--force`, which re-deploys only runtimes this machine may run.
+
+The install-contract guard exercises the real policy, gate, registered/module
+planners and execution barrier with isolated configuration and installer
+boundaries. It covers both platform plans, forced updates, enabling-repository
+selection, missing manifests and detection failures without importing an
+installed runtime or executing an installer. Source-mutation regressions in
+the existing guard suite prove that bypassing these decisions fails the guard.
 
 The reusable installer/readiness contract for `machine-gated` plugins is defined
 by [`patterns/installer-readiness-modules.md`](patterns/installer-readiness-modules.md)
@@ -1351,6 +1462,14 @@ ordering, storage-failure behavior, and installer-adoption boundary. Shipping
 this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
+
+The attached Bash construction adapter owns `INT` and `TERM` while a candidate
+is held. Both terminate through its `EXIT` settlement, which finishes candidate
+cleanup before chaining the installer's previous exit handler and releasing
+its install lock. A signal must not release that outer lock directly or return
+to a builder that no longer owns it. This transport supports Bash 3.2, including
+the stock macOS shell; the required scoped macOS lane exercises its real native
+construction, interruption and prior-runtime preservation contracts.
 
 ### Hard rules
 
@@ -1494,6 +1613,117 @@ depth: it snapshots the real User and Machine registry environment keys and
 fails the test flow if drift is observed. It never rolls back the whole key,
 because doing so could overwrite a legitimate concurrent edit.
 
+## Update-source authentication
+
+`agent-worktrees update` reports authentication before acquiring its configured
+GitHub marketplaces and HTTPS repo anchors. `update --auth-report` performs only
+that read-only report; it does not update payloads, install runtimes, write
+telemetry, or change saved credentials. `--json` returns the sanitized report.
+Sources and account mappings come from effective user/repository settings and
+the repository registry, not an updater-specific credential configuration.
+User `settings.local.json` overrides `settings.json` before repository overrides;
+an exact registered repository keeps its own account override, not a sibling's.
+Repository-account matching retains the remote host and port across HTTPS, SSH
+and SCP spellings; an enterprise source never inherits a public-host sibling's account.
+Default network ports are canonicalized consistently across registry lookup,
+token discovery, helper replay and API selection: `github.com:443` is public
+GitHub, while a non-default enterprise port remains a distinct authority.
+The report resolves ancestor or transported marketplace settings through the same
+context selection as normal update, including its active-project fallback.
+Bare and non-bare anchors on detached or non-default branches are excluded from
+preflight. Branch selection is isolated from caller Git repository selectors
+and shared with synchronization rather than inventing an auth requirement.
+
+Public probes clear source-scoped HTTP headers as well as disabling helpers.
+When a clean public probe succeeds, an effective-header diagnostic avoids
+another network request unless configured headers exist. Working configured
+headers remain untouched; a failing configured path can use an anonymous,
+source-scoped header-clearing overlay, without acquiring credentials.
+Other sources first exercise the
+caller's configured credentials through a read-only router, then try an
+environment token, the mapped `gh` account, and `git credential fill`. A candidate
+uses case-insensitive host matching; enterprise environment tokens require the
+matching explicit `GH_HOST`, and discovery and replay share token selection. It
+must pass both its mapped-account check and a read-only Git contents probe;
+repository metadata permission alone does not establish fetch permission. Each
+subprocess is bounded, non-interactive, headless on Windows, and retains at
+most 1 MiB per output stream. Windows requires a no-breakaway Job; POSIX probes
+own their session and nested helper children remain inside that boundary.
+Owned sessions are swept after success too, including redirected descendants;
+inherited sessions are never swept by an inner helper.
+Contained tests retain their test runner's ownership instead of detaching.
+Reachability does not require an advertised `HEAD`: an unborn or dangling default
+branch is not an authentication failure.
+
+A working setup gets no environment overlay. Only failed sources acquire an
+environment-only Git command-scope overlay, appended after inherited command
+configuration so local helpers cannot override it. Overrides use counted Git
+entries and, when inherited, appended `GIT_CONFIG_PARAMETERS`; the original
+parameter bytes are retained for original-configuration replay. Routes are qualified by
+host and repository: fixing or denying one repository must not change another
+working repository under the same owner. Other requests delegate to Git under
+the caller's original configuration at the child's actual working directory,
+preserving native helper matching, ordering, resets, and includes. Credential
+discovery and replay use the source URL's actual path without adding a `.git`
+suffix. Tokens are never written into the overlay. Read-only probes suppress
+credential approval and rejection; no path switches the active `gh` account.
+Discovery negotiates native `authtype`/`credential` responses as well as password
+credentials. Native identity validation preserves the helper's HTTP scheme,
+uses an isolated, bounded stdlib probe with credential input over stdin rather
+than argv, refuses redirects, and still checks the mapped principal and Git
+contents access. The resulting fallback stores only the fill route, never the
+credential; acquisition replays the original helper response.
+The slot-interpreter helper runs in isolated Python mode so checkout-local
+modules and inherited Python import paths cannot replace its code or standard library.
+Marketplace contexts and individual anchors have separate reports and overlays,
+even when they reference the same URL with different local credentials.
+
+Unresolved required sources are denied without retrying a stalled helper and
+contribute `auth_required` (exit 4, unless a worse failure applies). The shared
+exit remains 4 for auth-only acquisition failures even without telemetry; another
+required command failure still wins. The shared
+Manager result retains that precedence with or without telemetry; a recorded
+Manager authentication failure cannot hide an independent engine command failure.
+The shared
+status includes `auth.report` and `auth.fallback_used`; helper command values
+are not included. Preflight reports fallback availability separately from use.
+A source enters `fallback_used` only after its acquisition child receives the
+overlay, including a child that later times out. Failed spawns, activation
+preconditions, ordinary anchor inspection, and unattempted anchors do not count;
+activation restoration failures after launch do not erase the usage evidence.
+`CE_UPDATE_AUTH=report-only` applies no credential fix, so
+fixable sources remain unresolved. `CE_UPDATE_AUTH=off` skips this preflight.
+There is no persistent configuration cleanup or cleanup-consent flag.
+
+The Worktree Manager consumes the same report through its existing engine JSON
+process seam before its own Git fetch. Its engine environment preserves an
+overlay when present while still discarding parent Python runtime variables.
+Reused staging checkouts supply their own acquisition cwd to the report, so
+local helpers and conditional includes are observed in the right checkout.
+First clones use an empty staging directory with a discovery ceiling for both
+preflight and acquisition, retaining global/command credentials without reading
+the caller's repository-local configuration. Relative install roots and local Git
+sources are anchored before changing cwd; URLs and SCP-style sources stay intact.
+The machine report transports
+explicit environment removals as well as additions. Local-only anchors without
+a configured remote produce no HTTPS auth source.
+The internal `--auth-source`/`--auth-environment` report options transport only
+child environment differences over that pipe; never persist or publish that
+environment. Explicit-source reports can run from an unadopted directory without
+a selected project; ordinary updates still require their normal project context.
+Repository-isolated engine Git calls continue to discard arbitrary
+inherited Git selectors, including inherited updater snapshots, and receive only
+the updater's explicitly scoped auth overlay. Anchor preflight uses that same
+isolation. Every anchor operation is isolated even for local/SSH sources or when
+auth preflight is disabled; isolation alone does not suppress the legacy account
+policy. Auth-managed anchors suppress legacy injected headers even when
+configured credentials passed, so acquisition cannot override the report's
+credential authority.
+The Manager's own updater remains independently usable: a missing/older engine
+or a source outside this reporter's supported shape produces an explicit notice
+and retains the existing Git authentication path, not a false auth refusal.
+Known failed credentials reported by a capable engine still block that fetch.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is
@@ -1593,6 +1823,14 @@ watchdog (`<=0`) still leaves a finite 510-second updater safety bound. The
 worktrees self-installer retains its existing 600-second minimum, extended when
 a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
 values fail explicitly before launching the installer.
+
+The shared command-lifecycle runner passes the caller's stdout and stderr
+explicitly to its native installer child, including the strict Windows Job
+containment path. On Windows, a hidden child with only implicit OS stream
+inheritance can lose both streams when the caller was launched through a
+PowerShell native-command pipeline. Explicit handles preserve installer and
+self-staged grandchild diagnostics without capturing them in memory, changing
+their destinations, or changing admission, containment, or exit-code behavior.
 
 Plugins with a watchdog default other than 480 seconds declare that positive
 integer as `installerDeadlineSeconds` in `plugin.json`; unified update reads it
@@ -1702,6 +1940,20 @@ gate + marker**, a
 watchdog-killed build never becomes the live version — the old daemon keeps serving,
 and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 
+A refused or failed `mark-complete` (conflicting evidence, a storage failure, or no
+bootstrap interpreter to run it) **stops activation**: the installer reports why
+and exits non-zero instead of activating a slot whose completion was never
+published. `tools/check-install-contract.py` rejects a completion-marker helper
+that does not fail when its writer fails, and any call site that ignores the
+helper's result. A call is accepted only as a checked statement
+(`helper || exit 1`) or inside an `if` whose failure branch fails on every
+path, in that script's language (shell: a literal non-zero `exit`/`return`
+or the writer's own captured status; PowerShell: `return $false`, `throw` or
+a non-zero `exit`, since `return 1` is truthy there); any other form,
+such as assigning the result, is rejected as unrecognized.
+`tools/test_check_install_contract.py` also runs every shipped shell helper
+against a stub writer.
+
 > **Test it:** `tools/test-install-flow.ps1 -Plugin <name>` (Windows) and
 > `bash tools/test-install-flow.sh --plugin <name>` (Linux/WSL) are the turn-key
 > mini end-to-ends that assert all of the above in an isolated sandbox (STAGED,
@@ -1730,7 +1982,7 @@ reconcile, `update`, a session-start bootstrap, and a binstub's first-use
 `provision`. An adopting installer (`agent-pull-requests`, `agent-logger`,
 `agent-vault`, `agent-mcp`, `agent-containers`, `agent-ssh`) therefore holds one exclusive
 lock on `<install-dir>/.install.lock` for every mutating action
-(`stamp`/`install`/`update`/`provision`) across its whole
+(`stamp`/`install`/`update`/`provision`, plus `uninstall` where provided) across its whole
 build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
 fd 8 (fd 7 for `agent-ssh`), or an atomic pid symlink
 `<install-dir>/.install.lock.pid` where `flock` is unavailable, whose dead owner is
@@ -1752,9 +2004,35 @@ The lock is **fail-closed**: a run that cannot acquire it within its timeout
 (300s; overridable for `agent-vault`, `agent-mcp`, `agent-containers`, and `agent-ssh` via
 `COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC`) reports that it could not acquire the
 install transaction lock and exits non-zero — it never proceeds unlocked.
-Read-only actions (`status`), service controls, and `uninstall` do not take it.
-`agent-logger` differs only in also locking `uninstall` (everything except
-`status`).
+Read-only actions (`status`) and service controls do not take it.
+`agent-vault`, `agent-ssh`, and `agent-pull-requests` also serialize uninstall
+against the same install/update lock. Vault and SSH uninstall previews do not
+acquire or create the transaction lock or remove runtime/config contents.
+The normal transient payload self-staging protocol still applies.
+`agent-logger` already locks uninstall and keeps its state directory.
+
+For those three uninstallers, removing runtime/config contents must **not**
+remove the lock inode or in-flight staged sources. The canonical
+`Remove-InstallRuntimeContent` / `remove_install_runtime_content` helper keeps
+`.install.lock`, `.install.lock.pid`, `.install.lock.pid.reap`, and
+`.install-stage` in place; the install root may therefore remain after purge.
+Dead-owner staging reap remains with the self-staging protocol on subsequent
+invocations, not with purge. Moving the lock to a new
+path would not exclude an older installer holding the original lock, so purge
+preserves the existing identity instead. Removal errors stop that purge rather
+than reporting success. Nested links are unlinked, never traversed; filesystem
+roots, user homes, and linked install roots are refused. This changes no
+uninstaller's config-retention default and introduces no uninstall action for
+init-only plugins.
+
+`agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
+`flock` on fd 8; without a `flock` binary, the same `flock(2)` lock taken through
+Python, so it still excludes PowerShell and `flock` holders of `.install.lock`;
+the pid-symlink fallback only when neither is available, which excludes only other
+runs that also lack `flock(2)`; default wait 150s). It
+distinguishes the two non-success outcomes: another install holding the lock for
+the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
+success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call.
 
@@ -2100,6 +2378,202 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
+### Captured native human output
+
+Declaring PowerShell installers source their packaged
+`installer-human-output.ps1` after strict error setup and before installer
+output. Only an explicitly requested, redirected child initializes UTF-8;
+ordinary standalone invocation does not load the helper and retains its
+existing output encoding. Requested missing helpers fail closed. The initializer
+changes only the producer's stdout/stderr text writers, preserving native
+command decoding and pipeline stdin encoding.
+`tools/sync-installer-engine.py` vendors this helper and generates
+`install.human-output.json`, binding the declaration to both source files.
+Regenerate after changing either file. Release materialization validates all
+original declarations before any owner rewrites the tree, including when the
+source and destination are the same promotion scratch tree. It refreshes the
+entrypoint digests after all owning materializers finish (including the engine's
+own installer, which has no engine reference) and refuses conflicting helper
+assets. The helper is packaged with the installer, under the same
+native execution-policy and payload-ownership requirements.
+
+This declaration admits the existing Python updater's human-stream adapter;
+it does not replace signature/provenance checks or change `-File` arguments,
+script identity, exit handling, runtime construction or activation. Missing,
+unknown or stale declarations retain inherited native streams with a bounded
+presentation-gap notice. Such a producer is not reported as successfully
+captured or universally time-framed.
+
+The human-output adapter retains the updater's installer process-tree owner,
+deadline and deployed-version receipt judgment. Streaming output does not turn
+a zero exit with a missing target receipt, an expired deadline or a failed
+cutover into a successful operation.
+
+### External dependency seasoning
+
+External build, runtime, development and selected optional dependencies must
+have been released for at least **604800 seconds (seven days)** before their
+literal floors/pins are declared or their registry artifacts are installed.
+Attributable repository-owned source dependencies are exempt; their external
+dependency closure is not. Unknown or future upload timestamps never prove age.
+The declaration audit also attributes an ordinary versioned first-party
+dependency when the exact plugin test consumer explicitly installs that
+inventoried project's literal source path. Removing or redirecting that
+consumer binding revokes attribution; a package name alone is never exempt.
+Being a local path is not attribution: local wheels, archives and unattributed
+projects are refused. Source-directory admission verifies project identity,
+resolved containment and the recursive local dependency graph, including
+symlink escapes and hidden requirement-file references.
+
+The CLI authenticates its own canonical repository or materialized payload
+anchor. In a materialized repository, transitive sibling references retain the
+roster-owned plugin's embedded `libs` namespace; only explicitly named,
+identity-matching projects enter the admitted graph, not unrelated directories
+or another payload's libraries. Other callers provide separately attested
+absolute roots with repeated
+`--trusted-source-root` options before `--`; the Python API's
+`trusted_source_roots` defaults to empty and does not infer trust from the
+requested path or working directory. Python 3.10 can use the proper TOML parser
+bundled in its standard `ensurepip` wheel without installing bootstrap packages;
+an interpreter without an available parser fails before dependency writes.
+
+Trusted registry-only tooling can select `--registry-only` before `--`.
+This skips product-root discovery and passes no trusted local project roots
+to the same canonical installer policy. It is mutually exclusive with
+`--trusted-source-root`; ordinary CLI source admission is unchanged. Local
+projects, editable sources and configured local-source mappings remain refused.
+The selected registry, resolver cutoff, dependency resolution, caller-required
+hashes and retained-input checks still apply. In particular, metadata-validator
+bootstrap must not derive unrelated product graphs merely to install its
+hash-pinned registry toolchain.
+
+`tools/check-dependency-age.py` audits canonical declarations against public
+release metadata; configured-feed availability remains an installation check.
+Dependabot's seven-day cooldown is complementary, not a substitute for that
+guard or the resolver cutoff.
+
+`installer_dependency_policy.py` is the canonical stdlib-only installer policy,
+with private settings-projection and configuration-retention primitives in
+`installer_dependency_config.py`; both ship beside each versioned runtime helper
+and the shared engine. The native
+UV configuration probe is bounded, captured without printing credential-bearing
+settings, and fail-closed on an unsupported projection. Installation uses the
+stronger of seven days or the configured global cutoff, preserves stricter
+package cutoffs, and refuses disabled/weaker package overrides. Index-specific
+cutoffs are unsupported because UV can assign a synthetic age to artifacts
+without upload timestamps; flat indexes are unsupported because they bypass
+timestamp filtering. UV's exclusive millisecond-resolution cutoff may
+conservatively reject an artifact exactly on the seven-day boundary. The
+installer does not add an epsilon that could admit younger bytes.
+Supported UV cutoff projections include legacy absolute/relative values and
+structured timestamps with an optional relative span. The structured form
+uses the earlier captured timestamp or relative boundary for the enforced
+global cutoff. Each effective package cutoff must be at least as strict as that
+global boundary. Every admitted package override, including environment and
+configuration-file values, is frozen to an absolute CLI cutoff before execution;
+span metadata never excuses a younger executed override. Retained
+comparison accounts for that intentional span-to-absolute conversion, preserving
+the admitted timestamp and every other resolver setting even as probe and
+execution clocks advance.
+`--reinstall` forces actual resolution rather than
+trusting a previously installed, potentially newer package. Skipping dependency
+or isolated-build resolution is not an age-enforcement fallback.
+
+`run_uv_install` owns admission and execution as one lifetime. UV consumes
+private retained source metadata, recursive requirements and configuration,
+with an explicitly captured environment, rather than reopening the caller's
+mutable inputs after preflight. The retained resolver must match the native
+configured resolver, including index order/authentication, TLS, workspace
+constraints and stricter package cutoffs; an unsupported merge or mismatch
+refuses installation. `prepare_uv_install` is only a preflight API, not an
+installation boundary.
+
+Absolute, non-editable source-only installations retain the common source/resource
+layout without reproducing unrelated caller-directory or staging ancestry.
+An unrelated caller uses a separate private working directory; its effective
+configuration and target interpreter are still captured before relocation.
+Relative operands, requirement files, dependency groups, explicit project
+contexts, source-bearing configuration/metadata and editable installations
+retain their existing relative layout. This includes relative source traversals
+that leave and re-enter a project, rather than rewriting those declarations.
+This reduces backend build-path depth without relocating the checkout or
+weakening source attribution, seasoning or resolver-equivalence checks.
+
+Agent SSH's deferred-runtime snapshots materialize development source pointers
+to the libraries copied inside the snapshot before publication. Both stamp
+implementations keep this metadata transformation runtime-free; first use must
+not depend on the original checkout or references outside the retained payload.
+
+Editable source retention supports static `setuptools.build_meta` projects
+using the repository's `src` layout. Retained metadata selects compatibility
+editable mode and references the original live `src` through a same-volume
+relative package directory; installed imports survive snapshot cleanup and
+observe subsequent source edits. On Windows the private snapshot is a sibling
+of a shallowest admitted project or build-resource root on the editable source
+volume, outside every copied input. A volume-root input with no outside
+temporary location fails explicitly. This avoids long parent-relative paths from an unrelated
+temporary directory; setuptools requires relative package directories.
+Dynamic metadata, other editable backends or
+layouts, competing editable-mode settings and mixed source volumes on Windows
+fail explicitly rather than installing references to disposable source trees.
+On Windows, editable metadata is staged beside the common source ancestry so
+setuptools' relative metadata renames stay short. Retained filesystem copies,
+TOML I/O and cleanup use native extended paths where needed; UV arguments and
+file URLs retain ordinary canonical spelling. This preserves the configured
+resolver and attribution boundary rather than bypassing retention for long
+snapshot paths. Parent-relative config selections are normalized lexically
+before extended prefixing, preserving explicit `--config-file` and
+`UV_CONFIG_FILE` behavior.
+
+The policy does not replace the adopter's configured feed, disable TLS
+verification, or retry against a public index. A selected extra's dependency
+failure fails construction; retrying the base package in the same partially
+populated candidate is not successful installation. Unsupported pip fallback
+paths must refuse rather than resolve unseasoned packages.
+
+The repository's locked npm projects, including the rasterizer and workflow
+helpers, use
+`worktree-manager/scripts/picker-snapshot/install.py`. It queries npm's configured
+registry for every locked dependency, including transitive and optional entries,
+checks age and binds the admitted artifact to the lock's integrity before
+`npm ci`. Strong SRI evidence uses a valid SHA-256, SHA-384 or SHA-512 digest;
+matching SHA-1-only metadata and locks are not sufficient. Missing or
+SHA-1-only registry integrity additionally requires npm's tarball verification
+against the strong lock digest. npm's configured default-registry
+host substitution is preserved; private registry identities are never written
+into the shared lock. `npm ci --before` alone is not an age gate for locked
+versions. Installation disables dependency lifecycle scripts and must import
+the explicitly selected health modules successfully. No-argument use installs
+and checks the rasterizer; other projects supply `--directory` and repeat
+`--health-module` for their selected consumers.
+Installation consumes retained manifest and lock bytes in a private, same-volume
+snapshot with the project's npm configuration. Only its health-checked
+`node_modules` is published; admission, install, health or publication failure
+preserves the prior dependency tree. A concurrent manifest, lock or configuration
+change refuses publication rather than installing an unaudited closure.
+Inputs are rechecked after the candidate tree's rename, before retiring the
+previous tree; a mismatch at that linearization point rolls publication back.
+
+### Inert exact-profile preparation
+
+`tools/runtime_profile.py` provides a repository-only versioned exact-record
+validator and pure selector. It is not shipped in runtime payloads or invoked
+by an installer. Its [reviewed contract](../efforts/active/governed-python-artifact-promotion/exact-profile-contract.md)
+defines the schema and explicit boundary: canonical whole-record identities,
+release/target/mode compatibility, complete asserted wheel metadata graphs
+with extras/markers, and externally supplied whole-record approval references.
+It does not authenticate approvals, verify a source release, inspect/download
+wheels, detect hardware, resolve dependencies or activate a generation.
+
+Actual consumers still need adapters from the existing installation authority
+and verified release/configuration channels, followed by admitted byte/metadata
+checks and immutable construction. Candidate release-input generation is a
+separate concern (#6941); neither constraints nor this inert record prove an
+approved, available CPU/accelerator closure. The current constructors and their
+retained slots remain unchanged by this preparation seam.
+
+### Shared engine delivery
+
 A canonical pair of files, `libs/installer-engine/installer-engine.ps1` and
 `.sh`, carries the installer logic that was mechanically duplicated across
 every Python runtime plugin's own `install.*` before this existed: native
@@ -2119,6 +2593,12 @@ forms**:
   sources `libs/installer-engine/installer-engine.{sh,ps1}` directly while
   working on `dev`, and keeps **no** plugin-local engine copy there.
 
+Adopters that scrub generated build residue before a package attempt must do so
+before every bounded retry, not only before entering the shared helper. The
+PowerShell helper accepts `BeforeAttempt`; Bash accepts a shell-function name
+through `INSTALLER_ENGINE_BEFORE_ATTEMPT` and its source-path argument through
+`INSTALLER_ENGINE_BEFORE_ATTEMPT_ARGUMENT`. A failed callback stops installation.
+
 Regardless of the dev-time form, the **shipped payload is always materialized
 back to a real local `scripts/installer-engine.{ps1,sh}` copy** before release:
 `materialize_main.py` / `preview_release.py` copy canonical into the plugin's
@@ -2128,6 +2608,11 @@ runtime. `tools/sync-installer-engine.py`'s own `unregistered_adopters()`
 check also fails closed if a plugin references or carries installer-engine
 content without being registered in the tool's `ADOPTERS` tuple, so a
 hand-added adopter cannot drift silently forever.
+
+Referenced Python support assets are materialized with the engine. The same
+canonical dependency-policy bytes also fan out through
+`tools/sync-versioned-runtime.py` to runtime plugins that have not adopted the
+shared shell engine; those installers must not invent a second policy.
 
 `agent-worktrees`' packaged non-editable launch fallback follows the same
 contract: the authoritative launch-wrapper scripts live under

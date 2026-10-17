@@ -488,9 +488,11 @@ def materialize_installer_engine_ref_into(
     )
 
 
-def materialize_installer_engine_refs(dest: Path, *, canonical_root: Path) -> list[str]:
+def materialize_installer_engine_refs(
+    dest: Path, *, canonical_root: Path, human_sources: frozenset[Path] | None = None,
+) -> list[str]:
     """Expand canonical installer-engine references across every plugin."""
-    return mie.materialize_refs(dest, canonical_root=canonical_root)
+    return mie.materialize_refs(dest, canonical_root=canonical_root, human_sources=human_sources)
 
 
 def materialize_launch_wrapper_assets_into(
@@ -515,14 +517,20 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
 
     ``canonical_root`` is a parameter (not hardcoded to ``REPO``) so a test
     can point it at an isolated tree instead of the real checkout."""
+    human_sources = mie.validate_human_output_sources(canonical_root)
     log = [
         f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
         for pointer_path in find_retired_directory_pointers(dest)
     ]
     log.extend(materialize_file_pointers(dest, canonical_root=canonical_root))
     log.extend(materialize_uv_editable_refs(dest, canonical_root=canonical_root))
-    log.extend(materialize_installer_engine_refs(dest, canonical_root=canonical_root))
+    log.extend(materialize_installer_engine_refs(
+        dest, canonical_root=canonical_root, human_sources=human_sources,
+    ))
     log.extend(materialize_launch_wrapper_assets(dest, canonical_root=canonical_root))
+    log.extend(mie.materialize_human_output_declarations(
+        dest, canonical_root=canonical_root, human_sources=human_sources,
+    ))
     return log
 
 

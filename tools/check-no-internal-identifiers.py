@@ -376,11 +376,15 @@ def _load_identifiers() -> list[str]:
     return identifiers
 
 
-def _tracked_files() -> list[str]:
-    out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+def _tracked_files(ref: str | None = None) -> list[str]:
+    command = (
+        ["git", "ls-files", "-z"] if ref is None
+        else ["git", "ls-tree", "-r", "--name-only", "-z", ref]
     )
-    return [line for line in out.stdout.splitlines() if line]
+    out = subprocess.run(
+        command, cwd=REPO, capture_output=True, check=True,
+    )
+    return [path for path in out.stdout.decode("utf-8", "surrogateescape").split("\0") if path]
 
 
 def _load_paths_file(path: Path) -> list[str]:
@@ -410,8 +414,8 @@ def _ref_exists(ref: str) -> bool:
     )
 
 
-def _changed_files(base: str) -> list[str] | None:
-    """Files this branch changed vs *base* (``git diff --name-only base...HEAD``).
+def _changed_files(base: str, head: str = "HEAD") -> list[str] | None:
+    """Files *head* changed vs *base*, preserving Git filename bytes.
 
     Returns the changed paths, or ``None`` when *base* can't be resolved (e.g. a
     fresh clone with no ``origin/main``) OR has no common ancestor with ``HEAD``
@@ -431,30 +435,31 @@ def _changed_files(base: str) -> list[str] | None:
         return None
     try:
         out = subprocess.run(
-            ["git", "diff", "--name-only", f"{base}...HEAD"],
+            ["git", "diff", "--name-only", "-z", f"{base}...{head}"],
             cwd=REPO,
             capture_output=True,
-            text=True,
             check=True,
         )
     except subprocess.CalledProcessError:
         return None
-    return [line for line in out.stdout.splitlines() if line]
+    return [path for path in out.stdout.decode("utf-8", "surrogateescape").split("\0") if path]
 
 
-def _files_to_scan(scan_all: bool, base: str, *, emit_status: bool = True) -> list[str]:
+def _files_to_scan(
+    scan_all: bool, base: str, *, emit_status: bool = True, head: str | None = None,
+) -> list[str]:
     """Resolve the set of repo-relative files the guard should scan."""
     if scan_all:
-        return _tracked_files()
-    changed = _changed_files(base)
+        return _tracked_files() if head is None else _tracked_files(head)
+    changed = _changed_files(base) if head is None else _changed_files(base, head)
     if changed is None:
         if emit_status:
             print(
-                f"base ref '{base}' not found or shares no history with HEAD "
+                f"base ref '{base}' not found or shares no history with {head or 'HEAD'} "
                 f"(e.g. after a main history rewrite) -- scanning the whole "
                 f"tracked tree.",
             )
-        return _tracked_files()
+        return _tracked_files() if head is None else _tracked_files(head)
     if emit_status:
         print(f"scanning {len(changed)} file(s) changed vs {base}.")
     return changed
@@ -626,7 +631,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--git-ref",
         metavar="REF",
-        help="Read file contents from git tree-ish REF instead of the working tree.",
+        help="Read contents and enumerate paths from git tree-ish REF instead of the working tree.",
     )
     parser.add_argument(
         "--json-out",
@@ -674,7 +679,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.paths_jsonl
         else _load_paths_file(Path(args.paths_file))
         if args.paths_file
-        else _files_to_scan(args.all, args.base, emit_status=not args.ci)
+        else _files_to_scan(args.all, args.base, emit_status=not args.ci, head=args.git_ref)
     )
     text_loader = _make_git_ref_loader(args.git_ref) if args.git_ref else None
     violations = _scan(

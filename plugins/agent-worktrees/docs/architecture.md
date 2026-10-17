@@ -1310,6 +1310,12 @@ and `--stdio`/`--json` callers stay quiet (in `--stdio` mode the launcher's
 `Write-Host` is already routed to stderr, off the ACP channel). Every step is
 still written to the per-PID setup log under `$TMPDIR/worktree-setup-logs`
 regardless.
+Synchronous marketplace installers, bootstrap-service updates and reconciliation
+actions share UTC line prefixes, monotonic elapsed/completion suffixes and the
+same setup-log sink for both child streams. Already-framed nested lines are
+retained unchanged. Failed or missing commands report their outcome and continue;
+they do not suppress fresh planning or runtime re-resolution. Detached installers
+retain their independent lifetime and are not covered by that synchronous sink.
 
 ### "Update available" -> the full update (picker refresh)
 
@@ -1356,6 +1362,10 @@ stale runtime is never left behind. Pass `--force` to re-deploy every runtime
 unconditionally.
 
 ### Version-cutover reap and live-launcher protection
+
+For the installer handover's exact admission, lock, busy-oracle and rollback
+sequence, and its bounded structural logs, see the
+[status-monitor drain audit](status-monitor-drain.md).
 
 A version bump publishes a fresh `~/.agent-worktrees/versions/<v>` slot and
 calls `status-monitor-restart` (`_restart_status_monitor`) from that new

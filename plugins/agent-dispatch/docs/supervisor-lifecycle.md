@@ -51,6 +51,16 @@ suppress the action it observes. Native command failures are also reported,
 instead of being converted into successful audit outcomes. Audit loss is thus
 visible, but this log is not a transactional service-manager audit.
 
+The private Windows retirement subprocess returns one complete JSON object on
+stdout, either compact or pretty-printed. Its stderr remains diagnostic output;
+the installer retains the native stream records until parsing, so diagnostics
+cannot be mistaken for JSON properties or braces. The result requires a boolean
+`ok`, selected/retired PID arrays (retired identities must be selected), and a
+string-array `errors`. Failed typed results retain their errors and process exit
+code. Empty, malformed, multiple or non-object stdout results fail explicitly
+with a diagnostic before the existing identity-scoped native fallback; partial
+retirement failures do not authorize a broader second classifier.
+
 ## Enablement and ownership limits
 
 Fresh eligible supervisors retain the label/serve-mode opt-in gate. Existing

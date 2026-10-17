@@ -647,7 +647,7 @@ _bootstrap_python() {
 _payload_hash() {
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
+    # changed the payload WITHOUT bumping the version. Fails on any error.
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -656,40 +656,46 @@ _payload_hash() {
             __parts="$__parts"$'\n'"$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    # Fails (no output) when no SHA-256 implementation works: the caller must
+    # then refuse to publish a slot without its fingerprint.
+    local __d
+    if command -v sha256sum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
+    elif command -v openssl >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
+    else
+        return 1
+    fi
+    __d="${__d%% *}"
+    [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$__d"
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    local ph
-    ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
+        return 1
+    fi
+    _runtime_construction_complete "$actual_hash"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -1026,6 +1032,8 @@ _ensure_runtime() {
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _ok "Directories: $INSTALL_DIR"
 
+    _versioned_slot_clean || return 1
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
     if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
         if [[ "$have_uv" -eq 1 ]]; then
             _step 'Creating venv via uv...'
@@ -1145,11 +1153,11 @@ _ensure_runtime() {
             # second call's own build starts, so that second build can still
             # shadow-consume stale artifacts the way the pre-first-call scrub
             # above exists to prevent. Re-scrub between the two calls too.
-            "$VENV_PYTHON" -m pip install --force-reinstall --no-deps "$1"
+            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --force-reinstall "$1"
             rc=$?
             if [[ "$rc" -eq 0 ]]; then
                 _scrub_payload_build_artifacts
-                "$VENV_PYTHON" -m pip install "$1"
+                "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$1"
                 rc=$?
             fi
         fi
@@ -1158,16 +1166,12 @@ _ensure_runtime() {
         _scrub_payload_build_artifacts
         return "$rc"
     }
-    if _pip_install "${PLUGIN_DIR}[mcp]" >/dev/null 2>&1; then
+    if pkg_out="$(_pip_install "${PLUGIN_DIR}[mcp]" 2>&1)"; then
         _ok 'Package installed: agent-dispatch [mcp]'
     else
-        _warn 'Could not install the [mcp] extra (its native deps may not build on this platform) -- falling back to a base install without the MCP server surface'
-        if ! pkg_out="$(_pip_install "$PLUGIN_DIR" 2>&1)"; then
-            _fail 'Failed to install agent-dispatch package into venv'
-            printf '%s\n' "$pkg_out" >&2
-            exit 1
-        fi
-        _ok 'Package installed: agent-dispatch (base -- `agent-dispatch mcp` server unavailable on this platform)'
+        _fail 'Selected agent-dispatch [mcp] dependency installation failed'
+        printf '%s\n' "$pkg_out" >&2
+        exit 1
     fi
 
     # -- stamp build provenance (version from pyproject -- the single source of
@@ -1191,6 +1195,8 @@ _ensure_runtime() {
     # then swap the stable `.venv` symlink onto it. Everything below (manifest,
     # systemd units, binstub) resolves through `.venv` (the link). No-op in legacy
     # mode. Remember the previous active version as the gc keep target.
+    fi
+
     local prev_version=""
     # `embody` is only ever imported lazily, inside spawn_factories.
     # make_headless_spawn -- so a bare `import agent_dispatch` never touches
@@ -1214,7 +1220,7 @@ _ensure_runtime() {
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
-        _versioned_mark_complete
+        _versioned_mark_complete || exit 1
         _supervisor_audit runtime-ready import-health-gate "" "" ok
         _versioned_activate || exit 1
         # The supersession check and the shared publication it protects

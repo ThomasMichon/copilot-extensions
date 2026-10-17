@@ -467,3 +467,22 @@ def test_branch_switch_hint_works_from_any_directory(upstream: Path, tmp_path: P
     ran = subprocess.run(shell, cwd=elsewhere, env=env, capture_output=True, text=True)
     assert ran.returncode == 0, ran.stderr
     assert _git(anchor, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+
+
+def test_bare_anchor_sync_uses_the_named_remote(upstream: Path, tmp_path: Path) -> None:
+    anchor = _make_anchor(upstream, tmp_path / "anchor")
+    _git(anchor, "remote", "rename", "origin", "upstream")
+    new = _commit(upstream, "second", {"README.md": "v2\n"})
+
+    state, _detail = bare_anchor_sync.sync_bare_anchor(str(anchor), "main", remote="upstream")
+
+    assert state == "synced"
+    assert _ref(anchor) == new
+
+
+def test_is_bare_ignores_an_inherited_git_dir(upstream: Path, tmp_path: Path, monkeypatch) -> None:
+    anchor = _make_anchor(upstream, tmp_path / "anchor")
+    monkeypatch.setenv("GIT_DIR", str(upstream / ".git"))
+
+    assert bare_anchor_sync.is_bare(anchor) is True
+    assert bare_anchor_sync.is_bare(upstream) is False

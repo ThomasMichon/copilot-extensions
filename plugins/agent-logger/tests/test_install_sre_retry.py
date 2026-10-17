@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,75 @@ def _resolve_bash() -> str | None:
     return shutil.which("bash", path=filtered)
 _BASH = _resolve_bash()
 
+_UV_SETTINGS = """PipInstallSettings { settings: PipSettings {
+    index_locations: IndexLocations {
+        indexes: [],
+        flat_index: [],
+    },
+    exclude_newer: ExcludeNewer {
+        global: None,
+        package: ExcludeNewerPackage({}),
+    },
+}, }
+"""
+
+
+def _physical_uv(tmp_path: Path, failure: str, success_after: int | None) -> Path:
+    """Move the simulated outcome behind the real policy subprocess boundary."""
+    counter = tmp_path / "attempt-count.txt"
+    script = tmp_path / "fake-uv.py"
+    script.write_text(
+        f"""#!{sys._base_executable}
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+args = sys.argv[1:]
+assert args[:2] == ['pip', 'install'], args
+if '--show-settings' in args:
+    assert '--quiet' not in args
+    print({_UV_SETTINGS!r})
+    raise SystemExit(0)
+assert '--reinstall' in args
+assert '--quiet' in args and 'some-package' in args
+assert '--no-deps' not in args and '--no-build-isolation' not in args
+cutoff = datetime.fromisoformat(args[args.index('--exclude-newer') + 1].replace('Z', '+00:00'))
+assert cutoff <= datetime.now(timezone.utc) - timedelta(days=7)
+counter = Path({str(counter)!r})
+n = int(counter.read_text()) + 1
+counter.write_text(str(n))
+success_after = {success_after!r}
+if success_after is not None and n >= success_after:
+    print('Installed 1 package')
+    raise SystemExit(0)
+print({failure!r})
+raise SystemExit(1)
+""",
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        command = tmp_path / "fake-uv.cmd"
+        command.write_text(f'@"{sys._base_executable}" "{script}" %*\n', encoding="utf-8")
+    else:
+        command = script
+        command.chmod(0o755)
+    return command
+
+
+@pytest.mark.parametrize("failure", ["AssertionError: SRE module mismatch", "error: network unreachable"])
+def test_uv_settings_probe_has_no_install_effects(tmp_path: Path, failure: str) -> None:
+    counter = tmp_path / "attempt-count.txt"
+    counter.write_text("0", encoding="utf-8")
+    uv = _physical_uv(tmp_path, failure, None)
+    before = set(tmp_path.iterdir())
+    result = subprocess.run(
+        [str(uv), "pip", "install", "--show-settings", "some-package"],
+        capture_output=True, text=True, timeout=20, check=True,
+    )
+    assert result.stdout.strip() == _UV_SETTINGS.strip()
+    assert counter.read_text(encoding="utf-8") == "0"
+    assert set(tmp_path.iterdir()) == before
+
 
 def _extract_ps1_functions(*names: str) -> str:
     install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
@@ -56,21 +126,28 @@ def _extract_ps1_functions(*names: str) -> str:
 
 
 def _run_ps_harness(
-    tmp_path: Path, shell: str, uv_stub_body: str, extra_script: str, delays_file: Path
+    tmp_path: Path, shell: str, failure: str, extra_script: str, delays_file: Path,
+    success_after: int | None = None,
 ) -> subprocess.CompletedProcess:
     exe = shutil.which(shell)
     if not exe:
         pytest.skip(f"{shell} is not installed")
     delays_file_ps = str(delays_file).replace("\\", "\\\\")
+    uv = _physical_uv(tmp_path, failure, success_after)
+    policy = _INSTALL_PS1.with_name("installer_dependency_policy.py")
+    extra_script = extra_script.replace("'fake-python'", f"'{sys._base_executable}'")
+    extra_script = extra_script.replace(
+        "Invoke-UvPipInstallResilient @(",
+        f"Invoke-UvPipInstallResilient -UvCommand '{uv}' -Arguments @(",
+    )
     harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
         _extract_ps1_functions("Invoke-NativeCapture", "Test-IsSreModuleMismatch", "Invoke-UvPipInstallResilient")
         + f"""
+$script:InstallerDependencyPolicy = '{policy}'
 
 function Write-Warn {{ param([string]$m) Write-Host "WARN: $m" }}
 function Start-Sleep {{ param([int]$Seconds) Add-Content -LiteralPath '{delays_file_ps}' -Value $Seconds }}
-
-{uv_stub_body}
 
 {extra_script}
 """,
@@ -95,29 +172,15 @@ def _delays(delays_file: Path) -> list[int]:
 def test_windows_sre_mismatch_retries_then_succeeds(tmp_path: Path, shell: str) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
-    counter_file_ps = str(counter_file).replace("\\", "\\\\")
     delays_file = tmp_path / "delays.txt"
-    uv_stub = f"""
-function uv {{
-    $countPath = '{counter_file_ps}'
-    $n = [int](Get-Content -LiteralPath $countPath)
-    $n += 1
-    Set-Content -LiteralPath $countPath -Value $n
-    if ($n -lt 3) {{
-        Write-Output 'AssertionError: SRE module mismatch'
-        $global:LASTEXITCODE = 1
-        return
-    }}
-    Write-Output 'Installed 1 package'
-    $global:LASTEXITCODE = 0
-}}
-"""
     extra = """
 $result = Invoke-UvPipInstallResilient @('--python', 'fake-python', 'some-package', '--quiet')
 Write-Host "EXIT:$($result.ExitCode)"
 Write-Host "OUT:$($result.Output)"
 """
-    result = _run_ps_harness(tmp_path, shell, uv_stub, extra, delays_file)
+    result = _run_ps_harness(
+        tmp_path, shell, "AssertionError: SRE module mismatch", extra, delays_file, 3
+    )
     assert result.stdout.count("uv build hit a transient SRE module mismatch") == 2
     assert "EXIT:0" in result.stdout
     assert "OUT:Installed 1 package" in result.stdout
@@ -129,24 +192,13 @@ Write-Host "OUT:$($result.Output)"
 def test_windows_unrelated_failure_is_not_retried(tmp_path: Path, shell: str) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
-    counter_file_ps = str(counter_file).replace("\\", "\\\\")
     delays_file = tmp_path / "delays.txt"
-    uv_stub = f"""
-function uv {{
-    $countPath = '{counter_file_ps}'
-    $n = [int](Get-Content -LiteralPath $countPath)
-    $n += 1
-    Set-Content -LiteralPath $countPath -Value $n
-    Write-Output 'error: network unreachable'
-    $global:LASTEXITCODE = 1
-}}
-"""
     extra = """
 $result = Invoke-UvPipInstallResilient @('--python', 'fake-python', 'some-package', '--quiet')
 Write-Host "EXIT:$($result.ExitCode)"
 Write-Host "OUT:$($result.Output)"
 """
-    result = _run_ps_harness(tmp_path, shell, uv_stub, extra, delays_file)
+    result = _run_ps_harness(tmp_path, shell, "error: network unreachable", extra, delays_file)
     assert "uv build hit a transient SRE module mismatch" not in result.stdout
     assert "EXIT:1" in result.stdout
     assert "OUT:error: network unreachable" in result.stdout
@@ -160,23 +212,14 @@ def test_windows_persisting_sre_mismatch_still_fails_after_all_retries(
 ) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
-    counter_file_ps = str(counter_file).replace("\\", "\\\\")
     delays_file = tmp_path / "delays.txt"
-    uv_stub = f"""
-function uv {{
-    $countPath = '{counter_file_ps}'
-    $n = [int](Get-Content -LiteralPath $countPath)
-    $n += 1
-    Set-Content -LiteralPath $countPath -Value $n
-    Write-Output 'AssertionError: SRE module mismatch'
-    $global:LASTEXITCODE = 1
-}}
-"""
     extra = """
 $result = Invoke-UvPipInstallResilient @('--python', 'fake-python', 'some-package', '--quiet')
 Write-Host "EXIT:$($result.ExitCode)"
 """
-    result = _run_ps_harness(tmp_path, shell, uv_stub, extra, delays_file)
+    result = _run_ps_harness(
+        tmp_path, shell, "AssertionError: SRE module mismatch", extra, delays_file
+    )
     assert "uv build hit a transient SRE module mismatch" in result.stdout
     assert "EXIT:1" in result.stdout
     assert counter_file.read_text(encoding="utf-8").strip() == "4"
@@ -199,11 +242,18 @@ def _executable(path: Path, text: str) -> None:
 
 
 def _run_sh_harness(
-    tmp_path: Path, uv_stub_body: str, extra_script: str, delays_file: Path
+    tmp_path: Path, failure: str, extra_script: str, delays_file: Path,
+    success_after: int | None = None,
 ) -> subprocess.CompletedProcess:
     harness = tmp_path / "harness.sh"
+    uv = _physical_uv(tmp_path, failure, success_after)
+    policy = _INSTALL_SH.with_name("installer_dependency_policy.py")
+    extra_script = extra_script.replace(
+        "invoke_uv_pip_install_resilient uv --python fake-python",
+        f"invoke_uv_pip_install_resilient '{uv}' --python '{sys._base_executable}'",
+    )
     harness.write_text(
-        "#!/bin/sh\nset -eu\n"
+        f"#!/bin/bash\nset -eu\nINSTALLER_ENGINE_DEPENDENCY_POLICY='{policy}'\n"
         + _extract_sh_functions("test_is_sre_module_mismatch", "invoke_uv_pip_install_resilient")
         # Matches the real `warn() { log "WARN" "$1"; }` -- routed to stdout,
         # since agent-logger's own `log()` helper (unlike agent-bridge's
@@ -212,7 +262,6 @@ def _run_sh_harness(
 _warn() { echo "WARN: $*"; }
 
 """
-        + uv_stub_body
         + "\n\n"
         + extra_script
         + "\n",
@@ -241,19 +290,6 @@ def test_posix_sre_mismatch_retries_then_succeeds(tmp_path: Path) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
     delays_file = tmp_path / "delays.txt"
-    uv_stub = f"""
-uv() {{
-    n=$(cat '{counter_file}')
-    n=$((n + 1))
-    echo "$n" > '{counter_file}'
-    if [ "$n" -lt 3 ]; then
-        echo 'AssertionError: SRE module mismatch'
-        return 1
-    fi
-    echo 'Installed 1 package'
-    return 0
-}}
-"""
     extra = """
 if out=$(invoke_uv_pip_install_resilient uv --python fake-python some-package --quiet); then
     echo "EXIT:0"
@@ -262,7 +298,9 @@ else
 fi
 echo "OUT:$out"
 """
-    result = _run_sh_harness(tmp_path, uv_stub, extra, delays_file)
+    result = _run_sh_harness(
+        tmp_path, "AssertionError: SRE module mismatch", extra, delays_file, 3
+    )
     assert result.stdout.count("uv build hit a transient SRE module mismatch") == 2
     assert "EXIT:0" in result.stdout
     # agent-logger's `warn()` (unlike agent-bridge's `_warn`) writes to
@@ -281,15 +319,6 @@ def test_posix_unrelated_failure_is_not_retried(tmp_path: Path) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
     delays_file = tmp_path / "delays.txt"
-    uv_stub = f"""
-uv() {{
-    n=$(cat '{counter_file}')
-    n=$((n + 1))
-    echo "$n" > '{counter_file}'
-    echo 'error: network unreachable'
-    return 1
-}}
-"""
     extra = """
 if out=$(invoke_uv_pip_install_resilient uv --python fake-python some-package --quiet); then
     echo "EXIT:0"
@@ -298,7 +327,7 @@ else
 fi
 echo "OUT:$out"
 """
-    result = _run_sh_harness(tmp_path, uv_stub, extra, delays_file)
+    result = _run_sh_harness(tmp_path, "error: network unreachable", extra, delays_file)
     assert "uv build hit a transient SRE module mismatch" not in result.stdout
     assert "EXIT:1" in result.stdout
     assert "OUT:error: network unreachable" in result.stdout
@@ -314,15 +343,6 @@ def test_posix_persisting_sre_mismatch_still_fails_after_all_retries(tmp_path: P
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
     delays_file = tmp_path / "delays.txt"
-    uv_stub = f"""
-uv() {{
-    n=$(cat '{counter_file}')
-    n=$((n + 1))
-    echo "$n" > '{counter_file}'
-    echo 'AssertionError: SRE module mismatch'
-    return 1
-}}
-"""
     extra = """
 if out=$(invoke_uv_pip_install_resilient uv --python fake-python some-package --quiet); then
     echo "EXIT:0"
@@ -331,7 +351,9 @@ else
 fi
 echo "OUT:$out"
 """
-    result = _run_sh_harness(tmp_path, uv_stub, extra, delays_file)
+    result = _run_sh_harness(
+        tmp_path, "AssertionError: SRE module mismatch", extra, delays_file
+    )
     assert result.stdout.count("uv build hit a transient SRE module mismatch") == 3
     assert "EXIT:1" in result.stdout
     assert counter_file.read_text(encoding="utf-8").strip() == "4"

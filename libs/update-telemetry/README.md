@@ -83,3 +83,111 @@ modules), `runtime_reconcile` (other registered runtimes), `anchor_sync` and
 authorization-scheme credentials, GitHub token shapes, and URL user-info are
 redacted from `argv`, `action`, `error` and `details` before anything is
 written.
+
+## Human operation output
+
+`update_telemetry.human.HumanOperation` is the opt-in presentation extension
+used by the Manager update, engine update phases and launch preparation. It
+does not own another update run, change structured outcomes, persist human
+lines, or acquire a telemetry lock per line.
+
+```text
+[12:00:01.120Z] update/engine/runtime_reconcile/agent-example starting [elapsed 0.0s]
+[12:00:04.220Z] update/engine/runtime_reconcile/agent-example resolving dependencies [elapsed 3.1s]
+[12:00:05.420Z] update/engine/runtime_reconcile/agent-example done exit 0 [duration 4.3s]
+```
+
+UTC wall time is correlation only. Elapsed and duration use the containing
+operation's `time.monotonic()` clock, independently of wall-clock adjustments.
+Nested scopes inherit clocks and sink; completion is emitted once. Multiline,
+empty and unterminated child lines are framed individually. Known credentials
+are redacted before the human sink; already canonical child records are not
+framed twice. Human output goes to stderr; JSON output helpers and unscoped
+legacy output retain their existing behavior.
+Redaction covers complete logical messages before line splitting or state
+prefixes. Native relays retain only incomplete credential prefixes recognized
+by the existing redactor until their following text can be masked safely.
+
+`native_output()` adapts only explicitly selected human installer streams.
+The existing Python operation reads a pipe live; no reporting interpreter,
+raw-output spool file, daemon or per-line process is introduced. The caller
+still owns the child command, environment, timeout and exact exit status.
+After that command returns, the relay drains bytes already written without
+waiting for EOF from detached service descendants. Parsed JSON commands,
+binary/private protocols and interactive passthroughs must not use this adapter.
+
+### Shell maintenance adapter
+
+`python -m update_telemetry.shell` reuses `HumanOperation` for a native shell
+that cannot provide portable UTC and monotonic clocks itself (notably Bash
+3.2). It is one bounded child per maintenance phase, not a service or updater.
+The shell retains command execution, environment, stdin, exit handling and
+fresh planning. It sends NUL-delimited record triples through a private
+temporary spool; records are not JSON/protocol stdout or durable update events.
+The renderer acknowledges startup and each action's live clock before native
+execution, streams diagnostics only to the setup log, and echoes selected
+status/completion records to stderr only for an interactive launch.
+One in-process clock thread observes completion records independently of
+the output sink. Admission starts the action clock after earlier output and
+the start line drain; completion uses the observed end boundary even if
+presentation is still draining diagnostics. Only boundary timestamps are
+retained in memory, not another queue of diagnostic text.
+
+`HumanLineBuffer` shares the existing native relay's credential-continuation
+handling; ordinary lines remain live while credential prefixes wait for their
+continuation. An end record completes the corresponding action, and a finish
+record drains the phase without waiting for inherited descriptors in detached
+descendants. A known warning/failure prevents a misleading clean phase summary.
+The final ready-file receipt follows closed output and clock-thread shutdown;
+the launcher can distinguish successful completion from failure even after
+Bash reaps the completed job.
+The CLI's parent monitor starts before its first output write and remains
+active during action admission and final output drain. Parent loss records
+`parent-exited` in `ready.failure` and exits only this dedicated renderer
+process nonzero, without waiting for a blocked terminal writer or its locks.
+Embedded `render()` callers retain their normal exception/lifetime ownership.
+The shell owns bounded startup/shutdown and cleanup; the renderer also exits
+when its launch parent disappears. Renderer failures report an explicit error
+and never replace the native command's exit or launch-continuation policy.
+
+### Native producer admission
+
+Captured PowerShell installers opt in through generated
+`scripts/install.human-output.json`, bound to the original entrypoint and its
+packaged `installer-human-output.ps1` initializer. The digests normalize only
+CRLF to LF for portable checkouts. These are fixed build declarations, not user
+configuration or an alternative signature/trust authority.
+`tools/sync-installer-engine.py` owns the helper copies and declarations.
+Re-run it when a declaring installer changes. Materialization refreshes the
+declaration after rewriting an engine reference and refuses linked, missing
+or conflicting helper assets.
+
+The updater requests UTF-8 only in the admitted child's process environment.
+That original producer dot-sources its own helper before installer output;
+without a request, it does not load the helper at all. A requested missing
+helper fails closed before command discovery. The initializer installs UTF-8,
+auto-flushing stdout/stderr text writers only in that redirected, consoleless
+child. It preserves native-command decoding, pipeline stdin encoding, culture
+and console codepages. The host executable, `-File` argv, target file,
+parameter binding, execution policy and native process exit remain unchanged.
+The helper is a native payload asset beside the installer, not a runtime
+Python-wheel dependency. Native signature and execution-policy checks still
+apply to both files; no wrapper, evaluation or policy bypass is introduced.
+Pre-script host parse/policy diagnostics are not evidence that initialization
+ran.
+
+Unknown/legacy PowerShell producers, stale declarations and indirect/private
+invocation prefixes retain their original inherited streams without decoding.
+They receive one scoped presentation-gap notice, not a claim of successful
+UTF-8 capture. Direct POSIX `.sh` installer calls retain the existing Python
+stream owner's UTF-8 human adapter. This is not a claim that an arbitrary
+private protocol or every standalone installer has the same encoding.
+
+This does **not** yet frame every standalone native bootstrap line. The
+native launchers' setup-log/status adapters now use the maintenance clocks
+described above, but inherited bootstrap child streams, detached installer
+output and early/late Bash diagnostics remain outside that boundary.
+A first bootstrap before an interpreter is admitted retains native diagnostics
+rather than claiming fabricated monotonic timing. The Python-owned native-child
+adapter needs no extra interpreter and does not alter runtime-slot retention
+or activation.

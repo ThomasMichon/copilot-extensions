@@ -59,6 +59,13 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {
+        throw 'Required installer human-output initializer is unavailable.'
+    }
+    . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -512,21 +519,10 @@ function Invoke-UvPipInstallResilient {
         [string]$SourceDir = ''
     )
 
-    Remove-PluginBuildArtifacts -SourceDir $SourceDir
-    $delays = @(3, 6, 10)
-    $out = & uv pip install @Arguments 2>&1
-    $exit = $LASTEXITCODE
-    if ($exit -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
-    foreach ($delay in $delays) {
-        if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
-        Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        Start-Sleep -Seconds $delay
-        Remove-PluginBuildArtifacts -SourceDir $SourceDir
-        $out = & uv pip install @Arguments 2>&1
-        $exit = $LASTEXITCODE
-        if ($exit -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
-    }
-    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
+    $result = Invoke-UvPipInstallResilientShared -Arguments $Arguments `
+        -BeforeAttempt { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
+    if ($result.ExitCode -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
+    return $result
 }
 
 function Invoke-UvVenvResilient {
@@ -813,49 +809,29 @@ function Test-PayloadUnchangedSinceAdmission {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Ensure the target slot exists, tossing it first if a prior build left it
-       INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-       over a corpse (#935). The current/active slot is never tossed. Returns
-       $false when the primitive REFUSES (e.g. the incomplete slot is selected or
-       still in use): building over it would mutate a live/selected slot in
-       place, so the caller must not proceed (#5472). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return $true }
+    param([string]$PayloadHash = '')
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return $true }
-    & $py $vr --root $InstallDir --link-name 'venv' slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Step $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Runtime slot versions/$SrcVersion could not be safely prepared (exit $LASTEXITCODE); refusing to build over it in place"
-        return $false
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
     }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash $PayloadHash -LinkName (Split-Path -Leaf $LinkDir)
     return $true
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so the slot is provably a healthy, complete build. A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode.
-
-       $PayloadHash is the value computed ONCE before admission and used to
-       build this slot -- never recomputed here. Callers that built the slot
-       first confirm via Test-PayloadUnchangedSinceAdmission that the sources
-       still hash to it, so the marker never names bytes that were not
-       installed. #>
     param([string]$PayloadHash = '')
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', 'venv', 'mark-complete', $SrcVersion)
-    if ($PayloadHash) { $mcArgs += @('--payload-hash', $PayloadHash) }
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Step $_ }
-    # A refused publication (e.g. conflicting completion evidence for this
-    # numbered version) must fail the install, never be swallowed (#5472).
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to publish the completion marker for runtime slot versions/$SrcVersion (exit $LASTEXITCODE)"
-        return $false
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 
@@ -994,8 +970,9 @@ function Enter-InstallLock {
        is NO stale-lock class (no PID reaping). Retries up to $TimeoutSec; returns
        $true when acquired (handle in $script:InstallLockHandle), $false when
        another install held it the whole window -- the caller then DEFERS (the
-       in-flight install lands the version). A non-contention error degrades to
-       "proceed WITHOUT the lock" so a lock fault can never wedge the installer. #>
+       in-flight install may land the version, but this run reports "blocked by
+       lock" (exit 75), never success). A non-contention fault fails closed: it
+       exits 1 rather than ever installing without the lock. #>
     param([int]$TimeoutSec = 300)
     if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
     $lockPath = Join-Path $InstallDir '.install.lock'
@@ -1012,20 +989,28 @@ function Enter-InstallLock {
             return $true
         } catch [System.IO.IOException] {
             # Only a sharing/lock violation means "another install holds it" ->
-            # retry until the deadline. Any OTHER IOException (disk full, FS
-            # error) is a real fault: warn + degrade to lock-free rather than
-            # masking it as contention and spinning silently (ce#802 review).
-            $win32 = $_.Exception.HResult -band 0xFFFF
-            if ($win32 -eq 32 -or $win32 -eq 33) {   # ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+            # retry until the deadline: ERROR_SHARING_VIOLATION/ERROR_LOCK_VIOLATION
+            # (32/33) on Windows, EWOULDBLOCK from the FileShare.None lock on
+            # Linux (11) and macOS (35). Any OTHER IOException (disk full, FS
+            # error) is a real fault: fail closed (exit 1) rather than masking it
+            # as contention and spinning silently, and never install unlocked.
+            $code = $_.Exception.HResult -band 0xFFFF
+            $runtimeInfo = [System.Runtime.InteropServices.RuntimeInformation]
+            $osPlatform = [System.Runtime.InteropServices.OSPlatform]
+            $contention = if ($env:OS -eq 'Windows_NT') { $code -eq 32 -or $code -eq 33 } else {
+                ($runtimeInfo::IsOSPlatform($osPlatform::Linux) -and $code -eq 11) -or
+                ($runtimeInfo::IsOSPlatform($osPlatform::OSX) -and $code -eq 35)
+            }
+            if ($contention) {
                 if ((Get-Date) -ge $deadline) { return $false }
                 Start-Sleep -Milliseconds 750
             } else {
-                Write-Warn "Install-lock IO error (not contention): $($_.Exception.Message) -- proceeding WITHOUT the lock."
-                return $true
+                Write-Fail "Install-lock IO error (not contention): $($_.Exception.Message) -- refusing to proceed unlocked."
+                exit 1
             }
         } catch {
-            Write-Warn "Install-lock error: $($_.Exception.Message) -- proceeding WITHOUT the lock."
-            return $true   # non-contention fault -> degrade to today's lock-free behavior
+            Write-Fail "Install-lock error: $($_.Exception.Message) -- refusing to proceed unlocked."
+            exit 1   # a lock fault fails closed: never install unlocked
         }
     }
 }
@@ -1205,7 +1190,6 @@ function Get-SignedBasePython {
 }
 
 function New-SignedVenv {
-    if (-not (Invoke-VersionedSlotClean)) { return $false }
     return [bool](New-SignedVenvShared `
         -VenvDir $VenvDir `
         -VenvPython $VenvPython `
@@ -2042,6 +2026,12 @@ function Write-Binstubs {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
+    # Native service callers use the Python resolver without a payload or PATH.
+    $scriptsDir = Join-Path $InstallDir 'scripts'
+    New-Item -ItemType Directory -Path $scriptsDir -Force -ErrorAction Stop | Out-Null
+    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $r) -Destination (Join-Path $scriptsDir $r) -Force -ErrorAction Stop
+    }
     if (-not $publishGlobalBinstubs) {
         Write-Ok 'Scoped install keeps the global compatibility binstub unchanged'
         return
@@ -2404,8 +2394,8 @@ function Invoke-Install {
     # (the racing-rebuild that yields a DOA slot). Wait for any in-flight install;
     # on timeout DEFER -- it will land the version.
     if (-not (Enter-InstallLock)) {
-        Write-Warn 'Another agent-bridge install is in progress -- deferring this run (the in-flight install lands the version). No-op.'
-        return
+        Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
+        exit 75
     }
     # The transaction's single payload fingerprint (#5472): computed once under
     # the lock, BEFORE admission, and carried unchanged through admission, the
@@ -2432,6 +2422,8 @@ function Invoke-Install {
         Exit-InstallLock
         exit 1
     }
+    [void](Invoke-VersionedSlotClean -PayloadHash $payloadHash)
+    $admission = if ($script:RuntimeConstructionReuse) { 'reuse' } else { 'construct' }
 
     # Create directories
     foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -2688,10 +2680,6 @@ function Invoke-Start {
         }
     }
 
-    $logFile = Join-Path $InstallDir 'agent-bridge.log'
-    $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
-
-
     # Prefer the scheduled task to start the daemon whenever one is registered
     # -- for BOTH headless (S4U/Password, session 0) and at-logon (interactive)
     # tasks. The Task Scheduler owns the resulting process, so it is NOT parented
@@ -2738,24 +2726,14 @@ function Invoke-Start {
         Write-Warn '  For an always-on host reached over SSH, reinstall headless: install.ps1 update -NonInteractive'
     }
 
-    # Start the service through a DETACHED, hidden pwsh launched via
-    # ShellExecute (no -NoNewWindow / no redirection on THIS call, so handles
-    # are NOT inherited from the installer). That inner pwsh does the redirected
-    # Start-Process and records the pid. Without this indirection the long-lived
-    # uvicorn server inherits the installer's std handles; when install.ps1 is
-    # run with its output redirected or piped, the server holds that handle open
-    # and the installer appears to hang after "Update complete".
-    # #1376: pin both the inner python AND its conhost host to the runtime home,
-    # never the installer's cwd (the installed-plugins payload dir). -NoNewWindow
-    # keeps this conhost alive hosting the long-lived daemon, so without an
-    # explicit working dir it would hold the payload folder open and a later
-    # ``copilot plugin update agent-bridge`` would fail (os error 32) and empty it.
-    $inner = @"
-`$p = Start-Process -FilePath '$($LinkPython -replace "'", "''")' -ArgumentList '-m','agent_bridge','start' -WorkingDirectory '$($InstallDir -replace "'", "''")' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
-Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
-"@
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
-    $pwshForHeadless = Get-PwshPath
+    # Start the service directly through the bridge's own job-surviving launch
+    # (`service start --direct` -> agent_procutil.spawn_daemon): it breaks away
+    # from the installer's Job (an SSH session's or an updater's), falls back to
+    # the WMI broker when that Job forbids breakaway, roots the daemon at the
+    # runtime home rather than the installer's cwd (#1376: never the plugin
+    # payload), and gives it its own stdio files, so the long-lived server never
+    # holds the installer's std handles open. A PowerShell process launch offers
+    # none of those lifetime guarantees.
 
     # Spawn + health-gate, retrying a few times. A single slow/failed spawn must
     # NOT leave the service down (the previous single-attempt logic exited here,
@@ -2766,27 +2744,27 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
         $label = if ($attempt -gt 1) { " (attempt $attempt/$maxAttempts)" } else { '' }
         Write-Step "Starting agent-bridge$label..."
 
-        # Launch the detached, hidden pwsh through conhost --headless so Windows
-        # Terminal (when configured as the default terminal app) cannot capture it
-        # as a visible window/tab -- -WindowStyle Hidden alone is ignored by the
-        # DefTerm handoff. ShellExecute (no -NoNewWindow / no redirection on THIS
-        # call) is preserved so the long-lived python.exe (-m agent_bridge) does
-        # not inherit the installer's std handles.
-        Start-Process -FilePath 'conhost.exe' `
-            -ArgumentList @('--headless', "`"$pwshForHeadless`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
-            -WorkingDirectory $InstallDir `
-            -WindowStyle Hidden | Out-Null
+        # The command writes to stderr when the daemon does not come up; under
+        # $ErrorActionPreference='Stop' Windows PowerShell 5.1 would turn that
+        # into a terminating error and skip the drain and remaining retries.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $LinkPython -m agent_bridge service start --direct 2>&1 | ForEach-Object { Write-Host "  $_" }
+        } finally {
+            $ErrorActionPreference = $prevEAP
+        }
 
         # Success == the port actually answers /health (not merely "a process
         # exists"). Single-shot probe per second so the loop paces at ~1s.
         for ($i = 0; $i -lt 25; $i++) {
-            Start-Sleep -Seconds 1
             if (Test-HealthOnce) {
                 $rp = Get-RunningProcess
                 $pidTxt = if ($rp) { "pid=$($rp.Id), " } else { '' }
                 Write-Ok ("agent-bridge started ({0}port={1})" -f $pidTxt, (Get-ActiveEndpoint).Port)
                 return
             }
+            Start-Sleep -Seconds 1
         }
 
         Write-Warn "agent-bridge did not become healthy within 25s$label -- draining and retrying"
@@ -3097,6 +3075,23 @@ function Invoke-UpdateSlotBuild {
     Remove-ConsoleTrampolines -VenvDir $VenvDir
 }
 
+function Invoke-ServingRuntimeReconcile {
+    & $VenvPython -m agent_bridge deploy --reconcile-serving --probe-serving --health-timeout 180
+    if ($LASTEXITCODE -eq 0) { return }
+    if ($LASTEXITCODE -ne 10) {
+        throw "Serving runtime reconcile failed (probe exit $LASTEXITCODE); completed slot left unchanged."
+    }
+    Write-UpdateMarker
+    try {
+        & $VenvPython -m agent_bridge deploy --reconcile-serving --health-timeout 180
+        if ($LASTEXITCODE -ne 0) {
+            throw "Serving runtime reconcile failed (exit $LASTEXITCODE); completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
+        }
+    } finally {
+        Clear-UpdateMarker
+    }
+}
+
 function Invoke-Update {
     Write-Host ''
     Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
@@ -3104,33 +3099,24 @@ function Invoke-Update {
 
     if (-not (Ensure-Uv)) { exit 1 }
 
-    # Strict same-content no-op (ce#776/#777) -- checked BEFORE we stop the daemon
-    # or touch the venv. Otherwise the classic same-version path below "downgrades
-    # to stop-and-rebuild" IN PLACE over the live slot: it stops the running
-    # daemon and rewrites its python.exe / site-packages, the WinError-2 crash
-    # cascade (dotfiles#1612). If the active slot already matches the target
-    # content there is nothing to do; a genuine force-restart is a dedicated
-    # command (`service restart`), not an implicit effect of a reconcile.
-    $preLockHash = Get-PayloadHash
-    if (Test-SlotContentCurrent -PayloadHash $preLockHash) {
-        Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no stop, no rebuild)."
-        Write-DeployManifest -PayloadHash $preLockHash
-        return
-    }
-
     # Serialize concurrent installers (see Invoke-Install): don't let an
-    # overlapping install/update rebuild the venv over an in-flight one. Defer on
-    # timeout; re-check the no-op after acquiring in case it just landed.
+    # overlapping install/update race serving convergence or rebuild the venv.
     if (-not (Enter-InstallLock)) {
-        Write-Warn 'Another agent-bridge install/update is in progress -- deferring this run. No-op.'
-        return
+        Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
+        exit 75
     }
     # The transaction's single payload fingerprint (see Invoke-Install).
     $payloadHash = Get-PayloadHash
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
-        Write-Ok "agent-bridge $SrcVersion already active after lock wait -- no-op."
-        Write-DeployManifest -PayloadHash $payloadHash
-        Exit-InstallLock
+        try {
+            # Slot/import health proves reusable bytes, not the serving version.
+            # This guarded seam never rebuilds, cold-starts or falls back to stop.
+            Invoke-ServingRuntimeReconcile
+            Write-DeployManifest -PayloadHash $payloadHash
+            Write-Ok "agent-bridge $SrcVersion content matched; serving runtime reconciled without rebuilding."
+        } finally {
+            Exit-InstallLock
+        }
         return
     }
 
@@ -3143,6 +3129,8 @@ function Invoke-Update {
         Exit-InstallLock
         exit 1
     }
+    [void](Invoke-VersionedSlotClean -PayloadHash $payloadHash)
+    $admission = if ($script:RuntimeConstructionReuse) { 'reuse' } else { 'construct' }
 
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
@@ -3261,12 +3249,11 @@ function Invoke-Update {
         if ($VersionedRuntime) {
             # The `venv` link was never swapped (activate runs only after a healthy
             # build), so the previous slot is still active. Discard the half-built
-            # new slot (unless it IS the active one -- a same-version refresh) and
+            # new slot -- only one this run constructed: a reused slot was already
+            # published (create-once, #5472) and is never deleted here -- and
             # restart the previous version if the classic path stopped it.
-            if ($SrcVersion -and $SrcVersion -ne $prevVersion) {
-                $failedSlot = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
-                if (Test-Path $failedSlot) { Remove-Item -Recurse -Force $failedSlot -ErrorAction SilentlyContinue }
-            }
+            # The attached construction owner reclaims only its own unfinished
+            # candidate after rollback settles; no unguarded directory deletion.
             if ($wasRunning -and -not $useCutover -and -not $activeForward) {
                 if (-not (Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous version...')) { $wasRunning = $false }
             }
@@ -3389,7 +3376,13 @@ try {
         'provision' { Invoke-Provision }
     }
 } finally {
+    try {
+        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+            Stop-RuntimeConstruction
+        }
+    } finally {
     # Release the install lock on any exit path (the OS also drops it on process
     # death, so an `exit`/crash never strands it).
     Exit-InstallLock
+    }
 }

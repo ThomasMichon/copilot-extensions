@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -207,6 +207,19 @@ A local worktree agent, an agent on another machine, a CodeSpace agent, and a
 container agent are all reachable through **one** creation / inspection /
 communication contract. Where an agent runs is a venue detail, not a different
 interface.
+
+### host-qualified-guest-identity
+A host and each of its persistent guests are independently addressable through
+compact, stable logical names. A guest needs one distinguishing qualifier, not
+a growing chain of platform, distribution and transport suffixes. The owning
+machine map declares the host/guest relationship and selected substrate;
+spelling is a convenience, never execution authority.
+
+An adopter may designate one WSL guest as its normal worktree environment and
+align the host's default WSL selection with it. Logical addresses remain stable
+when a distribution's implementation name differs. Installation ownership and
+worktree locality identify the same guest through direct, SSH, service and
+interactive entry paths without relying on inherited shell variables.
 
 ### address-any-project
 Every layer of the fabric is invocable against an **explicitly named project**,

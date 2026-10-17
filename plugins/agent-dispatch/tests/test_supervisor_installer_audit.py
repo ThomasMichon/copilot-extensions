@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shlex
@@ -270,7 +271,8 @@ def test_retirement_audit_warning_does_not_corrupt_result_or_suppress_diagnostic
         "$ErrorActionPreference='Stop'",
         "function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }",
         f". '{helper}'",
-        '$raw=\'supervisor lifecycle audit unavailable\' + "`n" + \'{"ok":true,"retired":[123],"errors":[]}\'',
+        "$diagnostic=[System.Management.Automation.ErrorRecord]::new([Exception]::new('supervisor lifecycle audit unavailable'),'fixture',[System.Management.Automation.ErrorCategory]::NotSpecified,$null)",
+        '$raw=@($diagnostic, \'{"ok":true,"selected":[123],"retired":[123],"errors":[]}\')',
         "$result=Convert-SupervisorRetirementResult -Output $raw",
         "$result|ConvertTo-Json -Compress",
     ])
@@ -278,8 +280,178 @@ def test_retirement_audit_warning_does_not_corrupt_result_or_suppress_diagnostic
     fixture.write_text(script)
     result = subprocess.run(["pwsh", "-NoProfile", "-File", str(fixture)], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"ok": True, "retired": [123], "errors": []}
+    assert json.loads(result.stdout) == {"ok": True, "selected": [123], "retired": [123], "errors": []}
     assert "audit unavailable" in result.stderr
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+def test_retirement_native_stream_framing(tmp_path, host):
+    if not shutil.which(host):
+        pytest.skip(f"{host} unavailable")
+    modes = [
+        "compact", "pretty", "failed", "truncated", "malformed", "multiple",
+        "diagnostic-stdout", "wrong-type", "foreign-retired", "array-root", "empty",
+    ]
+    producer = tmp_path / "producer.py"
+    producer.write_text(
+        "import json, sys\n"
+        "mode = sys.argv[1]\n"
+        "payload = dict(ok=mode != 'failed', selected=[123], retired=[123], "
+        "errors=['nested {brace} and \"quote\"'] if mode == 'failed' else [])\n"
+        "if mode == 'pretty': payload['detail'] = {'nested': [{'text': 'braces }{ and \"quote\"'}, {}]}\n"
+        "if mode == 'wrong-type': payload['ok'] = 'true'\n"
+        "if mode == 'foreign-retired': payload['retired'] = [456]\n"
+        "text = json.dumps(payload, indent=2 if mode == 'pretty' else None)\n"
+        "if mode == 'truncated': text = text[:-1]\n"
+        "if mode == 'malformed': text = '{not json}'\n"
+        "if mode == 'multiple': text += '\\n' + text\n"
+        "if mode == 'diagnostic-stdout': text = 'unexpected stdout\\n' + text\n"
+        "if mode == 'array-root': text = '[' + text + ']'\n"
+        "if mode == 'empty': text = ''\n"
+        "print(mode + ': before {diagnostic}', file=sys.stderr, flush=True)\n"
+        "print(text, flush=True)\n"
+        "print(mode + ': after diagnostic', file=sys.stderr, flush=True)\n"
+        "sys.exit(1 if mode == 'failed' else 0)\n"
+    )
+    helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
+    fixture = tmp_path / "framing.ps1"
+    fixture.write_text("\n".join([
+        "$ErrorActionPreference='Continue'",
+        "function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }",
+        f". '{helper}'",
+        "$outcomes=@(",
+        "foreach($mode in @(" + ",".join(f"'{mode}'" for mode in modes) + ")) {",
+        f"  $raw=@(& '{sys.executable}' '{producer}' $mode 2>&1)",
+        "  $childExit=$LASTEXITCODE",
+        "  try {",
+        "    $result=Convert-SupervisorRetirementResult -Output $raw",
+        "    @{mode=$mode; accepted=$true; result=$result; exit=$childExit}",
+        "  } catch {",
+        "    @{mode=$mode; accepted=$false; error=$_.Exception.Message; exit=$childExit}",
+        "  }",
+        "}",
+        ")",
+        "ConvertTo-Json -InputObject $outcomes -Depth 10 -Compress",
+    ]))
+    result = subprocess.run(
+        [host, "-NoProfile", "-File", str(fixture)],
+        capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    outcomes = json.loads(result.stdout)
+    assert [data["mode"] for data in outcomes] == modes
+    for data in outcomes:
+        mode = data["mode"]
+        valid = mode in {"compact", "pretty", "failed"}
+        assert data["accepted"] is valid, data
+        assert data["exit"] == (1 if mode == "failed" else 0), data
+        assert f"{mode}: before {{diagnostic}}" in result.stderr
+        assert f"{mode}: after diagnostic" in result.stderr
+        if valid:
+            assert data["result"]["ok"] is (mode != "failed"), data
+            assert data["result"]["retired"] == [123], data
+        else:
+            assert data["error"], data
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+def test_real_retirement_producer_pretty_result_boundary(tmp_path):
+    """Execute the real producer and emitter without cold-importing the CLI."""
+    def function(filename, name):
+        source = (PLUGIN / "src/agent_dispatch" / filename).read_text()
+        node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == name)
+        return ast.get_source_segment(source, node)
+
+    producer = tmp_path / "retirement-producer.py"
+    producer.write_text(
+        "from __future__ import annotations\n"
+        "import json,os,sys\nfrom types import SimpleNamespace, ModuleType\n"
+        "__package__='fixture'\n"
+        "sys.modules['fixture']=ModuleType('fixture')\n"
+        "supervisor_processes=ModuleType('fixture.supervisor_processes')\n"
+        "supervisor_lifecycle=ModuleType('fixture.supervisor_lifecycle')\n"
+        "sys.modules[supervisor_processes.__name__]=supervisor_processes\n"
+        "sys.modules[supervisor_lifecycle.__name__]=supervisor_lifecycle\n"
+        "supervisor_processes.retire_windows_supervisor_generations = "
+        "lambda install_dir: SimpleNamespace(ok=False, selected=[123], retired=[], errors=['fixture {diagnostic}'])\n"
+        "supervisor_lifecycle.Invocation=SimpleNamespace(create=lambda *a: SimpleNamespace())\n"
+        "supervisor_lifecycle.audit = lambda *a, **kw: print('audit unavailable', file=sys.stderr)\n"
+        + function("__main__.py", "_emit") + "\n"
+        + function("coordinator_cli.py", "_cmd_retire_supervisors") + "\n"
+        f"args=SimpleNamespace(install_dir={str(tmp_path)!r})\n"
+        "sys.exit(_cmd_retire_supervisors(args))\n"
+    )
+    helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
+    fixture = tmp_path / "actual-producer.ps1"
+    fixture.write_text("\n".join([
+        "$ErrorActionPreference='Continue'",
+        "function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }",
+        f". '{helper}'",
+        f"$raw=@(& '{sys.executable}' '{producer}' 2>&1)",
+        "$rc=$LASTEXITCODE",
+        "$result=Convert-SupervisorRetirementResult -Output $raw",
+        "if($rc -ne 1 -or $result.ok -ne $false){throw 'failed result lost'}",
+        "$result|ConvertTo-Json -Depth 10 -Compress",
+    ]))
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-File", str(fixture)],
+        capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "ok": False, "selected": [123], "retired": [], "errors": ["fixture {diagnostic}"],
+    }
+    assert "audit unavailable" in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+@pytest.mark.parametrize("mode", ["pretty", "partial-failure", "malformed"])
+def test_retirement_installer_callsite_preserves_fallback_scope(tmp_path, mode):
+    package = tmp_path / "agent_dispatch"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "__main__.py").write_text(
+        "import json,sys\n"
+        "print('audit diagnostic', file=sys.stderr)\n"
+        f"mode={mode!r}\n"
+        "print('{truncated' if mode == 'malformed' else json.dumps("
+        "dict(ok=mode == 'pretty', selected=[123,456], retired=[123],"
+        "errors=['fixture partial refusal'] if mode == 'partial-failure' else []), indent=2))\n"
+        "sys.exit(0 if mode == 'pretty' else 1)\n"
+    )
+    source = (PLUGIN / "scripts/install.ps1").read_text()
+    start = source.index("function Retire-SupervisorProcesses {")
+    function = source[start:source.index("\nfunction ", start + 1)]
+    helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
+    fixture = tmp_path / "retirement-callsite.ps1"
+    fixture.write_text("\n".join([
+        "$ErrorActionPreference='Stop'; $env:OS='Windows_NT'; $script:Fallbacks=0",
+        f"$InstallDir='{tmp_path}'; $VenvPython='{sys.executable}'; $LinkPython=$VenvPython",
+        "function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }",
+        f". '{helper}'",
+        "function Invoke-SupervisorAudit { param($Event,$Reason,$Outcome,$ExitCode) }",
+        "function Retire-SupervisorProcessesFallback { $script:Fallbacks++; return 42 }",
+        function,
+        "$count=Retire-SupervisorProcesses",
+        "if($ErrorActionPreference -ne 'Stop'){throw 'error preference leaked'}",
+        "@{count=$count;fallbacks=$script:Fallbacks}|ConvertTo-Json -Compress",
+    ]))
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-File", str(fixture)],
+        env=dict(os.environ, PYTHONPATH=str(tmp_path)),
+        capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "count": 42 if mode == "malformed" else 1,
+        "fallbacks": 1 if mode == "malformed" else 0,
+    }
+    assert "audit diagnostic" in result.stderr
+    assert ("result rejected:" in result.stderr) is (mode == "malformed")
+    assert ("fixture partial refusal" in result.stderr) is (mode == "partial-failure")
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")

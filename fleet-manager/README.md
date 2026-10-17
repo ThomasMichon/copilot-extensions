@@ -3,10 +3,12 @@
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
 capacity planning, explicit release-snapshot inspection, installed-client
 resource diagnostics, explicitly authenticated artifact staging and an explicit
-local current-observation storage API.** No
-controller, provider invocation, credential lookup, managed install/update/uninstall,
-telemetry sink or managed-runtime/capacity mutation is delivered yet.
-Those remain the [canonical effort](../efforts/active/linux-role-fleet/README.md).
+local current-observation storage API, and an opt-in authenticated NEW
+Gateway/SDK/subscribed-controller boundary.**
+The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
+no production Gateway/index offload or managed install/update/uninstall,
+telemetry sink or fleet resource mutation is claimed.
+Broader fleet delivery remains the [canonical effort](../efforts/active/linux-role-fleet/README.md).
 
 ```text
 fleet-manager plan --template recommended.json --config adopter.json --inventory live.json --fleet-id example --machine-limit 5
@@ -102,6 +104,15 @@ local prerequisite, not an authenticated push endpoint, complete fleet roster,
 resident subscription service or a new domain writer. Default CLI commands do
 not open the store, and no installed service or producer is enrolled by it.
 
+Explicit `auth` and `server` extras supply maintained cryptographic dependencies for the
+[new authenticated Gateway](docs/gateway-runtime.md).
+
+The explicit [runtime identity verifier](docs/runtime-authentication.md) adds
+optional maintained-library JWT/DPoP checks and a bounded single-owner replay
+fence. It is not enrollment, scoped policy authorization or a Gateway listener.
+Its `runtime-authentication` extra does not change default client dependencies,
+select a provider, acquire credentials or impose a human-presence timer.
+
 ## Thin client artifacts and local diagnostics
 
 `fleet-manager` builds as a dependency-free runtime wheel. Its wheel carries the
@@ -120,7 +131,7 @@ fleet-manager doctor --role client
 ```
 
 `doctor` checks the imported package/version against its installed distribution
-and the package initializer/runtime resource against their SHA-256 wheel RECORD
+and the package initializer/runtime resource and executable companions against their SHA-256 wheel RECORD
 entries. It returns local installed-resource evidence, not a trusted release
 attestation, whole-package integrity proof or controller/service health. A
 missing, unreadable, linked, oversized or mismatched resource is an error,
@@ -129,6 +140,11 @@ there is no source-checkout, plugin or PATH fallback. No remote endpoint is
 queried, no credentials are acquired and no hosting role is accepted.
 Exit 0 means that local resource evidence passed; exit 1 means invalid or
 unavailable evidence. The command creates no configuration, service or runtime.
+
+Artifact staging rechecks every executable resource against those admitted
+digests before execution and loads the primitive and its companions from
+retained bytes. Later filesystem replacement cannot change a lazy component
+import during the staging lifetime.
 
 Ordinary explicit package-manager installation/removal remains supported.
 Native first-touch tests install the built wheel into a fresh package-manager
@@ -148,11 +164,14 @@ linked-helper refusal and first-touch install/removal proofs. The additional
 native build/refusal matrix is marked `client_distribution_full` and runs in
 unfiltered standalone validation and the existing manual native CI lane.
 Local full validation uses `tools/run-standalone-tests.py fleet-manager`;
-`PYTEST_ADDOPTS='-m "not client_distribution_full"'` selects the same fast
+`PYTEST_ADDOPTS='-m "not client_distribution_full and not observation_retention_full"'`
+selects the same fast
 portfolio as required PR CI without removing the real installation boundary.
-The aggregate native fleet-suite deadline is 120 seconds, inside the existing
-five-minute job budget; this includes the growing journal/claim suite and the
-real packaging boundary. Each artifact subprocess retains its 30-second limit.
+The required fleet selection retains its 120-second deadline; unfiltered local
+and explicit manual runs retain the production-size replay window and full
+artifact matrix under the existing 600-second budget. See
+[TESTING.md](../TESTING.md) for the canonical portfolio and job budgets.
+Each artifact subprocess retains its 30-second limit.
 
 Vision reconciliation: this prerequisite closes part of machine-fleet
 `unified-coordination-product` and the reviewed standalone-system distribution
@@ -190,7 +209,8 @@ The strict schema-v1 `fleet-manager.release` has:
   The client role cannot require a control/executor component. This is declared
   role isolation, not analysis of executable dependencies.
 
-No actual released Gateway/node artifacts are claimed by these declarations.
+No actual released Gateway/node artifacts are claimed by these declarations;
+the opt-in source Gateway runtime is not a released deployment.
 A manifest is explicit input, not a generated product release or proof of
 artifact availability. Role closures must be stated directly; there is no
 dependency resolver, artifact URL, executable path or apply operation.
@@ -250,9 +270,11 @@ The first [operation contract](docs/operation-contract.md) adds immutable,
 content-bound intent and target-receipt records as a Python API only. Strict
 scope/generation/digest correlation distinguishes acceptance, effect outcome and
 uncertainty. Parsing is not authentication, durable admission, execution,
-monotonic receipt ordering or objective settlement. No CLI mutation or resident
-control runtime is added; existing fixed-service routing contracts remain owned
-by `agent-fleet-contracts`.
+monotonic receipt ordering or objective settlement. This operation contract
+adds no CLI mutation or resident control runtime; the separate opt-in
+[NEW read/credential Gateway](docs/gateway-runtime.md) does not execute these
+operation commands. Existing fixed-service routing contracts remain owned by
+`agent-fleet-contracts`.
 
 An explicit Python [local operation journal](docs/operation-ledger.md) now
 persists admission/outbox/audit and correlated receipt updates transactionally.

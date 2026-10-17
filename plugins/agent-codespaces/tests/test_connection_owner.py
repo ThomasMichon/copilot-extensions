@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import time
 import types
 
@@ -542,6 +543,14 @@ def test_ensure_owner_running_spawns_and_waits_for_liveness(store, monkeypatch):
     # Never the caller's ambient cwd -- this is a permanent-ish background
     # daemon rooted at HOME instead.
     assert seen_kwargs.get("cwd") == os.path.expanduser("~")
+    # Launched through spawn_daemon: stdio appended to a log beside its state.
+    assert seen_kwargs["stdin"] == subprocess.DEVNULL
+    assert seen_kwargs["stdout"].name == os.path.join(
+        str(owner.OWNER_FILE.parent), "logs", "owner-stdio.log"
+    )
+    assert "agent_codespaces owner" in (
+        owner.OWNER_FILE.parent / "logs" / "owner-stdio.log"
+    ).read_text(encoding="utf-8")
 
 
 def test_ensure_owner_running_returns_false_on_spawn_failure(store, monkeypatch):
@@ -551,6 +560,53 @@ def test_ensure_owner_running_returns_false_on_spawn_failure(store, monkeypatch)
     monkeypatch.setattr("subprocess.Popen", fake_popen)
     monkeypatch.setattr(owner, "is_owner_live", lambda now=None: False)
     assert owner.ensure_owner_running(types.SimpleNamespace()) is False
+
+
+@pytest.mark.parametrize(
+    ("ready_after", "exit_code", "timeout", "expected"),
+    [
+        (16.0, None, None, True),
+        (None, 1, None, False),
+        (None, 0, None, False),
+        (None, None, 1.0, False),
+        (1.0, None, 1.0, True),
+        (None, None, 0.0, False),
+    ],
+)
+def test_owner_startup_budget(store, monkeypatch, caplog, ready_after, exit_code, timeout, expected):
+    clock = [0.0]
+    spawned = []
+    child = types.SimpleNamespace(poll=lambda: exit_code)
+    monkeypatch.setattr(owner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(owner.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(
+        owner, "is_owner_live",
+        lambda: bool(spawned) and ready_after is not None and clock[0] >= ready_after,
+    )
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: spawned.append(child) or child)
+    kwargs = {} if timeout is None else {"spawn_timeout": timeout}
+
+    assert owner.ensure_owner_running(types.SimpleNamespace(), poll=0.7, **kwargs) is expected
+    assert len(spawned) == 1
+    if ready_after == 16.0:
+        assert 16.0 <= clock[0] < 30.0
+    elif exit_code is not None:
+        assert clock[0] == 0.0
+        assert f"exit code {exit_code}" in caplog.text
+    else:
+        assert clock[0] == timeout
+        if not expected:
+            assert "startup may still be in progress" in caplog.text
+    assert not owner.OWNER_FILE.exists()
+
+
+def test_owner_startup_accepts_winner_after_contender_exits(store, monkeypatch):
+    live = iter([False, False, True])
+    monkeypatch.setattr(owner, "is_owner_live", lambda: next(live))
+    monkeypatch.setattr(
+        "subprocess.Popen", lambda *a, **k: types.SimpleNamespace(poll=lambda: 0),
+    )
+    assert owner.ensure_owner_running(types.SimpleNamespace()) is True
 
 
 def test_should_defer_to_owner_spins_up_on_demand(store, monkeypatch):
@@ -813,8 +869,8 @@ def test_should_defer_disabled_or_missing_config(store):
     assert owner.should_defer_to_owner(types.SimpleNamespace(), env={}) is False
 
 
-def test_should_defer_enabled_but_not_live(store):
-    # No beacon -> Owner not live -> do not defer (own the relay).
+def test_should_defer_enabled_but_not_live(store, monkeypatch):
+    monkeypatch.setattr(owner, "ensure_owner_running", lambda _cfg: False)
     assert owner.should_defer_to_owner(_cfg(True), env={}) is False
 
 

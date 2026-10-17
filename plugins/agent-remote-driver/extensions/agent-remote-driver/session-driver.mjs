@@ -1,6 +1,10 @@
 export function createSessionDriver(session) {
   return {
-    send: ({ content, mode }) => session.send({ prompt: content, mode }),
+    send: ({ content, mode, source }) => session.send({
+      prompt: content,
+      mode,
+      ...(source === undefined ? {} : { source }),
+    }),
     abort: () => session.abort(),
   };
 }

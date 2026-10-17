@@ -20,34 +20,31 @@ _remove_budget_build_artifacts() {
     done
 }
 
-_install_budget_guidance_package() {
+_budget_procutil_source() {
     local procutil="$PLUGIN_DIR/libs/agent-procutil"
     if [[ ! -f "$procutil/pyproject.toml" ]]; then
         procutil="$PLUGIN_DIR/../../libs/agent-procutil"
     fi
-    [[ -f "$procutil/pyproject.toml" ]] || { _fail 'Owning agent-procutil source is missing'; return 1; }
+    [[ -f "$procutil/pyproject.toml" ]] || { _fail 'Owning agent-procutil source is missing' >&2; return 1; }
+    (cd "$procutil" && pwd)
+}
+
+_install_budget_guidance_package() {
+    local procutil
+    procutil="$(_budget_procutil_source)" || return 1
     _remove_budget_build_artifacts "$procutil" || return 1
     _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
     if [[ "$HAVE_UV" -eq 1 ]]; then
         local uv_rc=0
-        if uv pip install --python "$VENV_PYTHON" "$procutil" "$PLUGIN_DIR" --quiet 2>/dev/null; then
-            uv_rc=0
-        else
-            uv_rc=$?
-        fi
+        "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \
+            --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "$procutil" "$PLUGIN_DIR" --quiet || uv_rc=$?
         _remove_budget_build_artifacts "$procutil" || return 1
         _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
-        [[ "$uv_rc" -ne 0 ]] || return 0
-        _step 'uv package install failed -- falling back to python -m pip'
+        return "$uv_rc"
     fi
 
-    _remove_budget_build_artifacts "$procutil" || return 1
-    _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
-    local pip_rc=0
-    "$VENV_PYTHON" -m pip install --quiet "$procutil" "$PLUGIN_DIR" 2>/dev/null || pip_rc=$?
-    _remove_budget_build_artifacts "$procutil" || return 1
-    _remove_budget_build_artifacts "$PLUGIN_DIR" || return 1
-    return "$pip_rc"
+    _fail 'uv is required; unrestricted pip fallback is not supported'
+    return 1
 }
 
 ACTION="${BUDGET_GUIDANCE_ACTION:-install}"
@@ -299,7 +296,7 @@ _versioned_activate() {
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
-    _versioned_mark_complete
+    _versioned_mark_complete || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
@@ -324,15 +321,27 @@ _bootstrap_python() {
     if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
     local __c
     for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+        if command -v "$__c" >/dev/null 2>&1 &&
+            "$__c" -I -c 'import sys; assert sys.version_info >= (3, 10)' >/dev/null 2>&1; then
+            command -v "$__c"; return 0
+        fi
     done
+    if command -v uv >/dev/null 2>&1; then
+        local base
+        base="$(uv python find 3.11 2>/dev/null)" ||
+            base="$(uv run --no-project --python 3.11 python -I -c 'import sys; print(sys.executable)')" ||
+            return 1
+        [[ -x "$base" ]] || return 1
+        printf '%s\n' "$base"
+        return 0
+    fi
     return 1
 }
 
 _payload_hash() {
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
+    # changed the payload WITHOUT bumping the version. Fails on any error.
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -341,7 +350,26 @@ _payload_hash() {
             __parts="$__parts"$'\n'"$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    if [[ ! -f "$PLUGIN_DIR/libs/agent-procutil/pyproject.toml" ]]; then
+        local procutil
+        procutil="$(_budget_procutil_source)" || return 1
+        __parts="$__parts"$'\n'"$(cat "$procutil/pyproject.toml")"
+    fi
+    # Fails (no output) when no SHA-256 implementation works: the caller must
+    # then refuse to publish a slot without its fingerprint.
+    local __d
+    if command -v sha256sum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
+    elif command -v openssl >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
+    else
+        return 1
+    fi
+    __d="${__d%% *}"
+    [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$__d"
 }
 
 _versioned_slot_clean() {
@@ -350,12 +378,18 @@ _versioned_slot_clean() {
     # over a corpse. The current/active slot is never tossed (the link-name is
     # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
     # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || { _fail 'Construction requires a versioned candidate'; return 1; }
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        local helpers
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
@@ -366,15 +400,7 @@ _versioned_mark_complete() {
     # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
     # this helper is portable byte-identically across plugins).
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    local ph
-    ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    _runtime_construction_complete "$(_payload_hash)"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -523,15 +549,20 @@ if [[ "$ACTION" == "stamp" ]]; then
     rm -rf -- "$snap_tmp"
     mkdir -p "$snap_tmp"
     cp -a "$PLUGIN_DIR/." "$snap_tmp/"
-    procutil="$PLUGIN_DIR/libs/agent-procutil"
-    if [[ ! -f "$procutil/pyproject.toml" ]]; then
-        procutil="$PLUGIN_DIR/../../libs/agent-procutil"
-    fi
-    [[ -f "$procutil/pyproject.toml" ]] || { _fail 'Owning agent-procutil source is missing'; exit 1; }
+    procutil="$(_budget_procutil_source)" || exit 1
     if [[ ! -d "$snap_tmp/libs/agent-procutil" ]]; then
         mkdir -p "$snap_tmp/libs"
         cp -a "$procutil" "$snap_tmp/libs/agent-procutil"
     fi
+    awk '
+        /^\[tool\.uv\.sources\][[:space:]]*$/ { sources=1; print; next }
+        /^\[/ { sources=0 }
+        sources && /^agent-procutil[[:space:]]*=/ {
+            print "agent-procutil = { path = \"libs/agent-procutil\" }"; next
+        }
+        { print }
+    ' "$snap_tmp/pyproject.toml" > "$snap_tmp/pyproject.toml.local" || exit 1
+    mv "$snap_tmp/pyproject.toml.local" "$snap_tmp/pyproject.toml"
     rm -rf -- \
         "$snap_tmp/.git" \
         "$snap_tmp/.venv" \
@@ -612,6 +643,8 @@ for h in bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 b
 done
 _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
 
+_versioned_slot_clean || exit 1
+if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     if [[ "$HAVE_UV" -eq 1 ]]; then
         _step 'Creating Python 3.10+ venv via uv...'
@@ -642,6 +675,7 @@ if ! _install_budget_guidance_package; then
     exit 1
 fi
 _ok 'Package installed: budget-guidance'
+fi
 
 # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
 _versioned_activate || exit 1

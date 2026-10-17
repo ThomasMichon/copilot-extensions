@@ -1,0 +1,9 @@
+{
+  "comment": "Document the module-local selected FTS retry clock and shared-library sleep isolation contract.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

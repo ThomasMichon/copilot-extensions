@@ -26,7 +26,10 @@ def installed(tmp_path, monkeypatch):
     package = tmp_path / "fleet_manager"
     package.mkdir()
     files = []
-    for name in ("__init__.py", "_versioned_runtime.py"):
+    for name in (
+        "__init__.py", "_versioned_runtime.py",
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    ):
         data = b"resource bytes\n"
         (package / name).write_bytes(data)
         files.append(Entry(f"fleet_manager/{name}", data))
@@ -45,6 +48,69 @@ def test_client_evidence_does_not_claim_release_or_controller_readiness(installe
     assert report["evidence"] == "local-installed-resource-record"
     assert not report["controller_readiness_verified"] and not report["mutations_performed"]
     assert "release_digest" not in report
+    assert set(report["runtime_resource_sha256s"]) == {
+        "__init__.py", "_versioned_runtime.py",
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    }
+    assert report["runtime_resource_sha256s"]["_versioned_runtime.py"] == report["runtime_resource_sha256"]
+
+
+def installed_runtime(installed, monkeypatch):
+    from fleet_manager import artifact_staging
+
+    distribution, package = installed
+    library = Path(__file__).resolve().parents[2] / "libs" / "versioned-runtime"
+    for name in ("_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+        source = "versioned_runtime.py" if name == "_versioned_runtime.py" else name
+        content = (library / source).read_bytes()
+        (package / name).write_bytes(content)
+        distribution.files = [
+            entry for entry in distribution.files if str(entry) != f"fleet_manager/{name}"
+        ] + [Entry(f"fleet_manager/{name}", content)]
+    monkeypatch.setattr(artifact_staging, "__file__", str(package / "artifact_staging.py"))
+    return artifact_staging, package
+
+
+@pytest.mark.parametrize("member", [
+    "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+])
+def test_runtime_and_companion_replacement_after_admission_is_refused(installed, monkeypatch, member):
+    staging, package = installed_runtime(installed, monkeypatch)
+    original = staging.diagnose_client
+
+    def replaced():
+        evidence = original()
+        (package / member).write_text("raise AssertionError('unadmitted code executed')\n")
+        return evidence
+
+    monkeypatch.setattr(staging, "diagnose_client", replaced)
+    with pytest.raises(PlanError, match="changed after RECORD admission"):
+        with staging._primitive():
+            pytest.fail("replaced executable bytes were admitted")
+
+
+@pytest.mark.parametrize("member", ["versioned_runtime_leases.py", "versioned_runtime_construction.py"])
+def test_companions_execute_only_retained_bytes_across_late_replacement(installed, monkeypatch, member):
+    import sys
+
+    staging, package = installed_runtime(installed, monkeypatch)
+    original = staging._bytes
+
+    def replaced(path, limit):
+        content = original(path, limit)
+        if path == package / member:
+            path.write_text("raise AssertionError('unadmitted code executed')\n")
+        return content
+
+    monkeypatch.setattr(staging, "_bytes", replaced)
+    with staging._primitive() as runtime:
+        prefix = runtime.__name__
+        for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+            (package / name).write_text("raise AssertionError('late code executed')\n")
+        assert runtime.ConstructionTimeout.__module__ == prefix + "_versioned_runtime_leases"
+        assert "_runtime_construction_channels_close" in runtime.construction_shell_helpers("sh")
+        assert runtime._runtime_component("versioned_runtime_construction").__name__ in sys.modules
+    assert not any(name == prefix or name.startswith(prefix + "_") for name in sys.modules)
 
 
 @pytest.mark.parametrize("failure", [

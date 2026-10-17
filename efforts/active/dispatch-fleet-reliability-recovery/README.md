@@ -9,7 +9,7 @@
   recoverable goals; plugin-services bounded work and single-owner lifecycle;
   registry-resolved configuration.
 - **Umbrella issue:** #6466
-- **Sub-issues:** #6467, #6470, #6471; coordinate #6185 and #6407.
+- **Sub-issues:** #6467, #6470, #6471, #6793; coordinate #6185 and #6407.
 
 ## Guiding Intent
 
@@ -27,6 +27,7 @@ Preserve the owning ground-layer, installer and configuration authorities.
 | Category implementer | Task metadata, producers and category-specific views | Dedicated implementation worktree for #6466 |
 | Supervisor implementer | Bounded receipt reconciliation and progress recovery | Dedicated implementation worktree for #6467 |
 | Registry implementer | Named repository/resource bindings and validation | Dedicated implementation worktree for #6470 |
+| Source safety implementer | Trusted ownership snapshots and optional scoped GitHub authentication | `jittery-latch`, #6793 |
 | Existing scalar-repair owner | Preserve ownership of #6407 and its existing #6421 PR | Existing PR and its current source worktree |
 
 ## Coordination
@@ -89,6 +90,17 @@ Public-safe summary of the requested behavior:
 
 Operational task recovery and deployment placement remain adopter-owned.
 No private host, checkout, task or session identifiers are needed upstream.
+
+### Bounded source-safety amendment
+
+Public-safe summary of the subsequently authorized repair:
+
+- Preserve ownership recorded by a trusted comment that the adapter updates in
+  place. An absent predecessor comment or task on another coordinator is not
+  evidence that the issue is unclaimed.
+- Allow a source to explicitly select existing repository-scoped GitHub
+  authentication, without switching global accounts, persisting credentials or
+  exporting one account into the shared supervisor environment.
 
 ## Plan
 
@@ -153,6 +165,26 @@ No private host, checkout, task or session identifiers are needed upstream.
 - [ ] Keep live, dirty, unlanded, open-PR, unfinished, held and ownership-ambiguous
   work protected by existing conclusion and cleanup authorities.
 
+### Phase 6 - Preserve source ownership and scoped authentication
+
+- [ ] Review this bounded amendment before runtime implementation of #6793.
+- [ ] Accept the adapter's verified, standalone claimed snapshot after an
+  in-place edit; preserve author, schema, occurrence and release-conflict
+  validation. Do not infer relinquished ownership from a missing local task.
+- [ ] _(Agent-recommended implementation detail)_ Add explicit GitHub-only
+  `forge.auth: repository`, retaining omitted/`ambient` standalone behavior.
+  Resolve the optional agent-worktrees sibling through its existing invocation
+  helper, select the repository account and obtain credentials through its
+  existing command boundary, then run GitHub operations with a child-only
+  environment. Refuse missing siblings, mismatches and credential fallback
+  before mutation. Never log or persist token output.
+- [ ] Renew scoped credentials on demand; preserve immediate pre-mutation
+  identity verification and avoid process-global environment changes.
+- [ ] Document the opt-in and unavailable-integration failures; add a changefile,
+  land through normal review/CI, and retain release/adoption as separate gates.
+- [ ] Leave task transfer (#6189), PR-ground-truth reconciliation (#2798),
+  broader account-aware operations, and unrelated recovery owners unchanged.
+
 ## Validation Plan
 
 - [ ] Request read-back preserves category-only scope, no pruning, audit retention,
@@ -177,6 +209,17 @@ No private host, checkout, task or session identifiers are needed upstream.
   review; drive implementation PRs through merge and promotion.
 - [ ] Authorized rollout has running-version and real consumer evidence; merge
   alone is not deployment.
+- [ ] Round-trip an actual provider comment edit through fresh discovery and
+  selection, including a second empty coordinator; a trusted claimed snapshot
+  remains excluded and is not released merely because its task is absent.
+- [ ] Keep malformed/untrusted markers rejected and conflicting releases from
+  clearing a claim. Preserve ordinary reserved/claimed/released histories.
+- [ ] Exercise scoped account selection, renewal, unavailable sibling, mismatched
+  account, failed/degraded token retrieval and child-environment isolation
+  without exposing credential bytes. Include a real subprocess contract.
+- [ ] Run the same declaration's ambient mode without the optional sibling.
+  Record native Windows results and available Linux CI separately from live
+  adopter proof; a mock or source pass is not installed-consumer evidence.
 - [ ] Resolve or explicitly transfer every plan/validation item before Done.
 
 ## Proposal
@@ -192,6 +235,17 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-14 - Bounded source-safety proposal
+
+- #6793 records two demonstrated source blockers. In-place marker editing
+  removes the predecessor that the current reducer requires for a claimed
+  snapshot; the GitHub adapter also has no source-scoped authentication opt-in.
+- This amendment closes existing dispatch ownership and agent-fabric
+  account-aware-operation intent. It adds no coordinator, credential store,
+  supervisor, transfer mechanism or mandatory sibling dependency.
+- Implementation remains gated on this amendment's review and merge. Existing
+  recovery, release and broader identity-contract ownership is unchanged.
 
 ### 2026-10-14 - Native category contract budget composition
 
@@ -823,3 +877,54 @@ requested contract.
   resulting-head review, complete CI and the repository's merge profile.
   Source merge remains separate from release, adopter operation and the
   canonical recovery effort's full completion gate.
+
+- **Current upstream conflict integration (PR #6542):** After normal incremental
+  publication, the provider reported a genuine conflict with newer dev. A named
+  backup retains the exact published tip and all earlier history. Supported
+  synchronization auto-aborted without changing the branch; its documented
+  owned-worktree conflict fallback then replayed the existing commits.
+  Integration retains newer launch admission and native-transport guards,
+  stage/take protocol floor 5, restore/finish floor 4, and cleanup removal
+  floor 5. The refusal matrix covers the union of older protocol versions,
+  including removal version 4, without dialing an incompatible owner.
+  The sender-proof helper remains client-neutral while preserving upstream's
+  lazy import, and both source-validation journals remain. No wholesale
+  ours/theirs replacement, stash, hard reset or manual remote push was used.
+  Pre-integration passing results above are not resulting-head proof;
+  the integrated seed/client/supervisor and pair contracts must pass again
+  before normal publication, fresh review and complete CI.
+
+- **Integrated candidate consumer proof (PR #6542):** Real daemon validation
+  caught removal still advertising version 4 after conflict integration.
+  Restored the existing removal client/server floor 5, preserving the newer
+  upstream stage/take floor 5 and restore/finish floor 4. The unchanged real
+  daemon assertion and complete seed suite then passed all 83 cases.
+  Integrated Dispatch cleanup/ordinary startup/conclusion/legacy and thin-client
+  proof coverage passed 263 cases. Complete reciprocal terminal coverage passed
+  86 cases, and remaining terminal/shared creation/lock coverage passed 93 with
+  three platform skips. These disjoint contained selections cover 525 passes
+  on the integrated behavior, all within unchanged item/suite/resource limits.
+  F/E9 lint, exact changed-source module ceilings, install/headless contracts,
+  vendor parity, staging and whitespace gates pass. Earlier pre-integration
+  results are not substituted for these current runs. Normal existing-PR
+  publication, fresh resulting-head review and complete CI still gate merge;
+  no updater, task replay, record repair or deployment is implied.
+
+- **Preserve published cleanup ancestry without guard bypass:** The receiving
+  publication guard rejected a rewritten source series containing an older
+  additive merge, despite the earlier dry-run accepting the local plan.
+  Retained the fully tested candidate and restored the published ancestry on
+  a separate local branch in the same owned worktree, merging only the exact
+  tested dev base. Composing four owned conflict/document paths from the
+  validated candidate made the entire merge index and worktree byte-identical
+  to that candidate, with the published tip retained as an ancestor.
+  The ordinary merge commit then exposed a real hook limit: 897 Python paths
+  and the full staged set exceeded Windows child argv limits.
+  The narrowly coupled hook correction batches all four staged guards in
+  groups of 32, preserves every path and option separator, and fails the
+  commit if any batch fails while still checking later batches. Three real-hook
+  regressions fail before the fix; the hook/large-file integration selection
+  passes all 41 cases afterward. No hook disablement, no-verify, forced push,
+  history/provenance override, dropped validation or deadline increase is used.
+  Only this hook, its focused tests and directly related documentation differ
+  from the already validated runtime/cleanup tree.

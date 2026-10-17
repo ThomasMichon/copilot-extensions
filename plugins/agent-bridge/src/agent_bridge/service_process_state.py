@@ -97,13 +97,16 @@ def _service_is_running() -> bool:
 
 
 def _service_health_on_port(
-    port: int, *, timeout: float = 2.0
+    port: int, *, timeout: float = 2.0, host: str = "127.0.0.1",
+    require_ready: bool = True,
 ) -> dict[str, Any] | None:
-    """Return one verified agent-bridge health payload for *port*."""
+    """Return Bridge health; retain unready identity only for explicit cleanup."""
     import http.client
     import urllib.request
 
-    url = f"http://127.0.0.1:{port}/health"
+    from zdd.routing import format_authority
+
+    url = f"http://{format_authority(host, port)}/health"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             if resp.status != 200:
@@ -119,9 +122,10 @@ def _service_health_on_port(
         return None
     if (
         not isinstance(body, dict)
-        or body.get("status") != "ok"
         or body.get("service") != "agent-bridge"
-        or body.get("ready") is not True
+        or (require_ready and (
+            body.get("status") != "ok" or body.get("ready") is not True
+        ))
     ):
         return None
     return body

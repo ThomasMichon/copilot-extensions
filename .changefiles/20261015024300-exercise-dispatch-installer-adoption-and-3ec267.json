@@ -1,0 +1,9 @@
+{
+  "comment": "Exercise Dispatch installer adoption and snapshot contracts in source and materialized layouts.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

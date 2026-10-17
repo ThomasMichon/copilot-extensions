@@ -15,6 +15,138 @@ import pytest
 SH_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
 
 
+def test_uninstall_keeps_the_existing_transaction_lock_identity() -> None:
+    sh = SH_SCRIPT.read_text(encoding="utf-8")
+    ps1 = SH_SCRIPT.with_suffix(".ps1").read_text(encoding="utf-8")
+    condition = sh[sh.index('if [[ "$ACTION" == "install"'):].split("then", 1)[0]
+    assert '"$ACTION" == "uninstall"' in condition
+    lock_actions = re.search(r"\$needsInstallLock = \$Action -in @\((.*?)\)", ps1)
+    assert lock_actions is not None and "'uninstall'" in lock_actions.group(1)
+    assert 'remove_install_runtime_content "$INSTALL_DIR" || exit 1' in sh
+    assert "Remove-InstallRuntimeContent -InstallRoot $InstallDir" in ps1
+    assert 'rm -rf "$INSTALL_DIR"' not in sh
+    assert "Remove-Item $InstallDir -Recurse" not in ps1
+
+
+def test_native_powershell_uninstall_preserves_the_coordination_root(tmp_path: Path) -> None:
+    pwsh = shutil.which("pwsh") if os.name == "nt" else None
+    if pwsh is None:
+        pytest.skip("native Windows PowerShell required")
+    home, root = tmp_path / "home", tmp_path / "runtime"
+    home.mkdir()
+    root.mkdir()
+    (root / "state").write_text("remove", encoding="utf-8")
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-File", str(SH_SCRIPT.with_suffix(".ps1")),
+         "-Action", "uninstall", "-InstallDir", str(root)],
+        capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        env={
+            **{key: value for key, value in os.environ.items()
+               if not key.startswith("COPILOT_PLUGIN_") and key != "COPILOT_EXTENSIONS_CONTEXT"},
+            "HOME": str(home), "USERPROFILE": str(home),
+        },
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(path.name for path in root.iterdir()) == [".install.lock"]
+    assert not (home / ".local").exists()
+
+
+def _cold_payload(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+    source = SH_SCRIPT.parents[1]
+    repo = source.parents[1]
+    home = tmp_path / "home"
+    payload = home / ".copilot" / "installed-plugins" / "example" / source.name
+    shutil.copytree(source / "scripts", payload / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    for name in ("plugin.json", "pyproject.toml"):
+        shutil.copyfile(source / name, payload / name)
+    monkeypatch.syspath_prepend(str(repo / "tools"))
+    import materialize_installer_engine
+
+    materialize_installer_engine.materialize_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=payload,
+        canonical_root=repo, dest_root=home,
+    )
+    assert (payload / "scripts" / "installer-engine.ps1").is_file()
+    assert (payload / "scripts" / "installer-engine.sh").is_file()
+    return home, payload
+
+
+def _cold_environment(home: Path) -> dict[str, str]:
+    return {
+        **{key: value for key, value in os.environ.items()
+           if not key.startswith("COPILOT_PLUGIN_") and key != "COPILOT_EXTENSIONS_CONTEXT"},
+        "HOME": str(home), "USERPROFILE": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+    }
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_materialized_uninstall_self_stage_on_first_touch(
+    tmp_path: Path, monkeypatch, host: str,
+) -> None:
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip(f"native Windows {host} unavailable")
+    home, payload = _cold_payload(tmp_path, monkeypatch)
+    root = home / ".agent-pull-requests"
+    assert not root.exists()
+    previous = []
+    active = root / ".install-stage" / f"20000101T000000-{os.getpid()}" / "active"
+    for cycle in range(2):
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File",
+             str(payload / "scripts" / "install.ps1"), "-Action", "uninstall",
+             "-InstallDir", str(root)],
+            capture_output=True, text=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW,
+            env=_cold_environment(home), cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        if cycle == 0:
+            previous = list((root / ".install-stage").iterdir())
+            active.parent.mkdir(parents=True)
+            active.write_text("another live stage", encoding="utf-8")
+        else:
+            assert all(not path.exists() for path in previous)
+            assert active.read_text(encoding="utf-8") == "another live stage"
+    assert (root / ".install.lock").is_file()
+    assert (root / ".install-stage").is_dir()
+    assert not (root / "versions").exists()
+    assert (payload / "scripts" / "install.ps1").is_file()
+    assert not (home / ".local").exists()
+
+
+def test_posix_materialized_uninstall_self_stage_on_first_touch(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("native POSIX Bash required")
+    home, payload = _cold_payload(tmp_path, monkeypatch)
+    root = home / ".agent-pull-requests"
+    assert not root.exists()
+    previous = []
+    active = root / ".install-stage" / f"20000101T000000-{os.getpid()}" / "active"
+    for cycle in range(2):
+        result = subprocess.run(
+            [bash, str(payload / "scripts" / "install.sh"), "uninstall", "--install-dir", str(root)],
+            capture_output=True, text=True, timeout=60, env=_cold_environment(home), cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        if cycle == 0:
+            previous = list((root / ".install-stage").iterdir())
+            active.parent.mkdir(parents=True)
+            active.write_text("another live stage", encoding="utf-8")
+        else:
+            assert all(not path.exists() for path in previous)
+            assert active.read_text(encoding="utf-8") == "another live stage"
+    assert root.is_dir()
+    assert (root / ".install-stage").is_dir()
+    assert not (root / "versions").exists()
+    assert (payload / "scripts" / "install.sh").is_file()
+    assert not (home / ".local").exists()
+
+
 def _posix_bash() -> str | None:
     if os.name == "nt":
         return None

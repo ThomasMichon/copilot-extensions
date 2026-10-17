@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from _promotion_workflow_test_support import heredoc, source_owned
 from test_promotion_python_artifacts import (
     _commit, _fake_builder, _git, artifacts, promotion,
     no_ambient_git_identity as _identity_fixture, repo as _repo_fixture,
@@ -22,6 +24,10 @@ _ROOT = Path(__file__).resolve().parent.parent
 
 def _adapter() -> str:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/validate-and-promote.yml").read_text())
+    if source_owned(workflow["jobs"]):
+        step = next(step for step in workflow["jobs"]["promote"]["steps"]
+                    if step.get("id") == "promote")
+        return heredoc(step["run"])
     step = next(
         step for step in workflow["jobs"]["promote"]["steps"]
         if step.get("name") == "Prepare temporary trusted-main promoter adapter"
@@ -53,10 +59,21 @@ def _legacy_promoter(monkeypatch):
 
 
 def _run_adapter(repo, directory, dev, main, monkeypatch):
+    current = source_owned(yaml.safe_load(
+        (_ROOT / ".github/workflows/validate-and-promote.yml").read_text(),
+    )["jobs"])
     monkeypatch.setattr(sys, "argv", [
-        "trusted-promoter.py", str(_ROOT), "--repo", str(repo),
+        "trusted-promoter.py", str(_ROOT / "tools" if current else _ROOT), "--repo", str(repo),
         "--dev-ref", dev, "--main-ref", main, "--python-artifacts-dir", str(directory),
     ])
+    if current:
+        def dispatch(path: str, *, run_name: str) -> None:
+            # Keep the real CLI's monkeypatched Git/build fixtures; the native
+            # isolation test below separately executes the unmocked runpy loader.
+            assert Path(path) == _ROOT / "tools/promote_release.py"
+            assert run_name == "__main__"
+            raise SystemExit(promotion.main(sys.argv[1:]))
+        monkeypatch.setattr(runpy, "run_path", dispatch)
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.setattr(artifacts, "validate_artifacts", artifacts.validate_artifacts)
     with pytest.raises(SystemExit) as exited:
@@ -124,17 +141,25 @@ def test_adapter_uses_real_cli_validation_and_failure_boundary(
 
     monkeypatch.setattr(artifacts, "_run", checkout)
     capsys.readouterr()
-    assert _run_adapter(repo, directory, dev, main, monkeypatch) == (1 if failure else 0)
+    current = source_owned(yaml.safe_load(
+        (_ROOT / ".github/workflows/validate-and-promote.yml").read_text(),
+    )["jobs"])
+    unsupported_legacy = current and legacy
+    assert _run_adapter(repo, directory, dev, main, monkeypatch) == (
+        1 if failure or unsupported_legacy else 0
+    )
     output = capsys.readouterr()
     assert "Traceback" not in output.out + output.err
-    if failure:
+    if failure or unsupported_legacy:
         expected = {
             "bundle": "artifact digest mismatch", "identity": "dev_head",
             "checkout": "forced canonical checkout failure",
-        }[failure]
+        }.get(failure, "payload hash differs")
+        if unsupported_legacy and failure not in ("bundle", "identity"):
+            expected = "payload hash differs"
         assert expected in output.err
         assert "promoted:" not in output.out
-    assert len(checkouts) == 1  # The repaired helper must not be wrapped again.
+    assert len(checkouts) == (0 if unsupported_legacy else 1)
     assert all(not path.exists() for path in checkouts)
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
@@ -148,7 +173,8 @@ def test_adapter_isolates_trusted_imports_and_preserves_arguments(tmp_path):
         "def main(argv):\n"
         "    assert argv == ['--push', '--candidate-branch', 'release/example']\n"
         "    assert sys.flags.isolated and sys.dont_write_bytecode\n"
-        "    return 23\n", encoding="utf-8",
+        "    return 23\n"
+        "if __name__ == '__main__': raise SystemExit(main(sys.argv[1:]))\n", encoding="utf-8",
     )
     (tools / "promotion_python_artifacts.py").write_text(
         "def validate_composed_artifacts(): pass\n", encoding="utf-8",
@@ -159,8 +185,11 @@ def test_adapter_isolates_trusted_imports_and_preserves_arguments(tmp_path):
         (hostile / name).write_text("raise RuntimeError('candidate code executed')\n", encoding="utf-8")
     driver = tmp_path / "trusted-promoter.py"
     driver.write_text(_adapter(), encoding="utf-8")
+    current = source_owned(yaml.safe_load(
+        (_ROOT / ".github/workflows/validate-and-promote.yml").read_text(),
+    )["jobs"])
     result = subprocess.run(
-        [sys.executable, "-I", "-B", str(driver), str(trusted),
+        [sys.executable, "-I", "-B", str(driver), str(tools if current else trusted),
          "--push", "--candidate-branch", "release/example"],
         cwd=hostile, env={**os.environ, "PYTHONPATH": str(hostile)},
         capture_output=True, text=True, timeout=15,
@@ -175,7 +204,13 @@ def test_both_workflow_promotion_branches_use_isolated_adapter():
         step for step in workflow["jobs"]["promote"]["steps"]
         if step.get("id") == "promote"
     )
-    assert step["run"].count(
-        '-I -B "$RUNNER_TEMP/trusted-promoter.py" "$GITHUB_WORKSPACE"'
-    ) == 2
+    if source_owned(workflow["jobs"]):
+        assert '-I -B - "$GITHUB_WORKSPACE/reviewed-helpers/tools" "${args[@]}"' in step["run"]
+        assert 'args=(--repo "$GITHUB_WORKSPACE"' in step["run"]
+        assert 'args+=(--push --candidate-branch "$CANDIDATE_BRANCH"' in step["run"]
+        assert "runpy.run_path" in _adapter()
+    else:
+        assert step["run"].count(
+            '-I -B "$RUNNER_TEMP/trusted-promoter.py" "$GITHUB_WORKSPACE"'
+        ) == 2
     assert " tools/promote_release.py " not in step["run"]

@@ -7,6 +7,12 @@ import pytest
 from agent_index_service.config import parse_config
 
 
+@pytest.fixture
+def distribution_root(tmp_path_factory):
+    # Nested wheel/sdist paths need room below Windows' legacy path limit.
+    return tmp_path_factory.mktemp("d")
+
+
 @pytest.fixture(autouse=True)
 def isolated_environment(monkeypatch, tmp_path):
     for name in list(os.environ):

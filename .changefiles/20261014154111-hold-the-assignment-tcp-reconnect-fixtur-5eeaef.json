@@ -1,0 +1,9 @@
+{
+  "comment": "Hold the assignment TCP reconnect fixture at an explicit subscription barrier instead of racing wall-clock backoff.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

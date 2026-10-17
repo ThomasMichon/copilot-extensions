@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from machine_transport.registry import (
@@ -51,12 +53,16 @@ def test_explicit_logical_transport_refuses_multiple_profiles():
 @pytest.mark.parametrize(("system", "release", "distro", "expected"), [
     ("Windows", "10", "", "windows"),
     ("Linux", "6.6-microsoft-standard-WSL2", "", "wsl"),
-    ("Linux", "6.6", "Example", "wsl"),
+    ("Linux", "6.6", "Example", "linux"),
     ("Linux", "6.6", "", "linux"),
 ])
 def test_local_platform_detection_is_owner_only(monkeypatch, system, release, distro, expected):
-    monkeypatch.setattr("machine_transport.identity.platform.system", lambda: system)
-    monkeypatch.setattr("machine_transport.identity.platform.release", lambda: release)
+    monkeypatch.setattr("sys.platform", "win32" if system == "Windows" else "linux")
+    monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release=release), raising=False)
+    monkeypatch.setattr("pathlib.Path.is_file", lambda _path: False)
+    monkeypatch.setattr("pathlib.Path.read_text", lambda *_args, **_kwargs: "0::/user.slice")
+    import io
+    monkeypatch.setattr("builtins.open", lambda *_args, **_kwargs: io.StringIO("Linux generic"))
     monkeypatch.setenv("WSL_DISTRO_NAME", distro)
     assert local_execution_platform() == expected
 

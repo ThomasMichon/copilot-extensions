@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import (
-    detached_kwargs,
     no_window_kwargs,
+    spawn_daemon,
     windowless_python,
     windowless_python_env,
 )
@@ -1024,9 +1024,11 @@ def cmd_engine(args: argparse.Namespace) -> int:
     if action == "status":
         return _emit(daemon.status())
     if action == "start":
+        from agent_procutil import DaemonSpawnError
+
         try:
-            print(daemon.start())
-        except (FileNotFoundError, RuntimeError, TimeoutError) as exc:
+            print(daemon.start(strict=bool(getattr(args, "strict", False))))
+        except (FileNotFoundError, RuntimeError, TimeoutError, DaemonSpawnError) as exc:
             print(f"[FAIL] {exc}", file=sys.stderr)
             return 1
         return 0
@@ -1374,33 +1376,21 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         start_command = "__cell-start" if expected_installation else "start"
         python = str(host_runtime_python())
         cmd = [
-            windowless_python(python),
-            "-I",
-            "-X",
-            "utf8",
-            "-m",
-            "agent_index",
-            start_command,
-            "--host",
-            cfg.host,
-            "--port",
-            str(port),
-            "--passive",
+            windowless_python(python), "-I", "-X", "utf8", "-m", "agent_index",
+            start_command, "--host", cfg.host, "--port", str(port), "--passive",
         ]
-        kwargs: dict[str, Any] = {
-            "cwd": str(install_dir().resolve()),
-            "env": {
-                key: value
-                for key, value in os.environ.items()
-                if key not in {"PYTHONPATH", "PYTHONHOME"}
-            },
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-        }
-        kwargs["env"].update(windowless_python_env(python))
-        kwargs.update(detached_kwargs(breakaway=True))
-        handle = subprocess.Popen(cmd, **kwargs)  # noqa: S603
+        root = install_dir().resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
+        overrides = dict(windowless_python_env(python))
+        # The generation's log is append-only: keep uvicorn's per-request lines
+        # out of it unless the operator set a level.
+        if "AGENT_INDEX_LOG_LEVEL" not in env:
+            overrides["AGENT_INDEX_LOG_LEVEL"] = "warning"
+        handle = spawn_daemon(
+            cmd, cwd=root, log_path=root / "service-stdio.log", env=env, env_overrides=overrides,
+            display=f"agent_index {start_command} --passive --port {port}",
+        )
         passive_instance.update({"port": port, "pid": handle.pid})
         return handle
 
@@ -1783,6 +1773,12 @@ def build_parser() -> argparse.ArgumentParser:
         "engine_action",
         choices=["start", "stop", "status", "run"],
         help="start/stop/status the daemon, or run it in the foreground (task entry)",
+    )
+    p_engine.add_argument(
+        "--strict",
+        action="store_true",
+        help="with start: fail rather than start the engine inside a caller's Job that "
+        "forbids breakaway (it would die with that Job)",
     )
     p_engine.set_defaults(func=cmd_engine)
 

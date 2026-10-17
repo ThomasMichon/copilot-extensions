@@ -209,7 +209,10 @@ def _launch_profile_selection(
             fallback_profile=ordinary_profile,
         )
     if not allocate_new:
-        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
+        warning = ""
+        if getattr(args, "dry_run", False) and policy and policy.armed and lane in policy.eligible_lanes:
+            warning = "Random profile assignment is deferred until launch; this preview reserves no profile."
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile, warning=warning)
     if policy is None:
         return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if not policy.armed:
@@ -312,7 +315,8 @@ def _resolve_base_repo(
     output.warn("Commits will go directly to the current branch.")
     print()
 
-    dirty = git_ops.get_dirty_files(repo.anchor) if sys.stdin.isatty() else []
+    # Even an informational status scan can refresh the Git index.
+    dirty = git_ops.get_dirty_files(repo.anchor) if not args.dry_run and sys.stdin.isatty() else []
     if dirty:
         output.warn(f"Anchor repo has {len(dirty)} uncommitted change(s):")
         for path in dirty[:5]:
@@ -445,53 +449,57 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     if launch_preflight.error:
         return _launch_preflight_error(launch_preflight)
 
-    try:
-        with tracking._RecordLock(record.yaml_path, require_sidecar=True):
-            fresh = tracking.load_record(record.yaml_path)
-            require_record_mutation(fresh, config)
-            tracking.mark_resumed(fresh, save=False)
-            tracking.save_record(fresh)
-    except ExecutionSpaceError as exc:
-        output.err(str(exc))
-        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
-        return 3
-    except TimeoutError as exc:
-        message = f"Cannot resume {record.worktree_id}: contended by another process ({exc})"
+    if args.dry_run and getattr(args, "restore", False):
+        message = "--restore preview is unsupported; no session was restored"
         output.err(message)
         _emit_plan({"action": "error", "error": message, "exit_code": 3})
         return 3
-    record.resume_count = fresh.resume_count
-    record.last_resumed_at = fresh.last_resumed_at
-    if hasattr(fresh, "codename") and not fresh.codename:
+    if not args.dry_run:
         try:
-            fresh = codename_tracking.ensure_codename(
-                fresh,
-                cfg.tracking_dir(),
-                codename_tracking.wordlist_for_repo(config),
-                **codename_tracking.allocation_policy_kwargs_for_repo(config),
-            )
-        except codename_tracking.CodenameAttributionPolicyError as exc:
+            with tracking._RecordLock(record.yaml_path, require_sidecar=True):
+                fresh = tracking.load_record(record.yaml_path)
+                require_record_mutation(fresh, config)
+                tracking.mark_resumed(fresh, save=False)
+                tracking.save_record(fresh)
+        except ExecutionSpaceError as exc:
             output.err(str(exc))
             _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
             return 3
-        record.codename = fresh.codename
-        record.codename_source = fresh.codename_source
-
-    activity.log_event(
-        "worktree_resumed",
-        worktree_id=record.worktree_id,
-        branch=record.branch,
-        resume_count=record.resume_count,
-    )
-
-    if verdict is not None:
-        try:
-            tracking.stamp_mux_live(record.worktree_id, verdict.mux_live, refresh=True)
-            tracking.stamp_bound_live(
-                record.worktree_id, bool(verdict.live_session_ids), refresh=True
-            )
-        except Exception:
-            pass
+        except TimeoutError as exc:
+            message = f"Cannot resume {record.worktree_id}: contended by another process ({exc})"
+            output.err(message)
+            _emit_plan({"action": "error", "error": message, "exit_code": 3})
+            return 3
+        record.resume_count = fresh.resume_count
+        record.last_resumed_at = fresh.last_resumed_at
+        if hasattr(fresh, "codename") and not fresh.codename:
+            try:
+                fresh = codename_tracking.ensure_codename(
+                    fresh,
+                    cfg.tracking_dir(),
+                    codename_tracking.wordlist_for_repo(config),
+                    **codename_tracking.allocation_policy_kwargs_for_repo(config),
+                )
+            except codename_tracking.CodenameAttributionPolicyError as exc:
+                output.err(str(exc))
+                _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+                return 3
+            record.codename = fresh.codename
+            record.codename_source = fresh.codename_source
+        activity.log_event(
+            "worktree_resumed",
+            worktree_id=record.worktree_id,
+            branch=record.branch,
+            resume_count=record.resume_count,
+        )
+        if verdict is not None:
+            try:
+                tracking.stamp_mux_live(record.worktree_id, verdict.mux_live, refresh=True)
+                tracking.stamp_bound_live(
+                    record.worktree_id, bool(verdict.live_session_ids), refresh=True
+                )
+            except Exception:
+                pass
 
     if (
         not args.dry_run
@@ -539,6 +547,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
     _dispatch_reflect_assignment(record, selection)
+    if args.dry_run and (warning := getattr(selection, "warning", "")):
+        output.warn(warning)
 
     launch_cmd = _build_launch_cmd(
         config,

@@ -66,6 +66,12 @@ import yaml
 from dropin_registry import ScanAuthority
 from plugin_activation import ActivationReport, resolve_active_plugins
 
+from .related_availability import (
+    MachineMatch,
+    locus_here as _availability_locus_here,
+    venue_machines as _availability_venue_machines,
+)
+
 # Repo-owned related-repo config moves toward the shared plugin namespace;
 # payload contributions retain the legacy in-payload ``.agent-worktrees/`` location.
 INREPO_DIRNAME = ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
@@ -1378,20 +1384,17 @@ class Resolution:
 
 
 def _venue_machines(venue: dict[str, Any]) -> list[str]:
-    """Machine keys a venue is restricted to (empty list = unrestricted)."""
-    raw = venue.get("machines") if isinstance(venue, dict) else None
-    if isinstance(raw, list):
-        return [str(m).strip() for m in raw if str(m).strip()]
-    if raw:
-        return [str(raw).strip()]
-    return []
+    return _availability_venue_machines(venue)
 
 
-def _venue_available_here(venue: dict[str, Any], current_machine: str) -> bool:
+def _venue_available_here(
+    venue: dict[str, Any], current_machine: str, *, machine_match: MachineMatch | None = None,
+) -> bool:
     """A venue with no ``machines`` is unrestricted; otherwise the current
     machine must match one of them."""
     ms = _venue_machines(venue)
-    return (not ms) or any(machine_matches(m, current_machine) for m in ms)
+    match = machine_match or machine_matches
+    return (not ms) or any(match(m, current_machine) for m in ms)
 
 
 # The generic "read the code where it lives" nudge.  When a repo's preferred
@@ -1457,6 +1460,7 @@ def build_resolution(
     repo_path: str | None,
     adopted: bool,
     base_repo: bool = False,
+    machine_match: MachineMatch | None = None,
 ) -> Resolution:
     """Compute how to work on ``entry`` from the current machine.
 
@@ -1555,7 +1559,7 @@ def build_resolution(
         )
         # Surface the container alternative when this machine hosts the fleet.
         if entry.locus.container and _venue_available_here(
-            entry.locus.container, current_machine
+            entry.locus.container, current_machine, machine_match=machine_match,
         ):
             res.notes.append(
                 f"A local container fleet is also available here: "
@@ -1566,7 +1570,7 @@ def build_resolution(
 
     if kind == "container":
         ct = entry.locus.container or {}
-        res.available_here = _venue_available_here(ct, current_machine)
+        res.available_here = _venue_available_here(ct, current_machine, machine_match=machine_match)
         repo = ct.get("repo", "<container-repo>")
         ws = ct.get("workspace_folder", "")
         ct_machines = _venue_machines(ct)
@@ -1611,7 +1615,7 @@ def build_resolution(
         return res
 
     if kind == "machine":
-        res.available_here = machine_matches(target, current_machine)
+        res.available_here = (machine_match or machine_matches)(target, current_machine)
         if res.available_here:
             res.steps = _local_edit_steps()
         else:
@@ -1628,7 +1632,7 @@ def build_resolution(
         return res
 
     # kind == "local"
-    if machines and not any(machine_matches(m, current_machine) for m in machines):
+    if machines and not any((machine_match or machine_matches)(m, current_machine) for m in machines):
         res.available_here = False
         via = entry.delegate or "agent-bridge"
         res.notes.append(
@@ -1687,26 +1691,16 @@ class RelatedFinding:
     candidate_path: str = ""
 
 
-def _locus_here(locus: Locus, current_machine: str) -> tuple[str, bool, bool]:
-    """Return ``(kind, expects_local_checkout, available_here)`` for a locus.
-
-    ``expects_local_checkout`` is True only for the ``local`` / ``machine`` kinds
-    (a CodeSpace/container is provisioned from its venue, not the machine's local
-    registry, so a missing registry entry there is not a defect).
-    """
-    kind, target = parse_preferred(locus.preferred)
-    if not kind:
-        kind = "local"
-    if kind == "codespace":
-        return kind, False, True
-    if kind == "container":
-        return kind, False, _venue_available_here(locus.container, current_machine)
-    if kind == "machine":
-        return kind, True, machine_matches(target, current_machine)
-    # local
-    ms = locus.machines
-    here = (not ms) or any(machine_matches(m, current_machine) for m in ms)
-    return kind, True, here
+def _locus_here(
+    locus: Locus, current_machine: str, *, machine_match: MachineMatch | None = None,
+) -> tuple[str, bool, bool]:
+    return _availability_locus_here(
+        locus, current_machine, preferred=parse_preferred(locus.preferred),
+        match=machine_match or machine_matches,
+        venue_available=lambda venue, current: _venue_available_here(
+            venue, current, machine_match=machine_match,
+        ),
+    )
 
 
 def _referenced_machine_keys(locus: Locus) -> list[str]:
@@ -1738,6 +1732,7 @@ def diagnose_related(
     machines_known_available: bool,
     registry_has: Any,           # Callable[[str], bool]
     registry_remote: Any = None,  # Callable[[str], str] | None
+    machine_match: MachineMatch | None = None,
 ) -> list[RelatedFinding]:
     """Validate a related.yaml against reality (pure; dependency-injected).
 
@@ -1810,7 +1805,9 @@ def diagnose_related(
             ))
 
         # 3) Local-checkout claims vs the machine's own registry (the headline).
-        kind, expects_local, available_here = _locus_here(locus, current_machine)
+        kind, expects_local, available_here = _locus_here(
+            locus, current_machine, machine_match=machine_match,
+        )
         if expects_local and not registry_has(name):
             if available_here:
                 remote = str(remote_of(name) or "").strip()

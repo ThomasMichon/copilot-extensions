@@ -1,4 +1,4 @@
-"""Thin standalone planning, release snapshots and installed-client diagnostics."""
+"""Thin fleet planning/diagnostics and explicit opt-in NEW Gateway serving."""
 
 import argparse
 import sys
@@ -36,10 +36,20 @@ def main(argv=None):
     inspection.add_argument("--installation", required=True)
     diagnostic = commands.add_parser("doctor", help="Check this installed thin client; never install or probe a controller")
     diagnostic.add_argument("--role", choices=("client",), default="client")
+    hosting = commands.add_parser("serve", help="Host the explicitly configured NEW Gateway over TLS")
+    hosting.add_argument("--role", choices=("gateway",), required=True)
+    hosting.add_argument("--config", type=Path, required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
+    if args.command == "serve":
+        try:
+            from .gateway_server import serve
+        except ImportError:
+            print("fleet-manager: serve requires the server/auth extras", file=sys.stderr)
+            return 1
+        return serve(args.config)
     try:
         if args.command == "doctor":
             from .client_diagnostics import diagnose_client

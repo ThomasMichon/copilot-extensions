@@ -16,13 +16,14 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
-from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd import breadcrumb
 from zdd import routing
 from zdd.cutover import CutoverOrchestrator
 
 from . import locks
+from .status_monitor_drain import DrainTrace
 from .status_monitor_python import direct_monitor_python
 
 _BIND = "127.0.0.1"
@@ -313,21 +314,32 @@ class ControlClient:
         )
 
     def drain(self, *, timeout: float, poll: float, force: bool) -> dict:
-        if self.config_dir is not None:
-            active = routing.read_active_endpoint(self.config_dir, verify_listener=False)
-            if active is not None and active.base_url != self.base_url:
+        trace = DrainTrace(
+            self.config_dir or routing_dir(), role="client", port=self.port,
+            timeout=timeout, poll=poll, rpc_timeout=self.timeout, force=force,
+        )
+        with trace.stage("select-successor"):
+            active = (
+                routing.read_active_endpoint(self.config_dir, verify_listener=False)
+                if self.config_dir is not None else None
+            )
+        if active is not None and active.base_url != self.base_url:
+            with trace.stage("promote-successor"):
                 promoted = ControlClient(
-                    active.base_url,
-                    token=self.token,
-                    config_dir=self.config_dir,
-                    timeout=self.timeout,
+                    active.base_url, token=self.token,
+                    config_dir=self.config_dir, timeout=self.timeout,
                 ).promote()
                 if not promoted.get("adopted"):
                     raise ValueError("status-monitor successor refused promotion")
-        return self._request(
-            "drain",
-            {"timeout": timeout, "poll": poll, "force": force},
+        with trace.stage("request-predecessor"):
+            result = self._request(
+                "drain", {"timeout": timeout, "poll": poll, "force": force},
+            )
+        trace.emit(
+            "response", "ok" if result.get("drained") else "fail",
+            reasons=result.get("busy_sessions"), receipt=result,
         )
+        return result
 
     def undrain(self) -> dict:
         return self._request("undrain")
@@ -342,19 +354,47 @@ class ControlClient:
         return self._request("promote")
 
 
+MONITOR_LOG_NAME = "status-monitor.log"
+
+
+def monitor_log_path(cwd: str) -> Path:
+    """Where a resident monitor generation appends its stdout/stderr.
+
+    ``<install root>/logs/status-monitor.log``. When the install root is not
+    materialized yet the daemon runs from HOME; its log is then a hidden file
+    in that (owner-only) directory, never a predictable name in a shared temp
+    directory that another user could pre-create.
+    """
+    home = os.path.normcase(os.path.expanduser("~"))
+    if os.path.normcase(os.path.abspath(cwd)) == home:
+        return Path(os.path.abspath(cwd)) / f".agent-worktrees-{MONITOR_LOG_NAME}"
+    return Path(os.path.abspath(cwd)) / "logs" / MONITOR_LOG_NAME
+
+
+def spawn_monitor(argv: list[str], env: dict[str, str], *, console_children: bool):
+    """Launch a resident status-monitor generation through ``spawn_daemon``.
+
+    Runs from the monitor's install root (``_daemon_cwd``), breaks away from a
+    kill-on-close Job around the caller (an installer, an updater, a hook) and
+    appends its stdout/stderr to :func:`monitor_log_path`. A Job that forbids
+    breakaway fails the spawn rather than starting a monitor that would die
+    with its caller.
+    """
+    from . import status_monitor_runtime as smr
+
+    cwd = smr._daemon_cwd()
+    return spawn_daemon(
+        argv, cwd=cwd, log_path=monitor_log_path(cwd), env=env,
+        console_children=console_children,
+        display="agent_worktrees " + " ".join(argv[3:5]),
+    )
+
+
 def spawn_passive(runtime_python: str, *, port: int):
     from . import status_monitor_runtime as smr
-    core = smr._core()
 
     child_env = smr._daemon_environment()
     child_env["AGENT_WORKTREES_STATUS_MONITOR_ROUTING_DIR"] = str(routing_dir())
-    kwargs: dict[str, object] = {
-        "env": child_env,
-        "cwd": smr._daemon_cwd(),
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-    }
     argv = [
         runtime_python,
         "-m",
@@ -366,13 +406,12 @@ def spawn_passive(runtime_python: str, *, port: int):
     ]
     if os.name == "nt":
         argv[0], extra_env = direct_monitor_python(runtime_python)
-        child_env.update(extra_env)
-        kwargs.update(core.windowless_daemon_kwargs(breakaway=True))
     else:
         argv[0] = windowless_python(runtime_python)
-        child_env.update(windowless_python_env(runtime_python))
-        kwargs.update(detached_kwargs())
-    return subprocess.Popen(argv, **kwargs)  # noqa: S603
+        extra_env = windowless_python_env(runtime_python)
+    child_env.update(extra_env)
+    # Windows: periodic console children inherit one hidden console tree.
+    return spawn_monitor(argv, child_env, console_children=os.name == "nt")
 
 
 def _monitor_control_url_from_route() -> str | None:

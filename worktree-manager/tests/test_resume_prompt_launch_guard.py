@@ -187,14 +187,16 @@ def test_ordinary_launches_do_not_require_new_flag_on_older_engine(monkeypatch, 
 
 
 @pytest.mark.parametrize("selector", [{"new": True}, {"worktree_id": "wt-a"}])
-def test_prompted_new_and_resume_require_staged_owner_on_older_engine(monkeypatch, selector):
+@pytest.mark.parametrize("missing", ["--stage-launch-seed", "--require-native-seed"])
+def test_prompted_new_and_resume_require_staged_owner_on_older_engine(monkeypatch, selector, missing):
     from worktree_manager import engine_client
 
     seen = []
     def older_engine(project, args, **kwargs):
         seen.append(args)
         assert "--stage-launch-seed" in args
-        raise engine_client.EngineError("unrecognized arguments: --stage-launch-seed")
+        assert "--require-native-seed" in args
+        raise engine_client.EngineError("unrecognized arguments: " + missing)
     monkeypatch.setattr(engine_client, "run_json", older_engine)
     with pytest.raises(engine_client.EngineFeatureUnavailable, match="staged launch-prompt ownership"):
         engine_client.resolve_launch_plan("demo", seed="task", **selector)

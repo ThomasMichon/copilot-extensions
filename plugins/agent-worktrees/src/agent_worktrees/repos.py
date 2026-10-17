@@ -41,6 +41,7 @@ import yaml
 from agent_procutil import no_window_kwargs
 
 from . import bare_anchor_sync, git_ops, output, registry_paths
+from .repo_accounts import account_for_remote as account_for_remote
 from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
 # ---------------------------------------------------------------------------
@@ -222,7 +223,6 @@ def write_registry(registry: ReposRegistry) -> None:
             lines.append(f"  {_quote(owner)}: {_quote(registry.account_map[owner])}")
         lines.append("")
 
-    # repos section
     if registry.repos:
         lines.append("repos:")
         for name in sorted(registry.repos.keys()):
@@ -253,6 +253,8 @@ def write_registry(registry: ReposRegistry) -> None:
                 if plat in entry.paths:
                     lines.append(f"    {plat}: {_quote(entry.paths[plat])}")
             lines.append("")
+    else:
+        lines.append("repos: {}")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -639,20 +641,19 @@ def is_unresolved_registered_target(target: str | None) -> bool:
 
 
 def account_for_github_slug(slug: str | None) -> str | None:
-    """Resolve the effective account for a github ``owner/name`` slug, a bare
-    ``owner``, or a bare registered repo *name*.
+    """Resolve a GitHub slug or registry alias to its configured account.
 
-    A bare registered repo name resolves via its own matched entry's
-    :func:`resolve_account` (explicit ``account:`` -> ``account_map[owner]`` ->
-    the remote owner itself -> None) -- never by handing the owner alone to
-    the owner-*wide* resolver (:func:`account_for_github_owner`), which scans
-    every registered repo and can return a *different, sibling* repo's
-    explicit account for the same owner (see #3032 follow-up: with `proj-a`
-    unoverridden and `proj-b` -> `account-b` under the same owner,
-    `account-for proj-a` must not resolve to `account-b`).
+    Exact registered repository matches take precedence over owner-wide policy,
+    so sibling repositories can use different accounts. Bare registered names
+    resolve directly through their entry; unregistered slugs use owner policy.
     """
     if not slug:
         return None
+    if "/" in slug:
+        for entry in read_registry().repos.values():
+            remote_slug = github_slug(entry.remote)
+            if remote_slug and remote_slug.casefold() == slug.casefold():
+                return resolve_account(entry)
     if "/" not in slug:
         entry = find_repo(slug)
         if entry is not None:
@@ -1290,12 +1291,11 @@ class RepoStatus:
 
 
 def _git(path: str, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", path, *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
+    # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE (e.g. from a hook or a
+    # parent git process) must never redirect a registry repo's status or
+    # sync to another repository: always act on `path`.
+    return git_ops.git(
+        "-C", path, *args, check=False, timeout=timeout, isolated_repository=True,
     )
 
 
@@ -1404,7 +1404,7 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
         # credential override when it differs from the active `gh` account.
         # `sync_repo`'s ambient-credential fetch previously bypassed that,
         # failing private repos owned by a non-active account (dotfiles#2069).
-        git_ops.fetch("origin", cwd=path, timeout=180)
+        git_ops.fetch("origin", cwd=path, timeout=180, isolated_repository=True)
         if not target:
             return ("skipped", "no branch to fast-forward")
         ff = _git(path, "merge", "--ff-only", f"origin/{target}")

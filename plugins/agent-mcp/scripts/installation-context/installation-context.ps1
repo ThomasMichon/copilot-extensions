@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$Action,
+    [string]$Distribution,
     [string]$SourceJson,
     [string]$SourceFile,
     [string]$MarketplaceKey,
@@ -53,9 +54,10 @@ $script:ValidatedFileSha256 = @{}
 $script:SnapshotMaxEntries = 100000
 $script:SnapshotMaxPathBytes = 4096
 $script:SnapshotMaxContentBytes = 4294967296
+$nativeTypeDefinitions = @()
 
-if ($env:OS -eq 'Windows_NT' -and -not ('CeFinalPath' -as [type])) {
-    Add-Type -TypeDefinition @'
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not ('CeFinalPath' -as [type])) {
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -109,8 +111,8 @@ public static class CeFinalPath {
 '@
 }
 
-if ($env:OS -eq 'Windows_NT' -and -not ('CeDirectoryState' -as [type])) {
-    Add-Type -TypeDefinition @'
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not ('CeDirectoryState' -as [type])) {
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.IO;
@@ -231,8 +233,8 @@ public static class CeDirectoryState {
 '@
 }
 
-if ($env:OS -ne 'Windows_NT' -and -not ('CePosixPath' -as [type])) {
-    Add-Type -TypeDefinition @'
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -and -not ('CePosixPath' -as [type])) {
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -260,8 +262,8 @@ public static class CePosixPath {
 '@
 }
 
-if ($env:OS -ne 'Windows_NT' -and -not ('CePosixAccount' -as [type])) {
-    Add-Type -TypeDefinition @'
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -and -not ('CePosixAccount' -as [type])) {
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -301,7 +303,7 @@ public static class CePosixAccount {
 }
 
 if (-not ('CeSafeFile' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.IO;
@@ -698,7 +700,7 @@ public sealed class CeSafeFile : IDisposable {
 }
 
 if (-not ('CeStrictJson' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -921,7 +923,7 @@ public static class CeStrictJson {
 }
 
 if (-not ('CeAtomicFile' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System.IO;
 
 public static class CeAtomicFile {
@@ -937,7 +939,7 @@ public static class CeAtomicFile {
 }
 
 if (-not ('CeAtomicDirectory' -as [type])) {
-    Add-Type -TypeDefinition @'
+    $nativeTypeDefinitions += @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -1037,6 +1039,47 @@ public static class CeAtomicDirectory {
 '@
 }
 
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -and -not ('CePosixPrivateFileV1' -as [type])) {
+    $nativeTypeDefinitions += @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class CePosixPrivateFileV1 {
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int Open(string path, int flags, uint mode);
+
+    public static void Write(string path, byte[] content) {
+        bool darwin = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+        int flags = 1 | (darwin ? 0xA00 | 0x1000000 : 0xC0 | 0x80000);
+        int descriptor = Open(path, flags, 0x180);
+        if (descriptor < 0) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        using (SafeFileHandle handle = new SafeFileHandle(new IntPtr(descriptor), true))
+        using (FileStream stream = new FileStream(handle, FileAccess.Write)) {
+            stream.Write(content, 0, content.Length);
+            stream.Flush(true);
+        }
+    }
+}
+'@
+}
+
+if ($nativeTypeDefinitions.Count -gt 0) {
+    # One compiler invocation keeps cold read-only probes within their deadline.
+    $usingPattern = '(?m)^using [^\r\n]+;\r?$'
+    $imports = @($nativeTypeDefinitions | ForEach-Object {
+        [regex]::Matches($_, $usingPattern) | ForEach-Object { $_.Value.Trim() }
+    } | Sort-Object -Unique)
+    $definitions = @($nativeTypeDefinitions | ForEach-Object {
+        [regex]::Replace($_, $usingPattern, '')
+    })
+    Add-Type -TypeDefinition ([string]::Join("`n", [string[]]($imports + $definitions)))
+}
+
 function Fail([string]$Message) {
     throw [System.InvalidOperationException]::new($Message)
 }
@@ -1086,7 +1129,7 @@ function Open-RegularFileHandle(
             Fail "Cannot open $($Label.ToLowerInvariant()) '$Path' safely: $($_.Exception.Message)"
         }
         try {
-            if ($env:OS -eq 'Windows_NT') {
+            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
                 if (-not (Paths-Equal $opened.FinalPath $Path)) {
                     Fail "$Label may not traverse a symbolic link or reparse point."
                 }
@@ -1282,7 +1325,7 @@ function Get-SnapshotEntryKind($Entry, [string]$RelativePath) {
     if (($Entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         Fail "Snapshot content may not contain symbolic links or reparse points: '$RelativePath'."
     }
-    if ($env:OS -eq 'Windows_NT') {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         return $(if ($Entry.PSIsContainer) { 'directory' } else { 'file' })
     }
     $statCommand = Get-Command stat -CommandType Application -ErrorAction SilentlyContinue |
@@ -1324,7 +1367,7 @@ function Get-SnapshotDirectoryState([string]$Path, [string]$RelativePath) {
         (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
         Fail "Snapshot content may not traverse symbolic links or reparse points: '$RelativePath'."
     }
-    if ($env:OS -eq 'Windows_NT') {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         try {
             $parts = [CeDirectoryState]::Inspect($Path)
         }
@@ -1545,7 +1588,7 @@ function Get-SnapshotContentSha256(
     }
 }
 
-function Write-AtomicJson([string]$Path, $Value, [switch]$SkipLockCheck) {
+function Write-AtomicJson([string]$Path, $Value, [switch]$SkipLockCheck, [switch]$Private) {
     $directory = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
@@ -1553,7 +1596,11 @@ function Write-AtomicJson([string]$Path, $Value, [switch]$SkipLockCheck) {
     $temporary = Join-Path $directory ('.' + (Split-Path -Leaf $Path) + '.tmp-' + [guid]::NewGuid().ToString('N'))
     try {
         $json = $Value | ConvertTo-Json -Depth 12
-        [IO.File]::WriteAllText($temporary, $json + "`n", $utf8NoBom)
+        if ($Private -and [Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+            [CePosixPrivateFileV1]::Write($temporary, $utf8NoBom.GetBytes($json + "`n"))
+        } else {
+            [IO.File]::WriteAllText($temporary, $json + "`n", $utf8NoBom)
+        }
         if (-not $SkipLockCheck -and $script:HeldLocks.Count -gt 0) {
             Assert-AllLocksOwned
         }
@@ -1713,7 +1760,7 @@ function Pop-HeldLock {
 }
 
 function Try-CreateLockDirectory([string]$Path) {
-    if ($env:OS -eq 'Windows_NT') {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         return [CeAtomicDirectory]::CreateWindows($Path)
     }
     return [CeAtomicDirectory]::CreatePosix($Path)
@@ -1935,7 +1982,7 @@ function Canonical-Path([string]$Path, [switch]$MustExist) {
         $existing = $parent
     }
     if (Test-Path -LiteralPath $existing) {
-        if ($env:OS -eq 'Windows_NT') {
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
             try { $fullPath = [CeFinalPath]::Resolve($existing) }
             catch { Fail "Cannot resolve final Windows path '$existing': $($_.Exception.Message)" }
         }
@@ -1953,7 +2000,7 @@ function Canonical-Path([string]$Path, [switch]$MustExist) {
 
 function Test-FullyQualifiedPath([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
-    if ($env:OS -eq 'Windows_NT') {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         return (
             $Path -cmatch '^[A-Za-z]:[\\/]' -or
             $Path -cmatch '^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)'
@@ -1967,14 +2014,14 @@ function Path-IsWithin([string]$Child, [string]$Parent) {
     $parentPath = Canonical-Path $Parent
     if (Paths-Equal $childPath $parentPath) { return $true }
     $comparison = [StringComparison]::Ordinal
-    if ($env:OS -eq 'Windows_NT') { $comparison = [StringComparison]::OrdinalIgnoreCase }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { $comparison = [StringComparison]::OrdinalIgnoreCase }
     $prefix = $parentPath.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     return $childPath.StartsWith($prefix, $comparison)
 }
 
 function Paths-Equal([string]$Left, [string]$Right) {
     $comparison = [StringComparison]::Ordinal
-    if ($env:OS -eq 'Windows_NT') { $comparison = [StringComparison]::OrdinalIgnoreCase }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { $comparison = [StringComparison]::OrdinalIgnoreCase }
     return [string]::Equals(
         (Canonical-Path $Left),
         (Canonical-Path $Right),
@@ -2489,7 +2536,7 @@ function Resolve-InstalledEvidence(
     $installed = Canonical-Path (Join-Path $ResolvedCopilotHome 'installed-plugins')
     $prefix = $installed + [IO.Path]::DirectorySeparatorChar
     $comparison = [StringComparison]::Ordinal
-    if ($env:OS -eq 'Windows_NT') { $comparison = [StringComparison]::OrdinalIgnoreCase }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { $comparison = [StringComparison]::OrdinalIgnoreCase }
     if (-not $ResolvedPayload.StartsWith($prefix, $comparison)) { return $null }
     $relative = $ResolvedPayload.Substring($prefix.Length)
     $parts = @($relative -split '[\\/]')
@@ -2676,7 +2723,7 @@ function Validate-NamespaceReceipt(
     [string]$ReceiptPath,
     [string]$ResolvedDurableHome
 ) {
-    $hostPlatform = $(if ($env:OS -eq 'Windows_NT') { 'windows' } else { 'posix' })
+    $hostPlatform = $(if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 'windows' } else { 'posix' })
     if (-not (Test-EnvironmentPathRooted $ReceiptPath $hostPlatform)) {
         Fail 'The namespace receipt pointer must be absolute.'
     }
@@ -2802,7 +2849,7 @@ function Resolve-RelativeRoot([string]$PluginRootPath, [string]$Relative, [strin
     $resolved = Canonical-Path (Join-Path $PluginRootPath $Relative)
     $prefix = (Canonical-Path $PluginRootPath) + [IO.Path]::DirectorySeparatorChar
     $comparison = [StringComparison]::Ordinal
-    if ($env:OS -eq 'Windows_NT') { $comparison = [StringComparison]::OrdinalIgnoreCase }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { $comparison = [StringComparison]::OrdinalIgnoreCase }
     if (-not $resolved.StartsWith($prefix, $comparison)) {
         Fail "roots.$Name escapes pluginRoot."
     }
@@ -2817,7 +2864,7 @@ function Validate-ContextReceipt(
     [string]$PayloadExpectation,
     [string]$CellExpectation
 ) {
-    $hostPlatform = $(if ($env:OS -eq 'Windows_NT') { 'windows' } else { 'posix' })
+    $hostPlatform = $(if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 'windows' } else { 'posix' })
     if (-not (Test-EnvironmentPathRooted $ReceiptPath $hostPlatform)) {
         Fail 'The installation-context receipt pointer must be absolute.'
     }
@@ -3074,7 +3121,7 @@ function Test-EnvironmentPathRooted([string]$Path, [string]$Platform) {
 }
 
 function Get-CurrentEnvironment {
-    if ($env:OS -eq 'Windows_NT') {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         if (-not $env:USERPROFILE) { Fail 'USERPROFILE is required on Windows.' }
         if (-not [IO.Path]::IsPathRooted($env:USERPROFILE)) {
             Fail 'USERPROFILE must be absolute.'
@@ -3097,10 +3144,7 @@ function Get-CurrentEnvironment {
         Fail 'The passwd database home must be absolute.'
     }
     $homeRealPath = Canonical-Path $passwdHome -MustExist
-    $wslDistro = $null
-    if (-not [string]::IsNullOrEmpty($env:WSL_DISTRO_NAME)) {
-        $wslDistro = [string]$env:WSL_DISTRO_NAME
-    }
+    $wslDistro = Resolve-WslDistribution $homeRealPath
     return [pscustomobject][ordered]@{
         platform = 'posix'
         homeRealPath = $homeRealPath
@@ -3219,7 +3263,7 @@ function Get-InstalledPayloadPluginId(
     $installed = Canonical-Path (Join-Path $ResolvedCopilotHome 'installed-plugins')
     $prefix = $installed + [IO.Path]::DirectorySeparatorChar
     $comparison = [StringComparison]::Ordinal
-    if ($env:OS -eq 'Windows_NT') { $comparison = [StringComparison]::OrdinalIgnoreCase }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { $comparison = [StringComparison]::OrdinalIgnoreCase }
     if (-not $ResolvedPayload.StartsWith($prefix, $comparison)) { return '' }
     $relative = $ResolvedPayload.Substring($prefix.Length)
     $parts = @($relative -split '[\\/]')
@@ -4355,7 +4399,7 @@ function Resolve-SnapshotPaths($Validated, [string]$RequestedSnapshotId) {
         Fail 'Snapshot root must be one direct child of snapshotsRoot.'
     }
     $nameComparison = [StringComparison]::Ordinal
-    if ($env:OS -eq 'Windows_NT') {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         $nameComparison = [StringComparison]::OrdinalIgnoreCase
     }
     if (-not [string]::Equals(
@@ -4750,7 +4794,7 @@ function Resolve-RuntimeSlotPaths(
     $install = Read-Json ([string]$Validated.installReceipt)
     $roots = Get-PropertyValue $install 'roots'
     $versionsRelative = Get-StringProperty $roots 'versions'
-    $separatorPattern = $(if ($env:OS -eq 'Windows_NT') { '[\\/]' } else { '/' })
+    $separatorPattern = $(if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { '[\\/]' } else { '/' })
     $cursor = $pluginRoot
     foreach ($part in @($versionsRelative -split $separatorPattern)) {
         if (-not $part) { continue }
@@ -4788,7 +4832,7 @@ function Resolve-RuntimeSlotPaths(
         Fail 'Runtime slot must be one direct child of versionsRoot.'
     }
     $comparison = [StringComparison]::Ordinal
-    if ($env:OS -eq 'Windows_NT') {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         $comparison = [StringComparison]::OrdinalIgnoreCase
     }
     if (-not [string]::Equals(
@@ -4823,7 +4867,7 @@ function Resolve-RuntimeSlotCompletionPaths(
 }
 
 function Ensure-VersionsRootChain($Validated, [string]$VersionsRelative) {
-    $separatorPattern = $(if ($env:OS -eq 'Windows_NT') { '[\\/]' } else { '/' })
+    $separatorPattern = $(if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { '[\\/]' } else { '/' })
     $cursor = Canonical-Path ([string]$Validated.pluginRoot)
     foreach ($part in @($VersionsRelative -split $separatorPattern)) {
         if (-not $part) { continue }
@@ -5261,7 +5305,7 @@ function Invoke-SlotProvision([string]$ResolvedDurableHome) {
         Write-AtomicJson $temporaryOwnership $ownership
         Assert-AllLocksOwned
         try {
-            if ($env:OS -eq 'Windows_NT') {
+            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
                 $moveResult = [CeAtomicDirectory]::MoveWindows(
                     $temporarySlot,
                     [string]$paths.slotRoot
@@ -5663,7 +5707,7 @@ function Publish-RuntimeSlotCompletion(
         Write-AtomicJson $temporary $Receipt
         Assert-AllLocksOwned
         try {
-            if ($env:OS -eq 'Windows_NT') {
+            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
                 $moveResult = [CeAtomicDirectory]::MoveWindows($temporary, $Path)
             }
             elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
@@ -6313,8 +6357,12 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
     return $validated
 }
 
+. (Join-Path $PSScriptRoot 'guest-environment.ps1')
+
 try {
     Assert-ExactChoice $Action @(
+        'guest-register',
+        'guest-status',
         'source-id',
         'resolve',
         'validate',
@@ -6427,7 +6475,16 @@ try {
     $resolvedProjectRoot = ''
     if ($ProjectRoot) { $resolvedProjectRoot = Canonical-Path $ProjectRoot -MustExist }
 
-    if ($Action -eq 'source-id') {
+    if ($Action -eq 'guest-register') {
+        $result = Register-GuestEnvironment $Distribution
+    }
+    elseif ($Action -eq 'guest-status') {
+        if ($PSBoundParameters.ContainsKey('Distribution')) {
+            [void](Assert-GuestDistributionName $Distribution)
+        }
+        $result = Get-GuestEnvironmentStatus $Distribution
+    }
+    elseif ($Action -eq 'source-id') {
         $descriptor = Read-SourceDescriptor
         if ($null -eq $descriptor) {
             Fail 'source-id requires -SourceJson or -SourceFile.'
@@ -6591,6 +6648,9 @@ try {
     $result | ConvertTo-Json -Depth 12 -Compress
     if ($Action -eq 'probe-legacy' -and -not $result.allowMutation) {
         exit 3
+    }
+    if ($Action -eq 'guest-status' -and $result.status -ne 'ready') {
+        exit 1
     }
     exit 0
 }

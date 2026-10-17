@@ -35,7 +35,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pytest
-        run: python -m pip install "pytest>=8.0"
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system "pytest>=8.0"
       - name: Run the full zdd singleton-manager suite
         # src/-layout package, not installed (editable or otherwise) in
         # this minimal job -- expose it on PYTHONPATH so collection can

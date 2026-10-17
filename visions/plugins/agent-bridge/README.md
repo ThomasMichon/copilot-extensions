@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-15
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -342,6 +342,21 @@ The bridge can drive an agent runtime through ACP while exposing or federating
 host-owned sessions through AHP, and can adopt additional compatible runtimes
 without changing its delegation semantics. Protocol roles remain explicit even
 when one conversation crosses both boundaries.
+
+### externally-hosted-acp-agents
+
+An already-running remote ACP agent is a first-class explicitly configured
+target. The bridge owns its client connection, not the remote server, process,
+or workspace. Transport selection and experimental protocol boundaries remain
+explicit; disconnect, cancellation, connection close, and durable session
+retirement are not interchangeable. Recovery preserves remote session identity
+without replaying uncertain consequential work.
+
+Credentials come from the existing scoped host-credential and auth-injection
+owners, not a second credential store. Remote tool permissions and structured
+application approvals remain answerable through the bridge's correlated
+headless interaction path. A live offered action and its exact answer determine
+approval; historical text, reconnect, and broad local tool authority do not.
 
 ### cursor-stable-event-replay
 

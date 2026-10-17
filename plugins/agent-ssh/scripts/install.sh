@@ -112,7 +112,7 @@ _install_agent_ssh_package() {
     }
     if [[ -n "${UV_CMD:-}" ]]; then
         local lib_out pkg_out
-        if lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" \
+        if ! lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" \
             --reinstall-package agent-venue-copilot --quiet \
             "pyyaml>=6.0.3" \
             "$agent_procutil_dir" \
@@ -123,26 +123,19 @@ _install_agent_ssh_package() {
             "$remote_login_shell_dir" \
             "$fleet_contracts_dir" \
             "$machine_transport_dir"); then
-            if pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --no-deps "$PLUGIN_DIR" --quiet); then
-                return 0
-            fi
-            [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
-            _step 'uv package install failed -- falling back to python -m pip'
-        else
             [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
-            _step 'uv package install failed -- falling back to python -m pip'
+            _fail 'Selected dependency installation failed'
+            return 1
         fi
+        if pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet); then
+            return 0
+        fi
+        [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
+        _fail 'Selected dependency installation failed'
+        return 1
     fi
-    "$VENV_PYTHON" -m pip install --quiet \
-        "$agent_procutil_dir" \
-        "$PLUGIN_DIR/libs/dropin-registry" \
-        "$ssh_manager_dir" \
-        "$venue_copilot_dir" \
-        "$zdd_dir" \
-        "$remote_login_shell_dir" \
-        "$fleet_contracts_dir" \
-        "$machine_transport_dir" \
-        "$PLUGIN_DIR" 2>/dev/null
+    _fail 'uv is required; unrestricted pip fallback is not supported'
+    return 1
 }
 
 ACTION="${AGENT_SSH_ACTION:-install}"
@@ -391,7 +384,7 @@ _versioned_activate() {
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
-    _versioned_mark_complete
+    _versioned_mark_complete || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
@@ -424,7 +417,7 @@ _bootstrap_python() {
 _payload_hash() {
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
+    # changed the payload WITHOUT bumping the version. Fails on any error.
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -433,40 +426,46 @@ _payload_hash() {
             __parts="$__parts"$'\n'"$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    # Fails (no output) when no SHA-256 implementation works: the caller must
+    # then refuse to publish a slot without its fingerprint.
+    local __d
+    if command -v sha256sum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
+    elif command -v openssl >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
+    else
+        return 1
+    fi
+    __d="${__d%% *}"
+    [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$__d"
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    local ph
-    ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
+        return 1
+    fi
+    _runtime_construction_complete "$actual_hash"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -539,6 +538,27 @@ _materialize_snapshot_vendored_libs() {
             _fail "Failed to copy required snapshot library: $lib"
             return 1
         fi
+    done
+    local manifest
+    for manifest in "$snapshot_dir/pyproject.toml" "$snapshot_dir"/libs/*/pyproject.toml; do
+        if ! awk '
+        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport", libs, " ") }
+        /^\[/ { sources = ($0 ~ /^\[tool\.uv\.sources\][[:space:]]*$/) }
+        sources && $0 !~ /^[[:space:]]*#/ {
+            for (i in libs) {
+                pattern = "path[[:space:]]*=[[:space:]]*\"\\.\\./\\.\\./libs/" libs[i] "\""
+                gsub(pattern, "path = \"libs/" libs[i] "\"")
+            }
+            if ($0 ~ /path[[:space:]]*=[[:space:]]*"/) {
+                sub(/,[[:space:]]*editable[[:space:]]*=[[:space:]]*true/, "")
+            }
+        }
+        { print }
+        ' "$manifest" > "$manifest.tmp"; then
+            _fail 'Failed to materialize snapshot dependency sources'
+            return 1
+        fi
+        mv -f "$manifest.tmp" "$manifest" || return 1
     done
 }
 
@@ -807,8 +827,9 @@ _enter_install_lock() {
 }
 # === end install-transaction lock ===
 
-case "$ACTION" in
-    install|update|stamp|provision)
+case "$ACTION:${DRY_RUN:-0}" in
+    uninstall:1) ;;
+    install:*|update:*|stamp:*|provision:*|uninstall:*)
         if ! _enter_install_lock; then
             _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
             exit 1
@@ -895,13 +916,13 @@ if [[ "$ACTION" == "uninstall" ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo '(dry run -- nothing will be changed)'
         [[ -e "$STUB" ]] && echo "[dry-run] would remove binstub: $STUB"
-        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove (config + DB + venv): $INSTALL_DIR"
+        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove runtime/config contents (coordination retained): $INSTALL_DIR"
         echo "agent-ssh uninstall dry run complete -- nothing was changed"
         exit 0
     fi
     rm -f "$STUB"
-    rm -rf "$INSTALL_DIR"
-    _ok 'agent-ssh runtime removed'
+    remove_install_runtime_content "$INSTALL_DIR" || exit 1
+    _ok 'agent-ssh runtime removed (transaction/staging coordination retained)'
     exit 0
 fi
 
@@ -945,6 +966,8 @@ for h in bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 b
 done
 _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
 
+_versioned_slot_clean || exit 1
+if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     _versioned_slot_clean
     if [[ -n "$UV_CMD" ]]; then
@@ -976,6 +999,8 @@ if ! _install_agent_ssh_package; then
     exit 1
 fi
 _ok 'Package installed: agent-ssh'
+
+fi
 
 # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
 _versioned_activate || exit 1

@@ -427,6 +427,8 @@ class EventLog:
 
     def _track_tool_event(self, event: SseEvent) -> None:
         """Update in-flight tool state while the event-log lock is held."""
+        if event.data.get("history_replay") is True:
+            return
         tool_call_id = event.data.get("tool_call_id") or ""
         if event.event == "tool_call_start":
             self._open_tool_calls[tool_call_id] = event

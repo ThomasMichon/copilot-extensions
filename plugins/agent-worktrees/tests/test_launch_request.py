@@ -68,6 +68,24 @@ def test_resume_admitted_once_via_real_daemon_then_finished_never_replays(tmp_pa
     assert request.inspect(intent["request_id"])["state"] == "completed-or-superseded"
 
 
+@pytest.mark.parametrize("state", ["active", "unknown"])
+def test_structured_resume_rejects_hosted_provider_via_real_daemon(
+    tmp_path, authority, state,
+):
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+    )
+    record.execution_leg = tracking.ExecutionLegBinding(
+        provider="ahp", state=state, binding_revision=1, blob={},
+    )
+    tracking.save_record(record, record.yaml_path)
+    before = record.yaml_path.read_bytes()
+    with pytest.raises(ValueError, match="native execution leg"):
+        request.execute(authority, _intent())
+    assert record.yaml_path.read_bytes() == before
+    assert launch_seed_state.peek(record.yaml_path) is None
+
+
 @pytest.mark.parametrize("kind,field,value", [
     ("resume", "worktree_id", "wt-b"),
     ("resume", "kind", "new"),

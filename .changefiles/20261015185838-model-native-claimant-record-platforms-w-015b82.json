@@ -1,0 +1,9 @@
+{
+  "comment": "Model native claimant record platforms while retaining foreign-platform unknown guards",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

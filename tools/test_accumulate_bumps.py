@@ -37,6 +37,15 @@ def test_bump_version_rejects_unknown_type():
         acc.bump_version("1.0.0", "gigantic")
 
 
+def test_docker_resource_producer_canonical_version_is_promotable(monkeypatch):
+    canonical = acc.REPO / "libs/docker-resource-producer/pyproject.toml"
+    version = acc.tomllib.loads(canonical.read_text(encoding="utf-8"))["project"]["version"]
+    monkeypatch.setattr(acc, "_version_at", lambda *args: version)
+    assert acc.lib_bumps_from_diff("unused", ["libs/docker-resource-producer/src/docker_resource_producer/client.py"]) == {
+        canonical: (version, acc.bump_version(version, "dev")),
+    }
+
+
 @pytest.mark.parametrize("types,expected", [
     (["patch"], "patch"),
     (["dev", "patch"], "patch"),

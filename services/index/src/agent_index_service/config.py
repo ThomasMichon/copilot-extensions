@@ -60,6 +60,7 @@ class HostConfig:
     stream_batch_size: int = 64
     indexer_nice: int = 10
     store_layout: str | None = None
+    fleet_policy: Path | None = None
 
     def core_environment(self) -> dict[str, str]:
         inline = {"role": "host", "corpus": {"sources": list(self.sources)}}
@@ -95,12 +96,14 @@ class HostConfig:
         }
         if self.store_layout is not None:
             result["AGENT_INDEX_STORE_LAYOUT"] = self.store_layout
+        if self.fleet_policy is not None:
+            result["AGENT_INDEX_FLEET_POLICY"] = str(self.fleet_policy)
         return result
 
 
 def _source(value: Any, index: int) -> dict[str, Any]:
     label = f"sources[{index}]"
-    raw = _mapping(value, label, {"name", "type", "path", "ref", "auth", "trust_domain"})
+    raw = _mapping(value, label, {"name", "type", "path", "ref", "auth", "trust_domain", "remote"})
     name = _text(raw.get("name"), f"{label}.name")
     kind = _text(raw.get("type", name.split(":", 1)[0]), f"{label}.type")
     if kind not in {"git", "github"} or name.split(":", 1)[0] != kind:
@@ -119,8 +122,26 @@ def _source(value: Any, index: int) -> dict[str, Any]:
         if "path" in raw or "ref" in raw:
             raise ConfigurationError(f"{label}: path/ref are only supported for git")
     if "auth" in raw:
-        auth = _mapping(raw["auth"], f"{label}.auth", {"account"})
+        auth = _mapping(raw["auth"], f"{label}.auth", {"account", "gateway"})
         result["auth"] = {"account": _text(auth.get("account"), f"{label}.auth.account")}
+        if "gateway" in auth:
+            result["auth"]["gateway"] = str(_path(auth["gateway"], f"{label}.auth.gateway"))
+    if "remote" in raw:
+        if kind != "git" or "gateway" not in result.get("auth", {}):
+            raise ConfigurationError(f"{label}.remote requires Git Gateway credentials")
+        from urllib.parse import urlsplit
+
+        remote = _text(raw["remote"], f"{label}.remote")
+        parts = urlsplit(remote)
+        if (
+            parts.scheme != "https" or not parts.hostname
+            or parts.username is not None or parts.password is not None
+            or parts.query or parts.fragment
+        ):
+            raise ConfigurationError(f"{label}.remote must be a credential-free HTTPS URL")
+        result["remote"] = remote
+    if kind == "git" and "gateway" in result.get("auth", {}) and "remote" not in result:
+        raise ConfigurationError(f"{label}: Git Gateway credentials require remote")
     if "trust_domain" in raw:
         result["trust_domain"] = _text(raw["trust_domain"], f"{label}.trust_domain")
     return result
@@ -130,7 +151,7 @@ def parse_config(value: Any, config_file: Path) -> HostConfig:
     raw = _mapping(
         value, "config",
         {"schema_version", "home", "data", "routing", "listener", "sources", "engine",
-         "limits", "store"},
+         "limits", "store", "fleet"},
     )
     if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
         raise ConfigurationError("schema_version must be 1")
@@ -166,6 +187,8 @@ def parse_config(value: Any, config_file: Path) -> HostConfig:
         if store.get("layout") != "source-aware-v1":
             raise ConfigurationError("store.layout must be source-aware-v1")
         layout = "source-aware-v1"
+    if "fleet" in raw and layout is None:
+        raise ConfigurationError("fleet requires explicit store.layout source-aware-v1")
     return HostConfig(
         config_file=config_file.resolve(),
         home=home,
@@ -182,6 +205,10 @@ def parse_config(value: Any, config_file: Path) -> HostConfig:
         ),
         indexer_nice=_integer(limits.get("indexer_nice", 10), "limits.indexer_nice", 0, 19),
         store_layout=layout,
+        fleet_policy=(
+            _path(_mapping(raw["fleet"], "fleet", {"policy"}).get("policy"), "fleet.policy")
+            if "fleet" in raw else None
+        ),
     )
 
 

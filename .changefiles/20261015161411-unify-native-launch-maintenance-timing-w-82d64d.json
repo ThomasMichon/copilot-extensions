@@ -1,0 +1,13 @@
+{
+  "comment": "Unify native launch maintenance timing with bounded portable shell rendering",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

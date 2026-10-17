@@ -345,13 +345,17 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
                 ok=False, stderr="Refusing unproved PR rewrite: " + reasons[0],
             )
         lease = expected
+        incremental = False
         if reconcile_head:
             from . import pr_publish
             pr = pr_publish._pr_for(record, proof.branch)
+            incremental = _ancestor(reconcile_head, proof.source_head, cwd)
             if not (
                 re.fullmatch(r"[0-9a-f]{40,64}", reconcile_head)
-                and _ancestor(expected, reconcile_head, cwd)
-                and _ancestor(reconcile_head, proof.old_source, cwd)
+                and (incremental or (
+                    _ancestor(expected, reconcile_head, cwd)
+                    and _ancestor(reconcile_head, proof.old_source, cwd)
+                ))
                 and pr_publish._tip(remote, proof.branch, cwd) == reconcile_head
                 and pr_publish._provider_head(
                     repo, pr, expected_ref=proof.branch,
@@ -368,7 +372,7 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
         from .git_push_transport import push as transport
         result = transport(
             remote, f"{proof.source_head}:refs/heads/{proof.branch}", cwd=cwd,
-            force_with_lease_expect=lease, timeout=timeout,
+            force_with_lease_expect=None if incremental else lease, timeout=timeout,
         )
         if not result and not reconcile_head and "stale info" in result.stderr:
             from . import pr_publish

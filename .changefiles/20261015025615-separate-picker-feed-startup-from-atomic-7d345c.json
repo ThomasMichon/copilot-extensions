@@ -1,0 +1,13 @@
+{
+  "comment": "Separate Picker feed startup from atomic publication deadlines and reconnect transient transport expiry without polling fallback.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

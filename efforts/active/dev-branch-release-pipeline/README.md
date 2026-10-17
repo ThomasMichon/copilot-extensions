@@ -6,11 +6,11 @@
   (promoted to `main` by the CI pipeline); Phase 7 work branches off `dev`
   per the current contributor flow.
 - **Created:** 2026-09-22
-- **Status:** Active (reopened 2026-10-02 for Phase 7; Phase 8 superseded by
+- **Status:** Active (Phases 7 and 9; Phase 8 superseded by
   main-owned-workflow-control Phase 5 — see Journal)
-- **Vision:** none yet for the pipeline itself — this effort may spawn a
-  `visions/release-pipeline` entry once the design settles; revisit at
-  Phase 2/3 boundary. It is, however, the named realization vehicle for the
+- **Vision:** [`release-pipeline`](../../../visions/release-pipeline/README.md)
+  (source-owned release identity and continuous delivery). Also the named
+  realization vehicle for the
   [`coverage-guided-ci`](../../../visions/coverage-guided-ci/README.md)
   vision's baseline-generation/correlation concept (this pipeline's
   promotion gate is the natural place to earn a coverage baseline and
@@ -44,6 +44,12 @@ version bumps, materializing vendored code, and validating the result — so
 in-flight merge. This removes the PR-time burden of precise version bumps and
 vendoring, while giving us a real pre-release validation gate for the first
 time.
+
+The verified development commit is the durable release and artifact owner.
+Generated main commits carry that source marker and remain operational landing
+receipts, not competing release identities. Versioning, materialization and
+explicitly governed control inputs still need one consistent, validated
+composition; content integrity does not reduce to trusting a source marker.
 
 ## Participants
 
@@ -92,6 +98,27 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-15 delivery and source-identity clarification:**
+
+> I feel like this issue happened a couple times in a row. We need to sweep over blockers of previous release attempts and check for repeat patterns. We really need a release once an hour, if not sooner.
+
+> When a dev-to-main promotion occurs, what matters is the `dev` commit hash. We expect to just "blit over" everything in main, and mark main with the source dev commit. We'll also publish artifacts, but frankly those artifacts really belong to the associated dev commit, which should be the durable marker. Exact main commits shouldn't matter, only the dev commit id stored in the main commit; we can tag the main commit with the dev commit once landed. We should avoid hash checks which result in catch-22s.
+
+**PR-time hash-compatibility clarification (verbatim):**
+
+> The has refusals are also a problem, because they get easily broken and nothing is catching the breaks before PRs go in. This is the kind of thing which needs to be caught at PR time; by the time a release goes out, we may need be more forgiving, or at least perform some normalization before hash-comparison
+
+**Main publication boundary clarification (verbatim):**
+
+> How can it land *AND* fail? If this merges:
+> https://github.com/ThomasMichon/copilot-extensions/pull/6938
+> I expect that to mean "release succeeded". If we have a failure, don't allow this merge through.
+
+Phase 9 is the agent-recommended decomposition of this clarification. It does
+not grant a new main-path exception, relax byte integrity or silently change
+the separately owned main-control preservation policy. The original pipeline
+request follows.
 
 > 1. Agree. We'll generate the entirety of main from the CI build, and apply
 > it whole, which will produce a nice incremental diff, accounting for
@@ -691,6 +718,44 @@ Historical proposal and supersession evidence:
       and [main-owned-workflow-control Phase 5](../main-owned-workflow-control/README.md#phase-5---finish-validation-and-automation-consolidation);
       the current-main audit does not establish deployed prevention.
 
+### Phase 9 - Source-owned release identity and repeat-blocker prevention
+
+_(Agent-recommended implementation and validation decomposition of the
+2026-10-15 operator clarification; not a replacement release writer.)_
+
+- [x] Land the reviewed source-identity and cadence contract before changing
+      the mechanism.
+- [ ] Exercise actual producer, materializer and verifier agreement in bounded
+      ordinary PR checks before development merge, reusing existing CI lanes.
+      Cover relevant attribute, closure and materializer inputs even when no
+      artifact-tool file changed; do not add an unconditional exhaustive matrix.
+- [ ] Reconcile the recurrence audit with existing repair owners. Distinguish
+      source merges from actual trusted-control activation and qualified
+      releases; #6237, #4876 and #6865 retain their implementation boundaries.
+- [ ] Make the verified development commit the durable release/artifact-set
+      lookup and landed-release tag identity, reusing the existing source
+      marker. Keep candidate, parent and landed-main commits as operational
+      provenance and stale-write receipts rather than second release keys.
+- [ ] Freeze and reuse the admitted composition and lock for the source-owned
+      artifact set. Wire build, export, attestation, availability, publication,
+      tagging and readback consistently; preserve validated legacy lookup.
+- [ ] Share a declared canonical source representation between production and
+      verification. Normalize known non-semantic checkout/staging differences
+      before source comparison while preserving raw published-byte digests.
+      Unknown or semantic differences must remain explicit, actionable failures.
+- [ ] Reuse immutable artifacts for equivalent source, content and variants
+      across different Git containers. Reject conflicting bytes or provenance
+      under the same binding without silently retargeting published objects.
+- [ ] Preserve source governance, byte integrity, exact lock authority, required
+      qualification and atomic publication. Any change to independently owned
+      main control requires its existing explicit review/authorization path.
+- [ ] Measure actual qualified source advancement, queue time and blocking
+      stages against hourly-or-faster delivery while changes are pending;
+      retain the original faster 10-30-minute validation intent.
+- [ ] Prove normal release and client compatibility, journal the result and
+      retain responsibility for unresolved acceptance. A contract PR, source
+      merge, tag, or green wrapper alone does not complete this phase.
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
@@ -823,13 +888,145 @@ Its remaining compatible obligations are transferred to #6430 and the canonical
 main-owned-workflow-control Phase 5. Existing release gates and other
 participants' phase ownership remain unchanged.
 
+### Phase 9 validation
+
+- [ ] An ordinary PR that breaks producer/verifier agreement fails before merge.
+      Prove the selector covers root/nested attributes, declared source closures,
+      materializers and hash/canonicalization helpers on the relevant platforms.
+      Reuse bounded contract portfolios rather than duplicating full validation.
+- [ ] The actual entry points agree across declared LF/CRLF and attribute-policy
+      representations, canonical/materialized layouts and irrelevant staging
+      noise. Changed shipped source/dependency content still fails; no downloaded
+      wheel or archive is normalized to bypass its raw digest.
+- [ ] Same verified dev source, admitted payload and lock with a different
+      candidate/squash commit or bookkeeping-only main change reuses the
+      immutable artifact set without a new Main-SHA identity refusal.
+- [ ] Wrong source binding, altered source/wheel/bundle/index bytes,
+      wrong signatures, conflicting variants and missing/extra assets refuse.
+      A source marker alone cannot satisfy integrity.
+- [ ] A different dev commit with equal payload gets accurate source provenance;
+      a content-only no-op never claims a source marker that was not recorded.
+- [ ] Candidate/base races, unauthorized control changes and moved immutable
+      tags remain rejected. A safe retry does not overwrite another writer.
+- [ ] Legacy indexes, tags, deploy provenance and serving generations remain
+      usable under validated compatibility; missing dev lineage is not invented.
+      Optional client artifacts do not become a source-installation gate.
+- [ ] Exact generated consumers and validator bootstrap qualify the transition
+      that activates them, not merely a later dev source state.
+- [ ] Two natural qualified release cycles with pending source changes
+      demonstrate the cadence, source marker, artifact reuse and landed tag.
+      Missed targets and remaining blockers stay explicit and owned.
+
 ## Proposal
 
+Phase 9 extends the existing source marker, generator, artifact identity and
+tagger rather than introducing another release authority. The implementation
+must separate the development source key from canonical payload/lock identity
+and from operation-specific Git receipts. Main-derived inputs that genuinely
+affect versions or shipped bytes must be frozen and attributable, not silently
+discarded or re-read as mutable state at another stage.
 
-_Pending — Phase 1 design work will produce concrete tool choices and
-generator contract details here or in a linked sub-doc._
+The twelve historical manifest/candidate hash refusals were content-hash
+inequalities, not established generated-commit comparisons. Preserve and verify
+that byte contract while removing incidental container dependencies. They are
+also integration/coverage failures when a changed producer and verifier reach
+release without proving agreement at PR time. Existing artifact CI portfolios
+should be reused with correct input/path selection and a shared canonical
+representation, not replaced by blanket acceptance of mismatched bytes.
+The separately governed control-preservation policy is not changed by this
+proposal.
 
 ## Journal
+
+### 2026-10-16 - Required baseline collection blocks paused replacement before publication
+
+Paused qualification run `38967279712` tested Dev
+`883623d68b5813ed8d6fa08c26cfd8f02fe9628f`. Every full-source suite,
+artifact build and signed validation passed, but promotion job `117213929076`
+correctly refused the missing Worktrees coverage baseline (#7032). The producer
+log proves a 25-file instrumented batch exceeded its unchanged 300-second cap;
+the nonblocking collection step and missing-file-ignore upload explain its
+otherwise green job. Candidate creation, qualification, publication and Main
+merge did not run. Main remains paused and unqualified.
+
+The bounded repair changes only the collector's default batch size to five
+files and reports each batch before execution. It retains the entire inventory,
+300-second cap, attribution merging and fail-closed behavior. The existing
+#5694 corpus, fixture, containment and runner ownership is untouched. Real
+Python 3.12 collection of the exact failed 25-file/722-item inventory passes in
+five batches of 8.41, 16.00, 64.70, 184.87 and 8.03 seconds. The full selector
+regression file passes 127 tests; explicit real collection/plan/error contracts
+pass 22 tests, including default and explicit chunking with shared-line
+attribution. These local witnesses do not qualify a release.
+
+Next: merge the reviewed collector repair through Dev, then earn a fresh
+paused replacement with complete source, candidate and artifact evidence.
+Resume, consumer deployment and both natural pending-source cadence cycles
+remain open.
+
+### 2026-10-16 - Source-owned helper implementation; activation remains open
+
+The source-identity/PR-time contract merged as #6939. Source helpers now bind
+version-2 artifact indexes and immutable availability lookup to the verified
+Dev commit, preserve version-1 validation, reuse the signed admitted
+composition/lock without rebuilding for another Git container, and record new
+landings with Dev-named tags. Source, composition, archive/wheel bytes,
+governance, immutable collisions and original hosted-signature checks remain
+hard failures.
+
+The independently reviewed Bridge release-label repair merged as #6992
+(`1d5bf16e408025f85315b035abc916faee35c5fb`). It normalizes the actual fallback
+release label, exercises already-stamped/materialized inputs, and re-attests
+only the current authority corpus with confined, deterministic capture.
+Current-head approval and CI succeeded; this is a source repair, not proof of
+a qualified containing Main release or installed acceptance.
+
+The Index plugin fixture repair then merged as #6995
+(`46a6c1a78df5aa06d93d9b1bb3bdac76349c00d0`) after current-head approval and
+green CI. Canonical/materialized layouts are explicit, fallback fixtures
+actually remove their temporary local dependency, and staged Bash is normalized
+after all text/materializer rewrites. The full contained Index suite passed
+1,060 cases; the review-fix selection passed 33, including two non-vacuous
+CRLF/coordinator regressions. This closes that source-fixture slice only.
+The next stretch remains reviewed helper/control activation and actual
+known-good replacement, not unpausing on the strength of these source merges.
+
+The new qualifier derives the required executed portfolio from canonical CI,
+including full suites, native platforms and matrix rows. Final publication
+requires its exact successful attempt and consumer-authority raw readback
+before a Main merge. Ordinary PR input selection now includes real source,
+attribute and materializer inputs; eight actual producer/materializer/verifier
+roundtrips cover canonical checkout representation and source/archive/wheel
+tamper refusal.
+
+Independent implementation review caught two additional authority/completion
+gaps, both repaired without weakening evidence. The prepared required Main
+source gate authenticates the owning run's executing control generation by
+workflow blob equality, so obsolete in-flight graphs cannot publish after
+resume. Immutable version aliases from prior squash-landed or never-landed
+candidates are authenticated through the prior signed Dev index and actual
+per-plugin source closure, not a nonexistent Main ancestry relationship.
+Real two-release regressions cover both cases and preserve current raw-byte,
+signature, provenance and no-clobber refusals.
+
+Before activation, an actual controlled consumer view exposed legacy-only test
+assumptions that the default Dev view could not reveal. All prior assertions
+and negative cases are retained; the prepared graph now executes its real
+pinned launcher, canonical reader, fresh-proof merge waiter, premerge publisher
+and postmerge receipt path. The full legacy view passes 1,226 cases and the
+controlled view passes 1,235; their explicit platform/inactive-tier skips are
+not credited as live qualification. A measured native cumulative timeout is
+addressed by partitioning into the existing second Windows job, preserving all
+cases and both five-minute bounds rather than extending a deadline.
+
+These source changes do not activate Main control. #6237 retains one
+coordinated, explicitly authorized workflow/control repair; the pipeline is
+paused after #6949, and the exposed product snapshot is not declared healthy.
+The paused `qualification_only` path preserves the pause and every other gate
+while preparing a normal candidate PR replacement. Its trusted control,
+first-transition qualification, actual known-good Main replacement, installed
+consumer acceptance and hourly-or-faster cadence proof remain open. A source
+merge, helper receipt or documentation change is not effort completion.
 
 ### 2026-10-13 - Phase 8 superseded by the canonical campaign
 
@@ -2676,6 +2873,3 @@ than fully pre-solved in the plan — operator direction: land the plan now
 and resolve those with tests during implementation.
 
 Phase 7 implementation can now begin.
-
-
-

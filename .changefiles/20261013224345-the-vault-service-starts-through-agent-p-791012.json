@@ -1,0 +1,9 @@
+{
+  "comment": "The vault service starts through agent_procutil.spawn_daemon: it runs from its runtime root, breaks away from a caller's kill-on-close Job (falling back inside a Job that forbids it, where it always ran), and logs stdout/stderr to service-stdio.log.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

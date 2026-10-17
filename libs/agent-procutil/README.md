@@ -64,21 +64,37 @@ It composes the helpers above, so its flags never drift from them:
 
 - **Windowless.** `DETACHED_PROCESS` by default; `console_children=True` uses
   the `windowless_daemon_kwargs()` host for daemons that keep spawning
-  console-subsystem children.
+  console-subsystem children. For a Python host in this mode, use
+  `python, extra_env = direct_python(sys.executable)`, pass `python` in argv
+  and layer `extra_env` into the child environment. This bypasses Windows venv
+  redirectors so process control names the actual worker while retaining its
+  venv imports. Opaque executable commands are not rewritten by `spawn_daemon`.
 - **Escapes the caller.** `breakaway=True` (default) adds
   `CREATE_BREAKAWAY_FROM_JOB` on Windows so a kill-on-close Job around the
   caller (an installer or updater) does not kill the new daemon; POSIX gets a
   new session. When the caller's Job forbids breakaway (`ERROR_ACCESS_DENIED`),
-  the spawn fails with `DaemonSpawnError` (an `OSError`) and the daemon log
-  records why: a daemon that silently inherits its caller's lifetime dies when
-  that Job closes. A caller whose daemon already ran inside the caller's Job
-  before adopting `spawn_daemon`, and for which that lifetime still beats no
-  daemon, passes `contained_fallback=True` to start it inside the Job instead
-  (logged as a warning and in the daemon log). Contained test mode suppresses
-  breakaway and the new session, like the helpers it builds on. Survival is
-  therefore conditional: only a daemon whose breakaway was permitted outlives
-  the caller's Job. One started through `contained_fallback`, with
-  `breakaway=False`, or in contained test mode dies when that Job closes.
+  the shared launcher uses a bounded, windowless WMI bootstrap outside that
+  Job. Its bootstrap uses the actual base interpreter with WMI's supported
+  detached-process flag, not a venv redirector or a console window. It passes
+  the original argv, cwd, complete environment, creation policy
+  and split log paths over an authenticated, one-use loopback channel; neither
+  credentials nor shell-interpolated daemon arguments go on the broker command
+  line or into temporary files. The actual daemon is staged suspended, its
+  native process handle is adopted and its independent lifetime checked, then
+  it is resumed. Failed uncommitted launches are reaped before a retry.
+  Cleanup branches run independently and preserve `DaemonSpawnError`;
+  `cleanup_confirmed=False` reports uncertain process exit and prohibits even
+  an explicitly requested contained retry.
+  The returned handle names the **actual daemon**, not PowerShell, WMI or a
+  console wrapper, and supports `pid`, `poll()`, `wait(timeout=...)`,
+  `terminate()` and `kill()`. Brokerage has a 30-second launch deadline with a
+  bounded cleanup wait. If both direct breakaway and brokerage fail,
+  `DaemonSpawnError` (an `OSError`) is raised and the daemon log records why.
+  A caller for which the shorter lifetime still beats no daemon may explicitly
+  pass `contained_fallback=True`; only after brokerage fails is that degraded
+  launch attempted, with a warning and a log entry. `breakaway=False` and
+  contained test mode never invoke the broker. Such contained daemons die when
+  the caller's Job closes.
 - **Explicit cwd.** `cwd` must be an existing absolute directory and must not be
   inside an `installed-plugins` payload, either as given or once symlinks and
   junctions are resolved (`<runtime>/current -> .../installed-plugins/...` is
@@ -93,7 +109,11 @@ It composes the helpers above, so its flags never drift from them:
   its own copy of the handle before returning the `Popen`. The header records
   the cwd and the executable (`argv[0]`) only, never the rest of argv or the
   environment, since either may carry a token, password or credential URL.
-  Pass an already-redacted `display="..."` label to add context to it.
+  Pass an already-redacted `display="..."` label to add context to it. A
+  daemon whose operators read its stderr from a separate file passes
+  `stderr_log_path=` (validated, created and tightened exactly like
+  `log_path`; the same path merges); the header and any breakaway note are
+  then written to both logs.
 
 `argv` must be a sequence of arguments: a bare `str`, `bytes` or path raises
 `TypeError` instead of being split into characters. `env` defaults to a copy

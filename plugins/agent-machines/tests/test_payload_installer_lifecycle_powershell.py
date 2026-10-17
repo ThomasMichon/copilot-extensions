@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -201,21 +202,47 @@ def test_real_init_stages_and_watchdog_preserves_124(sandbox) -> None:
     scripts = payload / "scripts"
     probe = scripts / "installation-context" / "legacy-entrypoint-probe.ps1"
     probe.parent.mkdir(parents=True)
-    # Only the external governance probe is stubbed; staging/watchdog/smoke are real.
-    probe.write_text("exit 0\n", encoding="utf-8")
-    shutil.copyfile(PLUGIN / "scripts" / "init.ps1", scripts / "init.ps1")
+    # Governance is outside this lifecycle contract; its stub runs in-process
+    # so nested PowerShell cold starts cannot consume the watchdog smoke budget.
+    # The helper, staged child, watchdog and owned-process checks remain real.
+    probe.write_text(
+        "[IO.File]::AppendAllText($env:FIXTURE_INIT_TRACE, "
+        "'probe ' + $PID + ' ' + [DateTime]::UtcNow.ToString('o') + \"`n\")\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    source = (PLUGIN / "scripts" / "init.ps1").read_text(encoding="utf-8")
+    probe_invocation = "& $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe"
+    assert source.count(probe_invocation) == 1
+    (scripts / "init.ps1").write_text(
+        source.replace(probe_invocation, "& $legacyProbe"),
+        encoding="utf-8",
+    )
     shutil.copyfile(PLUGIN / "plugin.json", payload / "plugin.json")
     env["FIXTURE_INSTALLER"] = str(scripts / "init.ps1")
     env["COPILOT_PLUGIN_INSTALL_SMOKE"] = "1"
+    trace = root / "init-trace"
+    env["FIXTURE_INIT_TRACE"] = str(trace)
     smoke_home = home / ".agent-machines"
     for sleep, deadline, expected in (("0", "8", 0), ("12", "3", 124)):
         env["COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP"] = sleep
         env["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = deadline
         (smoke_home / "smoke.json").unlink(missing_ok=True)
         Path(env["FIXTURE_PIDS"]).unlink(missing_ok=True)
+        trace.unlink(missing_ok=True)
+        started = time.monotonic()
         with _run(sandbox) as result:
-            assert result.returncode == expected, (result.stdout, result.stderr)
+            diagnostics = {
+                "sleep": sleep, "deadline": deadline,
+                "elapsed": time.monotonic() - started,
+                "probe_events": trace.read_text() if trace.exists() else "",
+                "watchdog": (smoke_home / "reconcile.err.log").read_text(encoding="utf-8-sig")
+                if (smoke_home / "reconcile.err.log").exists() else "",
+                "stdout": result.stdout, "stderr": result.stderr,
+            }
+            assert result.returncode == expected, diagnostics
             assert result.stdout == ""
+            assert (smoke_home / "smoke.json").is_file(), diagnostics
             record = json.loads((smoke_home / "smoke.json").read_text(encoding="utf-8-sig"))
             assert record["staged"] is True
             assert Path(record["staged_from"]) == payload

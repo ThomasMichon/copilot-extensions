@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit source-aware signed-grant fleet query ingress with bounded pre-TLS admission and no legacy fallback",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

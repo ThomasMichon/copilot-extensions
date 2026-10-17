@@ -3213,14 +3213,14 @@ def test_copy_process_logs_skips_file_rotated_away_mid_pass(
 
         monkeypatch.setattr(filesystem.ArchiveDirectory, "open", flaky_open)
     else:
-        real_needs_copy = filesystem._needs_copy
+        real_needs_copy = filesystem._needs_copy_from_stat
 
-        def flaky_needs_copy(src, dst):
-            if src.name == victim.name:
+        def flaky_needs_copy(before, dst, destination):
+            if dst.name == victim.name:
                 victim.unlink()
-            return real_needs_copy(src, dst)
+            return real_needs_copy(before, dst, destination)
 
-        monkeypatch.setattr(filesystem, "_needs_copy", flaky_needs_copy)
+        monkeypatch.setattr(filesystem, "_needs_copy_from_stat", flaky_needs_copy)
 
     copied, _nbytes, locked = _copy_process_logs(logs, dest)
 

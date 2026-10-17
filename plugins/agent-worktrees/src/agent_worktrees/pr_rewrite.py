@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import re
-import hashlib
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
-from . import activity, config as cfg, git_ops, hooks, output, pr_authority, pr_break_glass, pr_publication_state, pr_publish, pr_recovery, providers, publication_deadline, tracking
+from . import activity, config as cfg, git_ops, hooks, output, pr_authority, pr_break_glass, pr_publication_state, pr_publish, pr_recovery, pr_recovery_plan, providers, publication_deadline, tracking
 from .config import Config
 from .providers.attribution import BranchLeakError, validate_effective_head
 from .providers.base import ProviderError, PullResult
@@ -97,6 +97,7 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
     )
     audit: pr_break_glass.RecoveryAudit | None = None
     remote_published = False
+    publication_settled = False
     try:
         lock.acquire()
     except TimeoutError:
@@ -130,7 +131,8 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             observed = None
             if pr.number:
                 observed = observe_pr(config, pr)
-                if observed.merged or observed.state.lower() != "open" or observed.head_sha != pr.head_sha:
+                if (observed.merged or observed.state.lower() != "open"
+                        or (not recovery and observed.head_sha != pr.head_sha)):
                     raise ValueError("Provider PR is not open at the recorded head; inspect and reconcile it.")
                 if (recovery or legacy_revalidation) and (
                     observed.number != pr.number or observed.head_ref != pr.branch
@@ -142,7 +144,10 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                 ):
                     raise ValueError("Provider did not confirm this exact PR head and destination; nothing was pushed.")
             remote_tip = pr_publish._tip(target.remote, pr.branch, cwd)
-            if remote_tip != pr.head_sha:
+            if recovery:
+                if not remote_tip or observed is None or observed.head_sha != remote_tip:
+                    raise ValueError("Provider and remote must agree on the exact recovery PR head.")
+            elif remote_tip != pr.head_sha:
                 raise ValueError("PR remote head no longer matches the recorded lease; inspect and reconcile it.")
             if not recovery and not pr.branch.endswith("-" + git_ops.worktree_suffix(worktree_id)):
                 from .pr_custom_head import verify_attested
@@ -162,15 +167,15 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                 waived = pr_authority.assert_exclusive(
                     config, fresh, pr, recovery=True, destination_identity=identity,
                 )
-                operation = pr_break_glass.RecoveryPreview(
-                    provider=pr.provider or repo.pr.provider, repo=pr.repo, number=pr.number,
-                    branch=pr.branch, destination_fingerprint=hashlib.sha256(identity.encode()).hexdigest(),
-                    source_head=head_sha, expected_head=pr.head_sha,
+                operation = pr_recovery_plan.build(
+                    config, fresh, pr, source_head=head_sha, expected_head=remote_tip,
+                    identity=identity, cwd=cwd,
                     overrides=("historical ownership attestation", "private-head suffix", "replay journal", *waived),
                 )
                 approved = pr_break_glass.confirm(operation, recovery_reason, confirmation)
             if dry_run:
-                print(f"[dry-run] Would rewrite {target.remote}/{pr.branch} with exact lease {pr.head_sha}.")
+                action = approved.operation.action if approved is not None else "rewrite"
+                print(f"[dry-run] Would {action} {target.remote}/{pr.branch} with exact lease {remote_tip}.")
                 return True
             if approved is not None:
                 git_dir = Path(git_ops.git(
@@ -178,8 +183,9 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                 ).stdout.strip())
                 audit = pr_break_glass.begin_audit(
                     git_dir, approved, pr_break_glass.invocation_attribution(),
+                    saved_publication=pr_recovery_plan.saved_publication(pr),
                 )
-                if not git_ops.ref_exists(pr.head_sha, cwd=cwd):
+                if not git_ops.ref_exists(remote_tip, cwd=cwd):
                     try:
                         git_ops.git(
                             "--no-replace-objects", "fetch", "--no-tags", target.remote,
@@ -189,11 +195,25 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                     except subprocess.TimeoutExpired as exc:
                         raise TimeoutError("Recovery published-head fetch timed out; nothing was pushed.") from exc
                 point = pr_recovery.retain_rewrite(
-                    worktree_id, fresh.branch, head_sha, pr, cwd=cwd,
+                    worktree_id, fresh.branch, head_sha, replace(pr, head_sha=remote_tip), cwd=cwd,
                 )
                 audit.retained(point.local_ref, point.published_ref)
                 output.warn("Operator-confirmed recovery overrides historical ownership proof; normal merge gates remain.")
                 print(f"Recovery commits retained: source={point.local_ref}, published={point.published_ref}")
+                _validate(worktree_id, config, fresh, cwd, recovery=True)
+                pr_recovery_plan.revalidate(
+                    config, fresh, pr, approved.operation, remote=target.remote,
+                    observe=observe_pr, cwd=cwd,
+                )
+                if approved.operation.action == "settle-publication":
+                    pr_publish.record_reconciled_head(
+                        config, fresh, pr, remote_tip, rebase_base_sha=approved.operation.rebase_base_sha,
+                    )
+                    publication_settled = True
+                    audit.finish("succeeded")
+                    activity.log_event("pr_publication_reconciled", worktree_id=worktree_id, branch=pr.branch)
+                    output.ok(f"Settled proven publication of PR head '{pr.branch}'; no push or PR edit.")
+                    return True
             if not recovery and not pr.rewrite_owner:
                 error = pr_publish.record_rewrite_ownership(config, fresh, pr, pr.branch, pr.head_sha, identity)
                 if error:
@@ -206,7 +226,8 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                 result = pr_publish.push_checked(
                     fresh, target.remote, f"{head_sha}:refs/heads/{pr.branch}", cwd=cwd,
                     expected_head_repo=slug, expected_head_identity=identity,
-                    force_with_lease_expect=pr.head_sha, allow_history_rewrite=True,
+                    force_with_lease_expect=remote_tip, allow_history_rewrite=True,
+                    strict_lease=recovery,
                     timeout=publication_deadline.configured(repo.pr),
                 )
             if not result:
@@ -215,7 +236,7 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                     return False
                 observed_tip = pr_publish._tip(target.remote, pr.branch, cwd)
                 if observed_tip != head_sha:
-                    definite_failure = observed_tip == pr.head_sha
+                    definite_failure = observed_tip == remote_tip
                     audit.finish("failed" if definite_failure else "unknown")
                     output.err(
                         f"PR rewrite failed.{result.failure_detail}" if definite_failure else
@@ -232,17 +253,20 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             activity.log_event("pr_history_rewritten", worktree_id=worktree_id, branch=pr.branch)
             if audit is not None:
                 audit.finish("succeeded")
-            output.ok(f"Explicitly rewrote PR head '{pr.branch}' using its exact recorded lease.")
+            output.ok(f"Explicitly rewrote PR head '{pr.branch}' using its exact confirmed lease."
+                      if recovery else f"Explicitly rewrote PR head '{pr.branch}' using its exact recorded lease.")
             return True
     except pr_break_glass.ConfirmationRequired:
         raise
     except (ValueError, BranchLeakError, TimeoutError, git_ops.GitError, ProviderError, OSError) as exc:
         if audit is not None and audit.outcome == "attempted":
             try:
-                audit.finish("succeeded" if remote_published else "failed")
+                audit.finish("succeeded" if remote_published or publication_settled else "failed")
             except OSError as audit_error:
                 output.err(f"Recovery audit completion failed: {audit_error}")
         prefix = "Remote head was published; persistence/audit needs reconciliation: " if remote_published else ""
+        if publication_settled:
+            prefix = "Publication bookkeeping was settled without a push; audit needs reconciliation: "
         output.err(prefix + str(exc))
         return False
     finally:

@@ -5,9 +5,13 @@ from __future__ import annotations
 import os
 import subprocess
 
+from agent_procutil import no_window_kwargs
+from machine_transport import IdentityError, machine_identity_names, resolve_machine_selection
+
 from . import config as cfg
 from . import output, state_root as state_root_mod
 from . import status_updater_cli
+from .related_availability import MachineMatch
 
 
 def _core():
@@ -87,6 +91,7 @@ def _related_anchor(rest: list[str]) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            **no_window_kwargs(),
         )
         if cp.returncode == 0 and cp.stdout.strip():
             return cp.stdout.strip()
@@ -98,19 +103,69 @@ def _related_anchor(rest: list[str]) -> str | None:
         return None
 
 
-def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
-    for candidate in [base_anchor, *anchors]:
+def _related_current_topology(
+    anchors: list[str], base_anchor: str,
+) -> tuple[str, dict[str, cfg.MachineEntry] | None]:
+    try:
+        config = cfg.load_config(include_control_plane_related_pr=False)
+    except IdentityError:
+        raise
+    except RuntimeError as exc:
+        if not str(exc).startswith("No active project could be resolved."):
+            raise
+        config = None
+    except (ValueError, OSError, KeyError):
+        config = None  # An unadopted repo may still supply portable topology.
+    first_readable = None
+    for candidate in dict.fromkeys([base_anchor, *anchors]):
         if not candidate:
             continue
         try:
-            if cfg.machines_yaml_path(candidate).exists():
-                return cfg.detect_machine(candidate)
-        except Exception:
+            entries = cfg.load_machines_yaml(candidate)
+        except FileNotFoundError:
             continue
-    try:
-        return cfg.detect_machine(base_anchor)
-    except Exception:
-        return ""
+        if first_readable is None:
+            first_readable = entries
+        current = config.machine if config is not None and config.machine else cfg.detect_machine(candidate)
+        entry = _related_machine_entry(entries, current)
+        if entry is not None:
+            return (entry.key if entry.execution_platform else current), entries
+    current = config.machine if config is not None and config.machine else cfg.detect_machine(base_anchor)
+    return current, first_readable
+
+
+def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
+    return _related_current_topology(anchors, base_anchor)[0]
+
+
+def _related_machine_entry(entries: dict[str, cfg.MachineEntry], name: str) -> cfg.MachineEntry | None:
+    explicit = {
+        key: entry for key, entry in entries.items()
+        if name.casefold() in {
+            value.casefold() for value in machine_identity_names(entry, include_metadata=False)
+        }
+    }
+    return (
+        resolve_machine_selection(explicit, name).entry if explicit
+        else resolve_machine_selection(entries, name, cfg.detect_platform()).entry
+    )
+
+
+def _related_machine_matcher(anchors: list[str], base_anchor: str) -> MachineMatch:
+    """Resolve topology equivalence for availability, never ownership migration."""
+    from . import related
+
+    _, selected = _related_current_topology(anchors, base_anchor)
+    entries = selected or {}
+
+    def matches(key: str, current: str) -> bool:
+        target = _related_machine_entry(entries, key)
+        local = _related_machine_entry(entries, current)
+        if target is not None and local is not None:
+            return target.key.casefold() == local.key.casefold()
+        return related.machine_matches(key, current)
+
+    return matches
 
 
 def _related_config_source_anchors(
@@ -211,19 +266,14 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
     anchors = _related_config_source_anchors(anchor)
     rc = related.read_related_grafted(anchors)
 
-    current_machine = _related_current_machine(anchors, anchor)
-
-    machines_known_available = True
-    machine_entries: dict = {}
-    try:
-        machine_entries = cfg.load_machines_yaml(anchor)
-    except Exception:
-        machines_known_available = False
+    current_machine, selected = _related_current_topology(anchors, anchor)
+    machines_known_available = selected is not None
+    machine_entries = selected or {}
 
     def _machine_known(key: str) -> bool:
         if not machines_known_available:
             return True
-        return cfg.find_machine_entry(machine_entries, key) is not None
+        return _related_machine_entry(machine_entries, key) is not None
 
     def _registry_has(name: str) -> bool:
         return repos.find_repo(name) is not None
@@ -239,6 +289,7 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
         machines_known_available=machines_known_available,
         registry_has=_registry_has,
         registry_remote=_registry_remote,
+        machine_match=_related_machine_matcher(anchors, anchor),
     )
 
     for f in findings:
@@ -676,6 +727,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             repo_path=(reg.local_path() if reg else None),
             adopted=adopted,
             base_repo=base_repo,
+            machine_match=_related_machine_matcher(anchors, anchor),
         )
         _gh_slug = repos.github_slug(reg.remote) if (reg and reg.remote) else None
         if json_out:

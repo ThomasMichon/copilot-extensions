@@ -4,13 +4,15 @@ The update keeps its own status strings; this module classifies them into the
 shared outcome vocabulary, records them as target events, and maps the final
 result onto the shared exit-code table. Without the library (or on any
 telemetry error) every function degrades to a no-op that preserves the legacy
-return value.
+return value, except that recorded required failures retain a nonzero exit
+(4 for auth-only failures).
 """
 
 from __future__ import annotations
 
 import os
 import re
+import sys
 import time
 
 try:
@@ -19,26 +21,60 @@ except ImportError:  # pragma: no cover - a runtime built before the library exi
     _ut = None
 
 _run = None
+_human_phase = None
+_human_phase_failed = False
+_required_failures: set[str] = set()
 
 
 def start(proc: str = "engine") -> None:
     """Create (owner) or join (participant) the update run for this process."""
     global _run
+    _required_failures.clear()
     if _ut is not None:
         _run = _ut.Run.from_env_or_new(proc)
 
 
 def enter(phase: str) -> None:
+    global _human_phase, _human_phase_failed
+    from . import output
+
+    _close_human_phase()
     if _run is not None:
         _run.enter(phase)
+    if output.current_operation() is not None:
+        _human_phase = output.human_operation(phase)
+        _human_phase.__enter__()
+        _human_phase_failed = False
+
+
+def _close_human_phase(exc: BaseException | None = None) -> None:
+    global _human_phase, _human_phase_failed
+    phase, _human_phase = _human_phase, None
+    failed, _human_phase_failed = _human_phase_failed, False
+    if phase is not None:
+        try:
+            phase.complete("failed" if exc or failed else "done")
+        finally:
+            error_info = sys.exc_info()
+            if error_info[0] is None and exc is not None:
+                error_info = (type(exc), exc, exc.__traceback__)
+            phase.__exit__(*error_info)
+
+
+def redact(text: str) -> str:
+    """``text`` with credentials masked; without the library, at least URL
+    userinfo and authorization headers."""
+    if _ut is not None:
+        return _ut.redact(text)
+    text = re.sub(r"(?i)(authorization\s*:)[^\r\n]*", r"\1 ***", text)
+    return re.sub(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@", r"\1***@", text)
 
 
 def bounded(text: str, limit: int, *, tail: bool = False) -> str:
     """Redact, then truncate: a cut taken first can leave a credential fragment
     (for example the middle of URL userinfo) that the redactor no longer
     recognizes."""
-    if _ut is not None:
-        text = _ut.redact(text)
+    text = redact(text)
     return text[-limit:] if tail else text[:limit]
 
 
@@ -81,6 +117,8 @@ def classify_status(status: str) -> tuple[str, str | None]:
     """
     text = str(status).strip()
     low = text.lower()
+    if low == "auth_required":
+        return _ut.AUTH_REQUIRED, "auth_required"
     if text.startswith("OK"):
         return _ut.VERIFIED_CURRENT, None
     if text.startswith("SKIPPED (current)"):
@@ -113,6 +151,15 @@ def classify_status(status: str) -> tuple[str, str | None]:
 def record(phase: str, component: str, status: str, *, required: bool = True,
            changed: bool | None = None, started: float | None = None) -> None:
     """Record one target's status string as a target event."""
+    global _human_phase_failed
+    # These are the update owner's own success/skip statuses, independent of
+    # whether the optional telemetry library or durable event store exists.
+    text = str(status).strip()
+    if required and not (
+        text.startswith(("OK", "SKIPPED")) or text == "payload-only"
+    ):
+        _human_phase_failed = True
+        _required_failures.add("auth" if text == "auth_required" else "other")
     if _run is None:
         return
     try:
@@ -134,7 +181,11 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
     (the caller re-raises).
     """
     global _run
+    _close_human_phase(exc)
     run, _run = _run, None
+    if exc is None and rc in (0, 1) and _required_failures:
+        rc = 4 if _required_failures == {"auth"} else 1
+    _required_failures.clear()
     if run is None:
         return rc
     try:
@@ -144,6 +195,8 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
             return rc
         if rc == 0:
             outcome, code = _ut.VERIFIED_CURRENT, None
+        elif rc == 4:
+            outcome, code = _ut.AUTH_REQUIRED, "auth_required"
         elif rc == 1:
             # A generic failure: a more specific recorded target outcome wins.
             outcome = None if _ut.is_failure(run.outcome) else _ut.COMMAND_FAILED
@@ -153,3 +206,18 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
         return run.finish(outcome, error={"code": code} if code else None)
     except Exception:
         return rc
+
+
+def auth_result(summary: dict, *, applied: bool, available: bool = False) -> None:
+    ok = summary["status"] in ("ok", "anonymous") or applied or available
+    record("auth_fallback" if applied else "auth_report", summary["id"],
+           "OK" if ok else "auth_required", required=summary["required"], changed=False)
+    if _run is not None:
+        _run.emit("auth_report", summary["id"], "info",
+                  details={"auth": summary, "fallback_applied": applied,
+                           "fallback_available": available or applied})
+
+
+def auth_used(summary: dict) -> None:
+    if _run is not None:
+        _run.emit("auth_fallback", summary["id"], "info", details={"auth": summary})

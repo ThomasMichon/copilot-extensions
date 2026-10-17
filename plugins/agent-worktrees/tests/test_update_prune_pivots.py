@@ -29,6 +29,9 @@ from agent_worktrees import reconcile
 from agent_worktrees.picker_support import pivots as pivot_registry
 
 
+pytestmark = pytest.mark.usefixtures("payload_subprocess_double")
+
+
 class _Completed:
     def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
         self.returncode = returncode

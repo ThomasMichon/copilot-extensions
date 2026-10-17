@@ -44,6 +44,15 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     existing = "--worktree-id" in args
     if new == existing or (existing and args.index("--worktree-id") + 1 >= len(args)):
         raise ValueError("Remote prompt requires exactly one New or existing worktree selector")
+    selector_end = args.index("--worktree-id") + 1 if existing else -1
+    for index, arg in enumerate(args):
+        if index == selector_end or arg in (
+            "--new", "--worktree-id", "--no-mux", "--defer-new-seed", "--stage-launch-seed",
+        ):
+            continue
+        raise ValueError(
+            f"Remote prompt admission does not support {arg!r}; use this option on the target."
+        )
     request_id = uuid.uuid4().hex
     kind = "new" if new else "resume"
     wid = None if kind == "new" else args[args.index("--worktree-id") + 1]

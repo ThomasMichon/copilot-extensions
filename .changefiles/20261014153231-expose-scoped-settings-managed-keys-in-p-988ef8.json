@@ -1,0 +1,9 @@
+{
+  "comment": "Expose scoped settings managed keys in plan and restore JSON",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

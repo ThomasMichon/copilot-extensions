@@ -1,0 +1,9 @@
+{
+  "comment": "Collect runtime update commands once and preflight every selected target before installer execution",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

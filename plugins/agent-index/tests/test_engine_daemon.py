@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
+import json
+import shutil
+from pathlib import Path
 
 from agent_index.engine import daemon
 
@@ -31,6 +36,106 @@ def test_engine_venv_python_layout(tmp_path):
     py = daemon.engine_venv_python(tmp_path)
     assert py.parent.parent == tmp_path / ".venv"
     assert py.name in ("python", "python.exe")
+
+
+def _completed_engine_slot(home, version):
+    slot = home / "versions" / version
+    py = slot / ("Scripts/python.exe" if daemon.os.name == "nt" else "bin/python")
+    py.parent.mkdir(parents=True)
+    py.write_bytes(b"")
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": version, "completed_at": "2026-10-01T00:00:00Z",
+        "pid": 1, "payload_hash": "a" * 64,
+    }))
+    return py
+
+
+def _stage_engine_resolver(home):
+    source = Path(__file__).resolve().parents[3] / "libs/versioned-runtime/versioned_runtime.py"
+    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime.py"):
+        shutil.copyfile(source.with_name(name), home / name)
+
+
+def test_engine_selection_requires_completion_and_preserves_last_good(tmp_path):
+    _stage_engine_resolver(tmp_path)
+    good = _completed_engine_slot(tmp_path, "1.0.0")
+    broken = tmp_path / "versions/2.0.0" / good.relative_to(tmp_path / "versions/1.0.0")
+    broken.parent.mkdir(parents=True)
+    broken.write_bytes(b"")
+    (tmp_path / "current-version").write_text("2.0.0\n")
+    (tmp_path / "last-known-good").write_text("1.0.0\n")
+    assert daemon.engine_venv_python(tmp_path) == good
+
+
+def test_engine_selection_does_not_fall_back_to_legacy_after_migration(tmp_path):
+    legacy = daemon.engine_venv_python(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"")
+    _stage_engine_resolver(tmp_path)
+    (tmp_path / "current-version").write_text("2.0.0\n")
+    with pytest.raises(FileNotFoundError, match="No completed"):
+        daemon.engine_venv_python(tmp_path)
+
+
+def test_failed_first_engine_construction_does_not_retire_legacy(tmp_path):
+    legacy = daemon.engine_venv_python(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"")
+    (tmp_path / "versions/2.0.0").mkdir(parents=True)
+    assert daemon.engine_venv_python(tmp_path) == legacy
+
+
+@pytest.mark.parametrize("candidate_complete", [False, True])
+def test_first_engine_migration_keeps_legacy_until_activation(tmp_path, candidate_complete):
+    legacy = daemon.engine_venv_python(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy")
+    _stage_engine_resolver(tmp_path)
+    if candidate_complete:
+        _completed_engine_slot(tmp_path, "2.0.0")
+    assert daemon.engine_venv_python(tmp_path) == legacy
+    assert legacy.read_bytes() == b"legacy"
+
+
+def test_failed_first_engine_activation_preserves_legacy_selection(monkeypatch, tmp_path):
+    legacy = daemon.engine_venv_python(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy")
+    _stage_engine_resolver(tmp_path)
+    candidate = _completed_engine_slot(tmp_path, "2.0.0")
+    spec = daemon.importlib.util.spec_from_file_location(
+        "failed_engine_activation", tmp_path / "versioned_runtime.py",
+    )
+    runtime = daemon.importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+
+    replace = runtime.os.replace
+
+    def deny_selector(source, destination):
+        if Path(destination) == tmp_path / "current-version":
+            raise PermissionError("selector publication denied")
+        return replace(source, destination)
+
+    monkeypatch.setattr(runtime.os, "replace", deny_selector)
+    with pytest.raises(PermissionError, match="selector publication denied"):
+        runtime.activate(tmp_path, "2.0.0", link_free=True)
+    assert not (tmp_path / "current-version").exists()
+    assert not (tmp_path / "last-known-good").exists()
+    assert daemon.engine_venv_python(tmp_path) == legacy
+    assert candidate.exists()
+    assert legacy.read_bytes() == b"legacy"
+
+
+@pytest.mark.parametrize("selector", ["current-version", "last-known-good"])
+def test_first_engine_migration_uses_published_selector(tmp_path, selector):
+    legacy = daemon.engine_venv_python(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy")
+    _stage_engine_resolver(tmp_path)
+    candidate = _completed_engine_slot(tmp_path, "2.0.0")
+    (tmp_path / selector).write_text("2.0.0\n")
+    assert daemon.engine_venv_python(tmp_path) == candidate
+    assert legacy.read_bytes() == b"legacy"
 
 
 def test_engine_endpoint_env(monkeypatch):
@@ -148,7 +253,7 @@ def test_start_default_wait_timeout_is_300_seconds(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_INDEX_ENGINE_START_TIMEOUT", raising=False)
     _prepare_venv(tmp_path)
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=True))
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, **_k: FakeProc(alive=True))
     monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
 
     clock = {"t": 0.0}
@@ -168,7 +273,7 @@ def test_start_wait_timeout_is_overridable_via_env(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_INDEX_ENGINE_START_TIMEOUT", "5")
     _prepare_venv(tmp_path)
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=True))
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, **_k: FakeProc(alive=True))
     monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
 
     clock = {"t": 0.0}
@@ -197,7 +302,7 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
         return calls["n"] >= 2  # unhealthy at the guard, healthy while waiting
 
     monkeypatch.setattr(daemon, "is_healthy", health)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc())
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, **_k: FakeProc())
     monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
 
     out = daemon.start(tmp_path)
@@ -205,16 +310,61 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
     assert daemon._read_pid(tmp_path) == 5150
 
 
-def test_spawn_uses_windowless_daemon_contract(monkeypatch, tmp_path):
+@pytest.mark.parametrize("strict", [False, True])
+def test_strict_start_never_falls_back_inside_the_callers_job(monkeypatch, tmp_path, strict):
+    py = daemon.engine_venv_python(tmp_path)
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("", encoding="ascii")
+    health = iter([False, True])
+    seen = {}
+    monkeypatch.setattr(daemon, "is_healthy", lambda *_a, **_k: next(health, True))
+    monkeypatch.setattr(
+        daemon, "_spawn",
+        lambda cmd, *, python, home, contained_fallback: seen.update(cf=contained_fallback)
+        or FakeProc(),
+    )
+    monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
+
+    daemon.start(tmp_path, strict=strict)
+
+    assert seen["cf"] is (not strict)
+
+
+def test_spawn_strict_reaches_spawn_daemon(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr(
-        daemon,
-        "windowless_daemon_kwargs",
-        lambda: {"creationflags": 0x08000000},
+        daemon, "spawn_daemon",
+        lambda cmd, **kwargs: captured.update(kwargs=kwargs) or FakeProc(),
     )
+    daemon._spawn(["py", "-m", "agent_index_engine.app"], python="py", home=tmp_path,
+                  contained_fallback=False)
+    assert captured["kwargs"]["contained_fallback"] is False
+
+
+def test_cli_engine_start_strict_reports_a_denied_breakaway(monkeypatch, capsys):
+    import agent_procutil
+
+    from agent_index import __main__ as cli
+
+    seen = {}
+
+    def start(*, strict=False):
+        seen["strict"] = strict
+        raise agent_procutil.DaemonSpawnError("the caller's Job object forbids breakaway")
+
+    monkeypatch.setattr(daemon, "start", start)
+
+    assert cli.main(["engine", "start", "--strict"]) == 1
+    assert seen == {"strict": True}
+    assert "forbids breakaway" in capsys.readouterr().err
+
+
+def test_spawn_launches_through_spawn_daemon(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.delenv(daemon.ENGINE_LOG_LEVEL_ENV, raising=False)
     monkeypatch.setattr(
-        daemon.subprocess,
-        "Popen",
+        daemon,
+        "spawn_daemon",
         lambda cmd, **kwargs: captured.update(cmd=cmd, kwargs=kwargs) or FakeProc(),
     )
 
@@ -222,13 +372,76 @@ def test_spawn_uses_windowless_daemon_contract(monkeypatch, tmp_path):
         ["pythonw.exe", "-m", "agent_index_engine.app"], python="python.exe", home=tmp_path
     )
 
-    assert captured["kwargs"]["creationflags"] == 0x08000000
-    assert captured["kwargs"]["stdin"] is daemon.subprocess.DEVNULL
-    assert captured["kwargs"]["stdout"] is daemon.subprocess.DEVNULL
-    assert captured["kwargs"]["stderr"] is daemon.subprocess.DEVNULL
+    kwargs = captured["kwargs"]
+    # Launched through the log-level bootstrap, not `-m` directly.
+    assert captured["cmd"][:2] == ["pythonw.exe", "-c"]
     # Never the caller's ambient cwd -- this is a long-lived, detached
     # daemon rooted at its own durable engine home instead.
-    assert captured["kwargs"]["cwd"] == str(tmp_path)
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs["log_path"] == tmp_path / "logs" / "engine-stdio.log"
+    assert kwargs["console_children"] is True
+    # It used to start inside a caller's Job; that stays the fallback.
+    assert kwargs["contained_fallback"] is True
+    # One stdio log line per embedding request would grow without bound.
+    assert kwargs["env"][daemon.ENGINE_LOG_LEVEL_ENV] == "warning"
+
+
+def test_spawn_keeps_an_explicit_engine_log_level(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setenv(daemon.ENGINE_LOG_LEVEL_ENV, "debug")
+    monkeypatch.setattr(
+        daemon, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or FakeProc()
+    )
+    daemon._spawn(["pythonw.exe"], python="python.exe", home=tmp_path)
+    assert captured["env"][daemon.ENGINE_LOG_LEVEL_ENV] == "debug"
+
+
+_OLD_ENGINE_APP = """\
+import sys
+
+def main():
+    import uvicorn
+    # An engine app from before AGENT_INDEX_ENGINE_LOG_LEVEL: hard-coded info.
+    uvicorn.run("app", host=sys.argv[sys.argv.index("--host") + 1], log_level="info")
+
+if __name__ == "__main__":
+    main()
+"""
+_FAKE_UVICORN = """\
+import sys
+
+def run(app, **kwargs):
+    print("LEVEL=" + kwargs["log_level"])
+    print("ARGS=" + " ".join(sys.argv[1:]))
+"""
+
+
+@pytest.mark.parametrize(("level", "expected"), [("warning", "warning"), (None, "info")])
+def test_bootstrap_applies_the_log_level_to_a_preserved_older_engine(
+    monkeypatch, tmp_path, level, expected
+):
+    """The durable engine venv survives service updates, so its app may hard-code
+    ``info``; the launch bootstrap still applies the level without a rebuild."""
+    import subprocess
+    import sys
+
+    pkg = tmp_path / "agent_index_engine"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "app.py").write_text(_OLD_ENGINE_APP, encoding="utf-8")
+    (tmp_path / "uvicorn.py").write_text(_FAKE_UVICORN, encoding="utf-8")
+    cmd = daemon._with_log_level_bootstrap(
+        [sys.executable, "-m", "agent_index_engine.app", "--host", "127.0.0.1", "--port", "1"]
+    )
+    assert cmd[1] == "-c"
+    env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+    env.pop(daemon.ENGINE_LOG_LEVEL_ENV, None)
+    if level:
+        env[daemon.ENGINE_LOG_LEVEL_ENV] = level
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert f"LEVEL={expected}" in result.stdout
+    assert "ARGS=--host 127.0.0.1 --port 1" in result.stdout
 
 
 def test_start_raises_on_early_exit(monkeypatch, tmp_path):
@@ -237,7 +450,7 @@ def test_start_raises_on_early_exit(monkeypatch, tmp_path):
     py.write_text("", encoding="ascii")
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
     monkeypatch.setattr(
-        daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=False, returncode=1)
+        daemon, "_spawn", lambda cmd, **_k: FakeProc(alive=False, returncode=1)
     )
     monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
     with pytest.raises(RuntimeError, match="exited early"):
@@ -261,6 +474,14 @@ def test_stop_terminates(monkeypatch, tmp_path):
 
 
 def test_status_shape(monkeypatch, tmp_path):
+    resolve = daemon.engine_venv_python
+    resolutions = []
+
+    def resolve_once(home):
+        resolutions.append(home)
+        return resolve(home)
+
+    monkeypatch.setattr(daemon, "engine_venv_python", resolve_once)
     monkeypatch.setattr(
         daemon,
         "health",
@@ -286,6 +507,32 @@ def test_status_shape(monkeypatch, tmp_path):
     assert st["provisioned"] is False
     assert st["healthy"] is True
     assert st["observed_generation"] == "engine-v1"
+    assert resolutions == [tmp_path]
+
+
+@pytest.mark.parametrize("selector", ["current-version", "last-known-good"])
+@pytest.mark.parametrize("resolver_present", [False, True])
+def test_status_retains_diagnostics_when_migrated_interpreter_is_unavailable(
+    tmp_path, monkeypatch, selector, resolver_present,
+):
+    legacy = daemon.engine_venv_python(tmp_path)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy")
+    if resolver_present:
+        _stage_engine_resolver(tmp_path)
+    (tmp_path / selector).write_text("missing-slot\n")
+    daemon._pid_file(tmp_path).write_text("4242\n")
+    monkeypatch.setattr(daemon, "_pid_alive", lambda pid: pid == 4242)
+    monkeypatch.setattr(daemon, "health", lambda *_a, **_k: {
+        "status": "ok", "generation": "observed", "detail": "fixture-health",
+    })
+    report = daemon.status(tmp_path)
+    assert report["venv_python"] is None and report["provisioned"] is False
+    assert report["pid"] == 4242 and report["pid_alive"] is True
+    assert report["healthy"] is True and report["observed_generation"] == "observed"
+    assert report["detail"] == "fixture-health" and legacy.read_bytes() == b"legacy"
+    with pytest.raises(FileNotFoundError):
+        daemon.engine_command(tmp_path)
 
 
 # -- CLI ---------------------------------------------------------------------

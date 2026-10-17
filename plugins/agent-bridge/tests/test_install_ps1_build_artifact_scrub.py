@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -49,32 +50,78 @@ def _extract_function(source: Path, name: str) -> str:
 
 
 def _run_harness(plugin_dir: Path, stub_body: str, extra_script: str) -> subprocess.CompletedProcess:
+    fake_bin = plugin_dir / "bin"
+    fake_bin.mkdir()
+    # The policy subprocess needs a physical UV, not a PowerShell function.
+    # A settings-only probe must never execute install residue/counter events.
+    behavior = fake_bin / "uv-behavior.ps1"
+    behavior.write_text(
+        stub_body + "\nuv\nexit $global:LASTEXITCODE\n", encoding="utf-8"
+    )
+    uv_script = fake_bin / "uv.py"
+    uv_script.write_text(
+        f"#!{sys.executable}\n"
+        "import datetime, subprocess, sys\n"
+        "arguments = sys.argv[1:]\n"
+        "assert arguments[:2] == ['pip', 'install']\n"
+        "if '--show-settings' in arguments:\n"
+        "    print('PipInstallSettings { settings: PipSettings {\\n"
+        "    index_locations: IndexLocations { indexes: [], flat_index: [], },\\n"
+        "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\\n"
+        "}, }')\n"
+        "    sys.exit(0)\n"
+        "assert '--reinstall' in arguments and '--quiet' in arguments\n"
+        "cutoff = datetime.datetime.fromisoformat(arguments[arguments.index('--exclude-newer') + 1].replace('Z', '+00:00'))\n"
+        "assert cutoff <= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)\n"
+        f"result = subprocess.run([{_PWSH!r}, '-NoProfile', '-NonInteractive', '-File', {str(behavior)!r}], "
+        "capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)\n"
+        "sys.stdout.write(result.stdout)\n"
+        "sys.stderr.write(result.stderr)\n"
+        "sys.exit(result.returncode)\n",
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        (fake_bin / "uv.cmd").write_text(
+            f'@echo off\n"{sys.executable}" "{uv_script}" %*\n', encoding="utf-8"
+        )
+        uv_command = fake_bin / "uv.cmd"
+    else:
+        uv_script.rename(fake_bin / "uv")
+        (fake_bin / "uv").chmod(0o755)
+        uv_command = fake_bin / "uv"
+    policy = _ENGINE_PS1.with_name("installer_dependency_policy.py")
     harness = plugin_dir / "harness.ps1"
     harness.write_text(
         f'$PluginDir = "{plugin_dir}"\n'
+        f"$script:InstallerDependencyPolicy = '{policy}'\n"
         "function Write-Warn { param($msg) }\n"
-        + stub_body
+        "function Start-Sleep { param($Seconds) }\n"
         + "\n\n"
         + _extract_function(_ENGINE_PS1, "Invoke-NativeCapture")
         + "\n\n"
         + _extract_function(_ENGINE_PS1, "Test-IsSreModuleMismatch")
         + "\n\n"
-        + _extract_function(_ENGINE_PS1, "Invoke-UvPipInstallResilient")
+        + _extract_function(_ENGINE_PS1, "Invoke-UvPipInstallResilient").replace(
+            "[string]$UvCommand = 'uv'", f"[string]$UvCommand = '{uv_command}'"
+        )
         + "\n\n"
         + "Set-Item -Path Function:Invoke-UvPipInstallResilientShared -Value ${function:Invoke-UvPipInstallResilient}\n\n"
         + _extract_function(_INSTALL_PS1, "Remove-PluginBuildArtifacts")
         + "\n\n"
         + _extract_function(_INSTALL_PS1, "Invoke-UvPipInstallResilient")
         + "\n\n"
-        + extra_script
-        + "\n",
+        + extra_script.replace(
+            "@('some-package')",
+            f"@('--python', '{sys.executable}', 'some-package', '--quiet')",
+        ).replace("@(\n", f"@(\n    '--python', '{sys.executable}', '--quiet',\n")
+        + "\nif ($result.ExitCode -ne 0) { Write-Output $result.Output }\n",
         encoding="utf-8",
     )
     return subprocess.run(
         [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
         capture_output=True,
         text=True,
-        env=os.environ,
+        env={**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
         timeout=30,
         check=True,
     )

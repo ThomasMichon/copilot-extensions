@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve managed workspace transport and exact cleanup through the owning Worktrees execution boundary without coupling standalone CodeSpace sessions to Worktrees",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

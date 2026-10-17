@@ -1,0 +1,9 @@
+{
+  "comment": "Persist submitted launch seeds before resolving worktrees and support Up/Down recovery in prompt composers",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

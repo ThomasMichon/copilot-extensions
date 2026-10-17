@@ -109,6 +109,16 @@ def _global_config_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV) or default_config_path())
 
 
+def _global_config_dir() -> Path:
+    """Base for relative paths in the global settings file.
+
+    Like a repository config's paths resolve against its directory, so every
+    client and the service (which runs from its own root) agree regardless of
+    their working directory.
+    """
+    return Path(os.path.abspath(_global_config_path())).parent
+
+
 def load_global_config(*, strict: bool = False) -> dict[str, Any]:
     """Load the global JSON settings file."""
     path = _global_config_path()
@@ -159,7 +169,9 @@ def _expand_kpdb(value: Any, *, base_dir: Path | None = None) -> str | None:
     path = Path(expanded)
     if base_dir is not None and not path.is_absolute():
         path = base_dir / path
-    return str(path)
+    # Absolute before it reaches a request: the service resolves it from its
+    # own runtime root, not the caller's directory.
+    return os.path.abspath(path)
 
 
 def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -344,10 +356,10 @@ def resolve_context(
         kpdb = _expand_kpdb(ext_data["kpdb"])
         sources["kpdb"] = "ext"
     elif _nonempty(base.get("kpdb")):
-        kpdb = _expand_kpdb(base["kpdb"])
+        kpdb = _expand_kpdb(base["kpdb"], base_dir=_global_config_dir())
         sources["kpdb"] = base_source
     elif _nonempty(legacy.get("kpdb")):
-        kpdb = _expand_kpdb(legacy["kpdb"])
+        kpdb = _expand_kpdb(legacy["kpdb"], base_dir=_global_config_dir())
         sources["kpdb"] = "global"
     else:
         kpdb = None

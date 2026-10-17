@@ -1,0 +1,9 @@
+{
+  "comment": "Restore observed hostname, preferred machine name and friendly alias in exact-session guidance independently of worktree registration.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

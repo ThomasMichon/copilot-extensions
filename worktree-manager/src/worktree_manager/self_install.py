@@ -1016,18 +1016,11 @@ def self_update(
     root: Path | None = None,
     dry_run: bool = False,
 ) -> SelfUpdateResult:
-    """Fetch the latest Worktree Manager payload and version-install it.
+    """Fetch and version-install the Manager through its existing source authority.
 
-    This is the "updater updates itself" step: it fetches the out-of-band
-    ``worktree-manager`` payload (the same source as the bootstrap one-liners) and
-    :func:`self_install`\\s it -- publishing a new ``versions/<ver>`` slot +
-    ``current-version`` marker when the fetched payload is newer, a no-op when
-    already current (version-gated).
-
-    Fetch is **git-optional**: with git on PATH it ``git clone``/``fetch``es (which
-    also enables a lightweight in-place refetch next run); **without git** it falls
-    back to a GitHub codeload **tarball** download (:func:`manager_tarball_url` /
-    :func:`_fetch_via_tarball`), so a machine that never installed git can still
+    A newer payload publishes a new slot and marker; a matching version is a no-op.
+    Fetch uses Git when available, enabling a lightweight in-place refetch; otherwise it falls
+    back to a GitHub codeload tarball (:func:`manager_tarball_url`), so a bare machine can still
     update. The tarball fallback needs a GitHub source; a non-GitHub remote (local
     path / enterprise) still requires git and returns ``skipped``.
 
@@ -1038,7 +1031,7 @@ def self_update(
     installed slot takes effect on the *next* ``worktree-manager`` invocation
     (normal versioned-install semantics -- no in-process hot-swap).
     """
-    r = root or default_root()
+    r = (root or default_root()).resolve()
     ref = ref or manager_ref(r)
     repo = manager_repo(r)
     previous = current_version(r)
@@ -1046,22 +1039,27 @@ def self_update(
     staging = r / STAGING_DIR
     use_git = shutil.which("git") is not None
     try:
+        from . import engine_client, source_config, update_auth
+
+        repo = source_config.absolute_local_source(repo)
         staging.mkdir(parents=True, exist_ok=True)
+        auth_env = update_auth.environment(repo, cwd=staging) if use_git else None
+        environment = {"env": auth_env} if auth_env is not None else {}
         if use_git:
             if (staging / ".git").is_dir():
                 subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
                                 repo, ref], check=True, capture_output=True,
-                               text=True, timeout=180)
+                               text=True, timeout=180, **environment)
                 subprocess.run(["git", "-C", str(staging), "checkout", "-q",
                                 "FETCH_HEAD"], check=True, capture_output=True,
-                               text=True, timeout=60)
+                               text=True, timeout=60, **environment)
             else:
                 # staging may hold a prior tarball payload (no .git); clear so the
                 # clone lands in an empty dir.
                 _clear_dir(staging)
                 subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
                                 repo, str(staging)], check=True,
-                               capture_output=True, text=True, timeout=300)
+                               capture_output=True, text=True, timeout=300, cwd=staging, **environment)
         else:
             url = manager_tarball_url(r, ref)
             if url is None:
@@ -1070,7 +1068,9 @@ def self_update(
                     reason="git not found and source is not a GitHub repo "
                            "(cannot fetch a tarball) -- install git to update")
             _fetch_via_tarball(staging, url)
-    except (OSError, subprocess.SubprocessError) as e:
+    except update_auth.AuthRequired as e:
+        return SelfUpdateResult(action="auth_required", previous=previous, reason=str(e))
+    except (OSError, subprocess.SubprocessError, engine_client.EngineError) as e:
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetch failed: {e}")
 

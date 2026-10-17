@@ -13,7 +13,8 @@ from session_liveness_probe import (
     parse_probe_output,
 )
 
-from .config import RESTRICTED_PROFILE, SECURITY_UID_LABEL, ContainersConfig, FleetConfig
+from .config import DISPATCH_ONLY_LABEL, RESTRICTED_PROFILE, SECURITY_UID_LABEL, ContainersConfig, FleetConfig
+from .dispatch_projection import close_worker_admission, probe_worker_liveness
 from .lease import (
     ProviderAdmissionError,
     active_session_admissions,
@@ -111,6 +112,17 @@ def probe_session_liveness(
     except RuntimeError as exc:
         return SessionLiveness("unknown", [], [], str(exc))
     return parse_probe_output(result.returncode, result.stdout, result.stderr)
+
+
+def _probe_member_liveness(
+    info: DockerContainerInfo, inspected: dict, *, user: str, bash_path: str, home: str,
+) -> SessionLiveness:
+    labels = (inspected.get("Config") or {}).get("Labels") or {}
+    if labels.get(DISPATCH_ONLY_LABEL) == "true":
+        worker = probe_worker_liveness(info.container_id, inspected)
+        if worker.state != "idle":
+            return worker
+    return probe_session_liveness(info, user=user, bash_path=bash_path, home=home)
 
 
 def destroy_restricted_member(
@@ -506,8 +518,9 @@ def _restricted_member_action(
                     f"session liveness helper is unavailable: {exc}",
                 )
 
-            liveness = probe_session_liveness(
+            liveness = _probe_member_liveness(
                 current,
+                inspected,
                 user=user,
                 bash_path=bash_path,
                 home=home,
@@ -522,7 +535,7 @@ def _restricted_member_action(
                 return DestructiveResult(
                     info.name,
                     "deferred",
-                    "active Copilot session-state lock present",
+                    liveness.reason or "active Copilot session-state lock present",
                 )
 
             rescue = None
@@ -570,15 +583,16 @@ def _restricted_member_action(
                         rescue=rescue,
                         telemetry_abandoned=telemetry_abandoned,
                     )
-                final_liveness = probe_session_liveness(
+                final_liveness = _probe_member_liveness(
                     latest,
+                    inspected,
                     user=user,
                     bash_path=bash_path,
                     home=home,
                 )
                 if final_liveness.state != "idle":
                     reason = (
-                        "active Copilot session-state lock present"
+                        final_liveness.reason or "active Copilot session-state lock present"
                         if final_liveness.state == "active"
                         else f"session liveness is unknown: {final_liveness.reason}"
                     )
@@ -618,6 +632,17 @@ def _restricted_member_action(
                     verify_pinned_capture(rescue_pin)
                 _verify_generation(latest.container_id, generation)
                 if action is not None:
+                    if ((inspected.get("Config") or {}).get("Labels") or {}).get(
+                        DISPATCH_ONLY_LABEL,
+                    ) == "true":
+                        guest_gate = close_worker_admission(
+                            latest.name, latest.container_id, inspected, hold_token=hold.token,
+                        )
+                        if guest_gate.state != "idle":
+                            return DestructiveResult(
+                                info.name, "deferred", guest_gate.reason,
+                                rescue=rescue, telemetry_abandoned=telemetry_abandoned,
+                            )
                     _perform_action(
                         info.name,
                         hold.token,

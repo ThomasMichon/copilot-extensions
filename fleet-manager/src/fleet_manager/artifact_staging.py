@@ -115,14 +115,30 @@ def _primitive() -> Iterator[ModuleType]:
     content = _bytes(resource, MAX_BYTES)
     if hashlib.sha256(content).hexdigest() != evidence["runtime_resource_sha256"]:
         raise PlanError("installed runtime resource changed after RECORD admission")
+    companions = {}
+    for component in ("versioned_runtime_leases", "versioned_runtime_construction"):
+        member = component + ".py"
+        retained = _bytes(resource.with_name(member), MAX_BYTES)
+        if hashlib.sha256(retained).hexdigest() != evidence["runtime_resource_sha256s"][member]:
+            raise PlanError("installed runtime companion changed after RECORD admission")
+        companions[component] = retained
     name = f"fleet_manager._retained_staging_runtime_{uuid.uuid4().hex}"
     module = ModuleType(name)
     module.__file__ = str(resource)
+    module._retained_runtime_components = {}
     sys.modules[name] = module
     try:
+        for component, retained in companions.items():
+            child = ModuleType(name + "_" + component)
+            child.__file__ = str(resource.with_name(component + ".py"))
+            sys.modules[child.__name__] = child
+            exec(compile(retained, child.__file__, "exec"), child.__dict__)
+            module._retained_runtime_components[component] = child
         exec(compile(content, str(resource), "exec"), module.__dict__)
         yield module
     finally:
+        for component in companions:
+            sys.modules.pop(name + "_" + component, None)
         if sys.modules.get(name) is module:
             del sys.modules[name]
 

@@ -57,9 +57,11 @@ ordinary local-machine sync path (opt-in, filesystem targets only; see the
 doc's "Sync publication" section), with independently recoverable transfer-leg
 health and sustained-partial reporting. Source enumeration, direct reads and
 sync transfers pin canonical ancestors through the same directory boundary
-used by additive ZIP snapshots. Destination containment, source reclamation,
-SSH/ingest target support, repo-scoped admission fencing, and accounting
-ingestion remain outstanding.
+used by additive ZIP snapshots. Process-log payload destinations separately pin
+lexical ancestors before directory creation and retain that boundary through
+incremental inspection, atomic publication and cleanup. Session-state and
+health-metadata containment, source reclamation, SSH/ingest target support,
+repo-scoped admission fencing, and accounting ingestion remain outstanding.
 
 ### Segmenter (`agent_logger.segmenter`)
 

@@ -329,7 +329,7 @@ def inspect(request_id: str) -> dict:
 
 def _dispatch(verb: str, args: dict) -> dict:
     result = launch_seed_state._dispatch(
-        verb, args, min_version=3 if verb == "launch_request_stage" else 2,
+        verb, args, min_version=4 if verb == "launch_request_stage" else 2,
     )
     if result.get("error"):
         raise ValueError(result["error"])
@@ -347,6 +347,6 @@ def _guard(handler):
 
 
 tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=2)
-tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=3)
+tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=4)
 tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=2)
 tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=2)

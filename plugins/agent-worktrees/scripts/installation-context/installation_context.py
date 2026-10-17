@@ -13,6 +13,7 @@ _FRAGMENT_FILES = (
     "_installation_context_runtime_slot_ownership.py",
     "_installation_context_runtime_slot_completion.py",
     "_installation_context_resolution.py",
+    "_installation_context_guest_environment.py",
     "_installation_context_activation.py",
     "_installation_context_legacy_attribution.py",
     "_installation_context_legacy_transition.py",

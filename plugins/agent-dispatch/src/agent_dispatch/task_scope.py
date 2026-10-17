@@ -53,7 +53,7 @@ TASK_SCOPE_HEADER = "X-Agent-Dispatch-Task-Token"
 #: this expiry; the expiry is only a defense-in-depth bound on exposure
 #: window (e.g. a task somehow re-opened with a coincidentally-reused
 #: owner_session_id). A long-running container's supervisor is expected to
-#: re-mint through its own trusted `start` call well within this
+#: renew through its own trusted `task-grant` call well within this
 #: window, not treat one token as good for a whole task's lifetime.
 DEFAULT_TTL_SECONDS = 900.0
 

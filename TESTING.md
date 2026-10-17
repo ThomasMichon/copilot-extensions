@@ -9,6 +9,165 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+Guest-environment coverage runs the actual Python, Bash and PowerShell CLIs
+with only operating-system observations substituted (account home, guest kind
+and machine-id). Each writer's private registration is read repeatedly by all
+three runners with and without direct-entry variables. Exact profile snapshots,
+registration mode, foreign/conflicting identity and malformed-version controls
+retain real filesystem, parser, lock and atomic-write behavior. All three
+writer parameters participate in `installation_context_smoke` on native POSIX;
+native Windows tests separately cross both installed PowerShell hosts and
+prove inherited WSL/OS labels do not confer guest identity. Targeted Worktrees
+doctor tests cover explicit enrollment, repeated SSH-style no-write calls and
+refusal before unrelated repair machinery.
+Separate enrollment-admission fixtures inject another completed registration at
+real lock entry, using the native atomic writer. Every runner must revalidate
+the newly visible identity, refuse a conflicting name and retain canonical
+case for an idempotent enrollment; lock ownership and cleanup are not mocked.
+
+Remote ACP's focused contract/ledger tests and independent synthetic-process
+consumer lane run together:
+
+```text
+python tools/run-plugin-tests.py agent-bridge --test-file tests/test_remote_acp_transport.py --test-file tests/test_remote_acp_sessions.py --test-file tests/test_remote_acp_peer.py
+```
+
+The peer uses a disposable locally trusted synthetic certificate and Hypercorn:
+actual negotiated TLS HTTP/2 with connection/session SSE, and actual WSS
+upgrade. It checks explicit structured permission/form roundtrips, cancellation,
+auth refusal/refresh, cookie affinity, redirects-off, disconnect/load without
+prompt replay, capability mismatch without a write and independent server
+survival after client close. It does not contact a deployed remote agent or
+prove deployment readiness. Existing ACP/client/API tests retain local/provider
+regression coverage; the new lane is bounded rather than an exhaustive fleet
+matrix.
+
+Bridge's CI smoke job retains the full contained suite and fresh independent
+peer processes. Its bounded job budget is 12 minutes (the same native-consumer
+exception as dispatch/index): an observed complete run exceeded the former
+eight-minute job limit during cleanup despite passing test steps. Other plugin
+budgets and the required aggregate gate are unchanged.
+
+Bridge's tolerant-wire-reader guard continues to cover every discovered peer
+model. Its only explicit local-configuration classifications are the immutable
+`RemoteAuth` and `RemoteAcpTarget` settings: unknown auth/transport configuration
+fails closed instead of silently ignoring a typo. Subclasses do not inherit
+that classification. Remote replay tests also include unfinished historical
+tools, checking live tracking and telemetry after load, database restore and
+event-log rebuild.
+
+The shared `agent-procutil` daemon-broker unit suite covers authenticated frame
+bounds, WMI's JSON-stdin environment boundary, containment opt-out, partial-start
+cleanup and adoption failures. Its Windows-only native regression launches from
+a windowless parent in both breakaway-permitted and breakaway-forbidden
+kill-on-close Jobs. Each mode runs two full launch/stop cycles and observes
+actual daemon survival, exact argv/environment, split logs and zero attributable
+visible windows or foreground changes. A separate broker-handle case checks
+wait timeout, termination and actual exit status. The forbidden-breakaway cases
+fail rather than skip when lifetime escape fails; contained-mode execution
+instead proves that the daemon dies with its caller's Job.
+The redirector-fallback case also runs two native cycles; standalone import
+tests cover both an alias-loaded single file and a minimal package. Consumer
+checks exercise the real Session Host zipapp and the actual standalone
+Worktrees lifecycle loader. Fault-injected cleanup waits/closes verify
+independent cleanup, normalized errors and refusal to retry with uncertain
+process ownership.
+
+Pull Requests' installer wiring contract covers both canonical development
+references and self-contained materialized payloads. Its fixture invokes the
+real installer-engine materializer without changing the source wrappers or
+canonical assets. Both language variants must use the same layout; materialized
+engines and their required support files must exist locally and match the
+canonical bytes. Missing or modified assets and mixed source/local references
+remain failures, not accepted release-layout variations.
+
+Bridge's native PowerShell/Bash completed-slot admission and serving-reconcile refusal
+matrices use a minimal plugin payload. Both setup and admission still compute
+the real fingerprint and use real versioned-runtime evidence; dedicated
+shared-library fingerprint cases retain the full transitive fixture. This
+keeps unrelated MSYS hashing subprocesses from consuming the admission cases'
+unchanged 30-second item budget. Install and update partitions retain every
+case without extending the 300-second suite budget.
+The current-daemon native fixture starts independent cold daemon and CLI
+processes concurrently. A stdin barrier holds the actual CLI entrypoint until
+the daemon is verified ready; neither process is pooled or replaced by a mock.
+Their imports and consumer execution share the same 25-second budget, with
+cleanup inside the unchanged 30-second item cap. IPv4 exercises reconcile and
+IPv6 exercises the read-only installer probe. Fresh-root cases retain ordinary
+`python -m agent_bridge` invocation.
+Native fixture processes are contained before execution: required no-breakaway
+Jobs on Windows, owned sessions/process groups on POSIX. Bounded teardown covers
+broker descendants even before a serving-worker receipt exists; an injected
+early-failure case verifies both actual processes exit. Real worker CLI cases
+also prove missing/corrupt serving credentials stay unchanged, while ordinary
+startup retains first-run credential creation.
+The same native lifecycle fixture also exercises a supported non-default
+loopback bind and graceful start/stop/reconcile. The stopped case compares
+runtime files after confirmed native exit, excluding only its own log/output
+files, and requires inactive success without activation or runtime writes.
+Conditional cutover's native contention checks retain their one-second limit,
+measured from actual holder acquisition. Earlier healthy publication/fixture I/O
+is not part of that contention interval; the native lock and whole-item deadline
+remain real and unchanged.
+
+The registered-repository Git-probe guard follows the real `repos._git` to
+`git_ops.git` call chain. It checks headless options at that subprocess owner,
+the existing 60-second bound and UTF-8 capture policy, and removal of inherited
+repository/config selectors while retaining unrelated environment state.
+The companion real-Git identity test and native registered-only first-touch
+CLI test remain process-boundary coverage rather than mocked-runner evidence.
+
+The install-contract machine-gate probe exercises actual policy, gate, planner
+and execution-barrier source with synthetic config/inventory/installer
+boundaries. Registered and module plans cover forced and ordinary Windows/Linux
+updates, explicit enabling repositories and anchor fallback, missing manifests,
+universal runtimes and detection failures. Source-mutation tests independently
+break each planner and the shared policy/barrier; the production guard-wiring
+test prevents these probes from becoming an unwired helper. This source-level
+contract does not substitute for native installer or installed-update proof.
+
+Runtime purge contracts retain the original install-lock identity and active
+staged sources while removing runtime/config contents. The existing tool guard
+suite collects native POSIX flock, live PID-fallback, link-target and failure
+cases. Linked roots with terminal slash/dot components must be refused, and a
+symlink followed by `..` must purge only the physical directory holding the lock.
+Root/home resolution preserves trailing newlines and ignores `CDPATH`.
+An unprivileged mode-0300 case holds the real transaction lock and requires
+unreadable roots to fail; its source-mutation control reproduces the old false
+success without changing item or job deadlines.
+Vault's transaction suite runs the real shared helper under both Windows
+PowerShell 5.1 and PowerShell 7, with a held lock, open staged source and outside
+junction target. Native PowerShell purge cases compare home directory identities
+through linked ancestors while retaining legitimate aliased runtime paths; the
+existing POSIX guard also exercises that helper under native PowerShell.
+Native consumer cases exercise supported uninstall entrypoints
+and read-only previews in fresh roots; service APIs are isolated, never live.
+Pull Requests retains its existing 300-second production wait: its immediate
+native lock probe and source-wiring test cover contention without stretching a
+test deadline to wait out that default.
+Its fresh-payload fixture invokes the real engine materializer, then runs the
+actual marketplace-path self-stage/uninstall twice under native PowerShell and
+POSIX Bash. The next invocation reaps the prior dead stage while an independently
+live stage survives. Immediate self-stage cleanup is not the v4 protocol.
+
+The Worktrees standalone instruction-preflight fixture copies runtime files
+with at most 16 workers, waits for every copy and propagates copy errors.
+Byte-preservation and cache-exclusion guards cover that fixture separately.
+Native PowerShell and Bash preflight checks assert the framed launch-progress
+events while retaining the existing test and subprocess deadlines.
+
+The optional profile-assignment-state failure guard follows both real command
+layers returned by worktree creation: exact record-bound execution admission,
+then the installed setup launcher. It checks the underlying model arguments,
+fallback profile environment and absence of assignment metadata without
+mocking either launcher or treating a setup host as the Copilot executable.
+
+The create-plan project-scoping guard uses a real `WorktreeRecord` derived from
+the shared fixture, with the selected creation identity and owning project.
+Only external side effects are stubbed: the real creation path assembles its
+launch plan, including the deferred admission command. The guard still requires
+that plan to name the selected repository rather than the stale ambient project.
+
 Agent Logger's PowerShell access-denied classifier guard executes the extracted
 installer functions under both installed PowerShell hosts. Each child uses fresh
 contained home/config/temp roots, noninteractive startup and disabled telemetry
@@ -30,6 +189,17 @@ Healthy provision has a 20-second installer-owned deadline inside the unchanged
 
 ### Fleet replay-retention boundaries
 
+Native index installer snapshot tests separate dependency-content identity
+invalidation from publication ordering and snapshot-local consumer closure.
+Every case retains its real PowerShell boundary and existing 25-second child
+deadline; engine and library changes are independently covered, not omitted
+from the unchanged publication/older-pointer refusal case.
+
+The passive index-service promotion contract supplies an explicit synthetic
+search engine, just as the adjacent drain cases do. Its real HTTP admission
+must reject passive queries without invoking that engine, then admit exactly
+the tested query after owned promotion; it never contacts an embedding service.
+
 The required native fleet lane runs the replay-expiry/idempotency contract with
 a four-event window and real, fully synchronous SQLite transactions. The same
 parameterized test also crosses the production 1,024-event window under
@@ -43,7 +213,31 @@ runs select both windows and the full artifact matrix with a 600-second fleet
 suite budget inside a 15-minute native runner job. PR/push budgets remain
 120 seconds for fleet, five minutes for the Linux job and seven for Windows.
 
+The native fleet matrix runs disjoint planner, durable storage, artifact,
+client-distribution/diagnostic, Gateway TLS and Gateway process partitions on
+both operating systems, each with its own unchanged containment and job deadline.
+The exact `-k` selectors are
+declared together in `ci.yml` and checked by `tools/test_fleet_ci_scope.py`.
+The required PR aggregate depends on both static GitHub-hosted
+`fleet-native-linux` and `fleet-native-windows` partition matrices;
+a failed or cancelled partition fails that gate.
+Every otherwise selected test belongs
+to exactly one partition; neither partition is advisory or fail-fast.
+Manual runs use the same complete partition and retain both full markers.
+Native artifact/diagnostic subprocesses and durable planner/ledger tests do not
+consume each other's wall-clock budgets. Gateway TLS/credential tests and
+separate-process acceptance are independently bounded too; none shares the
+unrelated test-runner job's budget.
+
 ### Derived native installation diagnostics
+
+The Windows source-provenance/read-only lane separates command-catalog
+contracts, command-lifecycle contracts and native first-touch cases. Every
+previously selected case still runs; each step retains its two-minute deadline
+and the enclosing job retains five minutes. The former combined selection could
+exhaust a step's budget through cumulative successful native calls, without any
+single subprocess exceeding its own deadline. Do not re-combine those groups or
+drop first-touch assertions to make the aggregate appear faster.
 
 `libs/payload-invocation/tests/test_derived_diagnostic_cli.py` executes the
 actual vendored shell entry points selected by the installation-context
@@ -61,6 +255,17 @@ copy on Windows PowerShell 5.1 and POSIX, partitioned by mode and pointer state
 into eight independently bounded four-minute jobs. Run it against the exact
 candidate ref before claiming all-copy native acceptance. A smoke pass or
 byte-identical vendoring check alone does not satisfy that broader gate.
+
+### Assignment reconnect contracts
+
+The assignment TCP reconnect guard first holds the initial ready frame until
+startup reconciliation completes, then waits for the independent ready-triggered
+read before disconnecting. It holds the replacement SSE subscription at
+an explicit server-side barrier while creating unannounced work, and releases
+that barrier only after checking the disconnected queue, rather than assuming
+an HTTP request and a fixed sleep fit inside the real reconnect backoff.
+The blocked-spawn presence guard also waits for actual reader readiness;
+heartbeat progress alone does not prove the independent reader connected.
 
 ### Native category view contracts
 
@@ -83,6 +288,45 @@ python tools\run-plugin-tests.py agent-dispatch -k native_cli_category_view_cont
 python tools\run-plugin-tests.py agent-dispatch --guards -k one_cold_cli_boundary
 ```
 
+### Restricted supervisor Docker acceptance
+
+`plugins/agent-dispatch/tests/test_restricted_supervisor_docker.py` is opt-in.
+It uses a disposable, test-owned host Bridge/supervisor, a real central service
+container and a separate restricted worker on an internal network. No installed
+service, live account, shared Docker socket mount or cloud token is used.
+The offline ACP witness creates its actual native identity, then starts,
+reads, reports progress and completes its own task through authenticated HTTP.
+It must reject cross-task, fleet-route and signature-tampering attempts, and
+observe protected task-file rotation by the trusted supervisor.
+Acceptance also waits for the witness's final proof after its post-completion
+revocation check, not merely for the central task row to become completed.
+An older matching-label task with unmet capabilities must be deferred without
+an agent, allowing the subsequent eligible task to run in the same lane.
+
+Build the central image from the candidate source with
+`services/dispatch/Dockerfile`, using the environment's approved package-index
+configuration. Prepare the `agent-dispatch`, `agent-bridge` and
+`agent-containers` test runtimes through `tools/run-plugin-tests.py --prepare-only`.
+Set `AGENT_DISPATCH_RESTRICTED_E2E=1`,
+`AGENT_DISPATCH_E2E_CENTRAL_IMAGE` to that image, and
+`AGENT_DISPATCH_E2E_BRIDGE_PYTHON` / `AGENT_DISPATCH_E2E_PROVIDER_PYTHON` to the
+prepared Bridge/provider interpreters. Then run:
+
+```powershell
+python tools\run-plugin-tests.py agent-dispatch --test-file tests\test_restricted_supervisor_docker.py
+```
+
+The fixture owns its temporary Bridge state, provider runtime copy, containers
+and networks, and tears them down. Provider discovery uses an isolated legacy
+manifest to exercise its supported compatibility path without changing real
+plugin activation. The test is programmatic transport/authority acceptance,
+not a model evaluation or a claim of automatic pool placement.
+For timeout diagnosis, `AGENT_DISPATCH_E2E_EVIDENCE_DIR` may name a new absolute
+directory under an ignored local test-output root. The fixture refuses reuse
+and retains timestamped Bridge diagnostics and operation-label-only stage
+timing, without writing provider stdin or task credentials into the stage log.
+All diagnostics remain inside the unchanged test and subprocess deadlines.
+
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and
 `services/dispatch`, respectively. It normalizes aliases before environment
@@ -92,6 +336,81 @@ New invocations should use the canonical service paths. The native runner
 contract executes both aliases in canonical contained fixture environments
 from an isolated parent whose pytest dependencies reside outside its interpreter
 scheme, exercising the layered dependency layout without installing packages.
+Each alias has its own native fixture item and unchanged subprocess budgets.
+That pure pytest fixture disables unrelated third-party plugin autoload without
+changing the real contained runner or its ownership/environment assertions.
+Preparation's disposable override files stay under the repository so retaining
+their topology does not expand copied source paths back to a drive-root layout
+and exceed Windows' relative-path limit.
+
+The index-service smoke lane includes offline container-context and explicit
+fleet-image profile contracts; neither needs Docker, a model or enrollment.
+The real-wheel release test builds the sixth first-party `fleet-manager` wheel
+and verifies the actual declared fleet extras, without publishing or installing
+those fixture versions. Native schema-1 release behavior remains covered.
+
+Dependency preparation uses the canonical seven-day configured-resolver policy.
+Do not replace a failed admission with plain pip or an alternate index. After
+changing declarations, run `python tools/check-dependency-age.py`; its explicit
+`--ecosystem` lanes are diagnostics, not a replacement for the all-ecosystem CI
+gate.
+
+The automatically selected `tools/test_installer_dependency_policy.py` suite
+also exercises the deny-local CLI mode without product discovery. Its native
+bootstrap fixture runs the real materializer,
+removes the original library tree and deliberately corrupts embedded product
+identity, then bootstraps a pinned registry wheel into a fresh venv through
+real UV. Stricter cutoff, unseasoned artifacts and wrong hashes still refuse.
+The ordinary attributed-source path remains covered separately.
+
+Focused policy tests are:
+
+```bash
+python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_seasoned_npm_install.py
+```
+
+The editable-retention regression runs the real setuptools backend; the test
+environment must include `setuptools>=83.0.0` and `wheel`, installed through
+`tools/seasoned_uv.py` like CI's guard tooling.
+The native UV lane uses a controlled index to exercise a transitive dependency
+and an isolated build backend, including newer/missing upload timestamps,
+transitive URL refusal and UV's conservative exclusive boundary. The native npm
+lane runs configured-registry queries and `npm ci` against a controlled registry;
+newer or unknown releases must refuse before artifact download. These helpers
+perform no production service mutations.
+
+The standalone runner's retained-resource regressions build real Fleet and
+Index wheels with their declared setuptools backend; use a prepared test
+environment, not an older host setuptools installation. Installer fixtures
+must run from their own attributable payload or isolated working directory so
+UV does not discover unrelated checkout metadata. Retained-path assertions
+validate source identity, private ownership and content at the physical UV
+boundary before normalizing paths for ordering or retry comparisons.
+Vault's two snapshot-provisioning integration cases explicitly allow 60 seconds
+per item: fixture setup performs one complete four-package installation,
+health gate and publication transaction. The remaining items keep the default
+30-second limit; suite, child-process and CI budgets are unchanged.
+A focused, change-scoped Windows CI job executes both native cases under the
+same two-minute suite limit and participates in the required PR aggregate;
+the existing POSIX plugin suite remains required independently.
+The off-PATH Windows bootstrap fixture creates a real stdlib virtualenv in a
+spaced directory and probes its exact executable and prefix with a restricted
+PATH before invoking the hook. Copying a base `python.exe` and writing
+`pyvenv.cfg` is not a runnable cold interpreter fixture: its DLL dependencies
+may be absent, independently of argument forwarding or installation policy.
+The full native Fleet check allows 300 seconds on Windows under its unchanged
+seven-minute CI job limit; Linux retains 120 seconds. This is a full-suite
+budget, not a reduced test selection or a relaxed dependency-admission gate.
+Multiline PowerShell steps propagate each native admission or prerequisite-test
+failure explicitly before starting later commands.
+`tools/test_installer_finalizers.py` exercises production cleanup and exclusive
+lock reacquisition in the same still-live Windows PowerShell host.
+
+The pre-commit hook runs staged guards in batches of 32 paths to stay within
+Windows child-command limits during large integrations. Every path is checked,
+later batches still run after a failure, and any failed batch blocks the commit.
+`python -m pytest -q tools/test_pre_commit_batches.py tools/test_hook_interpreter.py tools/test_check_large_files.py`
+exercises the real hook, spaced/flag-like paths, batch failures and existing guards.
 
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
@@ -132,11 +451,32 @@ python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.
 python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
 ```
 
+For a focused lane, repeat `--test-file tests/test_name.py` with exactly one
+named plugin to avoid importing unrelated test modules. The selector accepts
+only existing, unlinked Python test files inside that plugin's `tests` tree;
+it retains the usual containment and time budgets and fails if no selected
+tests run. Combine it with `-k` to preserve a diagnostic lane's exact test
+roster without collecting the full plugin suite.
+
+Explicit out-of-plugin targets use the same bounded runner and admission lease:
+`worktree-manager` selects that product's tests, and `payload-invocation` selects
+`libs/payload-invocation/tests`. `--all` remains scoped to plugin suites.
+The payload suite's PowerShell contracts require a real `pwsh`; when it is absent
+from the isolation container, run that target through the host's contained runner
+rather than counting skipped PowerShell contracts as validation.
+
 > **A cached venv is not editable.** A vendored path dependency (e.g.
 > `agent-ssh-manager` under `plugins/<p>/libs/<lib>/`) installs into
 > `.test-venvs/<platform>/<p>` as a normal copy, not an editable link —
 > editing `libs/<lib>/src/...` does nothing to a suite you run against an
-> already-built venv until you pass `--reinstall`. This also means a shared
+> already-built venv until you pass `--reinstall`. That explicit option also
+> forwards reinstall to uv, so recreating the venv cannot silently reuse an old
+> same-version local-path wheel. Ordinary cached runs keep their existing policy.
+> Rebuild cleanup preserves the leased environment directory and unlinks child
+> junctions without traversing their targets, including under Python 3.11.
+> Native GUI-parent probes capture child diagnostics even when `pythonw -I`
+> cannot import the installed dependency API; an opaque exit code is not
+> windowless-launch evidence. This also means a shared
 > lib's **own** test suite (its top-level `libs/<lib>/tests/`, as opposed to
 > any plugin's `tests/`) is never run by this runner at all — it belongs to
 > no single plugin. Validate it directly against one specific vendored copy by
@@ -154,6 +494,29 @@ and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
+
+Agent-index's fleet-ingress tests select the same-checkout `fleet-manager[auth]`
+distribution explicitly during development preparation. Its runtime metadata
+keeps an ordinary versioned optional dependency, not an escaping standalone
+project path or a vendored Gateway copy. The runner fingerprints that project's
+dependency metadata and uses an editable test install so source changes remain
+visible. The canonical dependency-seasoning adapter retains the shared
+`libs/versioned-runtime` build resources needed by that standalone distribution,
+just as standalone test preparation does; it does not bypass policy or build
+from a mutable source fallback.
+
+The independent `libs/docker-resource-producer/tests` suite uses only a fake
+Docker process and temporary JSON state, never a live daemon. Required PR guards
+select it when that library, its selector, promotion tool/tests, or the CI workflow changes, and run it
+on the declared minimum Python 3.10 with bounded per-test and step timeouts.
+The same selection runs the canonical package's focused promotion-compatibility
+regression on guard Python, before minimum-runtime setup.
+Minimum-runtime dependency provisioning uses the canonical seasoned UV adapter.
+The library also declares the native seven-day UV cutoff for direct consumers.
+Minimum-runtime setup uses its explicit interpreter output without replacing
+the guard job's Python 3.12 environment. This catches fractional-timestamp and
+optional TLS client-identity compatibility; it is not live Docker lifecycle
+acceptance.
 
 On Windows, contained runs also set the installer test-mode contract
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`. Conforming installers virtualize
@@ -173,6 +536,18 @@ mutations, and expose attempted forbidden effects as assertion failures.
 User-root redirection alone does not isolate executable discovery or scheduled
 tasks. The signed-venv health/exit-code matrix uses simulated signatures on both
 platforms; native signature-policy behavior still requires Windows validation.
+Isolated runtime-helper fixtures must copy `versioned_runtime.py` with its
+adjacent `versioned_runtime_leases.py` and `versioned_runtime_construction.py`.
+Standalone wheel/sdist tests bind every member to canonical bytes and wheel
+RECORD; a missing companion must fail rather than yield a partial artifact.
+
+Dependency fixtures must also preserve source attribution. Stage matching
+publisher/project metadata and the declared local library graph at the real
+helper location; use the existing release materializers before stamping a
+payload rather than retaining development paths that escape its root.
+Direct policy API callers attest the fixture creator's fixed repository root,
+not a root derived from the requested package argument. Keep admission active:
+do not mock ownership discovery or widen trust to make a fixture pass.
 
 The Codespaces module-launch matrix is an opt-in T3 contract:
 `python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.
@@ -726,11 +1101,15 @@ manually dispatched `PR rebase full` workflow on Linux and Windows:
 
 ```powershell
 $env:AGENT_WORKTREES_PR_REBASE_EXHAUSTIVE = '1'
-python tools\run-plugin-tests.py agent-worktrees -k owned_pr_rebase --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
+python tools\run-plugin-tests.py agent-worktrees -k "owned_pr_rebase or pr_recovery or pr_break_glass or pr_rewrite or pr_publication_state or pr_publish_stale_tip or pr_partial_publish_guard" --allow-explicit-tiers --subsuite-timeout 1800 --plugin-timeout 1800
 ```
 
 Use the exhaustive mode when changing replay authorization or its publication
 adapters; unrelated PRs and ordinary promotion runs do not pay the matrix cost.
+The same manual lane covers exact operator-recovery previews, advanced live
+heads, backed-sync bookkeeping settlement, immutable source/lease races and
+ordinary stale-tip reconciliation against disposable Git repositories. It
+requires no live PR, credentials or effectful operator recovery.
 
 Required pull-request CI is a fast regression gate, not the complete test
 inventory. Its design target is a wall time below five minutes under normal
@@ -742,6 +1121,35 @@ a scheduled or manually dispatched workflow.
 
 - Gate specialized suites by changed paths so unrelated pull requests do not
   pay their cost.
+- The existing artifact/toolchain, Python 3.10 compatibility, Windows composed
+  artifact and Windows candidate-readiness lanes also cover their source inputs:
+  root/nested `.gitattributes`, plugin and shared-library trees (including
+  metadata and copied files), declared standalone consumers, changefiles,
+  marketplace versions, materializers and their helpers, and canonical copied
+  documentation. Both inline artifact selectors in `ci.yml` must agree;
+  `tools/test_public_toolchain_source.py` checks positive and unrelated-path
+  cases. `tools/test_promotion_python_artifacts.py` exercises the real producer
+  hash/materializer/verifier roundtrip with offline wheel-encoding fixtures,
+  including LF/CRLF policy and altered source, dependency, bundle and wheel
+  bytes. These contracts do not normalize downloaded bytes or replace raw
+  archive/wheel digest checks, and do not require an exhaustive portfolio for
+  unrelated documentation changes.
+- `tools/test_promotion_source_alias.py` uses real Git candidates, squash
+  landings and real source-bound archives to prove that an unchanged version
+  alias survives both a prior squash merge and a failed Main merge. Signed
+  prior-index proof never waives current plugin-source or raw-byte checks.
+- Before a workflow-only control activation, run the prepared file explicitly:
+  `python tools/test_release_publication_boundary.py --workflow <prepared-workflow> --base-branch-workflow <prepared-admission-workflow>`.
+  It executes the literal merge, pause and control-generation admission code
+  with bounded provider/Git fixtures. A legacy default controller is explicitly
+  skipped, not credited as implementing the new boundary; fixture proof does
+  not replace exact-candidate live CI and artifact qualification.
+- Release-tool compatibility tests retain complete legacy-controller branches
+  and execute the prepared source-owned graph when present. Before activation,
+  the full tool portfolio must also pass with the actual controlled workflow
+  overlays, not only the default Dev YAML. Native source-owned tests use the
+  existing second Windows job without increasing either five-minute budget;
+  unfiltered file partition assertions guard against lost cases.
 - Keep one canonical implementation broad; sample external adapters at genuine
   divergence seams such as parsing, interoperability, security boundaries,
   atomicity, concurrency, and wrapper wiring.
@@ -781,8 +1189,8 @@ demand through the `Installation context full` workflow. This keeps unrelated
 pull requests incremental and keeps the required fast lane independent from the
 size of the long-form regression portfolio.
 
-Native Windows diagnostic evidence is a separate, bounded selection inside
-the existing `test runner (windows-latest)` job. It runs actual `status` and
+Native Windows diagnostic evidence runs in the separate five-minute
+`Installation-context native diagnostics (Windows)` job. It runs actual `status` and
 `probe-legacy` CLI calls, existing/absent pointer checks, and mutation-entry
 guards from `test_installation_mode_governance.py`; it is not inferred from
 the job merely finishing successfully. The step has a two-minute budget,
@@ -792,10 +1200,15 @@ uses Windows PowerShell 5.1 via
 and derived implementation changes trigger it; unrelated docs do not.
 An explicitly requested unavailable shell fails collection rather than
 silently skipping the evidence. No exhaustive adapter matrix is added to PR CI.
-The Windows job has a seven-minute aggregate budget for these diagnostic and
-wrapper selections plus its runner, payload-CWD, and fleet contracts. Individual
-diagnostic/wrapper selections retain their two-minute limits; the Linux runner
-job retains its five-minute budget.
+Individual diagnostic/wrapper selections retain their two-minute limits.
+The separate Windows runner, payload-CWD and Fleet job keeps its ordinary
+seven-minute budget; the Linux runner keeps its ordinary five-minute budget.
+
+Native promotion readiness/retry cases have their own five-minute
+`Native promotion candidate contracts (Windows)` job. It consumes the governed
+artifact builder's changed-path output instead of duplicating detection, and
+both jobs gate PR and promotion snapshots. The same native cases and selectors
+run without exhausting the builder's cumulative five-minute budget.
 
 Source-qualified catalog no-write cases invoke the unchanged PowerShell script
 twice in one real, initialized host. Host-only initialization stops CLR startup
@@ -827,7 +1240,11 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
 
 - **agent-bridge:** transport, sessions, config, CLI, and the **Session Host**
   (framing, reattach/ack/buffering, reap logic, protocol-aware turn boundaries,
-  version-mux, host-index persistence).
+  version-mux, host-index persistence). Preference-authority tests require a
+  real release-label mutation, exercise the promotion fallback writer and
+  materializer against a disposable payload, and reject old receipts after
+  executable authority-code changes. Only standalone root-module release
+  labels are normalized; the complete staged authority closure remains bound.
 - **agent-dispatch:** queue/coordinator/supervisor behavior plus the opt-in
   worktree-focus `sessionStart` kernel (payload cwd authority, Git/config and
   agent-worktrees status-core gates, strict bounded input, exact config shape,
@@ -846,6 +1263,17 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   declaration and interpreter-only launch, unsupported/missing-supervisor
   inertness, and ordered direct-SSH routing parity. Agent-dispatch also consumes
   the shipped declaration/provider in its materialization and launch tests.
+  Installer fixture contracts in `test_install_engine_adoption.py`,
+  `test_installer_staging.py`, and the two
+  `test_installer_uv_editable_lib_preinstall_{sh,ps1}.py` files build explicit
+  canonical Dev and self-contained materialized layouts independently of the
+  checkout running the tests. The real materializer supplies payload-local
+  engine assets and regenerates native human-output declarations after wrapper
+  changes. Cell coordinator cases retain the live payload-replacement/no-reentry
+  proof in both layouts and shells. Procutil fallback cases remove only their
+  copied local procutil directory, assert its absence, and retain canonical
+  dependency-policy/private-copy checks; an existing local copy is not evidence
+  that fallback ran. Run all four files in source and generated-consumer views.
 - **agent-codespaces:** config, lifecycle, resolver, and the credential relay.
   The focused `-k worktrees_peer` lane covers every same-cell worktrees adapter,
   refusal propagation (including claim and auth fallbacks), and cross-context
@@ -871,6 +1299,12 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   **Picker** UX, golden, cache, pivot, streaming, steering, profile, SSH-source,
   selection, capture, mock, and PNG-validation corpus under
   `worktree-manager/tests/production_picker/`.
+  The real-child feed deadline regressions separate process/SSH startup from
+  admitted snapshot/update transactions, retain stale rows across transport
+  expiry, reconnect to a complete replacement generation, and verify child
+  cleanup on cancellation, including partial JSON lines returned after child
+  termination. Malformed output without watchdog expiry and explicit terminal
+  peer refusals retain no-respawn coverage.
   The configuration-action contracts exercise native forms, Cancel-default
   confirmation, safe argv substitution and visible command failures. For the
   real Workers-to-override acceptance lane, prepare agent-dispatch's test venv

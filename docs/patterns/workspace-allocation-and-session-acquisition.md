@@ -67,7 +67,15 @@ workspace-creation endpoint. Explicit dispatch allocation revisions likewise
 use a non-fallback revision endpoint. Older or unsupported owners refuse
 instead of ignoring a safety-affecting option. Existing unkeyed standalone
 creation keeps its deliberate fresh-create behavior; remote/fleet keyed
-embodiment remains explicitly unsupported.
+worktree embodiment remains explicitly unsupported.
+
+An explicitly selected provider-exec instance may instead use protocol 36's
+`provider_instance` keyed-native option. Its provider owns the concrete
+workspace; Bridge retains one physical provider instance and native result,
+without manufacturing a ground-layer worktree. This is not a remote-worktree
+allocation fallback. The separate provider journal records launch intent before
+effects, refuses changed facts and ambiguous history, and never starts a second
+conversation on replay. No first prompt or task authority is implied.
 
 ## Refusal and unknown outcome are different
 

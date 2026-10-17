@@ -32,6 +32,10 @@ from ssh_manager.locks import pid_alive
 from .config import LEASE_FILE, STATE_DIR, ContainersConfig, ensure_state_dir
 from .lifecycle import list_containers
 from .private_state import atomic_write_json
+from .lease_lock import (
+    PROTOCOL, LockCutoverError, legacy_writer_quiesced, provider_lock,
+    require_legacy_writers_quiesced,
+)
 
 log = logging.getLogger("agent-containers")
 
@@ -92,6 +96,7 @@ class DeployHold:
     heartbeat_at: float
     expires_at: float
     uncertain: bool = False
+    lock_protocol: str = PROTOCOL
 
 
 @dataclass
@@ -105,6 +110,7 @@ class SessionAdmission:
     environment: str
     acquired_at: float
     heartbeat_at: float
+    lock_protocol: str = PROTOCOL
 
 
 class ProviderAdmissionError(RuntimeError):
@@ -129,50 +135,20 @@ def _this_environment() -> str:
 
 
 @contextmanager
-def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
-    """Cross-platform exclusive lock via O_CREAT|O_EXCL lock file."""
+def _lease_lock(
+    timeout: float = 10.0, poll: float = 0.05, *, clear_expired_corruption: bool = False,
+    cleanup_only: bool = False,
+) -> Iterator[None]:
+    """Serialize admission, lifecycle and binding writers with kernel ownership."""
     ensure_state_dir()
-    deadline = time.monotonic() + timeout
-    fd = None
-    owner_token = uuid.uuid4().hex
-    while True:
-        try:
-            fd = os.open(
-                str(_LOCK_FILE),
-                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                0o600,
-            )
-            try:
-                os.fchmod(fd, 0o600)
-            except (AttributeError, OSError):
-                pass
-            os.write(fd, owner_token.encode("ascii"))
-            os.fsync(fd)
-            break
-        except FileExistsError:
-            if time.monotonic() >= deadline:
-                # Stale lock recovery: if older than timeout*3, steal it.
-                try:
-                    age = time.time() - _LOCK_FILE.stat().st_mtime
-                    if age > timeout * 3:
-                        _LOCK_FILE.unlink(missing_ok=True)
-                        continue
-                except OSError:
-                    pass
-                raise RuntimeError(
-                    "Could not acquire lease lock (held by another process)"
-                ) from None
-            time.sleep(poll)
     try:
-        yield
-    finally:
-        if fd is not None:
-            os.close(fd)
-        try:
-            if _LOCK_FILE.read_text(encoding="ascii") == owner_token:
-                _LOCK_FILE.unlink(missing_ok=True)
-        except OSError:
-            pass
+        with provider_lock(_LOCK_FILE, timeout=timeout, poll=poll):
+            require_legacy_writers_quiesced(
+                clear_expired_corruption=clear_expired_corruption, cleanup_only=cleanup_only,
+            )
+            yield
+    except LockCutoverError as exc:
+        raise ProviderAdmissionError(str(exc)) from exc
 
 
 def _read_leases() -> dict[str, Lease]:
@@ -295,7 +271,12 @@ def _read_records(path, record_type, *, fail_closed: bool = False):
     records = {}
     for key, rec in (raw or {}).items():
         try:
-            records[key] = record_type(**rec)
+            if not isinstance(rec, dict):
+                raise TypeError("provider record must be an object")
+            fields = dict(rec)
+            if record_type in (DeployHold, SessionAdmission):
+                fields.setdefault("lock_protocol", "legacy")
+            records[key] = record_type(**fields)
         except TypeError as exc:
             if fail_closed:
                 raise ProviderAdmissionError(
@@ -800,7 +781,7 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
     Windows and WSL cannot safely inspect each other's process IDs.
     """
     cleared = {"deploy_holds": 0, "session_admissions": 0}
-    with _lease_lock():
+    with _lease_lock(clear_expired_corruption=True, cleanup_only=True):
         for path, record_type, ttl, counter in (
             (
                 _DEPLOY_HOLDS_FILE,
@@ -830,7 +811,11 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
             kept = {}
             for key, record in records.items():
                 selected = container is None or record.container == container
-                if selected and not _record_live(record, ttl):
+                can_clear = (
+                    legacy_writer_quiesced(record) and not _record_live(record, ttl)
+                    if record.lock_protocol == "legacy" else not _record_live(record, ttl)
+                )
+                if selected and can_clear:
                     cleared[counter] += 1
                     continue
                 kept[key] = record
@@ -910,6 +895,8 @@ def session_admission(
     container: str,
     *,
     expected_assignment: dict | None = None,
+    dispatch_container_id: str | None = None,
+    dispatch_binding_id: str | None = None,
 ) -> Iterator[SessionAdmission]:
     """Admit one provider launch only when no destructive hold is present."""
     token = uuid.uuid4().hex
@@ -956,6 +943,17 @@ def session_admission(
             SessionAdmission,
             SESSION_ADMISSION_TTL,
         )
+        if dispatch_container_id is not None or dispatch_binding_id is not None:
+            if not dispatch_container_id or not dispatch_binding_id:
+                raise ProviderAdmissionError("Task admission requires both physical and binding identities")
+            from .dispatch_projection import verify_binding
+
+            try:
+                verify_binding(dispatch_container_id, dispatch_binding_id)
+            except RuntimeError as exc:
+                raise ProviderAdmissionError(str(exc)) from exc
+            if any(item.container == container for item in admissions.values()):
+                raise ProviderAdmissionError("Dispatch-only container already has an admitted worker")
         admissions[key] = admission
         _write_records(_SESSION_ADMISSIONS_FILE, admissions)
     heartbeat_stop = threading.Event()

@@ -10,7 +10,18 @@ mechanism.
 
 from __future__ import annotations
 
-from .identity import is_local_machine, local_execution_platform
+from .execution_identity import (
+    IdentityError,
+    Resolution,
+    TopologyEntry,
+    detect_platform,
+    machine_entries_to_topology,
+    qualify_guest,
+    resolve_identity,
+    resolve_machine_identity,
+)
+from .identity import is_local_machine, local_execution_platform, is_observed_local_name
+from .machine_environment import MachineEnvironment, legacy_alias_forms, normalize_environment, split_machine_environment
 from .registry import (
     AmbiguousMachineError,
     MachineEntry,
@@ -22,6 +33,10 @@ from .registry import (
     merge_machines_yaml,
     parse_machines_yaml,
     parse_machines_yaml_file,
+    MachineSelection,
+    entry_physical_host,
+    resolve_machine_selection,
+    find_machine_metadata,
 )
 from .transport import (
     TransportPlan,
@@ -33,20 +48,37 @@ from .transport import (
 
 __all__ = [
     "AmbiguousMachineError",
+    "IdentityError",
     "MachineEntry",
+    "MachineEnvironment",
+    "MachineSelection",
+    "entry_physical_host",
+    "normalize_environment",
+    "legacy_alias_forms",
+    "resolve_machine_selection",
+    "find_machine_metadata",
+    "Resolution",
     "SSHEnvironment",
+    "TopologyEntry",
     "TransportPlan",
     "default_shell_for_env_name",
+    "detect_platform",
     "find_machine_entry",
     "get_machine_transport",
     "is_local_machine",
+    "is_observed_local_name",
     "local_execution_platform",
+    "machine_entries_to_topology",
     "machine_name",
     "machine_identity_names",
     "normalize_machine_entries",
     "merge_machines_yaml",
     "parse_machines_yaml",
     "parse_machines_yaml_file",
+    "qualify_guest",
+    "resolve_identity",
+    "resolve_machine_identity",
     "resolve_ssh_target",
+    "split_machine_environment",
     "wrap_remote_command",
 ]

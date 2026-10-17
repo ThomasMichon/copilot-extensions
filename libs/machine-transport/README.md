@@ -29,9 +29,25 @@ resolved -- network call to reach a host that is actually the caller itself.
   legacy+canonical merge), and `find_machine_entry()` (key/alias/hostname/
   display_name matching, case-insensitive).
 - **`identity`** -- `is_local_machine()`: the canonicalized "is this the
-  local machine?" check, checking a direct `config_machine` match BEFORE
-  ever loading the registry (so a registry outage doesn't mask a known local
-  alias), with every comparison gated on a non-empty value.
+  local machine?" check. Native callers retain the direct `config_machine`
+  match before registry loading; guest callers first validate guest authority.
+  A registered WSL key need not have a suffix. Qualified guest self names retain
+  the absent/unscoped-registry fallback, never an explicit native entry.
+  Every comparison is gated on a non-empty value.
+- **`machine_environment`** -- `split_machine_environment()`: converts
+  `<host>-wsl` and `<host>` plus `WSL` into the same physical-host/environment
+  pair. It normalizes environment labels and rejects conflicting requests.
+  This is a compatibility/presentation adapter, not ownership or filesystem
+  authority: Windows and WSL still have distinct logical execution keys.
+- **`execution_identity`** -- `resolve_identity()` /
+  `resolve_machine_identity()`: ambiguity-checked execution-key resolution
+  that qualifies WSL guests as `<host>-wsl`, treats `display_name` as
+  metadata rather than identity authority, and warns when a guest falls back
+  to a qualified explicit identity because topology has no dedicated guest
+  entry. Its platform detector also treats container roots identified by
+  Docker/Podman markers or `/proc/1/cgroup` as plain `linux` even when the
+  shared kernel string mentions Microsoft/WSL, so containerized work on a
+  WSL host never acquires a spurious guest identity.
 - **`transport`** -- `resolve_ssh_target()` (pick the best SSH alias/shell
   for an entry), `wrap_remote_command()` (POSIX login-shell wrapping via
   `remote_login_shell`, non-POSIX shells passed through untouched), and
@@ -54,6 +70,32 @@ resolved -- network call to reach a host that is actually the caller itself.
   shared POSIX-login-shell wrap.
 
 ## Usage
+
+### Contextual historical aliases
+
+`resolve_machine_selection()` is the shared address map; format parsing belongs
+only to `machine_environment`. Case-insensitive keys, registered aliases and SSH
+profiles are checked before legacy inference. Fallback forms include `-win`,
+`-wsl`, `(Windows)`, `(Win)` and `(WSL)`, including mixed case and whitespace.
+Hostname/display families require a supplied execution context when multiple
+logical environments are possible. Conflicting inline and supplied contexts
+refuse; an exact registered identity is never renamed because its spelling
+resembles a legacy form.
+
+| Slot | Context and authority | Regression grid |
+|---|---|---|
+| Config/detection and Machines discovery | Actual platform; configured selection remains distinct from automatic independent-space admission | `test_alias_matrix.py`, `test_machine_alias_matrix.py` |
+| JSON/non-JSON launch, local creation/resume | Explicit environment or selected logical entry; exact SSH profile | `test_machine_alias_slots.py`, `test_resolve_seed_delivery.py` |
+| Stored record, owner/claim ref, liveness, handoff and settlement | Record platform, actual execution and named receiving-project record/namespace proof | `test_machine_alias_slots.py` |
+| Manager local roster and physical grouping | Same selected entry and explicit physical association; logical IDs and routes unchanged | `test_machine_environment_grouping.py` |
+
+The grids cover native Windows and WSL contexts, key/hostname/alias/display
+families, mixed case, legacy projected and explicitly registered records.
+Stored machine/config/reference strings are not rewritten. A historical
+projected host label can identify its WSL record only with full record proof;
+an explicitly foreign registered space cannot borrow that exception, even on
+the same physical host and platform. Unqualified ambiguous metadata without
+an environment remains a refusal, not an implicit preference for Windows/WSL.
 
 ### Independent execution spaces
 
@@ -100,9 +142,14 @@ operations targeting a projected space, and explicit declarations retain
 their existing registry-wide source-selection requirement.
 
 `machine_identity_names(entry)` exposes keys, aliases, explicit
-`compatibility_aliases`, and profile aliases. Hostname and display name are
-selection identities only for unscoped legacy entries. Logical-machine
+`compatibility_aliases`, and profile aliases. Hostnames are selection identities
+only for unscoped legacy entries; a WSL key qualifies its hostname for guest
+lookup. Display labels are a unique-lookup compatibility fallback, never a
+collision with a key or an alias. Logical-machine
 physical metadata is for grouping, not an alternate canonical source/target.
+Passing `entries=registry` includes a unique, unshadowed display label for an
+unscoped legacy entry's package gates; scoped entries never acquire display-name
+gate authority.
 Duplicate logical keys, profile aliases crossing entries, repeated same-platform
 profiles, and legacy WSL mixed with a non-Windows native platform fail closed.
 Collisions with an explicitly declared generated key require repository-owned
@@ -112,11 +159,14 @@ topology repair, not an automatic merge.
 execution_platform=None)` resolves independent profile aliases as well as keys.
 An owner that knows its local platform may supply `execution_platform` to resolve
 a physical hostname/association or select a sibling of another platform.
+An explicit `physical_host` wins; otherwise conventional `<host>-wsl` keys
+derive the host association for this context-aware lookup only.
 Multiple eligible same-platform siblings remain ambiguous; an exact logical
 key/profile of the requested platform stays independently selectable.
 Without that context a physical hostname alone never selects a logical entry.
 `local_execution_platform()` detects Windows, WSL, or Linux without launching
-subprocesses. Downstream address syntax remains a logical machine name, not a
+subprocesses or trusting inherited WSL environment variables. It uses the same
+container-aware detector as execution identity. Downstream address syntax remains a logical machine name, not a
 machine/environment pair.
 
 The parser's compatibility defaults are unchanged: normalization is an explicit
@@ -198,3 +248,12 @@ so a published consumer installs a self-contained source tree with no
 cross-plugin `path` reference. `tools/sync-vendored-libs.py --check` verifies
 every materialized copy's `src/` tree and version stay byte-identical to this
 canonical one and to each other.
+## Observed local hostname fallback
+
+`is_observed_local_name` recognizes this process's observed hostname when it
+differs from its configured preferred identity and the registry does not map
+that name. It is restricted to the actual execution context; registered keys,
+profiles and physical associations always take precedence. This is a local
+lookup adapter, not a new registry alias or a Windows/WSL equivalence. Persisted
+record callers must still prove the receiving project, exact ledger, platform
+and absolute namespace before applying that local spelling.

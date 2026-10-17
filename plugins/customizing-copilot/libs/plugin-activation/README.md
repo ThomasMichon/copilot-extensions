@@ -9,6 +9,14 @@ activation:
 - activation snapshots and restoration around inventory bootstrap; and
 - duplicate-key, malformed-shape, and wrong-type rejection before mutation.
 
+Activation restoration retries an explicit Windows sharing or lock violation
+(`winerror` 32 or 33) once after one second. It retains the original snapshot,
+re-reads current documents and preserves refreshed inventory and unrelated
+settings. The command is never replayed. Permission failures, malformed state
+and other errors are terminal; exhausted restoration still raises its
+restoration error. This is bounded in-process restoration, not crash recovery
+or proof that a timed-out command's descendants have stopped.
+
 It also resolves the machine-wide effective plugin set used by attributed
 drop-in registries:
 

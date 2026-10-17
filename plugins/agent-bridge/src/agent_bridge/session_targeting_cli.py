@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import workspace_creation_cli
+
 _COMPANION_SEED_HEADS_UP = (
     "Heads-up: you are an agent-bridge companion agent, not an agent-dispatch "
     "worker. Ordinary end-of-turn prose is fine here: the controlling agent "
@@ -790,9 +792,7 @@ def _cmd_create_cli(
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
-    if getattr(args, "creation_key", None) is not None and getattr(args, "cli", False):
-        print("[FAIL] --creation-key is not supported by CLI-mode venue creation.", file=sys.stderr)
-        sys.exit(2)
+    workspace_creation_cli.validate_arguments(args)
     if getattr(args, "detach", False) and not getattr(args, "cli", False):
         print("[FAIL] --detach requires --cli", file=sys.stderr)
         sys.exit(2)
@@ -820,8 +820,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
 
     creation_key = getattr(args, "creation_key", None)
     if creation_key is not None:
-        from .workspace_creation_cli import create
-        create(args, client, caller_id=caller_id)
+        workspace_creation_cli.create(args, client, caller_id=caller_id)
         return
 
     try:
@@ -992,7 +991,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     create_p.add_argument("--charter", dest="charter", default=None, metavar="AGENT", help="Optional .github/agents/<charter>.agent.md behavior overlay -- passed as Copilot's own --agent flag on the launched session, independent of TARGET (the venue this session spawns onto).")
     create_p.add_argument("--target-dir", dest="target_dir", default=None, metavar="PATH", help="Run this agent session in an existing checkout directory.")
     create_p.add_argument("--worktree-id", dest="worktree_id", default=None, metavar="ID", help="Bind the created session to an existing agent-worktrees worktree id.")
-    create_p.add_argument("--creation-key", help="opaque logical creation identity; exact local workspace/session retries retain the original result")
+    workspace_creation_cli.add_arguments(create_p)
     create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name>, container:<name>, or ssh:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")
     create_p.add_argument("--driver", default=None, metavar="LABEL", help="With --cli: forwarded to the remote `agent-worktrees copilot --driver` (stamps the 'driven by' banner).")
     create_p.add_argument("--detach", action="store_true", help="With --cli on a codespace:<name>, container:<name>, or ssh:<name> target: start the CLI-mode session in the background (seeded with the prompt) and print a JSON handle (session id plus attach/observe/nudge/stop commands) instead of taking over this terminal -- for an orchestrating agent that must not hand its TTY away.")

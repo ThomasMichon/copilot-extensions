@@ -17,7 +17,10 @@ launcher to query the wrong project's tracking directory and report
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 _MAIN = (
     Path(__file__).resolve().parents[1] / "src" / "agent_worktrees" / "__main__.py"
@@ -83,7 +86,9 @@ def _config(tmp_path):
     )
 
 
-def _stub_create_worktree_core_internals(monkeypatch, m, tmp_path, config=None):
+def _stub_create_worktree_core_internals(
+    monkeypatch, m, tmp_path, sample_record, config=None,
+):
     """Neutralize every side-effecting internal `_create_worktree_core` calls,
     while running the real function body -- so its assembled `launch` dict is
     genuinely exercised, not hand-constructed by the test."""
@@ -96,15 +101,20 @@ def _stub_create_worktree_core_internals(monkeypatch, m, tmp_path, config=None):
         lambda *_a, **_k: SimpleNamespace(start_point="HEAD"),
     )
     monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda project=None: tmp_path / "tracking")
     monkeypatch.setattr(
         m.tracking,
         "create_new_record",
-        lambda **kwargs: SimpleNamespace(
+        lambda **kwargs: replace(
+            sample_record,
             worktree_id=kwargs["worktree_id"],
             worktree_path=kwargs["worktree_path"],
             branch=kwargs["branch"],
             kind=kwargs["kind"],
+            repo=kwargs["repo"],
+            machine=kwargs["machine"],
+            platform=kwargs["platform_name"],
+            codename=kwargs["codename"],
         ),
     )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
@@ -140,8 +150,9 @@ def _stub_create_worktree_core_internals(monkeypatch, m, tmp_path, config=None):
         monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
 
 
+@pytest.mark.guard
 def test_create_worktree_core_plan_project_matches_repo_name_not_ambient_global(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, sample_record,
 ):
     """Behavior-level guard: even when the ambient `cfg.active_project()`
     global points at a DIFFERENT project than the one actually being created
@@ -150,7 +161,9 @@ def test_create_worktree_core_plan_project_matches_repo_name_not_ambient_global(
     from agent_worktrees import __main__ as m
 
     config = _config(tmp_path)
-    _stub_create_worktree_core_internals(monkeypatch, m, tmp_path, config)
+    _stub_create_worktree_core_internals(
+        monkeypatch, m, tmp_path, sample_record, config,
+    )
     # Simulate the daemon/ambient global sitting on a stale, unrelated project
     # while this specific call is scoped (via `config`) to "demo-repo".
     monkeypatch.setattr(m.cfg, "active_project", lambda: "some-other-stale-project")

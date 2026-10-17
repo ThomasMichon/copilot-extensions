@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import stat
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .client import DispatchClient, DispatchError
 from .client_transport import validate_task_url
@@ -17,7 +19,7 @@ _FIELDS = {
     "task_url": "AGENT_DISPATCH_TASK_URL",
     "task_worker": "AGENT_DISPATCH_TASK_WORKER_ID",
 }
-_COMMANDS = frozenset({"show", "payload", "progress", "heartbeat", "complete", "abandon"})
+_COMMANDS = frozenset({"show", "payload", "start", "progress", "heartbeat", "complete", "abandon"})
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,9 @@ class TaskWorker:
 
 def register_task_worker_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--task-token", help="task-only credential (AGENT_DISPATCH_TASK_TOKEN)")
+    parser.add_argument(
+        "--task-token-file", help="private renewable credential (AGENT_DISPATCH_TASK_TOKEN_FILE)",
+    )
     parser.add_argument(
         "--task-scope", dest="task_scope_id",
         help="task-only identity (AGENT_DISPATCH_TASK_ID)",
@@ -51,8 +56,15 @@ def task_worker(args: argparse.Namespace) -> TaskWorker | None:
         if getattr(args, name, None) is not None else os.environ.get(env)
         for name, env in _FIELDS.items()
     }
-    if all(value is None for value in supplied.values()):
+    token_file = getattr(args, "task_token_file", None)
+    if token_file is None:
+        token_file = os.environ.get("AGENT_DISPATCH_TASK_TOKEN_FILE")
+    if all(value is None for value in supplied.values()) and token_file is None:
         return None
+    if token_file is not None:
+        if supplied["task_token"] is not None:
+            raise DispatchError(403, "direct and file task credentials cannot be combined")
+        supplied["task_token"] = _read_task_token(token_file)
     values = {
         name: value if isinstance(value, str) else ""
         for name, value in supplied.items()
@@ -73,11 +85,31 @@ def task_worker(args: argparse.Namespace) -> TaskWorker | None:
     return TaskWorker(values["task_token"], values["task_scope_id"], url, values["task_worker"])
 
 
+def _read_task_token(filename: str) -> str:
+    if not isinstance(filename, str) or not filename or not Path(filename).is_absolute():
+        raise DispatchError(403, "task credential file must have an absolute path")
+    try:
+        if not Path(filename).is_file():
+            raise DispatchError(403, "task credential file must be a regular file")
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(filename, flags), "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise DispatchError(403, "task credential file must be a regular file")
+            raw = source.read(8193)
+        token = raw.decode("utf-8").strip()
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise DispatchError(403, "cannot read private task credential file") from exc
+    if not token or len(raw) > 8192 or any(not 33 <= ord(char) <= 126 for char in token):
+        raise DispatchError(403, "invalid private task credential file")
+    return token
+
+
 def run_task_worker(args: argparse.Namespace, worker: TaskWorker) -> int:
     if args.command not in _COMMANDS or getattr(args, "task_id", None) != worker.task_id:
         raise DispatchError(403, "command is outside the projected task authority")
     forbidden_options = (
         "history", "machine", "worktree", "duplicate_of", "resolve", "base", "override_live",
+        "owner_session_id",
     )
     if any(getattr(args, name, None) for name in forbidden_options):
         raise DispatchError(403, "task-only commands cannot use fleet identity or history")
@@ -97,6 +129,8 @@ def run_task_worker(args: argparse.Namespace, worker: TaskWorker) -> int:
             response = client.get(worker.task_id)
         elif args.command == "payload":
             response = client.payload(worker.task_id)
+        elif args.command == "start":
+            response = client.start(worker.task_id, worker.worker_id)
         elif args.command == "progress":
             response = client.progress(
                 worker.task_id, worker.worker_id, phase=args.phase or "",

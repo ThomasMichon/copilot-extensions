@@ -47,6 +47,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -54,6 +55,7 @@ import time
 import tomllib
 from pathlib import Path
 
+from seasoned_uv import run_uv_install
 from plugin_test_containment import (
     ContainmentError,
     Limits,
@@ -67,6 +69,11 @@ PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
+EXTERNAL_TEST_ROOTS = {
+    "worktree-manager": Path("worktree-manager"),
+    "payload-invocation": Path("libs/payload-invocation"),
+}
+EXTERNAL_TEST_DEPENDENCIES = {"payload-invocation": ("pyyaml>=6.0.3",)}
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
 
@@ -140,6 +147,8 @@ from _admission_protocol import acquire as _acquire_admission  # noqa: E402
 
 
 def _plugin_dir(name: str) -> Path:
+    if name in EXTERNAL_TEST_ROOTS:
+        return REPO / EXTERNAL_TEST_ROOTS[name]
     return PLUGINS / name
 
 
@@ -236,11 +245,13 @@ def _dep_fingerprint(name: str) -> str:
     import hashlib
     pdir = _plugin_dir(name)
     parts = [pdir / "pyproject.toml"]
+    if name == "agent-index":
+        parts.append(REPO / "fleet-manager" / "pyproject.toml")
     libs = pdir / "libs"
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
     h = hashlib.sha256()
-    for dependency in RUNNER_DEPENDENCIES:
+    for dependency in (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())):
         h.update(f"runner:{dependency}\n".encode())
     for p in parts:
         try:
@@ -276,7 +287,12 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         for child in venv.iterdir():
             if child.is_symlink():
                 child.unlink()
-            elif callable(getattr(child, "is_junction", None)) and child.is_junction():
+            elif (
+                callable(getattr(child, "is_junction", None)) and child.is_junction()
+            ) or (
+                os.name == "nt"
+                and getattr(child.lstat(), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+            ):
                 child.rmdir()
             elif child.is_dir():
                 shutil.rmtree(child)
@@ -299,26 +315,29 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # deps).
             spec = ".[dev]" if _has_dev_extra(name) else "."
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
+            if name == "agent-index":
+                cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
+            if reinstall:
+                # A new venv can still consume uv's stale local-path wheels.
+                cmd.append("--reinstall")
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
-            cmd.extend(RUNNER_DEPENDENCIES)
-            subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
+            cmd.extend((*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())))
+            run_uv_install(
+                uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                retained_resource_roots=(
+                    (REPO / "libs" / "versioned-runtime",) if name == "agent-index" else ()
+                ),
+            )
         else:
             # A pyproject-less plugin (e.g. a skill-script plugin like
             # harness-knowledge): there is nothing to install editable -- its
             # tests import the scripts directly (importlib). Just ensure a
             # pytest runner is present in the venv.
-            subprocess.run(
-                [
-                    uv,
-                    "pip",
-                    "install",
-                    "--python",
-                    str(py),
-                    "pytest",
-                    *RUNNER_DEPENDENCIES,
-                ],
-                cwd=str(_plugin_dir(name)), check=True,
+            run_uv_install(
+                uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
+                     *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
+                cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")
     return py
@@ -326,21 +345,28 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
 
 def _test_file_groups(
     name: str, max_files: int, *, filtered: bool = False,
-    test_files: list[str] | None = None,
+    test_files: tuple[str, ...] = (),
 ) -> list[list[Path]]:
     tests = _plugin_dir(name) / "tests"
-    files = sorted(tests.rglob("test_*.py"))
     if test_files:
-        available = {path.relative_to(tests): path for path in files}
-        requested = {Path(path) for path in test_files}
-        for path in requested:
-            candidate = available.get(path)
+        files = []
+        for value in test_files:
+            path = Path(value)
+            candidate = _plugin_dir(name) / path
             if (
-                candidate is None or not candidate.is_file()
+                path.is_absolute() or ".." in path.parts
                 or not candidate.resolve().is_relative_to(tests.resolve())
+                or candidate.resolve() != candidate.absolute()
+                or not candidate.is_file()
+                or not candidate.name.startswith("test_")
+                or candidate.suffix != ".py"
             ):
-                raise ValueError(f"test file must name an owned file beneath tests: {path}")
-        files = [path for path in files if path.relative_to(tests) in requested]
+                raise ValueError(f"test file must be an existing, unlinked tests/test_*.py: {value}")
+            if candidate not in files:
+                files.append(candidate)
+        files.sort()
+    else:
+        files = sorted(tests.rglob("test_*.py"))
     if filtered and files:
         return [files]
     return partition(files, max_files) or [[]]
@@ -361,8 +387,14 @@ def run_plugin(
     prepare_only: bool = False,
     allow_explicit_tiers: bool = False,
     allow_host_state: bool = False,
-    test_files: list[str] | None = None,
+    test_files: tuple[str, ...] = (),
 ) -> int:
+    if test_files and prepare_only:
+        raise ValueError("--test-file cannot be combined with --prepare-only")
+    groups = _test_file_groups(
+        name, max_files_per_subsuite, filtered=bool(guards or kexpr),
+        test_files=test_files,
+    )
     if not _has_suite(name):
         print(f"[SKIP] {name}: no test suite")
         return 0
@@ -379,9 +411,6 @@ def run_plugin(
         return 0
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
-    groups = _test_file_groups(
-        name, max_files_per_subsuite, filtered=bool(guards or kexpr), test_files=test_files,
-    )
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
@@ -456,13 +485,13 @@ def run_plugin(
                 sandbox=sandbox,
                 limits=group_limits,
             )
-            if returncode == 5 and (guards or kexpr):
+            if returncode == 5 and (guards or kexpr) and not test_files:
                 continue
             if returncode != 0:
                 break
     # pytest exit code 5 == "no tests collected"; in --guards mode that just
     # means the plugin declares no guard-marked tests -- not a failure.
-    if guards and returncode == 5:
+    if guards and returncode == 5 and not test_files:
         print(f"[SKIP] {name}: no guard-marked tests")
         return 0
     status = "PASS" if returncode == 0 else "FAIL"
@@ -478,8 +507,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", default="origin/main", help="diff base for --changed")
     ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
-    ap.add_argument("--test-file", action="append", default=[], metavar="PATH",
-                    help="collect only this file relative to the plugin tests directory (repeatable)")
+    ap.add_argument(
+        "--test-file", action="append", default=[], metavar="PATH",
+        help="collect only this plugin-relative tests/test_*.py file (repeatable; "
+             "requires exactly one named plugin)",
+    )
     ap.add_argument("--guards", action="store_true",
                     help="run only @pytest.mark.guard tests (fast structural/contract checks)")
     ap.add_argument("--collect-only", dest="collect_only", action="store_true",
@@ -535,6 +567,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    if args.test_file and (
+        len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
+    ):
+        ap.error("--test-file requires one named plugin and cannot use --all, --changed or --prepare-only")
     limits = Limits(
         wall_seconds=(
             args.subsuite_timeout if args.subsuite_timeout is not None else 300.0
@@ -580,8 +616,6 @@ def main(argv: list[str] | None = None) -> int:
     if not targets:
         print("No plugin suites to run.")
         return 0
-    if args.test_file and (len(targets) != 1 or args.prepare_only):
-        ap.error("--test-file requires exactly one plugin and cannot be used with --prepare-only")
 
     uv = shutil.which("uv")
     if not uv:
@@ -647,7 +681,7 @@ def main(argv: list[str] | None = None) -> int:
                     prepare_only=args.prepare_only,
                     allow_explicit_tiers=args.allow_explicit_tiers,
                     allow_host_state=args.allow_host_state,
-                    test_files=args.test_file,
+                    test_files=tuple(args.test_file),
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)

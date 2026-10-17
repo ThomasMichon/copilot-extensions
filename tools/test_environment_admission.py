@@ -63,6 +63,11 @@ def probe(root: Path, wait: float = 0) -> int:
 
 EXHAUSTIVE = pytest.mark.runner_exhaustive
 
+UV_SETTINGS = """PipInstallSettings { settings: PipSettings {
+    index_locations: IndexLocations { indexes: [], flat_index: [], },
+    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+}, }"""
+
 
 @pytest.mark.parametrize("other", [
     "same", "other-plugin",
@@ -439,7 +444,9 @@ def test_real_uv_rebuild_preserves_leased_directory_and_exclusion(cache, monkeyp
     def run(command, **kwargs):
         if command[:2] == [uv, "pip"]:
             assert python.is_file()
-            return subprocess.CompletedProcess(command, 0)
+            return subprocess.CompletedProcess(
+                command, 0, stdout=UV_SETTINGS if "--show-settings" in command else "", stderr="",
+            )
         if command[:2] == [uv, "venv"]:
             assert command[2] == "--allow-existing"
             assert "UV_VENV_CLEAR" not in kwargs["env"]
@@ -482,6 +489,24 @@ def test_standalone_real_uv_preparation_preserves_environment_identity(cache, mo
     runner = load_runner("run-standalone-tests.py")
     monkeypatch.setattr(runner, "REPO", cache)
     monkeypatch.setenv("UV_VENV_CLEAR", "true")
+    shutil.copytree(
+        TOOLS.parent / "libs" / "versioned-runtime", cache / "libs" / "versioned-runtime",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "tests"),
+    )
+    for relative, name in {
+        "libs/zdd": "agent-zdd",
+        "libs/agent-procutil": "agent-procutil",
+        "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
+        "plugins/agent-index": "agent-index",
+        "services/index": "agent-index-service",
+    }.items():
+        project = cache / relative
+        project.mkdir(parents=True, exist_ok=True)
+        (project / "pyproject.toml").write_text(
+            f'[project]\nname="{name}"\nversion="1.0"\n'
+            '[project.optional-dependencies]\ntest=[]\n',
+            encoding="utf-8",
+        )
     root = cache / ".test-venvs" / "standalone"
     root.mkdir(parents=True)
     python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -493,7 +518,9 @@ def test_standalone_real_uv_preparation_preserves_environment_identity(cache, mo
     def run(command, **kwargs):
         if command[:2] == ["uv", "pip"]:
             assert python.is_file()
-            return subprocess.CompletedProcess(command, 0)
+            return subprocess.CompletedProcess(
+                command, 0, stdout=UV_SETTINGS if "--show-settings" in command else "", stderr="",
+            )
         if command[:2] == ["uv", "venv"]:
             assert command == ["uv", "venv", "--allow-existing", str(root)]
             assert "UV_VENV_CLEAR" not in kwargs["env"]
@@ -559,6 +586,18 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
     (root / "ordinary-directory").mkdir(parents=True)
     (root / "ordinary-directory" / "file").touch()
     (root / "ordinary-file").touch()
+    outside = cache / "outside"
+    outside.mkdir()
+    sentinel = outside / "keep"
+    sentinel.write_text("preserved")
+    link = root / "outside-link"
+    if os.name == "nt":
+        subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(outside)],
+            check=True, timeout=10, capture_output=True, **launch_options(),
+        )
+    else:
+        link.symlink_to(outside, target_is_directory=True)
     monkeypatch.delattr(Path, "is_junction", raising=False)
     monkeypatch.setattr(runner, "_dep_fingerprint", lambda _: "new")
     monkeypatch.setattr(runner, "_has_pyproject", lambda _: False)
@@ -570,6 +609,9 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
             python = runner._venv_python("alpha")
             python.parent.mkdir()
             python.touch()
+        return subprocess.CompletedProcess(
+            command, 0, stdout=UV_SETTINGS if "--show-settings" in command else "", stderr="",
+        )
 
     monkeypatch.setattr(runner.subprocess, "run", run)
     lease = admission.acquire(0, root)
@@ -577,6 +619,7 @@ def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
         runner._ensure_venv("alpha", "uv", reinstall=True)
         after = root.stat()
         assert (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+        assert sentinel.read_text() == "preserved"
     finally:
         lease.release()
 
@@ -595,7 +638,7 @@ def test_ci_runner_portfolio_keeps_smoke_path_gated_and_manual_exhaustive():
         assert tests["run"].split().count("tools/test_environment_admission.py") == 1
         assert tests["if"] == "steps.runner-contracts.outputs.run == 'true'"
         assert tests["env"]["PYTEST_ADDOPTS"] == (
-            """${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}"""
+            """${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}"""
         )
         assert '"$EVENT_NAME" = "workflow_dispatch"' in detector["run"]
         assert "run=true" in detector["run"] and "run=false" in detector["run"]

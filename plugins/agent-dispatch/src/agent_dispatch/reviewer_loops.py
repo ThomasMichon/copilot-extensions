@@ -500,9 +500,9 @@ def _placement_filters(data: object) -> Filters:
 def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
     """Expand one high-level reviewer loop into emitter, evaluator, and pool units.
 
-    The child names and evaluator association depend only on the loop name. Mutable
-    commands, guidance, and pool settings therefore update the same supervised units
-    instead of forking a second producer or worker pool.
+    Child names and the evaluator association default to the loop name. Explicit
+    pool/evaluator identities preserve existing registrations and task selectors.
+    Mutable commands and guidance update those same supervised units.
     """
     if not isinstance(data, Mapping):
         raise RegistrarError(
@@ -538,14 +538,26 @@ def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
         raise RegistrarError(f"reviewer-loop pool.filters: {exc}") from exc
     additional_labels = _strings(pool, "additional_labels")
     _reject_reserved("emitter", emitter, {"id", "evaluator_ref"})
-    _reject_reserved("evaluator", evaluator, {"repo", "evaluator_ref", "reviewer_loop"})
+    _reject_reserved("evaluator", evaluator, {"repo", "reviewer_loop"})
     _reject_reserved(
         "pool",
         pool,
-        {"name", "labels", "repos", "kind", "spec", "owner", "description"},
+        {"labels", "repos", "kind", "spec", "owner", "description"},
     )
 
-    evaluator_ref = f"{name}-lifecycle"
+    pool_name = _string(pool, "name") if "name" in pool else f"{name}-workers"
+    pool.pop("name", None)
+    evaluator_name = (
+        _string(evaluator, "name") if "name" in evaluator else f"{name}-evaluator"
+    )
+    evaluator.pop("name", None)
+    evaluator_ref = (
+        _string(evaluator, "evaluator_ref")
+        if "evaluator_ref" in evaluator
+        else f"{name}-lifecycle"
+    )
+    if not evaluator_ref.strip():
+        raise RegistrarError("reviewer-loop evaluator_ref: expected a non-empty string")
     common = {"owner": owner, "description": description}
     common_filters = _filters_payload(placement_filters)
     worker_filters = _filters_payload(
@@ -564,7 +576,7 @@ def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
             **common,
         },
         {
-            "name": f"{name}-evaluator",
+            "name": evaluator_name,
             "kind": "evaluator",
             "spec": {
                 **evaluator,
@@ -580,7 +592,7 @@ def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
             **common,
         },
         {
-            "name": f"{name}-workers",
+            "name": pool_name,
             "labels": list(dict.fromkeys((task_label, *additional_labels))),
             "repos": repo,
             **pool,
@@ -588,4 +600,13 @@ def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
             **common,
         },
     )
-    return tuple(load_declaration(declaration) for declaration in declarations)
+    expanded = tuple(load_declaration(declaration) for declaration in declarations)
+    names: set[str] = set()
+    for declaration in expanded:
+        if declaration.name in names:
+            raise RegistrarError(
+                f"reviewer-loop: duplicate profile name {declaration.name!r}; "
+                "emitter, evaluator, and pool names must be unique"
+            )
+        names.add(declaration.name)
+    return expanded

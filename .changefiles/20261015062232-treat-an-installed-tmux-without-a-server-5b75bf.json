@@ -1,0 +1,9 @@
+{
+  "comment": "Treat an installed tmux without a server as healthy empty mux evidence while retaining genuine probe failures",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

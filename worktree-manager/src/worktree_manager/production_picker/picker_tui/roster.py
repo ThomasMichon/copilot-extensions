@@ -16,12 +16,20 @@ the engine then falls back to its built-in default axes.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
 from machine_transport import (
-    find_machine_entry,
     local_execution_platform,
+    split_machine_environment,
+    entry_physical_host,
+    resolve_machine_selection,
 )
 
 from .. import project_config as cfg
+
+if TYPE_CHECKING:
+    from .data_ssh import Source
 
 # machines.yaml environment name -> the picker's short env label (and C_ENV key).
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
@@ -29,6 +37,27 @@ _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
 _HOST_ENVS = {"windows", "wsl", "linux"}
 # Compact host-column env suffix.
 _HOST_SHORT = {"Win": "Win", "WSL": "WSL", "Linux": "Lx"}
+
+
+def display_machine(entry: cfg.MachineEntry) -> str:
+    """Group execution siblings without changing their routing keys."""
+    return entry_physical_host(entry)
+
+
+def physical_machine(machine: str) -> str:
+    return split_machine_environment(machine).machine if machine else machine
+
+
+def presentation_sources(sources: Iterable[Source]) -> list[Source]:
+    """Keep physical siblings together without altering any source identity."""
+    groups: dict[tuple[str, str], list[Source]] = {}
+    for source in sources:
+        key = (
+            source.display_machine.casefold()
+            if source.source_kind == "machine-ssh" else source.source_id
+        )
+        groups.setdefault((source.source_kind, key), []).append(source)
+    return [source for group in groups.values() for source in group]
 
 
 def _entries():
@@ -56,11 +85,6 @@ def _copilot_envs():
             yield m, name, _ENV_LABEL.get(name, name.title())
 
 
-def display_machine(entry):
-    """Physical association is cosmetic; all matrix keys stay logical."""
-    return entry.physical_host or entry.key
-
-
 def apply_display_machine(sources, entry):
     for source in sources:
         source.display_machine = display_machine(entry)
@@ -69,7 +93,14 @@ def apply_display_machine(sources, entry):
 
 def local_entry(entries, config_machine, hostname, execution_platform):
     """Resolve the running execution space, not every sibling on its host."""
-    selected = find_machine_entry(entries, config_machine, reject_ambiguous=True)
+    try:
+        selected = resolve_machine_selection(
+            entries, config_machine or hostname, execution_platform,
+        ).entry
+    except ValueError as exc:
+        raise ValueError(
+            f"configured machine {config_machine!r} is not the local {execution_platform} space: {exc}"
+        ) from exc
     if (
         selected is not None and selected.execution_platform
         and selected.execution_platform != execution_platform
@@ -81,10 +112,7 @@ def local_entry(entries, config_machine, hostname, execution_platform):
     for name in (config_machine, hostname):
         if not name:
             continue
-        entry = find_machine_entry(
-            entries, name, reject_ambiguous=True,
-            execution_platform=execution_platform,
-        )
+        entry = resolve_machine_selection(entries, name, execution_platform).entry
         if entry is not None:
             return entry
     return None

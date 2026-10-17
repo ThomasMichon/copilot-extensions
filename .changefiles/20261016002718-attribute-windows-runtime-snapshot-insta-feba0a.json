@@ -1,0 +1,9 @@
+{
+  "comment": "Attribute Windows runtime snapshot installs through the snapshot-owned dependency policy without broadening trusted source roots",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

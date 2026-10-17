@@ -1,0 +1,9 @@
+{
+  "comment": "Bound Manager pytest collection to owned tests across source and materialized layouts",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Add dispatch-only restricted container birth fences and private task credential projection",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

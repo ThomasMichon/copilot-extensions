@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in authenticated new Gateway and subscribed credential controller runtime interfaces",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

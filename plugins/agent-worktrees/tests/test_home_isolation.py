@@ -15,6 +15,7 @@ from agent_worktrees import config as cfg
 from agent_worktrees import copilot_launch_prefs as launch_prefs
 from agent_worktrees import installer as inst
 from agent_worktrees import repos
+from agent_worktrees.projects_registry import load_projects_document
 
 
 def test_home_is_redirected_under_tmp():
@@ -60,12 +61,17 @@ def test_reconcile_binstubs_writer_cannot_escape(monkeypatch, tmp_path):
     lb.mkdir()
     monkeypatch.setattr(inst, "local_bin", lambda: lb)
     # Reader patched to include the reserved name (prune will write a change).
-    monkeypatch.setattr(
-        inst, "read_projects_registry",
-        lambda: {"projects": {"agent-worktrees": {}, "realproj": {}}})
+    def read_registry(*, strict=False):
+        assert strict is True
+        return {"projects": {"agent-worktrees": {}, "realproj": {}}}
+
+    monkeypatch.setattr(inst, "read_projects_registry", read_registry)
 
     inst.reconcile_binstubs()
 
     # Whatever got written landed under the isolated home, not real state.
     written = inst.projects_yaml_path()
     assert Path.home() in written.parents
+    assert load_projects_document(written.read_text(encoding="utf-8")) == {
+        "schema_version": 2, "projects": {"realproj": None},
+    }

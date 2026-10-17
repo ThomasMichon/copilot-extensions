@@ -1010,6 +1010,7 @@ async def test_manager_deduplicates_identity_and_retires_when_idle():
     }
 
     async def open_channel(_host, _command, **_kwargs):
+        assert _kwargs["discard_stderr"] is False
         return await opener()
 
     async def close_channel(_host, process, **_kwargs):

@@ -68,6 +68,8 @@ class SourceSpec:
     trust_domain: str | None = None
     repo_path: str | None = None
     ref: str | None = None
+    auth_gateway: str | None = None
+    remote_url: str | None = None
 
 
 def _type_from_name(name: str) -> str:
@@ -144,6 +146,8 @@ def configured_source_specs() -> list[SourceSpec]:
                 trust_domain=entry.get("trust_domain"),
                 repo_path=entry.get("_repo_path"),
                 ref=entry.get("ref"),
+                auth_gateway=(auth or {}).get("gateway") if isinstance(auth, dict) else None,
+                remote_url=entry.get("remote"),
             )
         )
     if specs:
@@ -200,6 +204,10 @@ def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
     can't be resolved so the run loop records it as failed (never a silent no-op;
     #1350). The bare default ``git`` source (no repo/repo_path) resolves to no
     kwargs, letting ``GitRepoConnector`` fall back to its cwd/env default."""
+    if spec.auth_gateway is not None:
+        from agent_index.sources.credentials import gateway_connector_kwargs
+
+        return gateway_connector_kwargs(spec)
     if spec.type == "git":
         kwargs: dict[str, object] = {}
         path = _resolve_repo_path(spec)

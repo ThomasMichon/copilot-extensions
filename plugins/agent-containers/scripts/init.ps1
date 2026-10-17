@@ -621,6 +621,7 @@ if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)
 }
 if ($signedBase) { $pythonCmd = $signedBase }
 $profileArgs = @(
+    '-I',
     (Join-Path $PSScriptRoot 'runtime_profile.py'),
     '--root', $InstallDir, '--payload', $PluginDir, '--python', $pythonCmd
 )

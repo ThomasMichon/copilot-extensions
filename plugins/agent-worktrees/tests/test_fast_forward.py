@@ -163,3 +163,27 @@ class TestCanFastForward:
     def test_dirty_not_eligible(self):
         info = WorktreeStateInfo(state=WorktreeState.DIRTY, ahead=0, behind=2, dirty=4)
         assert can_fast_forward(info) is False
+
+
+def test_fetch_failure_is_reported_not_swallowed(repos: tuple[Path, Path]):
+    _seed, clone = repos
+    _git("remote", "set-url", "origin", str(clone.parent / "missing-origin.git"), cwd=clone)
+
+    result = git_ops.fast_forward_worktree(
+        clone, remote="origin", default_branch="master", do_fetch=True,
+    )
+
+    assert result.reason == "up-to-date"
+    assert result.fetch_error
+
+
+def test_successful_fetch_has_no_fetch_error(repos: tuple[Path, Path]):
+    seed, clone = repos
+    _advance_origin(seed)
+
+    result = git_ops.fast_forward_worktree(
+        clone, remote="origin", default_branch="master", do_fetch=True,
+    )
+
+    assert result.updated is True
+    assert result.fetch_error is None

@@ -328,6 +328,8 @@ class _SessionMonitoringMixin:
         remote_host_sids = self._live_remote_host_sessions()
         reaped = 0
         for sid, s in list(self._sessions.items()):
+            if s.target.type == "remote-acp":
+                continue
             if s.status != SessionStatus.IDLE:
                 continue
             if s.subscriber_count > 0:
@@ -381,4 +383,3 @@ class _SessionMonitoringMixin:
                 s.note_heartbeat(now)
                 beat += 1
         return beat
-

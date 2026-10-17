@@ -160,7 +160,7 @@ class PickerScreenWorktreeActionsMixin:
             acts = ["Open"]
         if rec.get("is_local", True) and ("Open" in acts or "Resume" in acts):
             acts.append("Launch in new window")
-        if "Resume" in acts:
+        if rec.get("is_local", True) and "Resume" in acts:
             acts.append("Resume prompt…")
         # Read-only "Messages" peek -- an auxiliary, non-lifecycle verb offered
         # for any worktree that could have a session to peek (not positively

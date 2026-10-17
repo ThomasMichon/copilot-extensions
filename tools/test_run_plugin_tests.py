@@ -32,6 +32,51 @@ finally:
     sys.path[:] = _previous_path
 
 
+@pytest.mark.parametrize("reinstall", [False, True])
+@pytest.mark.parametrize("cached", [False, True])
+def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
+    tmp_path, monkeypatch, reinstall, cached,
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    monkeypatch.setattr(runner, "_has_pyproject", lambda _name: True)
+    monkeypatch.setattr(runner, "_has_dev_extra", lambda _name: True)
+    monkeypatch.setattr(runner, "_dep_fingerprint", lambda _name: "current")
+    root = runner.VENV_ROOT / "example"
+    root.mkdir(parents=True)
+    python = root / "fixture-python"
+    monkeypatch.setattr(runner, "_venv_python", lambda _name: python)
+    if cached:
+        python.touch()
+        (root / ".dep-fingerprint").write_text("current", encoding="utf-8")
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        if command[:2] == ["uv", "venv"]:
+            python.touch()
+        return subprocess.CompletedProcess(command, 0)
+
+    def install(uv, arguments, **kwargs):
+        assert kwargs == {
+            "cwd": plugin, "trusted_source_roots": (runner.REPO,), "check": True,
+            "retained_resource_roots": (),
+        }
+        return run([uv, "pip", "install", *arguments])
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "run_uv_install", install)
+    assert runner._ensure_venv("example", "uv", reinstall=reinstall) == python
+    installs = [command for command in calls if command[:3] == ["uv", "pip", "install"]]
+    assert len(installs) == int(reinstall or not cached)
+    if installs:
+        assert installs[0].count("--reinstall") == int(reinstall)
+        assert installs[0][3:5] == ["--python", str(python)]
+        assert installs[0][5:7] == ["-e", ".[dev]"]
+
+
 @pytest.fixture
 def selectable_tests(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
@@ -42,47 +87,189 @@ def selectable_tests(tmp_path, monkeypatch):
     return tests
 
 
+def test_index_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    plugin = tmp_path / "plugins" / "agent-index"
+    plugin.mkdir(parents=True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    (plugin / "pyproject.toml").write_text(
+        '[project.optional-dependencies]\ndev = ["fleet-manager[auth]>=0.1.0.dev1"]\n',
+        encoding="utf-8",
+    )
+    fleet = tmp_path / "fleet-manager"
+    fleet.mkdir()
+    metadata = fleet / "pyproject.toml"
+    metadata.write_text('[project]\nversion = "0.1.0.dev1"\n', encoding="utf-8")
+    (runner.VENV_ROOT / "agent-index").mkdir(parents=True)
+    before = runner._dep_fingerprint("agent-index")
+    metadata.write_text('[project]\nversion = "0.1.0.dev2"\n', encoding="utf-8")
+    assert runner._dep_fingerprint("agent-index") != before
+    calls = []
+    monkeypatch.setattr(
+        runner.subprocess, "run",
+        lambda command, **kwargs: calls.append(command) or subprocess.CompletedProcess(command, 0),
+    )
+    retained = []
+
+    def prepare(uv, arguments, **kwargs):
+        retained.append(kwargs["retained_resource_roots"])
+        return runner.subprocess.run([uv, "pip", "install", *arguments])
+
+    monkeypatch.setattr(runner, "run_uv_install", prepare)
+    runner._ensure_venv("agent-index", "fixture-uv", reinstall=False)
+    install = calls[-1]
+    assert install[-len(runner.RUNNER_DEPENDENCIES) - 2:] == [
+        "-e", str(fleet) + "[auth]", *runner.RUNNER_DEPENDENCIES,
+    ]
+    assert not any("http" in argument for argument in install)
+    assert retained == [(tmp_path / "libs" / "versioned-runtime",)]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows editable staging contract")
+def test_windows_editable_metadata_is_retained_near_all_sources(tmp_path, monkeypatch):
+    import tomllib
+
+    policy = sys.modules[runner.run_uv_install.__module__]
+    checkout = tmp_path / "checkout"
+    projects = [checkout / "plugins" / "fixture", checkout / "fleet-manager"]
+    for index, source in enumerate(projects):
+        (source / "src").mkdir(parents=True)
+        (source / "pyproject.toml").write_text(
+            '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
+            f'[project]\nname="fixture-{index}"\nversion="1.0"\ndependencies=[]\n'
+            '[tool.setuptools.packages.find]\nwhere=["src"]\n', encoding="utf-8",
+        )
+    retained = []
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            return subprocess.CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
+                index_locations: IndexLocations { indexes: [], flat_index: [], },
+                exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+            }, }""", "")
+        root = Path(kwargs["cwd"])
+        retained.append(root)
+        assert root.is_relative_to(checkout.parent)
+        assert all(not root.is_relative_to(source) for source in projects)
+        manifests = list(root.parents[1].rglob("pyproject.toml"))
+        assert len(manifests) == len(projects)
+        for manifest in manifests:
+            data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+            relative = data["tool"]["setuptools"]["package-dir"][""]
+            target = (manifest.parent / relative).resolve()
+            assert target in [source / "src" for source in projects]
+            # Use the real metadata rename shape, with an absolute origin and
+            # a lexical relative destination, rather than resolving both away.
+            metadata = target / "fixture.egg-info"
+            metadata.mkdir()
+            temporary = metadata / "temporary"
+            temporary.write_text("fixture", encoding="utf-8")
+            destination = manifest.parent / relative / "fixture.egg-info" / "PKG-INFO"
+            assert len(str(destination)) < 260
+            temporary.replace(destination)
+            assert (metadata / "PKG-INFO").read_text(encoding="utf-8") == "fixture"
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    result = policy.run_uv_install(
+        "fixture-uv", ["--no-config", "-e", str(projects[0]), "-e", str(projects[1])],
+        cwd=projects[0], trusted_source_roots=(checkout,),
+    )
+    assert result.returncode == 0 and retained and not retained[0].exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows retained-file copy")
+def test_windows_retained_file_copy_preserves_long_path_bytes(tmp_path):
+    policy = sys.modules[runner.run_uv_install.__module__]
+    root = Path("\\\\?\\" + str(tmp_path.resolve())) / ("nested-" * 15) / ("snapshot-" * 8)
+    root.mkdir(parents=True)
+    source = root / "installer_dependency_policy.py"
+    source.write_bytes(b"fixture retained source\n")
+    destination = root / "copied_installer_dependency_policy.py"
+    plain_source = Path(str(source).removeprefix("\\\\?\\"))
+    plain_destination = Path(str(destination).removeprefix("\\\\?\\"))
+    assert len(str(plain_destination)) > 260
+    policy._copy_retained_file(plain_source, plain_destination)
+    assert destination.read_bytes() == source.read_bytes()
+    with policy._temporary_inputs(tmp_path) as temporary:
+        owned = Path(policy._native_retained_path(temporary))
+        nested = owned / ("snapshot-" * 14) / ("dependency-" * 5)
+        nested.mkdir(parents=True)
+        (nested / "installer_dependency_policy.py").write_bytes(b"retained fixture\n")
+    assert not owned.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows configuration path normalization")
+@pytest.mark.parametrize("selection", ["argument", "environment"])
+def test_windows_parent_relative_configuration_keeps_native_resolver_policy(tmp_path, selection):
+    policy = sys.modules[runner.run_uv_install.__module__]
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text(
+        '[build-system]\nrequires=[]\nbuild-backend="fixture_backend"\n'
+        '[project]\nname="owned-fixture"\nversion="1.0"\ndependencies=[]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "uv.toml").write_text('[pip]\nexclude-newer = "9 days"\n', encoding="utf-8")
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("UV_")}
+    environment["UV_OFFLINE"] = "1"
+    arguments = [str(source)]
+    if selection == "argument":
+        arguments = ["--config-file", "../uv.toml", *arguments]
+    else:
+        environment["UV_CONFIG_FILE"] = "../uv.toml"
+    uv = shutil.which("uv")
+    assert uv, "native UV is required for configuration provenance coverage"
+    admitted = policy.prepare_uv_install(
+        uv, arguments, cwd=source, env=environment, trusted_source_roots=(source,),
+    )
+    assert "--exclude-newer" in admitted
+    assert ".." not in Path(policy._native_retained_path(source / ".." / "uv.toml")).parts
+    assert policy._toml(source / ".." / "uv.toml")["pip"]["exclude-newer"] == "9 days"
+
+
 def test_explicit_test_files_preserve_default_grouping_and_filter_only_collection(selectable_tests):
     tests = selectable_tests
     assert len(runner._test_file_groups("example", 1)) == 3
     assert len(runner._test_file_groups("example", 1, filtered=True)[0]) == 3
     assert runner._test_file_groups(
         "example", 1, filtered=True,
-        test_files=["test_selected.py", "nested/test_child.py", "test_selected.py"],
+        test_files=("tests/test_selected.py", "tests/nested/test_child.py", "tests/test_selected.py"),
     ) == [[tests / "nested/test_child.py", tests / "test_selected.py"]]
 
 
 @pytest.mark.parametrize("path", [
-    "missing.py", "../test_selected.py", "tests/test_selected.py", "nested",
+    "missing.py", "../test_selected.py", "test_selected.py", "nested",
 ])
 def test_explicit_test_files_reject_unknown_or_nonowned_paths_before_preparation(
     selectable_tests, monkeypatch, path,
 ):
     monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **kw: pytest.fail("prepared invalid selection"))
-    with pytest.raises(ValueError, match="owned file beneath tests"):
+    with pytest.raises(ValueError, match="existing, unlinked"):
         runner.run_plugin(
-            "example", "unused", reinstall=False, kexpr=None, test_files=[path],
+            "example", "unused", reinstall=False, kexpr=None, test_files=(path,),
             limits=runner.Limits(), plugin_timeout=60, test_timeout=10,
             max_files_per_subsuite=25,
         )
 
 
 def test_explicit_test_files_reject_absolute_and_linked_escape(selectable_tests, tmp_path):
-    with pytest.raises(ValueError, match="owned file beneath tests"):
-        runner._test_file_groups("example", 25, test_files=[str(selectable_tests / "test_selected.py")])
+    with pytest.raises(ValueError, match="existing, unlinked"):
+        runner._test_file_groups("example", 25, test_files=(str(selectable_tests / "test_selected.py"),))
     outside = tmp_path / "test_outside.py"
     outside.write_text("raise AssertionError('must not collect')\n", encoding="utf-8")
     try:
         (selectable_tests / "test_link.py").symlink_to(outside)
     except OSError:
         pytest.skip("file symlinks unavailable")
-    with pytest.raises(ValueError, match="owned file beneath tests"):
-        runner._test_file_groups("example", 25, test_files=["test_link.py"])
+    with pytest.raises(ValueError, match="existing, unlinked"):
+        runner._test_file_groups("example", 25, test_files=("tests/test_link.py",))
 
 
 @pytest.mark.parametrize("arguments", [
-    ["example", "other", "--test-file", "test_selected.py"],
-    ["example", "--prepare-only", "--test-file", "test_selected.py"],
+    ["example", "other", "--test-file", "tests/test_selected.py"],
+    ["example", "--prepare-only", "--test-file", "tests/test_selected.py"],
 ])
 def test_explicit_test_files_require_one_executing_plugin(arguments):
     with pytest.raises(SystemExit) as error:
@@ -98,13 +285,96 @@ def test_explicit_test_files_reach_contained_pytest_without_unrelated_modules(
     monkeypatch.setattr(runner, "run_contained", lambda command, **kw: calls.append(command) or 0)
     assert runner.run_plugin(
         "example", "unused", reinstall=False, kexpr="example",
-        test_files=["test_selected.py"], limits=runner.Limits(),
+        test_files=("tests/test_selected.py",), limits=runner.Limits(),
         plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,
     ) == 0
     assert len(calls) == 1
     assert str(Path("tests") / "test_selected.py") in calls[0]
     assert not any("unrelated" in argument for argument in calls[0])
     assert calls[0][-3:-1] == ["-k", "example"]
+def test_explicit_file_selection_avoids_unrelated_collection(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "PLUGINS", tmp_path)
+    tests = tmp_path / "example" / "tests"
+    tests.mkdir(parents=True)
+    for name in ("test_reconcile.py", "test_binding.py", "test_unrelated.py"):
+        (tests / name).touch()
+    groups = runner._test_file_groups(
+        "example", 25, filtered=True,
+        test_files=("tests/test_reconcile.py", "tests/test_binding.py", "tests/test_binding.py"),
+    )
+    assert groups == [[tests / "test_binding.py", tests / "test_reconcile.py"]]
+    assert runner._test_file_groups("example", 25) == [[
+        tests / "test_binding.py", tests / "test_reconcile.py", tests / "test_unrelated.py",
+    ]]
+
+
+@pytest.mark.parametrize("value", [
+    "../test_outside.py", "tests/../test_outside.py", "tests/test_missing.py",
+    "tests/helper.py", "tests/test_directory.py",
+])
+def test_explicit_file_selection_refuses_invalid_paths(monkeypatch, tmp_path, value):
+    monkeypatch.setattr(runner, "PLUGINS", tmp_path)
+    tests = tmp_path / "example" / "tests"
+    tests.mkdir(parents=True)
+    (tests / "helper.py").touch()
+    (tests / "test_directory.py").mkdir()
+    with pytest.raises(ValueError, match="existing, unlinked"):
+        runner._test_file_groups("example", 25, test_files=(value,))
+
+
+def test_explicit_file_selection_refuses_absolute_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "PLUGINS", tmp_path)
+    tests = tmp_path / "example" / "tests"
+    tests.mkdir(parents=True)
+    target = tests / "test_absolute.py"
+    target.touch()
+    with pytest.raises(ValueError, match="existing, unlinked"):
+        runner._test_file_groups("example", 25, test_files=(str(target),))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX unprivileged symlink creation")
+def test_explicit_file_selection_refuses_linked_file_or_parent(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "PLUGINS", tmp_path)
+    tests = tmp_path / "example" / "tests"
+    tests.mkdir(parents=True)
+    target = tests / "test_target.py"
+    target.touch()
+    (tests / "test_link.py").symlink_to(target)
+    (tests / "linked").symlink_to(tests, target_is_directory=True)
+    for value in ("tests/test_link.py", "tests/linked/test_target.py"):
+        with pytest.raises(ValueError, match="existing, unlinked"):
+            runner._test_file_groups("example", 25, test_files=(value,))
+
+
+@pytest.mark.parametrize("args", [
+    ["--all"], ["--changed"], ["example", "other"], ["example", "--prepare-only"],
+])
+def test_explicit_file_selection_requires_one_execution_target(args):
+    with pytest.raises(SystemExit) as error:
+        runner.main([*args, "--test-file", "tests/test_example.py"])
+    assert error.value.code == 2
+
+
+def test_explicit_empty_selection_is_not_a_guard_success(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "PLUGINS", tmp_path)
+    tests = tmp_path / "example" / "tests"
+    tests.mkdir(parents=True)
+    (tests / "test_empty.py").touch()
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *args, **kwargs: Path(sys.executable))
+    calls = []
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return 5
+    monkeypatch.setattr(runner, "run_contained", run)
+    assert runner.run_plugin(
+        "example", "uv", reinstall=False, kexpr="missing", guards=True,
+        limits=containment.Limits(), plugin_timeout=60, test_timeout=30,
+        max_files_per_subsuite=25, test_files=("tests/test_empty.py",),
+    ) == 5
+    assert len(calls) == 1
+    assert calls[0][0][-1] == str(Path("tests") / "test_empty.py")
+    assert "--timeout=30" in calls[0][0]
+    assert 0 < calls[0][1]["limits"].wall_seconds <= 60
 
 
 def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
@@ -125,6 +395,62 @@ def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
             {"check": False, "creationflags": 123, **containment._windows_stdio_kwargs()},
         )
     ]
+
+
+@pytest.mark.parametrize("has_project", [False, True])
+def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, has_project):
+    plugin = tmp_path / "plugins" / "example"
+    plugin.mkdir(parents=True)
+    if has_project:
+        (plugin / "pyproject.toml").write_text(
+            '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
+            '[project]\nname="example"\nversion="1.0"\ndependencies=["owned-lib"]\n'
+            '[tool.uv.sources]\nowned-lib={path="../../libs/owned"}\n'
+            '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+            encoding="utf-8",
+        )
+        (plugin / "src").mkdir()
+        library = tmp_path / "libs" / "owned"
+        library.mkdir(parents=True)
+        (library / "pyproject.toml").write_text(
+            '[project]\nname="owned-lib"\nversion="1.0"\n', encoding="utf-8",
+        )
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "PLUGINS", tmp_path / "plugins")
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "environments")
+    monkeypatch.setattr(runner, "_dep_fingerprint", lambda name: "fixture")
+    environment = runner.VENV_ROOT / "example"
+    environment.mkdir(parents=True)
+    python = runner._venv_python("example")
+    admitted = runner.run_uv_install
+    installs = []
+    probes = []
+
+    def prepare(uv, arguments, **kwargs):
+        assert kwargs["trusted_source_roots"] == (tmp_path,)
+        return admitted(uv, arguments, **kwargs)
+
+    def command(arguments, **kwargs):
+        if arguments[1] == "venv":
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.touch()
+        elif "--show-settings" in arguments:
+            probes.append(arguments)
+            return subprocess.CompletedProcess(arguments, 0, """PipInstallSettings { settings: PipSettings {
+                index_locations: IndexLocations { indexes: [], flat_index: [], },
+                exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+            }, }""", "")
+        else:
+            installs.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(runner, "run_uv_install", prepare)
+    monkeypatch.setattr(runner.subprocess, "run", command)
+    assert runner._ensure_venv("example", "uv", reinstall=False) == python
+    assert len(probes) == 2 and len(installs) == 1
+    assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
+    assert ("-e" in installs[0]) is has_project
+    assert (environment / ".dep-fingerprint").read_text() == "fixture"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX creation permissions")
@@ -430,6 +756,13 @@ def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None
     Path(env["AGENT_WORKTREES_PROJECTS_YAML"]).resolve().relative_to(
         tmp_path.resolve()
     )
+
+
+def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    assert runner._plugin_dir("worktree-manager") == tmp_path / "worktree-manager"
+    assert runner._plugin_dir("payload-invocation") == tmp_path / "libs" / "payload-invocation"
+    assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == ("pyyaml>=6.0.3",)
 
 
 def test_optional_file_override_is_validated_only_when_present(

@@ -1,0 +1,21 @@
+{
+  "comment": "Expose safe bounded SSH carrier startup diagnostics and retire owned process pipes and outstanding requests without replay or raw framing changes (#6847).",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

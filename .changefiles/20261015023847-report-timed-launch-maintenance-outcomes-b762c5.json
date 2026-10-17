@@ -1,0 +1,13 @@
+{
+  "comment": "Report timed launch maintenance outcomes and preserve typed supervisor retirement JSON separately from diagnostic stderr.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

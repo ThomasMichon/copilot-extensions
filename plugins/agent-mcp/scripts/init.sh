@@ -486,7 +486,7 @@ _bootstrap_python() {
 _payload_hash() {
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
+    # changed the payload WITHOUT bumping the version. Fails on any error.
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -495,40 +495,46 @@ _payload_hash() {
             __parts="$__parts"$'\n'"$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    # Fails (no output) when no SHA-256 implementation works: the caller must
+    # then refuse to publish a slot without its fingerprint.
+    local __d
+    if command -v sha256sum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
+    elif command -v openssl >/dev/null 2>&1; then
+        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
+    else
+        return 1
+    fi
+    __d="${__d%% *}"
+    [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$__d"
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    local ph
-    ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
+        return 1
+    fi
+    _runtime_construction_complete "$actual_hash"
 }
 
 echo ''
@@ -565,6 +571,8 @@ mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
 
 # -- 2. Venv -----------------------------------------------------------
+_versioned_slot_clean || exit 1
+if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     if [[ "$HAVE_UV" -eq 1 ]]; then
         _step 'Creating venv via uv...'
@@ -607,10 +615,10 @@ for _lib_entry in \
     fi
     if [[ -f "$_lib_path/pyproject.toml" ]]; then
         if [[ "$HAVE_UV" -eq 1 ]]; then
-            uv pip install --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
+            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
                 "$_lib_path" --quiet || _lib_install_rc=$?
         else
-            "$VENV_PYTHON" -m pip install --quiet "$_lib_path" || _lib_install_rc=$?
+            "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$_lib_path" || _lib_install_rc=$?
         fi
         if [[ "${_lib_install_rc:-0}" -ne 0 ]]; then
             _fail "$_lib_dir_name library install failed"
@@ -622,17 +630,19 @@ done
 
 # -- 3. Install the package into the venv ------------------------------
 if [[ "$HAVE_UV" -eq 1 ]]; then
-    if ! uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+    if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
         _fail 'Failed to install agent-mcp package into venv'
         exit 1
     fi
 else
-    if ! "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null; then
+    if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR" 2>/dev/null; then
         _fail 'Failed to install agent-mcp package into venv'
         exit 1
     fi
 fi
 _ok 'Package installed: agent-mcp'
+
+fi
 
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
@@ -647,7 +657,7 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         exit 1
     fi
-    _versioned_mark_complete
+    _versioned_mark_complete || exit 1
     if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
             activate "$SRC_VERSION" --replace-nonlink --no-link >/dev/null 2>&1; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"

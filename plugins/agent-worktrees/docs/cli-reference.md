@@ -34,6 +34,132 @@ scoped keys retain their binding and checkout resolution.
 An explicit `--session-id` still selects the session's project before any
 scalar read; the shortcut does not change that targeting contract.
 
+## Session machine identity
+
+For entry-path-independent WSL installation identity, use
+`doctor --guest-distribution "Example Distro" --json`. This is a targeted
+report: it never enters general session/record repair. On Windows it checks
+the designated name against the current user's WSL default; inside the guest
+it checks the guest registration and reports host-default evidence unavailable.
+`--fix` can enroll only a verified named direct guest entry. It is idempotent
+from SSH once enrolled, never changes the OS default, and cannot be combined
+with other doctor repair scopes. The shared
+[guest-identity contract](../../../libs/installation-context/README.md#wsl-guest-identity)
+owns enrollment, refusal and cross-runner mechanics.
+
+The existing `instructions/agent-worktrees/session-guidance.instructions.md`
+file in the exact Copilot session contains a compact **Current machine
+identity** block. `hostname` is the observed OS hostname; `machine` is the
+registry's preferred name (alias when configured, otherwise key); `alias`
+is its friendly display name. Platform, resolution status and source are
+reported separately. These are contextual facts, never authorization.
+
+The combined startup lifecycle resolves and writes this block before
+worktree registration and other slower reconciliation. Fresh and resumed
+launches replace the exact-session snapshot. A HOME-cwd resume that recovers
+its project during registration refreshes the identity from that project's
+registry before final guidance is read. Native context rollover reads
+the same file through the existing session-guidance pointer. No machine
+inventory or machine-specific value is checked into instruction projections.
+Without usable registry context, the observed hostname remains visible while
+machine and alias are explicitly unresolved. An oversized combined guidance
+file retains the bounded machine block and reports the omitted guidance.
+The initial hook claims the launch under a per-session OS file lock.
+Lifecycle rewrites check that same launch ownership, read current snapshots,
+compose guidance and replace the file under the lock. A delayed prior launch
+cannot overwrite a newer resume's
+identity or command catalog. The launch marker is ordering metadata, not
+authorization or evidence that the model read the file.
+
+The legacy `machine-context` command likewise distinguishes the actual
+hostname, preferred machine name and friendly name; it no longer labels a
+registry key as the OS hostname.
+
+## Exact durable record read
+
+`agent-worktrees record --worktree-id <exact-id> --json` reads one durable
+tracking YAML from the receiving project's configured tracking namespace.
+Use the repository's binstub, its current directory, or explicit `--project`
+to select that project. IDs are exact filename components, not suffixes or
+codenames; the command never searches another project, enumerates records or
+sessions, asks the resident, or computes live facts. A newly created record
+is readable even before the resident publishes it. Ordinary `list` projection
+authority and failure behavior are unchanged.
+Membership is read from the selected project's machine-local repository
+declarations and registered anchors, not from a global default project or
+Git-backed repository policy. No plugin activation, policy overlays, or Git
+probes are needed to identify these metadata records.
+Validated operator-owned `config.d` YAML fragments merge in lexical order
+beneath `config.yaml`, preserving ordinary repository-declaration precedence.
+Managed plugin pointers are not activated by this metadata-only read.
+Project selection for this command reads Git marker and common-directory files
+without running Git or changing the caller's working directory.
+Git-file layouts without a common-directory marker (including submodules and
+separate Git directories) use the registered checkout root. Malformed or
+unreadable selection metadata returns `project-unavailable` JSON with the
+underlying diagnostic, not an unstructured traceback.
+Registered bare anchors and their linked worktrees resolve the common Git
+directory itself before considering a non-bare checkout's parent.
+
+Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
+The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
+`session_count`, `last_session_id`, `sessions_indexed`, `execution_leg`,
+`execution_leg_opaque`, `session_backend`, `session_backend_opaque`,
+`dispatch_attempt`, `dispatch_attempt_opaque`,
+and raw historical `machine`, `platform`, `owner`,
+`owner_ref`, `caller_worktree`, `parent_session`, `checkout_managed` fields
+(absent raw fields are null). `session_count` is null when sessions have not
+been indexed, not zero; an indexed empty list returns zero.
+`last_session_id` uses the existing record-local asserted-head resolution,
+including its transition ledger, without filesystem/session discovery.
+Malformed present ledgers or session states return `record-malformed` rather
+than silently deriving a legacy head. An absent or empty legacy ledger retains
+the existing asserted-head fallback; an explicit null head transition clears it.
+`execution_leg` uses the existing read-only legacy-backend compatibility view,
+preserving an unrecognized explicit leg as opaque data.
+An unrecognized legacy backend likewise remains visible as raw data with its
+opaque flag; a null derived leg does not prove absence of a provider binding.
+`dispatch_attempt` uses the canonical seven-field dispatch provenance parser.
+An absent attribution returns null with `dispatch_attempt_opaque: false`;
+an explicit null, incomplete or unrecognized attribution remains raw with
+`dispatch_attempt_opaque: true`. Consumers must check that capability and
+opacity before treating a record as unassigned.
+YAML timestamp scalars, including those nested in opaque bindings or provider
+blobs, are represented as ISO-8601 strings in JSON without rewriting the record.
+Other values must be JSON-compatible: mapping keys must be strings, and
+unsupported scalar types, non-finite numbers, and cyclic YAML are malformed.
+JSON conversion is bounded to 64 nesting levels, 10,000 expanded nodes and
+1 MiB of encoded data. Shared aliases count on every expansion; exceeding any
+budget returns `record-malformed` rather than allocating unbounded output.
+The same budgets are checked on raw record values before compatibility parsing
+can stringify them, as well as on the returned metadata.
+Keys are never silently coerced or collapsed during JSON conversion.
+Recognized legacy backends use the existing parsed version-1 representation.
+Explicit binding schema versions must be integers, not booleans, floats,
+strings, or null; malformed versions return `record-malformed` before binding
+interpretation. Unknown integer versions remain opaque, and an omitted legacy
+version retains the existing version-1 compatibility behavior.
+Durable `finalizing` and legacy `completed` statuses are returned unchanged,
+like other recognized lifecycle statuses; reading them grants no execution
+authority.
+
+The stored ID must match the requested ID, the repository must belong to the
+receiving project's configured repositories, and the stored path must be
+absolute and non-traversing. Historical paths need not exist or be locally
+executable, including paths recorded on another platform. No machine/platform
+identity is rewritten, nonce backfilled, registration created, or process
+started.
+
+Failures exit one with `{"version":1,"ok":false,"worktree":null,
+"error":{"code":"...","message":"..."}}`. Codes are `invalid-id`,
+`project-unavailable`, `record-missing`, `record-unreadable`,
+`record-malformed`, `id-mismatch`, `repository-mismatch`, and `path-invalid`.
+Argparse usage failures exit two. Missing, unreadable, or malformed metadata
+never means terminal/disposed, sessionless, or permission to allocate again.
+Successful reading likewise grants **no local execution, takeover, mutation,
+or launch authorization**. Actual launch APIs retain execution-space,
+locality, head, duplicate and live-holder protections.
+
 ## State-root and paired-worktree resolution
 
 `agent-worktrees state-root --json` resolves the repository that owns personal
@@ -163,7 +289,7 @@ continue to work unchanged.
 | `reclaim` | Free the **exact** Copilot process(es) bound to a session/worktree, resolved from Copilot's own `inuse.<pid>.lock` claim -- precise, never splashing onto a sibling session or a worktree that merely shares a cwd. The primitive for **bare** orphans (a Copilot launched straight in a terminal, invisible to the `wt-<id>` mux fleet view; e.g. its terminal was closed/wedged). Target with `--session-id` / `--worktree-id` (infers from cwd) / `--all`, restrict with `--bare-only`. **Dry-run by default; `--yes` terminates.** Never reaps the process tree of the running command. Freeing an idle orphan loses nothing -- the session stays resumable |
 | `remux` | Restore a running **bare** (un-muxed) Copilot to the worktree's mux fleet. On Linux/WSL, reparent it into the `wt-<id>` tmux pane via `reptyr`, preserving the live process. On Windows, where ConPTY cannot adopt an arbitrary running process, preview the precise reclaim-before-resume plan and pass `--yes` to retire only the confirmed Stop-unreachable owner; the structured result says to resume next through the normal PSMux launcher. Target with `--session-id` / `--worktree-id` (infers from cwd). The Pickers expose the combined preparation + launch path as **Restore**. |
 | `backfill-sessions` | Explicitly scan legacy session state to populate empty registries and titles, derive legacy controller relations from authoritative creation fields, and inspect a bounded number of exact session projections (`--projection-budget N`). Local missing/stale projections are repaired; restored, foreign, ambiguous, colliding, and newer state remains report-only |
-| `doctor` | Diagnose machine-wide Picker pivot hygiene plus this project's `config.d` and worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles, legacy controller metadata, bounded exact-ID projection drift (`--projection-budget N`), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment. `--fix` repairs local authoritative/controller/projection state but keeps restored, foreign, ambiguous, colliding, and newer state report-only. Runs outside a project for machine-wide pivot diagnostics; project health/config is then explicitly skipped/absent. `--json` emits the exhaustive report |
+| `doctor` | Diagnose machine-wide Picker pivot hygiene plus this project's `config.d` and worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles, legacy controller metadata, bounded exact-ID projection drift (`--projection-budget N`), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment. `--fix` repairs local authoritative/controller/projection state but keeps restored, foreign, ambiguous, colliding, and newer state report-only. `--repair-machine-record <exact-id> --from-machine <old-label>` is a separate report-first scope: `--fix` changes only a proven local native record's machine label, with exact backups and no ID, path, session or ownership rewrite. Requires an existing linked checkout in the selected repository; refuses foreign/guest identities and other repair selectors. Runs outside a project for machine-wide pivot diagnostics; project health/config is then explicitly skipped/absent. `--json` emits the exhaustive report |
 | `hygiene` | Detect (and with `--fix`, remove) stale **global-Python editable installs** left by a manual `pip install -e .` against a worktree checkout (a real, empirically-hit hazard: #2726) -- a `.pth` file permanently pinned to one worktree that silently shadows whichever worktree an `import`/console-script invocation actually intends, even after that worktree is deleted. Machine-wide; no project context needed. `--json` emits the report |
 | `status` | Show worktree git status; **write mode** (`--summary "<one-liner>"` / `--title "<headline>"` / `--follow-up` / `--resolved` / `--paused` / `--unpaused`) annotates THIS worktree's Picker disposition -- `--paused`/`--unpaused` is purely informational (never affects `finalize`'s obligation gate or any other gate, unlike `--follow-up`); **history mode** (`--history` `[--limit N]` `[--json]`) prints this worktree's durable disposition trajectory (summary/title over time). A `postToolUse` hook nudges you to refresh it as work drifts (`AGENT_WORKTREES_NUDGE=off` to silence) |
 | `recent-messages` | Show a worktree's latest session's last N message-bearing turns (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; includes per-turn `tool_names` plus an ending-state signal that distinguishes a cut-off assistant turn from a clean unanswered offer. Backs the picker's **Messages** viewer |
@@ -171,6 +297,7 @@ continue to work unchanged.
 | `session-recovery` | Read one exact session's reciprocal projection and emit validated, machine-readable recovery state without changing bindings. Version-aware output includes schema version, history completeness, relation overflow (`omitted_relations` is `null` for v2 overflow), and tombstone-overflow diagnostics. `--stdin` accepts a sessionStart payload; `--emit-context` renders the bounded pointer used when startup cannot establish an authoritative worktree binding |
 | `session-lineage` | Read one exact session projection and validate every retained worktree relation against authoritative records. Reports restored evidence, missing records, unsupported or invalid projections, schema/history completeness, relation overflow, full-key v1 or opaque-digest v2 tombstones, and tombstone overflow without enumerating the live session-state root |
 | `head-session` | Project-agnostic replay of a worktree's monotonic head-transition ledger, including pending handoffs (JSON; fail-open when untracked) |
+| `record` | Read one exact durable record in the current project (`--worktree-id <exact-id> --json`), without resident roster computation, session discovery, or lifecycle/launch authority |
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
 | `fleet` | Aggregate `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. |
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |
@@ -287,18 +414,38 @@ agent-worktrees push-changes <recovery-worktree-id> --config <project-config> --
 
 This first call refuses with exit 2 and an exact PR/provider/repository/head-ref,
 destination fingerprint, full source commit and expected remote commit preview.
-It changes no Git refs, tracking data or remote head. The reason and preview
+The saved head remains separate from the current head agreed by the provider
+and remote ref; disagreement or an unreadable/deleted ref refuses even a preview.
+The preview also binds the original publication authority, proposed action and
+any validated recovery evidence. It changes no Git refs, tracking data, audit
+files or remote head. The reason and preview
 fingerprint are not operator authentication or permission. Obtain real operator
 sign-off for this specific PR and operation before repeating the same call with
 `--confirm-break-glass <preview-fingerprint>`. Never add confirmation automatically
-after a guard refusal. Changed source, reason, destination or expected head
-requires a fresh preview and sign-off.
+after a guard refusal. Changed source, reason, destination, saved publication,
+expected head, action or evidence requires a fresh preview and sign-off.
 
-The confirmed call publishes the pinned committed source as-is. Historical
+If an existing completed backed-sync checkpoint proves that its exact result
+is already the agreed published head, the preview prefers `settle-publication`:
+confirmation updates only local publication bookkeeping, never pushes or edits
+the PR, and leaves later local work unpublished. The preview binds the checkpoint's
+new base; settlement records that base and its corresponding publication patch ID.
+Equal source/remote commits
+or matching patches alone do not establish this proof. Otherwise `rewrite`
+publishes the pinned committed source as-is with the **previewed live head** as
+its exact CAS lease, not a silently refreshed saved lease. Both actions require
+confirmation and revalidate the plan immediately before taking effect.
+Malformed, unreadable or dangling historical checkpoints explicitly mark
+settlement evidence `unusable` and disable settlement, not the rewrite preview.
+Invalid ref arguments and failed optional Git probes receive the same treatment.
+The imperfect evidence snapshot is confirmation-bound and preserved unchanged;
+it is neither repaired nor accepted as authority.
+Ordinary `push-changes` and `--rewrite-pr` retain their saved-lease refusal.
+Historical
 ownership, suffix and replay bookkeeping may be waived; provider-confirmed
 destination, exact remote lease, serialization, protected refs, clean source,
 real hooks and fresh PR review/merge gates are not. Title/squash options and
-new-PR use are inapplicable. Source and prior published commits are retained at
+new-PR use are inapplicable. Source and actual agreed published commits are retained at
 the reported `refs/agent-worktrees/recovery/...` refs before transport.
 
 Azure recovery recognizes the standard secure SSH and HTTPS addresses of the
@@ -308,10 +455,12 @@ this source observation does not change the saved publication destination fence.
 
 The selected worktree's Git metadata contains private
 `agent-worktrees-pr-break-glass-<id>.json` audits with the reason, confirmed
-operation, retained refs and observed invoker/session context. Unknown attribution
+operation, original saved publication evidence, retained refs and observed
+invoker/session context. Unknown attribution
 stays unknown; this is not authenticated identity. Private rationale and invoker
 details are not posted to the provider. Audit `succeeded` records successful
-transport, not completed review/merge: a subsequent persistence failure explicitly
+transport or the explicitly named bookkeeping settlement, not completed
+review/merge: a subsequent persistence failure explicitly
 reports that the remote was published and needs reconciliation. Do not repeat a
 push to repair a tracking or audit error. A failed transport is followed by a
 bounded exact-ref observation: an approved commit on the remote is reconciled
@@ -441,6 +590,12 @@ the resident is enabled; `--classify`, `--cache-only`, and `--fresh` do not
 authorize caller-side git/session/mux reconstruction. The Manager explicitly
 requires `--current`, and incompatible engines report an upgrade error rather
 than dropping that requirement.
+
+An installed tmux binary with no running server is a healthy empty session
+inventory, not a failed probe. Its recognized no-server responses do not block
+current-roster publication or make session liveness unknown by themselves.
+Permission errors, timeouts, missing executables and other probe failures remain
+unavailable evidence; they are never treated as proof that sessions are gone.
 
 Responses include complete generation/revision/count provenance. A failed
 producer preserves last-good rows with explicit stale availability. An
@@ -608,6 +763,71 @@ removes the settings).
 > Manager owns `~/.tmux.conf` or `~/.psmux.conf`.
 
 
+## Claim handoff locality
+
+Every handoff actor must match its receiving project's exact tracking record,
+actual execution platform and absolute checkout namespace, including same-name
+native records with an unscoped machine registry. Mixed historical/current
+producer references use full-record locality at admission and acceptance;
+stored references and producer metadata are not relabeled.
+
+An accepted bundle can finish or retry from its consumer and child records
+without requiring a retired source ledger or acquiring a new cross-machine
+fence. Receiving-side identity, platform, namespace and artifact checks still
+apply; acceptance does not authorize a foreign execution space.
+Before releasing source claims, the transaction persists child-specific
+`source_owner_refs` for validated source aliases. This optional version-1
+metadata survives local/remote serialization and is used only for accepted
+completion of those exact children. Older bundles still support exact source
+references; an alias-only retry without either the source ledger or durable
+proof fails explicitly rather than guessing equivalence.
+
+## Resolve previews
+
+`resolve --dry-run --worktree-id <id>` is read-only, including with `--json`
+or when forwarded to another machine. It does not record a resume, assign a
+codename, reserve a random profile, stage or consume a launch prompt, refresh
+instructions, restore/reclaim a process, or append launch activity/trace logs.
+Existing record/session/seed state is inspected without creating writer lock
+sidecars. Execution-space authority, configuration preflight and seed
+revision/cold-start checks still apply; refusal does not change durable state.
+A current typed launch seed takes precedence over leftover legacy prompt text;
+a newer legacy revision still supersedes the typed seed.
+
+JSON existing-worktree previews retain the normal launch-plan shape and set
+`launch.preview` to `true`; the returned worktree retains its current resume
+count and timestamp. Base-repo JSON plans remain flat and set `preview: true`.
+Base-repo previews skip the informational dirty-file scan so Git cannot refresh
+the checkout's index as a side effect.
+Explicit profiles and existing-session profile replay remain visible. When a
+new random assignment would be needed, selection is deferred until a real
+launch: `launch.preview_warning` explains that no profile was reserved (the
+interactive preview prints the same warning). A preview's command is advisory,
+not an admitted launch; resolve again without `--dry-run` to execute.
+
+Restoring an existing worktree with `--restore --dry-run` is refused without
+restoring a session.
+`--json --new --dry-run` remains unsupported and creates nothing.
+Interactive dry-run requires an explicit worktree, `--new`, or `--base`;
+it does not open the state-maintaining picker.
+
+## Remote launch options
+
+Machine-targeted JSON and interactive resolve use the same option policy.
+Ordinary remote plans preserve resume opt-outs (`--no-resume`,
+`--no-fast-forward`), bare/restore mode, dry-run, recovery, projection/seed
+deferral, bridge kind, profile and parent/caller lineage. Valued arguments are
+quoted for the target's declared shell. JSON's internal direct-launch setting
+does not disable remote multiplexing: `--target-no-mux` is the explicit override.
+
+Cross-space `--owner-ref` creation and raw Copilot arguments are unsupported and
+refused before a remote plan is emitted; invoke those operations on the target.
+Structured remote prompt admission supports its New/Resume selector and mux
+choice only (queued seed staging is intrinsic). Additional behavior options
+are rejected before SSH rather than omitted from the request. Staged seed IDs
+and launch-request admission/status options remain target-local, not selectors
+to forward through `--machine`.
+
 ## Keeping worktrees current
 
 The picker keeps idle worktrees aligned with the default branch, fast-forward
@@ -669,6 +889,23 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
 
 ### `update` results: exit codes, events, and status
+
+Required payload acquisition is a barrier before the engine's runtime work:
+if its own payload refresh or an active/activation-unknown target refresh
+fails, the engine returns that failure without running runtime installers,
+anchor synchronization, pruning or local command/profile finishing. Successfully
+refreshed payloads remain available for a retry; the error names the cause and
+asks the caller to resolve it and retry `update`. Inactive inventory failures
+remain advisory.
+
+The engine collects the logical target selection before acquisition, refreshes
+its own payload once, and attempts required registered payloads before inactive
+inventory. A required failure stops remaining payload attempts immediately;
+retired inactive payloads are not removed until acquisition succeeds. The summary
+distinguishes attempted failures from remaining targets that were not attempted.
+This does not persist a resumable runtime plan or add automatic retry. The
+barrier does not make the existing combined installers prepare-only or undo
+Manager's earlier self-update.
 
 `update` (and `worktree-manager update`, which drives it) records each run
 through the shared [`update-telemetry`](../../../libs/update-telemetry/README.md)

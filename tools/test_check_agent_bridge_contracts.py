@@ -207,6 +207,7 @@ def repo(tmp_path: Path) -> Path:
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "user.name", "Test")
     _git(root, "config", "core.autocrlf", "false")
+    _git(root, "config", "core.longpaths", "true")
     _git(root, "checkout", "-q", "-b", "main")
 
     _write(
@@ -578,6 +579,7 @@ def test_ci_preserves_orphan_blob_validation_outside_fast_pre_push(
     ])
     remote = repo.parent / "remote.git"
     _git(repo, "init", "--bare", "-q", str(remote))
+    _git(repo, "--git-dir", str(remote), "config", "core.longpaths", "true")
     _git(repo, "remote", "add", "origin", str(remote))
     _git(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
     _git(repo, "update-ref", "-d", "refs/remotes/origin/main")

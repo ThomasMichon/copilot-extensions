@@ -10,6 +10,14 @@ import pytest
 from agent_worktrees import tracking
 
 
+@pytest.fixture
+def payload_subprocess_double(monkeypatch):
+    """Classification tests retain their subprocess double; native Job tests opt out."""
+    from agent_worktrees import update_acquisition
+
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+
+
 @pytest.fixture(scope="session")
 def native_bash():
     from native_shell_support import ShellUnavailable, resolve_native_bash
@@ -566,3 +574,59 @@ def pr_repo(tmp_path: Path, monkeypatch):
     )
 
     return config, worktree_id, wt_path, remote_dir
+
+
+class _SubprocessRunInstaller:
+    """``installer_run`` process stand-in that delegates to ``subprocess.run``.
+
+    Many update tests fake an installer by patching ``subprocess.run`` (its
+    exit code, a ``TimeoutExpired``, the argv/env/cwd it receives). This keeps
+    those fakes meaningful now that installers run through
+    :func:`agent_worktrees.installer_run.run_installer`; tests of the real
+    process-tree behavior opt out with ``@pytest.mark.real_installer_processes``.
+    """
+
+    def __init__(self, argv, cwd, env, capture, output_fd=None):
+        self._call = (list(argv), cwd, env, capture, output_fd)
+        self.returncode = None
+        self.pid = 0
+
+    def communicate(self, timeout=None):
+        import subprocess
+
+        argv, cwd, env, capture, output_fd = self._call
+        stdio = (
+            {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
+            if capture else {}
+        )
+        if output_fd is not None:
+            stdio = {"stdout": output_fd, "stderr": output_fd}
+        result = subprocess.run(argv, cwd=cwd, timeout=timeout, env=env, **stdio)
+        self.returncode = result.returncode
+        return (getattr(result, "stdout", None) if capture else None), None
+
+
+@pytest.fixture(autouse=True)
+def _installer_processes_through_subprocess_run(request, monkeypatch):
+    if request.node.get_closest_marker("real_installer_processes"):
+        return
+    from agent_worktrees import installer_run
+
+    monkeypatch.setattr(
+        installer_run, "_spawn",
+        lambda argv, cwd, env, capture, output_fd=None: (
+            _SubprocessRunInstaller(argv, cwd, env, capture, output_fd), None,
+        ),
+    )
+    monkeypatch.setattr(installer_run, "_kill_tree", lambda proc, job: "")
+    if request.node.get_closest_marker("installer_receipts"):
+        return
+    # These fakes model an installer by its exit code alone: one that exits 0
+    # is taken to have published its target receipt. Receipt judgment itself is
+    # covered by tests marked ``installer_receipts`` / ``real_installer_processes``.
+    judge = installer_run._judge
+    monkeypatch.setattr(
+        installer_run, "_judge",
+        lambda rc, expired, target, deployed: judge(
+            rc, expired, target, target if rc == 0 and not expired else deployed),
+    )

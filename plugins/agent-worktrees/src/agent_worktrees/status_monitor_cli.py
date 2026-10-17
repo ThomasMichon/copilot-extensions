@@ -160,6 +160,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import resident_push, self_retire, status_monitor_cutover, status_monitor_runtime, status_updater_cli
     from . import tracking_write
     from . import worktree_status_daemon
+    from .status_monitor_drain import DrainTrace, drain_with_diagnostics
     from .worktrees_runtime import READ_ACTION, WorktreesRuntime
     from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
     from .worktrees_producer import publish_active_project
@@ -619,6 +620,23 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("worktrees-read")
         return reasons
 
+    def _drain_observations() -> dict[str, int]:
+        return {
+            "sweep": int(sweep_active),
+            "hook": sum(server.active_handler_count() for server in
+                        ([hook_server] if hook_server is not None else []) + retired_hook_servers),
+            "classify": sum(server.active_handler_count() for server in
+                            ([classify_server] if classify_server is not None else [])
+                            + retired_classify_servers),
+            "tracking-write": sum(server.active_handler_count() for server in
+                                  ([tracking_write_server] if tracking_write_server is not None else [])
+                                  + retired_tracking_write_servers),
+            "tracking-write-compute": int(tracking_write.has_inflight_write()),
+            "worktrees-feed": worktrees_runtime.feed.active_count(),
+            "worktrees-read": control_server.current_read_count(),
+            "lifecycle": lifecycle_count,
+        }
+
     control_server = status_monitor_cutover.ControlServer(
         lambda action, payload: _handle_control(action, payload),
         port=getattr(args, "control_port", None),
@@ -643,14 +661,24 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 worktrees_runtime.close_admission("superseded")
             return worktrees_runtime.handle(payload)
         if action == "promote":
-            with state_lock:
-                _cleanup_retired_request_surfaces()
-                published_lock = True
-                published_lock = _start_request_surfaces()
-                if not published_lock:
-                    wake_event.set()
-                    return {"adopted": False, "error": "current-roster authority unavailable"}
-                _locks.write_lock(lock, extra=_lock_extra())
+            trace = DrainTrace(
+                status_monitor_cutover.routing_dir(), role="daemon",
+                port=control_server.port, action=action, observe=_drain_observations,
+            )
+            with trace.stage("state-lock"):
+                with state_lock:
+                    with trace.stage("retired-cleanup"):
+                        _cleanup_retired_request_surfaces()
+                    published_lock = True
+                    with trace.stage("activate-publisher"):
+                        published_lock = _start_request_surfaces()
+                    if not published_lock:
+                        trace.emit("promotion-refused", "fail")
+                        wake_event.set()
+                        return {"adopted": False, "error": "current-roster authority unavailable"}
+                    with trace.stage("publish-lock"):
+                        _locks.write_lock(lock, extra=_lock_extra())
+            trace.emit("complete", "ok")
             wake_event.set()
             return {"adopted": True}
         if action == "shutdown":
@@ -659,15 +687,25 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             wake_event.set()
             return {"shutdown": True}
         if action == "undrain":
-            with state_lock:
-                admission_closed = False
-                _cleanup_retired_request_surfaces()
-                published_lock = True
-                published_lock = _start_request_surfaces()
-                if not published_lock:
-                    wake_event.set()
-                    return {"draining": True, "error": "current-roster authority unavailable"}
-                _locks.write_lock(lock, extra=_lock_extra())
+            trace = DrainTrace(
+                status_monitor_cutover.routing_dir(), role="daemon",
+                port=control_server.port, action=action, observe=_drain_observations,
+            )
+            with trace.stage("state-lock"):
+                with state_lock:
+                    admission_closed = False
+                    with trace.stage("retired-cleanup"):
+                        _cleanup_retired_request_surfaces()
+                    published_lock = True
+                    with trace.stage("activate-publisher"):
+                        published_lock = _start_request_surfaces()
+                    if not published_lock:
+                        trace.emit("undrain-refused", "fail")
+                        wake_event.set()
+                        return {"draining": True, "error": "current-roster authority unavailable"}
+                    with trace.stage("publish-lock"):
+                        _locks.write_lock(lock, extra=_lock_extra())
+            trace.emit("complete", "ok")
             wake_event.set()
             return {"draining": False}
         if action != "drain":
@@ -675,27 +713,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         timeout = float(payload.get("timeout") or 0.0)
         poll = float(payload.get("poll") or 0.1)
         force = bool(payload.get("force"))
-        with state_lock:
-            _enter_drain_only_state()
-        deadline = time.time() + max(0.0, timeout)
-        while True:
-            _cleanup_retired_request_surfaces()
-            reasons = _drain_busy_reasons()
-            if not reasons:
-                return {
-                    "drained": True,
-                    "clean": True,
-                    "forced": False,
-                    "busy_sessions": [],
-                }
-            if timeout <= 0 or time.time() >= deadline:
-                return {
-                    "drained": force,
-                    "clean": False,
-                    "forced": force,
-                    "busy_sessions": reasons,
-                }
-            time.sleep(max(0.05, poll))
+        return drain_with_diagnostics(
+            state_lock=state_lock, enter=_enter_drain_only_state,
+            cleanup=_cleanup_retired_request_surfaces, busy=_drain_busy_reasons,
+            observe=_drain_observations, directory=status_monitor_cutover.routing_dir(),
+            port=control_server.port, timeout=timeout, poll=poll, force=force,
+        )
 
     control_server.start()
     if not passive_mode:
