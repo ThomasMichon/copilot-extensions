@@ -89,6 +89,11 @@ No live rollout or credential operation is included.
   owned child. Use native Windows token/process creation identity and supported
   private handle/channel semantics; retain Linux/WSL process-start and namespace
   checks. No basename, caller flag, guessed home, or fabricated instance proof.
+- [ ] Limit the first native Windows adapter to an explicitly declared,
+  identity-preserving direct launch under the Host's own user. Keep the Host
+  as the sole owner of the actual agent PID and stdio; no relay child, token
+  impersonation, logon ceremony, elevation, or POSIX-exec emulation.
+  Undeclared shell/batch and local cross-user launch shapes remain unsupported.
 - [ ] Keep per-launch consent/binding private, reject replay/substitution and
   version skew, and refuse unsupported identity-changing wrappers explicitly.
   Reuse existing cleanup, containment, stdio/PTY and windowless launch owners.
@@ -121,6 +126,10 @@ No live rollout or credential operation is included.
 - [ ] Exercise native Windows handles/process semantics rather than mocking a
   Linux FD contract. Failure/cancellation closes only the owned fixture tree;
   no visible console or foreground takeover.
+- [ ] Prove Windows Host/child user-token and process creation binding for the
+  same-user direct shape; reject requested cross-user or shell/batch shapes
+  before effects. Prove WSL has a guest-local Host and selected native space,
+  never the Windows `wsl.exe` carrier or a fabricated container descriptor.
 - [ ] Preserve caller-mode, existing container authority, explicit selections,
   intentional local providers, and confirmed resume/load behavior.
 - [ ] Fake ACP advertisement/set/readback covers supported model/effort/context,
@@ -141,6 +150,25 @@ authorities. Do not add a competing process owner, custom identity database,
 credential broker, generic attestation daemon, or equally privileged hostile
 peer defense unrelated to the demonstrated boundary.
 
+For native Windows, use the existing direct process creation owner, bind the
+returned real child process/token and creation identity before readiness, and
+read settings under that proven same-user execution context. Windows cannot
+replace a process image while retaining its PID: a POSIX-style witness process
+that spawns an unowned grandchild is not an implementation option. Existing
+Job/transport cleanup stays with the Host; this design does not remove it.
+
+For Linux/WSL, require a Host inside the selected execution space and reuse
+the Linux consent/process-start/namespace machinery. Add the native declaration
+and descriptor binding needed to select that path without container preparation
+or a synthetic Docker ID. A Windows-side `wsl.exe` carrier is not the guest
+process and remains an opaque cross-boundary launcher for this capability.
+
+Use strict authority-kind-specific closed schemas within the existing
+versioned receipt envelope where compatible. Preserve every existing
+`wrapper-v1` Linux check; do not widen it into an optional-field schema that
+accepts Windows or arbitrary platform claims. Negotiate the native capability
+explicitly before accepting its Host-bound proof.
+
 ## Journal
 
 ### 2026-10-16 - Native continuation proposed
@@ -151,3 +179,8 @@ peer defense unrelated to the demonstrated boundary.
   this plan does not relabel a settings candidate as execution proof.
 - Generic scope is separated from adopter configuration and deployment.
   Implementation remains behind plan review and adjacent-owner coordination.
+- Independent contract review identified the lack of PID-preserving exec on
+  Windows. The selected minimal shape is a same-user direct Host-owned child,
+  not a witness relay or a privileged cross-user token launcher. WSL retains a
+  guest-local Host and Linux process proof, with explicit native descriptor
+  selection rather than container identity substitution. No code was changed.
