@@ -42,6 +42,9 @@ use the list for a complete view. Evaluator all-repository opt-in is `all`.
 Labels come from each kind's actual routing configuration: lane labels,
 evaluator watch labels, schedule task labels, or a composed emitter's nested
 task label. No title/name classification is used.
+The built-in CI-repair emitter projects its producer-owned lane (or repository
+fallback) and fixed task label through the same routing helper used when
+creating an admitted task.
 
 File-backed declarations retain the observed leaf source document through
 repository and verified-plugin discovery. Local instance components name the
@@ -65,6 +68,15 @@ content revisions. At standard terminal widths the secondary
 Kind column yields to the existing status, capacity, source and description
 columns; wider terminals show it alongside them. Existing IDs, edit revisions,
 form fields and activation semantics are unchanged.
+
+Projection failures are isolated per row, including registrar-supported
+specifications whose full routing metadata is malformed. The row is marked
+`metadata-error`, its `component_errors` also appear in `summary.errors`, and
+its component basis is `unknown` with no invented components. Healthy sources,
+instances and templates remain visible. Existing enablement/publication facts
+are not replaced with a fabricated stopped state; details name the failed
+projection. Any catalog error disables toggle affordances consistently, even
+when the error is found after another row was projected.
 
 Descriptions, source attribution, validation, publication, capacity, effective
 disable overrides, and observed activity are separate facts. A recent local

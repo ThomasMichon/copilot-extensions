@@ -81,6 +81,24 @@ def adapters(command, **kwargs):
     return SimpleNamespace(returncode=0, stdout=json.dumps(output), stderr="")
 
 
+@pytest.mark.parametrize("lane", [None, "github.com/example/project"])
+def test_catalog_routing_matches_the_actual_admitted_task(tmp_path, lane):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    binding = config(enabled=True, **({"lane_repository": lane} if lane else {}))
+    declaration = load_declaration({
+        "name": "repair-source", "kind": "emitter",
+        "spec": {"id": "repair-source", "interval_seconds": 60, "ci_repair": binding},
+    })
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    task, = ci_repair.run_tick(Client(tmp_path), binding, runner=adapters)["created"]
+    assert component["repo_scope"] == task["repo"] == (lane or binding["repository"])
+    assert component["repo_scopes"] == [task["repo"]]
+    assert component["labels"] == task["labels"] == ["ci-repair"]
+    assert task["target_repo"] == binding["repository"]
+
+
 def test_disabled_real_emitter_and_registrar(tmp_path, monkeypatch):
     client = Client(tmp_path)
     spec = {"id": "repair", "interval_seconds": 3600, "ci_repair": config()}

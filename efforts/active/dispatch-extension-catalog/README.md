@@ -315,3 +315,26 @@ automation activation still require their applicable operational authorization.
   flake or waiver: no timeout increase, test skip, forced retry or CI bypass.
   Normal updated-head checks remain an independent merge gate, not proof that
   the native timeout was diagnosed or fixed.
+
+### 2026-10-17 - Projection isolation and CI-repair routing
+
+- A fresh balanced review found a real boundary gap: schedule validation
+  accepts some shapes whose full routing cannot be projected. Isolate that
+  projection failure to the affected source/draft/publication row, retain
+  healthy catalog entries, and expose both row and summary errors. Unknown
+  component metadata never substitutes for independent enablement/activity.
+- Disable toggle affordances consistently after all rows are known, including
+  healthy rows preceding a later projection error. No registrar validation,
+  activation, publication, worker or task lifecycle behavior is changed.
+- Reuse a producer-owned CI-repair routing helper for both actual admitted
+  task creation and catalog metadata. Cover explicit lane and repository
+  fallback against a real isolated queue task; no inferred task labels.
+- Add malformed second-schedule and label-container cases through source,
+  draft and published catalog rows, retaining original bytes. Extend the real
+  CLI first-touch journey to assert successful degraded JSON with healthy
+  instances/templates rather than an aborted read.
+- The coupled catalog and CI-repair selection passed 128 tests, including the
+  real-CLI degraded-read assertion. Changed Python lint and the 13-plugin
+  install contract passed. Current-head review and
+  aggregate CI remain required; installed rollout and live source effects
+  are not part of these isolated fixtures.

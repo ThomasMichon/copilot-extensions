@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from agent_procutil import no_window_kwargs
@@ -18,6 +18,10 @@ from agent_procutil import no_window_kwargs
 
 class AdmissionRefused(ValueError):
     """Insufficient or mismatched failure/admission evidence."""
+
+
+def task_routing(config: Mapping[str, Any]) -> tuple[str, list[str]]:
+    return config.get("lane_repository") or config["repository"], ["ci-repair"]
 
 
 def validate_config(config: dict) -> None:
@@ -173,6 +177,7 @@ def run_tick(
             raise AdmissionRefused("inference and repository authority must be separate")
         admitted.append((evidence, verdict))
     created = []
+    repo, labels = task_routing(config)
     for evidence, verdict in admitted:
         prompt = json.dumps(
             {
@@ -199,14 +204,14 @@ def run_tick(
         created.append(
             client.create(
                 f"Repair verified CI failure {evidence['signature']}",
-                repo=config.get("lane_repository") or config["repository"],
+                repo=repo,
                 target_repo=config["repository"],
                 source="ci-repair",
                 origin_ref=config["lane_registration"],
                 requires=["ci-repair-admitted"],
                 dedup_key=f"ci-repair:{config['repository']}:{evidence['signature']}",
                 prompt=prompt,
-                labels=["ci-repair"],
+                labels=labels,
                 require_verification=True,
             )
         )

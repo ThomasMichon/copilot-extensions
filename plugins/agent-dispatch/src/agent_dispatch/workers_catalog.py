@@ -116,6 +116,9 @@ def _code_span(value: str) -> str:
 
 
 def _cards(row: dict, body: str) -> dict:
+    if row.get("component_errors"):
+        row.update(validity="metadata-error", pool_toggleable="false")
+        body += "\n\nComponent metadata requires repair: " + "; ".join(row["component_errors"])
     if row.get("components"):
         body += f"\n\nComponents ({row['components_basis']}):\n\n" + "\n\n".join(
             f"{component['name']} ({component['kind']}, {component['id']})\n\n"
@@ -135,6 +138,15 @@ def _declared_routing(declaration: ProfileDeclaration) -> tuple[list[str], list[
     if declaration.kind == "supervised-lane":
         return [declaration.repos], list(declaration.labels)
     spec = declaration.spec
+    if declaration.kind == "emitter" and "ci_repair" in spec:
+        from .producers.ci_repair import task_routing
+        config = spec["ci_repair"]
+        if not isinstance(config, Mapping):
+            raise RegistrarError(f"{declaration.name}: CI repair routing requires an object")
+        repo, labels = task_routing(config)
+        if not isinstance(repo, str):
+            raise RegistrarError(f"{declaration.name}: declared repo scope must be text")
+        return [repo], labels
     loop = next(
         (spec[key] for key in ("repository_issue_loop", "effort_driver_loop") if key in spec),
         None,
@@ -193,6 +205,24 @@ def _component_metadata(declarations: tuple, *, basis: str, source_path: str | N
         "components": components,
         "components_basis": basis,
     }
+
+
+def _catalog_components(
+    declarations: tuple, *, basis: str, context: str, errors: list[str],
+    source_path: str | None = None,
+) -> dict:
+    try:
+        return {
+            **_component_metadata(declarations, basis=basis, source_path=source_path),
+            "component_errors": [],
+        }
+    except (RegistrarError, TypeError, ValueError) as exc:
+        message = f"{context}: cannot project component metadata: {exc}"
+        errors.append(message)
+        return {
+            "kind": "unknown", "components": [], "components_basis": "unknown",
+            "component_errors": [message],
+        }
 
 
 def catalog() -> dict:
@@ -287,8 +317,9 @@ def catalog() -> dict:
             "dependency_errors": draft_errors,
             "publication_errors": publication_errors,
             **state,
-            **_component_metadata(
+            **_catalog_components(
                 runtime_declarations, basis="published" if active_conf is not None else "draft",
+                context=record["id"], errors=errors,
                 source_path=str((publication if active_conf is not None else instance_dir() / f"{record['name']}.json").absolute()),
             ),
         }
@@ -335,7 +366,10 @@ def catalog() -> dict:
             "pool_toggleable": str(not errors and declaration.kind == "supervised-lane").lower(),
             "pool_name": declaration.name, "owner": declaration.owner or "local",
             **_states((declaration,), overrides, observed),
-            **_component_metadata((declaration,), basis="source"),
+            **_catalog_components(
+                (declaration,), basis="source",
+                context=f"source:{declared_registration_id(declaration)}", errors=errors,
+            ),
         }
         body = (f"{row['description']}\n\nOwned by {row['provenance']}. "
                 "Read-only here: edit through the owning repository/plugin configuration flow.")
@@ -374,6 +408,10 @@ def catalog() -> dict:
             "kind": kind, "components": [], "components_basis": "template",
         }, f"Template: {name}\n\n{prerequisite}\n\nValidation refuses missing inputs/dependencies "
            "before saving or publishing. The template/source remains unchanged."))
+    if errors:
+        for row in rows:
+            if "pool_toggleable" in row:
+                row["pool_toggleable"] = "false"
     return {
         "schema_version": 1,
         "fetched_at": time.time(),

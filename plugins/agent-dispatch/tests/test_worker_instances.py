@@ -230,6 +230,49 @@ def test_invalid_schedule_container_remains_a_discovery_error_not_routing_metada
     assert path.read_bytes() == original
 
 
+@pytest.mark.parametrize("location", ["source", "draft", "published"])
+@pytest.mark.parametrize("spec", [
+    {"schedules": [{"id": "ok", "repo": "example/project", "interval_seconds": 60}, None]},
+    {"id": "ok", "repo": "example/project", "interval_seconds": 60, "labels": False},
+])
+def test_component_projection_errors_preserve_healthy_catalog_rows_and_source_bytes(tmp_path, location, spec):
+    from agent_dispatch.registrar import load_declaration
+
+    healthy = create("a-healthy", activate=True)
+    document = {"name": "z-bad", "kind": "schedule", "spec": spec}
+    load_declaration(document)  # These shapes currently pass the owning registrar.
+    if location == "source":
+        source = tmp_path / "source"
+        source.mkdir()
+        path = source / "schedule.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        rd.add_pointer("schedule-source", source, owner="repo:source")
+        paths = [path]
+    else:
+        receipt = create("z-bad")
+        save_instance(
+            receipt["id"], receipt["revision"],
+            {"name": "z-bad", "declaration": document, "repo_root": ""},
+            activate=location == "published",
+            consent=ACTIVATION_CONSENT if location == "published" else None,
+        )
+        paths = [instance_dir() / "z-bad.json"]
+        if location == "published":
+            paths.append(active_dir() / "z-bad.json")
+    before = {path: path.read_bytes() for path in paths}
+    data = catalog()
+    bad, = [row for row in data["entries"] if row["title"] == "z-bad"]
+    assert bad["validity"] == "metadata-error"
+    assert bad["kind"] == bad["components_basis"] == "unknown" and bad["components"] == []
+    assert bad["component_errors"] and all(error in data["summary"]["errors"] for error in bad["component_errors"])
+    assert "Component metadata requires repair" in bad["card"]["body"]
+    good = next(row for row in data["entries"] if row["id"] == healthy["id"])
+    assert good["kind"] == "supervised-lane" and good["validity"] == "valid"
+    assert good["pool_toggleable"] == "false", "late projection errors must disable earlier toggle affordances"
+    assert any(row["id"] == "template:worker-pool" for row in data["entries"])
+    assert {path: path.read_bytes() for path in paths} == before
+
+
 @pytest.mark.parametrize("key", ["repository_issue_loop", "effort_driver_loop"])
 def test_composed_emitter_metadata_reads_its_own_nested_routing(key):
     from agent_dispatch.registrar import ProfileDeclaration
@@ -951,3 +994,19 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path):
     assert published["kind"] == "supervised-lane" and published["components_basis"] == "published"
     assert [component["id"] for component in published["components"]] == published["registration_ids"]
     assert invoke(*arguments, "--activate", "--consent", ACTIVATION_CONSENT)["retry"]
+    source = tmp_path / "incomplete-routing-source"
+    source.mkdir()
+    path = source / "schedule.json"
+    path.write_text(json.dumps({
+        "name": "bad-routing", "kind": "schedule",
+        "spec": {"id": "bad-routing", "repo": "example/project", "labels": False},
+    }), encoding="utf-8")
+    before = path.read_bytes()
+    rd.add_pointer("incomplete-routing", source, owner="repo:source")
+    degraded = invoke("catalog")
+    bad = next(row for row in degraded["entries"] if row["title"] == "bad-routing")
+    assert bad["validity"] == "metadata-error"
+    assert bad["component_errors"][0] in degraded["summary"]["errors"]
+    assert any(row["id"] == saved["id"] for row in degraded["entries"])
+    assert any(row["id"] == "template:worker-pool" for row in degraded["entries"])
+    assert path.read_bytes() == before
