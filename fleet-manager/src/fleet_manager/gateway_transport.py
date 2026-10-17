@@ -95,10 +95,12 @@ class DeadlineHTTPSConnection(HTTPSConnection):
         first = resolved[0][0]
         primary = [item for item in resolved if item[0] == first]
         alternate = [item for item in resolved if item[0] != first]
-        addresses = [
-            group[index] for index in range(max(len(primary), len(alternate)))
-            for group in (primary, alternate) if index < len(group)
-        ]
+        addresses = []
+        for index in range(max(len(primary), len(alternate))):
+            if index < len(primary):
+                addresses.append(primary[index])
+            if index < len(alternate):
+                addresses.append(alternate[index])
         pending = set()
         winner = None
         index, next_attempt = 0, 0.0

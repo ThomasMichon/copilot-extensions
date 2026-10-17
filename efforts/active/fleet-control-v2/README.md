@@ -1750,3 +1750,27 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   provider/enrollment/serving adoption is authorized in this slice. Fresh
   current-head review and required hosted checks remain merge gates; every
   remaining parent Plan/Validation obligation stays open.
+
+### 2026-10-17 - Strict custom dispatch deadline review follow-through
+
+- The next #7099 review repeated one dispatch-time claim-type finding at four
+  controller locations. The receipt verifier already requires integer `exp`,
+  `iat` and `nbf`; the custom `deadline` now also passes the existing strict
+  bounded-integer validator before binding construction or provider acquisition.
+  No float rounding, string conversion or deadline extension is introduced.
+- Fourteen genuinely signed negative dispatch cases cover both `exp` and
+  `deadline`: fractional, numeric-string, boolean, null, missing, negative and
+  out-of-range values. Every case requires a domain refusal before invoking
+  the credential provider, receipt signer or reply path. Verification remains
+  real, not mocked.
+- The low-severity address-interleaving readability finding is addressed with
+  explicit primary/alternate appends. Four uneven-tail and first-family cases
+  preserve exact attempt order and loser closure, alongside the existing
+  real hostname/TLS and original-deadline regressions.
+- The complete required Gateway partition passes 151 cases (745 deselected)
+  in 68.23 seconds under its unchanged 120-second limit; touched Python passes
+  F/E9 lint. This exercises unit cases and the existing lightweight real-TLS
+  consumer paths. Installer clean-room validation is inapplicable to this
+  non-provisioning refinement; live external-venue activation remains outside
+  the authorized slice. Current-head hosted checks and fresh review are still
+  required. The parent remains Active with its remaining gates unchanged.

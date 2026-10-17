@@ -325,6 +325,51 @@ def test_actual_provider_wait_for_deadline_is_unknown_not_success(fixture, capsy
     assert "SYNTHETIC" not in logs.out + logs.err
 
 
+@pytest.mark.parametrize("field", ["exp", "deadline"])
+@pytest.mark.parametrize("invalid", [
+    "fractional", "numeric-string", "boolean", "null", "missing", "negative", "overflow",
+])
+def test_controller_rejects_invalid_signed_deadline_before_provider_or_reply(
+        fixture, monkeypatch, field, invalid):
+    import jwt
+
+    config = fixture.config
+    broker = Broker(config, fixture.signer, "epoch-a")
+    worker = AuthContext(config.enrollments[2], int(time.time()) + 120)
+    provider = AuthContext(config.enrollments[3], int(time.time()) + 120)
+    subscription = broker.subscribe(provider, {"lease": 15})["subscription"]
+    broker.submit(worker, credential_request())
+    result = broker.poll(provider, {"subscription": subscription})
+    claims = verify(result["dispatch"], fixture.gateway_keys,
+                    "fixture-issuer", "controller", lifetime=60)
+    if invalid == "missing":
+        del claims[field]
+    else:
+        claims[field] = {
+            "fractional": claims[field] + 0.5, "numeric-string": str(claims[field]),
+            "boolean": True, "null": None, "negative": -1, "overflow": 2**53 + 1,
+        }[invalid]
+    result["dispatch"] = jwt.encode(
+        claims, fixture.gateway, algorithm="EdDSA", headers={"kid": "gateway", "typ": "JWT"},
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid signed dispatch reached provider, receipt signer or reply")
+
+    client = SimpleNamespace(
+        principal="controller", epoch="epoch-a",
+        discovery=fixture.client("controller", 1).discovery,
+        subscribe=lambda *args: {"subscription": subscription},
+        poll=lambda *args: result, reply=forbidden,
+    )
+    owner = controller(fixture, client)
+    owner.subscription = subscription
+    monkeypatch.setattr(owner.provider, "acquire", forbidden)
+    monkeypatch.setattr(owner.signer, "sign", forbidden)
+    with pytest.raises(GatewayError):
+        owner.step()
+
+
 @pytest.mark.parametrize("outcome", [
     "budget-expired", "result-after-dispatch-expiry", "result-before-dispatch-expiry",
 ])

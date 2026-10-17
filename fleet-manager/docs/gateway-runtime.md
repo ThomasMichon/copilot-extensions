@@ -280,6 +280,10 @@ dispatch is renewed to deliver a late result.
 The controller samples wall time again after provider acquisition, rather than
 using its pre-acquisition timestamp to authorize a later result. Fractional
 seconds bound the asynchronous wait; integer epoch seconds bound signed JWTs.
+The receipt verifier already requires integer `exp` values, and the controller
+also requires a bounded integer custom `deadline` before provider acquisition.
+Missing, fractional, boolean or string deadlines are refused, never rounded
+or coerced into a longer authority window.
 The fresh post-acquisition expiry check and absolute signing cap are deliberate,
 not an attempt to make both phases share one stale clock sample.
 The pending limit bounds active requests; at most 1024 request identities are
