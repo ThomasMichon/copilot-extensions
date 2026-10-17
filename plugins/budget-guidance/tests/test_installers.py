@@ -33,6 +33,13 @@ def _copy_payload(target: Path) -> None:
         source_consumer_dir=PLUGIN, dest_consumer_dir=target,
         canonical_root=PLUGIN.parents[1],
     )
+    changes += materialize_main.materialize_file_pointers(
+        target, canonical_root=PLUGIN.parents[1],
+    )
+    changes += materialize_main.materialize_installer_engine_ref_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=target,
+        canonical_root=PLUGIN.parents[1],
+    )
     assert not any(change.startswith("SKIP ") for change in changes), changes
     procutil = target / "libs" / "agent-procutil"
     assert (procutil / "pyproject.toml").is_file(), "Missing agent-procutil fixture manifest"
@@ -224,6 +231,8 @@ def native_failed_install_state(tmp_path_factory, request):
         encoding="utf-8",
     )
     root = tmp_path / "runtime with spaces"
+    payload = tmp_path / "payload" / "budget-guidance"
+    _copy_payload(payload)
     old = root / "versions" / "0.0.1"
     if previous:
         old.mkdir(parents=True)
@@ -235,7 +244,7 @@ def native_failed_install_state(tmp_path_factory, request):
         (root / "current-version").write_text("0.0.1")
     command = [
         PWSH, "-NoProfile", "-NonInteractive", "-File",
-        str(PLUGIN / "scripts" / "install.ps1"),
+        str(payload / "scripts" / "install.ps1"),
         "install", "-InstallDir", str(root),
     ]
     before = (root / "current-version").read_bytes() if previous else None

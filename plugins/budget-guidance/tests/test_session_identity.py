@@ -195,12 +195,19 @@ def test_rpc_replacement_inside_status_cannot_read_a_replacement_session(when: s
     assert result["consumption"] is None
 
 
-def test_individually_short_rpcs_share_one_total_deadline() -> None:
+def test_individually_short_rpcs_share_one_total_deadline(monkeypatch) -> None:
+    import budget_guidance.session_identity as module
+
+    clock = [0.0]
+    monkeypatch.setattr(module, "monotonic", lambda: clock[0])
     session = Session()
     original = session.status
 
     async def status(*, timeout: float | None = None) -> SimpleNamespace:
-        await asyncio.sleep(0.02)
+        assert timeout is not None
+        if timeout < 0.02:
+            raise asyncio.TimeoutError
+        clock[0] += 0.02
         return await original(timeout=timeout)
 
     session.rpc.git_hub_auth.get_status = status
@@ -208,6 +215,53 @@ def test_individually_short_rpcs_share_one_total_deadline() -> None:
     assert session.calls == ["status", "quota"]
     assert result["allowance"] is None
     assert result["diagnostics"] == ["identity-quota-acquisition-timeout"]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("expired_after", ["first-status", "quota", "last-status"])
+@pytest.mark.parametrize("completed_at", [1.0, 1.1], ids=["at-deadline", "after-deadline"])
+def test_elapsed_total_deadline_refuses_completed_rpc_values(
+    monkeypatch, expired_after, completed_at,
+):
+    import budget_guidance.session_identity as module
+
+    clock = [0.0]
+    monkeypatch.setattr(module, "monotonic", lambda: clock[0])
+    session = Session()
+    original_status = session.status
+    original_quota = session.quota
+    budgets = []
+
+    async def status(*, timeout=None):
+        budgets.append(timeout)
+        value = await original_status(timeout=timeout)
+        clock[0] = (
+            completed_at
+            if expired_after == "first-status" or "quota" in session.calls
+            else 0.25
+        )
+        return value
+
+    async def quota(*, timeout=None):
+        budgets.append(timeout)
+        value = await original_quota(timeout=timeout)
+        clock[0] = completed_at if expired_after == "quota" else 0.5
+        return value
+
+    session.rpc.git_hub_auth.get_status = status
+    session.rpc.quota.get = quota
+    result = _read(session, timeout=1.0)
+
+    assert result["allowance"] is None
+    assert result["availability"] == "error"
+    assert result["diagnostics"] == ["identity-quota-acquisition-timeout"]
+    expected_calls = {
+        "first-status": ["status"],
+        "quota": ["status", "quota"],
+        "last-status": ["status", "quota", "status"],
+    }
+    assert session.calls == expected_calls[expired_after]
+    assert budgets == pytest.approx([1.0, 0.75, 0.5][:len(session.calls)])
 
 
 def test_not_implemented_status_is_explicit_and_preserves_quota_unsupported() -> None:

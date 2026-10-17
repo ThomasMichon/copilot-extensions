@@ -1,5 +1,5 @@
 {
-  "comment": "Preserve embedded dependencies in installer fixtures and keep full-size response rejection cases runnable on Windows",
+  "comment": "Preserve materialized installer fixture integrity, isolate stdlib test startup and enforce one total verified-session quota deadline",
   "changes": [
     {
       "plugin": "budget-guidance",

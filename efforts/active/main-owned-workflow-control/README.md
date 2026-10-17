@@ -1660,3 +1660,31 @@ hosted checks, review and a containing full validation remain required.
   Its current-fixture re-attestation must be reconciled with this effort's
   earlier immutable-v1/historical-producer decision; this session does not
   duplicate the implementation or declare that unresolved policy item complete.
+- The native failed-install fixture now executes from a standalone payload using
+  the real dependency, file-pointer and installer-engine materializers. Nothing
+  is pruned or ignored. Both fresh/retained failure and retry cases pass under
+  the unchanged 30-second item and 45-second child limits, preserving old-slot,
+  partial-slot cleanup and controlled dependency-exit assertions.
+- Broader native validation then reaches a distinct production total-deadline
+  defect: completed quota values can escape the outer timeout while nested
+  async waits race cancellation. The operator explicitly authorizes a narrow
+  correction beyond the original test-only residual scope; #7065's independent
+  foreground extension work remains untouched.
+- Verified-session acquisition now uses one absolute monotonic deadline,
+  checks phase completion and final delivery against it, and passes remaining
+  budget into identity/quota reads. No timeout is increased and no retry or
+  unverified quota fallback is introduced. Two deterministic completion-after-
+  expiry regressions fail before the fix; all 91 identity/quota cases pass
+  afterward. The former sub-OS-timer-resolution test now asserts remaining
+  budget deterministically; separate native async cancellation cases remain.
+- A later full native attempt still reaches the failed-install fixture's
+  unchanged item deadline, despite its focused four-case pass. Standalone
+  materialization alone is therefore not claimed to resolve that timing cause.
+  Bounded fixture diagnostics continue before publication or merge; no green
+  full-suite result, deadline increase or flake acceptance is inferred.
+- The expanded deterministic expiry matrix covers first identity, quota and
+  final identity completion exactly at and after the limit; all 95 identity/
+  quota cases pass. Temporary native trace timers and helper instrumentation
+  are withdrawn after bounded diagnosis establishes no safe further fixture
+  fix. The captured construction/venv/seasoning evidence is shared with the
+  retained #6928 owner; it is not a new watchdog implementation or a waiver.
