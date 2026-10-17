@@ -891,6 +891,17 @@ colliding, previously published native-draft vectors are retained under a
 separate historical namespace rather than overwritten. New generation-40
 evidence must attest the combined committed producers before publication.
 
+The next base advance corrected configured SSH-profile identity. Recovery now
+retains that correction for discovery and captured owner launches without
+losing encoded PowerShell argument transport. Legacy topology user fields no
+longer override the profile login. The real `ssh -G` fixture verifies user,
+port, identity files, proxy and host-key alias without connecting to a host;
+the profile/native selection passed 103 tests. The two previously published
+receipt captures updated by the base are retained separately, and changed
+combined producers require new generation-40 attestations rather than edits
+to existing generation-40 vectors. The prior head's CI passed, but the rebase
+requires fresh current-head CI and review.
+
 ### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
 
 Moved native receipt binding into the final locked delivery section, after

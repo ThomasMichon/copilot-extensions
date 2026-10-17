@@ -1561,6 +1561,18 @@
           "sha256": "c5b9a07129bb290a663fbbc12d3668cf00fc95ef375d09553a31fb0ee3e9d75b",
           "role": "Generation-40 combined receipt/native producer evidence: singleton_resume.py",
           "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/receipt-before-ssh-profile-generation-39/remote-message-receipt-generation-39.json",
+          "sha256": "45455f171ae7960b4c561b0f0062af4ffe2784bd357bd82fc310fb1e14d0a844",
+          "generation": 39,
+          "role": "Retained published receipt-39 capture before SSH-profile identity correction"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/receipt-before-ssh-profile-generation-39/worktree-render-worktrees-generation-39.json",
+          "sha256": "6aaf466d5a11fdf1b769b3c2885255a1ef24d61a9e203979691d0aa53b0a1f31",
+          "generation": 39,
+          "role": "Retained published receipt-39 capture before SSH-profile identity correction"
         }
       ],
       "provenance": [

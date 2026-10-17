@@ -12,7 +12,7 @@ import pytest
 from agent_procutil import no_window_flags
 from ssh_manager import SSHProfileSource
 
-from agent_bridge import carrier, remote_operations, transport
+from agent_bridge import carrier, remote_operations, transport, worktree_owner_operation
 from agent_bridge.routes import worktrees
 from agent_bridge.topology import SshEnvironment
 
@@ -120,8 +120,8 @@ async def test_discovery_and_session_reads_preserve_profile_user(
     monkeypatch.setattr(worktrees, "_exec_ex", execute)
     monkeypatch.setattr(worktrees, "_is_local_target", lambda *_args: False)
     resolver = MagicMock()
-    resolver.resolve.return_value = SimpleNamespace(
-        host="profile-host", user="topology-user", execution_space_key=None,
+    resolver.resolve.return_value = transport.SpawnTarget(
+        type="ssh", host="profile-host", user="topology-user",
     )
 
     await worktrees._run_for_agent(
@@ -139,6 +139,33 @@ async def test_discovery_and_session_reads_preserve_profile_user(
     )
     _assert_profile(line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
     assert command[-2] == "profile-host"
+    assert ssh_profile.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_native_owner_launch_preserves_profile_user(monkeypatch, ssh_profile):
+    before = ssh_profile.read_bytes()
+    process = SimpleNamespace(
+        communicate=AsyncMock(return_value=(b'{"ok":true}', b"")), returncode=0,
+    )
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(worktree_owner_operation.asyncio, "create_subprocess_exec", spawn)
+    resolver = SimpleNamespace(resolve=lambda _: transport.SpawnTarget(
+        type="ssh", host="profile-host", user="legacy-user", ssh_shell="pwsh",
+    ))
+    await worktree_owner_operation.run_owner_operation(
+        "remote", SimpleNamespace(project="example"), resolver,
+        ["embody", "--worktree-id", "example-worktree", "--json"],
+    )
+    command = spawn.await_args.args
+    result = subprocess.run(
+        ["ssh", "-G", "-F", str(ssh_profile), *command[1:-1]],
+        capture_output=True, text=True, check=True, timeout=10,
+        creationflags=no_window_flags(),
+    )
+    _assert_profile(line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
+    assert command[-2] == "profile-host"
+    assert "-EncodedCommand" in command[-1]
     assert ssh_profile.read_bytes() == before
 
 

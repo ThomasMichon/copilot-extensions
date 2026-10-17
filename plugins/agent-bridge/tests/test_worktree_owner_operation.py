@@ -64,7 +64,7 @@ async def test_windows_ssh_owner_arguments_preserve_literal_identity(monkeypatch
     spawn = AsyncMock(return_value=proc)
     monkeypatch.setattr(operation.asyncio, "create_subprocess_exec", spawn)
     resolver = SimpleNamespace(resolve=lambda _: SpawnTarget(
-        type="ssh", host="example-host", ssh_shell=shell,
+        type="ssh", host="example-host", user="legacy-user", ssh_shell=shell,
     ))
     result = await operation.run_owner_operation(
         "example", SimpleNamespace(project="example-project"), resolver,

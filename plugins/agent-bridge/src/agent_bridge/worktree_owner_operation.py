@@ -57,6 +57,7 @@ def _retain(task: asyncio.Task[tuple[bytes, bytes]]) -> None:
 async def run_owner_operation(
     owner: str, config: Any, resolver: Any, args: list[str], *, timeout: float = 180,
 ) -> str:
+    """Keep launch ownership and the SSH profile's connection identity intact."""
     target = resolver.resolve(owner)
     if target.type == "local":
         prefix = _agent_worktrees_launch_prefix()
@@ -65,8 +66,7 @@ async def run_owner_operation(
         argv = [*prefix, "--project", config.project, *args]
     elif target.type == "ssh" and target.host:
         remote = owner_ssh_command(config.project, args, target.ssh_shell)
-        host = f"{target.user}@{target.host}" if target.user else target.host
-        argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-T", host, remote]
+        argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-T", target.host, remote]
     else:
         raise ValueError("worktree owner has no local or SSH operation transport")
     proc = await asyncio.create_subprocess_exec(
