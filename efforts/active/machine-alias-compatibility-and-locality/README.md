@@ -199,7 +199,7 @@ _(Agent-recommended integration details for the requested #7057 capability.)_
   report partial/error outcomes honestly and make repeated apply idempotent.
 - [x] Pass focused regressions, lint, install-contract and metadata/documentation
   gates; add the agent-worktrees changefile. The final source candidate passes
-  176 affected tests, including native synthetic public-CLI report proof.
+  179 affected tests, including native synthetic public-CLI report proof.
 - [ ] Land the source candidate through final-head review and required dev CI.
 - [ ] Transfer explicit one-time local application to the coordinator with the
   retained clean source and public CLI commands. No runtime deployment, service

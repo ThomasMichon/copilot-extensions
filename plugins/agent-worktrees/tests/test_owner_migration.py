@@ -67,6 +67,7 @@ def receiving(tmp_path, monkeypatch):
         completed_at="2026-01-02T00:00:00",
         head_session="session-one", sessions=[{"session_id": "session-one"}],
         paused=True, follow_up=True,
+        custom_note="Retain passive extension data",
     )
 
     def write(**changes):
@@ -160,6 +161,8 @@ def test_exact_canonical_labels_and_independent_execution_authority(receiving, c
     ("resources", [{"kind": "task", "ref": "task-one", "state": "active"}]),
     ("execution_leg", {"provider": "external"}),
     ("custom_ref", f"cref1:session:{OLD}:knowledge/child#session"),
+    ("owner_refs", [f"{NEW}/knowledge/parent"]),
+    ("resources", [{"kind": "pr", "ref": "example/project#1", "context": {"owner_machine": OLD}}]),
 ])
 def test_dependent_references_refuse_instead_of_partial_migration(receiving, capsys, field, value):
     root, _, _, _, _, _, _, write = receiving
@@ -180,6 +183,17 @@ def test_knowledge_only_store_inbound_reference_and_misplaced_record_are_fenced(
     before = snapshot(root)
     code, report = run(capsys, "--fix")
     assert code == 1 and "inbound reference in knowledge/dependent" in report["error"]
+    assert snapshot(root) == before
+
+
+def test_structured_peer_owner_reference_is_fenced(receiving, capsys):
+    root, _, _, _, _, _, directories, _ = receiving
+    (directories["knowledge"] / "structured.yaml").write_text(yaml.safe_dump({
+        "owner": {"machine": OLD, "project": PROJECT, "worktree_id": RECORD},
+    }), encoding="utf-8")
+    before = snapshot(root)
+    code, report = run(capsys, "--fix")
+    assert code == 1 and "inbound reference" in report["error"]
     assert snapshot(root) == before
 
 

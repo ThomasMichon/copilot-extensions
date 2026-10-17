@@ -59,7 +59,9 @@ execution-provider bindings are refused. Resource claims other than PR, issue,
 bug and effort references are refused, including released historical resources.
 Embedded historical qualified references and inbound references to either owner
 spelling are refused, including canonical claim refs and references in another
-project. Duplicate or misplaced copies of the selected record also refuse.
+project. Structured owner tuples and nested historical machine labels are
+fenced too; they are not treated as opaque harmless text. Duplicate or misplaced
+copies of the selected record also refuse.
 Nothing is relocated, pruned, settled, renamed or silently skipped.
 
 These refusals require a deliberate relationship/provider-owned migration, not

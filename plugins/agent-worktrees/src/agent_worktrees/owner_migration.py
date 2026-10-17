@@ -81,6 +81,13 @@ def _inventory(project: str) -> dict[Path, tuple[str, bytes, dict]]:
 
 def _references(value, prefix: str = ""):
     if isinstance(value, dict):
+        project = value.get("project", value.get("repo"))
+        if prefix and all(isinstance(item, str) and item for item in (
+            value.get("machine"), project, value.get("worktree_id"),
+        )):
+            yield prefix, tracking_claims.ClaimRef(
+                machine=value["machine"], project=project, worktree_id=value["worktree_id"],
+            )
         for key, item in value.items():
             yield from _references(item, f"{prefix}.{key}" if prefix else str(key))
     elif isinstance(value, list):
@@ -93,16 +100,40 @@ def _references(value, prefix: str = ""):
             yield prefix, parsed
 
 
+def _embedded_old_label(value, old: str, prefix: str = "") -> str | None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            location = f"{prefix}.{key}" if prefix else str(key)
+            if (
+                location != "machine" and isinstance(item, str)
+                and item.casefold() == old.casefold()
+                and (key == "machine" or str(key).endswith("_machine") or key == "owner")
+            ):
+                return location
+            found = _embedded_old_label(item, old, location)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            found = _embedded_old_label(item, old, f"{prefix}[{index}]")
+            if found:
+                return found
+    return None
+
+
 def _require_unlinked(data: dict, inventory, project: str, record_id: str, old: str, new: str) -> None:
     # These relationships have other durable owners, including provider/session
     # projections outside the scanned local tracking ledgers. Do not rewrite one
     # half of their protocol during a record-local identity repair.
     for field in (
-        "owner_ref", "pair_ref", "pair_id", "controllers", "caller_worktree",
+        "owner_ref", "owner_refs", "pair_ref", "pair_refs", "pair_id", "controllers", "caller_worktree",
         "dispatch_attempt", "execution_leg", "session_backend", "owner",
     ):
         if data.get(field):
             raise ValueError(f"dependent {field} requires its owning relationship migration; record-local repair refused")
+    embedded = _embedded_old_label(data, old)
+    if embedded:
+        raise ValueError(f"embedded historical machine identity at {embedded}; record-local repair refused")
     for field in ("resources", "last_finalize_released"):
         claims = data.get(field, [])
         if not isinstance(claims, list) or any(
