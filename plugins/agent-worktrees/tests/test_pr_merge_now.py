@@ -11,6 +11,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import agent_worktrees.__main__ as m
+import pytest
 from agent_worktrees import config as cfg
 from agent_worktrees import pr_config
 from agent_worktrees import pr_contract as pc
@@ -179,6 +180,34 @@ def test_normal_merge_unreadable_completion_never_claims_landed(monkeypatch, cap
     assert result["applied"] is True and result["merged"] is False
     assert result["completion_verified"] is False
     assert "completion unavailable" in result["error"]
+
+
+@pytest.mark.parametrize("expected_head", ["", "a" * 40])
+@pytest.mark.parametrize("confirmation", [
+    None, SimpleNamespace(head_sha="a" * 40),
+    prov.PullResult(number=7, merged=None),
+    prov.PullResult(number=7, merged=1),
+])
+def test_invalid_completion_shape_is_explicit_not_a_post_merge_crash(
+    monkeypatch, capsys, expected_head, confirmation,
+):
+    import json
+    from agent_worktrees import pr_cli
+
+    fake = _FakeProvider(live_head=expected_head)
+    fake.get_pull = lambda *args, **kwargs: (
+        confirmation if fake.calls else prov.PullResult(number=7, head_sha=expected_head)
+    )
+    _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head", lambda *args: expected_head)
+    assert m._pr_merge_now(
+        _args(json=True), _prcfg(), _self_merge_flow(), apply=True,
+        config=object() if expected_head else None,
+    ) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["applied"] is True and result["action"] == "merge-pending"
+    assert result["merged"] is False and result["completion_verified"] is False
+    assert "invalid lifecycle data" in result["error"]
 
 
 def test_normal_merge_completion_with_wrong_head_is_not_success(monkeypatch, capsys):
@@ -352,9 +381,6 @@ def test_now_passes_tracked_pushed_head_to_auto_merge_default_path(monkeypatch):
              delete_source_branch=True, expected_head_sha="just-pushed-sha")
     ]
     assert fake.calls == []  # no immediate direct merge
-
-
-import pytest  # noqa: E402
 
 
 @pytest.mark.parametrize(("adopted", "expected"), [("manually-pushed-sha", "manually-pushed-sha"),

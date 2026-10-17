@@ -119,6 +119,7 @@ def _pr_merge_now(
     from . import pr_contract as pc
     from .providers import (
         ProviderError,
+        PullResult,
         account_token_for_slug,
         actor_viewer_permission,
         get_provider,
@@ -446,15 +447,19 @@ def _pr_merge_now(
         return 1
 
     if getattr(provider, "name", "") == "github":
-        confirmation = None
+        merge_confirmed = False
         observation_error = ""
         try:
             confirmation = provider.get_pull(args.repo, args.pr, api_base=base, token=tok)
-            if expected_head_sha and confirmation.head_sha != expected_head_sha:
+            if not isinstance(confirmation, PullResult) or type(confirmation.merged) is not bool:
+                observation_error = "GitHub merge completion returned invalid lifecycle data"
+            elif expected_head_sha and confirmation.head_sha != expected_head_sha:
                 observation_error = "GitHub merge completion returned a different or unavailable head"
+            else:
+                merge_confirmed = confirmation.merged
         except (ProviderError, OSError, ValueError, AttributeError) as exc:
             observation_error = f"GitHub accepted the merge request but completion lookup failed: {exc}"
-        if observation_error or confirmation.merged is not True:
+        if observation_error or not merge_confirmed:
             rem = pc.pr_reminder(flow, "pr-watch", ok=not observation_error)
             message = observation_error or "GitHub accepted the merge request; completion is still pending"
             if args.json:

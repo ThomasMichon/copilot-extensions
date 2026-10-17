@@ -178,6 +178,24 @@ def test_two_phase_preparation_is_not_readiness_before_publication(case):
     assert breadcrumb.read_breadcrumb(root) is None
 
 
+def test_two_phase_adoption_keeps_only_allowlisted_diagnostics(case):
+    request, orch = two_phase(case)
+    snapshot = request.capture_runtime(request.expected_active)
+
+    def adopt(endpoint):
+        response = snapshot.adopt_successor(endpoint)
+        return {**response, "private_settings": "fixture-private-adoption-secret"}
+
+    captured = replace(snapshot, adopt_successor=adopt)
+    result = orch.run(
+        conditional=replace(request, capture_runtime=lambda _: captured), health_timeout=0,
+    )
+    assert result.ok and result.retirement_confirmed
+    assert "successor resource adoption confirmed" in result.steps
+    assert "fixture-private-adoption-secret" not in repr(result.to_dict())
+    assert "private_settings" not in repr(result.to_dict())
+
+
 @pytest.mark.parametrize("field,value", [
     ("pid", 303), ("pid", True), ("process_start_time", "999"),
     ("version", "other"), ("config_identity", "other"),
