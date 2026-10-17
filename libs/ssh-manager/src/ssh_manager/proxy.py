@@ -38,7 +38,7 @@ from .process import (
 
 log = logging.getLogger("ssh-manager.proxy")
 _DRAIN_TIMEOUT = 2.0
-_WINDOWS_FD_STATE = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
+_WINDOWS_FD_STATE = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE".casefold()
 
 
 def _is_windows() -> bool:
@@ -377,7 +377,7 @@ async def create_ssh_subprocess(
         kwargs["env"] = {
             key: value
             for key, value in (os.environ if environment is None else environment).items()
-            if key.casefold() != _WINDOWS_FD_STATE.casefold()
+            if key.casefold() != _WINDOWS_FD_STATE
         }
     proxy = getattr(config, "proxy_command", None)
     if not proxy and isinstance(config, SSHConfig):
