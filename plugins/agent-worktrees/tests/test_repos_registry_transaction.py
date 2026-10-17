@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import subprocess
 import sys
 import threading
@@ -38,6 +39,31 @@ def test_writer_refreshes_own_baseline(registry_home):
         registry.account_map["example"] = value
         repos.write_registry(registry)
     assert repos.read_registry().account_map["example"] == "second"
+
+
+def test_registry_writes_preserve_publication_authority_guard(registry_home, monkeypatch):
+    from agent_worktrees import pr_authority, tracking
+
+    entered = []
+    original = tracking._atomic_write
+
+    @contextmanager
+    def guard():
+        entered.append(True)
+        try:
+            yield
+        finally:
+            entered.pop()
+
+    def checked_write(path, content):
+        assert entered
+        return original(path, content)
+
+    monkeypatch.setattr(pr_authority, "guard", guard)
+    monkeypatch.setattr(tracking, "_atomic_write", checked_write)
+    repos.set_account_map("example", "guarded")
+    assert not entered
+    assert repos.read_registry().account_map["example"] == "guarded"
 
 
 def test_unread_or_invalid_registry_cannot_replace_existing(registry_home):
