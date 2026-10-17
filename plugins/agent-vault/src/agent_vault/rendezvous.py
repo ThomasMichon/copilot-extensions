@@ -359,7 +359,7 @@ def _endpoint_lock(runtime_dir: Path | str) -> Iterator[None]:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except OSError as exc:
-                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK, errno.EINTR):
                     raise
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -426,8 +426,11 @@ def clear_endpoint(runtime_dir: Path | str, *, owner_pid: int | None = None) -> 
     path = endpoint_file(runtime_dir)
     if not path.parent.exists():
         return
+    acquired = False
+    removed = False
     try:
         with _endpoint_lock(runtime_dir):
+            acquired = True
             record = read_endpoint(runtime_dir)
             pid = owner_pid if owner_pid is not None else os.getpid()
             if record is not None and record.pid is not None and record.pid != pid:
@@ -436,8 +439,14 @@ def clear_endpoint(runtime_dir: Path | str, *, owner_pid: int | None = None) -> 
             if record is not None and record.pid is not None and record.pid != pid:
                 return
             path.unlink(missing_ok=True)
-    except OSError:
-        _LOG.warning("Endpoint cleanup failed for %s", path, exc_info=True)
+            removed = True
+    except OSError as exc:
+        if not acquired and isinstance(exc, TimeoutError):
+            _LOG.warning("Endpoint cleanup skipped: mutation lock timed out for %s", path)
+        elif removed:
+            _LOG.warning("Endpoint removed but mutation lock release failed for %s", path, exc_info=True)
+        else:
+            _LOG.warning("Endpoint cleanup failed for %s", path, exc_info=True)
 
 
 def read_endpoint(runtime_dir: Path | str) -> Endpoint | None:
