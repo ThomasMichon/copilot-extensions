@@ -25,9 +25,8 @@ def retirement_blocker(record: WorktreeRecord) -> RetirementBlocker | None:
         )
     held = [claim for claim in record.resources if claim.is_live or claim.is_unsettled]
     if held:
-        refs = ", ".join(f"{claim.kind}:{claim.ref}" for claim in held)
         return RetirementBlocker(
-            "held-claims", f"{len(held)} held resource claim(s) pending: {refs}"
+            "held-claims", f"{len(held)} held resource claim(s) pending; inspect claims"
         )
     return None
 

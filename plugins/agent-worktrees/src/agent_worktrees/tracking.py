@@ -3259,8 +3259,8 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
 
     Returns ``True`` once the record is durably retired (tombstoned or
     deleted, or found already retired by a concurrent call); ``False`` if
-    deferred by a contended lock -- callers treat that as "retry on a later
-    reap pass," not a failure. Raises ``ValueError`` for unsettled responsibility.
+    deferred by a contended lock or changed pair -- callers retry on a later
+    reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
     from .retirement_safety import require_retirable, retirement_blocker
 
@@ -3293,9 +3293,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
             latest = load_record(path)
             require_retirable(latest)
             if latest.pair_ref != record.pair_ref or latest.is_paired != record.is_paired:
-                raise ValueError(
-                    f"Cannot retire {record.worktree_id}: paired ownership changed; retry"
-                )
+                return False
             record = latest
 
             hard_delete_sibling = False
@@ -3305,8 +3303,11 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     sibling = find_paired_record(record)
                 except Exception:
                     sibling = None
-                if (sibling is not None and sibling.reaped_at
-                        and retirement_blocker(sibling) is None):
+                if (
+                    sibling is not None
+                    and sibling.reaped_at
+                    and retirement_blocker(sibling) is None
+                ):
                     hard_delete_sibling = True
 
             if hard_delete_sibling:
