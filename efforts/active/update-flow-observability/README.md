@@ -225,6 +225,27 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-16 - Honor an explicitly disabled composed-status switch
+
+- Review of #7119 found that the new PowerShell opt-in precondition tested
+  parameter presence rather than its switch value. Explicitly splatting
+  `WithContextValidation = $false` therefore rejected ordinary status
+  without expected-context arguments and rejected unrelated actions.
+- A real native regression first reproduced all four failures: ordinary
+  status and source identity, each on Windows PowerShell 5.1 and
+  PowerShell 7. The precondition now tests the switch value, matching the
+  existing execution branch. All eleven vendored runners are synchronized.
+- The complete native bootstrap file plus enabled composed-status and
+  changed-receipt consumer regressions passed 18 cases in 77.49 seconds.
+  Disabled calls emit the same parsed JSON as omission; enabled calls still
+  require the explicit action/expectations and independently revalidate
+  changed receipts. Original item, process and aggregate bounds remain.
+- This PowerShell-only repair changes no Bash/Python runner or production
+  installation. Native Windows entrypoint tests cover the changed contract;
+  full fresh-machine construction and live rollout remain outside this
+  source slice while the existing release and deployment holds apply.
+  Current-head hosted review and CI must clear after publication.
+
 ### 2026-10-16 - Keep the lifecycle capability source plugin-independent
 
 - Review of #7119 identified a real source-ownership coupling: generic

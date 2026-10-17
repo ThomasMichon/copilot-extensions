@@ -83,7 +83,8 @@ the earlier validated receipt or skip any file, identity, policy, or ownership
 checks. This lets a native caller retain separate status/generation comparisons
 without starting a second interpreter and recompiling its native helpers.
 Ordinary status JSON is unchanged; legacy and blocked statuses do not include
-a validation result. The option is refused on other actions.
+a validation result. The enabled option is refused on other actions;
+an explicitly false switch, including a splatted value, behaves as omitted.
 
 The Worktrees Windows dispatcher invokes this runner in a child script scope
 of its existing host. Every invocation resets receipt-validation state and

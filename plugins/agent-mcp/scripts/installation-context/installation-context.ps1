@@ -6389,7 +6389,7 @@ try {
         'status',
         'probe-legacy'
     ) 'Action'
-    if ($PSBoundParameters.ContainsKey('WithContextValidation')) {
+    if ($WithContextValidation) {
         if ($Action -cne 'status') {
             Fail '-WithContextValidation is valid only for status.'
         }

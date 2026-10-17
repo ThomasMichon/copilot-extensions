@@ -1,5 +1,6 @@
 """Cold native-type bootstrap stays bounded and safe to re-enter."""
 
+import json
 import os
 from pathlib import Path
 import re
@@ -150,3 +151,44 @@ def test_composed_status_requires_explicit_expectations_and_action(host, action,
     assert result.returncode == 1
     assert not result.stdout.strip()
     assert message in result.stderr
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
+@pytest.mark.parametrize("action", ["source-id", "status"])
+def test_false_composed_status_switch_preserves_unselected_action(tmp_path, host, action):
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    harness = tmp_path / "false-switch.ps1"
+    harness.write_text(
+        r"""
+param([string]$Source, [string]$Root, [string]$Action)
+$ErrorActionPreference = 'Stop'
+$parameters = @{
+    Action = $Action
+    SourceJson = '{"source":"github","repo":"example/marketplace"}'
+    MarketplaceKey = 'example'
+    PluginId = 'agent-example'
+    PayloadRoot = $Root
+    CopilotHome = Join-Path $Root 'copilot'
+    DurableHome = Join-Path $Root 'durable'
+    LegacyRoot = Join-Path $Root 'legacy'
+}
+$baseline = & $Source @parameters | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Unselected action failed' }
+$parameters.WithContextValidation = $false
+$disabled = & $Source @parameters | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Explicit false switch changed the action' }
+@{ baseline = $baseline; disabled = $disabled } | ConvertTo-Json -Depth 100 -Compress
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(harness),
+         "-Source", str(SCRIPT), "-Root", str(tmp_path), "-Action", action],
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    value = json.loads(result.stdout)
+    assert value["disabled"] == value["baseline"]
+    assert "contextValidation" not in value["disabled"]
