@@ -55,3 +55,11 @@ Compatible monthly usage adds a labeled
 [cycle-average projection and advice-only pacing](docs/provider-pacing.md).
 Provider-observed entitlement acquisition and requesting-account proof remain
 later slices.
+
+Credential-free fresh-machine validation is available through the
+[`budget-guidance-solo` clean-room scenario](../../tools/clean-room/scenarios/budget-guidance-solo/manifest.json).
+It installs only inside a disposable container from a read-only candidate
+checkout, proves first-use provisioning without the original source copy,
+checks installed source/version identity and offline posture, and runs the
+isolated extension fixture. It never starts a live Copilot session, borrows
+account credentials, or authorizes host rollout.

@@ -177,6 +177,25 @@ manifest's `auth.copilot: none` prevents host-token lookup or injection.
 The report records the actual source commit and runtime generation; a
 successful preparation or installer exit alone is not the acceptance result.
 
+### Credential-free budget-guidance snapshot
+
+The Tier-P/F1 `budget-guidance-solo` scenario requires no Copilot or forge
+authentication. From the candidate repository root:
+
+```bash
+bash tools/clean-room/run.sh --scenario budget-guidance-solo \
+  --harness-mount "$PWD" --name-suffix budget-candidate --then down run
+```
+
+Use a unique suffix when another run may be active. The candidate is mounted
+read-only and copied into disposable container storage. The scenario stamps
+the payload, removes only that container-local original source copy, proves
+first-use installation, checks installed identity/static/unavailable posture,
+and exercises the installed snapshot's extension with candidate-owned fake-SDK
+fixtures (tests are intentionally not installed). It does not create
+a live Copilot session, acquire account data, or update a host runtime.
+Its Bash proof does not replace native Windows acceptance.
+
 ### Windows arm — `run.ps1 -Os windows`
 
 The runner has a **Windows counterpart** that harmonizes the clean-room across

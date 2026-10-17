@@ -75,7 +75,7 @@ or prove the billing account of an arbitrary third-party provider.
   plugin entry, and canonical host integration reference.
 - [x] Cover old and new SDK shapes, failures, session/account changes, bounds,
   and late results with isolated tests.
-- [ ] Publish the implementation through current-head review and required CI.
+- [x] Publish the implementation through current-head review and required CI.
 - [x] Leave live enablement, quota/reset verification, release, and rollout
   gated on their own explicit authorization and capabilities.
 
@@ -125,4 +125,8 @@ adoption state. The adapter does not change instruction adoption or installed
 payloads; the cross-version reconciliation objective remains tracked in
 [#6092](https://github.com/ThomasMichon/copilot-extensions/issues/6092),
 separate from the plugin's source scan.
-Publication/review remains pending below until this implementation PR merges.
+Implementation merged through
+[#7065](https://github.com/ThomasMichon/copilot-extensions/pull/7065) as
+`6ba614b9be86639011519d0fdecc4fdd4ce2dff1`, after actual current-head
+approval and all three named managed checks. Live enablement, quota/raw-reset
+qualification, release, and authorized rollout remain outside this receipt.

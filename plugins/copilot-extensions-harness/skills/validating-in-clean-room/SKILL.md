@@ -202,6 +202,7 @@ Under `tools/clean-room/scenarios/` today:
 | Scenario | Tier/family | Purpose |
 |----------|-------------|---------|
 | `generic-single-plugin` | reference | Configurable install → bootstrap → binstub → plugin-load → register check. |
+| `budget-guidance-solo` | P/F1 | Credential-free local snapshot: stamp, remove the original copy, first-use provision, installed source/version and offline posture, plus the installed extension's fake-SDK fixture. No live Copilot session or host rollout. |
 | `agent-worktrees-solo` | P/F1 | Worktree base stands up solo and round-trips `register` → `create` → `finalize`. |
 | `agent-bridge-solo` | P/F1 | agent-bridge provisions and read verbs answer without an agent-worktrees base. |
 | `agent-codespaces-solo` | P/F1 | agent-codespaces read verbs degrade safely without an agent-worktrees base. |

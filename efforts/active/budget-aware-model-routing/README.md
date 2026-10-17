@@ -168,9 +168,13 @@ timestamp is not proof that the provider metadata was refreshed.
   adapters, empty provider reports, reset boundaries, config precedence,
   injection size, and routing composition.
 - [ ] Validate Bash and PowerShell paths plus clean-room installation when
-  practical.
+  practical. The credential-free `budget-guidance-solo` Bash scenario now
+  passes fresh install, first-use provisioning, installed identity/offline
+  posture, and the installed extension fixture; native Windows evidence is
+  not inferred from that Linux proof.
 - [ ] Keep marketplace, manifest, package, and runtime versions aligned.
-- [ ] Publish through the repository's normal review and self-merge flow.
+- [x] Publish the implemented slices through the repository's normal review
+  and self-merge flow, through #7065. Release/adoption remain separate gates.
 - [ ] Deploy through the unified update path and verify source/runtime identity.
 
 ### Phase 6 - Agent-owned quota helper and pacing advice
@@ -200,11 +204,11 @@ timestamp is not proof that the provider metadata was refreshed.
 
 ### Phase 6a - Credential-free host integration
 
-- [ ] Review and implement the bounded
+- [x] Review and implement the bounded
   [foreground-session integration contract](host-integration.md), including its
   isolated validation plan, without creating a new client or accessing
   credential-bearing internal APIs.
-- [ ] Preserve unsupported raw-reset and live-host evidence explicitly; this
+- [x] Preserve unsupported raw-reset and live-host evidence explicitly; this
   implementation slice does not authorize extension reload, runtime update,
   account switching, deployment, or service restart.
 
@@ -280,6 +284,44 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-16 - Credential-free isolated installation proof
+
+- Added the Tier-P/F1 `budget-guidance-solo` scenario using the established
+  no-auth local-snapshot pattern. The candidate mounts read-only; only the
+  budget payload and its local process utility are copied into a fresh
+  disposable machine.
+- All five phases pass: clean environment, self-contained stamp with no early
+  runtime, first-use provision after deleting the container-local original,
+  installed source/version and static/unavailable posture, and the installed
+  extension's isolated fake-SDK contract.
+- The initial scenario incorrectly expected tests inside the installed
+  snapshot. That phase failed visibly; the corrected scenario supplies
+  candidate-owned test fixtures while taking production extension files from
+  the actual snapshot. The installer was not changed to ship tests.
+- The owned container was removed with verified bounded-run cleanup. No host
+  credential was borrowed, live session created, or host runtime updated.
+  This is a Linux installation proof, not native Windows acceptance, live
+  account qualification, release, or rollout. The scenario is ready for
+  normal source review; the effort remains Active.
+
+### 2026-10-16 - Foreground-session integration merged
+
+- PR #7065 merged as `6ba614b9be86639011519d0fdecc4fdd4ce2dff1`
+  after actual current-head approval and all three named managed merge checks,
+  including the aggregate PR gate. No review, CI, or branch-policy bypass was
+  used. The canonical Plan and Validation Plan were re-read after merge.
+- The final focused bridge covers fourteen Node contracts and three Python
+  cases, including actual entry capture, provider compatibility, and explicit
+  rejection of incompatible quantity/observation forms. The earlier isolated
+  core suite passed 443 cases with eighteen explicit platform/environment
+  skips; the fixture runs separately where Node is present.
+- Phase 6a is implemented, not live-qualified. The host API and raw-reset
+  capability limits remain explicit; no extension reload, runtime update,
+  account switch, provider account read, or service change was performed.
+- Next is the remaining practical isolated-install validation gate. Raw-reset
+  acquisition, live requesting-account proof, release, and authorized rollout
+  stay open. Native Windows session-cue acceptance remains transferred to #6644.
 
 ### 2026-10-16 - Provider observation contract alignment
 
