@@ -1,0 +1,29 @@
+{
+  "name": "context-handoff-native-cli",
+  "tier": "E",
+  "family": "F1",
+  "image": "base",
+  "auth": {"copilot": "required", "gh": "none"},
+  "starting_state": {
+    "setup": "scenario.sh",
+    "installed_plugins": ["context-handoff"],
+    "notes": "Released payload, fresh synthetic repository and complete corpus, root-owned read-only seed capsule outside the driven workspace captured before launch, default thresholds and native setting enabled. No bridge, queue or worktree manager."
+  },
+  "prompt": "Read the synthetic task and execute its bounded native continuity witness under literal mode.",
+  "expected_outcome": {
+    "steps": [
+      "Discover an actually offered CLI model and measure a prompt limit materially below 922000.",
+      "Use the released context-handoff native checkpoint flow with the actual offered schemas.",
+      "Compare task, guidance, contract, ledger, config and original corpus to the setup-owned seed baseline; agent-mutated post-run files are never authoritative expectations.",
+      "Execute exactly two native new_context transitions under synthetic pressure without lowering policy caps.",
+      "Recover objective, parent gate, current slice, unresolved requests, decisions, live references, exactly one next action and durable guidance in each window.",
+      "Semantically refresh actual AGENTS content and the owning targeted skill before substantive task work; valid view/bash reads and combined sequential prerequisite reads are permitted.",
+      "Evidence native context measurement in each recovered window without an artificial exact tool position/count; execute the recorded atomic task action with correct content/path.",
+      "Retain session and workspace identity without custom transfer, duplicate clear or mutating-tool denial."
+    ],
+    "acceptance_contract": "semantic-content-refresh-before-task",
+    "false_pass_if": "ACP-only, mocked continuation, model fallback, improvised repair, lowered caps, missing/altered seed baseline or reliance on mutable post-run expectations, missing identity/checkpoint evidence, failed/skipped/bogus refresh, task work before refresh, abbreviated native measurements, conflicting or wrong-kind counters, missing recovered-window measurement, or a confirmed transition count other than two.",
+    "affirmative_ready": "A judge reviews the captured real CLI events, checkpoint contents, pressure measurements and literal-mode transcript; setup passes are not a Tier-E verdict."
+  },
+  "runs": {"count": 1, "aggregate": "unanimous", "per_turn_timeout_s": 1200}
+}

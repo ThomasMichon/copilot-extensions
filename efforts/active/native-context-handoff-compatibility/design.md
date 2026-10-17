@@ -4,6 +4,13 @@ Parent plan: [README.md](README.md).
 
 **Status:** proposed implementation contract.
 
+**Evidence status:** all four bounded real-CLI packets have final independent
+FAIL verdicts. Native rollover mechanics and first semantic recovery are proved;
+end-to-end checkpoint fidelity and the remaining acceptance matrix are not.
+Worker-authored invalid checkpoint content is not evidence of a native
+plugin/storage defect. See the parent effort's final evidence table and
+publication-preparation summary for the coherent tranche.
+
 ## Selection is not execution
 
 The operator requests native-compatible behavior when context management is
@@ -187,3 +194,126 @@ ordering. Prefer native agent/runtime scheduling initially.
 - Removing the plugin or explicit handoff.
 - Automatic subagent opt-in, policy bypass, or unrequested live session reset.
 - A custom second checkpoint store or cross-agent adoption of private artifacts.
+
+## Bounded live CLI observations (2026-10-11)
+
+The generic `context-handoff-native-cli` clean-room scenario captured a real
+interactive CLI 1.0.92 witness using released context-handoff 0.5.12-dev1 and
+actually offered `claude-sonnet-5`. The native tool measured a 200000-token
+prompt limit. Two terminal `new_context` calls produced two root clears and
+three successive native windows under unchanged root session, workspace and
+artifact memory scope. Native artifact results expose revision, source window
+and history-position binding; rollover requires no guessed clear API.
+Both resumed windows read the checkpoint and refreshed AGENTS/skill guidance.
+
+The independent judge returned FAIL on literal acceptance: compound/stale
+checkpoint next-action phrasing, revision-2 cursor offset, incomplete witness
+fields and missing second content read-back. Initial creation without an
+explicit expected revision was accepted by the host and is not a demonstrated
+violation; expected revision is required for replacement.
+The second checkpoint update supplied expected revision 1; the later final
+update supplied revision 2. Host-generated thread hints helped avoid repeating
+the already-completed first clear; that must not conceal a checkpoint defect.
+
+The witness rolled at approximately 65.5% and 63.4% measured prompt utilization
+without lowering caps or thresholds. No custom handoff tool or failed tool
+result occurred, and the plugin's final usage sidecar returned to 20% in the
+same root session. Correction: raw `session.warning` events contain native
+preparation notifications at 64% and 55%; the first analyzer excluded warnings.
+Agent-facing idle nudge delivery remains distinct, and absence of custom calls
+cannot establish actual force-threshold suppression.
+Hard/force, denied/capped/filtered/unsupported cases, partial persistence,
+stale-revision rejection, actual live-resource survival, ACP/subagent isolation
+and operator-host deployment remain separate unaccepted gates.
+
+### Narrower fixture responsibility
+
+Released guidance already orders post-rollover checkpoint read, durable refresh
+and execution of exactly one next action. The first fixture blurred that action
+with the pre-transition rollover procedure and did not concretely validate its
+synthetic audit cursor/report. The narrower rerun retains unmodified released
+guidance/runtime. A synthetic task contract defines atomic audit read/report
+actions and required factual fields; a read-only fixture validator rejects stale
+or compound actions and incorrect offsets. The fixture authors no checkpoint,
+invokes no native tools, and supplies no counterfeit plugin guidance.
+Both boundary contents must be read back through actual session_artifacts before
+the agent validates them; first-obstacle STOP still prohibits witness self-repair.
+No plugin runtime defect requiring a candidate patch was established.
+
+The fresh released-payload rerun produced two native clears with both boundary
+contents read back before clearing, structurally atomic successor actions,
+validated cursor offsets and complete witness measurements/identity. Corrected
+warning extraction captured native preparation notifications in both windows.
+The packet's final independent verdict is FAIL: AGENTS was not explicitly reread
+in either recovery window and the targeted skill was refreshed only in the first. These omissions
+remain visible evidence, not a repaired witness or accepted refresh contract.
+
+The second independent judge subsequently returned FAIL for those missing
+refreshes, missing second recovered-window measurement and first measurement
+after task execution. A single authorized final adherence attempt preserves
+the same released plugin and unchanged strict requirements. It exposes the
+already-required recovery checklist in the task prompt and a separate checkpoint
+`recovery_prerequisites` field, never inside the atomic next task action.
+Read-only event validation requires successful sequential checkpoint read,
+AGENTS refresh, owning-skill refresh, native measurement and exact task action;
+omission, wrong order or overlap fails explicitly. No plugin patch or runtime
+defect is inferred from an agent's failure to follow the stated sequence.
+
+The final attempt reached one genuine native rollover, then stopped on a
+recovery-order violation. Despite carrying the explicit prerequisites separately
+from the atomic next action, the recovered agent combined AGENTS/task/contract/
+ledger reads in a bash call instead of the ordered isolated AGENTS view and
+omitted the subsequent skill/measurement/action. It recognized the violation
+and did not self-repair. Deterministic event validation returned failure;
+two-transition adherence remains unaccepted. The packet's final independent
+verdict is FAIL; its exact isolated-view/five-tool fixture exceeded the released
+semantic guidance contract. The combined bash guidance read was successful and
+sequential, not parallel. Missing skill/task/second-transition/report gates still
+prevented acceptance. Both earlier FAIL packets remain unchanged; this result
+does not establish a plugin defect or license another attempt.
+
+### Prospective semantic acceptance selection (2026-10-12)
+
+The operator subsequently selected semantic recovery for a separately authorized
+fresh run. Native guidance does not prescribe isolated view calls or exactly five
+tools. A successful, attributable read of the actual durable guidance content
+and owning targeted-skill refresh must precede substantive task work; combined
+sequential prerequisite reads and task-contract recovery reads are valid.
+Actual native measurement must evidence each recovered window, with no artificial
+position/count. The single recorded successor TASK action stays separate from
+recovery prerequisites and rollover. Checkpoint read-back/revision/owner binding,
+parent gate, unresolved requests, settled decisions, live references and complete
+literal witness output remain required. Prior FAIL packets are not regraded.
+
+The new evidence validator verifies returned content against fixture bytes and
+actual proper-path read operands, successful owning-skill delivery, measurement
+window identity and refresh-before-work timing. Mentioned filenames, failed reads,
+bogus content or unverified success labels are not proof. Validators reject
+defects without repairing the driven agent. No runtime defect or patch is inferred
+from this explicit acceptance-scope change.
+
+The semantic run produced two real same-owner clears. Its first recovered
+window evidences actual guidance content, owning skill refresh before task work
+and native measurement without exact tool choreography. The second boundary,
+however, had malformed business checkpoint data and a skipped pre-clear
+validation; the agent found the defects after clearing and stopped without a
+witness, targeted-skill refresh or native measurement in that final window.
+The semantic packet's final independent verdict is FAIL; acceptance is not
+inferred from two clears alone. Native RPC success is distinguished from a contained shell
+command's nonzero exit; the read-only evidence validator rejects both failed
+refresh and missing recovery gates. No plugin/runtime patch was justified.
+
+### Evidence publication boundary (2026-10-12)
+
+The coherent tranche consists of the generic opt-in CLI scenario, source tests
+and canonical effort/design evidence corrections. It publishes neither a
+passing native acceptance claim nor raw machine-local transcripts. All four
+judge verdicts and original contracts remain intact; the prospective semantic
+selection did not retroactively regrade earlier failures. Hard/force, denial/
+fallback/adverse recovery, ACP/subagent, real live-resource and native deployed
+acceptance remain open. Separately completed worktree-manager rollout/admission
+does not substitute for those gates. This evidence/tooling tranche includes
+executable scenario setup, controller, validators, permission/cleanup probe and
+tests alongside documentation. It changes no plugin runtime, payload, installed
+host configuration or vision intent and runs no new paid trial. Managed
+publication/review/merge remains coordinator-owned.
