@@ -25,13 +25,20 @@ def _after_fork_parent() -> None:
 
 def _after_fork() -> None:
     global _guard, _holders
+    first_error: OSError | None = None
     try:
         for holder in _holders.values():
             if holder._file is not None:
-                holder._file.close()
+                try:
+                    holder._file.close()
+                except OSError as error:
+                    if first_error is None:
+                        first_error = error
     finally:
         _guard = threading.Lock()
         _holders = {}
+    if first_error is not None:
+        raise first_error
 
 
 if hasattr(os, "register_at_fork"):

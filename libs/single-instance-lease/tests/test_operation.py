@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 from agent_procutil import direct_python, no_window_kwargs
@@ -237,7 +239,8 @@ def test_inherited_reference_cannot_release_parent(tmp_path):
 
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="native fork unavailable")
-def test_live_forked_child_does_not_retain_released_parent_custody(tmp_path):
+@pytest.mark.parametrize("close_error", [False, True])
+def test_live_forked_child_does_not_retain_released_parent_custody(tmp_path, close_error):
     import select
     import signal
 
@@ -246,6 +249,16 @@ def test_live_forked_child_does_not_retain_released_parent_custody(tmp_path):
     stop_read, stop_write = os.pipe()
     custody = OperationLock(path)
     custody.acquire()
+    peer_path = tmp_path / "peer.lock"
+    peer = OperationLock(peer_path)
+    peer.acquire()
+    original_file = custody._file
+    if close_error:
+        class CloseFailure:
+            def close(self):
+                original_file.close()
+                raise OSError(errno.EBADF, "injected close failure")
+        custody._file = CloseFailure()
     pid = os.fork()
     if pid == 0:
         os.close(ready_read)
@@ -258,6 +271,7 @@ def test_live_forked_child_does_not_retain_released_parent_custody(tmp_path):
             os._exit(0)
         except BaseException:
             os._exit(3)
+    custody._file = original_file
     os.close(ready_write)
     os.close(stop_read)
     child_status = None
@@ -265,14 +279,18 @@ def test_live_forked_child_does_not_retain_released_parent_custody(tmp_path):
         assert select.select([ready_read], [], [], 5)[0]
         assert os.read(ready_read, 5) == b"ready"
         custody.release()
+        peer.release()
         with OperationLock(path) as successor:
             successor.assert_owned()
+        with OperationLock(peer_path) as next_peer:
+            next_peer.assert_owned()
         reaped, status = os.waitpid(pid, os.WNOHANG)
         if reaped:
             child_status = status
         assert reaped == 0, "forked child must still be alive"
     finally:
         custody.release()
+        peer.release()
         try:
             os.write(stop_write, b"x")
         except BrokenPipeError:
@@ -290,3 +308,26 @@ def test_live_forked_child_does_not_retain_released_parent_custody(tmp_path):
             os.kill(pid, signal.SIGKILL)
             _, child_status = os.waitpid(pid, 0)
         assert os.waitstatus_to_exitcode(child_status) == 0
+
+
+def test_fork_cleanup_closes_all_handles_before_reporting_error(tmp_path, monkeypatch):
+    failure = OSError(errno.EBADF, "injected close failure")
+    with (tmp_path / "first").open("w+b") as first, (tmp_path / "second").open("w+b") as second:
+        class CloseFailure:
+            def close(self):
+                first.close()
+                raise failure
+        guard = threading.Lock()
+        guard.acquire()
+        monkeypatch.setattr(operation, "_guard", guard)
+        monkeypatch.setattr(operation, "_holders", {
+            (0, 0, 1): SimpleNamespace(_file=CloseFailure()),
+            (0, 0, 2): SimpleNamespace(_file=second),
+        })
+        with pytest.raises(OSError) as caught:
+            operation._after_fork()
+        assert caught.value is failure
+        assert first.closed and second.closed
+        assert operation._holders == {}
+        assert operation._guard.acquire(blocking=False)
+        operation._guard.release()

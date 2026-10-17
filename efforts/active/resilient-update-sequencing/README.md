@@ -1066,3 +1066,25 @@ achieved by rearranging today's combined installer invocations.
   Existing native budget and running-state obligations remain open. The
   preceding exact-head Copilot review reported no open issues, but the next
   source head still owes its own review and CI.
+
+### 2026-10-16 - Fork cleanup error isolation
+- The subsequent exact-head review's full agentic lane did not start before
+  its runner deadline. Its fallback raised two portability findings and one
+  fork-cleanup finding; none was treated as passing merely because the verdict
+  was a Comment.
+- Both portability findings assume `stat.FILE_ATTRIBUTE_REPARSE_POINT` is
+  absent on POSIX. The supported CPython standard library defines it
+  unconditionally, including Python 3.10; native hosted POSIX custody and
+  preservation tests also execute that expression. Replied with that source
+  and execution evidence rather than silently disabling the reparse mask.
+- A native close error could stop the child callback before it processed other
+  inherited descriptors. Cleanup now attempts every descriptor, resets the
+  child registry/guard and only then reports the first native error through
+  Python's unraisable fork-callback path. Errors are not silently suppressed.
+  The standalone source copy is regenerated from the canonical library.
+- A portable injected-close regression verifies later handles close, registry
+  and guard reset, and original error identity. The real live-child fork
+  regression now covers two independent held locks, with and without an
+  injected error. Native Windows focused coverage passes six cases with four
+  POSIX skips; hosted POSIX must execute the faulted fork case before merge.
+  Required current-head CI/review and the parent running-state gate remain open.

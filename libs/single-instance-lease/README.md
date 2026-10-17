@@ -34,6 +34,9 @@ losing concurrent attempt on one instance cannot clear its successful owner.
 Fork preparation serializes descriptor setup/close; the child closes inherited
 operation descriptors without issuing an unlock against the parent's open-file
 description. Inherited operation objects remain invalid for the child's execution.
+If a native close reports an error, the child still processes every remaining
+descriptor and resets its local registry before reporting the first error through
+Python's unraisable-exception handling for fork callbacks.
 
 The lock file is never removed and no PID or age is used to reclaim it.
 Closing the descriptor releases custody; a process crash does the same through
