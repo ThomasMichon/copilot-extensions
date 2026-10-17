@@ -116,6 +116,11 @@ single-owner bounds, not per-principal fairness or pre-verification rate limits.
 Expiry cleanup scans these bounded maps under the owner lock, deleting expired
 entries in place rather than allocating replacement maps of all live handles.
 It is still a bounded linear scan, not an expiry-index or throughput guarantee.
+Effective read branches reuse the request/enrollment's canonical immutable tuple;
+field subset checks avoid temporary sets without joining branches.
+The fresh-process integration regression uses only production modules with
+synthetic signed credentials and a real SQLite store, proving separate views
+and refusal before foreign-row retrieval without importing test helpers.
 The verifier's independent nonce/replay fence remains required. Multi-owner
 shared-epoch service admission, enrollment persistence, provider outcomes,
 publication grants, delegation and resident integration are not implemented.

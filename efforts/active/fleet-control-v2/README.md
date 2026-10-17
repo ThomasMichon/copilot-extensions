@@ -1725,3 +1725,28 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Current-head hosted checks and fresh review remain independent merge
   gates. The full parent effort remains Active; no live enrollment,
   deployment, provider-adapter adoption or worktree finalization is claimed.
+
+### 2026-10-17 - Canonical admission branches and independent consumer regression
+
+- Addressed the next three #7099 review findings: bounded tuple membership
+  avoids rebuilding field sets, effective resources reuse already-canonical
+  immutable branches, and the fresh-process consumer constructs its own
+  synthetic credentials, enrollment and updates using production modules only.
+  No test module is on its explicit import path or loaded by the child.
+- Added subset and canonical-branch reuse regressions for both explicit and
+  enrollment-default reads, including execution-time revalidation. The existing
+  separate-process real verifier/SQLite case still proves isolated principal
+  views and denial before foreign-row lookup.
+- Validation: the unchanged required planner selector passes 422 cases
+  (456 deselected) in 21.87 seconds under its 120-second limit after the
+  canonical runner rebuilds the changed package. The initial run without that
+  rebuild reported two new tuple-identity assertion failures against the
+  prior installed package; neither assertions nor limits were weakened.
+  Touched Python passes F/E9 lint.
+- This is a below-altitude refinement of the reviewed admission slice, not a
+  new serving adapter. Unit and lightweight real-process consumer coverage
+  were exercised. Installer clean-room and live external-venue validation
+  were not run: no provisioning/deployment behavior changes, and no live
+  provider/enrollment/serving adoption is authorized in this slice. Fresh
+  current-head review and required hosted checks remain merge gates; every
+  remaining parent Plan/Validation obligation stays open.

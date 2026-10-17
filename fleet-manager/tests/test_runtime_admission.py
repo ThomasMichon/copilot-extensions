@@ -137,6 +137,29 @@ def test_empty_omitted_narrowed_and_foreign_fleet_filters(harness):
     refuses("forbidden-scope", harness.admit)
 
 
+@pytest.mark.parametrize("fields,included", [
+    (("status",), True),
+    (("title",), True),
+    (("title", "status"), True),
+    (("checkout_present",), False),
+    (("status", "checkout_present"), False),
+])
+def test_scope_subset_comparison_preserves_exact_fields(fields, included):
+    grant = ObservationScope("origin-a", "project-a", "entity-a", ("status", "title"))
+    requested = ObservationScope("origin-a", "project-a", "entity-a", fields)
+    assert grant.includes(requested) is included
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_effective_branches_reuse_canonical_request_or_enrollment(harness, explicit):
+    request = ObservationRead("fleet-a", (B, A) if explicit else None)
+    permit = harness.admit(request)
+    selected = request.scopes if explicit else permit.enrollment.reads
+    assert permit.resources is selected
+    assert permit.resources == (A, B)
+    assert harness.owner.revalidate(permit, request).resources is selected
+
+
 @pytest.mark.parametrize("changes,code", [
     ({"principal": "actor-b"}, "actor-mismatch"),
     ({"account": "account-b"}, "actor-mismatch"),
@@ -525,25 +548,71 @@ print(json.dumps({"optional_crypto_loaded": False}))
 
 def test_fresh_process_real_verifier_admission_and_scoped_store_read(tmp_path):
     script = """
+import base64, hashlib
+from dataclasses import asdict
 import json, sys
+from joserfc import jwt
 from joserfc.jwk import ECKey
 from fleet_manager.observation_store import ObservationStore
-from fleet_manager.observations import OriginBinding
-from fleet_manager.runtime_admission import AdmissionError, ObservationRead
-from test_observation_store import update
-from test_runtime_admission import A, B, Harness
+from fleet_manager.observations import CurrentUpdate, OriginBinding
+from fleet_manager.runtime_admission import (
+    AdmissionAuthority, AdmissionError, AuthoritySnapshot, Enrollment,
+    ObservationRead, ObservationScope,
+)
+from fleet_manager.runtime_identity import IdentityVerifier
+now = 1_900_000_000
+issuer, audience = "https://issuer.example", "example-gateway"
+target = "https://gateway.example/v1/observations"
 keys = (ECKey.generate_key("P-256"), ECKey.generate_key("P-256"))
-h = Harness(keys)
+verifier = IdentityVerifier(
+    issuer=issuer, audience=audience,
+    jwks={"keys": [{**keys[0].as_dict(private=False), "kid": "issuer-1"}]},
+    trust_valid_until=now + 3600, clock=lambda: now,
+)
+A = ObservationScope("origin-a", "project-a", "entity-a", ("status",))
+B = ObservationScope("origin-b", "project-b", "entity-b", ("title",))
+snapshot = AuthoritySnapshot(
+    authority="gateway-a", fleet="fleet-a", issuer=issuer, audience=audience,
+    revision=1, valid_from=now - 1, valid_until=now + 3600,
+    identity_trust_until=now + 3600,
+    enrollments=tuple(Enrollment(
+        subject=subject, principal=principal, account=account, kind="operator",
+        role="client", installation="client-a", generation=1, status="active",
+        reads=reads,
+    ) for subject, principal, account, reads in (
+        ("principal-1", "actor-a", "account-a", (A, B)),
+        ("principal-2", "actor-b", "account-b", (B,)),
+    )),
+)
+owner = AdmissionAuthority(snapshot=lambda: snapshot, clock=lambda: now)
 store = ObservationStore(sys.argv[1], authority="fleet-a", installation="gateway-a")
 for branch in (A, B):
     binding = OriginBinding(branch.origin, "installation", 1, "producer")
     store.bind_origin(binding)
-    store.apply(update(binding, project=branch.project, entity=branch.entity,
-        state={"status": "active", "title": "not-selected"}))
+    store.apply(CurrentUpdate.from_dict({
+        "schema": "fleet-manager.current-update", "version": 1, **asdict(binding),
+        "project": branch.project, "entity": branch.entity,
+        "sequence": 1, "source_revision": 1, "observed_at": now,
+        "availability": "current", "reason": None,
+        "state": {"status": "active", "title": "not-selected"},
+    }))
 lookups = []
 def consume(subject, requested):
-    permit = h.admit(requested, subject=subject)
-    permit = h.owner.revalidate(permit, requested)
+    token = jwt.encode(
+        {"alg": "ES256", "typ": "at+jwt", "kid": "issuer-1"},
+        {"iss": issuer, "sub": subject, "aud": audience, "iat": now,
+         "exp": now + 3600, "cnf": {"jkt": keys[1].thumbprint()}}, keys[0],
+    )
+    token_hash = base64.urlsafe_b64encode(
+        hashlib.sha256(token.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
+    proof = jwt.encode(
+        {"alg": "ES256", "typ": "dpop+jwt", "jwk": keys[1].as_dict(private=False)},
+        {"jti": f"proof-{len(lookups)}", "htm": "GET", "htu": target, "iat": now,
+         "ath": token_hash, "nonce": verifier.nonce}, keys[1],
+    )
+    identity = verifier.verify(token, proof, method="GET", target_uri=target)
+    permit = owner.authorize(identity, requested, role="client", installation="client-a")
+    permit = owner.revalidate(permit, requested)
     result = []
     for scope in permit.resources:
         lookups.append((scope.origin, scope.project, scope.entity))
@@ -560,12 +629,13 @@ except AdmissionError as error:
 else:
     raise AssertionError("foreign view was admitted")
 assert lookups == before
+assert not any(name.startswith("test_") for name in sys.modules)
 print(json.dumps({"scoped_reads": len(lookups), "forbidden_lookups": 0}))
 """
     root = Path(__file__).resolve().parents[1]
     env = {
         **os.environ,
-        "PYTHONPATH": os.pathsep.join((str(root / "src"), str(root / "tests"))),
+        "PYTHONPATH": str(root / "src"),
     }
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path / "observations.db")],
