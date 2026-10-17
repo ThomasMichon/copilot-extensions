@@ -1482,6 +1482,17 @@ class Supervisor(RestrictedStartupMixin):
     _hold_pending_cleanup = staticmethod(_hold_pending_cleanup)
     _cleanup_envelope_state = staticmethod(_cleanup_envelope_state)
 
+    @staticmethod
+    def _validated_cleanup_claim(claim: dict) -> tuple[str, dict]:
+        token, reservation = claim.get("claim_token"), claim.get("reservation")
+        if not isinstance(token, str) or not token.strip():
+            log.warning("cleanup claim protocol error: missing or malformed token")
+            raise DispatchError(426, "cleanup claim lacks a valid token")
+        if not isinstance(reservation, dict):
+            log.warning("cleanup claim protocol error: missing reservation snapshot")
+            raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
+        return token, reservation
+
     def release_requested_bodies(self, *, now: float | None = None) -> int:
         """Retire proven-absent bodies and preserve cleanup obligations."""
         now = time.time() if now is None else now
@@ -1517,10 +1528,7 @@ class Supervisor(RestrictedStartupMixin):
                     claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                     if not claim.get("claimed"):
                         continue
-                    claim_token = claim.get("claim_token")
-                    claimed_reservation = claim.get("reservation")
-                    if not isinstance(claimed_reservation, dict):
-                        raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
+                    claim_token, claimed_reservation = self._validated_cleanup_claim(claim)
                     self._conclusion_client.validate_spawn_conclusion_claim(res["key"], claim_token)
                     res = claimed_reservation
                 except DispatchError:
@@ -2601,10 +2609,7 @@ class Supervisor(RestrictedStartupMixin):
                         claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                         if not claim.get("claimed"):
                             continue
-                        conclusion_claim_token = claim.get("claim_token")
-                        claimed = claim.get("reservation")
-                        if not isinstance(claimed, dict):
-                            raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
+                        conclusion_claim_token, claimed = self._validated_cleanup_claim(claim)
                         self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"], conclusion_claim_token,
                         )
@@ -2754,15 +2759,12 @@ class Supervisor(RestrictedStartupMixin):
                         continue
                     if not claim.get("claimed"):
                         continue
-                    conclusion_claim_token = claim.get("claim_token")
                     try:
+                        conclusion_claim_token, claimed = self._validated_cleanup_claim(claim)
                         self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
                             conclusion_claim_token,
                         )
-                        claimed = claim.get("reservation")
-                        if not isinstance(claimed, dict):
-                            raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
                         res = claimed
                         prior_attempts, _ = self._conclusion_retry_meta(res)
                     except DispatchError:

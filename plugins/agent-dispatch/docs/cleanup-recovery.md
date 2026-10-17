@@ -94,6 +94,9 @@ alias resolution as registration scope; it does not omit that identity.
 Direct supervisor construction resolves its default local alias before binding
 the housekeeping adapter, so explicit and default identities carry the same
 lease proof.
+Successful cleanup claim responses must contain a nonblank string token and
+their authoritative reservation snapshot before validation or side effects.
+Malformed responses emit a protocol warning and retain pending cleanup.
 The bound adapter accepts omitted or matching explicit claimant values and
 rejects a conflicting override before any request. The optional legacy claim
 body is instantiated per request rather than shared across requests.

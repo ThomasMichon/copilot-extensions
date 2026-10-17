@@ -263,7 +263,7 @@ def _remove_record_state(path: Path, target: Path, receipt: Path) -> None:
 def _apply_remove(args: dict) -> dict:
     path = Path(args["yaml_path"])
     target = state_path(path)
-    receipt = terminal_pair_progress._receipt_path(path)
+    receipt = terminal_pair_progress.receipt_path(path)
     if args.get("worktree_id") != path.stem:
         raise ValueError("Launch-seed removal identity mismatch")
     with tracking._RecordLock(path, require_sidecar=True):

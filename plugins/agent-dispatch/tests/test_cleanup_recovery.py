@@ -1041,6 +1041,40 @@ def test_unbound_terminal_alias_cannot_publish_recovery_outcome(held, operation)
     assert asdict(queue.get_reservation(key)) == before
 
 
+@pytest.mark.parametrize("invalid_token", [None, "", " ", [], True, 0])
+def test_supervisor_rejects_malformed_claim_token_before_validation(held, monkeypatch, caplog, invalid_token):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    queue, task_id, key = held
+    task_before = asdict(queue.get(task_id))
+    apply(held, preview(held))
+    with DispatchClient("http://testserver") as client:
+        client._http.close()
+        client._http = TestClient(create_app(queue, enable_mcp=False, verification_interval=0))
+        original = client.claim_spawn_conclusion_retry
+
+        def malformed_claim(*args, **kwargs):
+            return {**original(*args, **kwargs), "claim_token": invalid_token}
+
+        monkeypatch.setattr(client, "claim_spawn_conclusion_retry", malformed_claim)
+        monkeypatch.setattr(client, "validate_spawn_conclusion_claim", lambda *a, **k: pytest.fail(
+            "a malformed token must not reach validation",
+        ))
+        supervisor = Supervisor(
+            client, spawn_fn=lambda *a: pytest.fail("business work must not replay"),
+            attempt_conclusion_fn=lambda *a: pytest.fail("malformed lease cannot authorize cleanup"),
+            repo=TEST_REPO, machine="host", nudge=False,
+        )
+        assert supervisor.release_requested_bodies() == 0
+    assert asdict(queue.get(task_id)) == task_before
+    assert queue.get_reservation(key).conclusion_state == "pending"
+    assert "cleanup claim protocol error" in caplog.text
+
+
 @pytest.mark.parametrize("native_operation", ["preview", "apply", "replay", "history", "completed-replay"])
 def test_native_cli_first_touch_preview_apply_and_history(held, native_operation):
     """Actual CLI -> loopback HTTP -> supervisor consumer -> fixture database."""

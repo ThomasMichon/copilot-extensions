@@ -18,7 +18,7 @@ from . import tracking
 _PAIR_FIELDS = ("pair_id", "pair_role", "pair_ref", "pair_kind")
 
 
-def _receipt_path(path: Path) -> Path:
+def receipt_path(path: Path) -> Path:
     return path.with_suffix(".terminal-pair.json")
 
 
@@ -88,7 +88,7 @@ def publish(record, sibling, sibling_path: Path, *, primary_path: Path | None = 
     }
     if primary_path is not None:
         receipt["primary_record_path"] = str(primary_path.resolve())
-    tracking._atomic_write(_receipt_path(sibling_path), json.dumps(receipt, sort_keys=True) + "\n")
+    tracking._atomic_write(receipt_path(sibling_path), json.dumps(receipt, sort_keys=True) + "\n")
     if primary_path is not None:
         primary_guard = {
             "version": 1, "receipt_role": "primary", "primary": receipt["primary"],
@@ -96,13 +96,13 @@ def publish(record, sibling, sibling_path: Path, *, primary_path: Path | None = 
             "sibling_record_path": str(sibling_path.resolve()),
         }
         tracking._atomic_write(
-            _receipt_path(primary_path), json.dumps(primary_guard, sort_keys=True) + "\n",
+            receipt_path(primary_path), json.dumps(primary_guard, sort_keys=True) + "\n",
         )
 
 
 def gc_preservation_reason(sibling_path: Path) -> str | None:
     """A receipt is collectible only after its exact primary unlink is durable."""
-    path = _receipt_path(sibling_path)
+    path = receipt_path(sibling_path)
     try:
         path.lstat()
     except FileNotFoundError:
@@ -136,7 +136,7 @@ def gc_preservation_reason(sibling_path: Path) -> str | None:
                     or other_path.name != receipt["sibling"]["worktree_id"] + ".yaml"):
                 return "terminal-pair-sibling-unverified"
             try:
-                _receipt_path(other_path).lstat()
+                receipt_path(other_path).lstat()
             except FileNotFoundError:
                 try:
                     other_path.lstat()
@@ -192,7 +192,7 @@ def reciprocal_snapshot(record, sibling, sibling_path: Path):
         document = _document(sibling_path)
         if any(name in document for name in _PAIR_FIELDS):
             return None
-        receipt = json.loads(_receipt_path(sibling_path).read_text(encoding="utf-8"))
+        receipt = json.loads(receipt_path(sibling_path).read_text(encoding="utf-8"))
         if (receipt["version"] != 1 or receipt["primary"] != primary_identity(record)
                 or receipt["sibling_digest"] != _document_digest(document)):
             return None

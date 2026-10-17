@@ -965,3 +965,16 @@ requested contract.
   reciprocal/GC preservation assertions remain intact. Installer/bootstrap is
   unchanged, so no new full fresh-box provisioning is claimed; hosted Linux and
   complete resulting-head CI remain the external lane, not a production rollout.
+- **Validate successful lease envelopes before use:** A subsequent review
+  identifies claimed responses with missing or malformed tokens being passed
+  directly into validation. Six real-consumer cases fail before correction.
+  All three claim consumers now share a protocol check for a nonblank string
+  token and authoritative reservation snapshot, with a sanitized warning and
+  typed protocol error before validation or effects. The complete Dispatch
+  cleanup/reservation selection passes 268 cases in 216.07 seconds.
+  The receipt-path projection, like reciprocal identity, is now an explicit
+  public module API. Its exact daemon/sidecar/paired-GC consumers pass 23 cases
+  in 163.65 seconds. An unnecessarily combined seed/GC run hit the unchanged
+  aggregate cap; it remains incomplete, not a pass. No cleanup assertion,
+  authority check or deadline was relaxed. Resulting-head review and CI remain
+  required, and the parent/native/deployment gates remain open.
