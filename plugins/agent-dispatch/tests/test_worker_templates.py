@@ -182,22 +182,39 @@ def test_repository_layers_and_user_local_reuse_existing_roots(monkeypatch, tmp_
     assert before == bytes_at(tmp_path) and not rd.pointers_file().exists()
 
 
-@pytest.mark.parametrize("broken_layer", ["canonical", "legacy", "overlay", "shadowed-legacy", None])
-def test_unavailable_repository_layers_are_not_absent_optional_layers(monkeypatch, tmp_path, broken_layer):
+@pytest.mark.parametrize("broken_layer,healthy_layer", [
+    ("canonical", "legacy"), ("canonical-parent", "legacy"),
+    ("canonical-grandparent", "legacy"), ("canonical-loop-parent", "legacy"),
+    ("canonical-file-parent", "legacy"), ("legacy", "overlay"),
+    ("legacy-parent", "overlay"), ("overlay", "canonical"),
+    ("overlay-parent", "canonical"), ("overlay-grandparent", "canonical"),
+    ("shadowed-legacy", "canonical"), (None, "overlay"),
+])
+def test_unavailable_repository_layers_are_not_absent_optional_layers(monkeypatch, tmp_path, broken_layer, healthy_layer):
     root = tmp_path / "repo"
     canonical = root / ".copilot-extensions" / "agent-dispatch" / "templates"
     legacy = root / ".agent-dispatch" / "templates"
     overlay = canonical.parent / "marketplaces" / "example-cell" / "templates"
-    healthy = (
-        legacy if broken_layer == "canonical"
-        else canonical if broken_layer in {"overlay", "shadowed-legacy"}
-        else overlay
-    )
+    paths = {
+        "canonical": canonical, "canonical-parent": canonical.parent,
+        "canonical-grandparent": canonical.parent.parent,
+        "canonical-loop-parent": canonical.parent, "canonical-file-parent": canonical.parent,
+        "legacy": legacy, "legacy-parent": legacy.parent,
+        "overlay": overlay, "overlay-parent": overlay.parent,
+        "overlay-grandparent": overlay.parent.parent, "shadowed-legacy": legacy,
+    }
+    healthy = paths[healthy_layer]
     write_index(root, index=healthy / "index.json")
     if broken_layer:
-        target = {"canonical": canonical, "legacy": legacy, "overlay": overlay, "shadowed-legacy": legacy}[broken_layer]
+        target = paths[broken_layer]
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.symlink_to(root / "missing-layer", target_is_directory=True)
+        if broken_layer == "canonical-file-parent":
+            target.write_text("not a directory", encoding="utf-8")
+        else:
+            target.symlink_to(
+                target if broken_layer == "canonical-loop-parent" else root / "missing-layer",
+                target_is_directory=True,
+            )
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
     monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
         returncode=0, stdout='{"inventory_authority":"complete","repos":[{"name":"library"}]}', stderr="",
@@ -208,20 +225,26 @@ def test_unavailable_repository_layers_are_not_absent_optional_layers(monkeypatc
     assert len(rows) == 1
     unavailable = broken_layer not in {None, "shadowed-legacy"}
     assert summary["state"] == ("partial" if unavailable else "complete")
-    assert summary["findings"] == ([{
-        "source": str(target), "reason": "invalid-index",
+    expected_sources = [paths[broken_layer.split("-")[0]]] if unavailable else []
+    if broken_layer in {"canonical-parent", "canonical-grandparent", "canonical-loop-parent", "canonical-file-parent"}:
+        expected_sources.append(overlay)
+    assert sorted(summary["findings"], key=lambda finding: finding["source"]) == sorted([{
+        "source": str(path), "reason": "invalid-index",
         "detail": "Template layer must be a directory.",
-    }] if unavailable else [])
+    } for path in expected_sources], key=lambda finding: finding["source"])
     assert wt.layered_repo_surface_dirs(root, "templates") == [healthy]
     assert bytes_at(tmp_path) == before and not rd.pointers_file().exists()
 
 
-@pytest.mark.parametrize("broken", ["root", "templates", "index.json", None])
-def test_user_local_broken_entries_remain_visible_not_optional(tmp_path, broken):
+@pytest.mark.parametrize("broken", ["ancestor", "root", "templates", "index.json", None])
+def test_user_local_broken_entries_remain_visible_not_optional(monkeypatch, tmp_path, broken):
+    if broken == "ancestor":
+        monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "local-storage" / "nested" / "registrar"))
     base = rd.registrar_dir()
     target = {
         "root": base, "templates": base / "templates",
         "index.json": base / "templates" / "index.json",
+        "ancestor": tmp_path / "local-storage",
     }.get(broken)
     if target:
         target.parent.mkdir(parents=True, exist_ok=True)

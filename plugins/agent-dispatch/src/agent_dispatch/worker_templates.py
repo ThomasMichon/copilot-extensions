@@ -15,7 +15,7 @@ from dropin_registry import ScanAuthority
 from . import registrar_discovery as rd
 from .registrar import RegistrarError
 from .registrations import RegistrationKind
-from .repo_config import layered_repo_surface_dirs
+from .repo_config import layered_repo_surface_dirs, surface_entry_present
 from .repository_resource_capture import run_agent_worktrees_capture
 from .repository_resources import RepositoryResourceSnapshot, split_repository_resource
 from .worker_instances import digest, templates
@@ -217,18 +217,13 @@ def _entry(source: TemplateSource, entry: object, root: Path, index: Path) -> di
 
 def _read_source(source: TemplateSource, findings: list[dict]) -> list[dict]:
     try:
-        if source.kind == "user-local":
-            try:
-                source.root.lstat()
-            except FileNotFoundError:
-                return []
+        if source.kind == "user-local" and not surface_entry_present(source.root):
+            return []
         root = source.root.resolve(strict=True)
         if not root.is_dir():
             raise ValueError("provider root is not a directory")
         source.index.parent.resolve().relative_to(root)
-        try:
-            source.index.parent.lstat()
-        except FileNotFoundError:
+        if not surface_entry_present(source.index.parent):
             return []
         if not source.index.parent.is_dir():
             raise ValueError("template index parent must be a directory")

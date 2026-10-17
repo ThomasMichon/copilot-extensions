@@ -612,3 +612,24 @@ venue limitations explicitly; source merge is not promotion or installed proof.
 - Updated-head review and complete required CI remain merge prerequisites;
   native POSIX execution, promotion and authorized installed proof are not
   inferred from the Windows result.
+
+### 2026-10-17 - Missing children do not hide unavailable ancestors
+
+- The next review found the same absence error one directory higher in both
+  owners. A child `lstat` can report missing when an ancestor is a dangling
+  link. Audit template candidates through their nearest existing ancestor;
+  retain every affected layer as a scoped finding and healthy fallback rows.
+  An unavailable shared ancestor may correctly affect both base and overlay.
+- The strict repository reader independently verifies the nearest existing
+  ancestor before reporting an absent registry. Broken links, link loops and
+  non-directory ancestors refuse inventory authority; genuinely missing
+  first-touch parents remain a complete empty inventory.
+- Native Windows coverage passed 301 coupled dispatch tests and 31 registered
+  repository tests. The latter includes actual strict CLI processes for absent,
+  dangling, non-directory and loop ancestors. The two POSIX-only FIFO tests
+  remain explicit Windows skips. Changed Python lint passed. The initial
+  template expectation incorrectly anticipated one finding for a shared
+  unavailable ancestor; corrected it to require both affected layers.
+- Updated-head review and the full normal aggregate gate remain required.
+  No retry, timeout increase, guard widening, installed update or live source
+  effect is used to claim completion.

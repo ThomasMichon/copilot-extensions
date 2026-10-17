@@ -201,7 +201,8 @@ save/activation actions are unchanged.
 also appear as read-only Discovery errors rows labelled Template discovery
 requires attention, with `finding_scope: templates`. Missing optional
 indexes are normal; broken canonical, fallback or active marketplace template
-directory links are explicit findings rather than absent optional layers.
+directory links or unavailable configuration ancestors are explicit findings
+rather than absent optional layers.
 Healthy selected layers remain visible without changing registrar selection.
 The same distinction applies to installation-local roots, template directories
 and index links; genuine first-touch absence remains an empty optional source.

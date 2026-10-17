@@ -1043,6 +1043,9 @@ files fail with exit 2 rather than silently dropping entries. The command does n
 discover unregistered checkouts, clone or provision anything. Individual local
 checkout availability is separate: use `repos find <name> --registered-only
 --json` when a read or operation needs that repository's current root.
+Missing first-touch parent directories are normal absence; a broken link,
+link loop or non-directory registry ancestor is unavailable storage and cannot
+attest a complete empty inventory.
 
 The default `repos list` remains the tolerant interactive listing. Its legacy
 JSON has no authority marker and must not be interpreted as a completeness

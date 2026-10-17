@@ -189,6 +189,34 @@ def test_strict_inventory_dangling_link_is_unavailable_not_absent(registry_path,
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("ancestor", ["absent", "dangling", "file", "loop"])
+def test_native_strict_inventory_distinguishes_missing_and_unavailable_ancestors(tmp_path, ancestor):
+    home = tmp_path / "home"
+    home.mkdir()
+    storage = home / ".agent-worktrees"
+    missing = tmp_path / "missing-storage"
+    if ancestor == "file":
+        storage.write_text("not a directory", encoding="utf-8")
+    elif ancestor in {"dangling", "loop"}:
+        storage.symlink_to(storage if ancestor == "loop" else missing, target_is_directory=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees", "repos", "list", "--strict", "--json"],
+        cwd=tmp_path, env={**os.environ, "AGENT_HOME": str(home)},
+        capture_output=True, text=True, check=False, timeout=20, **no_window_kwargs(),
+    )
+    payload = json.loads(result.stdout)
+    if ancestor == "absent":
+        assert result.returncode == 0, result.stderr
+        assert payload == {"version": 1, "repos": [], "inventory_authority": "complete"}
+        assert not storage.exists()
+    else:
+        assert result.returncode == 2, result.stderr
+        assert payload["error"] and "inventory_authority" not in payload
+        assert storage.is_symlink() if ancestor != "file" else storage.read_text() == "not a directory"
+    assert not missing.exists()
+
+
+@pytest.mark.guard
 def test_registry_git_probe_uses_canonical_headless_options(monkeypatch):
     options = {"creationflags": 123}
     calls = []

@@ -44,6 +44,16 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
             try:
                 path.lstat()
             except FileNotFoundError:
+                for parent in path.parents:
+                    try:
+                        parent.lstat()
+                    except FileNotFoundError:
+                        continue
+                    if not parent.is_dir():
+                        raise RepositoryResolutionError(
+                            f"repository registry ancestor is unavailable: {parent}"
+                        )
+                    break
                 return ReposRegistry()
             mode = path.stat().st_mode
             if not stat.S_ISREG(mode):

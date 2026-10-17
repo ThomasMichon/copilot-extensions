@@ -56,12 +56,17 @@ def selected_repo_surface_dir(repo_root: str | Path, relative: str) -> Path:
     return canonical
 
 
-def _surface_entry_present(path: Path) -> bool:
-    try:
-        path.lstat()
-    except FileNotFoundError:
-        return False
-    return True
+def surface_entry_present(path: Path) -> bool:
+    """Retain entries blocked by unavailable ancestors, not optional absence."""
+    for entry in (path, *path.parents):
+        try:
+            entry.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+        return entry == path or not entry.is_dir()
+    return False
 
 
 def overlay_repo_surface_dir(
@@ -76,7 +81,7 @@ def overlay_repo_surface_dir(
         / marketplace_id
         / relative
     )
-    present = _surface_entry_present(candidate) if include_unavailable else candidate.exists()
+    present = surface_entry_present(candidate) if include_unavailable else candidate.exists()
     return candidate if present else None
 
 
@@ -94,7 +99,7 @@ def layered_repo_surface_dirs(
         if not canonical.exists():
             candidates.append(legacy_repo_surface_dir(root, relative))
         for candidate in candidates:
-            if candidate not in layers and _surface_entry_present(candidate):
+            if candidate not in layers and surface_entry_present(candidate):
                 layers.append(candidate)
     overlay = overlay_repo_surface_dir(root, relative, include_unavailable=include_unavailable)
     if overlay is not None:
