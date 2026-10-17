@@ -824,3 +824,34 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   history, durable shared drafts, template instantiation, generic process proof
   and mapped-source production remain open. Normal release and authorized
   installed proof remain separate; no live task or runtime was changed.
+
+### 2026-10-17 - Graphical acceptance adopted; terminal receipt gaps remain
+
+- An independent graphical consumer now sends the owner-reported revision
+  and stable exact-request identity through the existing command transport.
+  Missing or replaced questions permit original receipt reads only, not
+  stale writes. Acceptance, original wake state and actual consumption remain
+  separate, with explicit older-owner refusal and no legacy-write fallback.
+- Isolated real command/HTTP owner coverage proves response loss after commit,
+  disappeared-question recovery without another write, exact replay after
+  consumption/card replacement, original wake identity and transactional race
+  refusal. Fresh state and legacy capability refusal were exercised without
+  an installed queue, external service, actual worker or runtime rollout.
+- The consumer's existing transient draft view retains uncertain submissions;
+  cancelling a same-answer retry must preserve the original uncertainty and
+  receipt recovery. Focused rendered regressions cover that sequence, failed
+  receipt checks and known-acceptance retention. This is not evidence of
+  restart or cross-client draft durability.
+- Re-read the full Plan and Validation Plan after that source merge. No broad
+  parity or installed-delivery checkbox is closed. Keep #7141 open: Manager's
+  generic form result path truncates command output and shows only its first
+  line, while task-only local drafts carry no card/ownership revision.
+  `inspect-task` includes task/events/progress/attachments/results, not steering
+  receipts or original wakes. Native precondition forwarding alone therefore
+  does not prove equal receipt/recovery fidelity.
+- Next is the bounded terminal result/recovery and draft-provenance contract,
+  reusing existing contributed actions, command transport and draft ownership
+  rather than introducing a dispatch-specific Manager backend. Preserve
+  #6379, #4959 and #6283 ownership. Template instantiation, process/evaluator
+  proof, mapped-record production, promotion and authorized installed proof
+  remain open; this effort is Active.
