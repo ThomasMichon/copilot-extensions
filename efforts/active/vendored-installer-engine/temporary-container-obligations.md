@@ -284,9 +284,12 @@ acceptance. Producer enablement stays gated by the validation plan below.
 - [ ] Prove admitted single-daemon operation sessions reject A/B/A routing,
       reconnect, truncated/oversized responses and unavailable transport
       admission; confirm bounded transport-child cleanup.
-- [ ] Prove ownership views preserve original creator and current owner,
+- [x] Source ownership views preserve original creator and current owner,
       expose all allocation/retention phases and accepted transfers, and do
-      not treat duplicate/unavailable records as unowned resources.
+      not treat duplicate/unavailable records as unowned resources. Bounded
+      tracking fixtures exercise real producer transitions and accepted chains;
+      execution-space probing and integrated live Docker acceptance remain
+      distinct open gates, not conclusions of this observational snapshot.
 - [ ] Prove named volumes remain owned and held after container/test completion;
       automatic deletion refuses before a name-based mutation, retained status
       is visible, and finalize remains blocked. Review an identity-safe volume

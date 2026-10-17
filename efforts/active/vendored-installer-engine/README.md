@@ -578,6 +578,47 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-16 — Strict derived ownership views implemented
+
+- Added a provider-neutral `claims ownership` source surface over the existing
+  registered-project tracking ledger, without a second registry, provider
+  callback, daemon probe, cached record load or mutation. The projection keeps
+  reservation/allocation/retention phases, exact opaque identity and original
+  creator, following matching accepted receipts to the recorded current owner.
+- Strict raw YAML/claim validation and ordinary input-change checks expose
+  incomplete records, duplicate identities/tokens/references, interrupted
+  handoffs and missing transfer recipients as uncertainty. Filters cannot hide
+  a conflicting owner or an unreadable project. An empty view is not absence,
+  and the local, non-transactional snapshot never grants cleanup authority.
+- Bounded Linux source validation passed 421 ownership, producer, finalization,
+  transfer and legacy lookup cases. F/E9 lint, whitespace, install-contract
+  and documentation-consistency checks passed. No native or live Docker
+  lifecycle acceptance, provider enablement or runtime rollout is claimed.
+- This closes the source ownership-view sub-item only. Provider integration,
+  allocation callers, atomic identity-conditional cleanup, live acceptance and
+  the combined parent Plan/Validation items remain open.
+
+### 2026-10-16 — Admitted read-only Docker verification merged
+
+- PR #7035 merged as `4eadccbcf1bccc391745da0e57ac90da9c32dd8b` at
+  16:45 Pacific after a current-head Balanced approval with no open findings
+  and successful CI. The published source passed 220 bounded Linux cases,
+  160 library cases on Python 3.10 and 167 native Windows cases with 53
+  explicit POSIX-only skips. Native fixtures are not live Docker acceptance.
+- Direct-local reads now share one admitted daemon connection, reject malformed
+  or unsolicited responses and close failed admission on interruption.
+  Reservation recovery covers both resource kinds and all returned generations
+  without turning partial coverage into absence.
+- Automatic removal remains unavailable for both containers and volumes;
+  sessions accept only GET requests. The atomic identity-conditional cleanup
+  requirement remains open. No provider, allocation caller, runtime deployment
+  or live resource was enabled or changed.
+- **Next Docker source slice:** derive strict owner/resource views from the
+  existing ledger, reporting incomplete or duplicate ownership as uncertainty.
+  The combined Docker Plan and Validation items and the parent effort remain
+  open. The operator-directed removal of blanket serial-merge guidance is
+  being landed separately; independent PRs need no shared merge slot.
+
 ### 2026-10-16 — Container deletion also needs an atomic identity mechanism
 
 - PR #7035 review identified that Moby's removal path calls `GetContainer()`,
