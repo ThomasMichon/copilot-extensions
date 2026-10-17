@@ -516,10 +516,6 @@ def _payload_root(repo_dir: str | Path | None = None) -> Path:
         candidate = Path(explicit).expanduser()
         if (candidate / "plugin.json").is_file():
             return candidate.resolve()
-    if repo_dir is not None:
-        candidate = find_package_source(repo_dir).parent.parent
-        if (candidate / "plugin.json").is_file():
-            return candidate.resolve()
     manifest = install_dir() / "deploy-manifest.json"
     try:
         source = json.loads(manifest.read_text(encoding="utf-8"))["source"]["path"]
@@ -528,6 +524,10 @@ def _payload_root(repo_dir: str | Path | None = None) -> Path:
             return candidate.resolve()
     except (OSError, KeyError, TypeError, ValueError):
         pass
+    if repo_dir is not None:
+        candidate = find_package_source(repo_dir).parent.parent
+        if (candidate / "plugin.json").is_file():
+            return candidate.resolve()
     candidate = Path(__file__).resolve().parents[2]
     if (candidate / "plugin.json").is_file():
         return candidate
