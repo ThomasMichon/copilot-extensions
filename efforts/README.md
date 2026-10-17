@@ -112,6 +112,7 @@ that pattern to this repository.
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
 | [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
+| [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Draft; native Windows/Linux execution proof before preference inheritance | #5708; preserves #7069/#6987/#5839/#7057 owners |
 
 
 ## Completed effort index
