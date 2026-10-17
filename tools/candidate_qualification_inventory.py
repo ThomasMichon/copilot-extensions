@@ -14,6 +14,32 @@ _NON_CANDIDATE = {
     "pr-gate": "github.event_name == 'pull_request'",
     "coverage-guided-selection-integration": "inputs.promotion_run == ''",
 }
+_SHARDED_SMOKE_NAME = (
+    "${{ matrix.shard != '' && format('{0} (shard {1})', matrix.plugin, matrix.shard) || matrix.plugin }}"
+)
+
+
+def _sharded_smoke_rows(block: str, discover: str, plugins: set[str]) -> list[str]:
+    recipe = (
+        "[{'plugin': p, 'shard': s} for p in json.load(sys.stdin) "
+        "for s in (('1/2', '2/2') if p == 'agent-dispatch' else ('',))]"
+    )
+    invocation = (
+        "run: python tools/run-plugin-tests.py ${{ matrix.plugin }} "
+        "${{ matrix.shard != '' && format('--sub-suite-shard {0}', matrix.shard) || '' }}"
+    )
+    if (
+        "matrix: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}" not in block
+        or invocation not in block or recipe not in discover
+        or "smoke_matrix: ${{ steps.set.outputs.smoke_matrix }}" not in discover
+        or 'echo "smoke_matrix=$SMOKE_MATRIX" >> "$GITHUB_OUTPUT"' not in discover
+    ):
+        raise CandidateValidationError("canonical smoke shard recipe is unsupported")
+    return [
+        f"{plugin} (shard {shard})" if shard else plugin
+        for plugin in sorted(plugins)
+        for shard in (("1/2", "2/2") if plugin == "agent-dispatch" else ("",))
+    ]
 
 
 def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
@@ -53,7 +79,9 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
             allowed_skips.add(name)
             continue
         substitutions = list(_MATRIX.finditer(name))
-        if not substitutions:
+        if identifier == "smoke" and name == _SHARDED_SMOKE_NAME:
+            rows = _sharded_smoke_rows(block, jobs["discover"], plugins - {heavy[1]})
+        elif not substitutions:
             if "\n      matrix:" in block or "${{" in name:
                 raise CandidateValidationError(f"unsupported CI job name/matrix: {identifier}")
             rows = [name]
