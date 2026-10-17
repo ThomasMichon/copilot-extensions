@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit cold source-aware storage, participating-writer exclusion and native prefiltered authorized retrieval",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep receiving-authority contracts in fast guards and align the negative Resume fixture.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Distinguish explicit stderr diagnostics from Python model-context output in inert hook classification",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Wait for foreground launch preparation and stream live diagnostics without discarding JSON or version-skew errors",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

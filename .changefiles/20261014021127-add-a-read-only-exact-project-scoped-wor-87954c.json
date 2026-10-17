@@ -1,9 +1,0 @@
-{
-  "comment": "Add a read-only exact project-scoped worktree record JSON API without launch authority",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "The Connection Owner launches through the shared spawn_daemon primitive and logs its stdio to logs/owner-stdio.log beside its state, which a readiness failure now names.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

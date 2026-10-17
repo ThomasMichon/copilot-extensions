@@ -1,9 +1,0 @@
-{
-  "comment": "Separate fast durable replay boundary coverage from the full production-window validation parameter.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

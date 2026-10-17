@@ -1,9 +1,0 @@
-{
-  "comment": "Skip pip/setuptools seeding for signed Windows profiles installed by uv while retaining the ordinary-pip fallback.",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

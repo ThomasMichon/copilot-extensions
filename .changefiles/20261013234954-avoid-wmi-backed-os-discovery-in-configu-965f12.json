@@ -1,9 +1,0 @@
-{
-  "comment": "Avoid WMI-backed OS discovery in configuration and coupled CLI startup paths",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

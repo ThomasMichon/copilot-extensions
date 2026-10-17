@@ -1,9 +1,0 @@
-{
-  "comment": "Add atomic owned-disposable producer reservations, immutable binding and trusted closeout with finalize and generic-settlement protection.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
