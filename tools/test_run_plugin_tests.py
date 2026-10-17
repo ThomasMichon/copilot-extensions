@@ -1189,6 +1189,8 @@ def test_unreaped_tree_retains_sandbox_and_never_schedules_group_cleanup(
 
     assert (sandbox_paths[0] / "still-owned.txt").read_text() == "preserve"
     assert (sandbox_paths[0] / "t" / "g1").is_dir()
+    if os.name != "nt":
+        assert (sandbox_paths[0] / "t").stat().st_mode & 0o077 == 0
     assert "[KEEP] Unreaped process tree: sandbox retained at" in capsys.readouterr().err
 
 

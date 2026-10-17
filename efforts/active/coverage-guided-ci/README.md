@@ -773,6 +773,8 @@ _Pending review of this plan._
   configuration instead of adding dependencies. F/E9 and diff whitespace
   checks pass. These test-only corrections need no new runtime or provisioning
   behavior documentation; this journal records the validation boundaries.
+  Retain the separately proposed private-parent permission assertion in the
+  unreaped-tree regression; the native POSIX CI lane must exercise that branch.
   Repeated exact-head normal Windows qualification, the240-second group
   margin, latest required CI, fresh genuine review and actual merge remain
   open before Phase4.
