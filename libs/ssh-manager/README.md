@@ -77,6 +77,15 @@ text decoder.
 Native Windows OpenSSH and Git for Windows retain their respective proxy-command
 quoting and shell semantics.
 
+Windows SSH roots and broker-owned proxy children omit Win32-OpenSSH's inherited
+`c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE` environment key. That metadata
+describes an ancestor's file descriptors, not the new redirected handles; passing
+it through can silently break SSH stdio. All other ambient or explicitly supplied
+environment entries are preserved without modifying the caller's environment.
+An explicit empty environment stays empty. When the descriptor-state key is
+absent, the original environment argument is left unchanged, including ambient
+inheritance. POSIX environment handling is unchanged.
+
 The broker lives in the calling process and closes with its SSH root.
 `terminate_ssh_process_tree` also awaits broker cleanup on timeout or
 cancellation. No persistent broker service or cached loopback port is created.

@@ -50,5 +50,9 @@ def test_native_proxy_stays_windowless_across_two_cycles(tmp_path, ssh_kind):
         not any(cycle["proxy_console_handles"])
         for cycle in evidence["cycles"]
     )
+    assert all(
+        not cycle["inherited_descriptor_state"]
+        for cycle in evidence["cycles"]
+    )
     assert evidence["new_visible_terminal_windows"] == 0, evidence
     assert evidence["new_terminal_took_foreground"] is False, evidence

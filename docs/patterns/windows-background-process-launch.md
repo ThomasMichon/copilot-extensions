@@ -59,6 +59,10 @@ Its narrow `pythonw.exe` client duplicates OpenSSH's inherited OS pipe handles
 as binary streams; it must not depend on Python's GUI-mode `sys.stdin/stdout`.
 Do not rewrite SSH's HostName or Port: credential and known-hosts paths may
 expand those values.
+The shared Windows SSH spawn boundary also drops only Win32-OpenSSH's inherited
+descriptor-state environment key: ancestor descriptor types do not describe the
+new redirected handles. Preserve other environment entries, explicit empty
+environments, caller immutability, and the POSIX launch contract.
 
 ## Lifetime is independent of visibility
 

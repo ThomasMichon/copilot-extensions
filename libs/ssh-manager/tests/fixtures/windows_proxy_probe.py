@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import ctypes
 from ctypes import wintypes
 import json
@@ -10,8 +11,12 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import struct
 import sys
 import time
+
+
+DESCRIPTOR_STATE = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
 
 
 def console_window() -> int:
@@ -67,7 +72,12 @@ def serve_proxy(marker: Path) -> None:
     for delay in (0.0, 0.2, 0.4):
         time.sleep(delay)
         samples.append(console_window())
-    marker.write_text(json.dumps(samples), encoding="utf-8")
+    temporary = marker.with_suffix(".tmp")
+    temporary.write_text(json.dumps({
+        "console_handles": samples,
+        "inherited_descriptor_state": DESCRIPTOR_STATE in os.environ,
+    }), encoding="utf-8")
+    temporary.replace(marker)
 
 
 async def drive_procutil_spawn(
@@ -105,7 +115,7 @@ async def drive_procutil_spawn(
         )
     return {
         "kind": flag_name,
-        "console_handles": json.loads(marker.read_text(encoding="utf-8")),
+        "console_handles": json.loads(marker.read_text(encoding="utf-8"))["console_handles"],
         "returncode": process.returncode,
     }
 
@@ -132,7 +142,12 @@ async def drive(directory: Path) -> dict:
     watcher = asyncio.create_task(monitor())
     cycles = []
     procutil_cycles = []
+    previous_state = os.environ.get(DESCRIPTOR_STATE)
     try:
+        # A Win32-OpenSSH ancestor describes socket stdio; these children use pipes.
+        os.environ[DESCRIPTOR_STATE] = base64.b64encode(
+            struct.pack("<i4B", 0, 1, 1, 1, 0),
+        ).decode("ascii")
         for cycle in range(2):
             procutil_cycles.append(
                 await drive_procutil_spawn(
@@ -177,23 +192,49 @@ async def drive(directory: Path) -> dict:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            communication = asyncio.create_task(process.communicate())
+
+            async def wait_for_proxy():
+                # The synthetic proxy is not an SSH server; its marker, not
+                # protocol shutdown, proves it ran under the real SSH client.
+                while not marker.is_file():
+                    if communication.done():
+                        return communication.result()[1]
+                    await asyncio.sleep(0.01)
+                return b""
+
             try:
-                _output, error = await asyncio.wait_for(process.communicate(), timeout=8)
+                error = await asyncio.wait_for(wait_for_proxy(), timeout=8)
             finally:
-                await terminate_ssh_process_tree(process)
-                await run_process_cleanup(process)
+                try:
+                    await terminate_ssh_process_tree(process)
+                    await run_process_cleanup(process)
+                finally:
+                    communication.cancel()
+                    try:
+                        await communication
+                    except asyncio.CancelledError:
+                        pass
             if not marker.is_file():
                 raise RuntimeError(
                     "The synthetic native SSH proxy did not execute: "
                     + error.decode(errors="replace")
                 )
+            proxy_evidence = json.loads(marker.read_text(encoding="utf-8"))
             cycles.append({
-                "proxy_console_handles": json.loads(marker.read_text(encoding="utf-8")),
+                "proxy_console_handles": proxy_evidence["console_handles"],
+                "inherited_descriptor_state": proxy_evidence["inherited_descriptor_state"],
                 "ssh_returncode": process.returncode,
             })
     finally:
-        stop.set()
-        await watcher
+        try:
+            stop.set()
+            await watcher
+        finally:
+            if previous_state is None:
+                os.environ.pop(DESCRIPTOR_STATE, None)
+            else:
+                os.environ[DESCRIPTOR_STATE] = previous_state
     return {
         "parent_console_handle": console_window(),
         "procutil_cycles": procutil_cycles,
