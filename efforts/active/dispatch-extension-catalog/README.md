@@ -2,9 +2,9 @@
 
 - **Slug:** `dispatch-extension-catalog`
 - **Repo:** copilot-extensions
-- **Branch(es):** Planning PR, then separately authorized dependency-ordered PRs against `dev`
+- **Branch(es):** Amended planning PR, then authorized dependency-ordered PRs against `dev`
 - **Created:** 2026-10-16
-- **Status:** Draft
+- **Status:** Active <!-- Execution authorized; implementation waits for the amended plan's review and merge. -->
 - **Vision:** [agent-dispatch](../../../visions/plugins/agent-dispatch/README.md):
   discoverable-extension-templates, extend-any-declaration,
   task-or-charter-owns-the-workflow
@@ -19,23 +19,25 @@ Consumers should inject their own execution procedures without teaching
 dispatch a domain's workflow or sub-stage model. The task or selected worker
 charter owns that logic; dispatch retains allocation, lifecycle and review.
 
-This is a draft implementation proposal, not authorization to implement,
-activate registrations, launch workers or change installed configuration.
+The operator authorized driving convergence on 2026-10-16. Implementation
+starts after the amended proposal clears review and merges. Production
+activation, fleet cutover and live external-source effects remain separately
+authorized operations.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Planning coordinator | Own this draft, dependency reconciliation and proposal publication | Managed planning worktree; issue #7091 |
+| Planning coordinator | Own contract reconciliation, implementation sequencing, integration and completion | Managed worktree; issue #7091 |
 | Catalog implementer, unassigned | Own only separately authorized template discovery and configuration contract slices | Dedicated managed worktree after assignment |
 | Consumer integrator, unassigned | Prove the generic external-process task contract without adding domain semantics | Dedicated managed worktree after assignment |
 
 ## Coordination
 
-- **Topology:** Planning PR first; dependency-ordered implementation PRs only
-  after separate authorization. Concurrent workers must have disjoint slices.
-- **Host (owns PRs):** Planning coordinator for this proposal; an execution
-  owner must be named before implementation starts.
+- **Topology:** Amended plan review first, then dependency-ordered
+  implementation PRs. Concurrent workers must have disjoint slices.
+- **Host (owns PRs):** Planning coordinator owns execution and integration
+  following the operator's 2026-10-16 authorization.
 - **Delegates:** None assigned or launched.
 - **Handoff:** Use this canonical effort and issue #7091 for public-safe
   contracts, evidence and current ownership. No downstream-private references.
@@ -81,10 +83,22 @@ this generic upstream effort and consumer-owned integration. Consumer-specific
 identifiers are intentionally excluded. The standing vision carries the shared
 intent; the implementation sequence below is a proposal.
 
+Subsequent operator direction, public-safe summary:
+
+The operator authorized taking the plans through review and driving
+implementation. Independent graphical and terminal clients should have equal
+semantic fidelity for existing task sources/registrations, task status and
+steering/input while retaining their different presentation styles. A reusable
+mapped-record source extension should support task production from external
+tabular lists; authenticated service access remains with the source adapter.
+Consumer-specific names and service details are excluded from this public plan.
+
 ## Plan
 
 The phase structure, contract details and validation design below are
 **agent-recommended**. They do not grant execution or rollout authority.
+The operator's subsequent execution authorization is recorded above; the
+implementation and validation choices remain proposed means.
 
 ### Phase 1 - Reconcile owners and review the delta
 
@@ -95,8 +109,11 @@ The phase structure, contract details and validation design below are
   from concrete desired registrations.
 - [ ] Review a bounded specification for template discovery, instantiation and
   consumer injection points against the existing catalog and instance lifecycle.
-- [ ] Record an explicit implementation owner and authorization before starting
-  Phase 2; merge of this Draft plan alone does not authorize execution.
+- [x] Record operator execution authorization and the Planning coordinator's
+  integration ownership; no production activation is implied.
+- [ ] Review a shared semantic parity matrix for source identity/provenance,
+  registration state, task status/category/history and steering/input
+  schemas, acknowledgements and failure states across independent clients.
 
 ### Phase 2 - Owner-declared template discovery
 
@@ -135,6 +152,23 @@ The phase structure, contract details and validation design below are
   paths, formats, commands and migration steps in owner documentation.
 - [ ] Preserve legacy references and existing active registration identities;
   make incompatibility explicit rather than silently ignoring unknown contracts.
+
+### Phase 5 - Mapped sources and client semantic parity
+
+- [ ] Expose existing registrar/task-source facts through the same owning
+  projection consumed by graphical and terminal clients; avoid a new registry
+  or a UI-owned state machine.
+- [ ] Establish a common acceptance matrix for source applicability,
+  declared/enabled/observed state, task lifecycle/category/history, structured
+  questions, steering delivery and errors. Presentation may differ; facts
+  and supported operations must not silently disappear.
+- [ ] Reuse the existing command-emitter task-output contract for mapped
+  external records. Extend only demonstrated gaps in stable record identity,
+  column/field mapping, deduplication and acceptance receipts.
+- [ ] Keep authentication, external-service protocols and source-specific
+  approvals in consumer adapters, not the generic dispatch package.
+- [ ] Validate the generic record-source contract and shared client semantics
+  with isolated providers before any separately authorized live adoption.
 - [ ] Clear current-head review and required CI, confirm normal release, and
   verify an explicitly authorized installed consumer before declaring delivery.
 - [ ] Reconcile every Plan and Validation Plan item or transfer it to a named
@@ -166,6 +200,12 @@ All items below are **agent-recommended acceptance checks** for execution.
   live external-venue lane rather than treating it as passed.
 - [ ] Verify promoted source and the authorized installed consumer separately;
   no merge-only deployment claim. Preserve other efforts' outstanding rollout.
+- [ ] Feed identical owner-backed source/task/steering fixtures to independent
+  graphical and terminal consumers. Assert semantic parity, including structured
+  inputs and failure/unknown states, without requiring matching layouts.
+- [ ] Exercise mapped-record emission with missing/renamed columns, stable
+  source identity, paging, repeated polls and lost responses. Prove malformed
+  records remain visible and retries do not duplicate accepted work.
 
 ## Proposal
 
@@ -174,8 +214,9 @@ discoverable templates and sufficient reusable injection contracts. Do not
 create a new registrar, template registry with duplicate truth, or consumer
 workflow engine. Exact schemas and paths remain subject to Phase 1 review.
 
-Drafting is the currently authorized deliverable. Implementation, provider
-migration, deployment and automation activation require a separate assignment.
+Implementation is authorized after amended-plan review and merge. External
+adapter specifics stay with their owner. Production migration, deployment and
+automation activation still require their applicable operational authorization.
 
 ## Journal
 
@@ -187,3 +228,11 @@ migration, deployment and automation activation require a separate assignment.
 - Vision prerequisite #7084 merged. Created issue #7091 for this bounded draft.
 - Captured the request and task/charter boundary; marked proposed implementation
   and validation details agent-recommended. No execution slices assigned.
+
+### 2026-10-16 - Execution authorized and parity scope clarified
+
+- Operator authorized taking the plans through review and driving convergence.
+- Added existing source/registration visibility, equal graphical/terminal task
+  semantics and a generic mapped-record source extension to the acceptance scope.
+- Retained process-neutral dispatch ownership and consumer-owned authentication.
+  Implementation remains behind the amended plan's review/merge gate.
