@@ -84,7 +84,9 @@ Windows SSH roots and broker-owned proxy children omit Win32-OpenSSH's inherited
 describes an ancestor's file descriptors, not the new redirected handles; passing
 it through can silently break SSH stdio. All other ambient or explicitly supplied
 environment entries are preserved without modifying the caller's environment.
-An explicit empty environment stays empty. POSIX environment handling is unchanged.
+An explicit empty environment stays empty. When the descriptor-state key is
+absent, the original environment argument is left unchanged, including ambient
+inheritance. POSIX environment handling is unchanged.
 
 The broker lives in the calling process and closes with its SSH root.
 `terminate_ssh_process_tree` also awaits broker cleanup on timeout or

@@ -374,11 +374,13 @@ async def create_ssh_subprocess(
         # OpenSSH's inherited descriptor metadata describes an ancestor's handles,
         # not the newly redirected stdio owned by this subprocess.
         environment = kwargs.get("env")
-        kwargs["env"] = {
-            key: value
-            for key, value in (os.environ if environment is None else environment).items()
-            if key.casefold() != _WINDOWS_FD_STATE
-        }
+        if environment is None:
+            environment = os.environ
+        if any(key.casefold() == _WINDOWS_FD_STATE for key in environment):
+            kwargs["env"] = {
+                key: value for key, value in environment.items()
+                if key.casefold() != _WINDOWS_FD_STATE
+            }
     proxy = getattr(config, "proxy_command", None)
     if not proxy and isinstance(config, SSHConfig):
         proxy = _option(config, "proxycommand")

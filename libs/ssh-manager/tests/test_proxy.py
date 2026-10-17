@@ -83,22 +83,27 @@ async def test_native_probe_cancels_pipe_drain_even_when_cleanup_fails(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("windows", [False, True])
-@pytest.mark.parametrize("environment", ["ambient", "explicit", "empty"])
+@pytest.mark.parametrize("environment", ["ambient", "ambient-none", "explicit", "empty"])
 @pytest.mark.parametrize("has_proxy", [False, True])
+@pytest.mark.parametrize("descriptor_present", [False, True])
 async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
-    monkeypatch, windows, environment, has_proxy,
+    monkeypatch, windows, environment, has_proxy, descriptor_present,
 ):
     key = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
     inherited = {
-        key: "synthetic-descriptors",
-        key.upper(): "synthetic-case-variant",
         "OTHER_POSIX_FD_STATE": "keep",
         "GH_TOKEN": "synthetic-account-value",
     }
+    if descriptor_present:
+        inherited.update({
+            key: "synthetic-descriptors",
+            key.upper(): "synthetic-case-variant",
+        })
     monkeypatch.setattr(proxy, "_is_windows", lambda: windows)
     monkeypatch.setattr(os, "environ", dict(inherited))
     explicit = {} if environment == "empty" else dict(inherited)
-    before = dict(os.environ if environment == "ambient" else explicit)
+    ambient = environment.startswith("ambient")
+    before = dict(os.environ if ambient else explicit)
     process = SimpleNamespace(wait=AsyncMock(return_value=0))
     spawn = AsyncMock(return_value=(process, None))
     broker_environments = []
@@ -114,13 +119,15 @@ async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
     monkeypatch.setattr(proxy, "_split_windows_command", lambda command: ["proxy"])
     monkeypatch.setattr(proxy, "_client_command", lambda *args, **kwargs: "client")
     kwargs = {} if environment == "ambient" else {"env": explicit}
+    if environment == "ambient-none":
+        kwargs = {"env": None}
     try:
         await proxy.create_ssh_subprocess(
             "ssh", "example",
             config=SSHConfig("example", user="probe", proxy_command="proxy" if has_proxy else None),
             **kwargs,
         )
-        if windows:
+        if windows and descriptor_present and environment != "empty":
             expected = {
                 name: value for name, value in before.items()
                 if name.casefold() != key.casefold()
@@ -128,11 +135,15 @@ async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
             assert spawn.await_args.kwargs["env"] == expected
             if has_proxy:
                 assert broker_environments == [expected]
-        elif environment == "ambient":
+        elif ambient:
             assert spawn.await_args.kwargs.get("env") is None
+            if has_proxy and windows:
+                assert broker_environments == [None]
         else:
             assert spawn.await_args.kwargs["env"] == before
-        assert dict(os.environ if environment == "ambient" else explicit) == before
+            if has_proxy and windows:
+                assert broker_environments == [before]
+        assert dict(os.environ if ambient else explicit) == before
     finally:
         await run_process_cleanup(process)
 
