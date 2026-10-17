@@ -179,7 +179,7 @@ class ReceiptReconciliation:
                 return _read_metadata(self.receipt_dir.absolute(), path.absolute())
         except (ManagedRuntimeError, OSError) as exc:
             raise lifecycle.CompanionIndeterminate(
-                f"receipt metadata is unavailable or invalid: {path.name}: {exc}"
+                "receipt metadata unavailable"
             ) from exc
 
     def _receipt_generation(self, registration_id: str) -> dict:

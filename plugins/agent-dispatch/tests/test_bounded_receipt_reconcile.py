@@ -35,6 +35,26 @@ def _receipt(controller, rid="withdrawn", *, owner_ready=True):
     return value
 
 
+@pytest.mark.parametrize("error_type", [ManagedRuntimeError, OSError])
+def test_receipt_metadata_failure_does_not_disclose_paths(tmp_path, monkeypatch, caplog, error_type):
+    from agent_dispatch import companion_reconcile
+
+    controller = DefaultCompanionController(tmp_path / "private-receipts")
+    _receipt(controller)
+    sensitive = str(tmp_path / "private-provider-detail")
+
+    def unavailable(*args, **kwargs):
+        raise error_type(sensitive)
+
+    monkeypatch.setattr(companion_reconcile, "_read_metadata", unavailable)
+    with pytest.raises(CompanionIndeterminate) as raised:
+        controller._receipt_metadata(controller._receipt_path("withdrawn"))
+    assert str(raised.value) == "receipt metadata unavailable"
+    controller.reconcile_receipts(set())
+    assert sensitive not in caplog.text
+    assert str(tmp_path) not in caplog.text
+
+
 def test_receipt_integrity_pending_does_not_block_unrelated_units(tmp_path, monkeypatch):
     entered, release = threading.Event(), threading.Event()
     controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
@@ -75,6 +95,7 @@ def test_receipt_integrity_pending_does_not_block_unrelated_units(tmp_path, monk
         inventory = controller._receipt_inventory_future
         if inventory is not None:
             inventory.result(timeout=1)
+        daemon._progress_future.result(timeout=1)
         assert controller._operation_record("withdrawn")["state"] == "timeout"
         assert controller._receipt_path("withdrawn").exists()
         assert len(launcher.launched) == 1

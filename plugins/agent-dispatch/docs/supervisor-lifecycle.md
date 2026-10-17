@@ -141,6 +141,8 @@ limited to one warning per category per 30 seconds. Unavailable receipt progress
 is marked unknown (`null` with an observation error), not a confirmed empty list.
 Status-file read errors expose fixed I/O, JSON and object-shape classifications,
 not filesystem paths or raw exception text.
+Receipt metadata failures likewise expose only a fixed unavailable category,
+not the underlying filesystem exception or receipt path.
 A controller without a callable progress observation reports
 `receipt-progress-unsupported`; only a completed observation may report `[]`.
 Data/state failures in the final summary follow the same classified best-effort

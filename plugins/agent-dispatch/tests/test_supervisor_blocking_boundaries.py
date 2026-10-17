@@ -179,6 +179,39 @@ def test_failed_progress_worker_does_not_abort_next_reconciliation(caplog, failu
         daemon.shutdown()
 
 
+@pytest.mark.parametrize("boundary", ["start", "progress", "final", "receipts"])
+def test_indeterminate_optional_progress_is_already_classified(caplog, boundary):
+    controller = FakeCompanionController()
+    controller.receipt_operation_progress = lambda: []
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", companion_controller=controller, launcher=FakeLauncher(),
+    )
+
+    def unavailable(*args):
+        raise CompanionIndeterminate("private-provider-detail")
+
+    daemon._progress_latest = {"phase": "complete", "cycle_id": 1}
+    if boundary == "start":
+        daemon._status_start_latest = (1, 1.0, unavailable)
+    elif boundary == "progress":
+        daemon._progress_callback = unavailable
+    elif boundary == "final":
+        daemon._status_latest = (object(), unavailable, 1)
+    else:
+        controller.receipt_operation_progress = unavailable
+    daemon._publish_progress()
+    expected = "receipt-progress-unavailable" if boundary == "receipts" else "publication-unavailable"
+    assert f"reason={expected}" in caplog.text
+    assert "private-provider-detail" not in caplog.text
+    assert "progress-worker-unavailable" not in caplog.text
+    assert not daemon._progress_worker_active
+    observed = []
+    daemon._progress_callback = observed.append
+    daemon._progress_latest = {"phase": "next", "cycle_id": 2}
+    daemon._publish_progress()
+    assert observed[-1]["phase"] == "next"
+
+
 @pytest.mark.parametrize("active_deadline", [None, 100.025, 0.0])
 def test_receipt_inventory_without_active_deadline_receives_forward_budget(monkeypatch, active_deadline):
     controller = FakeCompanionController()
