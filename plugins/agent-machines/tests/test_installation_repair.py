@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_machines import installation_repair as repair_api
 from agent_machines.installation_repair_admission import (
@@ -745,8 +747,20 @@ def test_installation_repair_distinct_sources_refuse_shared_legacy_writer(repair
     assert not list(home.glob("*.ready"))
 
 
+def _directory_alias(path: Path, target: Path) -> None:
+    if os.name != "nt":
+        path.symlink_to(target, target_is_directory=True)
+        return
+    command = f'"{os.environ["ComSpec"]}" /d /c mklink /J "{path}" "{target}"'
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("peer_mode", [
     "repairable", "no-readiness", "no-readiness-or-protocol", "no-protocol", "invalid-root",
+    "aliased-roots", "aliased-ancestor",
 ])
 def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_writer(
     repair_fixture, monkeypatch, peer_mode,
@@ -759,7 +773,8 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
         value = json.loads(path.read_text().replace("agent-example", "agent-peer"))
         if name == "payload-invocation.json":
             value["legacyRuntimeRoot"] = (
-                "../escape" if peer_mode == "invalid-root" else ".agent-example"
+                "../escape" if peer_mode == "invalid-root"
+                else ".agent-peer" if peer_mode == "aliased-roots" else ".agent-example"
             )
             if peer_mode in ("no-readiness-or-protocol", "no-protocol"):
                 value.pop("noSelfProvisionEnv")
@@ -774,13 +789,26 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
     value = json.loads(settings.read_text())
     value["enabledPlugins"]["agent-peer@fixture"] = True
     write_json(settings, value)
+    if peer_mode == "aliased-roots":
+        shared = home / "shared-runtime"
+        shared.mkdir()
+        for name in (".agent-example", ".agent-peer"):
+            _directory_alias(home / name, shared)
+        assert os.path.samefile(home / ".agent-example", home / ".agent-peer")
+    elif peer_mode == "aliased-ancestor":
+        alias = home.parent / "linked-home"
+        _directory_alias(alias, home)
+        home = alias
     host = admit_host(project, home=home)
-    assert bool(host.refused) == (peer_mode in ("no-protocol", "invalid-root"))
+    aliased = peer_mode.startswith("aliased-")
+    assert bool(host.refused) == (aliased or peer_mode in ("no-protocol", "invalid-root"))
     assert not host.report.findings
-    binding_count = 2 if peer_mode == "repairable" else 1
+    binding_count = 0 if aliased else 2 if peer_mode == "repairable" else 1
     assert len(host.bindings) == binding_count
+    if aliased:
+        assert len(host.refused) == 2
     assert len({owner.installation.provenance.source_fingerprint
-                for owner in host.bindings.values()}) == 1
+                for owner in host.bindings.values()}) == int(binding_count > 0)
     assert len({owner.installation.owner_id for owner in host.bindings.values()}) == binding_count
     refusal = (
         "ordinary-legacy-ownership-unresolved" if peer_mode == "invalid-root"
@@ -790,6 +818,14 @@ def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_write
                for owner in host.bindings.values())
     monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("executed"))
     modules = [module.qualified_id for module in host.report.modules]
+    if peer_mode == "aliased-ancestor":
+        with pytest.raises(RepairAdmissionError, match="linked or reparse"):
+            repair_api.repair(project, home=home, modules=modules)
+        with pytest.raises(RepairAdmissionError, match="linked or reparse"):
+            repair_api.repair(
+                project, home=home, modules=modules, apply=True, expected_plan_digest="0" * 64,
+            )
+        return
     plan = repair_api.repair(project, home=home, modules=modules)
     result = repair_api.repair(
         project, home=home, modules=modules, apply=True, expected_plan_digest=plan["planDigest"],

@@ -152,6 +152,8 @@ repair rather than guessing an installer. A legacy runtime root must have one
 qualified plugin owner, even when the competing plugins share a marketplace.
 All enabled runtimes contribute ownership claims independently of readiness or
 repair eligibility; an unverifiable runtime declaration blocks ordinary repair.
+Existing runtime roots and ancestors must be ordinary, unlinked directories;
+a missing ordinary root remains eligible for first installation.
 Validated active-core cells may be
 observed, but **unready core-cell repair is not yet supported**: ordinary `init`
 actions are not cell-lifecycle permission. This command never creates cells,

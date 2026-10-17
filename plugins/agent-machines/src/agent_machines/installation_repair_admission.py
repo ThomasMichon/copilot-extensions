@@ -153,7 +153,14 @@ def _legacy_root(invocation: Mapping[str, object], home: Path) -> Path:
     legacy = invocation.get("legacyRuntimeRoot", invocation.get("runtimeRoot"))
     if not isinstance(legacy, str) or not _LEGACY.fullmatch(legacy):
         raise RepairAdmissionError("repair owner has no supported declared legacy root")
-    return home / legacy
+    ordinary(home, directory=True)
+    root = home / legacy
+    try:
+        root.lstat()
+    except FileNotFoundError:
+        return root
+    ordinary(root, directory=True)
+    return root
 
 
 def _runtime_claim(root: Path, home: Path) -> Path | None:
