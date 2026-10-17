@@ -525,20 +525,33 @@ not to the vision. This effort does not acquire or migrate live capacity.
   Its review corrections bind actual executable admission, re-admit initially
   ready and refreshed/post-install outcomes, propagate refused prerequisite
   blockers, and preserve process ownership through SIGINT/SIGTERM spawn and
-  cleanup boundaries. A relative PATH entry now invokes the exact admitted
-  absolute executable instead of selecting another file from the payload cwd.
-- The latest complete native WSL repair portfolio passed 91 cases with three
-  Windows-only skips, plus 166 packaging/source/trusted-reader cases and an
-  installed-platform check. Focused native Windows executable/CMD/plan-apply
-  coverage passed nine cases with one POSIX-only skip. The preceding final-probe
-  cancellation/drift selection passed 14 native Windows cases. These are
-  bounded selections, not a new full Windows-suite claim.
+  cleanup boundaries. Executable lookup through a relative `PATH` entry now
+  produces an absolute admitted `argv[0]`; changing to the payload working
+  directory at launch cannot reinterpret that executable path.
+
+| Execution lane | Result | Scope |
+|----------------|--------|-------|
+| Linux binaries in WSL | 91 passed, three Windows-only skips | Complete repair/boundary/journal portfolio; installed WSL platform check also passed |
+| Linux binaries in WSL | 166 passed | Packaging/source/trusted-reader portfolio |
+| Windows-native processes | Nine passed, one POSIX-only skip | Executable admission, CMD and real plan/apply selection |
+| Windows-native processes, preceding final-probe candidate | 14 passed | Cancellation/drift selection |
+
+These bounded Windows selections are not a new full Windows-suite claim.
+
 - Fresh-box attempts passed materialization and payload stamping but failed
-  first-use provisioning on a public package-feed TLS handshake. No TLS/feed
-  waiver was used, and that lane is not recorded as passing. Native macOS,
+  first-use provisioning with `TLS HandshakeFailure` fetching setuptools 84
+  metadata from public `files.pythonhosted.org`. This reproduced in two
+  disposable Docker attempts; it was not diagnosed as a universal feed outage.
+  #6944 records that validation boundary, and #6464 retains its fresh-install
+  follow-up. No TLS/feed waiver was used or passing result claimed. Native macOS,
   declared active-core apply and actual consuming setup remain under #6464.
   Current-head review and required CI still gate #6944; source publication
   does not establish a promoted release, installed repair or live deployment.
+- The journal's first required Manager run hit the exact tracked #6490
+  second-caller `RoutingLockTimeout` signature (CI run `39001166643`, job
+  `117304199673`): one failed, 2,621 passed and 53 skipped. This is not a
+  passing gate or permission to bypass it; the updated journal still needs
+  real current-head CI success.
 - The reviewed #6624 client-admission boundary and merged #6569 byte staging
   remain the managed-client prerequisites under #6424/#6240. Separate proposed
   Gateway SSH runtime/policy leaves are published in #7083/#7087, not yet
