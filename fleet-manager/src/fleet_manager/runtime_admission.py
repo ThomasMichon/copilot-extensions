@@ -80,7 +80,7 @@ class ObservationScope:
         return (
             (self.origin, self.project, self.entity)
             == (requested.origin, requested.project, requested.entity)
-            and set(requested.fields) <= set(self.fields)
+            and all(field in self.fields for field in requested.fields)
         )
 
 
@@ -348,7 +348,7 @@ class AdmissionAuthority:
                 for branch in selected
             ):
                 raise AdmissionError("forbidden-scope")
-            return tuple(sorted(selected, key=_scope_key))
+            return selected
         value = request.to_dict()
         if (value["authority"], value["principal"], value["account"]) != (
             current.authority, enrolled.principal, enrolled.account,
