@@ -142,7 +142,7 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
   accounting, catalog, daily-output, and consumer compatibility contracts.
 
 ### Phase 1 - Complete evidence preservation
-- [ ] Preserve bounded, content-free session-local accounting observations before
+- [x] Preserve bounded, content-free session-local accounting observations before
   sync and compaction; retain prior evidence after store rebuild or corruption
   (#6439; [slice contract](usage-evidence-and-estimation.md)).
 - [ ] Extend configured sync to preserve process logs alongside session-state.
@@ -237,6 +237,50 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
 Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
+
+### 2026-10-17 - Transcript estimation implementation and bounded validation
+- Implemented the remaining #6439 estimation slice: content-free root-call
+  features, optional preserved/store measurement pairing, session-disjoint
+  model calibration, empirical uncertainty and an explicit read-only JSON CLI.
+  Standard live/tar.gz/ZIP inputs share preallocation limits and stable reads;
+  custom codecs explicitly decline unsupported bounded access.
+- Native focused feature/calibration/reader/ZIP selection passed 287 tests
+  with 19 platform skips; legacy session and cold-store consumers passed 90
+  tests with four skips. Install-contract, touched F/E9 lint, documentation
+  consistency and independent read-only correctness review passed.
+- A bounded private count-only production comparison exercised measured
+  coverage, session-aggregate held-out errors, explicit oversize refusals,
+  extrapolation warnings and zero-feature abstentions. Poor accuracy remained
+  visible in best-effort mode. No corpus, identifiers, coefficients or consumer
+  rates were published; this is not historical ground-truth proof.
+- Restored a stale session-owned test environment through the runner's explicit
+  reinstall path after confirming missing transitive dependency metadata.
+  Canonical shared-library manifest invalidation is tracked separately in
+  #7136; test leases, containment and time limits were unchanged.
+- The estimation source still owes its reviewed PR and required-CI merge.
+  Phase 3's historical-estimate checkbox and #6439 remain open until that
+  gate lands. The parent effort remains Active for catalog, exact accounting,
+  daily products, consumer parity and authorized runtime adoption.
+
+### 2026-10-17 - Session-local accounting preservation merged
+- #7072 merged as `85b16a25d1d17fef907ca1d4b7c4a5220c197e0b` after the
+  current-head review findings were fixed or explained and resolved. The
+  maintainer accepted the existing Lite review and the normal managed merge
+  gate; required CI enforcement was not bypassed.
+- Scheduled capture now preserves bounded, source-qualified SQLite/WAL and
+  modern transcript observations before signatures and compaction. Prior
+  artifacts survive rebuilds, corrupt inputs and publication failures. Missing
+  evidence is explicit, and raw sessions and existing archives remain
+  transferable when accounting prevents compaction.
+- Review regressions cover embedded-NUL text bounds, overflowing numeric
+  metrics, original timestamp admission, producer-lock signature churn and
+  archive delivery across accounting gaps. The final focused native selection
+  passed 106 tests with six platform skips; earlier broader selections remain
+  evidence for their own revisions, not invented final-head execution.
+- Re-read both completion gates after the merge. The preservation portion of
+  #6439 is complete; calibrated historical estimates are the next owned slice.
+  #6439, release-backed adoption and the parent effort remain open. No live
+  runtime or machine configuration was changed.
 
 ### 2026-10-16 - Internal all-target retirement sequence
 - Composed the prepared exact-ZIP publisher, full readback and native exclusive

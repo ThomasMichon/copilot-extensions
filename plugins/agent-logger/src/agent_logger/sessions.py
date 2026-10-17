@@ -326,12 +326,20 @@ def resolve_ref(session_id: str, state_root: Path, *archive_stores: Path) -> Ses
 # ---------------------------------------------------------------------------
 
 
-def read_member(ref: SessionRef, member: str) -> bytes | None:
+def read_member(
+    ref: SessionRef, member: str, *, max_bytes: int | None = None,
+) -> bytes | None:
     """Return raw bytes of ``member`` for ``ref``, or ``None`` if absent.
 
     For an archive, sidecar members are served from the uncompressed sidecar
     (no decompress); other members are read out of the tarball.
+    An explicit ``max_bytes`` selects strict, stable, no-follow reads without
+    sidecar substitution; codecs without bounded support fail explicitly.
     """
+    if max_bytes is not None:
+        from agent_logger.usage_reader import read_session_member
+
+        return read_session_member(ref, member, max_bytes=max_bytes)
     if ref.kind == "live":
         p = ref.path / member
         return p.read_bytes() if p.is_file() else None
