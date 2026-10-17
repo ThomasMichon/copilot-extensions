@@ -324,3 +324,33 @@ def test_pr_blocker_names_numbered_and_unnumbered_entries(tmp_path: Path) -> Non
     blocker = retirement_blocker(record)
     assert blocker is not None
     assert "PR #42, ?" in blocker.reason
+
+
+def test_direct_reaper_reports_lock_contention_without_destructive_actions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from agent_worktrees import cleanup_reap
+
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    record = make_record(tmp_path)
+    path = harness.seed(record)
+    original = path.read_bytes()
+
+    def locked(*_args: object, **_kwargs: object) -> None:
+        raise TimeoutError("record lock contended")
+
+    monkeypatch.setattr(tracking, "_RecordLock", locked)
+    monkeypatch.setattr(
+        cleanup_reap,
+        "_reap_locked",
+        lambda *_args: pytest.fail("destructive reaper must not run on contention"),
+    )
+
+    failures, warnings = cleanup_reap.reap_worktree(
+        record, info(S.COMPLETED), harness.repo, path.parent
+    )
+
+    assert failures == 1
+    assert warnings == ["Cannot retire wt1: record lock contended"]
+    assert path.read_bytes() == original
+    assert Path(record.worktree_path).exists()
