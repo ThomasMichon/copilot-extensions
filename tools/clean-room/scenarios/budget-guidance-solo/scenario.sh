@@ -7,6 +7,7 @@ export CR_SCENARIO_NAME=budget-guidance-solo
 cr_init
 
 phase 0 "fresh credential-free environment and candidate source"
+# The shared helper records tool versions, PATH, and config presence, not values.
 envdump
 if ! capture "python-prerequisite" -- python3 -I -c \
     'import sys; sys.exit("Python 3.10+ is required") if sys.version_info < (3, 10) else print(sys.version)'; then
@@ -23,7 +24,8 @@ if [ -z "$SOURCE" ] || [ ! -f "$SOURCE/plugins/budget-guidance/scripts/install.s
     jam "path-binstub" "candidate source is absent" "pass --harness-mount <candidate checkout>"
     cr_finalize
 fi
-if [ -d "$HOME/.budget-guidance" ] || [ -d "$HOME/.local/bin" ]; then
+if [ -d "$HOME/.budget-guidance" ] || [ -e "$HOME/.local/bin/budget-guidance" ] \
+    || [ -L "$HOME/.local/bin/budget-guidance" ]; then
     jam "path-binstub" "runtime or binstub already exists" "use a fresh scenario container"
     cr_finalize
 fi

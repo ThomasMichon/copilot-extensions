@@ -285,6 +285,16 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Plugin-specific clean-slate check
+
+- Narrowed the baseline refusal to the budget runtime or its specific binstub,
+  including dangling stubs, rather than rejecting an unrelated empty/shared
+  bin directory.
+- Confirmed the shared `envdump` implementation is already an allowlist of
+  tool versions/paths and configuration-file presence; it does not dump
+  environment variables, index URLs, or configuration values. Retained that
+  existing contract rather than adding a redundant redaction mechanism.
+
 ### 2026-10-16 - Exact fixture version forms
 
 - Replaced global version-text replacement with a full match of the
