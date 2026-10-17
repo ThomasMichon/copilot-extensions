@@ -7,8 +7,13 @@ Parent: [Coverage-Guided CI](README.md), Phase 5.
 > We need to use the coverage-based CI selection, and choose a bounded set
 > of cross-cutting tests for "smoke"
 
+Coordination: [#4453](https://github.com/ThomasMichon/copilot-extensions/issues/4453);
+the concrete timeout is also recorded on
+[#6800](https://github.com/ThomasMichon/copilot-extensions/pull/6800).
+
 The current required `agent-dispatch` job executes the full portfolio rather
-than smoke: passing sub-suites can exceed its twelve-minute outer deadline.
+than smoke: total job wall time, even when every test passes, can exceed its
+twelve-minute outer deadline.
 Keep that deadline unchanged. Full promotion/manual validation remains
 independent and exhaustive.
 
@@ -17,12 +22,19 @@ independent and exhaustive.
 The implementation details below are **agent-recommended**, realizing the
 existing coverage-guided CI and test-portfolio visions, not new operator intent.
 
-- Reuse the existing trusted main-history pointer, Release baseline,
-  ancestor correlation, attribution invalidation, debt assessment and
-  `decide()` selector. Do not create a parallel name-filter selection policy.
+- Reuse the existing [main-history pointer and Release baseline](README.md#phase-1--baseline-generation--correlation-at-the-promotion-gate),
+  [ancestor correlation and attribution invalidation](README.md#phase-2--nearest-ancestor-resolution--attribution-remapinvalidate),
+  and [debt assessment and `decide()` selector](README.md#phase-3--diff-scoped-selection--coverage-debt--smoke-fallback).
+  Their implementations live in
+  [`correlation.py`](../../../tools/coverage_guided_selection/correlation.py),
+  [`ancestor_resolution.py`](../../../tools/coverage_guided_selection/ancestor_resolution.py),
+  [`debt.py`](../../../tools/coverage_guided_selection/debt.py) and
+  [`decide.py`](../../../tools/coverage_guided_selection/decide.py).
+  Do not create a parallel name-filter selection policy.
 - Always execute structural guards plus a bounded cross-cutting smoke set
   derived from the baseline's measured coverage and test costs through the
-  existing weighted-set-cover curation. Union that floor with attributed
+  existing [weighted-set-cover curation](../../../tools/coverage_guided_selection/fallback.py).
+  Union that floor with attributed
   diff-selected tests; never discard a known implicated test to fit a budget.
 - Make smoke/debt budgets explicit and report the baseline generation,
   fallback reason, selected node IDs, predicted cost and coverage breadth.
