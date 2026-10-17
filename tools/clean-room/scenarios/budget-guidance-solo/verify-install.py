@@ -53,7 +53,7 @@ assert hashlib.sha256(original.read_bytes()).digest() == hashlib.sha256(installe
 def status(*args):
     result = subprocess.run(
         [str(bin_path), "status", *args, "--json"],
-        text=True, capture_output=True, timeout=20, check=False,
+        encoding="utf-8", errors="strict", capture_output=True, timeout=20, check=False,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
     if result.returncode:
@@ -72,11 +72,10 @@ def status(*args):
     return posture
 
 
-missing = status("--config", str(snapshot / "absent-config.json"))
-assert missing["availability"] == "unavailable"
-assert missing["calculated"] is None
-
 with tempfile.TemporaryDirectory(prefix="budget-static-") as temporary:
+    missing = status("--config", str(Path(temporary) / "absent-config.json"))
+    assert missing["availability"] == "unavailable"
+    assert missing["calculated"] is None
     config = Path(temporary) / "budget.json"
     config.write_text(json.dumps({
         "schema": "copilot-extensions.budget-guidance-config", "version": 1,
