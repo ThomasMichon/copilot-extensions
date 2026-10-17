@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import shlex
 import subprocess
 import sys
@@ -22,12 +23,52 @@ pytestmark = [
 ]
 
 
+def _ram_temporary_directory() -> tempfile.TemporaryDirectory[str]:
+    try:
+        return tempfile.TemporaryDirectory(prefix="launch-storage-test-", dir="/dev/shm")
+    except OSError as exc:
+        if exc.errno not in {
+            errno.ENOENT, errno.EACCES, errno.EPERM,
+            errno.EROFS, errno.ENOSPC,
+        }:
+            raise
+        raise pytest.skip.Exception(
+            f"RAM-storage regression requires writable /dev/shm (errno {exc.errno})"
+        ) from exc
+
+
 @pytest.fixture
 def ram_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
-    with tempfile.TemporaryDirectory(prefix="launch-storage-test-", dir="/dev/shm") as root:
+    with _ram_temporary_directory() as root:
         monkeypatch.setattr(launch_storage, "RAM_ROOT", root)
         monkeypatch.setattr(launch_storage, "EXEC_ROOT", str(tmp_path))
         yield Path(root)
+
+
+@pytest.mark.parametrize("number", [
+    errno.ENOENT, errno.EACCES, errno.EPERM,
+    errno.EROFS, errno.ENOSPC,
+])
+def test_unavailable_ram_prerequisite_is_an_explicit_skip(
+    monkeypatch: pytest.MonkeyPatch, number: int,
+) -> None:
+    def unavailable(**kwargs: object) -> tempfile.TemporaryDirectory[str]:
+        raise OSError(number, "synthetic unavailable prerequisite")
+
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", unavailable)
+    with pytest.raises(pytest.skip.Exception, match="requires writable /dev/shm"):
+        _ram_temporary_directory()
+
+
+def test_unexpected_ram_creation_error_is_not_silently_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected(**kwargs: object) -> tempfile.TemporaryDirectory[str]:
+        raise OSError(errno.EIO, "synthetic unexpected failure")
+
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", unexpected)
+    with pytest.raises(OSError, match="synthetic unexpected failure"):
+        _ram_temporary_directory()
 
 
 @pytest.fixture

@@ -340,7 +340,7 @@ def test_attached_rejoin_receipt_is_not_consumption(launch_seams, monkeypatch):
 def test_original_session_host_cleanup_handle_removes_companion_auth(launch_seams, monkeypatch):
     target, _ = launch_seams
     owner = "/home/user/.agent-containers/launch/" + "a" * 32 + ".env"
-    commands = []
+    commands: list[list[str]] = []
     monkeypatch.setattr(auth.transport, "_run", lambda argv, **kw:
         commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""))
     monkeypatch.setattr(cli, "cleanup_remote_env", real_cleanup_remote_env)
