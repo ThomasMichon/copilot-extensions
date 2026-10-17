@@ -25,16 +25,26 @@ def verify_case(root: Path, outcome: str) -> dict:
         json.loads(line) for line in (root / "stages.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     expected = "completed" if outcome == "complete" else "abandoned"
-    if not (
-        proof["outcome"] == outcome and proof["status"] == expected
-        and proof["native_preserved"] is True and proof["prompts"] == 1
-        and proof["rotated"] is True and proof["terminal_credential_refused"] is True
-        and len(proof["refused"]) == 5
-        and all(item["status"] == 403 for item in proof["refused"])
-        and sum(row["stage"] == "acceptance" and row["event"] == "complete" for row in stages) == 1
-        and stages[-1]["stage"] == "cleanup" and stages[-1]["event"] == "complete"
-    ):
-        raise ValueError("Incomplete task-only authority or cleanup evidence")
+    checks = [
+        ("terminal outcome differs", proof["outcome"] == outcome and proof["status"] == expected),
+        ("native identity changed", bool(proof["native"]) and (
+            proof["native"] == proof["owner_native"] == proof["bridge_native"]
+        )),
+        ("expected one prompt", proof["prompts"] == 1),
+        ("credential did not rotate", proof["rotated"] is True),
+        ("terminal credential was not refused", proof["terminal_credential_status"] == 403),
+        ("expected five refused routes", len(proof["refused"]) == 5),
+        ("route was not refused", all(item["status"] == 403 for item in proof["refused"])),
+        ("acceptance did not complete exactly once", sum(
+            row["stage"] == "acceptance" and row["event"] == "complete" for row in stages
+        ) == 1),
+        ("cleanup did not complete", bool(stages) and (
+            stages[-1]["stage"] == "cleanup" and stages[-1]["event"] == "complete"
+        )),
+    ]
+    for message, passed in checks:
+        if not passed:
+            raise ValueError(message)
     return proof
 
 

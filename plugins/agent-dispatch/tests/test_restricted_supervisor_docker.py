@@ -57,7 +57,6 @@ def _cleanup_docker(containers, networks):
     failures = []
     for kind, names in (("container", containers), ("network", networks)):
         for name in names:
-            missing = f"No such container: {name}" if kind == "container" else f"network {name} not found"
             argv = ["docker", "rm", "-f", "-v", name] if kind == "container" else [
                 "docker", "network", "rm", name,
             ]
@@ -66,15 +65,23 @@ def _cleanup_docker(containers, networks):
                     argv, capture_output=True, text=True, timeout=30,
                     creationflags=no_window_flags(),
                 )
-                if removed.returncode and missing not in removed.stderr:
-                    failures.append(f"{kind} removal: {removed.stderr}")
+                inventory = ["docker", kind, "ls", "--filter", f"name={name}"]
+                if kind == "container":
+                    inventory.append("--all")
+                inventory.extend(["--format", "{{json .Names}}" if kind == "container" else "{{json .Name}}"])
                 inspected = subprocess.run(
-                    ["docker", kind, "inspect", name], capture_output=True, text=True,
+                    inventory, capture_output=True, text=True,
                     timeout=30, creationflags=no_window_flags(),
                 )
-                if inspected.returncode == 0 or missing not in inspected.stderr:
-                    failures.append(f"{kind} absence not confirmed: {name}: {inspected.stderr}")
-            except (OSError, subprocess.TimeoutExpired) as exc:
+                if inspected.returncode:
+                    failures.append(f"{kind} inventory unavailable: {name}: {inspected.stderr}")
+                else:
+                    present = [json.loads(line) for line in inspected.stdout.splitlines()]
+                    if any(not isinstance(value, str) for value in present):
+                        failures.append(f"{kind} inventory malformed: {name}")
+                    elif name in present:
+                        failures.append(f"{kind} still exists: {name}: {removed.stderr}")
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
                 failures.append(f"{kind} cleanup failed: {name}: {exc}")
     assert not failures, "\n".join(failures)
 
@@ -341,6 +348,7 @@ def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkey
 
                 proof = _wait(final_proof)
                 assert proof["native"] == info["native_session_id"] and proof["rotated"] is True
+                assert proof["terminal_credential_status"] == 403
                 assert proof["outcome"] == outcome and proof["prompts"] == 1
                 assert len(proof["refused"]) == 5
                 assert all(item["status"] == 403 for item in proof["refused"])
@@ -354,12 +362,14 @@ def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkey
                 assert supervisor.renew_restricted_grants() == 0
                 inspected = _run("docker", "inspect", physical)
                 assert fleet_token not in inspected and control_token not in inspected
-                assert bridge_state(session_id)["acp_session_id"] == info["native_session_id"]
+                bridge_native = bridge_state(session_id)["acp_session_id"]
+                assert bridge_native == info["native_session_id"]
                 (evidence / "proof.json").write_text(json.dumps({
                     "outcome": outcome, "status": terminal_status,
-                    "native_preserved": True, "prompts": proof["prompts"],
-                    "refused": proof["refused"], "rotated": True,
-                    "terminal_credential_refused": True,
+                    "native": proof["native"], "owner_native": info["native_session_id"],
+                    "bridge_native": bridge_native, "prompts": proof["prompts"],
+                    "refused": proof["refused"], "rotated": proof["rotated"],
+                    "terminal_credential_status": proof["terminal_credential_status"],
                 }), encoding="utf-8")
                 trace("acceptance", "complete")
     finally:
