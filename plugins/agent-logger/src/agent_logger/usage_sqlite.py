@@ -41,6 +41,10 @@ class UsageReadError(ValueError):
     """Accounting coverage could not be read safely or completely."""
 
 
+class UsageStoreMissingError(UsageReadError):
+    """The accounting store or its containing directory is absent."""
+
+
 def _pin_file(
     directory: ArchiveDirectory,
     name: str,
@@ -52,7 +56,7 @@ def _pin_file(
         info = directory.stat(name)
     except FileNotFoundError:
         if required:
-            raise UsageReadError("accounting store is missing") from None
+            raise UsageStoreMissingError("accounting store is missing") from None
         return None
     if is_link_or_reparse(directory.path / name, info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise UsageReadError("accounting store path is unsafe")
@@ -255,7 +259,7 @@ def read_sqlite_usage(
     except UsageReadError:
         raise
     except FileNotFoundError:
-        raise UsageReadError("accounting store is missing") from None
+        raise UsageStoreMissingError("accounting store is missing") from None
     except OSError:
         raise UsageReadError("accounting store path is unsafe or unreadable") from None
     except (sqlite3.Error, RuntimeError, ValueError):

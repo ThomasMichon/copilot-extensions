@@ -14,7 +14,7 @@ import pytest
 
 from agent_logger import usage_sqlite
 from agent_logger.sync.publication_directory import PublicationDirectory
-from agent_logger.usage_sqlite import UsageReadError, read_sqlite_usage
+from agent_logger.usage_sqlite import UsageReadError, UsageStoreMissingError, read_sqlite_usage
 
 _CREATE = (
     "CREATE TABLE assistant_usage_events "
@@ -79,12 +79,14 @@ def test_committed_wal_without_checkpoint(tmp_path: Path) -> None:
         assert read_sqlite_usage(path, {"chosen"})["chosen"][0]["values"]["input_tokens"] == 12
 
 
-def test_missing_does_not_create_file(tmp_path: Path) -> None:
-    path = tmp_path / "missing" / "usage.db"
-    with pytest.raises(UsageReadError, match="^accounting store is missing$"):
+@pytest.mark.parametrize("missing_parent", [False, True])
+def test_missing_does_not_create_file(tmp_path: Path, missing_parent: bool) -> None:
+    parent = tmp_path / "missing" if missing_parent else tmp_path
+    path = parent / "usage.db"
+    with pytest.raises(UsageStoreMissingError, match="^accounting store is missing$"):
         read_sqlite_usage(path, {"chosen"})
     assert not path.exists()
-    assert not path.parent.exists()
+    assert parent.exists() is not missing_parent
 
 
 def test_empty_scope_never_opens_store(

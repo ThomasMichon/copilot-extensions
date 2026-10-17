@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from agent_logger.sync.publication_directory import publication_directory
 from agent_logger.usage_ledger import UsageEvidenceError, merge_session_evidence
-from agent_logger.usage_sqlite import UsageReadError, read_sqlite_usage
+from agent_logger.usage_sqlite import UsageReadError, UsageStoreMissingError, read_sqlite_usage
 from agent_logger.usage_transcript import read_transcript_usage
 
 MAX_SESSIONS = 10000
@@ -83,15 +83,12 @@ def capture_usage(source: Path, include: set[str] | None) -> CaptureResult:
     try:
         stored = read_sqlite_usage(source / "session-store.db", set(sessions))
         store_coverage = "captured"
+    except UsageStoreMissingError:
+        stored = {}
+        store_coverage = "missing"
+        gaps.append("session-store accounting source is missing")
     except (UsageReadError, OSError) as exc:
-        # Missing legacy stores are coverage gaps; a corrupt or refused store
-        # retains every last-good artifact and blocks cold archival this pass.
-        if isinstance(exc, UsageReadError) and str(exc) == "accounting store is missing":
-            stored = {}
-            store_coverage = "missing"
-            gaps.append("session-store accounting source is missing")
-        else:
-            return CaptureResult(failures=(f"session-store capture: {exc}",))
+        return CaptureResult(failures=(f"session-store capture: {exc}",))
     failures: list[str] = []
     updated = 0
     for session_id in sorted(sessions):

@@ -223,6 +223,26 @@ def test_usage_scope_rebuild_missing_and_corrupt_store(tmp_path: Path) -> None:
     assert (session / ARTIFACT).read_bytes() == prior
 
 
+@pytest.mark.parametrize("missing_store", [False, True])
+def test_usage_store_coverage_uses_error_type_not_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_store: bool,
+) -> None:
+    from agent_logger import usage_capture
+    from agent_logger.usage_sqlite import UsageReadError, UsageStoreMissingError
+
+    session = _session(tmp_path)
+    error = UsageStoreMissingError if missing_store else UsageReadError
+
+    def fail_store(*args: object, **kwargs: object) -> dict:
+        raise error("different wording" if missing_store else "accounting store is missing")
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", fail_store)
+    result = capture_usage(tmp_path, {"s1"})
+    assert bool(result.gaps) is missing_store
+    assert bool(result.failures) is not missing_store
+    assert (session / ARTIFACT).exists() is missing_store
+
+
 def test_usage_bounds_preserve_prior(tmp_path: Path, monkeypatch) -> None:
     from agent_logger import usage_ledger, usage_transcript
 
