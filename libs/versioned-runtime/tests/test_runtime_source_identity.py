@@ -84,6 +84,14 @@ def test_source_identity_preserves_package_and_full_source_identity(payload: Pat
 
 
 @pytest.mark.parametrize(
+    "version", ["0.4.1-dev3", "0.4.1.dev3", "0.4.1-dev3+base", "0.4.1.dev3+base"],
+)
+def test_source_identity_accepts_original_and_normalized_dev_versions(version: str) -> None:
+    qualified = identity.runtime_version(version, COMMIT, ASSEMBLY)
+    assert qualified.startswith(version + ("." if "+" in version else "+") + "source.")
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("version", True), ("source_commit", "short"), ("source_tree", "short"),

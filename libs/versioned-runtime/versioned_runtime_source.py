@@ -18,7 +18,7 @@ SOURCE_SCHEMA = "copilot-extensions.runtime-source"
 _OBJECT_ID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _PACKAGE_VERSION = re.compile(
-    r"\d+\.\d+\.\d+(?:-dev\d+)?(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?"
+    r"\d+\.\d+\.\d+(?:[.-]dev\d+)?(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?"
 )
 _GENERATED = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",

@@ -36,8 +36,8 @@ def compare_serving_version(running: str, target: str) -> str:
         raise ServingReconcileError("serving version could not be verified") from exc
     if left == right:
         return "current"
-    if is_source_build_version(target) or (
-        is_source_build_version(running) and left.public == right.public
+    if left.public == right.public and (
+        is_source_build_version(target) or is_source_build_version(running)
     ):
         return "different-source"
     return "older" if left < right else "newer"

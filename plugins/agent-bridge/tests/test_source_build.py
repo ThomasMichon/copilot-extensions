@@ -60,7 +60,9 @@ def test_ordinary_environment_keeps_package_version(tmp_path: Path, prefix: str)
         (FIRST, FIRST, "current"),
         (FIRST, SECOND, "different-source"),
         (SECOND, FIRST, "different-source"),
-        ("9.0.0", FIRST, "different-source"),
+        ("9.0.0", FIRST, "newer"),
+        ("0.3.0", FIRST, "older"),
+        (FIRST, "0.5.0", "older"),
         (FIRST, PACKAGE, "different-source"),
         ("1.0.0", "2.0.0", "older"),
         ("2.0.0", "1.0.0", "newer"),
@@ -106,3 +108,23 @@ def test_different_source_reconcile_uses_existing_guarded_cutover(
         force=False, recover=False, probe_serving=False, json=False,
     ))
     assert calls == [running]
+
+
+def test_source_target_cannot_downgrade_a_newer_serving_package(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    @contextmanager
+    def observed(_root: Path) -> Iterator[SimpleNamespace]:
+        yield SimpleNamespace(version="9.0.0")
+
+    calls = []
+    monkeypatch.setattr(agent_bridge, "__version__", FIRST)
+    monkeypatch.setattr(serving_reconcile, "observe_serving", observed)
+    monkeypatch.setattr(venue_cli, "_cmd_deploy", lambda args, *, serving: calls.append(serving))
+    with pytest.raises(SystemExit) as stopped:
+        serving_reconcile.reconcile_serving(argparse.Namespace(
+            force=False, recover=False, probe_serving=False, json=False,
+        ))
+    assert stopped.value.code == 1
+    assert "serving daemon is newer" in capsys.readouterr().err
+    assert calls == []
