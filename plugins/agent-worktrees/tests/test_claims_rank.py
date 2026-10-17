@@ -7,6 +7,25 @@ from agent_worktrees import claims_rank
 from agent_worktrees.tracking_claims import ResourceClaim
 
 
+def test_live_pr_identities_dedupe_without_ranking(monkeypatch):
+    def no_sort(*args, **kwargs):
+        raise AssertionError("dedupe must not rank the resource ledger")
+
+    monkeypatch.setattr(claims_rank, "rank_claims", no_sort)
+    identities = claims_rank.live_pr_claim_identities([
+        ResourceClaim(kind="pr", ref="example/project#7"),
+        {"kind": "pr", "ref": "https://github.com/example/project/pull/7", "state": "active"},
+        ResourceClaim(kind="pr", ref="example/project#8", state="released"),
+        {"kind": "pr", "ref": "example/project#9", "state": "at-rest"},
+        {"kind": "task", "ref": "example/project#10", "state": "active"},
+        {"kind": "pr", "state": "active"},
+    ])
+    assert identities == {
+        "https://github.com/example/project/pull/7",
+        "https://github.com/example/project/pull/9",
+    }
+
+
 def test_rank_claims_orders_by_pecking_order_not_ledger_order():
     claims = [
         ResourceClaim(kind="task", ref="task-9f21"),
@@ -369,4 +388,3 @@ def test_format_claim_pr_like_override_still_prefixes():
         "bug", "acme-org/sample-repo#2", own_repo="copilot-extensions",
         label_overrides={"bug": "ADO bug"},
     ) == "ADO bug sample-repo#2"
-

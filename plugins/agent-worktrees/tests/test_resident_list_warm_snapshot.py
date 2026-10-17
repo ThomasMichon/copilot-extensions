@@ -211,6 +211,7 @@ def test_standalone_payload_reads_do_not_reuse_resident_enrichment(warm_model):
 def test_warmed_payloads_match_the_actual_standalone_row_serializer(
     warm_model, monkeypatch
 ):
+    monkeypatch.setattr(tracking, "_now_iso", lambda: "2026-10-17T00:00:00")
     records = [tracking.WorktreeRecord(
         worktree_id="wt-example", branch="worktree/example",
         worktree_path="/w/example", repo="example", machine="host",

@@ -20,7 +20,7 @@ def populate_claims(
 ) -> None:
     from . import claim_kinds_registry, claims_rank, claims_transitive_cli
 
-    resources = claims_rank._claims_with_pr_backfill(record.resources, active_pr)
+    resources = claims_rank.claims_with_pr_backfill(record.resources, active_pr)
     unresolved = []
     if any(claim.kind == "worktree" and claim.is_unsettled for claim in record.resources):
         if record.machine:
@@ -30,11 +30,7 @@ def populate_claims(
             )
         else:
             found, unresolved = [], [{"reason": "root machine identity unavailable"}]
-        refs = {
-            claims_rank.claim_url(kind, ref) or ref
-            for kind, ref in claims_rank.rank_claims(resources, limit=None)
-            if kind == "pr"
-        }
+        refs = claims_rank.live_pr_claim_identities(resources)
         inherited = []
         for claim in found:
             if claim["kind"] != "pr" or len(claim["path"]) <= 1:
