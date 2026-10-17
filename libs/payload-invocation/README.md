@@ -54,6 +54,9 @@ canonical checkout libraries. The Worktrees import/version regression also runs
 without Python site initialization, loading only the external YAML dependency
 explicitly; missing staged transport dependencies cannot be hidden by an ambient
 editable installation.
+Dispatch-only fixtures may omit runtime sources only when execution is refused
+before dispatch or the test supplies its own explicit CLI stub. Tests invoking
+the real Worktrees CLI retain the complete copied runtime and staged dependencies.
 
 ### Source-qualified command binding
 

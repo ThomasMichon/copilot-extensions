@@ -225,6 +225,34 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-17 - Restore complete runtime fixtures for real CLI dispatch
+
+- Review of #7119 found three real-CLI cases incorrectly using the thinner
+  dispatch-only fixture. Their earlier passing results could use an ambient
+  Worktrees installation and are not accepted as isolated runtime evidence.
+  Those three results are superseded, not defended as a speed optimization.
+- Restored the complete copied runtime and materialized declared dependencies
+  for active-context selection, provisioning and concurrent first use.
+  Each case now explicitly requires its copied `__main__.py`; selection and
+  provisioning also assert real version output, as single-flight already did.
+  Dispatch-only fixtures remain confined to explicit stubs and pre-dispatch
+  refusals, not real CLI execution.
+- An initial complete-fixture attempt exceeded the unchanged 30-second item
+  bound before context stamping and is not a pass. Bounded instrumentation
+  measured fixture copying and native dispatch separately without changing
+  implementation or safety checks. Final uninstrumented acceptance passed
+  all three restored cases plus the existing no-site import-origin/version
+  regression: four passed in 68.02 seconds. Individual calls took 16.82,
+  17.96, 20.34 and 12.02 seconds respectively, below the original item bound;
+  the 300-second group and resource limits are unchanged.
+- The no-site case loads only the external YAML dependency explicitly and
+  proves the copied Worktrees configuration and transport modules originate
+  inside the staged payload before executing the real CLI. No import graph,
+  version assertion or ownership/governance check was replaced by a stub.
+  This repair changes Windows-only test fixture callsites, not production
+  runtime behavior. Hosted review/CI and the remaining effort/rollout gates
+  stay open.
+
 ### 2026-10-16 - Honor an explicitly disabled composed-status switch
 
 - Review of #7119 found that the new PowerShell opt-in precondition tested

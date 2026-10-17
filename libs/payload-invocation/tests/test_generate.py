@@ -1126,7 +1126,8 @@ def test_agent_worktrees_active_context_selects_only_its_cell_root(
 ) -> None:
     pwsh = shutil.which("pwsh")
     assert pwsh
-    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    assert (payload / "src" / "agent_worktrees" / "__main__.py").is_file()
     context = _stamp_agent_worktrees_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
@@ -1160,6 +1161,7 @@ def test_agent_worktrees_active_context_selects_only_its_cell_root(
     )
 
     assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("agent-worktrees ")
     assert root_record.read_text(encoding="utf-8") == str(plugin_root)
     assert not (home / ".agent-worktrees").exists()
 
@@ -1173,7 +1175,8 @@ def test_agent_worktrees_active_context_provisions_only_its_cell_root(
 ) -> None:
     pwsh = shutil.which("pwsh")
     assert pwsh
-    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    assert (payload / "src" / "agent_worktrees" / "__main__.py").is_file()
     context = _stamp_agent_worktrees_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
@@ -1216,6 +1219,7 @@ def test_agent_worktrees_active_context_provisions_only_its_cell_root(
     )
 
     assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("agent-worktrees ")
     assert install_record.read_text(encoding="utf-8") == (
         f"install|{plugin_root}|{context}"
     )
@@ -1231,7 +1235,8 @@ def test_agent_worktrees_namespaced_first_use_is_single_flight(
 ) -> None:
     pwsh = shutil.which("pwsh")
     assert pwsh
-    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    assert (payload / "src" / "agent_worktrees" / "__main__.py").is_file()
     context = _stamp_agent_worktrees_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
