@@ -653,10 +653,10 @@ profile-record API or a competing admission constructor.
   successful CI `38986244874`; all 42 actual check contexts completed without
   failures. The earlier approving review found a conflicting automatic-GPU
   definition; that definition now consistently follows authority capability
-  policy. The final review used the Lite lane because the full agentic review
-  could not obtain a runner before its timeout. Its three remaining suggestions
-  were optional wording changes, considered and explained on their resolved
-  threads; there were no open Medium/High findings.
+  policy. The final automated review could not run its full analysis because a
+  runner was unavailable before its timeout. Its reduced review completed with
+  only optional wording suggestions, considered and explained on their resolved
+  threads; there were no unresolved blocking findings.
 - Re-read the canonical effort and default sub-plan after merge. Closed only
   the ordered review gate and transitioned this retained worktree from Phase 5
   to Phase 4. The parent campaign remains Active; no implementation, platform

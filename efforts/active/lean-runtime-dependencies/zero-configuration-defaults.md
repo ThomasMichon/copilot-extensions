@@ -21,8 +21,10 @@ Runtime enabling and production rollout retain their existing gates.
 
 - [x] Land the adopting harness's reviewed default intent, then the generic
   Runtime Assembly/engine amendments and this plan, before external realization.
-  The generic amendment and plan merged in #7066; adopter intent cleared its
-  own review gate first. Neither merge enables a runtime.
+  The Runtime Assembly and Index vision amendments and this sub-plan merged in
+  #7066. The adopter's own repository maintains its earlier policy-review
+  evidence; its private identity and links do not belong in this public effort.
+  These review gates do not enable a runtime.
 - [ ] Extend the existing authority seam with an authenticated adopting-policy
   input. Its default requires no private approval file, invented provider or
   extra controller. Establish the actual existing release/configuration
