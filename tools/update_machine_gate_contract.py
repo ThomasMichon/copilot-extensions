@@ -127,10 +127,11 @@ def _check_case(
     def load_config():
         if failure == "anchor":
             raise ValueError("synthetic anchor resolution failure")
-        return SimpleNamespace(default_repo=SimpleNamespace(anchor=anchor))
+        return SimpleNamespace(configured_machine="local", default_repo=SimpleNamespace(anchor=anchor))
 
-    def detect_machine(repo):
+    def detect_machine(repo, *, value=None):
         detected.append(repo)
+        _expect(value == "local", f"{case}: configured machine identity was not supplied")
         if failure == "detect":
             raise ValueError("synthetic machine detection failure")
         return "local"
