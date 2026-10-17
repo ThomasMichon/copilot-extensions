@@ -663,7 +663,15 @@ def test_existing_daemon_reconciles_saved_activation_without_duplicate_work():
     daemon.shutdown()
 
 
-def test_real_cli_first_touch_save_catalog_and_activation(tmp_path):
+@pytest.mark.parametrize("stage", ["catalog", "save", "activate", "retry"])
+def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stage):
+    from agent_dispatch.__main__ import build_parser
+
+    def seed(*args):
+        arguments = build_parser().parse_args(["workers", *args])
+        assert arguments.func(arguments) == 0
+        return json.loads(capsys.readouterr().out)
+
     def invoke(*args):
         result = subprocess.run(
             [sys.executable, "-m", "agent_dispatch", "workers", *args],
@@ -673,17 +681,24 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path):
         )
         assert result.returncode == 0, result.stderr
         return json.loads(result.stdout)
-    initial = invoke("catalog")
+    initial = invoke("catalog") if stage == "catalog" else catalog()
     assert initial["summary"]["configured"] == 0
+    if stage == "catalog":
+        assert not instance_dir().exists() and not rd.pointers_file().exists()
+        return
     row = next(r for r in initial["entries"] if r["id"] == "template:worker-pool")
     arguments = [
         "save", row["id"], "--revision", row["revision"],
         "--field", "name=cli-fixture", "--field", 'declaration={"labels":["work"]}',
     ]
-    saved = invoke(*arguments)
+    saved = invoke(*arguments) if stage == "save" else seed(*arguments)
     assert saved["persisted"] and saved["activation"] == "not-requested"
     assert not rd.pointers_file().exists()
-    activated = invoke(*arguments, "--activate", "--consent", ACTIVATION_CONSENT)
+    if stage == "save":
+        return
+    activate = (*arguments, "--activate", "--consent", ACTIVATION_CONSENT)
+    activated = invoke(*activate) if stage == "activate" else seed(*activate)
     assert activated["id"] == saved["id"] and activated["activation"] == "pending"
     assert len(rd.discover()) == 1
-    assert invoke(*arguments, "--activate", "--consent", ACTIVATION_CONSENT)["retry"]
+    if stage == "retry":
+        assert invoke(*activate)["retry"]

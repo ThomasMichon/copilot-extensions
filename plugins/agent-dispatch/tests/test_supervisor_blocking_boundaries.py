@@ -98,6 +98,35 @@ def test_confirmed_registry_snapshot_retains_nested_spec_isolation(monkeypatch):
     assert daemon._store_registrations()[0]["spec"]["nested"] == {"labels": ["original"]}
 
 
+def test_slow_registry_snapshot_copy_remains_off_master(monkeypatch):
+    from agent_dispatch import supervisor_reconcile
+
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unit", machine="host")]), "host", launcher=FakeLauncher(),
+        companion_controller=FakeCompanionController(), reconcile_call_budget=0.05,
+    )
+    daemon._store_registrations()
+    entered, release = threading.Event(), threading.Event()
+    original = supervisor_reconcile.copy.deepcopy
+
+    def slow_copy(value):
+        entered.set()
+        assert release.wait(3)
+        return original(value)
+
+    monkeypatch.setattr(supervisor_reconcile.copy, "deepcopy", slow_copy)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(daemon.reconcile_once)
+        try:
+            assert entered.wait(1)
+            assert future.result(timeout=0.5).started == ["unit"]
+            assert not daemon._discovery_futures["registrations"].done()
+        finally:
+            release.set()
+            future.result(timeout=1)
+            daemon.shutdown()
+
+
 def test_slow_receipt_inventory_is_off_master_and_single_inflight(tmp_path, monkeypatch):
     from agent_dispatch import companion_reconcile
 

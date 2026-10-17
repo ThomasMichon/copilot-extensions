@@ -253,11 +253,16 @@ class BoundedReconciliation:
     def _store_registrations(self) -> list[dict]:
         publisher = self._declaration_publisher
         epoch = publisher.withdrawal_epoch if publisher is not None else 0
+
+        def read():
+            registrations = self.client.list_registrations(
+                machine=self.machine, env=self.env, include_paused=False,
+            )
+            return epoch, registrations, copy.deepcopy(registrations)
+
         try:
-            started_epoch, registrations = self._bounded_read(
-                "registrations", lambda: (epoch, self.client.list_registrations(
-                    machine=self.machine, env=self.env, include_paused=False,
-                )),
+            started_epoch, registrations, snapshot = self._bounded_read(
+                "registrations", read,
             )
         except (CancelledError, TimeoutError) as exc:
             if self._last_store_registrations is None:
@@ -277,7 +282,7 @@ class BoundedReconciliation:
                     raise CompanionIndeterminate("registration discovery has no confirmed current snapshot")
                 return self._last_store_registrations
             self._published_declared_ids.difference_update(cleared)
-        self._last_store_registrations = copy.deepcopy(registrations)
+        self._last_store_registrations = snapshot
         return registrations
 
     def _declared(self) -> list[dict]:

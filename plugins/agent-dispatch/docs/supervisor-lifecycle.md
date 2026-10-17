@@ -10,7 +10,10 @@ watchdog or a claim that an earlier outage's requester has been identified.
 The master establishes its shared wait budget before declaration discovery,
 registration reads and companion provider resolution. Pending reads retain the
 last confirmed desired state; unfinished providers cannot supply new launch
-authority. Before the first successful store snapshot or configured declaration
+authority. Registry reads and their nested snapshot copy share one bounded
+discovery operation; only the master accepts a completed snapshot. A slow copy
+retains the previous confirmed state without sacrificing nested-spec isolation.
+Before the first successful store snapshot or configured declaration
 snapshot, a pending read is explicitly indeterminate, not a confirmed empty
 registry: reconciliation defers
 before stopping units or scheduling receipt withdrawal. Receipt integrity runs
