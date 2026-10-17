@@ -25,6 +25,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -319,7 +320,7 @@ function Get-BootstrapPython {
         # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
-    if ((Get-Command Invoke-Hidden -ErrorAction SilentlyContinue) -and (Get-Command py -ErrorAction SilentlyContinue)) {
+    if (Get-Command py -ErrorAction SilentlyContinue) {
         $exe = (Invoke-Hidden -FilePath py -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
@@ -612,51 +613,6 @@ $script:McpInstallFailure = $null
 try {
 Assert-SourceRuntime
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
-
-# -- Windowless spawn helper --------------------------------------------
-# This script is frequently invoked headlessly (no console of its own --
-# spawned via CREATE_NO_WINDOW from the Python-side bridge launcher). A
-# plain `&`-invoked console-subsystem child (python.exe, uv.exe) in that
-# situation gets a FRESH console window allocated by Windows, which flashes
-# on screen once per spawn during provisioning. Route provisioning spawns
-# through this helper (native CreateNoWindow=true) instead, so the child
-# never gets a window regardless of this script's own console state.
-# Bind native argv explicitly so PowerShell cannot consume flags or separators.
-function Invoke-Hidden {
-    param(
-        [Parameter(Mandatory)][string]$FilePath,
-        [string[]]$ArgList = @()
-    )
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    if ($psi.PSObject.Properties['ArgumentList']) {
-        foreach ($a in $ArgList) { [void]$psi.ArgumentList.Add($a) }
-    } else {
-        # Windows PowerShell 5.1 uses .NET Framework's quoted command line.
-        $psi.Arguments = ($ArgList | ForEach-Object {
-            '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
-        }) -join ' '
-    }
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    try {
-        $stdout = $proc.StandardOutput.ReadToEndAsync()
-        $stderr = $proc.StandardError.ReadToEndAsync()
-        $proc.WaitForExit()
-        [Threading.Tasks.Task]::WaitAll($stdout, $stderr)
-        $global:LASTEXITCODE = $proc.ExitCode
-        if ($stderr.Result) {
-            if ($proc.ExitCode -ne 0) { [Console]::Error.Write($stderr.Result) }
-            else { Write-Verbose $stderr.Result }
-        }
-        return $stdout.Result
-    } finally {
-        $proc.Dispose()
-    }
-}
 
 # -- Preflight checks --------------------------------------------------
 

@@ -74,6 +74,10 @@ def _payload(tmp_path: Path, plugin: str, *, source: bool = True) -> tuple[Path,
     scripts.mkdir(parents=True)
     for path in (ROOT / "plugins" / plugin / "scripts").glob("versioned_runtime*.py"):
         shutil.copyfile(path, scripts / path.name)
+    shutil.copyfile(
+        ROOT / "plugins" / plugin / "scripts" / "versioned_runtime_native.ps1",
+        scripts / "versioned_runtime_native.ps1",
+    )
     for suffix in ("ps1", "sh"):
         shutil.copyfile(
             ROOT / "plugins" / plugin / "scripts" / f"source-runtime.{suffix}",
@@ -149,6 +153,7 @@ function Rec($value) {{ Add-Content -LiteralPath $Events -Value $value }}
 function Get-BootstrapPython {{ return {q(sys.executable)} }}
 function Get-PayloadHash {{ return 'fingerprint' }}
 function Write-Fail($value) {{ Write-Host $value }}
+. (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
 . (Join-Path $ScriptDir 'source-runtime.ps1')
 {_function(plugin, 'Invoke-VersionedSlotClean', language)}
 {_function(plugin, 'Invoke-VersionedMarkComplete', language)}

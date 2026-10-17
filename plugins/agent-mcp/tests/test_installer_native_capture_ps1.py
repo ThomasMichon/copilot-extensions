@@ -28,9 +28,7 @@ def _quote(value: str | Path) -> str:
 
 
 def _helper() -> str:
-    text = INSTALLER.read_text(encoding="utf-8")
-    start = text.index("function Invoke-Hidden {")
-    return text[start : text.index("# -- Preflight checks", start)]
+    return ". " + _quote(INSTALLER.parent / "versioned_runtime_native.ps1") + "\n"
 
 
 def _run(host: str | None, script: str) -> subprocess.CompletedProcess[str]:

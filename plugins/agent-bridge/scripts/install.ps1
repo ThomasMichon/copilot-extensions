@@ -65,6 +65,7 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -502,17 +503,10 @@ function Get-SourceRuntimeIdentity {
         '--payload', $Payload, '--package-version', $PackageVersion,
         '--plugin', 'agent-bridge', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
-    $previousErrorAction = $ErrorActionPreference
-    try {
-        # Windows PowerShell otherwise terminates before native stderr can be captured.
-        $ErrorActionPreference = 'Continue'
-        $result = @(& $py @arguments 2>&1)
-        $code = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousErrorAction
-    }
-    $detail = ($result | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-    if ($code -ne 0) { throw "${FailureContext} (exit ${code}): $detail" }
+    $nativeError = ''
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "${FailureContext} (exit ${code}): $detail$nativeError" }
     return $detail.Trim()
 }
 
@@ -1230,11 +1224,10 @@ function Get-SignedBasePython {
     $cands = @()
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-            $result = Invoke-NativeCapture {
-                & py "-$v" -c 'import sys;print(sys.executable)'
-            }
-            if ($result.ExitCode -eq 0 -and $result.Output) {
-                $cands += $result.Output
+            $launcher = (Get-Command py -ErrorAction Stop).Source
+            $output = Invoke-Hidden -FilePath $launcher -ArgList @("-$v", '-c', 'import sys;print(sys.executable)')
+            if ($LASTEXITCODE -eq 0 -and $output) {
+                $cands += $output.Trim()
             }
         }
     }

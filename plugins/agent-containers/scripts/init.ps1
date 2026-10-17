@@ -30,6 +30,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 if ($InstallDir) {
     $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
@@ -291,23 +292,25 @@ if ($SrcVersion) {
 
 $PackageVersion = $SrcVersion
 $SourceSelected = $false
-function Get-SourceRuntimeVersion {
-    param([string]$ExpectedVersion = '')
-    $py = @('python3', 'python') | ForEach-Object {
+function Get-SourceRuntimePython {
+    $py = @('python3', 'python', 'py') | ForEach-Object {
         Get-Command $_ -ErrorAction SilentlyContinue
     } | Where-Object { $_.Source -and $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
     if (-not $py) { throw 'Source runtime selection requires a bootstrap Python interpreter' }
+    return $py.Source
+}
+
+function Get-SourceRuntimeVersion {
+    param([string]$ExpectedVersion = '')
+    $py = Get-SourceRuntimePython
     $arguments = @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_source.py'),
         '--payload', $PluginDir, '--package-version', $PackageVersion, '--plugin', 'agent-containers')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
-    $preference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $result = @(& $py.Source @arguments 2>&1)
-        $code = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $preference }
-    if ($code -ne 0) { throw "Source runtime validation failed: $($result -join [Environment]::NewLine)" }
-    return ($result -join '').Trim()
+    $nativeError = ''
+    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "Source runtime validation failed (exit ${code}): $result$nativeError" }
+    return $result.Trim()
 }
 $sourceMetadata = Join-Path $PluginDir 'runtime-source.json'
 try {
@@ -448,13 +451,17 @@ function Invoke-Stamp {
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     if ($SourceSelected) {
-        $py = @('python3', 'python') | ForEach-Object {
-            Get-Command $_ -ErrorAction SilentlyContinue
-        } | Where-Object { $_.Source -and $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
-        $snapshot = & $py.Source -I -B (Join-Path $PSScriptRoot 'runtime_profile.py') `
-            --root $InstallDir --payload $PluginDir --stamp-source --expected-source-version $SrcVersion
-        if ($LASTEXITCODE -ne 0) { throw 'Source snapshot validation failed; redirects were not published' }
-        $snapDir = ($snapshot -join '').Trim()
+        $py = Get-SourceRuntimePython
+        $nativeError = ''
+        $snapshot = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $PSScriptRoot 'runtime_profile.py'),
+            '--root', $InstallDir, '--payload', $PluginDir, '--stamp-source',
+            '--expected-source-version', $SrcVersion
+        ) -ErrorOutput ([ref]$nativeError)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Source snapshot validation failed; redirects were not published: $snapshot$nativeError"
+        }
+        $snapDir = $snapshot.Trim()
         [IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
         Deploy-SelfProvisioningBinstub

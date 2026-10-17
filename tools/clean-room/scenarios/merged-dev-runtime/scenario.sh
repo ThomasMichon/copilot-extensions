@@ -31,7 +31,7 @@ case "$PLUGIN" in
     *) INSTALLER="install.sh" ;;
 esac
 INSTALL_ACTION=provision
-if [ "$PLUGIN" = agent-bridge ]; then INSTALL_ACTION=install; fi
+if [ "$PLUGIN" = agent-bridge ] || [ "$PLUGIN" = agent-codespaces ]; then INSTALL_ACTION=install; fi
 
 phase 0 "fresh machine without installed runtime"
 envdump

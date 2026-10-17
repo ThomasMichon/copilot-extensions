@@ -12,6 +12,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 if (-not $PSBoundParameters.ContainsKey('Action')) {
     $PSBoundParameters['Action'] = $Action
@@ -480,13 +481,14 @@ function Get-BootstrapPython {
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+        $launcher = (Get-Command py -ErrorAction Stop).Source
+        $exe = (Invoke-Hidden -FilePath $launcher -ArgList @('-3', '-c', 'import sys; print(sys.executable)')).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
         if ($c -and $c.Source -notmatch 'WindowsApps') {
-            $exe = (& $c.Source -I -c "import sys; print(sys.executable)" 2>$null | Out-String).Trim()
+            $exe = (Invoke-Hidden -FilePath $c.Source -ArgList @('-I', '-c', 'import sys; print(sys.executable)')).Trim()
             if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
         }
     }
@@ -527,14 +529,10 @@ function Get-SourceRuntimeIdentity {
         '--payload', $Payload, '--package-version', $PackageVersion,
         '--plugin', 'budget-guidance', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
-    $previousErrorAction = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $result = @(& $py @arguments 2>&1)
-        $code = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previousErrorAction }
-    $detail = ($result | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-    if ($code -ne 0) { throw "Source runtime identity validation failed (exit ${code}): $detail" }
+    $nativeError = ''
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "Source runtime identity validation failed (exit ${code}): $detail$nativeError" }
     return $detail.Trim()
 }
 

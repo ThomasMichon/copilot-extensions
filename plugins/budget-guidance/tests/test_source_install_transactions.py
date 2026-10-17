@@ -143,6 +143,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $PluginDir = {q(payload)}
 $ScriptDir = Join-Path $PluginDir 'scripts'
+. (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
 $PkgSrcDir = Join-Path $PluginDir 'src/budget_guidance'
 $InstallDir = {q(root / "install")}
 $LocalBin = {q(root / "bin")}
