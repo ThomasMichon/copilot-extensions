@@ -355,17 +355,19 @@ standalone-behavior changes.
 
 | Skill | Description |
 |-------|-------------|
-| `worktree` | Worktree lifecycle -- creation, finalization, cleanup, safety rules |
-| `git-collaboration` | Pull-forward and shared feature-branch git primitives |
-| `service-lifecycle` | Service installer patterns -- deploy, update, status |
-| `copilot-extensions-setup` | Bootstrap agent-worktrees and optional sibling plugins |
-| `agent-worktrees-wsl-provision` | Provision the current project in WSL |
-| `agent-worktrees-repos` | Repos registry -- known repos and source roots |
-| `agent-worktrees-related` | Directional related-repo index and locus/delegation plan |
-| `resolving-state-home` | Native stateless-harness state routing and paired knowledge-worktree resolution |
-| `repairing-worktrees` | Diagnose/repair worktree+session health via `doctor` |
-| `create-setup-script` | Generate repo-specific session setup scripts |
-| `working-cross-repo` | Good-citizen workflow for work in another registered repo |
+| [worktree](skills/worktree/SKILL.md) | Worktree lifecycle -- creation, finalization, cleanup, safety rules |
+| [git-collaboration](skills/git-collaboration/SKILL.md) | Pull-forward and shared feature-branch git primitives |
+| [service-lifecycle](skills/service-lifecycle/SKILL.md) | Service installer patterns -- deploy, update, status |
+| [copilot-extensions-setup](skills/copilot-extensions-setup/SKILL.md) | Bootstrap agent-worktrees and optional sibling plugins |
+| [agent-worktrees-wsl-provision](skills/agent-worktrees-wsl-provision/SKILL.md) | Provision the current project in WSL |
+| [agent-worktrees-repos](skills/agent-worktrees-repos/SKILL.md) | Repos registry -- known repos and source roots |
+| [agent-worktrees-related](skills/agent-worktrees-related/SKILL.md) | Directional related-repo index and locus/delegation plan |
+| [resolving-state-home](skills/resolving-state-home/SKILL.md) | Native stateless-harness state routing and paired knowledge-worktree resolution |
+| [repairing-worktrees](skills/repairing-worktrees/SKILL.md) | Diagnose/repair worktree+session health via `doctor` |
+| [create-setup-script](skills/create-setup-script/SKILL.md) | Generate repo-specific session setup scripts |
+| [working-cross-repo](skills/working-cross-repo/SKILL.md) | Good-citizen workflow for work in another registered repo |
+| [tracing-claimant-graphs](skills/tracing-claimant-graphs/SKILL.md) | Trace resource claims back to their owning worktree |
+| [setting-up-pr-identity](skills/setting-up-pr-identity/SKILL.md) | Set up and verify a shared vault-backed PR identity key |
 
 ## Hooks
 
