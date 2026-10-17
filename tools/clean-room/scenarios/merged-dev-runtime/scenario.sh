@@ -135,6 +135,19 @@ if ! capture "installed-version" -- bash -lc "$PLUGIN --help"; then
     jam "path-binstub" "Installed command is not usable on a fresh login-shell PATH"
     cr_finalize
 fi
+if [ "$PLUGIN" = agent-codespaces ]; then
+    _verify_codespaces_source_version() {
+        local reported command version remainder
+        reported="$(bash -lc 'agent-codespaces version')" || return 1
+        printf '%s\n' "$reported"
+        read -r command version remainder <<< "$reported"
+        [[ "$command" = agent-codespaces && "$version" = "$GENERATION" ]]
+    }
+    if ! capture "installed-source-version" -- _verify_codespaces_source_version; then
+        jam "path-binstub" "Codespaces command does not report the selected source generation"
+        cr_finalize
+    fi
+fi
 pass "Installed command resolves a completed source-qualified generation"
 
 phase 4 "invoke the runtime with the source checkout unavailable"

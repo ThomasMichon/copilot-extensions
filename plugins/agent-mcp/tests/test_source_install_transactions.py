@@ -292,6 +292,49 @@ rec ACTIVATE
 
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("language", ["ps1", "sh"])
+def test_snapshot_marker_failure_refuses_success_without_advancing_stamp(
+    tmp_path: Path, plugin: str, language: str,
+) -> None:
+    payload, selected = _payload(tmp_path, plugin)
+    script = _setup(tmp_path, payload, plugin, language)
+    root = tmp_path / "install"
+    (root / "payload-dir").rename(root / "previous-payload-dir")
+    (root / "payload-dir").mkdir()
+    stamp = root / "stamped-version"
+    if language == "ps1":
+        script += f"""
+$ServiceName = 'fixture'
+$LocalBin = Join-Path $InstallDir 'bin'
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+function Write-ServiceHeader($value) {{ }}
+function Write-ServiceOk($value) {{ }}
+function Write-Ok($value) {{ }}
+function Deploy-SelfProvisioningBinstub {{ throw 'Unexpected binstub publication' }}
+function Materialize-SnapshotDependencies {{ throw 'Source snapshot was rematerialized' }}
+{_function(plugin, 'Invoke-Stamp', language)}
+Initialize-SourceRuntime
+try {{ Invoke-Stamp; exit 0 }} catch {{
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 23
+}}
+"""
+    else:
+        script += """
+_initialize_source_runtime
+if _stamp_source_snapshot; then exit 0; fi
+exit 23
+"""
+    result = _run(tmp_path, language, script)
+    assert result.returncode == 23, result.stdout + result.stderr
+    assert "payload-dir" in result.stderr
+    assert stamp.read_text(encoding="utf-8") == "previous"
+    assert IDENTITY.read_source_identity(
+        root / "snapshots" / selected, VERSION, plugin=plugin,
+    ).runtime_version == selected
+
+
+@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("language", ["ps1", "sh"])
 def test_native_selection_reuse_and_noneditable_snapshot(
     tmp_path: Path, plugin: str, language: str,
 ) -> None:
