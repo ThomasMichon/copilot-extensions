@@ -40,7 +40,7 @@ def repository_template(tmp_path_factory):
         "  testenv:\n    type: full\n",
         encoding="utf-8",
     )
-    (service / "install.ps1").write_text(
+    (service / "install.py").write_text(
         "import json, os, pathlib, sys\n"
         "pathlib.Path(os.environ['SERVICE_TEST_RECEIPT']).write_text(json.dumps("
         "{'cwd': str(pathlib.Path.cwd()), 'action': sys.argv[1], "
@@ -69,7 +69,7 @@ def repository(repository_template, tmp_path, monkeypatch):
     monkeypatch.setattr(service_sources.cfg, "project_dir", lambda: tmp_path / "state")
     monkeypatch.setattr(services_cli.cfg, "load_config", lambda: config)
     monkeypatch.setattr(services_cli.worktree_identity, "_find_repo_dir", lambda: anchor)
-    monkeypatch.setattr(services_cli.svc, "_preferred_installer_order", lambda: ("install.ps1",))
+    monkeypatch.setattr(services_cli.svc, "_preferred_installer_order", lambda: ("install.py",))
     monkeypatch.setattr(
         services_cli, "_installer_cmd",
         lambda installer, args: [sys._base_executable, "-I", "-S", str(installer), *args],
@@ -176,10 +176,20 @@ def test_nonbare_sync_retains_checkout_and_rejects_local_commits(repository):
     ordinary = r.anchor.parent / "ordinary"
     _git(r.anchor.parent, "clone", "-q", str(r.upstream), str(ordinary))
     assert service_sources.resolve(ordinary, r.config, deploy=True) == ordinary
+    hooks = r.anchor.parent / "hooks"
+    hooks.mkdir()
+    marker = r.anchor.parent / "hook-ran"
+    hook = hooks / "post-merge"
+    hook.write_text(
+        "#!/bin/sh\n" + f"touch '{marker.as_posix()}'\n", encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    _git(ordinary, "config", "core.hooksPath", str(hooks))
     (r.upstream / "new.txt").write_text("reviewed update\n", encoding="utf-8")
     _git(r.upstream, "add", ".")
     _git(r.upstream, "commit", "-qm", "Reviewed update")
     assert service_sources.resolve(ordinary, r.config, deploy=True) == ordinary
+    assert not marker.exists()
     assert (ordinary / "new.txt").read_text(encoding="utf-8") == "reviewed update\n"
     (ordinary / "local.txt").write_text("unmerged\n", encoding="utf-8")
     _git(ordinary, "add", ".")
@@ -197,3 +207,34 @@ def test_bare_converted_clone_keeps_configuration(repository):
     assert source != converted
     assert _git(source, "rev-parse", "HEAD") == r.reviewed
     assert _git(converted, "config", "--get", "core.bare") == "true"
+
+
+def test_lost_checkout_creation_race_revalidates_published_source(repository, monkeypatch, caplog):
+    r = repository
+    service_sources.ensure_current(r.anchor, r.config)
+    real_git = service_sources._git
+
+    def raced_git(repo, *args):
+        result = real_git(repo, *args)
+        if args[:2] == ("worktree", "add"):
+            raise git_ops.GitError(["git", *args], 128, "checkout already published")
+        return result
+
+    monkeypatch.setattr(service_sources, "_git", raced_git)
+    source = service_sources.resolve(r.anchor, r.config)
+    assert _git(source, "rev-parse", "HEAD") == r.reviewed
+    assert "validating an existing checkout" in caplog.text
+
+
+def test_anchor_key_collision_refuses_foreign_checkout(repository, monkeypatch):
+    r = repository
+    monkeypatch.setattr(
+        service_sources, "hashlib",
+        SimpleNamespace(sha256=lambda value: SimpleNamespace(hexdigest=lambda: "a" * 64)),
+    )
+    source = service_sources.resolve(r.anchor, r.config, deploy=True)
+    other = r.anchor.parent / "other-anchor"
+    _git(r.anchor.parent, "clone", "-q", "--bare", str(r.anchor), str(other))
+    with pytest.raises(RuntimeError, match="belongs to another anchor"):
+        service_sources.resolve(other, r.config)
+    assert _git(source, "rev-parse", "HEAD") == r.reviewed

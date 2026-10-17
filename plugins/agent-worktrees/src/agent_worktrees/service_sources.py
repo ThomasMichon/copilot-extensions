@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 
 from . import bare_anchor_files, bare_anchor_sync, config as cfg, git_ops, output
 
 
 def _git(repo: Path, *args: str):
-    return git_ops.git(*args, cwd=repo, isolated_repository=True, timeout=180)
+    return git_ops.git(*args, cwd=repo, isolated_repository=True, no_hooks=True, timeout=180)
 
 
 def ensure_current(repo: Path, config: cfg.Config) -> None:
@@ -28,7 +29,7 @@ def ensure_current(repo: Path, config: cfg.Config) -> None:
     current = _git(repo, "symbolic-ref", "--short", "HEAD").stdout.strip()
     if current != branch:
         raise RuntimeError(f"Service source is on {current!r}, not configured branch {branch!r}")
-    git_ops.fetch(remote, cwd=repo, isolated_repository=True)
+    git_ops.fetch(remote, cwd=repo, isolated_repository=True, no_hooks=True)
     _git(repo, "merge", "--ff-only", f"refs/remotes/{remote}/{branch}")
     head = _git(repo, "rev-parse", "HEAD").stdout.strip()
     upstream = _git(repo, "rev-parse", f"refs/remotes/{remote}/{branch}").stdout.strip()
@@ -53,13 +54,21 @@ def resolve(repo: Path, config: cfg.Config, *, deploy: bool = False) -> Path:
     source = cfg.project_dir() / "service-sources" / identity / commit
     if not source.exists():
         source.parent.mkdir(parents=True, exist_ok=True)
-        _git(
-            repo, "-c", "core.hooksPath=", "worktree", "add",
-            "--detach", "--lock", str(source), commit,
-        )
+        try:
+            _git(repo, "worktree", "add", "--detach", "--lock", str(source), commit)
+        except git_ops.GitError as exc:
+            if not source.is_dir():
+                raise
+            logging.getLogger(__name__).warning(
+                "Service checkout creation failed; validating an existing checkout: %s", exc,
+            )
 
     if source.is_symlink():
         raise RuntimeError(f"Service source checkout is a symbolic link: {source}")
+    owner = _git(source, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    expected_owner = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    if Path(owner).resolve() != Path(expected_owner).resolve():
+        raise RuntimeError(f"Service source checkout belongs to another anchor: {source}")
     actual = _git(source, "rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
     changes = _git(source, "status", "--porcelain", "--untracked-files=all").stdout
     if actual != commit or changes.strip():

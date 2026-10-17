@@ -200,10 +200,8 @@ def _cmd_services_list(json_output: bool = False) -> int:
         return 1
 
     env = _resolve_environment(config)
-    try:
-        repo_dir = service_sources.resolve(repo_dir, config)
-    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
-        output.err(f"Cannot resolve service source: {exc}")
+    repo_dir = _resolve_service_source(repo_dir, config)
+    if repo_dir is None:
         return 1
     services = svc.discover_services(
         repo_dir,
@@ -256,10 +254,8 @@ def _cmd_services_status(json_output: bool = False) -> int:
         return 1
 
     env = _resolve_environment(config)
-    try:
-        repo_dir = service_sources.resolve(repo_dir, config)
-    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
-        output.err(f"Cannot resolve service source: {exc}")
+    repo_dir = _resolve_service_source(repo_dir, config)
+    if repo_dir is None:
         return 1
     services = svc.discover_services(
         repo_dir,
@@ -325,8 +321,14 @@ def _cmd_services_check_stale(install_dir_str: str, repo_dir_str: str) -> int:
 _DEPLOY_ACTIONS = {"install", "update", "copy"}
 
 
-def _ensure_repo_current(repo_dir: Path, config: cfg.Config) -> None:
-    service_sources.ensure_current(repo_dir, config)
+def _resolve_service_source(
+    repo_dir: Path, config: cfg.Config, *, deploy: bool = False,
+) -> Path | None:
+    try:
+        return service_sources.resolve(repo_dir, config, deploy=deploy)
+    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        output.err(f"Cannot resolve service source: {exc}")
+        return None
 
 
 def _is_copilot_plugin_name(name: str) -> bool:
@@ -367,12 +369,8 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
     if not action_args:
         action_args = ["status"]
 
-    try:
-        if action in _DEPLOY_ACTIONS:
-            _ensure_repo_current(repo_dir, config)
-        repo_dir = service_sources.resolve(repo_dir, config)
-    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
-        output.err(f"Cannot resolve service source: {exc}")
+    repo_dir = _resolve_service_source(repo_dir, config, deploy=action in _DEPLOY_ACTIONS)
+    if repo_dir is None:
         return 1
 
     env = _resolve_environment(config)
@@ -427,12 +425,8 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
         output.err(f"Cannot load config: {e}")
         return 1
 
-    try:
-        if action in _DEPLOY_ACTIONS:
-            _ensure_repo_current(repo_dir, config)
-        repo_dir = service_sources.resolve(repo_dir, config)
-    except (git_ops.GitError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
-        output.err(f"Cannot resolve service source: {exc}")
+    repo_dir = _resolve_service_source(repo_dir, config, deploy=action in _DEPLOY_ACTIONS)
+    if repo_dir is None:
         return 1
 
     env = _resolve_environment(config)

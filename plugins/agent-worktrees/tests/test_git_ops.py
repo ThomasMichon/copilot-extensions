@@ -1245,6 +1245,7 @@ class TestFetchTimeout:
             captured["args"] = args
             captured["isolated_repository"] = isolated_repository
             captured["auth_acquisition"] = auth_acquisition
+            captured["no_hooks"] = no_hooks
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(go, "git", fake_git)
@@ -1253,8 +1254,10 @@ class TestFetchTimeout:
         assert captured["args"] == ("fetch", "origin", "--quiet")
         assert captured["isolated_repository"] is False
         assert captured["auth_acquisition"] is True
-        go.fetch("origin", cwd=".", isolated_repository=True)
+        assert captured["no_hooks"] is False
+        go.fetch("origin", cwd=".", isolated_repository=True, no_hooks=True)
         assert captured["isolated_repository"] is True
+        assert captured["no_hooks"] is True
 
     def test_fetch_timeout_override(self, monkeypatch):
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
