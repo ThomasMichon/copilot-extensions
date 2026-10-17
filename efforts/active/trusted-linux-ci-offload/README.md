@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent managed plan, implementation and control-activation PRs
 - **Created:** 2026-10-16
-- **Status:** Draft
+- **Status:** Active; Linux offload plan merged, validator implementation paused for official Code Review capacity proposal
 - **Vision:** `visions/test-portfolio/README.md`: bounded feedback loops,
   shared-host admission, unique value or consolidation, reductions preserve assurance
 - **Umbrella issue:** #7122
@@ -44,6 +44,9 @@ cross-platform parity and explicit failures.
   participant's implementation scope.
 - **Handoff:** report concrete changes, gates and blockers to the integration
   owner; retain the same public effort and issue.
+- **Related ownership:** #6237 retains workflow-control policy, #3336 retains
+  release ownership and #1303 retains portfolio rationalization. This effort
+  changes neither those owners nor their independent completion gates.
 - **Stage gate:** the integration owner authorized publication of the
   planning-only proposal. Merge the reviewed plan before implementation, and
   obtain a further implementation authorization. Proposal publication does not
@@ -52,6 +55,9 @@ cross-platform parity and explicit failures.
   changes, repository variables, workflow pins, release resume or direct-main
   edits. Preserve the accepted collaborator boundary and separately qualify
   capacity before enabling routing.
+- **Current priority:** draft the official ARC Code Review capacity proposal
+  first. Broad validator implementation is paused. Do not publish implementing
+  ARC source until the integration owner confirms its prerequisite intent gate.
 
 ## Context
 
@@ -128,6 +134,15 @@ existing limitation. Preserve that boundary; additional caller/callee
 attestation is not a prerequisite unless a concrete new routing-induced
 violation is identified.
 
+Subsequent operator direction, summarized for public planning: prioritize the
+official GitHub Copilot Code Review runner integration, not a CLI reviewer or
+unofficial replacement. Use ARC-managed Ubuntu x64 ephemeral capacity with a
+single review slot and operator-enforced deny-LAN, allowlisted egress isolation.
+Fork/external review workloads are accepted only inside that isolated review
+envelope; this does not widen the persistent validator lane's collaborator
+admission. Deployment remains operator-owned. See
+[the proposed ARC review slice](arc-code-review.md).
+
 The remaining design below is **agent-recommended**, not an authorization to
 change host policy or bypass the release pause.
 
@@ -142,12 +157,30 @@ change host policy or bypass the release pause.
 - [x] Confirm routing preserves the existing durable-collaborator trust model,
   protected workflow governance and all-external approval policy. Identify any
   concrete new boundary widening before making additional hardening mandatory.
-- [ ] Land a plan-only PR through current-head Copilot review and required CI.
-  Record its actual merge before proceeding.
-- [ ] Obtain separate implementation authorization. Reconfirm the source and
-  destination workflow admission rules and control-activation owner.
+- [x] Land a plan-only PR and record its actual merge: #7125 merged as
+  `d4925bc2394d5b1c1c5bc1176cc7f4334b53f367` under the operator's exact-head
+  bootstrap exception. Normal full review/CI did not pass; original protection
+  settings were restored and verified immediately after merge.
+- [x] Obtain separate implementation authorization and identify source/destination
+  admission ownership. Subsequent operator direction pauses broad validator
+  implementation while the official Code Review priority is planned.
+
+### Phase 1a - Official ARC Code Review proposal
+
+- [x] Assess existing review setup, authorization and default-branch control;
+  capture the official supported ARC-only integration and exact guard migration
+  in [arc-code-review.md](arc-code-review.md).
+- [ ] Obtain the integration owner's implementing-source publication clearance
+  and coordinate the exact dev-first default-branch compatibility transaction
+  with #6237's existing owner.
+- [ ] Land the ARC proposal through its authorized review/merge path before
+  implementation. Do not treat the existing Linux plan merge as ARC code review.
+- [ ] Implement and qualify only the approved official ARC slice after its
+  gates clear; keep broad validators paused until separately resumed.
 
 ### Phase 2 - Inert public implementation
+
+Paused while Phase 1a is the operator's priority.
 
 - [ ] Implement the single-graph routing and bounded executor below, disabled by
   default. Do not enable a live route while implementation is under review.
@@ -496,3 +529,36 @@ instead of taking ownership of that campaign.
   widening is required by the proposed route; implementation must verify that
   against actual reusable-workflow event and permission behavior.
 - Only the canonical effort and its index are proposed for publication.
+
+### 2026-10-17 - Exact-head planning merge and review priority
+
+- #7125 merged at 01:39 America/Los_Angeles as
+  `d4925bc2394d5b1c1c5bc1176cc7f4334b53f367`, from verified planning head
+  `b9b23d9c10bdef128400068380f83dff4cf2e7de`. The operator explicitly
+  authorized a bounded PR-only bootstrap exception; the original independent
+  ruleset and classic admin-enforcement settings were restored and live-audited
+  before any further work. No release pause, unrelated PR or check status was
+  edited.
+- The actual Copilot review reported that full agentic review did not start
+  before timeout. Its lightweight feedback noted an index/related-campaign
+  ownership inconsistency; the local continuation now names #1303 alongside
+  the existing workflow-control and release owners. This is not recorded as
+  successful full review or green required CI.
+- Re-read the canonical effort after managed PR completion advanced the worktree
+  onto the merged dev commit. The parent #7122 remains open; implementation and
+  live acceptance are not complete.
+- Operator prioritized official ARC Code Review capacity. Added a planning-only
+  ARC slice; no workflow, guard, runner label or infrastructure was changed.
+
+### 2026-10-17 - ARC proposal publication and scoped compatibility direction
+
+- Operator authorized the public planning amendment in parallel with other
+  intent reviews; implementing ARC source publication remains separately gated.
+- Captured explicit authorization for a minimum compatible, dev-first
+  guard/admission bootstrap on main. The proposed transaction pins four
+  guard/admission source and test files, activates its admission policy first,
+  transfers only approved merged-dev blobs, then retires the bounded source
+  exception. No unrelated plugin/runtime source or whole dev snapshot is in scope.
+- The existing #6237 workflow-control owner retains its campaign. This slice
+  coordinates the exact compatibility policy rather than declaring an
+  unqualified helper-source blockage or taking over the release work.
