@@ -187,6 +187,38 @@ The healthy and namespace/watchdog cases share this source-free payload builder.
 Healthy provision has a 20-second installer-owned deadline inside the unchanged
 90-second pytest ceiling; failures retain both stdout and stderr diagnostics.
 
+### Shared PR identity against a disposable KeePass database
+
+The opt-in combined contract is
+`plugins/agent-worktrees/tests/test_identity_vault_keepass_live.py`.
+It requires a real `keepassxc-cli`, both plugins' source/dependencies available
+to the selected test interpreter, and
+`AGENT_WORKTREES_IDENTITY_REAL_KEEPASS=1`. Run that exact file with pytest
+and an explicit 180-second item ceiling for native launcher integration;
+normal required suites skip it without the explicit opt-in.
+
+The fixture creates its own database, master password, owner key, cache,
+configuration and foreground daemon with a private local endpoint (dynamic
+loopback TCP or a Unix socket). It verifies the daemon PID before private IPC
+and retires only that child. It never targets an installed daemon or the
+operator's database.
+
+The individually bounded cases prove existing-key reuse, mutation-free
+status, persisted source selection, a fresh normal consumer while the private
+daemon is locked, ordinary missing-entry refusal, explicit first-owner creation,
+retry without database rewrites, and stopped-service refusal without spawning
+a resident inside the contained adapter. Setup and source configuration must not
+expose fixture key material. This is a source integration proof, not installed
+release or whole-machine clean-room evidence. Keep source/runtime selection
+explicit and record the Docker lane separately when it is unavailable.
+
+The vault's matching `test_identity_payload_gate.py` actual-launcher contracts
+are also opt-in (`AGENT_VAULT_IDENTITY_PAYLOAD_GATE=1`, and
+`AGENT_VAULT_IDENTITY_REAL_KEEPASS=1` for real databases). Select that exact file
+with a 120-second item ceiling. Its pure pin-validation contract remains in
+the ordinary suite. This keeps repeated native-shell startup and real databases
+out of the required fast portfolio rather than expanding its default budget.
+
 ### Fleet replay-retention boundaries
 
 Native index installer snapshot tests separate dependency-content identity

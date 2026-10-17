@@ -6,6 +6,7 @@ import contextlib
 import os
 import shutil
 import subprocess
+import time
 
 
 class PasswordMutationAmbiguous(RuntimeError):
@@ -84,7 +85,7 @@ class KeePassXCBackend:
         self,
         kpdb: str,
         args: list[str],
-        timeout: int = 10,
+        timeout: float = 10,
     ) -> subprocess.CompletedProcess | None:
         if not self._cli_path or not self.has_password(kpdb):
             return None
@@ -116,6 +117,101 @@ class KeePassXCBackend:
     def has_entry(self, kpdb: str, entry_path: str) -> bool:
         r = self._run(kpdb, ["show", "-q", "-s", kpdb, entry_path])
         return bool(r and r.returncode == 0)
+
+    def _identity_run(
+        self, kpdb: str, args: list[str], deadline: float,
+    ) -> subprocess.CompletedProcess | None:
+        from .identity_key import IdentityKeyError
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise IdentityKeyError("operation_expired", "Owner-key operation expired; inspect vault before retrying.")
+        return self._run(kpdb, args, timeout=min(10, remaining))
+
+    def _identity_listing(self, kpdb: str, deadline: float) -> set[str]:
+        from .identity_key import IdentityKeyError
+
+        result = self._identity_run(kpdb, ["ls", "-q", "-R", "-f", kpdb, "/"], deadline)
+        if result is None or result.returncode != 0:
+            raise IdentityKeyError("vault_read_failed", "Authoritative vault listing failed; no entry was created.")
+        paths: set[str] = set()
+        for line in result.stdout.splitlines():
+            if line == "[empty]" and len(result.stdout.splitlines()) == 1:
+                continue
+            path = line
+            parts = path.rstrip("/").split("/")
+            if (
+                not path or path != path.strip()
+                or any(part in ("", ".", "..") for part in parts)
+                or any(ord(char) < 32 for char in path)
+                or path in paths or path.rstrip("/") in paths
+                or path + "/" in paths
+            ):
+                raise IdentityKeyError("ambiguous_entry", "Malformed or duplicate vault paths; no entry was created.")
+            paths.add(path)
+        for path in paths:
+            segments = path.rstrip("/").split("/")
+            if any("/".join(segments[:index]) + "/" not in paths for index in range(1, len(segments))):
+                raise IdentityKeyError("ambiguous_entry", "Flattened paths have undeclared parents; no entry was created.")
+        return paths
+
+    def read_identity_key(self, kpdb: str, entry_path: str, deadline: float) -> str | None:
+        """Absence is established only by a successful recursive root listing."""
+        from .identity_key import IdentityKeyError
+
+        paths = self._identity_listing(kpdb, deadline)
+        if entry_path + "/" in paths:
+            raise IdentityKeyError("ambiguous_entry", "Owner entry resolves to a group; no entry was created.")
+        if entry_path not in paths:
+            return None
+        result = self._identity_run(kpdb, ["show", "-q", "-s", kpdb, entry_path, "-a", "Password"], deadline)
+        if result is None or result.returncode != 0:
+            raise IdentityKeyError("vault_read_failed", "Authoritative owner-key read failed; no entry was created.")
+        return result.stdout.removesuffix("\n").removesuffix("\r")
+
+    def create_identity_key(self, kpdb: str, entry_path: str, value: str, deadline: float) -> None:
+        from .identity_key_lock import database_creation_lock
+
+        with database_creation_lock(kpdb, deadline):
+            self._create_identity_key_locked(kpdb, entry_path, value, deadline)
+
+    def _create_identity_key_locked(
+        self, kpdb: str, entry_path: str, value: str, deadline: float,
+    ) -> None:
+        """Create only; never edit, retry an add, or report subprocess diagnostics."""
+        from .identity_key import IdentityKeyError
+
+        paths = self._identity_listing(kpdb, deadline)
+        if entry_path in paths:
+            return
+        if entry_path + "/" in paths:
+            raise IdentityKeyError("ambiguous_entry", "Owner entry path is already a group.")
+        parts = entry_path.split("/")
+        for index in range(1, len(parts)):
+            group = "/".join(parts[:index])
+            if group in paths:
+                raise IdentityKeyError("ambiguous_entry", "Owner path parent is an entry, not a group.")
+            if group + "/" not in paths:
+                result = self._identity_run(kpdb, ["mkdir", "-q", kpdb, group], deadline)
+                paths = self._identity_listing(kpdb, deadline)
+                if result is None or result.returncode != 0 or group + "/" not in paths:
+                    raise IdentityKeyError("group_create_failed", "Could not create owner-entry group; inspect vault before retrying.")
+        if not self._cli_path or not self.has_password(kpdb):
+            raise IdentityKeyError("needs_unlock", "Vault locked; explicitly unlock and retry.")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise IdentityKeyError("operation_expired", "Owner-key operation expired before creation.")
+        try:
+            subprocess.run(
+                [self._cli_path, "add", "-q", kpdb, entry_path, "-p"],
+                input=self._master_pass[kpdb] + "\n" + value + "\n",
+                capture_output=True,
+                text=True,
+                timeout=min(10, remaining),
+            )
+        except (OSError, subprocess.SubprocessError):
+            # Completion is unknown. The caller must reread, never retry add.
+            return
 
     def search(self, kpdb: str, query: str) -> list[str]:
         r = self._run(kpdb, ["search", "-q", kpdb, query])

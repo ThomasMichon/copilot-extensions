@@ -109,7 +109,7 @@ class PersistentCache:
             self._available = False
         return self._available
 
-    def _get_fernet(self):
+    def _get_fernet(self, *, readonly: bool = False):
         if self._fernet is not None:
             return self._fernet
         if not self._crypto_available():
@@ -137,7 +137,8 @@ class PersistentCache:
 
         from . import kek
 
-        self._base_dir.mkdir(parents=True, exist_ok=True)
+        if not readonly:
+            self._base_dir.mkdir(parents=True, exist_ok=True)
         if self._key_file.exists():
             blob = self._key_file.read_bytes()
             if kek.is_wrapped(blob):
@@ -146,9 +147,12 @@ class PersistentCache:
                 # Legacy plaintext key file -> migrate to a wrapped (DPAPI on
                 # Windows) blob bound to the OS user, best-effort.
                 key = blob.strip()
-                with contextlib.suppress(Exception):
-                    self._write_key(key)
+                if not readonly:
+                    with contextlib.suppress(Exception):
+                        self._write_key(key)
         else:
+            if readonly:
+                raise CacheProtectionError("existing cache key missing; cache was not replaced")
             key = Fernet.generate_key()
             self._write_key(key)
         self._fernet = Fernet(key)
@@ -164,7 +168,7 @@ class PersistentCache:
 
     # -- atomic file I/O ---------------------------------------------------
 
-    def _read_store(self) -> dict:
+    def _read_store(self, *, readonly: bool = False, strict: bool = False) -> dict:
         if not self._cache_file.exists():
             return {"v": 1, "entries": {}}
         if not self._key_file.exists():
@@ -174,17 +178,20 @@ class PersistentCache:
                 native = stream.read(len(MAGIC)) == MAGIC
             if not IS_WINDOWS or not native:
                 raise CacheProtectionError("existing cache key missing; cache was not replaced")
-        f = self._get_fernet()
+        f = self._get_fernet(readonly=True) if readonly else self._get_fernet()
         if f is None or not self._cache_file.exists():
             return {"v": 1, "entries": {}}
         try:
             plaintext = f.decrypt(self._cache_file.read_bytes())
             data = json.loads(plaintext)
-            if data.get("v") != 1:
+            if (
+                not isinstance(data, dict) or data.get("v") != 1
+                or (strict and not isinstance(data.get("entries"), dict))
+            ):
                 from .cache_dpapi import CacheProtectionError, DpapiCacheCipher
 
-                if isinstance(f, DpapiCacheCipher):
-                    raise CacheProtectionError("unsupported Windows cache schema")
+                if strict or isinstance(f, DpapiCacheCipher):
+                    raise CacheProtectionError("unsupported protected cache schema")
                 return {"v": 1, "entries": {}}
             return data
         except Exception as exc:
@@ -192,8 +199,8 @@ class PersistentCache:
 
             if isinstance(exc, CacheProtectionError):
                 raise
-            if isinstance(f, DpapiCacheCipher):
-                raise CacheProtectionError("Windows cache data is invalid; not replaced") from exc
+            if strict or isinstance(f, DpapiCacheCipher):
+                raise CacheProtectionError("Protected cache data is invalid; not replaced") from exc
             return {"v": 1, "entries": {}}
 
     @contextlib.contextmanager
@@ -307,13 +314,24 @@ class PersistentCache:
         max_age_seconds: int | None = None,
         *,
         legacy_entry: str | None = None,
+        readonly: bool = False,
     ) -> str | None:
-        """Return a cached value, or ``None`` on miss / disabled cache."""
+        """Read a cached value; readonly mode refuses migration and corrupt data."""
         if not self.enabled:
             return None
-        store = self._read_store()
+        store = (
+            self._read_store(readonly=True, strict=True)
+            if readonly else self._read_store()
+        )
         rec = self._field_record(store, entry, field)
-        if rec is None and legacy_entry and legacy_entry != entry:
+        if readonly and rec is not None and (
+            not isinstance(rec, dict)
+            or ("rotation" not in rec and not isinstance(rec.get("value"), str))
+        ):
+            from .cache_dpapi import CacheProtectionError
+
+            raise CacheProtectionError("Selected protected cache record is invalid")
+        if not readonly and rec is None and legacy_entry and legacy_entry != entry:
             rec = self._field_record(store, legacy_entry, field)
             if rec is not None:
                 self.migrate_entry(legacy_entry, entry, field)

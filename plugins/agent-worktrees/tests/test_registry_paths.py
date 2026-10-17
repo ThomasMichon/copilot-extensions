@@ -144,6 +144,8 @@ def test_explicit_context_selects_all_three_registry_files(monkeypatch, tmp_path
 
     assert config.global_config_path() == plugin_root / "config.yaml"
     assert config.install_dir() == plugin_root
+    from agent_worktrees import identity_vault_settings
+    assert identity_vault_settings.settings_path() == plugin_root / "identity-vault.json"
     assert activity.log_path() == plugin_root / "logs" / "activity.jsonl"
     assert installer.projects_yaml_path() == plugin_root / "projects.yaml"
     assert repos._repos_yaml_path() == plugin_root / "repos.yaml"

@@ -104,6 +104,178 @@ Supported built-in command groups:
 | Git HTTPS credentials | `git-credential get|store|erase` (delegates allowlisted hosts to local Git Credential Manager) |
 | Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify` |
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
+| Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
+
+## Shared owner-key setup
+
+Use the owning payload's session-catalog command, not a guessed PATH command:
+
+```text
+<agent-vault catalog argv[0]> identity-key context --json
+<agent-vault catalog argv[0]> identity-key setup --entry Identity/PR-attribution
+```
+
+`context` strictly resolves an existing configured database and returns
+`{"version":1,"env":{...}}`. It does not contact/start the service,
+unlock, or read/write the protected cache. Its non-secret `env` mapping pins
+absolute `KPDB`, cache directory, runtime home, config and rendezvous directory,
+the selected vault/group (including empty selections), installation ID, port,
+socket/pipe and explicit transport overrides. `AGENT_VAULT_PINNED_CONTEXT`
+contains validated JSON with exactly `version:1`, an absolute `kpdb`, normalized
+`group` and `vault_name` strings (including empty strings), and an integer
+`port`. That JSON is authoritative even if legacy selection environment
+variables conflict, and prevents repository, extension or global fallback.
+Malformed pins fail closed rather than falling back. Pinned `get ... --cache-only`
+also refuses legacy cache-entry fallback/migration to an unselected group.
+Apply the complete mapping to later fresh-process readers; retain the
+attributable owning command separately. `COPILOT_PLUGIN_ROOT` is not captured.
+
+Identity setup does not share the ordinary entry/field-only cache namespace.
+An unpinned context selects
+`<effective cache root>/identity/<sha256>` even when `AGENT_VAULT_CACHE_DIR`
+explicitly selects that root. The stable digest covers the canonical absolute
+database path, canonical runtime home and installation ID; distinct databases
+or installation cells cannot collide on the same entry name. A valid persisted
+pin reuses its exact absolute cache directory without nesting another scope.
+Pinned context requires `AGENT_VAULT_CACHE=1` and an absolute
+`AGENT_VAULT_CACHE_DIR`; it never falls back to the global cache.
+Actual payload dispatchers preserve the identity cache pin only after shared
+vault-owned validation confirms the database digest, selected runtime home
+and installation ID, and exact `<owning runtime>/cache/identity/<digest>`
+location. Both PowerShell and POSIX gates use the cell already resolved by the
+existing installation-context primitive; they do not add another resolver.
+Unpinned arbitrary cache overrides retain the ordinary gate behavior, while
+invalid/foreign pins fail closed rather than silently reverting to a different
+cache. Direct module callers may explicitly select another cache root; that
+selection is not authorization to bypass a payload's cell-owned namespace.
+
+Setup populates that selected directory from the existing authoritative vault
+value. Migration into this flow is ordinary population, not copying a legacy
+cache entry, generating another key, moving/deleting old caches, or changing
+global cache semantics. If the vault is locked/unavailable, setup still fails
+until access is restored. When deliberately selecting another database, clear
+or replace inherited pin/selection variables in that subprocess before
+resolving a fresh context; an existing pin is authoritative and is never
+silently reinterpreted as another database.
+
+The environment allowlist is `KPDB`, `VAULT_GROUP`, `AGENT_VAULT`,
+`AGENT_VAULT_PINNED_CONTEXT`, `AGENT_VAULT_CACHE`, `AGENT_VAULT_CACHE_DIR`,
+`AGENT_VAULT_HOME`, `AGENT_VAULT_INSTALLATION_ID`, `AGENT_VAULT_CONFIG`,
+`AGENT_VAULT_RUN_DIR`, `AGENT_VAULT_ENDPOINT`, `AGENT_VAULT_HOST`,
+`AGENT_VAULT_PORT`, `AGENT_VAULT_PIPE`, `AGENT_VAULT_SOCKET`,
+`AGENT_VAULT_PID`, `AGENT_VAULT_LOG`, `AGENT_VAULT_SYSTEMD_UNIT`,
+`AGENT_VAULT_TASK_NAME` and `AGENT_VAULT_WINDOWS_RUN_DIR`.
+Every value is a string. Optional absent
+transport overrides use empty strings so another caller cannot inject them
+through an inherited environment.
+PID/log paths are resolved absolutely, as is an explicit Windows-side
+rendezvous directory. Absent systemd-unit, task-name and Windows-side directory
+overrides remain empty. Clear all 20 known context keys from a child environment
+before applying the complete saved mapping, so a refresh/cold start cannot
+inherit another installation's lifecycle artifacts.
+
+Setup requires an enabled, usable protected cache (`AGENT_VAULT_CACHE=1` or
+an explicit cache directory), may start the configured service, and populates
+only the selected entry using authoritative live reads and the existing cache
+replacement protocol. It never collects extension bulk-cache entries. Ordinary
+setup must reuse a canonical base64-encoded 32-byte key; locked, missing,
+unreadable or malformed values fail without generating or replacing a key.
+Unattended requests have a 90-second bound and never prompt; `--prompt`
+explicitly permits unlocking and uses a 120-second request bound.
+Delegated/contained callers must pass `--require-running`. It performs a bounded
+check of the selected existing service and returns `service_unavailable` when
+stopped, without activating a daemon. Payload gates also refuse first-use
+provisioning for that option. Provision/start the owning vault independently
+outside the contained consumer adapter before retrying. Standalone setup
+without this flag retains its explicit activation behavior.
+
+First-owner initialization requires **both** `--initialize-owner` and
+`--confirm-first-owner`, only after the user separately confirms this is a new
+owner with no existing common key. Initialize once on the designated
+authoritative database copy, confirm synchronization, then use ordinary setup
+on every other machine. Independent unsynchronized copies cannot establish
+global absence, and no cross-machine atomicity is claimed. The service
+serializes creation with credential operations, proves absence through a
+successful recursive flattened root listing, and uses create-only KeePass
+`add` with random key material on stdin. It refuses ambiguous/duplicate paths
+and malformed keys; ambiguous add completion is authoritatively reread,
+never retried or overwritten.
+
+KeePass CLI snapshot writes do not provide an atomic concurrent first-owner
+guarantee: simultaneous create-only adds can both succeed for one absent
+entry. The backend therefore uses the existing `single-instance-lease`
+OS-lock primitive during owner creation. Its stable, non-secret sidecar lock
+is beside the canonical database pathname, independent of daemon, cache root,
+runtime home and installation ID. Absence is rechecked after acquiring it,
+and parent-group creation plus the single add remain inside that lease.
+Contenders reuse the winner instead of issuing another add. Acquisition is
+bounded to five seconds within the existing operation deadline; contention
+returns `service_busy`, and unavailable coordination returns
+`vault_read_failed`, with no unlocked fallback.
+
+Keep the sidecar file: deleting it while a participant holds it can split the
+lock namespace. The OS releases ownership automatically when its process
+dies; stale PID text is not ownership. This coordinates cooperating
+agent-vault identity initializers on the same canonical database pathname
+where the filesystem supports the existing OS lease. It does not fence
+unrelated KeePass GUI/CLI writers, rotate keys, or establish atomicity between
+independent synchronized copies. First-owner initialization still happens once
+on the designated authoritative copy.
+
+Setup always prints secret-free JSON (also accepts `--json`):
+`{"version":1,"status":"reused|created","cached":true}`.
+Failures exit 1 with `{"version":1,"error":"reason-code","message":"sanitized actionable text"}`;
+key bytes and backend stderr are never printed.
+Cache failure does not rotate/delete the authoritative key: repair and retry.
+
+Pinned cache-only reads are strictly read-only: a miss creates no directory,
+cache, lock or key file, and legacy plaintext wrapping keys are not rewritten.
+Corrupt protected data fails explicitly rather than being reported as a miss.
+Setup distinguishes `cache_unavailable` (disabled/unusable protection),
+`cache_read_failed` (existing cache cannot be safely read) and
+`cache_update_failed` (population/verification failed) from
+`database_unconfigured`, `database_unavailable`, `context_invalid`,
+`needs_unlock`, `entry_missing` and `malformed_key`.
+The remaining setup reason codes are `confirmation_required`, `invalid_entry`,
+`ambiguous_entry`, `vault_read_failed`, `group_create_failed`,
+`operation_expired`, `creation_unconfirmed`, `service_busy`,
+`service_unavailable` and `invalid_response`. Consumers should allowlist these
+codes, not copy backend diagnostics. Raw pinned cache-only `get` failures print
+only sanitized `cache_missing`, `cache_unavailable` or `cache_read_failed`
+diagnostics; successful `get` still returns the requested secret on stdout.
+
+### Disposable real KeePass proof
+
+With the existing prepared test runtime and source/shared-library `PYTHONPATH`,
+opt into the bounded native lane:
+
+```powershell
+$env:AGENT_VAULT_IDENTITY_REAL_KEEPASS = "1"
+& "<prepared-runtime-python>" -m pytest plugins\agent-vault\tests\test_identity_key_keepass_live.py -q
+```
+
+The lane creates only fresh disposable KDBX files, uses the available KeePassXC
+binary with passwords/keys exclusively on stdin, and starts a foreground
+daemon with private home, configuration, PID/log, socket/pipe and rendezvous
+paths plus a dynamic loopback port. It verifies reused-key CLI setup and a
+fresh cache-only reader while that private daemon is locked, plus separately
+confirmed create-only initialization and retry reuse. It never connects to,
+locks or restarts an installed daemon. Fixtures retire only their PID-owned
+child on exit; the Windows fixture launches the selected interpreter's base
+executable with its existing dependency paths to avoid venv redirector PID
+ambiguity.
+The concurrent lane starts two independent service processes in different
+installation cells, synchronizes both authoritative absence reads against the
+same physical KDBX, and requires exactly one actual KeePass add. Both returned
+and in-memory-cached key digests must match the final authoritative value and
+fresh protected-cache reader; no fixture key or master password is printed.
+
+For caller-owned combined worktrees integration, the test module exports
+`disposable_vault(root, seed_owner=True)`. Inside that context, use its `env`,
+`argv`, `entry` and CLI-emitted context environment; it removes inherited
+identity/vault/worktrees selection variables only from child environments.
+Keep comparisons in memory: fixture secrets must not become arguments,
+diagnostics or plaintext artifacts.
 
 ## Locking, prompting, and robustness
 

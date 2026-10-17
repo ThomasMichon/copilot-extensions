@@ -70,6 +70,7 @@ def run_dir() -> Path:
 
 
 CONFIG_ENV = "AGENT_VAULT_CONFIG"
+PINNED_CONTEXT_ENV = "AGENT_VAULT_PINNED_CONTEXT"
 REPO_CONFIG_NAME = ".agent-vault.json"
 
 
@@ -313,6 +314,24 @@ def resolve_context(
     strict: bool = False,
 ) -> ResolvedVault:
     """Resolve the active vault using env, repo, extension, global, and defaults."""
+    if PINNED_CONTEXT_ENV in os.environ:
+        from .identity_context import parse_pinned_context
+
+        pinned = parse_pinned_context(os.environ[PINNED_CONTEXT_ENV], installation_id())
+        port = pinned["port"]
+        cache_dir = os.environ.get("AGENT_VAULT_CACHE_DIR")
+        if (
+            os.environ.get("AGENT_VAULT_CACHE") != "1"
+            or not cache_dir or not Path(cache_dir).is_absolute()
+        ):
+            raise RuntimeError("Pinned vault context requires CACHE=1 and an absolute CACHE_DIR")
+        return ResolvedVault(
+            vault_name=pinned["vault_name"] or None,
+            kpdb=pinned["kpdb"],
+            group=pinned["group"] or None,
+            port=port,
+            sources=dict.fromkeys(("vault", "kpdb", "group", "port"), "pinned"),
+        )
     global_data = load_global_config(strict=True) if strict else load_global_config()
     if strict:
         _validate_config_data(global_data, "global vault configuration")
@@ -503,6 +522,20 @@ def resolve_kpdb(*, required: bool = True) -> str:
 def tcp_port() -> int:
     """Return the configured localhost TCP port."""
     return resolve_context().port
+
+
+def within_group(entry: str, group: str | None) -> bool:
+    """Whether a normalized entry falls within the resolved vault group.
+
+    When no group is configured there is nothing to scope to, so every entry is
+    considered in-scope. Used to gate destructive operations (remove/move) so a
+    caller cannot delete or move an entry outside the active vault's group
+    without an explicit ``force``.
+    """
+    if not group:
+        return True
+    root = group.rstrip("/")
+    return entry == root or entry.startswith(root + "/")
 
 
 def normalize_entry(entry: str, group: str | None = None) -> str:

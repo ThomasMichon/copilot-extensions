@@ -84,6 +84,14 @@ session on a machine you didn't expect.
 
 ### One owner key through the vault cache
 
+For new adopters with a configured agent-vault database, use
+`identity-vault setup/status/verify` through the
+[setting-up-pr-identity skill](../../setting-up-pr-identity/SKILL.md).
+The [local setup reference](../../../docs/identity-vault.md) covers pinned
+installation-scoped source selection and separately confirmed first-owner
+initialization. Normal additional-machine setup always reuses the common entry.
+
+The manual environment interface remains available for existing adopters:
 Set `AGENT_WORKTREES_IDENTITY_VAULT_ARGV` to a JSON argv array naming the
 absolute payload-local agent-vault command from its session catalog.
 `AGENT_WORKTREES_IDENTITY_VAULT_ENTRY` selects the common entry (default:
@@ -97,8 +105,8 @@ decode use `get <entry> password --cache-only`: no daemon contact, automatic
 unlock, prompt or key creation. A cache miss or invalid key emits a sanitized
 warning and never switches silently to another key source. The existing
 `AGENT_WORKTREES_IDENTITY_KEY` file override takes precedence for compatibility;
-it must contain the same owner key. Without either explicit source, legacy
-OneDrive file resolution is unchanged.
+it must contain the same owner key. With no explicit override or persisted
+vault source, legacy OneDrive file resolution is unchanged.
 
 The vault database is the common portable authority; local cache wrapping is
 machine-bound and must not itself be synced. Rotating the vault key requires
@@ -141,7 +149,7 @@ python -m agent_worktrees.identity_marker decode "<token>"
 
 ### Existing file-key compatibility
 
-With no configured vault argv, the key resolves from
+With no configured vault source, the key resolves from
 `AGENT_WORKTREES_IDENTITY_KEY` or the legacy OneDrive location
 (`<OneDrive root>/Apps/agent-worktrees/identity.key`). Existing file-key adopters
 may provision once with `python -m agent_worktrees.identity_marker generate`;

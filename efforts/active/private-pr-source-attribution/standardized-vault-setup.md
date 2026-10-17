@@ -69,12 +69,12 @@ guessed PATH commands or direct database manipulation.
 
 ## Plan
 
-- [ ] Review and merge this amendment before implementing new behavior.
-- [ ] Implement installation-scoped non-secret worktrees configuration and
+- [x] Review and merge this amendment before implementing new behavior (#6744).
+- [x] Implement installation-scoped non-secret worktrees configuration and
   explicit local status/setup/verification using the vault tool boundary.
-- [ ] Supply a vault-owned create-only first-owner operation with explicit
+- [x] Supply a vault-owned create-only first-owner operation with explicit
   consent, no secret-bearing argv/output and no overwrite on retry/race.
-- [ ] Add trigger-discoverable agent guidance and reconcile the existing PR
+- [x] Add trigger-discoverable agent guidance and reconcile the existing PR
   attribution, vault setup, CLI help and adopter documentation.
 - [ ] Land implementation through current-head review and required CI, prove
   the promoted release, and distinguish authorized installed verification
@@ -85,18 +85,18 @@ guessed PATH commands or direct database manipulation.
 
 - [ ] Disposable configured KeePass database: existing common entry populates
   the normal protected cache and fresh-process publication/decoding succeed.
-- [ ] Missing entry refuses ordinary setup; initialization is explicit,
+- [x] Missing entry refuses ordinary setup; initialization is explicit,
   create-only and preserves existing key material under repeats/concurrency.
-- [ ] Locked/unconfigured/missing/unreadable database and malformed keys produce
+- [x] Locked/unconfigured/missing/unreadable database and malformed keys produce
   distinct bounded action-required errors, not success or replacement keys.
-- [ ] Read-only status has no file/service/cache/key mutation; failed setup
+- [x] Read-only status has no file/service/cache/key mutation; failed setup
   leaves prior configuration and authoritative key intact.
 - [ ] Named vault/group and installation-cell selection stay pinned across
   population and later reads; conflicting overrides are not silently ignored.
-- [ ] No key/master password in argv, logs, JSON, temp plaintext files or
+- [x] No key/master password in argv, logs, JSON, temp plaintext files or
   diagnostics. Explicit interactive prompt behavior is covered independently
   of bounded unattended behavior.
-- [ ] Existing environment/file-key precedence, optional encryption, generic
+- [x] Existing environment/file-key precedence, optional encryption, generic
   opt-outs and legacy tokens remain compatible.
 - [ ] Windows native ARM64 and POSIX unit/real-subprocess coverage; first-touch
   clean-room configured-database exercise and available live local proof.
@@ -109,3 +109,55 @@ guessed PATH commands or direct database manipulation.
   generic setup flow. This amendment defines the missing reusable boundary.
   No production database, common key, protected cache or installed payload is
   changed by this planning slice.
+- The amendment merged before implementation. Worktrees now supplies
+  installation-scoped setup/status/verification and trigger-discoverable guidance;
+  vault-owned provisioning and combined configured-database integration are
+  implemented. These are source results, not a released or installed readiness
+  claim; current-head review, required CI and promotion remain separate gates.
+- Focused worktrees identity/compatibility/native-crypto tests and validated
+  installation-cell path selection pass (88 items). Native Windows ARM64 runs
+  without `cryptography` pass 50 items; only the optional comparison against that
+  absent portable backend is skipped. POSIX source/fresh-process contracts pass
+  37 items; nine Windows-only contracts are skipped there.
+- The Docker clean-room engine is unavailable on this host. No daemon startup
+  or repair was attempted to manufacture that lane. Fresh disposable homes,
+  source settings, protected caches and real configured KeePass databases
+  directly exercise first touch on both platforms; no whole-machine Docker
+  clean-room pass is claimed.
+- The Python-runtime combined live contract passes eight items on native Windows ARM64
+  and eight on POSIX. It proves existing-owner reuse, immutable read-only status,
+  locked-daemon fresh-process lookup, explicit first-owner creation and repeat
+  reuse. POSIX execution uses a byte-matched native-filesystem source artifact;
+  slow cross-filesystem cold startup and a TCP-only test-fixture assumption
+  were diagnosed, not hidden by production timeout/transport changes.
+- A bounded real KeePass probe demonstrated that concurrent create-only CLI adds
+  can both succeed for the same absent entry. The implementation therefore
+  coordinates cooperating initializers with the existing database-sidecar
+  OS-lease primitive and rechecks absence under it. A real regression starts
+  two independent service processes in different installation contexts against
+  one database: exactly one add occurs and both cached results match the final
+  authoritative key. Unrelated GUI/raw CLI writers and unsynchronized copies
+  remain outside that cooperative guarantee.
+- The initial review of #6782 identified missing payload-launcher coverage:
+  runtime gates replaced the identity cache selection, a worktrees receipt
+  crossed the vault boundary, and Windows cold activation inside a contained
+  adapter could lose its resident. Those findings block merge. Python-runtime
+  integration results do not discharge the corresponding launcher obligations;
+  their validation items are reopened while the actual entrypoints are fixed.
+  Worktrees now preserves its own probe context, passes candidate metadata over
+  bounded stdin, and requires independent vault-service activation rather than
+  weakening cache-reader containment. Actual launcher/cold-service regression
+  proof and a subsequent passing review are still required.
+- The review correction now passes real Windows payload-entry tests in legacy
+  and namespaced modes, including a distinct worktrees receipt, scoped vault
+  cache, persisted fresh reader and an independently running resident. The full
+  native vault suite passes 368 items; the focused worktrees reader/CLI suite
+  passes 99. A headless-launch guard failure and registration-introspection
+  omission are corrected rather than bypassed.
+- Actual native gate validation can exceed the old Python-adapter-only
+  15-second reader budget. Persisted sources now explicitly allow 45 seconds
+  including that provenance validation; legacy explicit argv retains 15 seconds.
+  Output limits, non-breakaway process containment and cleanup stay enforced.
+  This timing change is intentional and documented, not a claim that the
+  earlier Python-only proof covered payload startup. Subsequent review remains
+  a separate gate; Linux actual-entry validation is still in progress.

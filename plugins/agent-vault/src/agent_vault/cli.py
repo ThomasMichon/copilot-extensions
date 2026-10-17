@@ -10,8 +10,11 @@ import sys
 import time
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config, launch, rendezvous
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
+from .credential_reads import cmd_get
 from .prompt import prompt_password as gui_prompt_password
 from .winpipe import pipe_send
 
@@ -169,6 +172,8 @@ def _discover_endpoint(
     exactly today's legacy dial (UDS->TCP / fixed port).
     """
     override = os.environ.get(config.ENDPOINT_ENV)
+    if override == "" and config.PINNED_CONTEXT_ENV in os.environ:
+        override = None
     expected_installation = config.installation_id()
     if strict:
         if override is not None:
@@ -617,6 +622,7 @@ Write-Output $box1.Text
         r = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", ps_script],
             capture_output=True, text=True, timeout=120,
+            **no_window_kwargs(),
         )
         pw = r.stdout.strip().replace("\r", "")
         if pw == "CANCELLED" or not pw:
@@ -645,88 +651,6 @@ Write-Output $box1.Text
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
-
-
-def cmd_get(args):
-    entry = args.entry
-    field = args.field or "password"
-    cache_entry = config.normalize_entry(entry, config.resolve_context().group)
-    refresh = getattr(args, "refresh", False)
-    cache_only = getattr(args, "cache_only", False)
-    max_cache_age = getattr(args, "max_cache_age", None)
-
-    from .cache import get_cache
-
-    cache = get_cache()
-
-    # Tier 0: the persistent on-disk cache. Consulted first unless --refresh,
-    # and authoritatively (no daemon contact) when --cache-only.
-    if cache.enabled and not refresh:
-        cached = cache.get(
-            cache_entry,
-            field,
-            max_age_seconds=max_cache_age,
-            legacy_entry=entry,
-        )
-        if cached is not None:
-            print(cached)
-            return 0
-    if cache_only:
-        print(f"Error: {entry} [{field}] not in cache", file=sys.stderr)
-        return 1
-
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
-
-    request = {
-        "action": "get",
-        "entry": entry,
-        "field": field,
-        "refresh": refresh or max_cache_age is not None,
-    }
-    if getattr(args, "prompt", False):
-        request["allow_prompt"] = True
-    authoritative = refresh or max_cache_age is not None
-    read_lock = (
-        cache.replacement_lock()
-        if authoritative
-        else contextlib.nullcontext()
-    )
-    succeeded = False
-    reconciliation_failed = False
-    with read_lock:
-        resp = send_command(request, timeout=None)
-        if resp and resp.get("ok"):
-            value = resp["value"]
-            succeeded = True
-            if cache.enabled:
-                generation = resp.get("generation")
-                if authoritative:
-                    reconciliation_failed = not cache.reconcile_authoritative(
-                        cache_entry,
-                        field,
-                        value,
-                        int(generation) if generation is not None else None,
-                    )
-                elif generation is None:
-                    cache.put(cache_entry, field, value)
-                else:
-                    cache.put(cache_entry, field, value, int(generation))
-    if reconciliation_failed:
-        print(
-            "Error: credential was read, but the persistent cache could not be "
-            "reconciled",
-            file=sys.stderr,
-        )
-        return 2
-    if succeeded:
-        print(value)
-        return 0
-
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
 
 
 def cmd_has(args):
@@ -1670,6 +1594,23 @@ def main(argv: list[str] | None = None):
         help="show program's version number and exit",
     )
     sub = parser.add_subparsers(dest="command")
+
+    from .identity_key import command as identity_key_command
+
+    identity = sub.add_parser("identity-key", help="Provision a shared owner key or pin vault context")
+    identity_sub = identity.add_subparsers(dest="identity_command", required=True)
+    p = identity_sub.add_parser("context", help="Read configured source metadata without service/cache writes")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=identity_key_command)
+    p = identity_sub.add_parser("setup", help="Reuse the live owner key and populate only its protected cache")
+    p.add_argument("--entry", default="Identity/PR-attribution")
+    p.add_argument("--prompt", action="store_true", help="Explicitly allow unlock prompting")
+    p.add_argument("--initialize-owner", action="store_true")
+    p.add_argument("--confirm-first-owner", action="store_true")
+    p.add_argument("--require-running", action="store_true",
+                   help="Require an independently running selected service; never activate it")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=identity_key_command)
 
     p = sub.add_parser("get", help="Read a credential")
     p.add_argument("entry", help="Entry path")

@@ -1,0 +1,42 @@
+"""Lazy CLI modules verified not to require the full command cluster.
+
+Regenerate with tests/_core_cluster_scan.py and exercise real command handlers,
+not just parser help: transitive deferred-global dependencies need runtime proof.
+"""
+
+CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
+    "attribution_prepare_cli",
+    "identity_vault_cli",
+    "claims_cli",
+    "cleanup_gc_cli",
+    "finalize_cli",
+    "follow_ups_cli",
+    "handoff_cancel_cli",
+    "handoff_cli",
+    "handoff_successor_repair_cli",
+    "installation_cli",
+    "launch_registry",
+    "list_cli",
+    "maintenance_cli",
+    "pane_lifecycle",
+    "picker_profiles_cli",
+    "picker_reconcile_cli",
+    "pr_state_cli",
+    "reap_cli",
+    "reclaim_cli",
+    "record_cli",
+    "resource_producer_cli",
+    "session_binding_cli",
+    "session_inspection_cli",
+    "session_metadata_cli",
+    "session_tracking_cli",
+    "status_bar_cli",
+    "status_cli",
+    "status_monitor_cli",
+    "status_monitor_reap_stale",
+    "status_monitor_runtime",
+    "status_updater_cli",
+    "update_cli",
+    "worktree_ops_cli",
+    "worktree_status_audit",
+})

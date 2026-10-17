@@ -11,6 +11,13 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+For optional encrypted PR attribution with an already configured agent-vault
+KeePass database, use `identity-vault setup/status/verify` or the
+[setting-up-pr-identity skill](skills/setting-up-pr-identity/SKILL.md).
+The [local setup flow](docs/identity-vault.md) reuses one shared owner key and
+persists only installation-scoped source selection; routine reads remain
+cache-only and require no vault unlock.
+
 Resolved machine topology treats native Windows and WSL as independent logical
 machines, conventionally `host` and `host-wsl`. The shared machine owner
 projects legacy combined entries without editing topology or historical

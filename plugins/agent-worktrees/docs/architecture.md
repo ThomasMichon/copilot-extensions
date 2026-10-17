@@ -1173,6 +1173,12 @@ discloses the underlying worktree identity in plaintext (encrypting it alongside
 would add ciphertext with no additional privacy value), and `false` (the
 anonymous opt-out) continues to emit no marker of any kind, encrypted or
 not -- an operator who explicitly chose full anonymity gets it, full stop.
+The [local identity-vault setup flow](identity-vault.md) pins the configured
+vault and protected cache in installation-scoped non-secret machine state.
+Setup delegates all KeePass/key/cache operations through the owning vault CLI;
+read-only status and fresh-process verification never unlock or create keys.
+First-owner initialization is separately confirmed, create-only and never the
+response to a cache miss or unavailable database.
 Key custody uses one portable owner-level 32-byte key, never a per-machine
 PR key. An explicit nonempty `AGENT_WORKTREES_IDENTITY_KEY` path overrides
 the optional `AGENT_WORKTREES_IDENTITY_VAULT_ARGV` source, whose JSON argv
@@ -1181,7 +1187,8 @@ names the absolute vault payload command. That source reads the common
 with `--cache-only`; the synced vault holds the shared key, while each local
 protected cache serves routine lookup without vault unlock.
 Configured vault failure never silently falls back to a different key.
-Without an explicit source, the legacy OneDrive file location remains
+Absent an explicit override, persisted setup supplies the selected vault
+source. Without either source, the legacy OneDrive file location remains
 compatible. File generation is only for file-key adopters and is refused
 when vault sourcing is configured. Vault provisioning and cache population
 are explicit; normal publish/decode never creates keys or unlocks the vault.

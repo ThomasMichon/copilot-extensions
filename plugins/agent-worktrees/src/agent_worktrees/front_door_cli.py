@@ -344,6 +344,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 
 
 _NO_PROJECT_COMMANDS = {
+    "identity-vault",
     "--version",
     "-V",
     "--help",

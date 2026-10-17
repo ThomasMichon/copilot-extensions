@@ -5,6 +5,9 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 $forwardArgs = @($args)
+$identitySourceHome = [string]$env:AGENT_VAULT_HOME
+$identitySourceId = [string]$env:AGENT_VAULT_INSTALLATION_ID
+$identityCacheDir = [string]$env:AGENT_VAULT_CACHE_DIR
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_VAULT_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-vault] owning payload root is unavailable.')
@@ -183,6 +186,7 @@ function Resolve-RuntimePython {
 
 function Set-RuntimeEnvironment {
     $env:AGENT_VAULT_HOME = $runtimeRoot
+    $env:AGENT_VAULT_VALIDATED_CONTEXT = $context
     if ($installationId) {
         $env:AGENT_VAULT_INSTALLATION_ID = $installationId
         $env:AGENT_VAULT_RUN_DIR = Join-Path $runtimeRoot 'run'
@@ -218,6 +222,17 @@ function Set-RuntimeEnvironment {
 function Invoke-Runtime {
     param([Parameter(Mandatory)][string]$Python)
     Set-RuntimeEnvironment
+    if (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT) {
+        $validationArgs = @(
+            '-I', (Join-Path $scriptDir 'validate_identity_cache_context.py'),
+            "--runtime-root=$runtimeRoot", "--installation-id=$installationId",
+            "--source-home=$identitySourceHome", "--source-id=$identitySourceId",
+            "--cache-dir=$identityCacheDir"
+        )
+        $validatedCache = @(& $Python @validationArgs)
+        if ($LASTEXITCODE -ne 0) { exit 126 }
+        $env:AGENT_VAULT_CACHE_DIR = ($validatedCache -join "`n").Trim()
+    }
     # Relax EAP for just this forwarding call: the wrapped module's own
     # exit code is the only contract this dispatcher relays, so a
     # legitimate stderr diagnostic from a non-zero exit must never become
@@ -235,6 +250,21 @@ function Invoke-Runtime {
 $runtimePython = Resolve-RuntimePython
 if ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
+}
+if (
+    $forwardArgs.Count -ge 2 -and $forwardArgs[0] -eq 'identity-key' -and
+    $forwardArgs[1] -eq 'setup' -and $forwardArgs -contains '--require-running'
+) {
+    [Console]::Out.WriteLine(
+        '{"version":1,"error":"service_unavailable","message":"Provision and start the selected vault independently before delegated setup."}'
+    )
+    exit 1
+}
+if (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT) {
+    [Console]::Error.WriteLine(
+        '[agent-vault] pinned identity reads require a prepared owning runtime; provision independently.'
+    )
+    exit 126
 }
 
 if ($env:AGENT_VAULT_NO_SELFPROVISION) {

@@ -5262,6 +5262,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import attribution_prepare_cli
     attribution_prepare_cli.add_parsers(sub)
+    from . import identity_vault_cli
+    identity_vault_cli.add_parsers(sub)
     finalize_cli.add_parsers(sub)
     pr_state_cli.add_parsers(sub)
 
@@ -5433,6 +5435,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'anchor-check': ('maintenance_cli', 'cmd_anchor_check'),
     'attribution-audit': ('finalize_cli', 'cmd_attribution_audit'),
     'attribution-prepare': ('attribution_prepare_cli', 'cmd_attribution_prepare'),
+    'identity-vault': ('identity_vault_cli', 'cmd_identity_vault'),
     'backfill-sessions': ('maintenance_cli', 'cmd_backfill_sessions'),
     'bind-nudge': ('session_binding_cli', 'cmd_bind_nudge'),
     'bind-session': ('session_binding_cli', 'cmd_bind_session'),
@@ -5573,41 +5576,7 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 # `create-pr`'s regression; this transitive class needs runtime exercise
 # too -- see the effort's Journal). Adding a module requires running its
 # real commands end-to-end, not just `--help`.
-_CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
-    "attribution_prepare_cli",
-    "claims_cli",
-    "cleanup_gc_cli",
-    "finalize_cli",
-    "follow_ups_cli",
-    "handoff_cancel_cli",
-    "handoff_cli",
-    "handoff_successor_repair_cli",
-    "installation_cli",
-    "launch_registry",
-    "list_cli",
-    "maintenance_cli",
-    "pane_lifecycle",
-    "picker_profiles_cli",
-    "picker_reconcile_cli",
-    "pr_state_cli",
-    "reap_cli",
-    "reclaim_cli",
-    "record_cli",
-    "resource_producer_cli",
-    "session_binding_cli",
-    "session_inspection_cli",
-    "session_metadata_cli",
-    "session_tracking_cli",
-    "status_bar_cli",
-    "status_cli",
-    "status_monitor_cli",
-    "status_monitor_reap_stale",
-    "status_monitor_runtime",
-    "status_updater_cli",
-    "update_cli",
-    "worktree_ops_cli",
-    "worktree_status_audit",
-})
+from .cli_cluster_free import CLUSTER_FREE_MODULES as _CLUSTER_FREE_MODULES
 
 
 def _dispatch_lazy(command: str, args_list: list[str]) -> int:
@@ -6157,6 +6126,7 @@ def _load_full_command_surface() -> None:
         "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
         "attribution-audit": cmd_attribution_audit,
         "attribution-prepare": __import__(f"{__package__}.attribution_prepare_cli", fromlist=["cmd_attribution_prepare"]).cmd_attribution_prepare,
+        "identity-vault": __import__(f"{__package__}.identity_vault_cli", fromlist=["cmd_identity_vault"]).cmd_identity_vault,
         "set-pr": cmd_set_pr,
         "pr-ready": cmd_pr_ready,
         "pr-status": cmd_pr_status,
