@@ -217,7 +217,10 @@ def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregat
     assert len(digest) == 64
 
 
-@pytest.mark.parametrize("mutation", ["missing-shard", "matrix", "runner", "name", "output"])
+@pytest.mark.parametrize("mutation", [
+    "missing-shard", "matrix", "runner", "name", "output",
+    "collect-only", "filtered", "failure-masked",
+])
 def test_inventory_rejects_smoke_shard_recipe_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
 ) -> None:
@@ -232,6 +235,18 @@ def test_inventory_rejects_smoke_shard_recipe_drift(
         text = text.replace("format('--sub-suite-shard {0}', matrix.shard)", "''")
     elif mutation == "name":
         text = text.replace("format('{0} (shard {1})', matrix.plugin, matrix.shard)", "matrix.plugin")
+    elif mutation in ("collect-only", "filtered", "failure-masked"):
+        invocation = (
+            "run: python tools/run-plugin-tests.py ${{ matrix.plugin }} "
+            "${{ matrix.shard != '' && format('--sub-suite-shard {0}', matrix.shard) || '' }}"
+        )
+        suffix = {
+            "collect-only": " --collect-only",
+            "filtered": " -k selected_case",
+            "failure-masked": " || true",
+        }[mutation]
+        assert text.count(invocation) == 1
+        text = text.replace(invocation, invocation + suffix)
     else:
         text = text.replace("smoke_matrix: ${{ steps.set.outputs.smoke_matrix }}", "smoke_matrix: '[]'")
     workflow.write_text(text, encoding="utf-8")

@@ -25,12 +25,12 @@ def _sharded_smoke_rows(block: str, discover: str, plugins: set[str]) -> list[st
         "for s in (('1/2', '2/2') if p == 'agent-dispatch' else ('',))]"
     )
     invocation = (
-        "run: python tools/run-plugin-tests.py ${{ matrix.plugin }} "
+        "        run: python tools/run-plugin-tests.py ${{ matrix.plugin }} "
         "${{ matrix.shard != '' && format('--sub-suite-shard {0}', matrix.shard) || '' }}"
     )
     if (
         "matrix: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}" not in block
-        or invocation not in block or recipe not in discover
+        or block.splitlines().count(invocation) != 1 or recipe not in discover
         or "smoke_matrix: ${{ steps.set.outputs.smoke_matrix }}" not in discover
         or 'echo "smoke_matrix=$SMOKE_MATRIX" >> "$GITHUB_OUTPUT"' not in discover
     ):

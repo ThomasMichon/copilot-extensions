@@ -457,9 +457,11 @@ Sharding assigns the existing sorted file-group sub-suites round-robin without
 changing their composition, containment limits, or test selection. Both shards
 must pass the required PR gate. The unsharded local command still runs the full
 suite sequentially. Candidate release qualification inventories both executed
-shard rows and refuses an unsupported matrix, invocation or shard recipe instead
-of silently narrowing the required portfolio. Sharding requires one named plugin and cannot combine with
-test-file, keyword, guard, or preparation-only filters; empty shards fail.
+shard rows and requires the exact canonical runner line, rejecting appended
+collection/filter flags or shell failure masking. It refuses an unsupported
+matrix, invocation or shard recipe instead of silently narrowing the required
+portfolio. Sharding requires one named plugin and cannot combine with test-file,
+keyword, guard, or preparation-only filters; empty shards fail.
 
 For a focused lane, repeat `--test-file tests/test_name.py` with exactly one
 named plugin to avoid importing unrelated test modules. The selector accepts
