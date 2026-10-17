@@ -227,10 +227,15 @@ def _catalog_components(
 
 def catalog() -> dict:
     """No mkdir, network clients, mutation, service ensure, or task access."""
+    from functools import cache
+    from plugin_activation import resolve_active_plugins
     from .overrides import load_overrides
+    from .worker_templates import discover_templates
+
+    activation = cache(resolve_active_plugins)
     errors = []
     records = read_records(errors=errors)
-    report = rd.RegistrarSources().refresh(emit_warnings=False)
+    report = rd.RegistrarSources(activation_source=activation).refresh(emit_warnings=False)
     errors.extend(str(finding) for finding in report.combined.findings)
     if report.trusted_error:
         errors.append(report.trusted_error)
@@ -412,13 +417,27 @@ def catalog() -> dict:
         for row in rows:
             if "pool_toggleable" in row:
                 row["pool_toggleable"] = "false"
+    provider_rows, template_discovery = discover_templates(activation())
+    rows.extend(provider_rows)
+    for index, finding in enumerate(template_discovery["findings"]):
+        detail = f"{finding['source']}: {finding['reason']}: {finding['detail']}"
+        rows.append({
+            "id": f"template-error:{index}", "title": "Template discovery requires attention",
+            "group": "Discovery errors", "finding_scope": "templates", "description": detail,
+            "provenance": finding["source"], "kind": "error", "validity": "error",
+            "enabled": "unknown", "activity": "not-applicable",
+            "editable": "false", "instantiable": "false",
+            "components": [], "components_basis": "unknown",
+            "card": {"title": "Template discovery requires attention", "body": detail},
+        })
     return {
         "schema_version": 1,
         "fetched_at": time.time(),
         "entries": rows,
         "summary": {
             "configured": len(records), "source_declarations": sum(r["group"] == "Source declarations" for r in rows),
-            "templates": len(templates()), "errors": errors,
+            "templates": len(templates()) + len(provider_rows), "errors": errors,
+            "template_discovery": template_discovery,
             "activity_known": observed["known"], "activity_reason": observed.get("reason"),
             "activity_updated_at": observed.get("updated_at"),
             "target": "CLI-local machine; independent of operational machine selection",

@@ -1,0 +1,317 @@
+"""Provider discovery is inert and cannot weaken existing worker authority."""
+
+from __future__ import annotations
+
+import copy
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
+
+from dropin_registry import EntryDecision, ScanAuthority
+from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
+import pytest
+
+from agent_dispatch import registrar_discovery as rd, worker_templates as wt
+from agent_dispatch.worker_instances import digest, save_instance, templates
+from agent_dispatch.workers_catalog import catalog
+
+
+def empty_activation():
+    return ActivationReport(authority=ScanAuthority.COMPLETE, decisions={})
+
+
+@pytest.fixture(autouse=True)
+def isolated(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "registrar"))
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DROPINS_DIR", str(tmp_path / "dropins"))
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(tmp_path / "overrides.json"))
+    monkeypatch.setattr("plugin_activation.resolve_active_plugins", empty_activation)
+    monkeypatch.setattr("agent_dispatch.workers_catalog._observation", lambda: {"known": False})
+    monkeypatch.setattr(
+        wt, "run_agent_worktrees_capture",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"repos":[]}', stderr=""),
+    )
+
+
+def write_index(root, *, index=None, entries=None):
+    index = index or root / "dispatch-templates.json"
+    index.parent.mkdir(parents=True, exist_ok=True)
+    fragment = index.parent / "recipes" / "source.json"
+    fragment.parent.mkdir(exist_ok=True)
+    fragment.write_text(json.dumps({"kind": "emitter", "spec": {"command": ["never-execute"]}}), encoding="utf-8")
+    entry = {
+        "id": "record-source", "title": "Record source", "description": "Adapter-owned records.",
+        "kind": "emitter", "declaration": "recipes/source.json",
+        "requirements": ["Choose a stable record identity."],
+    }
+    index.write_text(json.dumps({
+        "schema": "agent-dispatch.template-index", "version": 1,
+        "templates": entries if entries is not None else [entry],
+    }), encoding="utf-8")
+    return index, entry
+
+
+def plugin_report(*roots):
+    source = "example-provider@example-market"
+    plugin = ActivePlugin(
+        source, "example-provider", "example-market", roots[0].root,
+        tuple(dict.fromkeys(scope for root in roots for scope in root.scopes)), roots,
+    )
+    return ActivationReport(
+        authority=ScanAuthority.COMPLETE, decisions={source: EntryDecision.active(plugin)},
+    )
+
+
+def bytes_at(root):
+    return {str(path.relative_to(root)): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def test_multi_root_templates_keep_identity_scope_revision_and_no_executables(tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    write_index(first)
+    write_index(second)
+    report = plugin_report(
+        ActivePluginRoot(first, ("global",), "installed"),
+        ActivePluginRoot(second, ("project:sample",), "local"),
+    )
+    before = bytes_at(tmp_path)
+    rows, summary = wt.discover_templates(report)
+    assert summary["state"] == "complete" and summary["provider_templates"] == 2
+    assert len({row["id"] for row in rows}) == len({row["revision"] for row in rows}) == 2
+    assert [row["repo_scopes"] for row in rows] == [["global"], ["project:sample"]]
+    assert all(row["instantiable"] == row["editable"] == "false" for row in rows)
+    assert all(row["dependency_status"] == "not-resolved" for row in rows)
+    assert "never-execute" not in json.dumps(rows)
+    assert rows == wt.discover_templates(report)[0]
+    assert before == bytes_at(tmp_path)
+    index, entry = write_index(first)
+    changed = json.loads(index.read_text())
+    changed["templates"][0]["description"] = "Changed metadata."
+    index.write_text(json.dumps(changed), encoding="utf-8")
+    updated = wt.discover_templates(report)[0]
+    assert updated[0]["id"] == rows[0]["id"] and updated[0]["revision"] != rows[0]["revision"]
+    assert updated[1] == rows[1]
+
+
+@pytest.mark.parametrize("problem", [
+    "version", "version-bool", "schema", "fields", "duplicate", "kind",
+    "path-escape", "absolute", "missing", "not-object", "oversize", "requirements",
+])
+def test_invalid_contributions_keep_healthy_peers_and_source_bytes(tmp_path, problem):
+    root = tmp_path / "provider"
+    index, entry = write_index(root)
+    data = json.loads(index.read_text())
+    good = copy.deepcopy(entry)
+    good["id"] = "healthy"
+    if problem == "version":
+        data["version"] = 2
+    elif problem == "version-bool":
+        data["version"] = True
+    elif problem == "schema":
+        data["schema"] = "unknown"
+    elif problem == "fields":
+        data["unknown"] = True
+    elif problem == "duplicate":
+        data["templates"].append(copy.deepcopy(entry))
+    elif problem == "kind":
+        data["templates"][0]["kind"] = "workflow-engine"
+    elif problem == "path-escape":
+        outside = tmp_path / "outside.json"
+        outside.write_text("{}", encoding="utf-8")
+        data["templates"][0]["declaration"] = "../outside.json"
+    elif problem == "absolute":
+        data["templates"][0]["declaration"] = str(index)
+    elif problem == "missing":
+        data["templates"][0]["declaration"] = "missing.json"
+    elif problem == "requirements":
+        data["templates"][0]["requirements"] = ["x" * 1001]
+    else:
+        bad = root / "bad.json"
+        bad.write_text("[]" if problem == "not-object" else " " * (wt._MAX_BYTES + 1), encoding="utf-8")
+        data["templates"][0]["declaration"] = "bad.json"
+    data["templates"].append(good)
+    index.write_text(json.dumps(data), encoding="utf-8")
+    before = bytes_at(tmp_path)
+    rows, summary = wt.discover_templates(plugin_report(ActivePluginRoot(root, ("global",), "installed")))
+    assert summary["state"] == "partial" and summary["findings"]
+    assert [row["title"] for row in rows] == ([] if problem in {"version", "version-bool", "schema", "fields"} else ["Record source"])
+    if rows:
+        assert rows[0]["id"].endswith(":healthy")
+    assert bytes_at(tmp_path) == before
+
+
+def test_disabled_plugin_and_stale_root_do_not_create_templates(tmp_path):
+    root = tmp_path / "disabled"
+    write_index(root)
+    assert wt.discover_templates(empty_activation())[0] == []
+    rows, summary = wt.discover_templates(plugin_report(ActivePluginRoot(root / "missing", ("global",), "installed")))
+    assert rows == [] and summary["state"] == "partial"
+    assert summary["findings"][0]["reason"] == "invalid-index"
+
+
+def test_repository_layers_and_user_local_reuse_existing_roots(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    canonical = root / ".copilot-extensions" / "agent-dispatch"
+    legacy = root / ".agent-dispatch"
+    write_index(root, index=legacy / "templates" / "index.json")
+    canonical_index, _ = write_index(root, index=canonical / "templates" / "index.json")
+    overlay = canonical / "marketplaces" / "example-cell" / "templates" / "index.json"
+    write_index(root, index=overlay)
+    local = rd.registrar_dir() / "templates" / "index.json"
+    write_index(rd.registrar_dir(), index=local)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout='{"repos":[{"name":"library"}]}', stderr="",
+    ))
+    calls = []
+    def resolve(snapshot, name):
+        calls.append((name, snapshot._execution))
+        return root
+    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", resolve)
+    before = bytes_at(tmp_path)
+    rows, summary = wt.discover_templates(empty_activation())
+    assert summary["state"] == "complete" and len(rows) == 3
+    assert calls == [("library", False)]
+    assert {row["source"]["index"] for row in rows} == {str(canonical_index), str(overlay), str(local)}
+    assert len({row["id"] for row in rows}) == 3
+    assert before == bytes_at(tmp_path) and not rd.pointers_file().exists()
+
+
+def test_inert_errors_do_not_disable_existing_controls_and_activation_is_lazy(monkeypatch, tmp_path):
+    directory = tmp_path / "source"
+    directory.mkdir()
+    (directory / "pool.json").write_text('{"name":"existing-pool"}', encoding="utf-8")
+    rd.add_pointer("source", directory)
+    (rd.registrar_dir() / "templates").mkdir()
+    (rd.registrar_dir() / "templates" / "index.json").write_text("invalid", encoding="utf-8")
+    calls = []
+    def resolve():
+        calls.append("activation")
+        return ActivationReport(authority=ScanAuthority.INDETERMINATE, decisions={})
+    monkeypatch.setattr("plugin_activation.resolve_active_plugins", resolve)
+    before = bytes_at(tmp_path)
+    data = catalog()
+    assert calls == ["activation"]
+    assert data["summary"]["errors"] == []
+    assert data["summary"]["template_discovery"]["state"] == "partial"
+    template_errors = [row for row in data["entries"] if row.get("finding_scope") == "templates"]
+    assert template_errors and all(row["group"] == "Discovery errors" for row in template_errors)
+    assert next(row for row in data["entries"] if row["title"] == "existing-pool")["pool_toggleable"] == "true"
+    assert next(row for row in data["entries"] if row["id"] == "template:worker-pool")["instantiable"] == "true"
+    assert before == bytes_at(tmp_path)
+    monkeypatch.setattr("agent_dispatch.registrar_registry.resolve_active_plugins", lambda: pytest.fail("unexpected activation read"))
+    rd.RegistrarSources(activation_source=lambda: pytest.fail("no candidate needs activation")).refresh(emit_warnings=False)
+
+
+def test_standalone_missing_repository_integration_is_partial_not_healthy_empty(monkeypatch):
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: None)
+    data = catalog()
+    summary = data["summary"]["template_discovery"]
+    assert summary["state"] == "partial" and summary["findings"][0]["source"] == "registered-repositories"
+    assert any(row["id"] == "template:worker-pool" for row in data["entries"])
+    assert data["summary"]["errors"] == []
+    assert not rd.registrar_dir().exists()
+
+
+def test_new_provider_id_cannot_be_saved_or_activated(tmp_path):
+    root = tmp_path / "provider"
+    write_index(root)
+    row = wt.discover_templates(plugin_report(ActivePluginRoot(root, ("global",), "installed")))[0][0]
+    from agent_dispatch.registrar import RegistrarError
+    with pytest.raises(RegistrarError, match="absent or changed"):
+        save_instance(row["id"], row["revision"], {
+            "name": "never-saved", "declaration": {"kind": "emitter"}, "repo_root": "",
+        })
+    assert not rd.registrar_dir().exists()
+    assert digest(templates()["worker-pool"]) != row["revision"]
+
+
+def test_real_cli_first_touch_inert_catalog_and_existing_manager_action_contract(tmp_path, monkeypatch):
+    local = rd.registrar_dir() / "templates" / "index.json"
+    write_index(rd.registrar_dir(), index=local)
+    before = bytes_at(tmp_path)
+    code = """
+import runpy, sys
+from types import SimpleNamespace
+from agent_dispatch import worker_templates
+worker_templates.run_agent_worktrees_capture = lambda *a, **k: SimpleNamespace(returncode=0, stdout='{"repos":[]}', stderr='')
+sys.argv = ['agent-dispatch', 'workers', 'catalog']
+runpy.run_module('agent_dispatch', run_name='__main__')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=20,
+        env={**os.environ, "AGENT_DISPATCH_NO_AUTOSTART": "1"},
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    row = next(row for row in data["entries"] if row["id"].startswith("template:provider:"))
+    manifest = json.loads((Path(__file__).resolve().parents[1] / "pivots" / "workers-config.json").read_text(encoding="utf-8"))
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "worktree-manager" / "src"))
+    from worktree_manager.production_picker.picker_tui.pivot_actions import entry_matches
+    from worktree_manager.production_picker.picker_tui.pivot_manifest import parse_list_payload, parse_manifest
+    records, summary = parse_list_payload(data)
+    assert row in records and summary == data["summary"]
+    contribution = parse_manifest(manifest, name="workers", source_path="workers-config.json")
+    allowed = [
+        action.key for action in contribution.actions if entry_matches(action.when, row)
+    ]
+    assert allowed == ["details"]
+    assert "safe local instantiation is not supported" in row["card"]["body"]
+    assert bytes_at(tmp_path) == before
+
+
+def test_duplicate_json_fields_are_explicit_errors(tmp_path):
+    root = tmp_path / "provider"
+    index, _ = write_index(root)
+    index.write_text('{"schema":"unknown","schema":"agent-dispatch.template-index","version":1,"templates":[]}', encoding="utf-8")
+    rows, summary = wt.discover_templates(plugin_report(ActivePluginRoot(root, ("global",), "installed")))
+    assert rows == [] and "duplicate JSON field" in summary["findings"][0]["detail"]
+
+
+def test_bad_repository_inventory_row_and_duplicate_names_keep_healthy_sources(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    write_index(root, index=root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json")
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout='{"repos":[false,{"name":"healthy"},{"name":"duplicate"},{"name":"duplicate"}]}', stderr="",
+    ))
+    calls = []
+    def resolve(snapshot, name):
+        calls.append(name)
+        return root
+    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", resolve)
+    rows, summary = wt.discover_templates(empty_activation())
+    assert len(rows) == 1 and calls == ["healthy"]
+    assert summary["state"] == "partial"
+    assert {finding["reason"] for finding in summary["findings"]} == {"invalid", "ambiguous"}
+
+
+def test_plugin_source_and_templates_share_one_lazy_activation_report(monkeypatch, tmp_path):
+    root = tmp_path / "plugin"
+    write_index(root)
+    (root / "plugin.json").write_text('{"name":"example-provider","version":"1.0.0"}', encoding="utf-8")
+    registrar = root / "registrar"
+    registrar.mkdir()
+    (registrar / "pool.json").write_text('{"name":"provider-pool"}', encoding="utf-8")
+    dropins = Path(os.environ["AGENT_DISPATCH_REGISTRAR_DROPINS_DIR"])
+    dropins.mkdir()
+    (dropins / "provider.json").write_text(json.dumps({
+        "schema_version": 1, "plugin": "example-provider@example-market",
+        "plugin_root": str(root), "registrar": "registrar",
+    }), encoding="utf-8")
+    report = plugin_report(ActivePluginRoot(root, ("global",), "installed"))
+    calls = []
+    def resolve():
+        calls.append("activation")
+        return report
+    monkeypatch.setattr("plugin_activation.resolve_active_plugins", resolve)
+    before = bytes_at(tmp_path)
+    data = catalog()
+    assert calls == ["activation"] and data["summary"]["errors"] == []
+    assert data["summary"]["template_discovery"]["state"] == "complete"
+    assert any(row["title"] == "provider-pool" for row in data["entries"])
+    assert any(row["id"].startswith("template:provider:") for row in data["entries"])
+    assert before == bytes_at(tmp_path)

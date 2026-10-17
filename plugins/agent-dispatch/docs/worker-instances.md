@@ -18,7 +18,8 @@ The table distinguishes:
 - **Source declarations**: discovered repository/plugin declarations, read-only
   here. Ownership/provenance identifies their configuration flow.
 - **Available templates**: built-in recipes plus a bounded worker-pool template,
-  with **Instantiate** actions. Recipe fragments are not complete instances.
+  with **Instantiate** actions; provider-owned fragments are discoverable but
+  have no Instantiate action. Recipe fragments are not complete instances.
 
 ### Shared catalog metadata
 
@@ -127,6 +128,88 @@ stale edits, redirected files, ambiguous discovery and missing dependencies fail
 explicitly. Cancel never executes a provider command or writes task-steering drafts.
 The stored name and ID must match the exact edit target, including case;
 Windows case-insensitive file lookup cannot rename an existing instance.
+
+### Discover provider templates without registering them
+
+Providers may publish a version-1 inert JSON index at:
+
+| Provider | Index home |
+|---|---|
+| Enabled plugin | `dispatch-templates.json` in each identity-verified live payload root |
+| Registered repository or declared repository pointer | `templates/index.json` in the existing agent-dispatch repository configuration layers |
+| User-local | `templates/index.json` beneath this installation's `registrar_dir()` |
+
+Repository layers retain canonical `.copilot-extensions/agent-dispatch`
+selection, `.agent-dispatch` fallback and the active installation's marketplace
+overlay. They are reported separately, not merged using a new local-wins rule.
+Registering an active registrar pointer is not required to discover templates
+from an already registered repository. A legacy repository pointer retains its
+pointer attribution; its label/path basename is not a registered repo identity.
+Arbitrary directory pointers are not additional template roots.
+
+```json
+{
+  "schema": "agent-dispatch.template-index",
+  "version": 1,
+  "templates": [
+    {
+      "id": "record-source",
+      "title": "Record source",
+      "description": "Produce ordinary tasks through a configured adapter.",
+      "kind": "emitter",
+      "declaration": "recipes/record-source.json",
+      "requirements": ["Choose a source adapter and stable record identity."]
+    }
+  ]
+}
+```
+
+`declaration` references an existing JSON object/fragment relative to the index
+directory, contained within the owning provider root. It does not copy the
+declaration into a second registry. IDs use 1-80 letters, digits, `.`, `_` or
+`-`, starting with a letter/digit. Titles are at most 200 characters,
+descriptions 2,000, and requirements at most 32 nonempty strings of up to
+1,000 characters. Each JSON document is bounded to 1 MiB; an index contains at
+most 256 entries. Unknown versions/fields, duplicate JSON keys or entry IDs,
+unsupported kinds, unavailable roots/files and containment failures are explicit
+findings; healthy peers remain visible. `kind` describes the fragment, not
+validated effective registrations. Runtime kinds and existing built-in
+composite recipe kinds are supported; `composite` may describe a fragment
+without a top-level kind.
+
+New rows qualify the provider's local ID with its source/root/layer context.
+The ID is stable while that context is stable; relocating a provider root
+produces a distinct variant. Revisions fingerprint the index entry, raw
+declaration object and resolution context, not unresolved inherited resources.
+Equal bytes at different relative dependency roots are distinct contributions.
+Details retain all provider-reported applicability scopes, root kind, index,
+declaration path, requirements and revision. Raw commands/specs/environment
+values are not returned by this discovery projection.
+
+Provider rows report `resolution: discovered-only`,
+`dependency_status: not-resolved`, `instantiable: "false"` and an explicit
+`unsupported_reason`. Only Details is available through the existing Manager
+contribution. The current `workers save` command still refuses these new IDs:
+safe external recipe materialization is not implemented. Do not treat declared
+requirements as evaluated prerequisites or copy relative references into the
+local-instance directory. Built-in IDs, recipe references and their existing
+save/activation actions are unchanged.
+
+`summary.template_discovery` reports `state` (`complete` or `partial`),
+`provider_templates`, `findings` and `instantiation: builtin-only`. Its findings
+also appear as read-only Discovery errors rows labelled Template discovery
+requires attention, with `finding_scope: templates`. Missing optional
+indexes are normal; unavailable optional repository integration reports a
+partial scan rather than a healthy empty result. Registered-only lookups share
+a bounded snapshot; discovery never installs that integration. Plugin sources
+and templates share one lazily acquired current activation report, preserving
+each verified live root and its applicability.
+
+Inert-template findings are separate from `summary.errors`: they do not disable
+unrelated source toggles or local-instance edits. Existing registrar,
+publication, draft and component-metadata failures keep their original mutation
+refusals. Browsing creates no directories, registrations, tasks or agents and
+does not execute provider commands, start a service or contact a coordinator.
 
 ### Effects require confirmation
 

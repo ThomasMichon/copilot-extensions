@@ -1,0 +1,9 @@
+{
+  "comment": "Discover inert provider templates through the existing worker catalog with scoped findings and unsupported-action boundaries.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

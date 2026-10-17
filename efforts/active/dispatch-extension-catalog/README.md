@@ -107,7 +107,7 @@ implementation and validation choices remain proposed means.
 - [ ] Inventory built-in template mappings, provider declarations, setup
   examples and contributed catalogs; classify reusable templates separately
   from concrete desired registrations.
-- [ ] Review a bounded specification for template discovery, instantiation and
+- [x] Review a bounded specification for template discovery, instantiation and
   consumer injection points against the existing catalog and instance lifecycle.
 - [x] Record operator execution authorization and the Planning coordinator's
   integration ownership; no production activation is implied.
@@ -523,3 +523,39 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   missing optional repository integration and unchanged unrelated controls.
   No provider format, source registration, service or installed payload changed.
 - Both the parent effort and its remaining validation/rollout gates stay open.
+
+### 2026-10-17 - Template contract reviewed; read-only discovery next
+
+- #7143 merged at 15:05Z as
+  `ce2a8dabaca37b21c28d924a551716fc6e415b22`. The exact reviewed head
+  had a Copilot approving verdict with no open issues and successful complete
+  normal CI, including `PR gate (required check)`. The parent issue stays open.
+- Re-read the Plan and Validation Plan after merge. Marked only the bounded
+  specification-review item complete; its proposed interfaces are not runtime
+  capabilities yet. Next is isolated read-only provider discovery, with scoped
+  completeness/findings and no new external-template mutation affordances.
+- Existing builtin instantiation and registrar controls remain the
+  compatibility floor. Instantiation, client parity, mapped production,
+  promotion and authorized installed proof remain open.
+
+### 2026-10-17 - Read-only provider discovery implemented for review
+
+- Added explicit inert JSON index discovery for verified plugin live roots,
+  existing repository layers and installation-local templates. Qualified
+  identity/revision, applicability, declared requirements and unsupported-action
+  reasons are projected without executable values or new registrations.
+- Template completeness/findings remain separate from registrar mutation
+  refusals. Error rows reuse the existing Discovery errors group so clients
+  retain them while filtering; their scope is explicitly templates.
+- Kept activation acquisition lazy and shared across registrar/template reads.
+  An indeterminate template-only activation scan cannot introduce a new
+  registrar error when there are no plugin registrar candidates.
+- The contained catalog, instance, registrar and recipe selection passed
+  279 tests. The final 108-test catalog/instance selection includes actual
+  first-touch CLI output through Manager's real manifest/list/action parsers,
+  unchanged source/state bytes and builtin save/publication compatibility.
+  Changed Python lint and the 13-plugin install contract passed.
+- This implements discovery only. External fragments remain non-instantiable;
+  no source activation, provider command, queue access or installed update was
+  used. Native CI, normal promotion and authorized installed proof are
+  independent gates; the earlier #7020 timeout remains tracked, not waived.

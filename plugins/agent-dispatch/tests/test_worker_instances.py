@@ -30,6 +30,10 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "fixture-host")
     monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DROPINS_DIR", str(tmp_path / "dropins"))
     monkeypatch.setattr("agent_dispatch.workers_catalog._observation", lambda: {"known": False})
+    monkeypatch.setattr(
+        "agent_dispatch.worker_templates.run_agent_worktrees_capture",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"repos":[]}', stderr=""),
+    )
 
 
 def fields(name="local-pool", **changes):
@@ -399,8 +403,7 @@ def test_ordinary_plugin_components_retain_the_verified_source_document(monkeypa
     plugin = ActivePlugin(source=source, name="example-producer", marketplace="example-marketplace",
                           root=root.resolve(), scopes=("global",))
     report = ActivationReport(authority=ScanAuthority.COMPLETE, decisions={source: EntryDecision.active(plugin)})
-    sources = rd.RegistrarSources
-    monkeypatch.setattr(rd, "RegistrarSources", lambda: sources(activation_source=lambda: report))
+    monkeypatch.setattr("plugin_activation.resolve_active_plugins", lambda: report)
     data = catalog()
     row = next(row for row in data["entries"] if row["title"] == "plugin-pool")
     assert data["summary"]["errors"] == []

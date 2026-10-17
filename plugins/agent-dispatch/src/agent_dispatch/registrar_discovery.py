@@ -938,11 +938,10 @@ class RegistrarSources:
         else:
             self._trusted = list(trusted)
 
-        activation = self.activation_source() if self.activation_source else None
         plugins = scan_registrar_registry(
             self.dropins,
             previous=self._plugin_entries,
-            activation_report=activation,
+            activation_source=self.activation_source,
         )
         self._plugin_entries = dict(plugins.entries)
         combined = combine_registrar_sources(trusted, plugins)
