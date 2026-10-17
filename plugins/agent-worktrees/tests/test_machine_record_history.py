@@ -228,22 +228,29 @@ def test_busy_selected_record_refuses_before_receipt(history, capsys):
         assert not thread.is_alive()
 
 
-def test_stale_current_code_writer_cannot_restore_old_label(history, capsys):
+@pytest.mark.parametrize("clone", [False, True, "readonly"])
+def test_stale_current_code_writer_cannot_restore_old_label(history, capsys, clone):
     _, _, path, _, _, _ = history
-    stale = tracking.load_record(path)
+    stale = tracking.load_record(path, copy_result=clone != "readonly")
+    if clone:
+        stale = replace(stale)
     assert run(capsys, "--fix")[0] == 0
     with pytest.raises(ValueError, match="owner machine changed"):
         tracking.save_record(stale, path)
 
 
-def test_explicit_internal_update_from_a_current_snapshot_is_not_stale(history):
+@pytest.mark.parametrize("clone", [False, True, "readonly"])
+def test_explicit_internal_update_from_a_current_snapshot_is_not_stale(history, clone):
     _, _, path, _, _, _ = history
-    record = tracking.load_record(path)
+    record = tracking.load_record(path, copy_result=clone != "readonly")
+    if clone:
+        record = replace(record)
     record.machine = NEW
     tracking.save_record(record, path)
     record.title = "Subsequent ordinary update"
     tracking.save_record(record, path)
     assert tracking.load_record(path).machine == NEW
+    assert "_loaded_machine" not in path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("owner", [f"{OLD}/{PROJECT}/missing-parent", f"foreign/{PROJECT}/missing-parent"])

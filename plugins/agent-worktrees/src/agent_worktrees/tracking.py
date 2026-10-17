@@ -932,6 +932,7 @@ class WorktreeRecord:
     # explicit, per-record operator edit ever promotes it). Emitted only
     # when set, so a legacy/pre-Phase-1 YAML stays byte-identical.
     codename_source: str | None = None
+    _loaded_machine: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -1532,8 +1533,10 @@ def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
     """Load via the self-invalidating record cache; ``copy_result=False`` is read-only."""
     from .pr_publication_state import loaded
     record = record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result)
-    record._loaded_machine = record.machine  # Read-time CAS evidence, never serialized.
-    return loaded(record) if copy_result else record
+    if copy_result:
+        record = loaded(record)
+        record._loaded_machine = record.machine  # Read-time CAS evidence, never serialized.
+    return record
 
 
 def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
@@ -2164,7 +2167,7 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
         codename_source=(str(data["codename_source"])
                          if data.get("codename_source") else None),
     )
-    record._loaded_from = path
+    record._loaded_from, record._loaded_machine = path, record.machine
     return record
 
 

@@ -211,8 +211,9 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
   report partial/error outcomes honestly and make repeated apply idempotent.
 - [x] Pass the converged focused regressions, lint, install-contract and
   metadata/documentation gates; retain the agent-worktrees changefile.
-  Bounded groups pass 418 tests: 48 native/history repair, 72 legacy handoff
-  graph cases, and 298 authority/doctor/registry/locality cases.
+  Native/history repair, legacy handoff, authority/doctor/registry/locality,
+  cache/serialization and exact CI producer-clone regressions have bounded
+  contained coverage without increasing the normal test deadlines.
 - [ ] Land the source candidate through final-head review and required dev CI.
 - [x] Blocked; transferred to `#7097`: targeted authoritative handling of
   misplaced duplicates/orphans without lifecycle destruction or a weakened
@@ -297,6 +298,10 @@ unrelated service changes or a second machine registry.
 - Exact-record mutation and resident roster freshness are distinct facts.
   Coordinator-owned live verification remains required; no installed runtime,
   service or real record is changed by the source participant.
+- The read-time machine CAS token is a private non-serialized dataclass field,
+  so ordinary `dataclasses.replace` and copies derived from read-only cache
+  models preserve current-snapshot intent. A genuinely stale writer still
+  refuses after an explicit label repair.
 
 ### 2026-10-16 - Explicit owner-migration slice proposed
 - #7057 reserves the bounded capability; `chugging-ratchet` owns its source
