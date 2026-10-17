@@ -6,6 +6,7 @@ import os
 import math
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -65,6 +66,30 @@ class ActionResult:
     status: str
     exit_code: int | None
     stdout: bytes = b""
+
+
+def _posix_group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    if not sys.platform.startswith("linux"):
+        return True
+    # Zombies have released their resources but can await an external reaper.
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            with (entry / "stat").open("rb") as stream:
+                stat = stream.read(8192)
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        fields = stat[stat.rfind(b")") + 2:].split()
+        if len(fields) < 3:
+            raise RuntimeError("repair could not inspect process-group lifetime")
+        if int(fields[2]) == pgid and fields[0] not in (b"Z", b"X"):
+            return True
+    return False
 
 
 @cancel_on_termination()
@@ -134,6 +159,12 @@ def run_action(
         elif process.poll() is None:
             process.kill()
         process.wait(timeout=5)
+        if os.name != "nt":
+            deadline = time.monotonic() + 5
+            while _posix_group_alive(process.pid):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("repair transient process group did not exit")
+                time.sleep(0.01)
         terminated = True
 
     try:

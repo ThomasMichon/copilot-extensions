@@ -119,7 +119,8 @@ TEST_ENV="$FRESH/test-env"
 if ! capture "prepare-tests" -- bash -c '
     set -e
     uv venv "$1"
-    uv pip install --python "$1/bin/python" -e "$2[dev]" "pytest-timeout>=2.3,<3"
+    "$1/bin/python" -I "$2/scripts/installer_dependency_policy.py" --uv uv -- \
+        --python "$1/bin/python" -e "$2[dev]" "pytest-timeout>=2.3,<3"
 ' _ "$TEST_ENV" "$PAYLOAD"; then
     jam "toolchain-uv" "declared test dependencies unavailable" "inspect prepare-tests.log"
     cr_finalize

@@ -435,6 +435,12 @@ POSIX payload commands bind supported `sh`/`bash` shebang interpreters, bypassin
 Both command and script relative-PATH cases exercise real plan/apply. Native
 Windows Job teardown confirms zero active members, including an exited
 installer's redirected descendant, before releasing the repair lock.
+POSIX cleanup likewise waits for transient group members to exit (ignoring
+resource-free Linux zombies); an exited-parent regression verifies a redirected
+descendant's exclusive file lock is released before repair unlocks. Interpreter
+admission preserves the declared absolute path's basename semantics while
+binding its resolved executable content, including `sh` symlinked to Bash.
+Declared action content is bound independently of payload cache exclusions.
 Post-install probes also require fresh owner admission before readiness is
 accepted, including the final selected module. Binding drift or cancellation
 retains the completed installer result but rejects stale readiness and blocks

@@ -168,7 +168,8 @@ def test_admitted_executable_argv_is_absolute(tmp_path, monkeypatch, platform):
         str(Path("relative-bin") / "interpreter"), "unchanged-argument",
     ])
     action = Invocation(kind="payload-script", target=tmp_path / "action", arguments=())
-    argv, admitted, _ = repair_api._admit_invocation(action, platform)
+    (tmp_path / "action").write_bytes(b"action")
+    argv, admitted, _, _ = repair_api._admit_invocation(action, platform)
     assert argv == [str(executable), "unchanged-argument"]
     assert admitted == executable and Path(argv[0]).is_absolute()
 
@@ -257,6 +258,122 @@ def test_payload_command_refuses_unsupported_interpreter_forms(tmp_path, shebang
     action = Invocation(kind="payload-command", target=target, arguments=())
     with pytest.raises(RepairAdmissionError, match="unsupported interpreter declaration"):
         repair_api._admit_invocation(action, Platform.LINUX)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX interpreter symlink semantics")
+def test_declared_sh_symlink_preserves_bash_sh_invocation_semantics(tmp_path, monkeypatch):
+    bash = shutil.which("bash")
+    assert bash
+    shell = tmp_path / "sh"
+    shell.symlink_to(bash)
+    target = tmp_path / "agent-example"
+    target.write_text(
+        "#!/usr/bin/env sh\nset -e\nvalue=$(false; printf should-not-run)\n"
+        "printf reached-end\n", encoding="utf-8",
+    )
+    action = Invocation(kind="payload-command", target=target, arguments=())
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
+    argv, executable, _, _ = repair_api._admit_invocation(action, Platform.LINUX)
+    assert argv[0] == str(shell)
+    assert executable == Path(bash).resolve()
+    result = run_action(argv, cwd=tmp_path, environment=os.environ, timeout=5, readonly=True)
+    assert result.status == "exited" and result.exit_code != 0 and result.stdout == b""
+
+
+@pytest.mark.parametrize("tree", ["__pycache__", ".pytest_cache", ".ruff_cache", ".git"])
+def test_declared_action_in_excluded_tree_still_has_content_binding(
+    repair_fixture, monkeypatch, tree,
+):
+    _, _, payload, _, _ = repair_fixture
+    scripts = payload / "scripts"
+    excluded = scripts / tree
+    excluded.mkdir()
+    for name in ("action.ps1", "action.sh"):
+        (scripts / name).rename(excluded / name)
+    declaration = payload / "installer-readiness.json"
+    value = json.loads(declaration.read_text())
+    for module in value["modules"]:
+        for actions in (module["installer"], module["readiness"]["invocations"]):
+            for action in actions.values():
+                action["path"] = action["path"].replace("scripts/", f"scripts/{tree}/")
+    write_json(declaration, value)
+    plan = invoke(repair_fixture, selection=("base",))
+    for target in excluded.iterdir():
+        target.write_text(target.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
+    monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("executed"))
+    with pytest.raises(RepairAdmissionError, match="plan"):
+        invoke(repair_fixture, apply=True, digest=plan["planDigest"], selection=("base",))
+
+
+@pytest.mark.parametrize("size", [8 * 1024 * 1024, 8 * 1024 * 1024 + 1])
+def test_action_content_binding_enforces_exact_byte_bound(tmp_path, monkeypatch, size):
+    target = tmp_path / "action"
+    with target.open("wb") as stream:
+        stream.truncate(size)
+    monkeypatch.setattr(repair_api, "_argv", lambda *args: [sys.executable, str(target)])
+    action = Invocation(kind="payload-script", target=target, arguments=())
+    if size > 8 * 1024 * 1024:
+        with pytest.raises(RepairAdmissionError, match="action exceeds its content bound"):
+            repair_api._admit_invocation(action, Platform.LINUX)
+    else:
+        assert len(repair_api._admit_invocation(action, Platform.LINUX)[3]) == 64
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX descendant resource lifetime")
+def test_posix_exited_installer_releases_redirected_descendant_lock_before_unlock(
+    tmp_path,
+):
+    import fcntl
+
+    resource = tmp_path / "descendant.lock"
+    group_file = tmp_path / "descendant.pgid"
+    child = (
+        "import fcntl,os,time; from pathlib import Path; "
+        f"lock=open({str(resource)!r},'w'); fcntl.flock(lock,fcntl.LOCK_EX); "
+        f"Path({str(group_file)!r}).write_text(str(os.getpgrp())); time.sleep(60)"
+    )
+    parent = (
+        "import subprocess,sys,time; from pathlib import Path; "
+        f"subprocess.Popen([sys.executable,'-c',{child!r}],stdin=subprocess.DEVNULL,"
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        f"p=Path({str(group_file)!r}); deadline=time.monotonic()+8\n"
+        "while not p.exists() and time.monotonic()<deadline: time.sleep(.02)\n"
+        "assert p.exists()\n"
+    )
+    with RestartJournal(tmp_path).locked():
+        result = run_action(
+            [sys.executable, "-c", parent], cwd=tmp_path, environment=os.environ,
+            timeout=10, readonly=True,
+        )
+        assert result.status == "exited" and result.exit_code == 0
+        with resource.open("a") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert not process_api._posix_group_alive(int(group_file.read_text()))
+    with RestartJournal(tmp_path).locked():
+        pass
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX group cleanup deadline")
+def test_unconfirmed_posix_group_cleanup_never_returns_success(tmp_path, monkeypatch):
+    import types
+
+    elapsed = 0
+    real_clock = time.monotonic
+
+    def alive(pgid):
+        nonlocal elapsed
+        elapsed += 6
+        return True
+
+    monkeypatch.setattr(process_api, "_posix_group_alive", alive)
+    monkeypatch.setattr(process_api, "time", types.SimpleNamespace(
+        monotonic=lambda: real_clock() + elapsed, sleep=time.sleep,
+    ))
+    with pytest.raises(TimeoutError, match="transient process group did not exit"):
+        run_action(
+            [sys.executable, "-c", "pass"], cwd=tmp_path, environment=os.environ,
+            timeout=10, readonly=True,
+        )
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows CMD contract")

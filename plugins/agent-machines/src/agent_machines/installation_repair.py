@@ -142,9 +142,10 @@ def _environment(owner: OwnerBinding, *, readonly: bool) -> dict[str, str]:
 
 def _admit_invocation(
     invocation: Invocation, platform: Platform,
-) -> tuple[list[str], Path, str]:
+) -> tuple[list[str], Path, str, str]:
     argv = _argv(invocation, platform)
-    executable = Path(argv[0]).resolve(strict=True)
+    declared_executable = Path(argv[0]).absolute()
+    executable = declared_executable.resolve(strict=True)
     ordinary(executable)
     if executable.stat().st_size > 64 * 1024 * 1024:
         raise RepairAdmissionError("repair interpreter exceeds its content bound")
@@ -156,8 +157,12 @@ def _admit_invocation(
             if remaining <= 0:
                 raise RepairAdmissionError("repair interpreter exceeds its content bound")
             content.update(block)
-    argv[0] = str(executable)
-    return argv, executable, content.hexdigest()
+    with invocation.target.open("rb") as stream:
+        target_content = stream.read(8 * 1024 * 1024 + 1)
+    if len(target_content) > 8 * 1024 * 1024:
+        raise RepairAdmissionError("repair action exceeds its content bound")
+    argv[0] = str(declared_executable)
+    return argv, executable, content.hexdigest(), hashlib.sha256(target_content).hexdigest()
 
 
 def _invoke(
@@ -166,12 +171,13 @@ def _invoke(
 ) -> ActionResult:
     invocation = (module.readiness if readonly else module.installer)[platform]
     try:
-        argv, executable, content_digest = _admit_invocation(invocation, platform)
+        argv, executable, content_digest, target_digest = _admit_invocation(invocation, platform)
     except (RepairAdmissionError, OSError):
         return ActionResult("invocation-refused", None)
     purpose = "readiness" if readonly else "installer"
     if owner.execution_bindings.get(module.qualified_id + ":" + purpose) != digest({
         "argv": argv, "executable": str(executable), "sha256": content_digest,
+        "targetSha256": target_digest,
     }):
         return ActionResult("invocation-refused", None)
     return run_action(
@@ -261,9 +267,12 @@ def _binding_inputs(
             continue
         for purpose, actions in (("readiness", module.readiness), ("installer", module.installer)):
             try:
-                argv, executable, content_digest = _admit_invocation(actions[platform], platform)
+                argv, executable, content_digest, target_digest = _admit_invocation(
+                    actions[platform], platform,
+                )
                 execution[module.qualified_id + ":" + purpose] = {
                     "argv": argv, "executable": str(executable), "sha256": content_digest,
+                    "targetSha256": target_digest,
                 }
             except (RepairAdmissionError, OSError):
                 execution[module.qualified_id + ":" + purpose] = {"status": "invocation-unavailable"}
