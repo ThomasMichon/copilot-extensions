@@ -8,11 +8,30 @@ from types import SimpleNamespace
 import pytest
 
 from zdd.private_peer import PeerProcess
+from zdd import private_peer
 from zdd.private_protocol import Deadline, PeerIdentity, PrivateIPCError, Refusal
 from zdd.private_windows import WindowsChannel
 from zdd.private_windows_native import WAIT_TIMEOUT, Native
 
 PEER = PeerIdentity(123, "456", "synthetic-principal")
+
+
+def test_missing_native_poll_is_a_fixed_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(private_peer, "select", SimpleNamespace())
+    with pytest.raises(PrivateIPCError) as caught:
+        private_peer._pidfd_exited(55, 0)
+    assert caught.value.reason is Refusal.UNAVAILABLE
+    assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_missing_native_backend_refuses_before_taking_custody(
+    monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    monkeypatch.setattr(private_peer, "sys", SimpleNamespace(platform=platform))
+    with pytest.raises(PrivateIPCError) as caught:
+        PeerProcess(55, PEER)
+    assert caught.value.reason is Refusal.UNAVAILABLE
 
 
 def _api(result: int) -> tuple[Native, list[int]]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import math
 import select
+import sys
 import threading
 
 from .private_protocol import Deadline, PeerIdentity, PrivateIPCError, Refusal
@@ -12,7 +13,10 @@ from .private_windows_native import WAIT_TIMEOUT, Native
 
 
 def _pidfd_exited(reference: int, timeout: float) -> bool:
-    poller = select.poll()
+    poll_factory = getattr(select, "poll", None)
+    if not callable(poll_factory):
+        raise PrivateIPCError(Refusal.UNAVAILABLE)
+    poller = poll_factory()
     poller.register(reference, select.POLLIN)
     events = poller.poll(0 if timeout == 0 else max(1, math.ceil(timeout * 1000)))
     for descriptor, flags in events:
@@ -35,6 +39,8 @@ class PeerProcess:
     def __init__(
         self, reference: int, peer: PeerIdentity, *, api: Native | None = None,
     ) -> None:
+        if api is None and sys.platform != "linux":
+            raise PrivateIPCError(Refusal.UNAVAILABLE)
         self._reference = reference
         self._peer = peer
         self._api = api

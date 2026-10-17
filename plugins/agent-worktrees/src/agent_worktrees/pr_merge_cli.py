@@ -216,7 +216,7 @@ def _pr_merge_now(
             # head behind: adopt the provider's head when it is that HEAD.
             try:
                 live = provider.get_pull(args.repo, args.pr, api_base=base, token=tok).head_sha
-            except (ProviderError, OSError, ValueError, AttributeError):
+            except (ProviderError, OSError, ValueError, TypeError, AttributeError):
                 live = ""  # unreadable: merge against the recorded head, as before
             if live and live != expected_head_sha:
                 expected_head_sha = _pr_cli._adopt_pushed_head(
@@ -457,7 +457,7 @@ def _pr_merge_now(
                 observation_error = "GitHub merge completion returned a different or unavailable head"
             else:
                 merge_confirmed = confirmation.merged
-        except (ProviderError, OSError, ValueError, AttributeError) as exc:
+        except (ProviderError, OSError, ValueError, TypeError, AttributeError) as exc:
             observation_error = (
                 "GitHub accepted the merge request but completion lookup failed "
                 f"({type(exc).__name__})"

@@ -440,6 +440,8 @@ Both native channel implementations refuse invalid read counts with
 `Refusal.SIZE` and non-byte writes with `Refusal.PROTOCOL`, before any I/O.
 Linux connection, acceptance, channel I/O and peer observation use native polling
 without the `FD_SETSIZE` ceiling; invalid descriptors remain explicit refusals.
+Peer-exit custody without a native Windows API requires Linux; missing native
+polling or an unsupported backend refuses explicitly as unavailable.
 
 Native channels retain peer process custody independently of frame contents:
 

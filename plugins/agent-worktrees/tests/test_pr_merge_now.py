@@ -184,7 +184,7 @@ def test_normal_merge_unreadable_completion_never_claims_landed(monkeypatch, cap
 
 @pytest.mark.parametrize("json_output", [False, True])
 @pytest.mark.parametrize("failure_type", [
-    prov.ProviderError, OSError, ValueError, AttributeError,
+    prov.ProviderError, OSError, ValueError, TypeError, AttributeError,
 ])
 def test_completion_lookup_diagnostics_do_not_expose_exception_values(
     monkeypatch, capsys, json_output, failure_type,
@@ -205,6 +205,29 @@ def test_completion_lookup_diagnostics_do_not_expose_exception_values(
     assert "fixture-private-completion-secret" not in text
     assert "additional private details" not in text
     assert "completion lookup failed" in text
+
+
+def test_malformed_provider_number_after_accepted_request_is_redacted(monkeypatch, capsys):
+    import json
+    import subprocess
+    from agent_worktrees.providers import github
+
+    fake = _FakeProvider()
+    fake.get_pull = github.GitHubProvider().get_pull
+    _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(
+        github, "run_cli",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, json.dumps({"number": None, "state": "MERGED"}), "",
+        ),
+    )
+    assert m._pr_merge_now(
+        _args(json=True), _prcfg(), _self_merge_flow(), apply=True,
+    ) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert len(fake.calls) == 1 and result["applied"] is True
+    assert result["merged"] is False and result["completion_verified"] is False
+    assert result["error"].endswith("(TypeError)")
 
 
 @pytest.mark.parametrize("expected_head", ["", "a" * 40])
@@ -428,13 +451,16 @@ def test_now_adopts_a_moved_head_only_when_it_is_the_worktrees_own(monkeypatch, 
     assert fake.calls[0]["expected_head_sha"] == expected
 
 
-def test_now_attempts_recorded_head_but_cannot_confirm_unreadable_completion(monkeypatch, capsys):
+@pytest.mark.parametrize("failure_type", [ValueError, TypeError])
+def test_now_attempts_recorded_head_but_cannot_confirm_unreadable_completion(
+    monkeypatch, capsys, failure_type,
+):
     """A malformed initial read still permits a pinned attempt, not a false
     completed-merge receipt when the subsequent read also fails."""
     from agent_worktrees import pr_cli
 
     fake = _FakeProvider()
-    fake.get_pull = lambda *a, **kw: (_ for _ in ()).throw(ValueError("Expecting value"))
+    fake.get_pull = lambda *a, **kw: (_ for _ in ()).throw(failure_type("Malformed metadata"))
     _patch_provider(monkeypatch, fake)
     monkeypatch.setattr(pr_cli, "_tracked_pr_pushed_head",
                         lambda config, repo, number, provider: "just-pushed-sha")
