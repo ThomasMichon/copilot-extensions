@@ -107,3 +107,13 @@ def unpublished(pr: tracking.PRRecord | None) -> bool:
             pr.head_observed_at, pr.head_observed_api_base, pr.attribution_head, pr.closed_at,
         )
     )
+
+
+def unpublished_retry(
+    pr: tracking.PRRecord | None, branch: str, provider: str, repo: str,
+) -> bool:
+    """Match a never-published attempt without borrowing another destination."""
+    return bool(
+        unpublished(pr) and pr is not None
+        and (pr.branch, pr.provider, pr.repo) == (branch, provider, repo)
+    )

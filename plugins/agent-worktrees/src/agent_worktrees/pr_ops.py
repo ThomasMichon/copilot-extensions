@@ -727,18 +727,11 @@ def create_pr(
             f"Checkout '{wt_branch}' before create-pr."
         )}
 
-    provisional_retry = bool(
-        pr_publication_state.unpublished(active)
-        and active.branch == feature_branch
-        and active.provider == prcfg.provider
-        and active.repo == default_pr_repo
-    )
+    provisional_retry = pr_publication_state.unpublished_retry(active, feature_branch, prcfg.provider, default_pr_repo)
     reusing = bool(active_is_live and not new and active and active.branch == feature_branch and not provisional_retry)
     ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
 
-    # Re-run fast path: under the old reset-to-upstream scheme (or after a
-    # sync-back) the published PR head may live only on the local feature
-    # branch. Re-push that branch instead of erroring on "already exists".
+    # Legacy sync-back may leave the published head only on the local feature branch.
     if reusing and not ahead and git_ops.local_branch_exists(
         feature_branch, cwd=worktree_path
     ):
@@ -768,8 +761,7 @@ def create_pr(
 
     orig_sha = _rev(wt_branch, cwd=worktree_path)
 
-    # Reuse the live active PR record, or append a fresh one, and mark it
-    # 'creating' up front so a later publish failure is recoverable.
+    # Persist 'creating' before publication so a failed attempt remains recoverable.
     target_pr: PRRecord | None = None
     if record is not None:
         if (reusing or provisional_retry) and active is not None:

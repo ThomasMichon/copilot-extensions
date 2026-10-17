@@ -79,3 +79,37 @@ def test_different_new_head_preserves_unrelated_provisional(
     assert after.prs[0].pr_id == original.pr_id
     assert pr_publication_state.unpublished(after.prs[0])
     assert after.prs[0].branch != after.prs[1].branch
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("field", ["branch", "provider", "repo"])
+def test_provisional_retry_requires_same_destination(field: str) -> None:
+    record = tracking.PRRecord(
+        state="creating", branch="pr/example", provider="github", repo="example/repo",
+    )
+    assert pr_publication_state.unpublished_retry(
+        record, "pr/example", "github", "example/repo",
+    )
+    setattr(record, field, "different")
+    assert not pr_publication_state.unpublished_retry(
+        record, "pr/example", "github", "example/repo",
+    )
+
+
+def test_unpublished_retry_preserves_existing_local_branch(
+    pr_repo: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, wt, _remote = pr_repo
+    monkeypatch.setattr(git_ops, "rebase", lambda *_args, **_kwargs: False)
+    failed = pr_ops.create_pr(wid, config, title="Retry example", new=True, open_pr=False)
+    assert not failed["success"]
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    before = tracking.load_record(path)
+    branch = before.pr.branch
+    original = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+    git_ops.git("branch", branch, cwd=str(wt))
+    retry = pr_ops.create_pr(wid, config, title="Retry example", new=True, open_pr=False)
+    assert not retry["success"]
+    assert "already exists" in retry["error"]
+    assert git_ops.git("rev-parse", branch, cwd=str(wt)).stdout.strip() == original
+    assert len(tracking.load_record(path).prs) == 1
