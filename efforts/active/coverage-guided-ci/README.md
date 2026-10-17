@@ -741,6 +741,42 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-17 - Fix current CI fixture failures without restoring host access
+- The predecessor normal run39021442073 fails at903.75 seconds inclusive,
+  during group9 of18 with75.391 seconds remaining at that group's start.
+  Its first eight pytest groups take68.23,22.03,134.82,151.95,71.04,
+  133.52,118.63 and109.00 seconds. Index and attribution pass; no assertion
+  failure precedes the worktrees aggregate timeout. This is another failed
+  normal qualification, not permission to change its budgets or omit groups.
+- Reject a measured published-seed reuse experiment in the six real
+  accepted-rebase retry cases: whole-file cost changes from83.95 to105.38
+  seconds inclusive. Restore the original tests rather than claiming an
+  unmeasured optimization. A real single-call profile spends19.67 of24.06
+  seconds in211 Git helper calls; repeated real authority/rewrite/transport
+  checks, not just initial publication setup, dominate that case.
+- Current-head CI exposes four Linux failures in Windows Bash-admission
+  mocks: simulating `os.name == "nt"` does not supply Windows-only
+  subprocess constants. Supply that constant in the test doubles and
+  explicitly assert the real helper requests the headless flag. Preserve
+  the native Bash proof and WSL launcher refusals unchanged.
+- The Vault first-use lane correctly loses host module discovery under the
+  isolated runner, revealing its fixture's unguarded access to the real
+  scheduler. Match the existing transaction-lock harness: invoke the complete
+  unchanged installer through a test wrapper with an absent-task query and
+  throwing scheduler-mutation commands. Keep `-NoService`, isolated roots,
+  actual stamp/provision/venv/activation and launcher checks; never reopen
+  host module access to make this test pass.
+- The complete installer-contract file passes188 cases with14 existing
+  POSIX skips in63.33 seconds. The whole Vault snapshot file passes6 cases
+  with2 existing POSIX skips in45.72 seconds including cleanup. Its first
+  attempted run used unsupported xdist options; use its existing serial
+  configuration instead of adding dependencies. F/E9 and diff whitespace
+  checks pass. These test-only corrections need no new runtime or provisioning
+  behavior documentation; this journal records the validation boundaries.
+  Repeated exact-head normal Windows qualification, the240-second group
+  margin, latest required CI, fresh genuine review and actual merge remain
+  open before Phase4.
+
 ### 2026-10-17 - Accelerate fresh registry parsing without caching authority
 - A single projected historical retry spends5.44 seconds without any subprocess.
   Its Python profile performs814 machine-registry parses,983 total YAML parses

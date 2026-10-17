@@ -755,6 +755,7 @@ def _working_bash() -> str | None:
     None, r"C:\Windows\System32\bash.exe", r"C:\AppPackages\WindowsApps\bash.exe",
 ])
 def test_native_bash_admission_rejects_wsl_launchers(monkeypatch, override):
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     native = r"D:\native-shell\bin\bash.exe"
     shells = {
         "system32": r"C:\Windows\System32\bash.exe",
@@ -770,6 +771,7 @@ def test_native_bash_admission_rejects_wsl_launchers(monkeypatch, override):
 
     def probe(command, **kwargs):
         calls.append(command)
+        assert kwargs["creationflags"] == 0x08000000
         return subprocess.CompletedProcess(command, 0, stdout="quoted value", stderr="")
 
     monkeypatch.setattr(subprocess, "run", probe)
@@ -778,14 +780,17 @@ def test_native_bash_admission_rejects_wsl_launchers(monkeypatch, override):
 
 
 def test_native_bash_admission_retains_explicit_supported_override(monkeypatch):
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     native = r"D:\custom-shell\bin\bash.exe"
     monkeypatch.setitem(globals(), "os", SimpleNamespace(
         name="nt", environ={"CE_TEST_BASH": native}, get_exec_path=lambda: [],
         pathsep=os.pathsep,
     ))
-    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(
-        command, 0, stdout="quoted value", stderr="",
-    ))
+    def probe(command, **kwargs):
+        assert kwargs["creationflags"] == 0x08000000
+        return subprocess.CompletedProcess(command, 0, stdout="quoted value", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", probe)
     assert _working_bash() == native
 
 
