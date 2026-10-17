@@ -373,7 +373,9 @@ class AdmissionAuthority:
                 del self._issued[key]
             for key in [key for key, expiry in self._evidence.items() if now >= expiry]:
                 del self._evidence[key]
-            if not identity.verified_at <= now < identity.verified_at + REQUEST_SECONDS:
+            if now < identity.verified_at:
+                raise AdmissionError("invalid-identity")
+            if now >= identity.verified_at + REQUEST_SECONDS:
                 raise AdmissionError("stale-identity")
             if identity.evidence in self._evidence:
                 raise AdmissionError("identity-reused")
