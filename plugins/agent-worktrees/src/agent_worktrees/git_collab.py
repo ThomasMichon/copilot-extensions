@@ -79,13 +79,15 @@ def sync_forward(worktree_id: str, config: Config, *, dry_run: bool = False) -> 
         output.err(f"Upstream {upstream} not found after fetch.")
         return False
 
-    from . import config as cfg, pr_recovery
+    from . import config as cfg, pr_recovery, pr_routine_recovery
+    from .providers.base import ProviderError
     try:
         record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
+        pr_routine_recovery.reconcile(config, record, cwd=worktree_path)
         recovery = pr_recovery.prepare(
             worktree_id, branch, upstream, record, cwd=worktree_path,
         )
-    except (OSError, ValueError, git_ops.GitError) as exc:
+    except (OSError, ValueError, git_ops.GitError, ProviderError) as exc:
         output.err(f"Could not prepare backed sync; nothing rebased: {exc}")
         return False
     print(f"Pre-sync HEAD retained at {recovery.local_ref}.")

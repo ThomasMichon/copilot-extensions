@@ -1077,6 +1077,14 @@ destination evidence still requires explicit reconciliation. An inconsistent
 PR identity or branch correction remains refused; a matching-looking suffix is
 never proof by itself.
 
+#### Routine backed publication reconciliation
+
+An intact backed-sync result already accepted by the provider/ref can be
+reconciled automatically by normal `push-changes` or `git sync`, with ordinary
+exclusive ownership and no override. See
+[routine publication reconciliation](../../../docs/cli-reference.md#routine-publication-reconciliation)
+for the admission, retention, non-forcing transport and refusal contract.
+
 #### Operator-confirmed break glass
 
 Prefer source-owning CWD when available. If the original context or historical
@@ -1107,7 +1115,8 @@ no push, PR attribution edit or publication of later local work. Equal SHAs or
 patches without that checkpoint are not proof. Otherwise `rewrite` requires
 explicit confirmation of the exact source and agreed live CAS lease. The
 original saved lease is retained as evidence, never silently replaced before
-approval; normal publication and ordinary `--rewrite-pr` still refuse it.
+approval in this override flow; outside routine backed reconciliation, normal
+publication and ordinary `--rewrite-pr` still refuse it.
 Corrupt, unreadable or dangling optional checkpoints mark settlement evidence
 `unusable` in the preview and audit. They disable settlement, not an explicit
 rewrite preview; their bytes/available file identity and referenced-ref state

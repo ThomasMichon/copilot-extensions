@@ -109,7 +109,8 @@ def test_backed_sync_publishes_legacy_pr_without_replay_journals(
     _git("gc", "--prune=now", cwd=path)
     assert _git("rev-parse", point["local_ref"], cwd=path) == original
     assert _git("rev-parse", point["published_ref"], cwd=path) == old
-    assert _git("show", f'{point["local_ref"]}:feedback.txt', cwd=path) == "unpublished source work"
+    retained = _git("rev-parse", point["local_ref"], cwd=path)
+    assert _git("show", f"{retained}:feedback.txt", cwd=path) == "unpublished source work"
     monkeypatch.setattr(pr_rebase, "_replay", lambda *_: pytest.fail("backup must replace journal gate"))
     tip = _git("rev-parse", "HEAD", cwd=path)
     if checkout_head:
