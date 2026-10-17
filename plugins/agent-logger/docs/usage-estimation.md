@@ -34,7 +34,9 @@ Root calls are identified by chronological root `assistant.turn_start`
 segments and API-call IDs, not by a possibly repeated turn ID or the nearest
 previous assistant message. Measured usage may precede its emitted response.
 Native event IDs suppress identical replay; conflicting replay is an error.
-Child assistant/usage events do not become root-call quantities.
+Envelope `agentId`, legacy `data.agentId` and parent-tool ownership are filtered
+before changing any root prompt, model, context or turn state. Child events do
+not become root-call quantities.
 
 Output counts Unicode characters in recorded response content, one explicitly
 exposed plaintext reasoning representation, and emitted tool arguments.
@@ -45,7 +47,8 @@ compact JSON once; tool-execution echoes are not emitted arguments.
 
 Input exposure is the replayed visible-context character count at root turn
 start: user/system text, root emitted output and results of known root tool
-calls. Successful compaction replaces that count with `summaryContent`;
+calls. Successful compaction replaces that count with `summaryContent`; a
+missing/nontext summary clears stale context, counts the compaction and warns.
 `session.context_cleared` replaces it with `initialMessage`. Unlinked tool results
 are counted as a coverage gap, not guessed into context. Hidden instructions,
 tool definitions, nontext attachments, wire formatting and discarded context

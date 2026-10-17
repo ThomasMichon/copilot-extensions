@@ -13,7 +13,8 @@ from agent_logger.sync.publication_directory import publication_directory
 from agent_logger.usage_calibration import CalibrationPolicy, calibrate
 from agent_logger.usage_estimation import estimate
 from agent_logger.usage_feature_contract import MAX_SESSIONS, admit_sessions, validate_feature_session
-from agent_logger.usage_features import extract_features
+from agent_logger.usage_feature_evidence import enrich_features
+from agent_logger.usage_features import read_transcript_features
 from agent_logger.usage_ledger import MAX_BYTES, MAX_RECORDS, UsageEvidenceError
 from agent_logger.usage_sqlite import UsageReadError, read_sqlite_usage
 
@@ -78,20 +79,19 @@ def _execute(args: argparse.Namespace) -> dict:
         documents = []
         calls = 0
         for ref in refs:
-            document = extract_features(ref)
+            document = read_transcript_features(ref)
             calls += len(document["calls"])
             if calls > MAX_RECORDS:
                 raise UsageEvidenceError("usage extraction total call limit exceeded")
             documents.append(document)
+        rows: dict[str, list[dict]] = {}
         if args.usage_store:
-            from agent_logger.usage_feature_evidence import pair_measured_features
-
             ids = {ref.id for ref in refs} | {document["session_id"] for document in documents}
             rows = read_sqlite_usage(Path(args.usage_store), ids)
-            for ref, document in zip(refs, documents):
-                selected = {ref.id, document["session_id"]}
-                records = [record for identity in selected for record in rows.get(identity, [])]
-                pair_measured_features(document, records)
+        for ref, document in zip(refs, documents):
+            selected = {ref.id, document["session_id"]}
+            records = [record for identity in selected for record in rows.get(identity, [])]
+            enrich_features(document, ref, additional_records=records)
         return {"schema": FEATURE_SET_SCHEMA, "version": 1, "sessions": admit_sessions(documents)}
     if args.usage_command == "calibrate":
         return calibrate(

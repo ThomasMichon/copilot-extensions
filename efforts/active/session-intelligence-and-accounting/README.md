@@ -238,6 +238,20 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-17 - Historical-estimation review corrections
+- Reproduced all four Medium findings from #7137 with eight failing synthetic
+  regressions, then corrected each bug class: invalid/truncated TAR headers can
+  no longer be swallowed as EOF; preserved and SQLite scalar batches join once;
+  child ownership filters all root state updates; successful compaction without
+  a textual summary discards stale context and reports the coverage gap.
+- The combined native estimation, bounded-reader, ZIP, session and cold-store
+  selection passed 384 tests with 23 platform skips. The corrected private
+  count-only production comparison also completed with explicit refusals and
+  uncertainty, without weakening stable-read checks or publishing its corpus.
+- Lint, install-contract, docs consistency and unchanged module ceilings pass.
+  Updated-head review and required CI remain pre-merge gates; this does not
+  close #6439, the parent effort or its runtime-adoption obligations.
+
 ### 2026-10-17 - Transcript estimation implementation and bounded validation
 - Implemented the remaining #6439 estimation slice: content-free root-call
   features, optional preserved/store measurement pairing, session-disjoint

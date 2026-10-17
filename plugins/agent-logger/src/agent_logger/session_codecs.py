@@ -312,11 +312,15 @@ class TarGzCodec(Codec):
                 nonlocal headers, metadata_bytes
                 # Patched Python readers bypass frombuf, including for extended headers.
                 parser = getattr(super(), "_frombuf", None)
-                info = (
-                    parser(buf, encoding, errors, **kwargs)
-                    if parser is not None
-                    else super().frombuf(buf, encoding, errors)
-                )
+                try:
+                    info = (
+                        parser(buf, encoding, errors, **kwargs)
+                        if parser is not None
+                        else super().frombuf(buf, encoding, errors)
+                    )
+                except (tarfile.InvalidHeaderError, tarfile.TruncatedHeaderError) as exc:
+                    # TarFile.next otherwise treats a later corrupt header as EOF.
+                    raise ValueError("invalid session tar member header") from exc
                 headers += 1
                 if headers > MAX_ARCHIVE_MEMBERS:
                     raise ValueError("session archive exceeds its member budget")

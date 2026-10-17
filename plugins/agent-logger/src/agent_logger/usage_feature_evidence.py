@@ -10,11 +10,14 @@ from agent_logger.usage_features import _identifier, _tokens
 from agent_logger.usage_ledger import MAX_BYTES, MAX_RECORDS, SCHEMA, UsageEvidenceError, validate_values
 
 
-def enrich_features(features: dict, ref: SessionRef, *, usage_store: Path | None = None) -> dict:
+def enrich_features(
+    features: dict, ref: SessionRef, *, usage_store: Path | None = None,
+    additional_records: list[dict] | None = None,
+) -> dict:
     from agent_logger.usage_reader import read_session_member
     from agent_logger.usage_sqlite import read_sqlite_usage
 
-    records: list[dict] = []
+    records: list[dict] = list(additional_records or [])
     saved = read_session_member(ref, "usage-evidence.json", max_bytes=MAX_BYTES)
     if saved is not None:
         try:

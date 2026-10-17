@@ -503,3 +503,16 @@ def test_usage_reader_zip_directory_bound_before_index(tmp_path, monkeypatch):
 def test_usage_reader_unbounded_legacy_seam_unchanged(tmp_path):
     ref = _ref(tmp_path, "live")
     assert sessions.read_member(ref, "events.jsonl") == PAYLOAD
+
+
+@pytest.mark.parametrize("header", [b"x" * 512, b"x" * 257], ids=["invalid-checksum", "truncated"])
+def test_usage_reader_review_regression_corrupt_header_after_selected_member(
+    tmp_path: Path, header: bytes,
+) -> None:
+    ref = _ref(tmp_path, "tar")
+    expanded = gzip.decompress(ref.path.read_bytes())
+    boundary = 512 + ((len(PAYLOAD) + 511) // 512) * 512
+    padding = b"\0" * 10240 if len(header) == 512 else b""
+    ref.path.write_bytes(gzip.compress(expanded[:boundary] + header + padding))
+    with pytest.raises(UsageEvidenceError, match="header"):
+        reader.read_session_events(ref)

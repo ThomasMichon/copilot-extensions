@@ -233,3 +233,86 @@ def test_usage_features_cli_store_is_one_scoped_snapshot(
     assert len(actual["sessions"]) == 2
     assert all(item["calls"][0]["input_tokens"] == 30 for item in actual["sessions"])
     assert database.read_bytes() == before
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("placement", ["envelope", "legacy"])
+def test_usage_features_review_regression_child_ownership_is_central(placement: str) -> None:
+    children = [
+        event("session.start", sessionId="child"),
+        event("session.model_change", newModel="child-model"),
+        event("user.message", content="child prompt must not enter root input"),
+        event("assistant.turn_start"),
+        event("assistant.message", apiCallId="child", content="child output"),
+        event("session.usage_record", usage={
+            "apiCallId": "child", "model": "child-model", "inputTokens": 999,
+        }),
+        event("session.compaction_complete", success=True, summaryContent="child summary"),
+        event("session.context_cleared", initialMessage="child reset"),
+    ]
+    for child in children:
+        target = child if placement == "envelope" else child["data"]
+        target["agentId"] = "child-agent"
+    rows = fixture()
+    expected = features_from_events(rows, "original")
+    actual = features_from_events(rows[:2] + children + rows[2:], "original")
+    assert actual["calls"] == expected["calls"]
+    assert actual["coverage"]["root_turns"] == expected["coverage"]["root_turns"]
+    assert actual["coverage"]["compactions"] == actual["coverage"]["context_resets"] == 0
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("summary", [None, {"not": "text"}])
+def test_usage_features_review_regression_summaryless_compaction_discards_context(
+    summary: object,
+) -> None:
+    result = features_from_events([
+        event("session.start", model="model-a"),
+        event("user.message", content="discarded history"),
+        event("session.compaction_complete", success=True, summaryContent=summary),
+        event("assistant.turn_start"),
+        event("assistant.message", apiCallId="a", content="output"),
+    ], "s")
+    assert result["calls"][0]["input_chars"] == 0
+    assert result["coverage"]["compactions"] == 1
+    assert "unobserved-compaction-context" in result["warnings"]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("overlap", [False, True])
+def test_usage_features_review_regression_preserved_diagnostics_plus_store(
+    tmp_path: Path, capsys: pytest.CaptureFixture, overlap: bool,
+) -> None:
+    session = tmp_path / "s"
+    session.mkdir()
+    rows = [
+        event("session.start", sessionId="s"), event("user.message", content="input"),
+        event("assistant.turn_start"),
+        event("assistant.message", apiCallId="a", model="model-a", content="output"),
+    ]
+    (session / "events.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    records = [
+        {"source": "session-store", "values": {
+            "created_at": "2026-01-01T00:00:00Z", "api_call_id": api,
+            "model": "model-a", "input_tokens": 30,
+        }} for api in ("a", "unmatched")
+    ]
+    (session / "usage-evidence.json").write_text(json.dumps({
+        "schema": "agent-logger.usage-evidence", "version": 1, "session_id": "s", "records": records,
+    }))
+    database = tmp_path / "store.db"
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute(
+            "CREATE TABLE assistant_usage_events "
+            "(session_id TEXT, created_at TEXT, model TEXT, api_call_id TEXT, input_tokens INTEGER)"
+        )
+        if overlap:
+            connection.execute(
+                "INSERT INTO assistant_usage_events VALUES(?,?,?,?,?)",
+                ("s", "2026-01-01T00:00:00Z", "model-a", "a", 30),
+            )
+    assert main(["usage", "features", "--session", str(session), "--usage-store", str(database)]) == 0
+    result = json.loads(capsys.readouterr().out)["sessions"][0]
+    assert result["calls"][0]["input_tokens"] == 30
+    assert result["evidence_join"]["paired_calls_by_source"] == {"session-store": 1}
+    assert result["evidence_join"]["unmatched_records"] == 1
