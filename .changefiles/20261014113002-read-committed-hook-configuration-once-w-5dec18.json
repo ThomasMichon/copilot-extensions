@@ -1,0 +1,9 @@
+{
+  "comment": "Read committed hook configuration once within each protected-branch decision, retaining override precedence and fresh policy on the next decision.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

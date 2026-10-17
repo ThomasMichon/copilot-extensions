@@ -1,0 +1,9 @@
+{
+  "comment": "Batch fresh finalization object evidence and reuse isolated Git-only inputs without touching host mux services.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

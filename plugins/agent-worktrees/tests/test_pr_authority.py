@@ -178,8 +178,9 @@ installer.register_project(sys.argv[3], 'unused', 'main')
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path(pr_publish.__file__).parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
     children = [subprocess.Popen(
-        [sys.executable, "-c", script, str(root), str(registry), name],
+        [sys.executable, "-X", "utf8", "-c", script, str(root), str(registry), name],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding="utf-8",
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     ) for name in ("first-project", "second-project")]
     for child in children:

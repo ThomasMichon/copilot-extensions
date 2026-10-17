@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import finalize, git_ops, pr_recovery
-from test_pr_recovery_advanced_head import REASON, PrRepo, backed_publication, git, metadata, preview, record
+from agent_worktrees import finalize, git_ops, pr_rebase, pr_recovery
+from test_pr_break_glass import _recovered_pr_seed as _recovered_pr_seed
+from test_pr_recovery_advanced_head import _backed_pr_seed as _backed_pr_seed
+from test_pr_recovery_advanced_head import backed_pr as backed_pr
+from test_pr_recovery_advanced_head import REASON, BackedPR, git, metadata, preview, record
 
 pytestmark = [pytest.mark.timeout(120)]
 
@@ -18,15 +21,16 @@ pytestmark = [pytest.mark.timeout(120)]
     "null-ref", "surrogate-ref", "spawn", "synced-encoding",
 ])
 def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrite(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+    backed_pr: BackedPR, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
     defect: str,
 ) -> None:
-    config, wid, wt, remote, saved, branch, published = backed_publication(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch, published = backed_pr
     checkpoint = pr_recovery._path(str(wt))
     read_original_bytes = Path.read_bytes
     original = checkpoint.read_bytes()
     collection = json.loads(original)
     point = collection["checkpoints"][collection["latest"]]
+    encoding_probes = []
     if defect == "json":
         checkpoint.write_text("{unfinished checkpoint")
     elif defect == "schema":
@@ -40,18 +44,30 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
     elif defect in {"null-ref", "surrogate-ref"}:
         point["local_ref"] = "\0" if defect == "null-ref" else "\ud800"
         checkpoint.write_text(json.dumps(collection))
-    elif defect in {"spawn", "synced-encoding"}:
+    elif defect == "spawn":
         real_git = git_ops.git
 
         def probe(*args: str, **kwargs: object) -> object:
             if "--end-of-options" in args and args[-1].startswith(point["local_ref"]):
-                if defect == "spawn":
-                    raise OSError(22, "evidence probe could not start")
-                if args[-1] == point["local_ref"] + "^{commit}":
-                    raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "unencodable evidence")
+                raise OSError(22, "evidence probe could not start")
             return real_git(*args, **kwargs)
 
         monkeypatch.setattr(git_ops, "git", probe)
+    elif defect == "synced-encoding":
+        real_git_bytes = pr_rebase._git_bytes
+        requested = (point["local_ref"] + "^{commit}").encode()
+
+        def batch_probe(*args: str, **kwargs: object) -> bytes:
+            data = kwargs.get("stdin")
+            if (
+                args == ("cat-file", "--batch-check=%(objectname) %(objecttype)", "-z")
+                and isinstance(data, bytes) and requested in data.split(b"\0")[:-1]
+            ):
+                encoding_probes.append(args)
+                raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "unencodable evidence")
+            return real_git_bytes(*args, **kwargs)
+
+        monkeypatch.setattr(pr_rebase, "_git_bytes", batch_probe)
     else:
         real_text, real_bytes = Path.read_text, Path.read_bytes
 
@@ -70,6 +86,8 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
     evidence_bytes = read_original_bytes(checkpoint)
     capfd.readouterr()
     first = preview(wid, config)
+    if defect == "synced-encoding":
+        assert len(encoding_probes) == 1
     operation = first["operation"]
     assert operation["action"] == "rewrite"
     assert operation["evidence_status"] == "unusable"
@@ -95,9 +113,9 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
 
 @pytest.mark.parametrize("change", ["broken-bytes", "repaired-proof", "other-retained-ref"])
 def test_changed_imperfect_evidence_invalidates_confirmation(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, change: str,
+    backed_pr: BackedPR, change: str,
 ) -> None:
-    config, wid, wt, _remote, _saved, _branch, _published = backed_publication(pr_repo, monkeypatch)
+    config, wid, wt, _remote, _saved, _branch, _published = backed_pr
     checkpoint = pr_recovery._path(str(wt))
     original = checkpoint.read_bytes()
     point = json.loads(original)
@@ -121,9 +139,9 @@ def test_changed_imperfect_evidence_invalidates_confirmation(
 
 @pytest.mark.parametrize("kind", ["blob", "tree", "tag"])
 def test_recreated_non_commit_evidence_ref_requires_fresh_confirmation(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, kind: str,
+    backed_pr: BackedPR, kind: str,
 ) -> None:
-    config, wid, wt, _remote, saved, _branch, _published = backed_publication(pr_repo, monkeypatch)
+    config, wid, wt, _remote, saved, _branch, _published = backed_pr
     collection = json.loads(pr_recovery._path(str(wt)).read_bytes())
     point = collection["checkpoints"][collection["latest"]]
     git("update-ref", "-d", point["local_ref"], point["local_head"], cwd=wt)

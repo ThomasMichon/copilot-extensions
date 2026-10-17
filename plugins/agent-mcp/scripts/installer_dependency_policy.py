@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.
 from __future__ import annotations
 
 import argparse
+import configparser
 import hashlib
 import importlib
 import json
@@ -876,6 +877,19 @@ def run_uv_install(
             find["where"] = [relative]
             setuptools["package-dir"] = {"": relative}
             _write_toml(Path(_native_retained_path(manifest)), data)
+            # setuptools otherwise puts egg-info alongside the live package-dir.
+            config_path = Path(_native_retained_path(manifest.with_name("setup.cfg")))
+            config = configparser.ConfigParser(interpolation=None)
+            try:
+                if config_path.is_file():
+                    config.read_string(config_path.read_text(encoding="utf-8"))
+                if not config.has_section("egg_info"):
+                    config.add_section("egg_info")
+                config.set("egg_info", "egg_base", ".")
+                with config_path.open("w", encoding="utf-8") as stream:
+                    config.write(stream)
+            except (OSError, configparser.Error) as exc:
+                raise DependencyPolicyError("retained setuptools metadata configuration could not be prepared") from exc
         for path in files:
             destination = mirror(path)
             Path(_native_retained_path(destination.parent)).mkdir(parents=True, exist_ok=True)

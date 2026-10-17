@@ -429,12 +429,17 @@ def test_native_guard_rejects_self_consistent_off_main_target_before_checkout(re
 
 
 @pytest.mark.parametrize("result", ["success", "skipped", "failure", "cancelled"])
-def test_real_promotion_coverage_aggregate_refuses_missing_coverage(monkeypatch, result):
+@pytest.mark.parametrize("scope", ["all", "macos"])
+def test_real_promotion_coverage_aggregate_refuses_missing_coverage(monkeypatch, result, scope):
     job = workflows()["ci.yml"]["jobs"]["promotion-gate"]
     script = job["steps"][0]["run"]
     code = re.search(r"python3 - <<'PY'\n(.*?)^PY$", script, re.M | re.S).group(1)
-    monkeypatch.setenv("NEEDS_JSON", json.dumps({name: {"result": result} for name in job["needs"]}))
     monkeypatch.setenv("PROMOTION_PHASE", "candidate")
+    results = {name: {"result": result if scope == "all" else "success"} for name in job["needs"]}
+    if scope == "macos":
+        assert "test-runner-macos" in results
+        results["test-runner-macos"]["result"] = result
+    monkeypatch.setenv("NEEDS_JSON", json.dumps(results))
     if result == "success":
         exec(compile(code, "promotion-coverage-aggregate", "exec"), {})
     else:

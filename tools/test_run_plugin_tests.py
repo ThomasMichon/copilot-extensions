@@ -513,14 +513,22 @@ def test_containment_owner_launch_preserves_process_contract(monkeypatch, tmp_pa
     monkeypatch.setattr(containment, "no_window_kwargs", lambda: {"creationflags": 123})
     monkeypatch.setattr(containment.subprocess, "Popen", popen)
     monkeypatch.setattr(containment, "_WindowsJob", Job)
-    monkeypatch.setattr(containment, "_terminate_posix_group", lambda pid: None)
+    monkeypatch.setattr(containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(containment, "_posix_exit_code", lambda proc: 17)
+    monkeypatch.setattr(containment, "_terminate_posix_group", lambda *args: None)
     assert containment._run_contained_process(
         ["command"], cwd=tmp_path, env={"TEST": "value"}, sandbox=tmp_path,
         limits=containment.Limits(),
     ) == 17
     assert captured["creationflags"] == 123
     assert captured["cwd"] == str(tmp_path)
-    assert captured["env"] == {"TEST": "value"}
+    assert captured["env"]["TEST"] == "value"
+    if os.name != "nt":
+        assert captured["pass_fds"] == (
+            int(captured["env"]["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"]),
+        )
+    else:
+        assert captured["env"] == {"TEST": "value"}
     assert {
         name: captured[name] for name in containment._windows_stdio_kwargs()
     } == containment._windows_stdio_kwargs()
@@ -1035,6 +1043,153 @@ def test_host_state_requires_explicit_tier_opt_in(capsys) -> None:
         runner.main(["--allow-host-state"])
     assert exc.value.code == 2
     assert "--allow-host-state requires --allow-explicit-tiers" in capsys.readouterr().err
+
+
+def test_plugin_budget_includes_final_sandbox_cleanup(monkeypatch, tmp_path, capsys):
+    clock = [0.0]
+    original_directory = runner._TestSandbox
+
+    class Directory(original_directory):
+        def __exit__(self, *args):
+            result = super().__exit__(*args)
+            clock[0] = 61.0
+            return result
+
+    plugin = tmp_path / "alpha"
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups",
+                        lambda *a, **k: [[plugin / "tests" / "test_one.py"]])
+    monkeypatch.setattr(runner, "run_contained", lambda *a, **k: 0)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runner, "_TestSandbox", Directory)
+
+    rc = runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+    )
+
+    assert rc == 124
+    assert "including sandbox cleanup" in capsys.readouterr().err
+
+def test_budget_exhausted_between_groups_still_reports_final_cleanup(monkeypatch, tmp_path, capsys):
+    clock = [0.0]
+    original_directory = runner._TestSandbox
+
+    class Directory(original_directory):
+        def __exit__(self, *args):
+            result = super().__exit__(*args)
+            clock[0] = 65.0
+            return result
+
+    plugin = tmp_path / "alpha"
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *args, **kwargs: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups",
+                        lambda *args, **kwargs: [[plugin / "tests" / "one.py"], [plugin / "tests" / "two.py"]])
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(args)
+        clock[0] = 61.0
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runner, "_TestSandbox", Directory)
+    rc = runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+    )
+    assert rc == 124 and len(calls) == 1
+    assert "including sandbox cleanup: 65.00s elapsed" in capsys.readouterr().err
+
+
+def test_reaped_group_cleanup_overlaps_the_next_group(monkeypatch, tmp_path):
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    original_directory = runner.tempfile.TemporaryDirectory
+
+    class Directory(original_directory):
+        @classmethod
+        def _rmtree(cls, name, *args, **kwargs):
+            if Path(name).name == "g1":
+                started.set()
+                assert release.wait(5), "next group never released cleanup"
+            super()._rmtree(name, *args, **kwargs)
+
+    plugin = tmp_path / "alpha"
+    calls = []
+
+    def run_contained(*args, **kwargs):
+        calls.append(args[0])
+        cache = kwargs["sandbox"] / "s" / "example" / "data"
+        if len(calls) == 1:
+            cache.parent.mkdir(parents=True)
+            cache.write_bytes(b"immutable shared seed")
+            assert containment._tree_size(kwargs["sandbox"]) >= cache.stat().st_size
+        if len(calls) == 2:
+            try:
+                assert started.wait(5), "cleanup did not start after the first reaped group"
+                assert cache.read_bytes() == b"immutable shared seed"
+            finally:
+                release.set()
+        return 0
+
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **k: [
+        [plugin / "tests" / "test_one.py"], [plugin / "tests" / "test_two.py"],
+    ])
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+    monkeypatch.setattr(runner.tempfile, "TemporaryDirectory", Directory)
+
+    rc = runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+    )
+
+    assert rc == 0
+    assert len(calls) == 2
+    assert not list(tmp_path.glob("ce-alpha-*"))
+
+
+def test_unreaped_tree_retains_sandbox_and_never_schedules_group_cleanup(
+    monkeypatch, tmp_path, capsys
+):
+    plugin = tmp_path / "alpha"
+    sandbox_paths = []
+
+    def run_contained(*args, **kwargs):
+        sandbox_paths.append(kwargs["sandbox"])
+        (kwargs["sandbox"] / "still-owned.txt").write_text("preserve")
+        raise runner.UnreapedProcessError("forced teardown failure")
+
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups",
+                        lambda *a, **k: [[plugin / "tests" / "test_one.py"]])
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+
+    with pytest.raises(runner.UnreapedProcessError, match="forced teardown failure"):
+        runner.run_plugin(
+            "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+            plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+        )
+
+    assert (sandbox_paths[0] / "still-owned.txt").read_text() == "preserve"
+    assert (sandbox_paths[0] / "t" / "g1").is_dir()
+    assert "[KEEP] Unreaped process tree: sandbox retained at" in capsys.readouterr().err
 
 
 def test_admission_wait_rejects_infinite_value(monkeypatch, capsys) -> None:

@@ -4432,6 +4432,8 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
     processes: list[subprocess.Popen[bytes]] = []
     endpoints: list[tuple[Path, int]] = []
     resolved: list[tuple[Path, int]] = []
+    shutdown_tokens: dict[int, str] = {}
+    shutdown_errors: dict[int, Exception] = {}
     try:
         for name in ("one", "two"):
             root = tmp_path / name
@@ -4536,20 +4538,19 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
         assert refused["reason"] == "ownership-mismatch"
         assert processes[1].poll() is None
 
+        shutdown_tokens[0] = str(json.loads(
+            urllib.request.urlopen(
+                f"http://{first_endpoint}/health",
+                timeout=2,
+            ).read()
+        )["instanceToken"])
         request = urllib.request.Request(
             f"http://{first_endpoint}/shutdown",
             data=b"",
             method="POST",
             headers={
                 "X-Agent-Index-Installation-Id": "one/agent-index",
-                "X-Agent-Index-Instance-Token": str(
-                    json.loads(
-                        urllib.request.urlopen(
-                            f"http://{first_endpoint}/health",
-                            timeout=2,
-                        ).read()
-                    )["instanceToken"]
-                ),
+                "X-Agent-Index-Instance-Token": shutdown_tokens[0],
             },
         )
         urllib.request.urlopen(request, timeout=2).read()
@@ -4560,17 +4561,22 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
             timeout=2,
         ) as response:
             assert response.status == 200
+            shutdown_tokens[1] = str(json.loads(response.read())["instanceToken"])
     finally:
         for index, (endpoint_path, _) in enumerate(resolved):
+            if processes[index].poll() is not None:
+                continue
             try:
                 record = json.loads(endpoint_path.read_text(encoding="utf-8"))
                 endpoint = record["endpoint"]
-                health = json.loads(
-                    urllib.request.urlopen(
-                        f"http://{endpoint}/health",
-                        timeout=2,
-                    ).read()
-                )
+                token = shutdown_tokens.get(index)
+                if token is None:
+                    token = str(json.loads(
+                        urllib.request.urlopen(
+                            f"http://{endpoint}/health",
+                            timeout=2,
+                        ).read()
+                    )["instanceToken"])
                 request = urllib.request.Request(
                     f"http://{endpoint}/shutdown",
                     data=b"",
@@ -4579,21 +4585,25 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
                         "X-Agent-Index-Installation-Id": (
                             "one/agent-index" if index == 0 else "two/agent-index"
                         ),
-                        "X-Agent-Index-Instance-Token": str(
-                            health["instanceToken"]
-                        ),
+                        "X-Agent-Index-Instance-Token": token,
                     },
                 )
-                urllib.request.urlopen(request, timeout=2).read()
-            except Exception:
-                pass
-        for process in processes:
+                response = json.loads(urllib.request.urlopen(request, timeout=2).read())
+                assert response["shutdown"] is True
+            except Exception as error:
+                shutdown_errors[index] = error
+        for index, process in enumerate(processes):
             try:
-                process.wait(timeout=15)
+                returncode = process.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 raise AssertionError(
-                    f"Agent Index process {process.pid} did not stop gracefully"
-                )
+                    f"Agent Index process {process.pid} did not stop gracefully; "
+                    f"control error: {shutdown_errors.get(index)!r}"
+                ) from shutdown_errors.get(index)
+            assert returncode == 0, (
+                f"Agent Index process {process.pid} exited with {returncode}; "
+                f"control error: {shutdown_errors.get(index)!r}"
+            )
 
 
 def test_cross_platform_sources_keep_legacy_and_cell_lifecycle_separate() -> None:

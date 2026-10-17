@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve native owner command stdin, stdout, and stderr through the windowless Windows trampoline",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

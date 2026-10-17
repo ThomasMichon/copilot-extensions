@@ -1564,13 +1564,54 @@ def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):
         argv = [shell, str(root / "scripts" / "emit-command-catalog.sh")]
     if not shell:
         pytest.skip("Native catalog shell is unavailable")
-    result = hook_client.subprocess.run(
-        argv, capture_output=True, text=True, check=True, timeout=15,
-        env={**os.environ, "PYTHONPATH": ""},
-        **({"creationflags": hook_client.subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-    )
+    try:
+        result = hook_client.subprocess.run(
+            argv, capture_output=True, text=True, check=True, timeout=15,
+            env={**os.environ, "PYTHONPATH": "", "COPILOT_EXTENSIONS_BOOT_TRACE": "1"},
+            **(
+                {"creationflags": hook_client.subprocess.CREATE_NO_WINDOW}
+                if os.name == "nt" else {}
+            ),
+        )
+    except hook_client.subprocess.TimeoutExpired as error:
+        print(f"Native catalog deadline stderr: {error.stderr!r}", file=sys.stderr)
+        raise
     native = _hook_catalog(json.loads(result.stdout)["additionalContext"])
     assert _hook_catalog(hook_client._command_catalog_context()) == native
+    if os.name == "nt":
+        prefix = "::boot-trace:: plugin=agent-worktrees phase="
+        phases = [
+            line.removeprefix(prefix).split(" t=")
+            for line in result.stderr.splitlines() if line.startswith(prefix)
+        ]
+        assert phases[0][0] == "catalog-binding-start", result.stderr
+        assert phases[-1][0] == "catalog-binding-complete", result.stderr
+        assert "catalog-launcher-discovered" in [phase for phase, _ in phases]
+        assert "catalog-interpreter-resolved" in [phase for phase, _ in phases]
+        assert all(int(timestamp) > 0 for _, timestamp in phases)
+
+
+def test_native_catalog_deadline_reports_partial_trace_without_retry(
+    monkeypatch, tmp_path, capsys
+):
+    failure = hook_client.subprocess.TimeoutExpired(
+        "native-catalog-shell", 15, stderr=b"phase=catalog-launcher-start"
+    )
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["timeout"] == 15
+        assert kwargs["env"]["COPILOT_EXTENSIONS_BOOT_TRACE"] == "1"
+        raise failure
+
+    monkeypatch.setattr(hook_client.shutil, "which", lambda _: "native-catalog-shell")
+    monkeypatch.setattr(hook_client.subprocess, "run", run)
+    with pytest.raises(hook_client.subprocess.TimeoutExpired) as raised:
+        test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path)
+    assert raised.value is failure
+    assert len(calls) == 1
+    assert "phase=catalog-launcher-start" in capsys.readouterr().err
 
 
 def test_session_start_main_folds_decision_context_and_emits_empty_result(

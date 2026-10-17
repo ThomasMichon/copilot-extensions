@@ -145,6 +145,15 @@ grouping never makes distinct registered spaces local to one another. See
 [Execution-space identity](docs/config-reference.md#execution-space-identity)
 for explicit selection, compatibility and lifecycle fences.
 
+## Fresh publication evidence
+
+Each publication captures fresh fetch and complete push URLs under its existing
+lock and derives authority from those exact transport destinations. Known remote
+transport settings are read in one NUL-framed query, preserving repeated values,
+multiline values and valueless settings. This is invocation-local evidence, not
+a cache: later publications re-read configuration, and URL pinning, hooks,
+ownership, leases and bounded child cleanup remain enforced.
+
 ## Captured child ownership
 
 Bounded Git publication and static-guidance Git preflights use a headless

@@ -1,0 +1,21 @@
+{
+  "comment": "Preserve private pytest permissions, fresh bounded Windows storage accounting and namespace reader ownership across repeated cancellation; reuse independent real inputs and isolate native fixtures without changing validation budgets.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "dev"
+    }
+  ]
+}

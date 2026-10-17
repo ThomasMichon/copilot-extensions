@@ -5,7 +5,7 @@ run-name: ${{ inputs.promotion_run != '' && format('CI promotion {0} at {1}', in
 #
 # Design (see tools/run-plugin-tests.py + the repo guards under tools/):
 #   * checks         - repo guards + repo-wide ruff F/E9. Cheap (~1 min); always.
-#   * test-runner    - Linux/Windows admission + state-isolation contract.
+#   * test-runner    - Linux/Windows admission and native POSIX ownership contracts.
 #   * discover       - resolve which plugin suites to run (changed on PR, all on
 #                      push to main), split into a fast set (smoke) and the one
 #                      heavy plugin (agent-worktrees, ~11 min) handled separately.
@@ -1197,6 +1197,45 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$CI_PROMOTION_RUN" ]; then MODE=""; fi
           python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
+  test-runner-macos:
+    name: test runner (macos-latest)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: runner-contracts
+        name: Detect POSIX containment changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(tools/(plugin_test_containment\.py|test_plugin_test_containment\.py|test_run_plugin_tests\.py)|libs/agent-procutil/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.runner-contracts.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: steps.runner-contracts.outputs.run == 'true'
+      - name: Test native POSIX ownership and cleanup
+        if: steps.runner-contracts.outputs.run == 'true'
+        env:
+          PYTEST_ADDOPTS: '-m "not runner_exhaustive"'
+        run: |
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml
+          python -m pytest -q tools/test_plugin_test_containment.py tools/test_run_plugin_tests.py
+
   installation-context-windows:
     name: Installation-context native diagnostics (Windows)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
@@ -1768,6 +1807,7 @@ jobs:
       - agent-index-service-linux
       - agent-index-service-windows
       - test-runner-linux
+      - test-runner-macos
       - test-runner-windows
       - installation-context-windows
       - command-lifecycle-windows
@@ -1838,6 +1878,7 @@ jobs:
       - agent-index-service-linux
       - agent-index-service-windows
       - test-runner-linux
+      - test-runner-macos
       - test-runner-windows
       - installation-context-windows
       - command-lifecycle-windows

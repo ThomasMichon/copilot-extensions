@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -152,7 +154,7 @@ def test_api_input_file_with_mention_is_denied(tmp_path: Path) -> None:
     guard = _load_guard()
     payload = tmp_path / "body.json"
     payload.write_text('{"body": "@copilot review"}', encoding="utf-8")
-    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    cmd = f'gh api repos/owner/repo/issues/1/comments --method POST --input "{payload.as_posix()}"'
     assert guard.command_publishes_copilot_mention(cmd) == "mention"
 
 
@@ -160,7 +162,7 @@ def test_api_input_file_without_mention_is_allowed(tmp_path: Path) -> None:
     guard = _load_guard()
     payload = tmp_path / "body.json"
     payload.write_text('{"body": "Looks good, thanks!"}', encoding="utf-8")
-    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    cmd = f'gh api repos/owner/repo/issues/1/comments --method POST --input "{payload.as_posix()}"'
     assert guard.command_publishes_copilot_mention(cmd) is None
 
 
@@ -168,7 +170,7 @@ def test_api_input_equals_form_with_mention_is_denied(tmp_path: Path) -> None:
     guard = _load_guard()
     payload = tmp_path / "body.json"
     payload.write_text('{"body": "@copilot review"}', encoding="utf-8")
-    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input={payload}"
+    cmd = f'gh api repos/owner/repo/issues/1/comments --method POST --input="{payload.as_posix()}"'
     assert guard.command_publishes_copilot_mention(cmd) == "mention"
 
 
@@ -182,7 +184,7 @@ def test_api_input_unparseable_json_is_denied_fail_closed(tmp_path: Path) -> Non
     guard = _load_guard()
     payload = tmp_path / "body.json"
     payload.write_text("not valid json", encoding="utf-8")
-    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    cmd = f'gh api repos/owner/repo/issues/1/comments --method POST --input "{payload.as_posix()}"'
     assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
 
 
@@ -294,7 +296,7 @@ def test_api_long_field_form_file_ref_is_scanned(tmp_path: Path) -> None:
     guard = _load_guard()
     body_file = tmp_path / "body.md"
     body_file.write_text("@copilot review", encoding="utf-8")
-    cmd = f"gh api repos/o/r/issues/1/comments --field body=@{body_file}"
+    cmd = f'gh api repos/o/r/issues/1/comments --field "body=@{body_file.as_posix()}"'
     assert guard.command_publishes_copilot_mention(cmd) == "mention"
 
 
@@ -405,9 +407,9 @@ def test_hook_is_a_noop_outside_the_target_repo(tmp_path: Path) -> None:
         "toolArgs": {"command": 'gh pr comment 1 -R owner/repo --body "@copilot review"'},
     })
     result = subprocess.run(
-        ["python3", str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
+        [sys.executable, str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
         input=payload, capture_output=True, text=True,
-        env={"COPILOT_PLUGIN_ROOT": str(PLUGIN)},
+        env={**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN)},
         cwd=str(tmp_path),
     )
     assert result.returncode == 0
@@ -423,9 +425,9 @@ def test_hook_denies_inside_the_target_repo() -> None:
     })
     repo_root = PLUGIN.resolve().parents[1]
     result = subprocess.run(
-        ["python3", str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
+        [sys.executable, str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
         input=payload, capture_output=True, text=True,
-        env={"COPILOT_PLUGIN_ROOT": str(PLUGIN)},
+        env={**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN)},
         cwd=str(repo_root),
     )
     assert result.returncode == 0

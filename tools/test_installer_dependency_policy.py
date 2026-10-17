@@ -796,6 +796,100 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
         assert imported.stdout.strip() == value
 
 
+@pytest.mark.parametrize("authored_config", [False, True])
+def test_native_real_setuptools_editable_keeps_generated_metadata_private(tmp_path_factory, monkeypatch, authored_config):
+    import configparser
+    import os
+    import subprocess
+
+    tmp_path = tmp_path_factory.mktemp("editable")
+    source = tmp_path / "nested-source-layout" / "plugins" / "fixture-editable"
+    live = source / "src" / "fixture_editable"
+    live.mkdir(parents=True)
+    module = live / "__init__.py"
+    module.write_text("value = 'original'\n", encoding="utf-8")
+    manifest = source / "pyproject.toml"
+    manifest.write_text(
+        '[build-system]\nrequires=["setuptools>=64"]\nbuild-backend="setuptools.build_meta"\n'
+        '[project]\nname="fixture-editable"\nversion="1.0"\ndependencies=[]\n'
+        '[project.scripts]\nfixture-editable="fixture_editable:main"\n'
+        '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+        encoding="utf-8",
+    )
+    authored = "[egg_info]\negg_base = src\ntag_date = 0\n[aliases]\nrelease = egg_info -b ''\n"
+    if authored_config:
+        (source / "setup.cfg").write_text(authored, encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("PYTHON") and key != "VIRTUAL_ENV"
+    }
+    environment.pop("UV_OFFLINE", None)
+    uv = shutil.which("uv")
+    assert uv, "native UV is required for actual setuptools editable coverage"
+    actual = subprocess.run
+    target = tmp_path / "venv"
+    created = actual(
+        [uv, "venv", "--python", sys.executable, str(target)], env=environment,
+        capture_output=True, text=True, timeout=30, creationflags=policy._HEADLESS,
+    )
+    assert created.returncode == 0, created.stderr
+    python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    retained = []
+
+    def run(command, **kwargs):
+        if "--show-settings" not in command:
+            retained_base = Path(kwargs["cwd"])
+            retained.append(retained_base)
+            copied = next(retained_base.rglob("setup.cfg"))
+            config = configparser.ConfigParser(interpolation=None)
+            config.read(copied, encoding="utf-8")
+            assert config["egg_info"]["egg_base"] == "."
+            if authored_config:
+                assert config["egg_info"]["tag_date"] == "0"
+                assert config["aliases"]["release"] == "egg_info -b ''"
+            if os.name == "nt":
+                assert retained_base.parents[2] == source.parent
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    "dependencies=[]", 'dependencies=["bad @ https://unapproved.example/bad.whl"]',
+                ),
+                encoding="utf-8",
+            )
+        return actual(command, **kwargs)
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    installed = policy.run_uv_install(
+        uv, ["--no-config", "--python", str(python), "-e", str(source)],
+        env=environment, cwd=tmp_path, trusted_source_roots=(source,),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert installed.returncode == 0, installed.stderr
+    assert retained and not retained[0].exists()
+    assert not list(source.rglob("*.egg-info"))
+    if authored_config:
+        assert (source / "setup.cfg").read_text(encoding="utf-8") == authored
+    else:
+        assert not (source / "setup.cfg").exists()
+    for value in ("original", "changed"):
+        module.write_text(f"value = '{value}'\ndef main():\n    print(value)\n", encoding="utf-8")
+        imported = actual(
+            [str(python), "-I", "-c",
+             "import fixture_editable; import importlib.metadata as m; import json; "
+             "print(fixture_editable.value); "
+             "print(json.loads(m.distribution('fixture-editable').read_text('direct_url.json'))['dir_info']['editable'])"],
+            env=environment, capture_output=True, text=True, timeout=10, creationflags=policy._HEADLESS,
+        )
+        assert imported.returncode == 0, imported.stderr
+        assert imported.stdout.splitlines() == [value, "True"]
+        script = python.parent / ("fixture-editable.exe" if os.name == "nt" else "fixture-editable")
+        invoked = actual(
+            [str(script)], env=environment, capture_output=True, text=True,
+            timeout=10, creationflags=policy._HEADLESS,
+        )
+        assert invoked.returncode == 0, invoked.stderr
+        assert invoked.stdout.strip() == value
+
+
 @pytest.mark.parametrize("packages", [["pyyaml"], ["pyyaml", "packaging"]])
 def test_native_retained_configuration_preserves_package_specific_reinstall(tmp_path, monkeypatch, packages):
     import subprocess

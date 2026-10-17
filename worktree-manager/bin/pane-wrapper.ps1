@@ -54,31 +54,43 @@ function Set-AwPaneKillOnCloseJob {
     if (-not $IsWindows) { return }
     try {
         if (-not ('AwProcessOwnership.PaneJob' -as [type])) {
-            Add-Type -Namespace 'AwProcessOwnership' -Name 'PaneJob' -MemberDefinition @'
-[StructLayout(LayoutKind.Sequential)]
-public struct IO_COUNTERS { public ulong ReadOperationCount; public ulong WriteOperationCount; public ulong OtherOperationCount; public ulong ReadTransferCount; public ulong WriteTransferCount; public ulong OtherTransferCount; }
-[StructLayout(LayoutKind.Sequential)]
-public struct JOBOBJECT_BASIC_LIMIT_INFORMATION { public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass; }
-[StructLayout(LayoutKind.Sequential)]
-public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION { public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo; public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed; }
-[DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
-[DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetInformationJobObject(IntPtr hJob, int JobObjectInfoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
-[DllImport("kernel32.dll", SetLastError=true)] public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
-[DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr GetCurrentProcess();
-public const int JobObjectExtendedLimitInformation = 9;
-public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
-'@ -ErrorAction Stop
+            # Bind native calls without starting the C# compiler on the pane hot path.
+            $assembly = [Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly(
+                [Reflection.AssemblyName]::new('AwProcessOwnership'),
+                [Reflection.Emit.AssemblyBuilderAccess]::Run
+            )
+            $type = $assembly.DefineDynamicModule('PaneJob').DefineType(
+                'AwProcessOwnership.PaneJob', [Reflection.TypeAttributes]'Public, Abstract, Sealed'
+            )
+            $bindings = @(
+                @('CreateJobObject', 'CreateJobObjectW', [IntPtr], [type[]]@([IntPtr], [string])),
+                @('SetInformationJobObject', 'SetInformationJobObject', [bool], [type[]]@([IntPtr], [int], [IntPtr], [uint32])),
+                @('AssignProcessToJobObject', 'AssignProcessToJobObject', [bool], [type[]]@([IntPtr], [IntPtr])),
+                @('GetCurrentProcess', 'GetCurrentProcess', [IntPtr], [type[]]@())
+            )
+            foreach ($binding in $bindings) {
+                $method = $type.DefinePInvokeMethod(
+                    $binding[0], 'kernel32.dll', $binding[1],
+                    [Reflection.MethodAttributes]'Public, Static, PinvokeImpl',
+                    [Reflection.CallingConventions]::Standard, $binding[2], $binding[3],
+                    [Runtime.InteropServices.CallingConvention]::Winapi,
+                    [Runtime.InteropServices.CharSet]::Unicode
+                )
+                $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+            }
+            $null = $type.CreateType()
         }
         $t = [AwProcessOwnership.PaneJob]
         $h = $t::CreateJobObject([IntPtr]::Zero, $null)
         if ($h -eq [IntPtr]::Zero) { return }
-        $info = New-Object 'AwProcessOwnership.PaneJob+JOBOBJECT_EXTENDED_LIMIT_INFORMATION'
-        $info.BasicLimitInformation.LimitFlags = $t::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        $len = [Runtime.InteropServices.Marshal]::SizeOf($info)
+        # Windows' extended-limit ABI is 144 bytes on 64-bit, 112 on 32-bit;
+        # LimitFlags follows the two 64-bit time limits at byte 16 on both.
+        $len = if ([IntPtr]::Size -eq 8) { 144 } else { 112 }
         $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal($len)
         try {
-            [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false)
-            if (-not $t::SetInformationJobObject($h, $t::JobObjectExtendedLimitInformation, $ptr, [uint32]$len)) { return }
+            [Runtime.InteropServices.Marshal]::Copy([byte[]]::new($len), 0, $ptr, $len)
+            [Runtime.InteropServices.Marshal]::WriteInt32($ptr, 16, 0x2000)
+            if (-not $t::SetInformationJobObject($h, 9, $ptr, [uint32]$len)) { return }
             $null = $t::AssignProcessToJobObject($h, $t::GetCurrentProcess())
         } finally {
             [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr)

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Unicode Git paths in headless PowerShell policy capture and exercise real Bash guidance with isolated native tool launchers.",
+  "changes": [
+    {
+      "plugin": "ai-attribution",
+      "type": "patch"
+    }
+  ]
+}

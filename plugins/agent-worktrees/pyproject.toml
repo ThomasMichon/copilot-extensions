@@ -115,6 +115,7 @@ agent-worktrees = "agent_worktrees.__main__:console_entry"
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1.1",
+    "pytest-xdist>=3.8,<4",
     # tomllib is stdlib on 3.11+; tomli backports it for 3.10 (this plugin's
     # requires-python floor). Used by packaging-level assertions in
     # tests/test_shutdown_exit.py and tests/test_runtime_dependencies.py.

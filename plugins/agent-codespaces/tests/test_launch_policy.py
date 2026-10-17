@@ -6,12 +6,18 @@ import argparse
 import os
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
 from agent_codespaces import copilot_venue, launch_policy as lp
 
 _REAL_BRIDGE_ENFORCEMENT = lp.bridge_enforcement  # the conftest stubs it per test
+
+
+@pytest.fixture(autouse=True)
+def _isolated_profile(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
 
 def _policy(code: str, *, timeout: float = 20.0) -> None:

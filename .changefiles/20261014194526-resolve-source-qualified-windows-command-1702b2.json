@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve source-qualified Windows command bindings in the selected isolated launcher process; preserve fallback and explicit helper refusals.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

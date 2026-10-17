@@ -116,16 +116,21 @@ def test_unbound_acquire_emits_structured_readiness_without_store_access(
     assert payload["coordination_readiness"]["version"] == 1
 
 
-def test_acquire_with_disposition_rides_context(remote: Path, capsys):
+def test_acquire_with_disposition_is_preserved_by_plain_renewal(remote: Path, capsys):
     data = _run(
         capsys, "acquire", "codespace", "cs-1",
         "--holder", "m/p/w", "--origin", str(remote), "--disposition", "at-rest",
     )
     assert data["context"]["disposition"] == "at-rest"
     assert ob.from_context(data["context"]) == ob.AT_REST
+    renewed = _run(
+        capsys, "renew", "codespace", "cs-1",
+        "--token", data["token"], "--origin", str(remote),
+    )
+    assert ob.from_context(renewed["context"]) == ob.AT_REST
 
 
-def test_acquire_defaults_have_no_disposition(remote: Path, capsys):
+def test_acquire_defaults_then_renew_settle_durably(remote: Path, capsys):
     data = _run(
         capsys, "acquire", "codespace", "cs-2",
         "--holder", "m/p/w", "--origin", str(remote),
@@ -133,38 +138,15 @@ def test_acquire_defaults_have_no_disposition(remote: Path, capsys):
     # No --disposition -> no disposition key; a reader still degrades to active.
     assert "disposition" not in data["context"]
     assert ob.from_context(data["context"]) == ob.ACTIVE
-
-
-def test_renew_advances_disposition_to_at_rest(remote: Path, capsys):
-    acq = _run(
-        capsys, "acquire", "codespace", "cs-3",
-        "--holder", "m/p/w", "--origin", str(remote),
-    )
-    token = acq["token"]
     renewed = _run(
-        capsys, "renew", "codespace", "cs-3",
-        "--token", token, "--origin", str(remote), "--disposition", "at-rest",
+        capsys, "renew", "codespace", "cs-2",
+        "--token", data["token"], "--origin", str(remote), "--disposition", "at-rest",
     )
     assert renewed["context"]["disposition"] == "at-rest"
 
     # inspect confirms the settled disposition is durable on the ref.
-    seen = _run(capsys, "inspect", "codespace", "cs-3", "--origin", str(remote))
+    seen = _run(capsys, "inspect", "codespace", "cs-2", "--origin", str(remote))
     assert ob.from_context(seen["context"]) == ob.AT_REST
-
-
-def test_renew_without_flags_preserves_existing_disposition(remote: Path, capsys):
-    _run(
-        capsys, "acquire", "codespace", "cs-4",
-        "--holder", "m/p/w", "--origin", str(remote), "--disposition", "at-rest",
-    )
-    acq = _run(capsys, "inspect", "codespace", "cs-4", "--origin", str(remote))
-    token = acq["token"]
-    # A plain renew (no --context, no --disposition) must keep the prior context.
-    renewed = _run(
-        capsys, "renew", "codespace", "cs-4",
-        "--token", token, "--origin", str(remote),
-    )
-    assert ob.from_context(renewed["context"]) == ob.AT_REST
 
 
 @pytest.mark.parametrize("origin_source", ["argument", "environment"])

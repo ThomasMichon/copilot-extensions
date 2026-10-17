@@ -1,0 +1,9 @@
+{
+  "comment": "Prove absent committed-config candidates with one fresh literal tree query while preserving ordered blob reads, priority, ref hopping, diagnostics and shared resolution budgets.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -399,6 +400,23 @@ def _bash_prereqs():
     return bash, jq, sha
 
 
+def _bash_environment(home: Path, tmp_path: Path) -> dict[str, str]:
+    python_bin = tmp_path / "python-bin"
+    python_bin.mkdir()
+    python = python_bin / "python3"
+    python.write_text(
+        "#!/bin/sh\nexec " + shlex.quote(Path(sys._base_executable).as_posix())
+        + ' "$@"\n', encoding="utf-8",
+    )
+    python.chmod(0o700)
+    return {
+        **os.environ,
+        "PATH": str(python_bin) + os.pathsep + os.environ.get("PATH", ""),
+        "HOME": home.as_posix(), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": _PLUGIN.as_posix(),
+    }
+
+
 def test_bash_wrapper_writes_bounded_session_file(tmp_path):
     bash, jq, sha = _bash_prereqs()
     if not (bash and jq and sha):
@@ -411,9 +429,9 @@ def test_bash_wrapper_writes_bounded_session_file(tmp_path):
     payload = json.dumps(
         {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
     )
-    env = {**os.environ, "HOME": str(home), "COPILOT_PLUGIN_ROOT": str(_PLUGIN)}
+    env = _bash_environment(home, tmp_path)
     result = subprocess.run(
-        [bash, str(_PLUGIN / "scripts" / "write-session-guidance.sh")],
+        [bash, (_PLUGIN / "scripts" / "write-session-guidance.sh").as_posix()],
         cwd=repo,
         env=env,
         input=payload,
@@ -430,10 +448,10 @@ def test_bash_wrapper_writes_bounded_session_file(tmp_path):
 
 def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
     """Same proof as the PowerShell equivalent, adapted for bash: build an
-    isolated PATH containing symlinks only to the tools the fast path needs
+    isolated PATH containing only the real tools the fast path needs
     (bash, jq, sha256sum/shasum, git, coreutils) and deliberately excluding
-    every python3/python/py -- if the fast path did not serve this from
-    cache and fell through to python, there would be none to invoke."""
+    every python3/python/py. Windows launchers preserve each executable's
+    DLL lookup directory; POSIX uses symlinks. A Python fallback cannot run."""
     bash, jq, sha = _bash_prereqs()
     if not (bash and jq and sha):
         pytest.skip("bash/jq/sha256sum unavailable")
@@ -465,6 +483,14 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
     ):
         src = shutil.which(tool)
         if src:
+            if os.name == "nt":
+                launcher = isolated_bin / tool
+                launcher.write_text(
+                    "#!/bin/sh\nexec " + shlex.quote(Path(src).as_posix())
+                    + ' "$@"\n', encoding="utf-8",
+                )
+                launcher.chmod(0o700)
+                continue
             try:
                 (isolated_bin / tool).symlink_to(src)
             except OSError:
@@ -475,11 +501,12 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):
     )
     env = {
         "PATH": str(isolated_bin),
-        "HOME": str(home),
-        "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+        "HOME": home.as_posix(),
+        "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": _PLUGIN.as_posix(),
     }
     result = subprocess.run(
-        [str(isolated_bin / "bash"), str(_PLUGIN / "scripts" / "write-session-guidance.sh")],
+        [bash, (_PLUGIN / "scripts" / "write-session-guidance.sh").as_posix()],
         cwd=repo,
         env=env,
         input=payload,
@@ -505,9 +532,9 @@ def test_bash_wrapper_falls_back_on_cold_cache(tmp_path):
     payload = json.dumps(
         {"sessionId": "session-1", "cwd": str(repo), "source": "copilot-cli"}
     )
-    env = {**os.environ, "HOME": str(home), "COPILOT_PLUGIN_ROOT": str(_PLUGIN)}
+    env = _bash_environment(home, tmp_path)
     result = subprocess.run(
-        [bash, str(_PLUGIN / "scripts" / "write-session-guidance.sh")],
+        [bash, (_PLUGIN / "scripts" / "write-session-guidance.sh").as_posix()],
         cwd=repo,
         env=env,
         input=payload,

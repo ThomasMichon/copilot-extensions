@@ -1,6 +1,6 @@
 """Tests for fork_pr.py -- the durable (repo, account) fork-confirmation
 registry (forks.yaml) plus the identity/credential/authority resolution
-behind pr.fork's confirmation gate. See test_pr_ops.py's
+behind pr.fork's confirmation gate. See test_create_pr_fork.py's
 TestCreatePRForkFlow for the integration-level tests exercising the full
 create_pr flow through this module.
 """

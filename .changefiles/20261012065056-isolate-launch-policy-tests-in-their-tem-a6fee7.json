@@ -1,0 +1,9 @@
+{
+  "comment": "Isolate launch-policy tests in their temporary profile while preserving Windows profile refusal checks",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import copy
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -55,8 +57,7 @@ def remote(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.fixture
-def settings(remote: Path) -> LeaseSettings:
+def _settings(remote: Path) -> LeaseSettings:
     return LeaseSettings(
         origin=str(remote),
         default_ttl_seconds=60,
@@ -64,6 +65,11 @@ def settings(remote: Path) -> LeaseSettings:
         clock_skew_seconds=10,
         acquire_retries=2,
     )
+
+
+@pytest.fixture
+def settings(remote: Path) -> LeaseSettings:
+    return _settings(remote)
 
 
 BASE = datetime(2026, 8, 6, 20, 0, tzinfo=timezone.utc)
@@ -76,6 +82,25 @@ def store(settings: LeaseSettings, now: datetime = BASE) -> GitLeaseStore:
         sleep=lambda _seconds: None,
         jitter=lambda _low, _high: 0,
     )
+
+
+@pytest.fixture(scope="session")
+def _released_history_seed(tmp_path_factory):
+    remote = tmp_path_factory.mktemp("released-lease-seed") / "coordination.git"
+    git("init", "--bare", str(remote))
+    client = store(_settings(remote))
+    acquired = client.acquire("machine", "stale-history", "holder")
+    renewed = client.renew("machine", "stale-history", acquired.oid)
+    released = client.release("machine", "stale-history", renewed.oid)
+    return remote, acquired, renewed, released
+
+
+@pytest.fixture
+def released_history(tmp_path, _released_history_seed):
+    seed, acquired, renewed, released = _released_history_seed
+    remote = tmp_path / "coordination.git"
+    shutil.copytree(seed, remote)
+    return remote, _settings(remote), *copy.deepcopy((acquired, renewed, released))
 
 
 def remote_oid(remote: Path, ref: str) -> str:
@@ -365,7 +390,7 @@ def test_applied_push_with_lost_status_is_reported_as_success(
 
 
 def test_squash_stale_collapses_an_old_released_lease(
-    remote: Path, settings: LeaseSettings,
+    released_history, _released_history_seed,
 ) -> None:
     """worktree-claims-transitive-finalization Phase 5: a `released` ref
     well past the retention window collapses to a minimal two-commit
@@ -373,10 +398,8 @@ def test_squash_stale_collapses_an_old_released_lease(
     -- never deleted, and never a single parentless commit either (the
     protocol's own self-validation requires the history's root to be an
     acquire event)."""
-    client = store(settings)
-    acquired = client.acquire("machine", "stale-history", "holder")
-    renewed = client.renew("machine", "stale-history", acquired.oid)
-    released = client.release("machine", "stale-history", renewed.oid)
+    remote, settings, _acquired, renewed, released = released_history
+    seed_ref = remote_oid(_released_history_seed[0], released.ref)
     assert commit_parents(remote, released.oid) == [released.oid, renewed.oid]
 
     later = store(settings, now=BASE + timedelta(days=31))
@@ -398,6 +421,7 @@ def test_squash_stale_collapses_an_old_released_lease(
     assert squashed.record.issued_at == released.record.issued_at
     assert squashed.record.renewed_at == released.record.renewed_at
     assert squashed.live is False
+    assert remote_oid(_released_history_seed[0], released.ref) == seed_ref
 
 
 def test_squash_stale_skips_a_recently_released_lease(
@@ -424,27 +448,11 @@ def test_squash_stale_never_touches_a_live_lease_regardless_of_age(
     assert remote_oid(remote, acquired.ref) == acquired.oid
 
 
-def test_squash_stale_is_idempotent_on_an_already_squashed_ref(
-    settings: LeaseSettings,
-) -> None:
-    client = store(settings)
-    acquired = client.acquire("machine", "twice", "holder")
-    renewed = client.renew("machine", "twice", acquired.oid)
-    client.release("machine", "twice", renewed.oid)
-    later = store(settings, now=BASE + timedelta(days=60))
-    first = later.squash_stale(retention_days=30)
-    assert len(first) == 1
-    second = later.squash_stale(retention_days=30)
-    assert second == []
-
-
 def test_squash_stale_filters_by_kind(
-    remote: Path, settings: LeaseSettings,
+    released_history,
 ) -> None:
+    remote, settings, _acquired, _renewed, m = released_history
     client = store(settings)
-    m_acquired = client.acquire("machine", "m-ref", "holder")
-    m_renewed = client.renew("machine", "m-ref", m_acquired.oid)
-    m = client.release("machine", "m-ref", m_renewed.oid)
     c_acquired = client.acquire("codespace", "c-ref", "holder")
     c_renewed = client.renew("codespace", "c-ref", c_acquired.oid)
     c = client.release("codespace", "c-ref", c_renewed.oid)
@@ -454,13 +462,10 @@ def test_squash_stale_filters_by_kind(
     assert remote_oid(remote, m.ref) == m.oid
 
 
-def test_squash_stale_dry_run_reports_without_pushing(
-    remote: Path, settings: LeaseSettings,
+def test_squash_stale_dry_run_then_apply_is_idempotent(
+    released_history,
 ) -> None:
-    client = store(settings)
-    acquired = client.acquire("machine", "preview", "holder")
-    renewed = client.renew("machine", "preview", acquired.oid)
-    released = client.release("machine", "preview", renewed.oid)
+    remote, settings, _acquired, _renewed, released = released_history
     later = store(settings, now=BASE + timedelta(days=60))
 
     report = later.squash_stale(retention_days=30, dry_run=True)
@@ -468,9 +473,20 @@ def test_squash_stale_dry_run_reports_without_pushing(
     assert report == [{"ref": released.ref, "old_oid": released.oid, "new_oid": ""}]
     assert remote_oid(remote, released.ref) == released.oid
 
+    first = later.squash_stale(retention_days=30)
+    assert len(first) == 1
+    assert first[0]["ref"] == released.ref
+    assert first[0]["old_oid"] == released.oid
+    squashed_oid = remote_oid(remote, released.ref)
+    assert first[0]["new_oid"] == squashed_oid
+    assert squashed_oid != released.oid
+    second = later.squash_stale(retention_days=30)
+    assert second == []
+    assert remote_oid(remote, released.ref) == squashed_oid
+
 
 def test_squash_stale_skips_a_ref_reacquired_mid_sweep(
-    remote: Path, settings: LeaseSettings,
+    released_history,
 ) -> None:
     """A concurrent `acquire()` racing in between `squash_stale`'s own
     `list()` read and its push (another client re-acquiring the resource
@@ -478,10 +494,7 @@ def test_squash_stale_skips_a_ref_reacquired_mid_sweep(
     compare-and-swap (the same `--force-with-lease` discipline every other
     lease mutation uses) rejects it, and `squash_stale` skips that ref
     gracefully rather than raising or corrupting the live lease."""
-    client = store(settings)
-    acquired = client.acquire("machine", "raced", "holder")
-    renewed = client.renew("machine", "raced", acquired.oid)
-    released = client.release("machine", "raced", renewed.oid)
+    remote, settings, _acquired, _renewed, released = released_history
 
     later = store(settings, now=BASE + timedelta(days=60))
     racer = store(settings, now=BASE + timedelta(days=60))
@@ -490,7 +503,7 @@ def test_squash_stale_skips_a_ref_reacquired_mid_sweep(
 
     def _race_before_push(args, **kwargs):
         if "push" in args and "--force-with-lease" in " ".join(args):
-            reacquired["snapshot"] = racer.acquire("machine", "raced", "new-holder")
+            reacquired["snapshot"] = racer.acquire("machine", "stale-history", "new-holder")
         return real_git(args, **kwargs)
 
     later._git = _race_before_push  # type: ignore[method-assign]
@@ -499,7 +512,7 @@ def test_squash_stale_skips_a_ref_reacquired_mid_sweep(
 
     assert report == []
     assert "snapshot" in reacquired
-    live = later.inspect("machine", "raced")
+    live = later.inspect("machine", "stale-history")
     assert live.record.state == "leased"
     assert live.record.holder == "new-holder"
     assert live.oid == reacquired["snapshot"].oid

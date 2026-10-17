@@ -1,0 +1,9 @@
+{
+  "comment": "Share genuinely built immutable client-wheel and independently copied active-allocation inputs while preserving installed package, retirement, crash and isolation contracts.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "dev"
+    }
+  ]
+}

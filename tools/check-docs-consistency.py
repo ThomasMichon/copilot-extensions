@@ -28,11 +28,13 @@ Exit 0 = consistent, 1 = drift (suitable for a pre-push hook / CI).
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import html
 import json
 import os
 import re
 import sys
+from collections.abc import Iterator
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -354,11 +356,26 @@ COUNT_PATTERNS = [
 ]
 
 
+def _raise_walk_error(error: OSError) -> None:
+    raise error
+
+
+def _markdown_paths() -> Iterator[Path]:
+    """Keep glob candidates, but never descend into already-excluded trees."""
+    excluded = {".worktrees", "node_modules"}
+    if excluded.intersection(REPO.parts):
+        return
+    for root, dirs, files in os.walk(REPO, onerror=_raise_walk_error):
+        dirs[:] = [name for name in dirs if name not in excluded]
+        # Glob also yields matching directories; preserve their read errors.
+        for name in dirs + files:
+            if fnmatch.fnmatch(name, "*.md"):
+                yield Path(root) / name
+
+
 def check_counts(expected: dict[str, int]) -> list[str]:
     problems: list[str] = []
-    for md in sorted(REPO.glob("**/*.md")):
-        if ".worktrees" in md.parts or "node_modules" in md.parts:
-            continue
+    for md in sorted(_markdown_paths()):
         if not md.is_file():
             problems.append(f"  {md.relative_to(REPO)}: expected a Markdown file")
             continue

@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "async-timeout>=5; python_version < '3.11'",
     "fastapi>=0.141.1",
     # Plain uvicorn (not the [standard] extra) so the HTTP path stays pure
     # Python (h11) on every platform. agent-bridge serves low-traffic localhost

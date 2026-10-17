@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
+import shutil
 import textwrap
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -36,6 +41,15 @@ def native_powershell():
         return resolve_native_powershell()
     except ShellUnavailable as exc:
         pytest.skip(str(exc))
+
+
+@pytest.fixture
+def git_only_mux(monkeypatch):
+    """Git-only fixtures never own a mux or contact the host's mux service."""
+    from agent_worktrees import sessions
+
+    monkeypatch.setattr(sessions, "has_mux_session", lambda _worktree: False)
+    monkeypatch.setattr(sessions, "kill_tmux_session", lambda _worktree: False)
 
 
 @pytest.fixture(autouse=True)
@@ -489,7 +503,7 @@ def make_session_dir(
 
 
 # ---------------------------------------------------------------------------
-# PR-mode repo fixture (shared by test_pr_ops + test_providers)
+# PR-mode repo fixture (shared by PR contract modules + test_providers)
 # ---------------------------------------------------------------------------
 
 from agent_worktrees import config as cfg  # noqa: E402
@@ -499,25 +513,84 @@ from agent_worktrees import git_ops  # noqa: E402
 def _pr_git(*args: str, cwd) -> str:
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
 
-
 @pytest.fixture
-def pr_repo(tmp_path: Path, monkeypatch):
-    """A bare 'remote' + anchor + a worktree branch with two commits.
+def record_repo(tmp_path, monkeypatch):
+    """Record contracts need persisted YAML, not a Git publication."""
+    tracking_dir = tmp_path / "tracking"
+    tracking_dir.mkdir()
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    wid = "test-recorded-pr"
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="linux",
+        repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor=str(tmp_path / "anchor"), worktree_root=str(tmp_path),
+            default_branch="master", remote="origin",
+            pr=cfg.PRConfig(enabled=True, provider="gitea", head_scheme="snapshot"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: tracking_dir)
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
+    tracking.create_new_record(
+        wid, f"worktree/{wid}", str(worktree), "ext", "test", "linux", tracking_dir,
+    )
+    return config, wid, worktree, tmp_path / "remote"
 
-    Returns (config, worktree_id, worktree_path, remote_dir).  Patches
-    tracking_dir so records land in a tmp directory.  PR mode is enabled with
-    ``auto_open=False`` so create_pr exercises only the git side unless a test
-    opts in.
-    """
+
+@contextmanager
+def _seed_directory(tmp_path_factory, key):
+    """Publish one immutable seed within the runner-owned plugin sandbox."""
+    if not re.fullmatch(r"[a-z0-9-]+", key):
+        raise ValueError(f"invalid fixture seed key: {key!r}")
+    sandbox = os.environ.get("COPILOT_EXTENSIONS_TEST_SANDBOX")
+    if os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1" or not sandbox:
+        yield tmp_path_factory.mktemp(key), True
+        return
+    parent = Path(sandbox)
+    if not parent.is_absolute() or not parent.is_dir() or parent.is_symlink():
+        raise ValueError("fixture seeds require an existing real absolute test sandbox")
+    root = parent / "s"
+    root.mkdir(exist_ok=True)
+    if root.is_symlink():
+        raise ValueError("fixture seed cache cannot be a symlink")
+    seed = root / key
+    ready = root / f"{key}.ready"
+    if ready.is_symlink() or ready.with_suffix(".lock").is_symlink():
+        raise ValueError("fixture seed control files cannot be symlinks")
+    expected = {"version": 1, "key": key, "path": str(seed)}
+    with tracking._RecordLock(ready, timeout=30, require_sidecar=True):
+        if ready.exists():
+            if (
+                not seed.is_dir()
+                or seed.is_symlink()
+                or json.loads(ready.read_text("utf-8")) != expected
+            ):
+                raise ValueError(f"invalid fixture seed readiness: {key}")
+            yield seed, False
+            return
+        if seed.exists():
+            raise RuntimeError(f"incomplete fixture seed: {key}")
+        seed.mkdir()
+        yield seed, True
+        tracking._atomic_write(ready, json.dumps(expected))
+
+
+def _build_pr_repo_seed(tmp_path):
     remote_dir = tmp_path / "remote.git"
     anchor = tmp_path / "anchor"
     wt_root = tmp_path / "worktrees"
     tracking_d = tmp_path / "tracking"
     tracking_d.mkdir()
 
-    git_ops.git("init", "--bare", "-b", "master", str(remote_dir))
+    git_ops.git("init", "--template=", "--bare", "-b", "master", str(remote_dir))
+    (remote_dir / "hooks").mkdir()
+    _pr_git("--git-dir", str(remote_dir), "config", "maintenance.auto", "false",
+            cwd=remote_dir)
 
-    git_ops.git("init", "-b", "master", str(anchor))
+    git_ops.git("init", "--template=", "-b", "master", str(anchor))
+    (anchor / ".git" / "hooks").mkdir()
+    _pr_git("config", "maintenance.auto", "false", cwd=anchor)
     _pr_git("config", "user.email", "t@example.com", cwd=anchor)
     _pr_git("config", "user.name", "Test", cwd=anchor)
     (anchor / "README.md").write_text("base\n")
@@ -541,6 +614,39 @@ def pr_repo(tmp_path: Path, monkeypatch):
     (wt_path / "b.txt").write_text("two\n")
     _pr_git("add", "-A", cwd=wt_path)
     _pr_git("commit", "-m", "work 2", cwd=wt_path)
+
+    return tmp_path
+
+
+@pytest.fixture(scope="session")
+def _pr_repo_seed(tmp_path_factory):
+    """Build immutable topology once per contained run; copy mutable test state."""
+    with _seed_directory(tmp_path_factory, "base") as (seed, build):
+        if build:
+            _build_pr_repo_seed(seed)
+        return seed
+
+
+def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
+    """An isolated bare remote, anchor, and two-commit linked worktree.
+
+    Copy object stores rather than sharing mutable Git state across tests.
+    Git repairs the relocated worktree's administrative links itself.
+    This seed has no executable files, so copying file metadata is unnecessary.
+    """
+    shutil.copytree(
+        seed, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile
+    )
+    remote_dir = tmp_path / "remote.git"
+    anchor = tmp_path / "anchor"
+    wt_root = tmp_path / "worktrees"
+    tracking_d = tmp_path / "tracking"
+    worktree_id = "test-wt-20260618-aaaa"
+    wt_path = wt_root / worktree_id
+    _pr_git("worktree", "repair", str(wt_path), cwd=anchor)
+    _pr_git("remote", "set-url", "origin", str(remote_dir), cwd=anchor)
+    if (tmp_path / "fork.git").is_dir():
+        _pr_git("remote", "set-url", "fork", str(tmp_path / "fork.git"), cwd=anchor)
 
     config = cfg.Config(
         srcroot=str(tmp_path), machine="test", platform="linux",
@@ -568,10 +674,31 @@ def pr_repo(tmp_path: Path, monkeypatch):
     # leaked WORKTREE_PROJECT, making these tests order/environment dependent.
     monkeypatch.setattr("agent_worktrees.config.load_config", lambda *a, **k: config)
 
-    tracking.create_new_record(
-        worktree_id, f"worktree/{worktree_id}", str(wt_path),
-        "ext", "test", "linux", tracking_d,
-    )
+    record_path = tracking_d / f"{worktree_id}.yaml"
+    if record_path.exists():
+        record = tracking.load_record(record_path)
+        record.worktree_path = str(wt_path)
+        source_slug = git_ops.slug_from_url(str(seed / "remote.git"))
+        target_slug = git_ops.slug_from_url(str(remote_dir))
+        from agent_worktrees import pr_publish
+        target_identity = (
+            pr_publish._identity(str(remote_dir), str(wt_path))
+            if any(pr.rewrite_identity for pr in record.prs) else ""
+        )
+        assert source_slug is not None and target_slug is not None
+        for pr in record.prs:
+            if pr.repo == source_slug:
+                pr.repo = target_slug
+                if pr.rewrite_identity:
+                    assert target_identity
+                    pr.rewrite_identity = target_identity
+                pr.pr_revision += 1
+        tracking.save_record(record, record_path)
+    else:
+        tracking.create_new_record(
+            worktree_id, f"worktree/{worktree_id}", str(wt_path),
+            "ext", "test", "linux", tracking_d,
+        )
 
     return config, worktree_id, wt_path, remote_dir
 
@@ -630,3 +757,136 @@ def _installer_processes_through_subprocess_run(request, monkeypatch):
         lambda rc, expired, target, deployed: judge(
             rc, expired, target, target if rc == 0 and not expired else deployed),
     )
+
+
+@pytest.fixture
+def pr_repo(tmp_path: Path, monkeypatch, _pr_repo_seed):
+    return _copy_pr_repo(_pr_repo_seed, tmp_path, monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def _published_pr_seed(tmp_path_factory, _pr_repo_seed):
+    from agent_worktrees import pr_ops
+
+    with _seed_directory(tmp_path_factory, "published") as (seed, build):
+        if build:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+                config, worktree_id, _, _ = _copy_pr_repo(_pr_repo_seed, seed, patch)
+                result = pr_ops.create_pr(worktree_id, config, title="Add feature")
+                assert result["success"], result
+        return seed
+
+
+@pytest.fixture
+def published_pr_repo(tmp_path: Path, monkeypatch, _published_pr_seed):
+    """Independent real-Git published state for tests of post-publication behavior."""
+    return _copy_pr_repo(_published_pr_seed, tmp_path, monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def _rebased_refspec_pr_seed(tmp_path_factory, _pr_repo_seed):
+    from test_pr_rewrite import publish_and_rebase
+
+    with _seed_directory(tmp_path_factory, "rebased-refspec") as (seed, build):
+        if build:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+                publish_and_rebase(_copy_pr_repo(_pr_repo_seed, seed, patch), "refspec")
+        return seed
+
+
+def _copy_rebased_pr_repo(seed, tmp_path, monkeypatch, scheme):
+    from dataclasses import replace
+
+    config, wid, wt, remote = _copy_pr_repo(seed, tmp_path, monkeypatch)
+    config = replace(config, repos={
+        config.repo_name: replace(config.default_repo, pr=replace(
+            config.default_repo.pr, head_scheme=scheme,
+        )),
+    })
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    return config, wid, wt, remote, record.pr.head_sha
+
+
+@pytest.fixture
+def rebased_refspec_pr_repo(tmp_path, monkeypatch, _rebased_refspec_pr_seed):
+    """Independent real post-rebase state for rewrite, not rebase, contracts."""
+    return _copy_rebased_pr_repo(_rebased_refspec_pr_seed, tmp_path, monkeypatch, "refspec")
+
+
+@pytest.fixture(scope="session")
+def _rebased_snapshot_pr_seed(tmp_path_factory, _pr_repo_seed):
+    from test_pr_rewrite import publish_and_rebase
+
+    with _seed_directory(tmp_path_factory, "rebased-snapshot") as (seed, build):
+        if build:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+                publish_and_rebase(_copy_pr_repo(_pr_repo_seed, seed, patch), "snapshot")
+        return seed
+
+
+@pytest.fixture
+def rebased_snapshot_pr_repo(tmp_path, monkeypatch, _rebased_snapshot_pr_seed):
+    return _copy_rebased_pr_repo(_rebased_snapshot_pr_seed, tmp_path, monkeypatch, "snapshot")
+
+
+@pytest.fixture
+def rebased_pr_repo(scheme, request):
+    return request.getfixturevalue(f"rebased_{scheme}_pr_repo")
+
+
+@pytest.fixture(scope="session")
+def _fork_pr_seed(tmp_path_factory, _published_pr_seed):
+    with _seed_directory(tmp_path_factory, "fork") as (seed, build):
+        if build:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+                config, wid, worktree, remote = _copy_pr_repo(_published_pr_seed, seed, patch)
+                record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+                fork = seed / "fork.git"
+                shutil.copytree(remote, fork, copy_function=shutil.copyfile)
+                _pr_git("--git-dir", str(fork), "update-ref", "-d", "refs/heads/master", cwd=fork)
+                _pr_git("remote", "add", "fork", str(fork), cwd=worktree)
+                _pr_git("--git-dir", str(remote), "update-ref", "-d",
+                        f"refs/heads/{record.pr.branch}", cwd=remote)
+                record.pr.remote = "fork"
+                record.pr.rewrite_owner = record.pr.rewrite_identity = ""
+                record.pr.pr_revision += 1
+                tracking.save_record(record)
+                (worktree / "c.txt").write_text("feedback\n")
+                _pr_git("add", "c.txt", cwd=worktree)
+                _pr_git("commit", "-m", "address feedback", cwd=worktree)
+        return seed
+
+
+@pytest.fixture
+def fork_pr_repo(tmp_path: Path, monkeypatch, _fork_pr_seed):
+    return _copy_pr_repo(_fork_pr_seed, tmp_path, monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def _published_refspec_pr_seed(tmp_path_factory, _pr_repo_seed):
+    import dataclasses
+    from agent_worktrees import pr_ops
+
+    with _seed_directory(tmp_path_factory, "published-refspec") as (seed, build):
+        if build:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+                config, worktree_id, _, _ = _copy_pr_repo(_pr_repo_seed, seed, patch)
+                repo = dataclasses.replace(
+                    config.default_repo,
+                    pr=dataclasses.replace(config.default_repo.pr, head_scheme="refspec"),
+                )
+                config = dataclasses.replace(config, repos={"ext": repo})
+                result = pr_ops.create_pr(worktree_id, config, title="Own change")
+                assert result["success"], result
+        return seed
+
+
+@pytest.fixture
+def published_refspec_pr_repo(tmp_path: Path, monkeypatch, _published_refspec_pr_seed):
+    return _copy_pr_repo(_published_refspec_pr_seed, tmp_path, monkeypatch)

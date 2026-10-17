@@ -39,12 +39,13 @@ Exit code 0 = conformant, 1 = violations (suitable for a pre-push hook).
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -55,6 +56,7 @@ from install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
     declares_stamp_provision as _declares_stamp_provision,
+    check_runtime_retention as _check_runtime_retention,
     is_ignored_scan_path,
     persistent_environment_violations,
 )
@@ -679,43 +681,34 @@ def _uses_engine_manifest_writer(text: str, ext: str) -> bool:
     )
 
 
-def _check_runtime_retention(runtime) -> None:
-    """Exercise the canonical lifetime contract without an installed runtime."""
-    with tempfile.TemporaryDirectory(prefix="runtime-retention-contract-") as temporary:
-        root = Path(temporary)
-        candidate = runtime.slot(root, "candidate")
-        payload = candidate / "payload"
-        payload.write_text("unchanged", encoding="utf-8")
-        with runtime.construction_lease(root, "candidate", timeout=0):
-            assert runtime.gc(root) == [], "GC removed a construction owner"
-            assert runtime.toss_incomplete(root) == [], "toss removed a construction owner"
-        with runtime.retention_lease(root, "candidate", timeout=0):
-            assert runtime.gc(root) == [], "GC removed a retained candidate"
-            assert runtime.toss_incomplete(root) == [], "toss removed a retained candidate"
-            try:
-                runtime.slot(root, "candidate", clean_incomplete=True)
-            except RuntimeError:
-                pass
-            else:
-                raise AssertionError("incomplete cleanup admitted a retained candidate")
-            assert payload.read_text(encoding="utf-8") == "unchanged"
-        assert runtime.toss_incomplete(root) == ["candidate"], "released candidate was not reclaimed"
-        marker = runtime.mark_complete(root, "candidate", payload_hash="same", pid=11)
-        before = marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns
-        runtime.mark_complete(root, "candidate", payload_hash="same", pid=22)
-        assert (marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns) == before, (
-            "matching completion rewrote immutable evidence"
+def _raise_scan_error(error: OSError) -> None:
+    raise error
+
+
+def _powershell_paths(root: Path, *, repo_backstop: bool = False) -> list[Path]:
+    """Collect the same script candidates, pruning only backstop exclusions."""
+    if repo_backstop and (
+        root == PLUGINS_DIR
+        or PLUGINS_DIR in root.parents
+        or is_ignored_scan_path(root)
+    ):
+        return []
+    paths: list[Path] = []
+    for directory, dirs, files in os.walk(root, onerror=_raise_scan_error):
+        parent = Path(directory)
+        if repo_backstop:
+            dirs[:] = [
+                name for name in dirs
+                if parent / name != PLUGINS_DIR
+                and not is_ignored_scan_path(parent / name)
+            ]
+        # rglob also selects directories and file symlinks bearing this suffix;
+        # retain them so read failures still surface rather than being filtered.
+        paths.extend(
+            parent / name for name in (*dirs, *files)
+            if fnmatch.fnmatch(name, "*.ps1")
         )
-        try:
-            runtime.mark_complete(root, "candidate", payload_hash="different")
-        except RuntimeError:
-            pass
-        else:
-            raise AssertionError("numbered completion accepted conflicting content")
-        assert marker.read_bytes() == before[0], "conflict changed immutable evidence"
-        with runtime.retention_lease(root, "candidate", payload_hash="same", timeout=0):
-            runtime.activate(root, "candidate")
-        assert runtime.gc(root) == [], "GC removed the published candidate"
+    return sorted(paths)
 
 
 def check() -> int:
@@ -743,7 +736,7 @@ def check() -> int:
     violations.extend(_mark_complete_result_violations(PLUGINS_DIR))
 
     persistent_environment_blocks: dict[str, str | None] = {}
-    for path in sorted(PLUGINS_DIR.rglob("*.ps1")):
+    for path in _powershell_paths(PLUGINS_DIR):
         text = path.read_text(encoding="utf-8", errors="replace")
         direct_access = persistent_environment_violations(text)
         uses_adapter = (
@@ -785,11 +778,9 @@ def check() -> int:
     # registry paths/APIs) directly and leak into the operator's real,
     # persistent Windows User PATH -- exactly the leak this repo hit live. This
     # pass only checks the same direct-access detector against every other
-    # tracked `.ps1` in the repo; it does not require the adapter marker or
+    # non-excluded `.ps1` in the repo; it does not require the adapter marker or
     # `PLUGINS_DIR`'s stricter identical-block rules, which are installer-only.
-    for path in sorted(REPO.rglob("*.ps1")):
-        if PLUGINS_DIR in path.parents or is_ignored_scan_path(path):
-            continue
+    for path in _powershell_paths(REPO, repo_backstop=True):
         text = path.read_text(encoding="utf-8", errors="replace")
         for problem in persistent_environment_violations(text):
             relative = path.relative_to(REPO).as_posix()

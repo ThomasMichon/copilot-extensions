@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse fresh pinned replay parent rows within each verification while retaining raw identity, ancestry, reconstruction and publication checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

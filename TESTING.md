@@ -150,6 +150,35 @@ actual marketplace-path self-stage/uninstall twice under native PowerShell and
 POSIX Bash. The next invocation reaps the prior dead stage while an independently
 live stage survives. Immediate self-stage cleanup is not the v4 protocol.
 
+The contained runner gives PowerShell its own module-search directory as well
+as fresh home/config/temp roots. Inherited user module paths must not cause
+host-specific discovery or autoload during offline native tests. Both Windows
+hosts retain their core commands; a synthetic external module is discoverable
+only with the existing explicit host-state opt-in. Native application lookup
+and installer lifecycle probes remain real.
+
+Native installer-finalizer checks execute every optional construction-cleanup
+guard under both Windows PowerShell hosts with absent, loaded and autoloadable
+functions. A poisoned module and the previous command-discovery negative
+control prove cleanup never imports a module; the same-host failure regression
+still requires install-lock release. Worktrees' native snapshot-copy checks
+retain hidden files, literal paths, empty directories and binary bytes while
+excluding nested Python bytecode caches from source snapshots.
+
+Creation-tail repair uses an actual immutable initialized Git seed, copied
+into independent per-case anchors before real worktree creation. A native
+mutation guard checks config, ref and object isolation from the seed and sibling.
+Each fixture writes its own empty topology and still performs fresh authority,
+lease and CLI operations.
+
+The machine-transport registry parser runs its full file-contract class through
+both the safe Python loader and the preferred safe accelerated loader. Alias,
+merge, quoted-scalar and UTF-8 parity checks accompany repeated file replacement,
+malformed/unsafe-tag refusal and missing-file checks. Acceleration never caches
+a topology or weakens a later authority read. Local-cache copy fixtures likewise
+copy only an immutable empty Git store; a real commit plus config/exclude
+mutations prove the seed and sibling stay unchanged.
+
 The Worktrees standalone instruction-preflight fixture copies runtime files
 with at most 16 workers, waits for every copy and propagates copy errors.
 Byte-preservation and cache-exclusion guards cover that fixture separately.
@@ -245,7 +274,13 @@ inventory. Each copy has independent legacy/active and absent/retained-pointer
 items; each item invokes `status` and `probe-legacy` twice and compares the
 complete fixture profile after every call and after PowerShell-host shutdown.
 The existing initialized-host fixture excludes only host initialization from
-the baseline, never product execution or profile contents.
+the baseline, never product execution or profile contents. Its catalog
+environment disables PowerShell's asynchronous module-analysis file cache using
+the platform null device, so that engine background writes cannot race the
+complete profile comparison. No product or ownership-state path is excluded.
+The local-cache nonregular-input fixture changes only the node mode and retains
+the native stat fields, including Windows file attributes and reparse tags; its
+refusal and no-open/no-write assertions remain active on every platform.
 
 Required change-scoped CI runs the Agent Worktrees copy's four cases with
 `-m "not derived_diagnostic_full"`; the existing derived-Python API matrix and
@@ -266,6 +301,17 @@ that barrier only after checking the disconnected queue, rather than assuming
 an HTTP request and a fixed sleep fit inside the real reconnect backoff.
 The blocked-spawn presence guard also waits for actual reader readiness;
 heartbeat progress alone does not prove the independent reader connected.
+
+### Native installer helper guards
+
+The installer helper guards in `tools/test_check_install_contract.py` admit
+native Bash, not a Windows System32/WindowsApps WSL launcher that merely passes
+an echo probe. Windows candidates come from an explicit supported
+`CE_TEST_BASH`, installed Git locations and the native PATH entries. The real
+shipped writer helpers must leave their expected marker when invoked, not just
+print a successful exit code; failed payload hashing must still prevent the
+writer from running. Existing subprocess bounds and missing-shell handling are
+unchanged.
 
 ### Native category view contracts
 
@@ -513,6 +559,140 @@ Minimum-runtime setup uses its explicit interpreter output without replacing
 the guard job's Python 3.12 environment. This catches fractional-timestamp and
 optional TLS client-identity compatibility; it is not live Docker lifecycle
 acceptance.
+PR transport evidence contracts require two fresh URL reads per snapshot and one
+literal, NUL-framed read for all known transport settings, not repeated queries
+for the same captured authority. They exercise duplicate/multiline/valueless
+configuration, later repoints, between-read repoints and explicit malformed/read
+failure refusals. Existing real hook, lease, cross-process publication, recovery
+and rewrite contracts remain intact; no publication proof is cached.
+
+Explicit rewrites derive destination identity and repository from the same
+fresh URL snapshot instead of querying that pair twice. Target selection and
+push-time verification still take their own snapshots; an intervening real
+remote repoint refuses publication without changing tracking or remote heads.
+Replay verification reads pinned commit trees in one fresh native `log --stdin`
+batch per decision, with exact ordered object IDs and newline framing. Real
+merge-tree reconstruction and raw author/message comparisons remain per-commit.
+Native SHA-1/SHA-256 contracts retain replacement-ref and foreign-context
+isolation, ignore notes/signature/styling annotations, retain subsequent fresh
+reads, malformed-result refusal and the existing
+30-second binary-probe timeout. No tree or destination evidence crosses a
+decision boundary.
+Within one replay verification, patch-ID generation and tree reconstruction
+share the freshly read parent rows for the same two pinned ranges. Every later
+verification reads both ranges again. Raw author/message reads, ancestry checks
+and merge-tree reconstruction remain unchanged; no publication proof is reused.
+
+Committed-config resolution proves all candidate paths absent with one fresh,
+literal Git tree probe. When any candidate may exist, it retains the original
+ordered blob reads, first-match priority, ref hopping and YAML handling; lower
+priority blobs are not eagerly read. Probe unavailability warns and falls back
+within the existing shared 30-second and per-probe 15-second bounds.
+The protected-branch hook reads that configuration once per guard decision,
+including an empty result, and shares it only with that decision's default-
+branch fallback. Contracts retain machine-local/drop-in precedence and prove
+that later committed changes are read freshly, independently of a dirty anchor.
+
+Recovery commit-object resolution uses one fresh native `cat-file` batch per
+decision, with NUL-framed input and exact commit-type/object-ID validation.
+Retained local, published and lineage refs are created by one atomic native
+`update-ref` transaction; a collision creates none of the remaining refs.
+Contracts exercise later ref movement, inherited foreign Git context, missing
+and non-commit objects, malformed batch output, and native SHA-1/SHA-256 repos.
+No recovery authority or object proof is reused across decisions.
+The imperfect-evidence encoding tripwire injects its failure at that actual
+NUL-input batch boundary and requires the probe to run. It does not patch the
+retired per-ref resolution path or waive the real rewrite-consent assertions.
+
+Fleet-manager's installed-client and authenticated-staging contracts share one
+session-local, genuinely built wheel. Each consumer still installs into its own
+target and exercises the real installed package; fixture teardown checks that
+the shared artifact remains byte-identical. This removes duplicated build setup,
+not installation, removal, authentication or offline assertions.
+Retirement tests copy independently owned SQLite files from one genuinely
+admitted and committed active-allocation input. Constructors still validate each
+copy; retirement, rollback, upgrades, fencing and actual process races run per
+case. A separate two-copy contract proves that retiring one allocation cannot
+change the other copy or the byte-identical seed.
+
+Temporary-storage probes use cached directory-entry metadata without following
+symbolic links. This avoids repeated filesystem queries competing with the
+suite on Windows; accounting limits and probe frequency are unchanged.
+Windows overlaps directory enumeration with two joined metadata-reader threads
+and at most two bounded directory batches in flight. These are not pytest
+workers. Every probe still enumerates current files, without retaining stale
+sizes or skipping growth; POSIX keeps serial enumeration.
+
+After each contained process tree has been reaped, one owned cleanup thread
+removes that group's temporary directory while the next group runs. The runner
+waits for all cleanup before returning and includes final sandbox cleanup in
+the aggregate budget. An exited process cannot hide an already-exceeded
+sub-suite deadline. The final status reports elapsed time including cleanup.
+The short `t/g<index>` basetemp names are preserved for Windows path limits.
+Windows teardown explicitly terminates the owned Job Object and waits until
+its full active-process count is zero before closing the handle. POSIX teardown
+keeps the controller alive after its command reports status through a private
+pipe, revalidates its owned process-group/session identity before each signal,
+and verifies no live
+group members remain after termination. Zombie processes still count against
+the process-slot budget; only teardown's file-holding membership excludes them.
+The command does not inherit the controller's reporting descriptor or its
+environment variable. This also supports macOS Python versions without
+`os.waitid`; a change-scoped native macOS lane exercises the runner on Python
+3.12. The immutable promotion snapshot's aggregate also requires that lane to
+succeed; a skipped, failed or cancelled macOS result cannot be hidden by green
+results from the other required jobs. If reaping
+cannot be proved, the runner fails and retains the named sandbox rather than
+deleting files beneath a potentially live descendant.
+
+Pre-push still runs every declared guard. Candidate discovery prunes only
+each guard's existing exclusions rather than repeatedly traversing them.
+Identical Python source is analyzed once per headless-guard invocation, while
+every path's diagnostics and allowances are still evaluated independently.
+
+PR record-merge tests use real isolated YAML records rather than creating,
+publishing, and moving Git branches unrelated to their assertions. The real
+fork-publication and locked push-identity tests retain independent Git remotes.
+The squash-landing scenario also checks probe ref immutability against its
+already-built topology instead of rebuilding the same commits in another test.
+Provider marker-policy branches run the real persisted auto-open boundary
+without rebuilding Git publication. Separate initial-create and implicit-default
+tests still exercise the full Git-to-provider wiring and policy preflight.
+Legacy fork-rerun cases copy an immutable published topology with an independent
+fork object store, a pruned origin feature ref, and an unpushed feedback commit.
+Real rerun, repoint, locked identity and concurrent-remote behavior still execute
+per case; setup-only fork movement and feedback commits are built once.
+Recovery cases also copy genuinely published history with setup-only upstream
+advancement built once per run; legacy publication remains fresh. Publication
+authority tests use per-case authority profiles and retain real child probes.
+Partial-publication refusal cases copy one genuinely lost-acknowledgement,
+rebased input, while the recovery success case still constructs that entire
+pipeline per case. Provider observations, actual concurrent pushes and seed
+immutability remain asserted.
+Normal Windows rotation keeps unbuffered group/progress, failure details and
+the slowest thirty per-test durations without emitting a line for every case.
+The explicit diagnostic profile retains verbose case-by-case output and all
+durations; neither mode changes the selected test portfolio.
+An explicit GitHub runner-debug rerun also enables the existing copied
+pane-wrapper trace, without changing the 15-second launch bound or runner
+budgets. Traced reruns are diagnostic evidence, never normal performance
+acceptance; ordinary launches still copy the wrapper byte-for-byte.
+The captured native pane test launches PowerShell in its own hidden console,
+not the pytest worker's shared console. It still executes the actual launcher
+and wrapper, with the same receipt, argv and 15-second assertions.
+Native Worktree Manager regressions additionally query the wrapper's actual
+Job Object through an independently declared Windows ABI, refuse C# compilation,
+and prove that terminating the real wrapper terminates its sleeping child.
+Pane ownership uses direct .NET P/Invoke bindings rather than launch-time
+`Add-Type` compilation; the kill-on-close lifetime contract is unchanged.
+Roster-cache stale-discovery tests distinguish stale and fresh report identities
+and await the abandoned task's actual completion instead of assuming one fresh
+retry or sleeping for its callback. Reader-retention contracts cover repeated
+cancellation on Python 3.10, 3.11 and 3.12; provider execution stays in the holder
+task rather than an independently live timeout-wrapper task.
+Bridge-contract availability caches only positive, full immutable commit IDs
+within the current repository/invocation; missing evidence and mutable refs
+remain rechecked so fetch recovery cannot be hidden by a negative cache.
 
 On Windows, contained runs also set the installer test-mode contract
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`. Conforming installers virtualize
@@ -544,6 +724,17 @@ payload rather than retaining development paths that escape its root.
 Direct policy API callers attest the fixture creator's fixed repository root,
 not a root derived from the requested package argument. Keep admission active:
 do not mock ownership discovery or widen trust to make a fixture pass.
+
+Recovery fixtures materialize and guard an immutable runtime-only payload once,
+then physically copy it for each installer. Selected incomplete generations
+must be refused and preserved; unselected incomplete generations still exercise
+actual cold rebuilding on uv-only hosts.
+Native checkout-audit fixtures invoke the generated login-shell argv directly
+instead of passing POSIX quoting through Windows CMD. They retain actual Git
+traversal, corrupt stores and linked-worktree checks; odd names use spaces on
+Windows and literal backslashes on POSIX. Mention-guard hook fixtures use the
+running interpreter and preserve executable discovery, with quoted portable
+file arguments for actual JSON/body scanning.
 
 The Codespaces module-launch matrix is an opt-in T3 contract:
 `python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.
@@ -841,6 +1032,122 @@ moving tests between files didn't silently drop or duplicate a contract's
 coverage. When splitting an existing oversized test module, assign one
 contract per resulting file as you go; retrofitting the marker onto
 already-small, single-contract files is not required.
+
+The PR-workflow contracts in `agent-worktrees` are separated into create,
+fork, refspec, attribution, publication, push, finalize, tracking, claim,
+status, CLI, and helper modules. Their shared repository fixture builds its
+Git topology once per contained plugin run and gives each test independent copied
+object stores, refs, indexes, remotes, and repaired worktree links. The
+base, published, fork, rebased and recovered input seeds live under that run's sandbox,
+outside group basetemps, so successive groups and both workers reuse them.
+A required cross-process sidecar lock serializes real construction; readiness
+is published only after success. Interrupted construction fails closed.
+Direct, uncontained pytest sessions retain separate session-local seeds.
+The runner still accounts for cache storage and removes it at final cleanup;
+real process-exclusion and Git-link/ref-isolation regressions cover this reuse.
+The finalize landing/precondition families likewise use isolated copies rather
+than recreating the same committed topology for each test. Tests still run
+the real Git behavior under test; no mutable repository is shared.
+Landing checks reuse genuinely merged and hand-made PR inputs under the same
+run-local construction lock. All three seeds are checked for independent
+object stores, unchanged sibling refs and unchanged seed bytes after real pushes.
+The hand-made PR report and actual finalization are separate cases against that
+same input; the Git-only finalization fixture declares its absent mux and
+background processes explicitly instead of reaching the host's live services.
+Other Git-only finalization modules also declare the absence of a mux, without
+replacing actual process termination or any teardown-race assertions.
+Unused Git template files and unused commit-ID queries are omitted from these
+input constructors; every commit and hash actually needed by a contract remains
+real. Resource-producer
+finalization copies only its immutable Git topology; records, reservations and
+allocation fences are recreated per case, and the real producer race is unchanged.
+Finalization's changed-file fallback uses the classifier's bounded, literal,
+NUL-delimited object helpers, including deletions and file/directory replacements.
+Unreadable object evidence refuses landing. A fresh zero extra-commit count needs
+no creation-point history; positive counts still validate the historical published
+creation point, and every pre-teardown recheck still obtains fresh Git evidence.
+Provider-live status and comment-thread tests use persisted records rather than
+unrelated Git setup; real pushed-head, lock and identity cases still use Git.
+Lease CLI disposition checks share short real acquisition/renewal/inspection
+flows without repeating the same acquisition, retaining every distinct assertion.
+Lease-store preview/application/idempotence share one real history; races and
+compare-and-swap remain independently exercised. Credential configuration
+fixtures retain actual Git configuration but omit unrelated commits; actual
+clone, synchronization and classification tests still construct real histories.
+Lease compaction cases copy independent bare remotes from a genuinely acquired,
+renewed and released history instead of repeating that setup lifecycle. Their
+actual compaction, preview, kind filter and concurrent reacquisition remain real;
+compaction also verifies that the immutable seed ref does not change.
+Post-publication contracts also copy a real, already-published seed and its
+tracking record, relocating both worktree and local-repository identity.
+Creation rerun contracts use that seed too; first-publication, required-body
+and title-normalization contracts still construct their own publication.
+Snapshot-scheme replay and legacy checked-out-head cases use that published
+seed too: only initial publication is shared; rebase, lineage proofs, lease
+publication and real hook rejection still run independently in each copy.
+Fresh-publication tests still execute the complete create/push path.
+Operator-recovery contracts copy a separately prepared, published and rebased
+repository. Confirmation, exact-lease transport, races, hooks, audit failures,
+and CLI behavior still execute independently in each copy; the successful
+recovery also checks that the seed's tracking bytes and remote refs stay intact.
+Provider-specific preview and frozen-attribution cases retain fresh setup.
+Advanced-head and imperfect-evidence contracts use those independently copied
+recovered inputs too. Backed-sync settlement inputs, with and without a saved
+base, are constructed through actual synchronization once per contained run.
+Each case gets independent checkpoint bytes, tracking, refs, indexes, remotes
+and worktree links. Every preview, proof revalidation, confirmation, retention,
+settlement, rewrite and publication race remains an actual per-case operation.
+Native two-copy contracts mutate evidence, commits, tracking and the remote
+publication in one copy and require the other copy and complete seed bytes to
+remain unchanged.
+Post-rebase ownership and legacy contracts for both snapshot and refspec copy
+independent, genuinely published and rebased state, while public rebase,
+creation-identity and moved-destination scenarios retain real operations.
+The public rewrite CLI and revised-legacy authority cases also use prepared
+rebased inputs; their actual squash, rewrite, live-provider authority and
+generation assertions remain per-case. Fresh publication/ownership-refresh
+and synchronization families continue exercising first creation and rebase.
+Real configured-project rewriting verifies the seed's tracking and refs stay
+unchanged. Renderer fixtures copy source scripts, not host-generated Python
+bytecode caches.
+Native worktree-owner launch tests exercise an installed peer under a
+service-like PATH and verify that the windowless Windows trampoline forwards
+stdin, stdout, stderr and the peer's exit status. Launch-policy tests isolate
+their profile alongside their registration; outside-profile refusal checks
+still exercise the production fence.
+Agent Index cell-isolation cleanup reuses each live service's observed control
+identity, skips already-exited owned children and verifies zero exit within the
+existing graceful-stop bound. A failed control request is retained in a failed
+stop's diagnostic instead of being silently discarded.
+Terminal-conclusion tests likewise copy a Git-only seed while recreating
+tracking and session lifecycle state for each case; disposable cleanup is
+verified not to modify either the seed or an independent sibling copy.
+
+Legacy handoff graph tests bypass committed-config discovery only for their
+three fixture-owned, non-repository anchors. Project YAML and topology are
+still loaded afresh, including post-offer authority changes. Other anchors
+retain the real committed-config resolver; lease acquisition, transfer and
+inspection still use the actual Git store.
+Context-resolution cases copy an initialized anchor/worktree seed and repair
+its administrative links with Git, but recreate registration and tracking per
+case. A native mutation contract verifies independent refs, repository config
+and worktree bytes in a sibling copy, and checks the entire seed stays intact.
+
+The Windows rotation runs `agent-worktrees` with two `pytest-xdist` workers
+and `--dist=worksteal`, balancing individual cases without adding workers. Other
+plugins and ordinary local runs remain serial. Both workers and all their
+descendants share the sub-suite's existing containment job and its unchanged
+time, process, memory, and temporary-storage limits. Worker-local pytest
+temporary roots and immutable seeds preserve repository isolation.
+The rotation resolves Git for Windows' packaged native executable from its
+execution path and verifies it matches the installed Git version before
+preferring its binary directory in the test process's PATH.
+The real pane-prompt regression copies the shipped PowerShell wrapper
+byte-for-byte in normal mode. Statement tracing is enabled only by the existing
+explicit diagnostic duration-profile mode; a focused regression checks both
+paths without changing the normal fifteen-second launch bound.
+This avoids the extra launcher process without altering persistent settings,
+Git configuration, hooks, shell lookup priority, or repository behavior.
 
 ## Optional devcontainer-based isolation (Linux)
 

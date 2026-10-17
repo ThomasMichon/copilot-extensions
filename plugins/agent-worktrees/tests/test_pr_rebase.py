@@ -16,6 +16,7 @@ import pytest
 from agent_worktrees import config as cfg
 from agent_worktrees import finalize, git_collab, git_ops, pr_ops, pr_publish, tracking
 from agent_worktrees import pr_rebase
+from conftest import _copy_pr_repo, _seed_directory
 
 # Each case exercises multiple real publications and bounded Git graph probes.
 pytestmark = pytest.mark.timeout(180)
@@ -33,12 +34,26 @@ def _record(wid):
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
+@pytest.fixture
+def pr_repo(request):
+    snapshot = (
+        getattr(request.node, "callspec", None)
+        and request.node.callspec.params.get("scheme") == "snapshot"
+    ) or request.node.originalname == "test_owned_pr_rebase_publishes_legacy_checked_out_private_head"
+    if snapshot:
+        return request.getfixturevalue("published_pr_repo")
+    return request.getfixturevalue("published_refspec_pr_repo")
+
+
 def _prepare(pr_repo, scheme="refspec", branch=None):
     config, wid, path, remote = pr_repo
     repo = dataclasses.replace(
         config.default_repo, pr=dataclasses.replace(config.default_repo.pr, head_scheme=scheme),
     )
     config = dataclasses.replace(config, repos={"ext": repo})
+    published = _record(wid).pr
+    if branch is None and published is not None:
+        return config, wid, path, remote, published.branch, published.head_sha
     first = pr_ops.create_pr(wid, config, title="Own change", branch=branch)
     assert first["success"], first
     return config, wid, path, remote, first["branch"], first["head_sha"]
@@ -87,6 +102,31 @@ def _partial_success_then_rebase(pr_repo, monkeypatch):
     return config, wid, path, remote, branch, old, accepted
 
 
+@pytest.fixture(scope="session")
+def _partial_success_seed(tmp_path_factory, _published_refspec_pr_seed):
+    with _seed_directory(tmp_path_factory, "rebase-partial-success") as (seed, build):
+        if build:
+            with pytest.MonkeyPatch.context() as patch:
+                *_, branch, old, accepted = _partial_success_then_rebase(
+                    _copy_pr_repo(_published_refspec_pr_seed, seed, patch), patch,
+                )
+                (seed / "partial-success-input.json").write_text(json.dumps({
+                    "branch": branch, "old": old, "accepted": accepted,
+                }), encoding="utf-8")
+        return seed
+
+
+@pytest.fixture
+def partial_success_repo(tmp_path, monkeypatch, _partial_success_seed):
+    config, wid, path, remote = _copy_pr_repo(_partial_success_seed, tmp_path, monkeypatch)
+    config = dataclasses.replace(config, repos={"ext": dataclasses.replace(
+        config.default_repo, pr=dataclasses.replace(config.default_repo.pr, head_scheme="refspec"),
+    )})
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    inputs = json.loads((tmp_path / "partial-success-input.json").read_text(encoding="utf-8"))
+    return config, wid, path, remote, inputs["branch"], inputs["old"], inputs["accepted"]
+
+
 def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_repo, monkeypatch):
     config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
     monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr, **kwargs: accepted)
@@ -104,8 +144,12 @@ def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_
 
 
 @pytest.mark.parametrize("provider", ["unavailable", "different", "foreign", "racing"])
-def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(pr_repo, monkeypatch, provider):
-    config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
+def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(
+    partial_success_repo, monkeypatch, provider, _partial_success_seed,
+):
+    config, wid, path, remote, branch, old, accepted = partial_success_repo
+    seed_tracking = (_partial_success_seed / "tracking" / f"{wid}.yaml").read_bytes()
+    seed_refs = _git("--git-dir", str(_partial_success_seed / "remote.git"), "show-ref", cwd=path)
     remote_head = accepted
     if provider in ("foreign", "racing"):
         other = remote.parent / "concurrent"
@@ -120,15 +164,20 @@ def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(
         if provider == "foreign":
             _git("push", "origin", branch, cwd=other)
     observed = "" if provider == "unavailable" else "0" * 40 if provider == "different" else remote_head
+    observations = []
     def provider_head(repo, pr, **kwargs):
+        observations.append(observed)
         if provider == "racing":
             _git("push", "origin", branch, cwd=other)
             return accepted
         return observed
     monkeypatch.setattr(pr_publish, "_provider_head", provider_head)
     assert not finalize.push_changes(wid, config)
+    assert bool(observations) is (provider != "foreign")
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == remote_head
     assert _record(wid).pr.head_sha == old
+    assert (_partial_success_seed / "tracking" / f"{wid}.yaml").read_bytes() == seed_tracking
+    assert _git("--git-dir", str(_partial_success_seed / "remote.git"), "show-ref", cwd=path) == seed_refs
 
 
 @pytest.mark.parametrize("scheme,command,flow", [
@@ -155,12 +204,20 @@ def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, monkeypatch, sch
     assert not git_ops.is_commit_ancestor(old, tip, cwd=path)
     raw_url = "".join(["https://", "developer:", "synthetic-password", "@example.com/repo.git"])
     original_git = pr_rebase._git
+    original_rows = pr_rebase._commit_rows
+    observed_rows = []
 
     def url_with_credentials(*args, cwd):
         if args == ("remote", "get-url", "--push", "origin"):
             return raw_url
         return original_git(*args, cwd=cwd)
 
+    def read_rows(base, head, cwd):
+        rows = original_rows(base, head, cwd)
+        observed_rows.append(((base, head), rows))
+        return rows
+
+    monkeypatch.setattr(pr_rebase, "_commit_rows", read_rows)
     with monkeypatch.context() as patch:
         patch.setattr(pr_rebase, "_git", url_with_credentials)
         record = _record(wid)
@@ -169,12 +226,20 @@ def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, monkeypatch, sch
             old, cwd=str(path),
         )
         assert proof is not None
+        assert len(observed_rows) == 2
         pr_rebase._save(proof, str(path))
         metadata = Path(_git("rev-parse", "--absolute-git-dir", cwd=path))
         serialized = (metadata / "agent-worktrees-pr-rebase.json").read_text()
         assert raw_url not in serialized and "synthetic-password" not in serialized
         assert json.loads(serialized)["remote_fingerprint"] == hashlib.sha256(raw_url.encode()).hexdigest()
     assert _publish(command, config, wid)
+    if flow == "manual":
+        assert len(observed_rows) == 4
+        assert observed_rows[:2] == observed_rows[2:]
+        assert all(
+            first[1] is not second[1]
+            for first, second in zip(observed_rows[:2], observed_rows[2:])
+        )
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
     record = _record(wid)
     assert record.pr.head_sha == tip
@@ -409,19 +474,27 @@ def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, comma
 @pytest.mark.guard
 @pytest.mark.parametrize("changed_message", [" Message\n", "Message\n\n"])
 def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypatch, changed_message):
+    old, new, onto = "a" * 40, "b" * 40, "c" * 40
+    messages = []
+
     def fake_git(*args, cwd, check, isolated_repository):
         assert isolated_repository
         if args[-1] == "base..original":
-            stdout = "old base\n"
-        elif args[-1] == "onto..finished":
-            stdout = "new onto\n"
+            stdout = f"{old} base\n"
+        elif args[-1] == f"{onto}..finished":
+            stdout = f"{new} {onto}\n"
         else:
             stdout = "current-tree\n"
         return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
     def fake_run(args, **kwargs):
         assert not kwargs.get("text")
-        message = "Message\n" if args[-1] == "old" else changed_message
+        if "log" in args:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=f"{onto} {'1' * 40}\n{new} {'2' * 40}\n".encode(), stderr=b"",
+            )
+        messages.append(args[-1])
+        message = "Message\n" if args[-1] == old else changed_message
         stdout = b"Author\x00author@example.com\x002026-01-01T00:00:00Z\x00" + message.encode()
         return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr=b"")
 
@@ -430,9 +503,10 @@ def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypa
     monkeypatch.setattr(pr_rebase, "_ancestor", lambda *args: False)
     monkeypatch.setattr(pr_rebase, "_merge_tree", lambda *a: ("replay-tree", True))
     assert pr_rebase._conflict_lineage(
-        "base", "original", "onto", "finished", ["old-patch"], ["new-patch"],
-        [("new", "rebase (continue): Message")], "unused",
+        "base", "original", onto, "finished", ["old-patch"], ["new-patch"],
+        [(new, "rebase (continue): Message")], "unused",
     ) is None
+    assert messages == [old, new]
 
 
 @pytest.mark.guard

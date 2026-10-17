@@ -218,6 +218,10 @@ reaping. Sampling is provider-local, off-loop, at most once per second, with a
 on later reads, independently of command completion or caller cancellation.
 The roster cache retains those exact futures across provider replacement and
 bounded shutdown.
+Namespace resolver deadlines run in the holder task itself, using the standard
+timeout context on Python 3.11+ and its backport on Python 3.10. Repeated
+cancellation cannot release ownership while a cancellation-resistant provider
+is still running in a separate timeout wrapper task.
 
 The existing configured telemetry sink receives `reader_cpu_observation`
 events: plugin, `namespace-list` role, bounded namespace key, root PID/creation

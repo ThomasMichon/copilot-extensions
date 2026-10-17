@@ -1487,6 +1487,12 @@ this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
 
+PowerShell installers probe the Function provider for the optional loaded
+`Stop-RuntimeConstruction` cleanup function. Cleanup must not use command
+discovery, which can search or autoload unrelated modules on a cold stamp path.
+Loaded construction cleanup still runs, and its failure must not prevent
+release of the outer install lock.
+
 The attached Bash construction adapter owns `INT` and `TERM` while a candidate
 is held. Both terminate through its `EXIT` settlement, which finishes candidate
 cleanup before chaining the installer's previous exit handler and releasing
@@ -2543,7 +2549,10 @@ Editable source retention supports static `setuptools.build_meta` projects
 using the repository's `src` layout. Retained metadata selects compatibility
 editable mode and references the original live `src` through a same-volume
 relative package directory; installed imports survive snapshot cleanup and
-observe subsequent source edits. On Windows the private snapshot is a sibling
+observe subsequent source edits. Generated setuptools `egg-info` stays in the
+retained project, not the original live `src`; existing `setup.cfg` sections
+and options are preserved except for that retained `egg_info.egg_base`.
+On Windows the private snapshot is a sibling
 of a shallowest admitted project or build-resource root on the editable source
 volume, outside every copied input. A volume-root input with no outside
 temporary location fails explicitly. This avoids long parent-relative paths from an unrelated
@@ -2648,6 +2657,11 @@ Referenced Python support assets are materialized with the engine. The same
 canonical dependency-policy bytes also fan out through
 `tools/sync-versioned-runtime.py` to runtime plugins that have not adopted the
 shared shell engine; those installers must not invent a second policy.
+After changing either canonical dependency-policy component, run both
+`python tools/sync-installer-engine.py` and
+`python tools/sync-versioned-runtime.py`, then check both with `--check`.
+Canonical-reference wrappers still carry shipped support copies; release
+materialization refuses a stale copy rather than overwriting conflicting bytes.
 
 `agent-worktrees`' packaged non-editable launch fallback follows the same
 contract: the authoritative launch-wrapper scripts live under

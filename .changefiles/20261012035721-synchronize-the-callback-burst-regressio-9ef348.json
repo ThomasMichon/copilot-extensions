@@ -1,0 +1,9 @@
+{
+  "comment": "Synchronize the callback burst regression after registration instead of racing its callback hold deadline",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

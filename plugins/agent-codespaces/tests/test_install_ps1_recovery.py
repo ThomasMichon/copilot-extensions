@@ -185,15 +185,17 @@ def _slot(home: Path) -> Path:
     return home / ".agent-codespaces" / "versions" / VERSION
 
 
-def _copy_plugin_tree(dst: Path) -> None:
+def _copy_plugin_tree(dst: Path, source: Path = PLUGIN) -> None:
     ignored = shutil.ignore_patterns(
-        "__pycache__", ".pytest_cache", ".ruff_cache", "*.egg-info",
+        "__pycache__", ".pytest_cache", ".ruff_cache", "*.egg-info", "tests",
     )
     shutil.copytree(
-        PLUGIN,
+        source,
         dst,
         ignore=ignored,
     )
+    if source != PLUGIN:
+        return
     repo = PLUGIN.parents[1]
     sys.path.insert(0, str(repo / "tools"))
     try:
@@ -207,7 +209,24 @@ def _copy_plugin_tree(dst: Path) -> None:
         source_consumer_dir=PLUGIN, dest_consumer_dir=dst, canonical_root=repo,
     )
     assert not any(line.startswith("SKIP") for line in logs), logs
+    # Installer staging and snapshots need runtime payloads, not nested test suites.
+    for tests in sorted((dst / "libs").rglob("tests"), reverse=True):
+        if tests.is_dir():
+            shutil.rmtree(tests)
     guard_installer_payload(dst)
+
+
+@pytest.fixture(scope="module")
+def _payload_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    template = tmp_path_factory.mktemp("recovery-payload") / "source"
+    _copy_plugin_tree(template)
+    return template
+
+
+@pytest.fixture(autouse=True)
+def _prepared_payload(tmp_path: Path, _payload_template: Path) -> None:
+    # Share only immutable materialization; every installer gets a private copy.
+    _copy_plugin_tree(tmp_path / "source", _payload_template)
 
 
 def test_uv_only_clean_host_installs_without_precreating_slot(tmp_path: Path) -> None:
@@ -228,7 +247,8 @@ def test_uv_only_clean_host_installs_without_precreating_slot(tmp_path: Path) ->
     assert (_slot(home) / ".install-complete.json").is_file()
 
 
-def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:
+@pytest.mark.parametrize("selected", [False, True])
+def test_uv_only_host_handles_malformed_slot(tmp_path: Path, selected: bool) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
@@ -237,11 +257,14 @@ def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:
     (slot / "Scripts" / "python.exe").write_text("malformed", encoding="ascii")
     (slot / "partial.txt").write_text("discard", encoding="ascii")
     root = slot.parents[1]
-    (root / "current-version").write_text(VERSION, encoding="ascii")
-    before = {
-        path: path.read_bytes()
-        for path in (slot / "Scripts" / "python.exe", slot / "partial.txt", root / "current-version")
-    }
+    if selected:
+        (root / "current-version").write_text(VERSION, encoding="ascii")
+    before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    if selected:
+        before[root / "current-version"] = (root / "current-version").read_bytes()
+
+    assert not (slot / "pyvenv.cfg").exists()
+    assert not (slot / ".install-complete.json").exists()
 
     result = _run(
         INSTALL,
@@ -252,10 +275,24 @@ def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:
         uv_only=True,
     )
 
-    assert result.returncode != 0, result.stdout
-    assert "requires distinct-generation health repair" in result.stdout
-    assert all(path.read_bytes() == content for path, content in before.items())
-    assert not (slot / ".install-complete.json").exists()
+    if selected:
+        assert result.returncode != 0, result.stdout
+        assert "requires distinct-generation health repair" in result.stdout
+        assert all(path.read_bytes() == content for path, content in before.items())
+        assert (slot / "Scripts" / "python.exe").read_text(encoding="ascii") == "malformed"
+        assert (slot / "partial.txt").read_text(encoding="ascii") == "discard"
+        assert (root / "current-version").read_text(encoding="ascii") == VERSION
+        assert not (slot / "pyvenv.cfg").exists()
+        assert not (slot / ".install-complete.json").exists()
+        calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+        assert not any(call[0] == "venv" or call[:2] == ["pip", "install"] for call in calls)
+        return
+
+    assert result.returncode == 0, result.stdout
+    assert not (slot / "partial.txt").exists()
+    assert (slot / "pyvenv.cfg").is_file()
+    assert (slot / ".install-complete.json").is_file()
+    assert (root / "current-version").read_text(encoding="ascii").strip() == VERSION
 
 
 def _seed_healthy_slot(home: Path) -> Path:
@@ -296,7 +333,8 @@ def _seed_healthy_slot(home: Path) -> Path:
     return slot
 
 
-def test_install_refuses_selected_slot_with_incomplete_metadata(tmp_path: Path) -> None:
+@pytest.mark.parametrize("selected", [False, True])
+def test_install_handles_slot_with_incomplete_metadata(tmp_path: Path, selected: bool) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
@@ -305,23 +343,36 @@ def test_install_refuses_selected_slot_with_incomplete_metadata(tmp_path: Path) 
     (slot / "Scripts" / "python.exe").write_text("not a Python runtime", encoding="ascii")
     (slot / "partial.txt").write_text("corpse", encoding="ascii")
     runtime = home / ".agent-codespaces"
-    (runtime / "current-version").write_text(VERSION, encoding="ascii")
-    (runtime / "last-known-good").write_text(VERSION, encoding="ascii")
-    before = {
-        path: path.read_bytes()
-        for path in (
-            slot / "Scripts" / "python.exe", slot / "partial.txt",
-            runtime / "current-version", runtime / "last-known-good",
-        )
-    }
+    if selected:
+        (runtime / "current-version").write_text(VERSION, encoding="ascii")
+        (runtime / "last-known-good").write_text(VERSION, encoding="ascii")
+    before = {path: path.read_bytes() for path in runtime.rglob("*") if path.is_file()}
+
+    assert not (slot / "pyvenv.cfg").exists()
+    assert not (slot / ".install-complete.json").exists()
 
     result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode="success")
 
-    assert result.returncode != 0, result.stdout
-    assert "requires distinct-generation health repair" in result.stdout
-    assert all(path.read_bytes() == content for path, content in before.items())
-    assert not (slot / "pyvenv.cfg").exists()
-    assert not (slot / ".install-complete.json").exists()
+    if selected:
+        assert result.returncode != 0, result.stdout
+        assert "requires distinct-generation health repair" in result.stdout
+        assert all(path.read_bytes() == content for path, content in before.items())
+        assert (slot / "Scripts" / "python.exe").read_text(encoding="ascii") == "not a Python runtime"
+        assert (slot / "partial.txt").read_text(encoding="ascii") == "corpse"
+        for name in ("current-version", "last-known-good"):
+            assert (runtime / name).read_text(encoding="ascii") == VERSION
+        assert not (slot / "pyvenv.cfg").exists()
+        assert not (slot / ".install-complete.json").exists()
+        calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+        assert not any(call[0] == "venv" or call[:2] == ["pip", "install"] for call in calls)
+        return
+
+    assert result.returncode == 0, result.stdout
+    assert not (slot / "partial.txt").exists()
+    assert (slot / "pyvenv.cfg").is_file()
+    marker = json.loads((slot / ".install-complete.json").read_text(encoding="utf-8"))
+    assert marker["version"] == VERSION
+    assert (runtime / "current-version").read_text(encoding="utf-8").strip() == VERSION
 
 
 def test_install_rebuilds_slot_with_malformed_completion_state(tmp_path: Path) -> None:
@@ -413,6 +464,7 @@ def test_first_use_propagates_provision_failure(tmp_path: Path) -> None:
 
 def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(
     tmp_path: Path,
+    _payload_template: Path,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -424,7 +476,7 @@ def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(
         / "example-marketplace"
         / "agent-codespaces"
     )
-    _copy_plugin_tree(installed)
+    _copy_plugin_tree(installed, _payload_template)
     stamped = _run(installed / "scripts" / "install.ps1", "stamp", home=home, fake_bin=fake_bin, mode="success")
     assert stamped.returncode == 0, stamped.stdout
 
@@ -445,6 +497,7 @@ def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(
 
 def test_marketplace_staged_uninstall_waits_without_holding_runtime_cwd(
     tmp_path: Path,
+    _payload_template: Path,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -456,7 +509,7 @@ def test_marketplace_staged_uninstall_waits_without_holding_runtime_cwd(
         / "example-marketplace"
         / "agent-codespaces"
     )
-    _copy_plugin_tree(installed)
+    _copy_plugin_tree(installed, _payload_template)
     env = _environment(home, fake_bin, fake_bin.parent / "fake_uv.py", "sleep-pip")
     install_process = subprocess.Popen(
         [PWSH, "-NoProfile", "-File", str(installed / "scripts" / "install.ps1"), "install"],
