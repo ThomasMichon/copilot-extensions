@@ -285,6 +285,28 @@ def test_path_key_retains_native_case_semantics(history):
     assert same is (os.name == "nt")
 
 
+def test_history_physical_fence_does_not_follow_both_final_components(history, capsys, monkeypatch):
+    root, _, record_path, data, _, _ = history
+    checkout = Path(data["worktree_path"])
+    checkout.parent.mkdir(parents=True)
+    target = root / "foreign-removed"
+    target.mkdir()
+    try:
+        checkout.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"contained host cannot create directory link: {exc}")
+    target.rmdir()
+    is_symlink = Path.is_symlink
+    # Model a directory redirect whose classification is not a symbolic link.
+    monkeypatch.setattr(Path, "is_symlink", lambda path: False if path == checkout else is_symlink(path))
+    before = record_path.read_bytes()
+    entries = sorted(str(path.relative_to(root)) for path in root.rglob("*"))
+    code, report = run(capsys, "--fix")
+    assert code == 1 and "redirected namespace descendant" in report["error"]
+    assert record_path.read_bytes() == before
+    assert sorted(str(path.relative_to(root)) for path in root.rglob("*")) == entries
+
+
 def test_busy_selected_record_refuses_before_receipt(history, capsys):
     _, _, path, _, _, _ = history
     ready, release = threading.Event(), threading.Event()

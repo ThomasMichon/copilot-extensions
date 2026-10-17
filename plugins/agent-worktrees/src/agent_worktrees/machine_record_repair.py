@@ -102,14 +102,21 @@ def _prove_history(data: dict, config) -> None:
         raise ValueError("receiving project does not match its registered native repository")
     checkout = Path(data.get("worktree_path") or "")
     root = Path(config.default_repo.worktree_root)
-    if (
-        not checkout.is_absolute() or not root.is_absolute()
-        or checkout.is_symlink() or checkout.exists()
-        or (root.exists() and not root.is_dir())
-        or os.path.normcase(str(checkout)) != os.path.normcase(str(root / data["worktree_id"]))
-        or _path_key(checkout) != os.path.normcase(str(root.resolve() / data["worktree_id"]))
-    ):
-        raise ValueError("removed checkout lacks exact registered worktree-namespace provenance")
+    if not checkout.is_absolute() or not root.is_absolute():
+        raise ValueError("removed checkout requires absolute checkout and namespace paths")
+    if checkout.is_symlink():
+        raise ValueError("removed checkout path indirection refused")
+    if checkout.exists():
+        raise ValueError("historical proof requires an absent checkout; inspect its current Git state")
+    if root.exists() and not root.is_dir():
+        raise ValueError("registered worktree namespace is not a directory")
+    expected = root / data["worktree_id"]
+    if os.path.normcase(str(checkout)) != os.path.normcase(str(expected)):
+        raise ValueError("removed checkout is outside the registered worktree namespace")
+    # Do not resolve the expected final component: resolving both sides would
+    # hide a dangling directory redirect at the record ID.
+    if _path_key(checkout) != os.path.normcase(str(root.resolve() / data["worktree_id"])):
+        raise ValueError("removed checkout has a redirected namespace descendant")
     git_ops.git(
         "rev-parse", "--path-format=absolute", "--git-common-dir",
         cwd=anchor, isolated_repository=True, timeout=10,

@@ -46,6 +46,10 @@ JSON `proof` is `existing-linked-git` or `removed-registered-namespace`. A
 misplaced record whose `repo` differs from the selected receiving project still
 refuses. Label repair never relocates, deletes or deduplicates records; targeted
 misplaced-record integrity handling is separately tracked in #7097.
+Historical refusal messages distinguish absolute-path, existence, namespace-root,
+lexical membership and redirected-descendant failures. The physical check
+resolves the expected root but intentionally not its final ID component:
+resolving both full paths would hide a dangling directory redirect.
 
 ## Preserve relationships, do not transfer them
 

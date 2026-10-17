@@ -1530,7 +1530,11 @@ def _yaml_safe_load(raw: str) -> object:
 
 
 def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
-    """Load via the self-invalidating record cache; ``copy_result=False`` is read-only."""
+    """Load using the record cache's ``(mtime_ns, size)`` invalidation.
+
+    Copies carry transient machine CAS evidence, never serialized. A non-copy
+    result is shared/read-only; clone it before making an intentional update.
+    """
     from .pr_publication_state import loaded
     record = record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result)
     if copy_result:
