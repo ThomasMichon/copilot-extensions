@@ -196,8 +196,11 @@ headed CLI and a headless ACP agent executing there. Remote venues receive the
 payloads before launch; local venues may reference already-local payloads.
 The target checkout's `.github/copilot/settings.local.json` declares the local
 marketplace paths and enabled identities without replacing unrelated settings
-or requiring user-global registration. ACP additionally receives the resolved
-`--plugin-dir` arguments its launch contract requires. A copy or registration
+or requiring user-global registration. The operation owns only the reflected
+entries it creates in `extraKnownMarketplaces` and `enabledPlugins`, not those
+maps wholesale. Each launch mode also receives the explicit plugin-directory
+arguments its supported contract requires, including ACP's `--plugin-dir`.
+A copy or registration
 failure is not a successful, plugin-equipped launch. Restricted venues retain
 their explicit no-automatic-projection boundary.
 

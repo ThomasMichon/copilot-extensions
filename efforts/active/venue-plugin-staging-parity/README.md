@@ -45,7 +45,7 @@ CLI and headless ACP sessions should discover equivalent skills.
 local-loopback related-plugin resolution. Their merge does not prove remote
 payload reflection, target-local registration, or headed/headless discovery.
 
-CodeSpace code already resolves and copies local payloads, and passes plugin
+Codespace code already resolves and copies local payloads, and passes plugin
 directories to some launch paths; existing remote-marketplace registration
 instead writes user settings. Bridge owns remote Session Hosts for trusted
 venues. Reconcile those actual paths rather than introducing a second launcher
@@ -62,8 +62,8 @@ abstracted; the requested mechanics and priorities are unchanged):
 
 > Keep driving the effort. When bridging to a repository, its plugins must reach
 > the agent for that repository, whether the session is headed or headless,
-> local or on a CodeSpace. The primary goal is that an agent executing in a
-> CodeSpace or container has those plugins registered. Reflect the plugins into
+> local or on a Codespace. The primary goal is that an agent executing in a
+> Codespace or container has those plugins registered. Reflect the plugins into
 > the container, update the target repository's
 > `.github/copilot/settings.local.json` to point at the plugins' local paths,
 > and then launch the agent. Agent-bridge uses `--plugin-dir` for ACP; determine
@@ -78,7 +78,7 @@ abstracted; the requested mechanics and priorities are unchanged):
 - [ ] Land this proposal and the registration-before-launch vision refinement
   before implementing the new behavior.
 
-### Phase 1 - Trusted CodeSpace and container registration
+### Phase 1 - Trusted Codespace and container registration
 
 - [ ] Trace the actual headed CLI and headless ACP launch owners, including
   bridge-owned remote Session Hosts and provider process boundaries.
@@ -121,6 +121,13 @@ abstracted; the requested mechanics and priorities are unchanged):
 - [ ] Unit contracts cover first preparation, repeat preparation, settings
   preservation, identity mapping, required payload absence, malformed settings,
   and restricted-venue refusal.
+- [ ] Concurrent preparations against one checkout retain both intended
+  registration sets and unrelated settings; an interrupted write leaves the
+  previous valid file usable.
+- [ ] Existing user-level registration and target-local registration of the
+  same identity resolve to the selected target payload without duplicate skill
+  loading. Explicit target-local operator overrides remain authoritative unless
+  this operation explicitly owns that entry.
 - [ ] Shared preparation covers headed CLI and ACP with the same selected
   payload identities; ordering tests prove registration completes before launch.
 - [ ] Synthetic fresh-checkout integration uses the real configuration writer
@@ -128,7 +135,7 @@ abstracted; the requested mechanics and priorities are unchanged):
   and launches an independent consumer rather than mocking past registration.
 - [ ] Trusted container proof: headed and headless agents enumerate the
   expected skills from the reflected payloads.
-- [ ] CodeSpace proof: the same narrow discovery check succeeds for both launch
+- [ ] Codespace proof: the same narrow discovery check succeeds for both launch
   modes, with effective paths/settings and launch version recorded.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
   evidence or explicit tracked transfers.
@@ -141,6 +148,15 @@ Keep selection and launch policy in agent-bridge or its existing shared
 dependency; providers expose substrate operations rather than independent
 registration policies. Reuse the existing local-marketplace parser, payload
 copy exclusions, and supported per-repository settings schema.
+The existing contract uses `extraKnownMarketplaces` for marketplace declarations
+and `enabledPlugins` for `<plugin>@<marketplace>` enablement; its parser is
+`libs/plugin-resolve/src/plugin_resolve/settings.py`. This operation owns only
+the registration entries it creates for its reflected payloads, not those maps
+wholesale, repository-native declarations, or any other top-level setting.
+Repeated preparation must retain those unrelated values and avoid identity
+collisions. CLI may also receive explicit plugin directories when its supported
+launch contract requires them; the settings file is not assumed sufficient
+without a consumer proof.
 
 Agent-recommended implementation safeguards: use an atomic merge under an
 appropriate existing lock for shared settings; use stable owned registration
@@ -154,7 +170,7 @@ or a reason to create a daemon.
 ### 2026-10-16 - Continuation and reprioritization
 
 - Verified the vision and local-loopback PRs are merged.
-- Claimed #5286 for continuation; prioritized trusted CodeSpace/container
+- Claimed #5286 for continuation; prioritized trusted Codespace/container
   registration in both launch modes before remaining static SSH/privileged work.
 - Prepared this public canonical sub-effort; environment-specific adoption
   context remains outside the public repository.
