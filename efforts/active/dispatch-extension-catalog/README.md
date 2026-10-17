@@ -633,3 +633,21 @@ venue limitations explicitly; source merge is not promotion or installed proof.
 - Updated-head review and the full normal aggregate gate remain required.
   No retry, timeout increase, guard widening, installed update or live source
   effect is used to claim completion.
+
+### 2026-10-17 - Filesystem probe failures are layer-scoped
+
+- A further current-head review identified readable fallback loss when the
+  default selector's canonical probe raises PermissionError before audit
+  isolation runs. Audit mode now acquires each candidate independently;
+  a verified existing canonical layer still shadows legacy, while an
+  unavailable canonical layer remains a finding beside readable fallback
+  evidence. Default registrar/execution selection is unchanged.
+- Isolate each layer's directory probe as well as its index reader. Neither
+  an unreadable base nor an unreadable overlay suppresses healthy peer rows.
+  Browsable inert fragments do not establish effective registration precedence.
+- Four fault-injected PermissionError cases retain real healthy filesystem
+  reads, scoped findings and source bytes across configuration ancestors,
+  canonical, legacy and marketplace probes. The coupled contained dispatch
+  selection passed 305 tests with the two POSIX FIFO Windows skips explicit.
+- Current-head review, complete native CI, promotion and authorized installed
+  proof remain separate gates. No service or deployed runtime changed.

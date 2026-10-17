@@ -61,11 +61,11 @@ def surface_entry_present(path: Path) -> bool:
     for entry in (path, *path.parents):
         try:
             entry.lstat()
+            return entry == path or not entry.is_dir()
         except FileNotFoundError:
             continue
         except OSError:
             return True
-        return entry == path or not entry.is_dir()
     return False
 
 
@@ -90,17 +90,20 @@ def layered_repo_surface_dirs(
 ) -> list[Path]:
     root = Path(repo_root).expanduser()
     layers: list[Path] = []
-    base = selected_repo_surface_dir(root, relative)
-    if base.exists():
-        layers.append(base)
     if include_unavailable:
         canonical = canonical_repo_surface_dir(root, relative)
         candidates = [canonical]
-        if not canonical.exists():
+        try:
+            canonical.stat()
+        except OSError:
             candidates.append(legacy_repo_surface_dir(root, relative))
         for candidate in candidates:
-            if candidate not in layers and surface_entry_present(candidate):
+            if surface_entry_present(candidate):
                 layers.append(candidate)
+    else:
+        base = selected_repo_surface_dir(root, relative)
+        if base.exists():
+            layers.append(base)
     overlay = overlay_repo_surface_dir(root, relative, include_unavailable=include_unavailable)
     if overlay is not None:
         layers.append(overlay)

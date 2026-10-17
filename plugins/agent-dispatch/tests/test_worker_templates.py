@@ -258,6 +258,44 @@ def test_user_local_broken_entries_remain_visible_not_optional(monkeypatch, tmp_
         assert target.is_symlink() and not target.exists()
 
 
+@pytest.mark.parametrize("denied,probe", [
+    ("configuration", "all"), ("canonical", "stat"),
+    ("legacy", "all"), ("overlay", "stat"),
+])
+def test_permission_denied_layers_keep_readable_peers(monkeypatch, tmp_path, denied, probe):
+    root = tmp_path / "repo"
+    canonical = root / ".copilot-extensions" / "agent-dispatch" / "templates"
+    legacy = root / ".agent-dispatch" / "templates"
+    overlay = canonical.parent / "marketplaces" / "example-cell" / "templates"
+    healthy = legacy if denied in {"configuration", "canonical"} else overlay if denied == "legacy" else canonical
+    write_index(root, index=healthy / "index.json")
+    target = {"configuration": canonical.parent, "canonical": canonical, "legacy": legacy, "overlay": overlay}[denied]
+    if probe == "stat":
+        target.mkdir(parents=True, exist_ok=True)
+    original_stat = Path.stat
+
+    def inaccessible(path, *args, **kwargs):
+        if path.is_relative_to(target) and (probe == "all" or kwargs.get("follow_symlinks", True)):
+            raise PermissionError("fixture layer is unreadable")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout='{"inventory_authority":"complete","repos":[{"name":"library"}]}', stderr="",
+    ))
+    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", lambda self, name: root)
+    before = bytes_at(tmp_path)
+    with monkeypatch.context() as denied_probe:
+        denied_probe.setattr(Path, "stat", inaccessible)
+        rows, summary = wt.discover_templates(empty_activation())
+    assert len(rows) == 1 and rows[0]["source"]["index"] == str(healthy / "index.json")
+    assert summary["state"] == "partial"
+    expected = [canonical, overlay] if denied == "configuration" else [target]
+    assert {finding["source"] for finding in summary["findings"]} == {str(path) for path in expected}
+    assert all(finding["reason"] == "invalid-index" for finding in summary["findings"])
+    assert bytes_at(tmp_path) == before and not rd.pointers_file().exists()
+
+
 def test_inert_errors_do_not_disable_existing_controls_and_activation_is_lazy(monkeypatch, tmp_path):
     directory = tmp_path / "source"
     directory.mkdir()

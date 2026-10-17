@@ -120,13 +120,15 @@ def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
                 raise ValueError("repository root is not a directory")
             layers = layered_repo_surface_dirs(root, "templates", include_unavailable=True)
             for layer in layers:
-                if not layer.is_dir():
-                    _finding(findings, str(layer), "invalid-index", "Template layer must be a directory.")
-                    continue
-                sources.append(TemplateSource(
-                    provider, root, layer / "index.json", (provider,),
-                    f"repository-layer:{layer.relative_to(root).as_posix()}",
-                ))
+                try:
+                    if not layer.is_dir():
+                        raise ValueError("Template layer must be a directory.")
+                    sources.append(TemplateSource(
+                        provider, root, layer / "index.json", (provider,),
+                        f"repository-layer:{layer.relative_to(root).as_posix()}",
+                    ))
+                except (OSError, ValueError, RuntimeError) as exc:
+                    _finding(findings, str(layer), "invalid-index", str(exc))
         except (OSError, ValueError, RuntimeError) as exc:
             _finding(findings, provider, "unavailable", str(exc))
     return sources

@@ -204,6 +204,9 @@ indexes are normal; broken canonical, fallback or active marketplace template
 directory links or unavailable configuration ancestors are explicit findings
 rather than absent optional layers.
 Healthy selected layers remain visible without changing registrar selection.
+Audit-only reads isolate permission/probe failures per layer: a readable
+fallback may remain browsable alongside an unavailable canonical-layer finding,
+without asserting that it is an effective registration or overriding precedence.
 The same distinction applies to installation-local roots, template directories
 and index links; genuine first-touch absence remains an empty optional source.
 Unavailable optional repository integration reports a
