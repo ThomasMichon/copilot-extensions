@@ -1,4 +1,4 @@
-# Official ARC Code Review Capacity - Proposed Slice
+# Official ARC Code Review Capacity - Approved Slice
 
 Parent contract: [README.md](README.md), Phase 1a. This records the approved
 design and staged activation gates, not a declaration of ARC runner readiness.

@@ -10,7 +10,7 @@ jobs:
     # Keep hosted until the isolated ARC capacity is explicitly qualified.
     runs-on: ubuntu-latest
     permissions: {}
-    timeout-minutes: 5
     steps:
       - name: Complete minimal review setup
+        timeout-minutes: 5
         run: echo "Copilot Code Review setup complete."

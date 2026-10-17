@@ -581,8 +581,8 @@ instead of taking ownership of that campaign.
   `bc74b885de29cef5039118ff717b81e3bc3264bf`. The operator-authorized
   PR-only protection transaction restored and live-audited both original
   settings before any continuation; no exception remains open.
-- Posted [the bounded compatibility coordination note](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6232142688)
-  on #6237 before any admission-policy implementation. It names the four-file
+- Posted the bounded compatibility coordination note on #6237 before any
+  admission-policy implementation. It names the four-file
   dev-first transfer, retained owners and prohibition on unrelated release work.
 - Re-read this canonical effort after managed completion advanced the worktree
   onto the actual merge. Phase 1a's proposal landing is complete; implementing
@@ -595,10 +595,21 @@ instead of taking ownership of that campaign.
 - Integration owner cleared implementing-source publication, requiring literal
   hosted staging until a separate explicit ARC readiness decision.
 - Added the dedicated official setup with one `copilot-setup-steps` job,
-  `ubuntu-latest`, empty setup permissions and a bounded no-op setup step.
+  `ubuntu-latest`, empty setup permissions and a bounded minimal setup command.
   No checkout, dependency setup, coding-agent fallback or custom label changed.
 - Existing trusted-route guard passed and all 34 existing guard regressions
   passed under the bounded test supervisor, with verified cleanup.
 - Shared-helper owner coordination remains outstanding; no admission helper or
   `ci.yml` was edited. The narrow route-guard and preservation changes follow
   only after that ownership seam is resolved.
+
+### 2026-10-17 - Setup-step timeout and current-head review findings
+
+- Scoped the five-minute timeout to the single setup command step. No
+  job-level timeout is configured, so the setup file does not impose its own
+  five-minute limit on the official review job.
+- The previous head's required checks passed. Its lightweight review noted a
+  historical-link portability issue and a stale proposal heading; the
+  continuation uses the existing repo-local issue reference and labels the
+  approved design accordingly.
+- No Main control, shared helper, runner selector or credential was changed.

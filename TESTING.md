@@ -15,6 +15,8 @@ until an explicit isolated-capacity activation. Its only job is
 dependency install. Copilot performs its checkout after setup. Manual dispatch
 can exercise the setup once the definition is on the default branch; it is not
 proof that an official agentic review completed or that an ARC worker is ready.
+The five-minute timeout belongs only to the setup command step, not the job.
+No job-level timeout overrides the official review's execution budget.
 
 `tools/check-trusted-ci.py` and `tools/test_check_trusted_ci.py` retain the
 existing global custom-route restrictions during hosted staging. A future ARC
