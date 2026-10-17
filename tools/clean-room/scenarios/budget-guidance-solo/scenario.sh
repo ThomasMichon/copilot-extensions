@@ -8,7 +8,10 @@ cr_init
 
 phase 0 "fresh credential-free environment and candidate source"
 # The shared helper records tool versions, PATH, and config presence, not values.
-envdump
+if ! envdump; then
+    jam "path-binstub" "environment snapshot failed" "inspect the disposable toolchain"
+    cr_finalize
+fi
 if ! capture "python-prerequisite" -- python3 -I -c \
     'import sys; sys.exit("Python 3.10+ is required") if sys.version_info < (3, 10) else print(sys.version)'; then
     jam "pythonpath" "scenario requires Python 3.10+" "use the documented base-image toolchain"
@@ -30,7 +33,11 @@ if [ -d "$HOME/.budget-guidance" ] || [ -e "$HOME/.local/bin/budget-guidance" ] 
     cr_finalize
 fi
 pass "no existing budget runtime or binstub"
-cr_meta "source_installer_sha256" "$(sha256sum "$SOURCE/plugins/budget-guidance/scripts/install.sh" | cut -d' ' -f1)"
+if ! SOURCE_HASH="$(sha256sum "$SOURCE/plugins/budget-guidance/scripts/install.sh" | cut -d' ' -f1)"; then
+    jam "path-binstub" "candidate installer hash failed" "inspect the candidate source"
+    cr_finalize
+fi
+cr_meta "source_installer_sha256" "$SOURCE_HASH"
 if [ -n "${CR_UV_INDEX:-}" ]; then
     export UV_DEFAULT_INDEX="$CR_UV_INDEX" UV_INDEX_URL="$CR_UV_INDEX"
 fi
@@ -59,8 +66,15 @@ if ! capture "stamp" -- timeout 120 bash "$FRESH/plugins/budget-guidance/scripts
     jam "path-binstub" "candidate stamp failed" "inspect stamp.log"
     cr_finalize
 fi
-SNAPSHOT="$(cat "$HOME/.budget-guidance/payload-dir")"
-VERSION="$(python3 -I -c 'import json,sys; from pathlib import Path; print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["version"])' "$SNAPSHOT/plugin.json")"
+if ! SNAPSHOT="$(cat "$HOME/.budget-guidance/payload-dir")" || [ ! -d "$SNAPSHOT" ]; then
+    jam "path-binstub" "stamped payload pointer is unavailable" "inspect stamp.log"
+    cr_finalize
+fi
+if ! VERSION="$(python3 -I -c 'import json,sys; from pathlib import Path; print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["version"])' "$SNAPSHOT/plugin.json")" \
+    || [ -z "$VERSION" ]; then
+    jam "path-binstub" "stamped manifest version is unavailable" "inspect the stamped plugin.json"
+    cr_finalize
+fi
 RUNTIME="$HOME/.budget-guidance/versions/$VERSION"
 BIN="$HOME/.local/bin/budget-guidance"
 if [ -d "$RUNTIME" ] || [ ! -x "$BIN" ] || [ ! -f "$SNAPSHOT/libs/agent-procutil/pyproject.toml" ]; then

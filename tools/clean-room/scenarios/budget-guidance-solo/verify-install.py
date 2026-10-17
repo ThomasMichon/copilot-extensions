@@ -53,10 +53,21 @@ assert hashlib.sha256(original.read_bytes()).digest() == hashlib.sha256(installe
 def status(*args):
     result = subprocess.run(
         [str(bin_path), "status", *args, "--json"],
-        text=True, capture_output=True, timeout=20, check=True,
+        text=True, capture_output=True, timeout=20, check=False,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
-    posture = json.loads(result.stdout)
+    if result.returncode:
+        raise AssertionError(
+            f"installed CLI failed: {result.args!r}, exit={result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    try:
+        posture = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"installed CLI returned invalid JSON: {result.args!r}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        ) from exc
     assert posture["schema"] == "copilot-extensions.budget-posture"
     return posture
 
