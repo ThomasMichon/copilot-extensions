@@ -123,6 +123,8 @@ human diagnostic stream with UTC prefixes and monotonic elapsed time, followed
 by the child's actual success/failure duration and exit code. PowerShell
 capture requires the existing entrypoint-bound UTF-8 declaration. The parent
 retains the same lease, argument vector, execution deadline and Job cleanup.
+An admitted but unattributed source is classified as a warning in human mode,
+not as selectable ownership; its ordinary unframed stderr contract is unchanged.
 Without explicit opt-in, child stdout and stderr remain inherited separately;
 catalogs, protocol callers and other lifecycle actions do not infer human mode
 from their output or environment. Structured-context installers retain their

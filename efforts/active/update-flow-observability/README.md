@@ -225,6 +225,29 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-17 - Classify unattributed-source diagnostics as warnings
+
+- Review found the existing unattributed-source admission diagnostic was
+  passed directly to generic progress, omitting the human warning state.
+  The existing warning callback is now defined before lease admission and
+  reused there; timeout/cancellation diagnostics and plain stderr retain
+  their existing behavior. Regenerated both lifecycle consumers.
+- A real-lease regression first reproduced the missing warning classification.
+  It covers human and plain output with a real failed child, exact exit 37,
+  one source diagnostic, retained unattributed pending ownership, unresolved
+  selection and released lease. The plain variant uses file-descriptor
+  capture so the native child's inherited streams remain real file handles.
+- The complete stdio file plus the existing unattributed admission,
+  requalification and explicit-policy refusal cases passed 18 Windows
+  cases in 33.29 seconds. An exact-code native Linux snapshot passed
+  eleven cases with four Windows-only skips in 8.19 seconds, including
+  both new real-lease variants and the existing fresh-bootstrap/generation
+  contracts; its separate compatibility-export import also passed.
+  Original containment limits remain unchanged.
+- Classification does not grant ownership or change mutation policy,
+  child status, redaction or machine streams. Fresh hosted review and CI,
+  followed by release and authorized running-state proof, remain open.
+
 ### 2026-10-17 - Preserve mixed-case PowerShell installer actions
 
 - A fresh review accepted the real-CLI fixture correction but reported a

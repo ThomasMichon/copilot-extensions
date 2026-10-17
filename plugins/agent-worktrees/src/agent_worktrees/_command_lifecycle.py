@@ -257,23 +257,23 @@ def run_lifecycle(
             operation = stack.enter_context(human.HumanOperation(
                 f"{arguments['plugin_id']}/{human_operation}",
             ))
-        # Sample elapsed at child exit, then close work to drain output and
-        # verify/release the lease before reporting completion.
-        work = stack.enter_context(ExitStack())
-        lease = work.enter_context(legacy_lifecycle(
-            binding, primitive, reserve=not (deferred_runtime or teardown),
-            teardown=teardown, diagnostic=operation.progress if operation else None, **arguments,
-        ))
-        environment[TICKET_ENV] = json.dumps(lease.ticket)
-        output = work.enter_context(human.native_output()) if human is not None else None
-        stdout = sys.stdout if output is None else output
-        stderr = sys.stderr if output is None else output
         def diagnostic(message: str) -> None:
             if operation is None:
                 print(message, file=sys.stderr)
             else:
                 operation.progress(message, state="warning")
 
+        # Sample elapsed at child exit, then close work to drain output and
+        # verify/release the lease before reporting completion.
+        work = stack.enter_context(ExitStack())
+        lease = work.enter_context(legacy_lifecycle(
+            binding, primitive, reserve=not (deferred_runtime or teardown),
+            teardown=teardown, diagnostic=diagnostic if operation else None, **arguments,
+        ))
+        environment[TICKET_ENV] = json.dumps(lease.ticket)
+        output = work.enter_context(human.native_output()) if human is not None else None
+        stdout = sys.stdout if output is None else output
+        stderr = sys.stderr if output is None else output
         job = None
         if timeout is not None and os.name == "nt":
             child, job = _procutil(Path(arguments["payload_root"])).spawn_sync_in_kill_on_close_job(

@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from test_command_binding import (
-    LIB, POWERSHELL, ROOT, _lifecycle_lock_path, _load, _resolve,
+    LIB, POWERSHELL, ROOT, _lifecycle_lock_path, _load, _resolve, _write,
     binding_fixture as binding_fixture,
 )
 
@@ -89,6 +89,42 @@ def test_human_failure_retains_real_pending_owner_and_releases_lease(
     assert "NATIVE_FAILURE [elapsed " in output.err
     assert "failed exit 37 [duration " in output.err.splitlines()[-1]
     assert "done exit" not in output.err
+
+
+@pytest.mark.parametrize("human", [False, True])
+def test_unattributed_lifecycle_warning_preserves_human_and_plain_contracts(
+    human_lifecycle: Path, binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture, human: bool,
+) -> None:
+    lifecycle = _load(human_lifecycle, "unattributed_warning_lifecycle")
+    monkeypatch.delitem(sys.modules, "_payload_lifecycle_human", raising=False)
+    _write(binding_fixture["home"] / ".copilot/settings.json", {})
+    result = lifecycle.run_lifecycle(
+        binding_fixture["binding"], binding_fixture["primitive"],
+        [sys.executable, "-I", "-c", "raise SystemExit(37)"],
+        human_operation="install" if human else None, **binding_fixture["arguments"],
+    )
+    assert result == 37
+    output = capfd.readouterr()
+    assert output.out == ""
+    lines = output.err.splitlines()
+    warnings = [line for line in lines if "command ownership remains unresolved." in line]
+    assert len(warnings) == 1
+    if human:
+        assert re.fullmatch(
+            r"\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] agent-worktrees/install warning "
+            r"Runtime source is unavailable; .+ \[elapsed \d+\.\d+s\]", warnings[0],
+        )
+        assert "failed exit 37 [duration " in lines[-1]
+    else:
+        assert len(lines) == 1
+        assert warnings[0].startswith("Runtime source is unavailable; ")
+    manifest = json.loads((binding_fixture["legacy"] / "deploy-manifest.json").read_text())
+    assert manifest["commandLifecycle"]["state"] == "pending"
+    assert manifest["commandLifecycle"]["owner"]["unattributed"] is True
+    assert "commandBinding" not in manifest
+    assert _resolve(binding_fixture)["status"] == "unresolved"
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
 
 
 def test_human_duration_excludes_final_output_drain(
