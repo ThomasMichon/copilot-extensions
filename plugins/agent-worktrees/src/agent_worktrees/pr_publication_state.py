@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import fields
+from datetime import datetime, timedelta
 
 from . import config as cfg, tracking
 
@@ -95,3 +96,57 @@ def provisional_lease(pr, remote: str, branch: str, cwd: str) -> str | None:
     if tip:
         raise ValueError("Unleased provisional PR head already exists; inspect and reconcile the ambiguous push before retrying.")
     return ""
+
+
+def unpublished(pr: tracking.PRRecord | None) -> bool:
+    """Identify a provisional entry with no publication or provider evidence."""
+    # head_sha is the saved lease; remote/head/rewrite identities bind destination.
+    return pr is not None and pr.state == "creating" and pr.number is None and not any(
+        (
+            pr.url, pr.base_sha, pr.head_sha, pr.patch_id, pr.rewrite_owner,
+            pr.rewrite_identity, pr.remote, pr.head_repo, pr.head_identity, pr.head_owner,
+            pr.head_observed_at, pr.head_observed_api_base, pr.attribution_head, pr.closed_at,
+        )
+    )
+
+
+def unpublished_retry(
+    pr: tracking.PRRecord | None, branch: str, provider: str, repo: str,
+) -> bool:
+    """Match a never-published attempt without borrowing another destination."""
+    if unpublished(pr) and pr.branch == branch and (pr.provider, pr.repo) != (provider, repo):
+        raise ValueError("Unpublished PR destination changed; select a distinct head before retrying.")
+    return bool(
+        unpublished(pr) and pr is not None
+        and (pr.branch, pr.provider, pr.repo) == (branch, provider, repo)
+    )
+
+
+def retry_candidate(
+    record: tracking.WorktreeRecord | None, active: tracking.PRRecord | None,
+    branch: str, provider: str, repo: str,
+) -> tracking.PRRecord | None:
+    """Find one matching attempt across interleaved heads without merging identities."""
+    candidates = [
+        pr for pr in record.prs
+        if not tracking._pr_is_terminal(pr) and pr.branch == branch
+    ] if record is not None else []
+    if len(candidates) > 1:
+        raise ValueError("Multiple live PR associations share this head; reconcile them before retrying.")
+    if candidates and unpublished_retry(candidates[0], branch, provider, repo):
+        return candidates[0]
+    return active
+
+
+def settle_creation(
+    record: tracking.WorktreeRecord, target: tracking.PRRecord, *, resumed: bool,
+) -> None:
+    """Make a successfully resumed attempt the default without changing its peers."""
+    target.state = "open"
+    if resumed:
+        latest = max((pr.opened_at or "" for pr in record.prs), default="")
+        now = tracking._now_iso()
+        target.opened_at = (
+            (datetime.fromisoformat(latest) + timedelta(microseconds=1)).isoformat()
+            if latest and latest >= now else now
+        )

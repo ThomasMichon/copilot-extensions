@@ -1,0 +1,189 @@
+"""Failed pre-publication attempts retain exactly one recoverable association."""
+
+from __future__ import annotations
+
+import pytest
+
+from agent_worktrees import config as cfg
+from agent_worktrees import finalize, git_ops, pr_ops, pr_publication_state, tracking
+
+pytestmark = pytest.mark.contract("agent_worktrees.pr_publish.publication_state")
+
+
+@pytest.mark.parametrize("new", [False, True])
+def test_rebase_failure_retry_reuses_unpublished_record(
+    pr_repo: tuple, monkeypatch: pytest.MonkeyPatch, new: bool,
+) -> None:
+    config, wid, _wt, remote = pr_repo
+    real_rebase = git_ops.rebase
+    monkeypatch.setattr(git_ops, "rebase", lambda *_args, **_kwargs: False)
+    failed = pr_ops.create_pr(wid, config, title="Retry example", new=True, open_pr=False)
+    assert not failed["success"]
+    assert "genuine conflicts" in failed["error"]
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    before = tracking.load_record(path)
+    assert len(before.prs) == 1
+    assert pr_publication_state.unpublished(before.pr)
+    original = before.pr
+
+    monkeypatch.setattr(git_ops, "rebase", real_rebase)
+    result = pr_ops.create_pr(wid, config, title="Retry example", new=new, open_pr=False)
+    assert result["success"], result
+    after = tracking.load_record(path)
+    assert len(after.prs) == 1
+    assert after.pr.pr_id == original.pr_id
+    assert after.pr.attribution_mode == original.attribution_mode
+    assert after.pr.attribution_explicit == original.attribution_explicit
+    assert after.pr.head_sha == git_ops.git(
+        "--git-dir", str(remote), "rev-parse", f"refs/heads/{result['branch']}",
+        cwd=str(_wt),
+    ).stdout.strip()
+    assert after.pr.head_sha == result["head_sha"]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("field", [
+    "url", "number", "base_sha", "head_sha", "patch_id", "rewrite_owner",
+    "rewrite_identity", "remote", "head_repo", "head_identity", "head_owner",
+    "head_observed_at", "head_observed_api_base", "attribution_head", "closed_at",
+])
+def test_publication_evidence_prevents_provisional_retry(field: str) -> None:
+    record = tracking.PRRecord(state="creating")
+    setattr(record, field, 7 if field == "number" else "recorded-evidence")
+    assert not pr_publication_state.unpublished(record)
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("state", ["", "open", "active", "closed", "merged"])
+def test_only_creating_entries_are_unpublished(state: str) -> None:
+    assert not pr_publication_state.unpublished(tracking.PRRecord(state=state))
+    assert not pr_publication_state.unpublished(None)
+
+
+def test_different_new_head_preserves_unrelated_provisional(
+    pr_repo: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, _wt, _remote = pr_repo
+    real_rebase = git_ops.rebase
+    monkeypatch.setattr(git_ops, "rebase", lambda *_args, **_kwargs: False)
+    assert not pr_ops.create_pr(
+        wid, config, title="First example", new=True, open_pr=False,
+    )["success"]
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    original = tracking.load_record(path).pr
+    monkeypatch.setattr(git_ops, "rebase", real_rebase)
+    result = pr_ops.create_pr(wid, config, title="Other example", new=True, open_pr=False)
+    assert result["success"], result
+    after = tracking.load_record(path)
+    assert len(after.prs) == 2
+    assert after.prs[0].pr_id == original.pr_id
+    assert pr_publication_state.unpublished(after.prs[0])
+    assert after.prs[0].branch != after.prs[1].branch
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("field", ["branch", "provider", "repo"])
+def test_provisional_retry_requires_same_destination(field: str) -> None:
+    record = tracking.PRRecord(
+        state="creating", branch="pr/example", provider="github", repo="example/repo",
+    )
+    assert pr_publication_state.unpublished_retry(
+        record, "pr/example", "github", "example/repo",
+    )
+    setattr(record, field, "different")
+    if field == "branch":
+        assert not pr_publication_state.unpublished_retry(
+            record, "pr/example", "github", "example/repo",
+        )
+    else:
+        with pytest.raises(ValueError, match="destination changed"):
+            pr_publication_state.unpublished_retry(
+                record, "pr/example", "github", "example/repo",
+            )
+
+
+def test_unpublished_retry_preserves_existing_local_branch(
+    pr_repo: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, wt, _remote = pr_repo
+    monkeypatch.setattr(git_ops, "rebase", lambda *_args, **_kwargs: False)
+    failed = pr_ops.create_pr(wid, config, title="Retry example", new=True, open_pr=False)
+    assert not failed["success"]
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    before = tracking.load_record(path)
+    branch = before.pr.branch
+    original = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+    git_ops.git("branch", branch, cwd=str(wt))
+    retry = pr_ops.create_pr(wid, config, title="Retry example", new=True, open_pr=False)
+    assert not retry["success"]
+    assert "already exists" in retry["error"]
+    assert git_ops.git("rev-parse", branch, cwd=str(wt)).stdout.strip() == original
+    assert len(tracking.load_record(path).prs) == 1
+
+
+@pytest.mark.parametrize("new", [False, True])
+def test_same_head_repository_change_refuses_without_mutation(
+    pr_repo: tuple, monkeypatch: pytest.MonkeyPatch, new: bool,
+) -> None:
+    config, wid, wt, _remote = pr_repo
+    monkeypatch.setattr(git_ops, "rebase", lambda *_args, **_kwargs: False)
+    assert not pr_ops.create_pr(
+        wid, config, title="Retry example", new=True, open_pr=False,
+    )["success"]
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    before = tracking.load_record(path)
+    branch = before.pr.branch
+    git_ops.git("branch", branch, cwd=str(wt))
+    original = git_ops.git("rev-parse", branch, cwd=str(wt)).stdout.strip()
+    result = pr_ops.create_pr(
+        wid, config, title="Retry example", target_repo="other/repository",
+        new=new, open_pr=False,
+    )
+    assert not result["success"]
+    assert "destination changed" in result["error"]
+    after = tracking.load_record(path)
+    assert after.prs == before.prs
+    assert git_ops.git("rev-parse", branch, cwd=str(wt)).stdout.strip() == original
+
+
+@pytest.mark.parametrize("explicit_branch", [False, True])
+def test_interleaved_retry_reuses_original_attempt(
+    pr_repo: tuple, monkeypatch: pytest.MonkeyPatch, explicit_branch: bool,
+) -> None:
+    config, wid, _wt, _remote = pr_repo
+    real_rebase = git_ops.rebase
+    monkeypatch.setattr(git_ops, "rebase", lambda *_args, **_kwargs: False)
+    for title in ("First attempt", "Other attempt"):
+        assert not pr_ops.create_pr(
+            wid, config, title=title, new=True, open_pr=False,
+        )["success"]
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    before = tracking.load_record(path)
+    first, other = before.prs
+    monkeypatch.setattr(git_ops, "rebase", real_rebase)
+    result = pr_ops.create_pr(
+        wid, config, title="First attempt", new=not explicit_branch,
+        branch=first.branch if explicit_branch else None, open_pr=False,
+    )
+    assert result["success"], result
+    after = tracking.load_record(path)
+    assert len(after.prs) == 2
+    assert after.prs[0].pr_id == first.pr_id
+    assert after.prs[0].head_sha == result["head_sha"]
+    assert after.prs[1] == other
+    assert sum(not tracking._pr_is_terminal(pr) and pr.branch == first.branch
+               for pr in after.prs) == 1
+    assert after.active_pr().pr_id == first.pr_id
+    assert after.prs[0].attribution_mode == first.attribution_mode
+    assert after.prs[0].attribution_explicit == first.attribution_explicit
+    (_wt / "followup.txt").write_text("followup\n", encoding="utf-8")
+    git_ops.git("add", "followup.txt", cwd=str(_wt))
+    git_ops.git("commit", "-m", "followup", cwd=str(_wt))
+    assert finalize.push_changes(wid, config)
+    updated = tracking.load_record(path)
+    assert updated.active_pr().pr_id == first.pr_id
+    assert updated.prs[1] == other
+    assert updated.prs[0].head_sha == git_ops.git(
+        "--git-dir", str(_remote), "rev-parse", f"refs/heads/{first.branch}",
+        cwd=str(_wt),
+    ).stdout.strip()

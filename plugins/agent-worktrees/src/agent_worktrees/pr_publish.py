@@ -650,7 +650,7 @@ def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tra
 
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
     fields = ("state", "base_sha", "head_sha", "patch_id", "remote", "head_repo",
-              "head_identity", "head_owner", "head_observed_at", "head_observed_api_base", "provider")
+              "head_identity", "head_owner", "head_observed_at", "head_observed_api_base", "provider", "opened_at")
     with metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)
         current = _publication_pr(fresh, pr)

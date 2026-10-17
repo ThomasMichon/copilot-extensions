@@ -562,6 +562,8 @@ def create_pr(
     # reconcile down to the genuinely-live (or no) active PR.
     if not new and not branch and git_ops.has_remote(remote, cwd=worktree_path):
         while active_is_live and active is not None and active.branch:
+            if pr_publication_state.unpublished(active):
+                break
             if not pr_publish.head_branch_gone(repo, active, worktree_path):
                 break
             active.state = "merged"
@@ -725,12 +727,13 @@ def create_pr(
             f"Checkout '{wt_branch}' before create-pr."
         )}
 
-    reusing = bool(active_is_live and not new and active and active.branch == feature_branch)
+    try:
+        active = pr_publication_state.retry_candidate(record, active, feature_branch, prcfg.provider, default_pr_repo)
+        provisional_retry = pr_publication_state.unpublished_retry(active, feature_branch, prcfg.provider, default_pr_repo)
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
+    reusing = bool(active_is_live and not new and active and active.branch == feature_branch and not provisional_retry)
     ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
-
-    # Re-run fast path: under the old reset-to-upstream scheme (or after a
-    # sync-back) the published PR head may live only on the local feature
-    # branch. Re-push that branch instead of erroring on "already exists".
     if reusing and not ahead and git_ops.local_branch_exists(
         feature_branch, cwd=worktree_path
     ):
@@ -759,12 +762,9 @@ def create_pr(
         )}
 
     orig_sha = _rev(wt_branch, cwd=worktree_path)
-
-    # Reuse the live active PR record, or append a fresh one, and mark it
-    # 'creating' up front so a later publish failure is recoverable.
     target_pr: PRRecord | None = None
     if record is not None:
-        if reusing and active is not None:
+        if (reusing or provisional_retry) and active is not None:
             target_pr = active
             target_pr.state = "creating"
             target_pr.branch = feature_branch
@@ -943,7 +943,7 @@ def create_pr(
     # 7. Record the open state on the target PR (preserving any url/number
     #    already recorded for a reused live PR).
     if record is not None and target_pr is not None:
-        target_pr.state = "open"
+        pr_publication_state.settle_creation(record, target_pr, resumed=provisional_retry)
         target_pr.branch = feature_branch
         pr_publish.record_remote_identity(target_pr, publish_remote, remote, pushed.head_repo, getattr(pushed, "head_identity", ""), fork_owner)
         target_pr.base_sha = base_sha

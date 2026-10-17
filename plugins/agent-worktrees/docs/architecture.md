@@ -2,6 +2,30 @@
 
 ## Concurrent PR publication
 
+### Unpublished creation retries
+
+A failed pre-publication rebase retains one `creating` PR entry. Retrying the
+same branch, provider and repository reuses that entry, including its stable
+ID and frozen attribution decision, even with `create-pr --new`. Interleaved
+attempts search the full owning record for a unique same-head association.
+A successful resumed publication refreshes that entry's opening timestamp so
+subsequent no-selector updates target it, without changing unrelated attempts.
+Only an entry
+without any provider identity, publication lease, destination or observed-head
+evidence qualifies. It still follows fresh-publication rebase and absent-ref
+checks; this is not authority to rewrite an existing remote head.
+
+Different requested branches retain separate entries. Published or partially
+published attempts retain the existing lease and ambiguity guards. If an older
+version already left a duplicate, inspect `pr-status --all --no-live --json`
+before correction. `set-pr --select-branch <branch> --state closed` selects the
+first matching entry: use it only after confirming that entry is the empty,
+unnumbered failed attempt, then verify the numbered PR remains open. It closes
+tracking for the failed attempt, not the provider PR. Never edit the ledger or
+close a numbered association merely to satisfy publication ownership.
+
+### Transport boundaries
+
 The clone-wide `agent-worktrees-publish.lock` protects shared remote
 configuration and destination verification, not the duration of a push.
 Publication captures the expanded, verified push URL under that lock, then
