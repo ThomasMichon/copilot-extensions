@@ -697,3 +697,7 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   Python lint and the thirteen-plugin install contract passed. A separate
   deployment clean room remains inapplicable to CI-only scheduling; the fresh
   normal workflow is the required external proof.
+- Current-head CI exposed the path-selector test reader's assumption of a
+  single grep expression. It now reads both literal `-e` expressions and
+  retains all existing positive/negative scope assertions, adding helper/test
+  paths and rejecting their backup-file siblings on both platforms.

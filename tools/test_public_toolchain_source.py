@@ -123,9 +123,9 @@ def _artifact_scope(job_name: str) -> tuple[dict, str]:
     jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
     detector = next(step for step in jobs[job_name]["steps"]
                     if step.get("id") == "python-artifact-builder")
-    expression = re.search(r"grep -Eq\s*\\\n\s*'([^']+)'", detector["run"])
+    expression = re.search(r"grep -Eq -e '([^']+)' -e\s*\\\n\s*'([^']+)'", detector["run"])
     assert expression is not None
-    return jobs, expression.group(1)
+    return jobs, "|".join(f"(?:{part})" for part in expression.groups())
 
 
 def test_windows_source_contracts_keep_separate_budgets_without_dropping_cases():
@@ -180,6 +180,7 @@ def test_windows_source_contracts_keep_separate_budgets_without_dropping_cases()
         "public_toolchain_source", "seasoned_public_feed", "governed_feed_trust",
         "promotion_python_artifacts", "publish_python_artifacts", "promotion_artifact_readiness",
         "test_promotion_python_artifacts", "test_public_toolchain_source",
+        "ci_plugin_partitions", "test_ci_plugin_partitions",
     )),
 ])
 def test_ci_artifact_scope_covers_source_and_recipe_inputs(job_name: str, changed: str) -> None:
@@ -193,6 +194,7 @@ def test_ci_artifact_scope_covers_source_and_recipe_inputs(job_name: str, change
     "libs-sibling/library/pyproject.toml", "services/other/pyproject.toml",
     ".gitattributes.backup", "docs/.gitattributes.backup",
     "tools/materialize_main.py.backup", "tools/unrelated.py",
+    "tools/ci_plugin_partitions.py.backup", "tools/test_ci_plugin_partitions.py.backup",
 ])
 def test_ci_artifact_scope_excludes_unrelated_paths(job_name: str, changed: str) -> None:
     _, expression = _artifact_scope(job_name)
