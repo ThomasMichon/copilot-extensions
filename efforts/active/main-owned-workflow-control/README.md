@@ -1628,3 +1628,35 @@ hosted checks, review and a containing full validation remain required.
   POSIX installer cases remain skipped on Windows, so hosted Linux and actual
   containing materialized-main evidence remain mandatory. Ruff, docs and
   whitespace checks pass. No production installer behavior or deadline changes.
+
+### 2026-10-16 - Resume with the retained release owner and residual Budget scope
+
+- Resumed after the newer operator-authorized release-control and standalone
+  ownership decisions. The single control writer retains Main pause,
+  qualification, manifest activation and verified resume; this session makes
+  no unpause, rollback, workflow or runtime change. Standalone preparation and
+  Manager repairs already have their separately authorized owners.
+- #6801's original copy-helper correction is partially superseded by merged
+  #7008. The operator explicitly selects a residual contribution rather than
+  restoring the obsolete helper or closing the remaining safeguards.
+  Rebase retains #7008's real materializer and both existing stamp-layout tests;
+  only embedded manifest/package integrity checks are added to that helper.
+- The five new guards now supply valid canonical or embedded source declarations
+  to the actual materializer, preserving embedded bytes and source immutability
+  without mocking composition. Their complete module passes five cases.
+  Directly related bootstrap, build-attempt, fixture and response modules pass
+  77 cases with six platform skips.
+- Fresh broader native validation is not claimed green: ordinary cold Python
+  fixture startup can exhaust the existing half-second reader budget before
+  parse/exit classification, and the native failed-install fixture reaches its
+  existing 30-second item bound inside a 45-second child call.
+- Reader snippets require only the standard library, so their fixture now uses
+  isolated no-site Python, with a real-child guard checking both flags. The real
+  reader and cleanup/timeout/byte-limit assertions remain unchanged; the complete
+  reader, boundary and CLI selection passes 70 cases with 23 platform skips.
+  The independent native installer fixture diagnosis remains open; no deadline
+  increase, accepted-flake claim or failed-gate waiver.
+- Bridge #6992 has since merged under the retained source owner's authorization.
+  Its current-fixture re-attestation must be reconciled with this effort's
+  earlier immutable-v1/historical-producer decision; this session does not
+  duplicate the implementation or declare that unresolved policy item complete.

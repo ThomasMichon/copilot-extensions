@@ -39,11 +39,22 @@ def _reading(**overrides):
 
 
 def _reader(tmp_path, code, **limits):
-    return CommandReader((sys.executable, "-c", code), tmp_path, **limits)
+    return CommandReader((sys.executable, "-I", "-S", "-c", code), tmp_path, **limits)
 
 
 def _posture(config):
     return build_posture(config, datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+
+@pytest.mark.guard
+def test_stdlib_reader_fixture_does_not_load_ambient_site_packages(tmp_path):
+    reader = _reader(
+        tmp_path,
+        "import sys; assert sys.flags.isolated and sys.flags.no_site; "
+        f"print({json.dumps(_reading())!r})",
+    )
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["availability"] == "available"
 
 
 @pytest.mark.guard

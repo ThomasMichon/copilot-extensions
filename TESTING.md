@@ -119,6 +119,10 @@ source immutability, and malformed embedded input; installer behavior is unchang
 The billing-response rejection matrix uses short explicit parameter IDs while
 retaining its 65,537-byte oversized input, so Windows can set pytest's current-test
 environment value without preventing the actual 65,536-byte boundary check.
+External-reader fixture snippets use isolated, no-site Python because they need
+only the standard library. The real reader, process cleanup and existing
+half-second deadline still execute; unrelated editable-package startup is not
+part of the fixture's parse/exit/byte-bound classification workload.
 
 The registered-repository Git-probe guard follows the real `repos._git` to
 `git_ops.git` call chain. It checks headless options at that subprocess owner,
