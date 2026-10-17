@@ -269,6 +269,7 @@ def targeted_doctor(args) -> int:
             before_sha256=hashlib.sha256(original).hexdigest(),
         )
         if data["machine"] != config.machine:
+            _replacement(original.decode("utf-8"), data, config.machine)
             report["repairable"] = True
             if apply:
                 backup, audit = _apply(project, record_id, previous, target, observed)

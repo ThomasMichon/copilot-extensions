@@ -17,6 +17,8 @@ selector for another machine. Existing invocations without that assertion remain
 supported. Review `repairable`, `from_machine`, `to_machine` and `proof`; append
 `--fix` only after accepting that exact report. There is no competing migration
 command or wildcard/bulk default.
+Preview validates the exact byte-preserving scalar replacement too: unsupported
+multiline machine scalars refuse in both modes without a backup or audit write.
 
 ## Proof and historical records
 

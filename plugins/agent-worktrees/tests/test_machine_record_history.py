@@ -109,6 +109,19 @@ def snapshot(root):
     }
 
 
+@pytest.mark.parametrize("flags", [(), ("--fix",)])
+def test_multiline_machine_scalar_refuses_preview_and_apply_without_writes(history, capsys, flags):
+    root, _, path, _, _, _ = history
+    original = path.read_bytes()
+    path.write_bytes(original.replace(b"machine: old-host\r\n", b"machine: |-\r\n  old-host\r\n"))
+    assert yaml.safe_load(path.read_bytes())["machine"] == OLD
+    before = snapshot(root)
+    code, report = run(capsys, *flags)
+    assert code == 1 and "not a standalone scalar" in report["error"]
+    assert not report["repairable"] and not report["repaired"]
+    assert snapshot(root) == before
+
+
 def test_removed_linked_record_report_apply_audit_and_same_alias_readers(history, capsys):
     root, config, path, data, _, _ = history
     before = snapshot(root)
