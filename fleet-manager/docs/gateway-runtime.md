@@ -273,6 +273,11 @@ Successful acquisition and reply/envelope expiry are also capped by the earlier
 of signed dispatch expiry and request deadline. A provider's own earlier
 failure remains `UNAVAILABLE` while that authority is valid; no subscription or
 dispatch is renewed to deliver a late result.
+The controller samples wall time again after provider acquisition, rather than
+using its pre-acquisition timestamp to authorize a later result. Fractional
+seconds bound the asynchronous wait; integer epoch seconds bound signed JWTs.
+The fresh post-acquisition expiry check and absolute signing cap are deliberate,
+not an attempt to make both phases share one stale clock sample.
 The pending limit bounds active requests; at most 1024 request identities are
 retained per Gateway epoch, then admission refuses new work. The in-memory
 broker is not a durable queue/task ledger. Restart means `UNKNOWN`, not success.

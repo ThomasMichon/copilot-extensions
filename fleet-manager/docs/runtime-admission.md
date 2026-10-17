@@ -110,6 +110,9 @@ permit at most 256 exact branches. An owner retains at most 4096 live permits
 (configurable downward) and 4096 consumed proof evidence digests for the bounded
 request window. Capacity refuses without evicting a live fence. These are
 single-owner bounds, not per-principal fairness or pre-verification rate limits.
+Expiry cleanup scans these bounded maps under the owner lock, deleting expired
+entries in place rather than allocating replacement maps of all live handles.
+It is still a bounded linear scan, not an expiry-index or throughput guarantee.
 The verifier's independent nonce/replay fence remains required. Multi-owner
 shared-epoch service admission, enrollment persistence, provider outcomes,
 publication grants, delegation and resident integration are not implemented.
