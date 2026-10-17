@@ -447,6 +447,13 @@ the pinned, clean source commit. No confirmation token or ownership waiver is
 used. Unknown evidence, changed ownership/destination, and unrelated history
 remain refusals.
 
+Acknowledgement loss outside that settlement case still uses the existing
+verified publication paths: a non-forcing fast-forward retry, or an independently
+verified source replay after a rebase. The preflight checks ownership,
+destination and provider/ref agreement before deferring; it neither settles
+tracking nor authorizes a rewrite through this fallback. Corrupt recovery
+evidence still refuses rather than silently falling back.
+
 Reconciliation retains source, original saved and observed commits plus a private
 `agent-worktrees-pr-reconciliation-<id>.json` audit in the worktree's Git metadata.
 It settles tracking through the normal publication transaction without a push or

@@ -76,17 +76,22 @@ def _settle(
     if not identity or identity != (pr.rewrite_identity or pr_rewrite.legacy_identity(pr, cwd)):
         raise ValueError("Routine reconciliation requires the original publication destination.")
     source = pr_recovery._rev("HEAD", cwd)
-    if not git_ops.is_commit_ancestor(observed, source, cwd=cwd):
-        raise ValueError("The live PR head is not an ancestor of the source; no routine reconciliation.")
     operation = pr_recovery_plan.build(
         config, record, pr, source_head=source, expected_head=observed,
         identity=identity, overrides=(), cwd=cwd,
     )
-    if operation.action != "settle-publication":
-        raise ValueError("Routine reconciliation requires intact retained publication evidence.")
     pr_recovery_plan.revalidate(
         config, record, pr, operation, remote=remote, observe=pr_rewrite.observe_pr, cwd=cwd,
     )
+    if operation.action != "settle-publication":
+        if operation.evidence_status == "unusable" or not _verified_fallback(
+            config, record, pr, remote, observed, source, cwd=cwd,
+        ):
+            raise ValueError("Routine reconciliation requires intact retained publication evidence.")
+        output.warn("No backed settlement applies; continuing through verified publication recovery.")
+        return ""
+    if not git_ops.is_commit_ancestor(observed, source, cwd=cwd):
+        raise ValueError("The live PR head is not an ancestor of the source; no routine reconciliation.")
     git_dir = pr_recovery._path(cwd).parent
     path = git_dir / f"agent-worktrees-pr-reconciliation-{uuid.uuid4().hex}.json"
     audit = {
@@ -133,3 +138,21 @@ def _settle(
     activity.log_event("pr_publication_reconciled", worktree_id=record.worktree_id, branch=pr.branch)
     output.ok(f"Reconciled backed publication of PR head '{pr.branch}'; no push or PR edit.")
     return source
+
+
+def _verified_fallback(
+    config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
+    remote: str, observed: str, source: str, *, cwd: str,
+) -> bool:
+    """Defer only source-owned acknowledgement loss to the existing push guards."""
+    if not git_ops.is_commit_ancestor(pr.head_sha, observed, cwd=cwd):
+        return False
+    if git_ops.is_commit_ancestor(observed, source, cwd=cwd):
+        return True
+    from . import pr_rebase
+
+    proof = pr_rebase.verify(
+        record, config.default_repo, remote, f"{record.branch}:refs/heads/{pr.branch}",
+        pr.head_sha, cwd=cwd,
+    )
+    return proof is not None and git_ops.is_commit_ancestor(observed, proof.old_source, cwd=cwd)
