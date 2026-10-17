@@ -71,7 +71,7 @@ def task_worker(args: argparse.Namespace) -> TaskWorker | None:
     }
     if not all(value.strip() for value in values.values()):
         raise DispatchError(403, "incomplete task-worker credential projection")
-    if any(getattr(args, name, None) for name in ("token", "control_token", "shared")):
+    if any(getattr(args, name, None) for name in ("token", "control_token", "shared", "local")):
         raise DispatchError(403, "task authority cannot be combined with fleet credentials")
     url = values["task_url"]
     try:

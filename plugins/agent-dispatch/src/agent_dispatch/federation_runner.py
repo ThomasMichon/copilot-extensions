@@ -120,6 +120,9 @@ class FederationRunner:
             raise ValueError("instance is required")
         if role not in config.FEDERATION_ROLES:
             raise ValueError(f"unknown federation role: {role!r}")
+        from .client_authority import validate_federated_role
+
+        validate_federated_role(role)
         self._rv = rendezvous
         self._instance = instance
         self._role = role

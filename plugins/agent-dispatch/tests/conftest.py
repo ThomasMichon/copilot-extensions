@@ -71,5 +71,8 @@ def _isolate_discovery(monkeypatch, tmp_path):
         # Authentication helpers belong to the test, never the invoking agent.
         "AGENT_DISPATCH_CONTROL_TOKEN_COMMAND",
         "AGENT_DISPATCH_TOKEN_COMMAND",
+        "AGENT_DISPATCH_SHARED_TOKEN_COMMAND",
+        "AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND",
+        "AGENT_DISPATCH_TASK_AUTHORITY",
     ):
         monkeypatch.delenv(var, raising=False)

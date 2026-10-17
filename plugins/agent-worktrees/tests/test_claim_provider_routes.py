@@ -104,8 +104,15 @@ def test_legacy_callback_keeps_prefix_and_suppresses_provisioning_only_in_child(
     bin_dir.mkdir()
     stub = bin_dir / ("fixture.cmd" if os.name == "nt" else "fixture")
     if os.name == "nt":
+        # CMD needs an ordinary spelling of the same interpreter file.
+        interpreter = sys.executable
+        if interpreter.startswith("\\\\?\\UNC\\"):
+            interpreter = "\\\\" + interpreter[8:]
+        elif interpreter.startswith("\\\\?\\"):
+            interpreter = interpreter[4:]
+        assert os.path.samefile(interpreter, sys.executable)
         stub.write_text(
-            "@echo off\r\n" + subprocess.list2cmdline([sys.executable, "-I", str(child)]) + " %*\r\n",
+            "@echo off\r\n" + subprocess.list2cmdline([interpreter, "-I", str(child)]) + " %*\r\n",
             encoding="utf-8",
         )
     else:
@@ -125,13 +132,25 @@ def test_legacy_callback_keeps_prefix_and_suppresses_provisioning_only_in_child(
     monkeypatch.setattr(cp, "discover_claim_providers", lambda *a: ({"raw-docker": provider}, ()))
     monkeypatch.setattr(pla, "run", lambda *a, **k: pytest.fail("cell launch in legacy mode"))
     monkeypatch.chdir(tmp_path)
+    run_legacy = cp._run_legacy_command
+    callbacks = []
+
+    def observed_callback(*args, **kwargs):
+        result = run_legacy(*args, **kwargs)
+        callbacks.append(result)
+        return result
+
+    monkeypatch.setattr(cp, "_run_legacy_command", observed_callback)
     if kind == "status":
         observed = cp.resolve_claim_status("raw-docker:resource-123")
         suffix = ["claim-status", "resource-123"]
     else:
         observed = cp.resolve_claim_reclaim("raw-docker:resource-123", apply=False)
         suffix = ["claim-reclaim", "resource-123"]
-    assert observed["available"] is True
+    assert observed["available"] is True, [
+        None if result is None else (result.returncode, result.stdout, result.stderr)
+        for result in callbacks
+    ]
     assert observed["argv"] == [*prefix, *suffix]
     assert Path(observed["cwd"]) == tmp_path
     assert observed["routing"] == []
