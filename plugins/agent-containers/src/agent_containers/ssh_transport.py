@@ -25,6 +25,7 @@ from ssh_manager import SSHConfig, build_remote_exec_args
 
 from .config import RUNTIME_DIR
 from .launch_input_cleanup import abandoned_cleanup_script
+from .launch_storage import directory_guard, executable_directory, launch_directory
 
 log = logging.getLogger("agent-containers")
 
@@ -420,8 +421,7 @@ def write_remote_env(container: str, user: str, values: dict[str, str]) -> str |
     invalid = sorted(name for name in values if not _SAFE_ENV.fullmatch(name))
     if invalid:
         raise RuntimeError(f"Unsafe environment names for SSH launch: {invalid}")
-    _launch_rel = ".agent-containers/launch"  # marketplace-isolation: allow remote-container-path
-    launch_dir = f"{_remote_home(container, user)}/{_launch_rel}"
+    launch_dir = launch_directory(user)
     remote_path = f"{launch_dir}/{uuid.uuid4().hex}.env"
     payload = "".join(
         f"export {name}={shlex.quote(value)}\n"
@@ -430,10 +430,9 @@ def write_remote_env(container: str, user: str, values: dict[str, str]) -> str |
     written = _run([
         "docker", "exec", "-i", "-u", user, container,
         "sh", "-c",
-        f"umask 077; mkdir -p {shlex.quote(launch_dir)}; "
-        f"chmod 700 {shlex.quote(launch_dir)}; " +
-        abandoned_cleanup_script(launch_dir) + "\n" +
-        f"cat > {shlex.quote(remote_path)}",
+        directory_guard(launch_dir, create=True) +
+        abandoned_cleanup_script(launch_dir, executable_directory(launch_dir + "/owner.env").rsplit("/", 1)[0]) + "\n" +
+        f"set -C; cat > {shlex.quote(remote_path.rsplit('/', 1)[1])}",
     ], input_text=payload)
     if written.returncode != 0:
         raise RuntimeError(
@@ -447,18 +446,21 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> bo
     if not remote_path:
         return True
     _validate_target(container, user)
+    executable = executable_directory(remote_path)
     try:
         result = _run([
             "docker", "exec", "-u", user, container,
             "rm", "-f", remote_path,
-            remote_path + ".d/copilot",
-            remote_path + ".d/auth.env", remote_path + ".d/result.json",
-            remote_path + ".d/consumed", remote_path + ".d/active.pid",
-            remote_path + ".d/active.pid.tmp",
+            executable + "/copilot",
+            remote_path + ".d/auth.env", executable + "/result.json",
+            executable + "/consumed", executable + "/active.pid",
+            executable + "/active.pid.tmp",
         ])
         _run([
             "docker", "exec", "-u", user, container,
-            "sh", "-c", f"rmdir {shlex.quote(remote_path + '.d')} 2>/dev/null || true",
+            "sh", "-c",
+            f"rmdir {shlex.quote(remote_path + '.d')} 2>/dev/null || true; "
+            f"rmdir {shlex.quote(executable)} 2>/dev/null || true",
         ])
     except RuntimeError as exc:
         log.warning("Could not clean SSH launch environment in %s: %s", container, exc)
@@ -476,12 +478,12 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> bo
 def cleanup_remote_envs(container: str, user: str) -> None:
     """Remove abandoned launch-only env files before preparing a new launch."""
     _validate_target(container, user)
-    _launch_rel = ".agent-containers/launch"  # marketplace-isolation: allow remote-container-path
-    launch_dir = f"{_remote_home(container, user)}/{_launch_rel}"
+    launch_dir = launch_directory(user)
     result = _run([
         "docker", "exec", "-u", user, container,
         "sh", "-c",
-        abandoned_cleanup_script(launch_dir),
+        directory_guard(launch_dir, create=True) +
+        abandoned_cleanup_script(launch_dir, executable_directory(launch_dir + "/owner.env").rsplit("/", 1)[0]),
     ])
     if result.returncode != 0:
         raise RuntimeError(

@@ -431,7 +431,7 @@ def test_write_remote_env_sends_secrets_over_stdin(monkeypatch):
         {"GH_TOKEN": "secret-value", "LC_GIT_CREDENTIAL_RELAY": "54321"},
     )
 
-    assert path == "/home/vscode/.agent-containers/launch/abc.env"
+    assert path == "/dev/shm/agent-containers-vscode/launch/abc.env"
     assert "secret-value" in seen["input"]
     assert all("secret-value" not in arg for arg in seen["args"])
 

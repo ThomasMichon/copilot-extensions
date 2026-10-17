@@ -544,6 +544,8 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
 
 def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
     """Remove only a provider-created launch env path."""
+    from .launch_storage import launch_directory
+
     if args.expected_instance:
         from .session_host_context import cleanup_user
 
@@ -551,10 +553,13 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
     else:
         _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)
     remote_env = PurePosixPath(args.remote_env)
+    canonical_ram = str(remote_env.parent) == launch_directory(user)
+    legacy_home = remote_env.parts[-3:-1] == (".agent-containers", "launch")
     if (
         not remote_env.is_absolute()
         or len(remote_env.parts) < 4
-        or remote_env.parts[-3:-1] != (".agent-containers", "launch")
+        or ".." in remote_env.parts
+        or not (canonical_ram or legacy_home)
         or remote_env.suffix != ".env"
         or not re.fullmatch(r"[0-9a-f]{32}", remote_env.stem)
     ):

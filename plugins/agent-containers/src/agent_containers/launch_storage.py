@@ -1,0 +1,68 @@
+"""Private tmpfs storage for trusted-container launch inputs."""
+
+from __future__ import annotations
+
+import posixpath
+import shlex
+
+RAM_ROOT = "/dev/shm"
+EXEC_ROOT = "/tmp"
+
+
+def launch_directory(user: str) -> str:
+    return f"{RAM_ROOT}/agent-containers-{user}/launch"
+
+
+def executable_directory(auth_env: str) -> str:
+    owner = auth_env.removesuffix(".d/auth.env")
+    if owner.startswith(RAM_ROOT + "/agent-containers-"):
+        return EXEC_ROOT + owner[len(RAM_ROOT):] + ".d"
+    return owner + ".d"
+
+
+def directory_guard(
+    directory: str, *, create: bool = False, require_ram: bool = True,
+) -> str:
+    """Validate before reading stdin; pin subsequent relative writes by cwd."""
+    if not directory.startswith("/") or posixpath.normpath(directory) != directory:
+        raise RuntimeError("launch storage requires a normalized absolute directory")
+    parent = posixpath.dirname(directory)
+    base = posixpath.dirname(parent) if create else directory
+    ancestors: list[str] = []
+    current = base
+    while current != "/":
+        ancestors.append(current)
+        current = posixpath.dirname(current)
+    ancestors.append("/")
+    quoted = shlex.quote(directory)
+    script = (
+        "set -eu\numask 077\n"
+        "refuse_launch_storage() { "
+        "echo 'trusted launch storage must be a private, non-symlink tmpfs directory' >&2; "
+        "exit 1; }\n"
+        f"for ancestor in {shlex.join(list(reversed(ancestors)))}; do\n"
+        'test -d "$ancestor" && test ! -L "$ancestor" || refuse_launch_storage\n'
+        "done\n"
+    )
+    if require_ram:
+        script += f'test "$(stat -f -c %T -- {shlex.quote(base)})" = tmpfs || refuse_launch_storage\n'
+    if create:
+        script += (
+            f"for private in {shlex.join([parent, directory])}; do\n"
+            'if test ! -e "$private" && test ! -L "$private"; then\n'
+            'mkdir -m 700 -- "$private" || test -d "$private" || refuse_launch_storage\n'
+            "fi\n"
+            'test ! -L "$private" && test -d "$private" || refuse_launch_storage\n'
+            'test "$(stat -c %u -- "$private")" = "$(id -u)" || refuse_launch_storage\n'
+            'test "$(stat -c %a -- "$private")" = 700 || refuse_launch_storage\n'
+            "done\n"
+        )
+    script += (
+        f"cd -- {quoted} || refuse_launch_storage\n"
+        f'test "$(pwd -P)" = {quoted} || refuse_launch_storage\n'
+        'test "$(stat -c %u -- .)" = "$(id -u)" || refuse_launch_storage\n'
+        'test "$(stat -c %a -- .)" = 700 || refuse_launch_storage\n'
+    )
+    if require_ram:
+        script += 'test "$(stat -f -c %T -- .)" = tmpfs || refuse_launch_storage\n'
+    return script

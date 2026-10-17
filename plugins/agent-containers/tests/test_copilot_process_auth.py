@@ -368,6 +368,8 @@ def test_wrapper_transport_failure_cleans_staged_token_and_owner(launch_seams, m
     def run(argv, **kwargs):
         if "--secret-env-vars" in argv[-1]:
             return subprocess.CompletedProcess(argv, 0, "/usr/bin/copilot\n", "")
+        if "refuse_launch_storage" in argv[-1] and "cat >" not in argv[-1]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
         raise RuntimeError("synthetic wrapper transport failure")
 
     monkeypatch.setattr(auth.transport, "_run", run)
