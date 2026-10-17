@@ -32,7 +32,11 @@ cr_meta "source_installer_sha256" "$(sha256sum "$SOURCE/plugins/budget-guidance/
 if [ -n "${CR_UV_INDEX:-}" ]; then
     export UV_DEFAULT_INDEX="$CR_UV_INDEX" UV_INDEX_URL="$CR_UV_INDEX"
 fi
-FRESH="$(mktemp -d)"
+if ! FRESH="$(mktemp -d)"; then
+    jam "path-binstub" "candidate temporary directory creation failed" "inspect the disposable filesystem"
+    cr_finalize
+fi
+trap 'rm -rf -- "$FRESH"' EXIT
 if ! capture "copy-candidate" -- python3 - "$SOURCE" "$FRESH" <<'PY'
 import shutil
 import sys

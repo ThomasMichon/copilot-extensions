@@ -285,6 +285,15 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Clean-room candidate lifetime and output contract
+
+- Added exit/failure cleanup for the scenario-owned temporary candidate root,
+  with an explicit diagnostic if temporary-directory creation fails. Report
+  logs remain outside that root.
+- Retained the exact `"680"` balance assertion: posture version 1 intentionally
+  serializes Decimal quantities as strings. Coercing it to a number would hide
+  a real output-schema regression rather than improve compatibility.
+
 ### 2026-10-16 - Clean-room prerequisite clarity
 
 - Addressed source-review findings by declaring the scenario's standard Bash

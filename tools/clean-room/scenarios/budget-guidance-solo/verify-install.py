@@ -56,6 +56,7 @@ with tempfile.TemporaryDirectory(prefix="budget-static-") as temporary:
     }), encoding="utf-8")
     posture = status("--config", str(config), "--at", "2030-01-10T12:00:00Z")
     assert posture["availability"] == "available"
+    # Posture v1 deliberately serializes calculated Decimal values as strings.
     assert posture["calculated"]["remaining"] == "680"
     assert posture["fields"]["allowance"]["selected"]["source"] == "manual-example"
     assert posture["routing_advice"]["availability"] == "available"
