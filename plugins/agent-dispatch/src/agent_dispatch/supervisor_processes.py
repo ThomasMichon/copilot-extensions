@@ -213,9 +213,10 @@ def iter_windows_processes() -> list[WindowsProcess]:
     """Read the Windows process inventory (best-effort)."""
 
     script = (
-        "Get-CimInstance Win32_Process | "
-        "Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine | "
-        "ConvertTo-Json -Compress"
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
+        "$rows = @(Get-CimInstance Win32_Process | "
+        "Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine); "
+        "[Console]::Out.Write((ConvertTo-Json -InputObject $rows -Compress))"
     )
     completed = subprocess.run(
         [
@@ -227,6 +228,7 @@ def iter_windows_processes() -> list[WindowsProcess]:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=_ENUM_TIMEOUT_S,
         check=False,
         **no_window_kwargs(),

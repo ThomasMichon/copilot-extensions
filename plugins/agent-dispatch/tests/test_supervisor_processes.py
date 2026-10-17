@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+
+import pytest
+
+from agent_dispatch import supervisor_processes
 from agent_dispatch.supervisor_processes import (
     WindowsProcess,
     parse_windows_process_json,
@@ -148,6 +155,44 @@ def test_parse_windows_process_inventory_accepts_single_or_array_payload():
             command_line="python -V",
         ),
         WindowsProcess(pid=21, parent_pid=20),
+    ]
+
+
+def test_inventory_uses_explicit_utf8_stdout_without_host_formatting(monkeypatch):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+    monkeypatch.setattr(supervisor_processes.subprocess, "run", run)
+    assert supervisor_processes.iter_windows_processes() == []
+    argv, options = calls[0]
+    assert options["encoding"] == "utf-8"
+    assert "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)" in argv[-1]
+    assert "[Console]::Out.Write((ConvertTo-Json -InputObject $rows -Compress))" in argv[-1]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows PowerShell JSON transport")
+def test_inventory_transport_preserves_large_unicode_and_control_character_fields(monkeypatch):
+    command_line = "synthetic \u03bb\r\n\t\x1b" + ("long-field " * 40000)
+    executable = "C:\\synthetic\\\u03bb.exe"
+    payload = json.dumps({
+        "ProcessId": 42, "ParentProcessId": 7,
+        "ExecutablePath": executable, "CommandLine": command_line,
+    })
+    run = supervisor_processes.subprocess.run
+
+    def synthetic_inventory(argv, **kwargs):
+        script = (
+            "function Get-CimInstance { "
+            "[Console]::In.ReadToEnd() | ConvertFrom-Json }; " + argv[-1]
+        )
+        return run([*argv[:-1], script], input=payload, **kwargs)
+
+    monkeypatch.setattr(supervisor_processes.subprocess, "run", synthetic_inventory)
+    assert supervisor_processes.iter_windows_processes() == [
+        WindowsProcess(pid=42, parent_pid=7, executable=executable, command_line=command_line),
     ]
 
 

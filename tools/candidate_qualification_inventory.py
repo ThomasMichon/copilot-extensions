@@ -1,6 +1,7 @@
 """Derive required executed rows from the candidate's canonical CI aggregate."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import re
 from pathlib import Path
@@ -10,10 +11,84 @@ from materialized_candidate_inventory import (
 )
 
 _MATRIX = re.compile(r"\$\{\{\s*matrix\.([a-z][a-z0-9_]*)(?:\.name)?\s*\}\}")
+_SHARDED_SMOKE_NAME = (
+    "${{ matrix.shard_count > 1 && format('{0} ({1}/{2})', "
+    "matrix.plugin, matrix.shard_index, matrix.shard_count) || matrix.plugin }}"
+)
 _NON_CANDIDATE = {
     "pr-gate": "github.event_name == 'pull_request'",
     "coverage-guided-selection-integration": "inputs.promotion_run == ''",
 }
+
+
+def _ci_shards(root: Path, plugins: set[str]) -> tuple[dict[str, int], int]:
+    """Read the literal runner policy without executing candidate source."""
+    try:
+        module = ast.parse(regular(root, Path("tools/run-plugin-tests.py")).read_text("utf-8"))
+        declarations = []
+        for node in module.body:
+            if (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                    and node.target.id == "_CI_SHARD_COUNTS"):
+                declarations.append(node.value)
+            elif isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "_CI_SHARD_COUNTS"
+                for target in node.targets
+            ):
+                if len(node.targets) != 1:
+                    raise ValueError("expected a single shard policy assignment target")
+                declarations.append(node.value)
+        matrices = [
+            node for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_ci_matrix"
+        ]
+        if len(declarations) != 1 or len(matrices) != 1:
+            raise ValueError("expected one literal shard policy and matrix function")
+        defaults = [
+            node.args[1] for node in ast.walk(matrices[0])
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "_CI_SHARD_COUNTS" and node.func.attr == "get"
+            and len(node.args) == 2
+        ]
+        if len(defaults) != 1:
+            raise ValueError("expected one literal matrix shard default")
+        counts, default = ast.literal_eval(declarations[0]), ast.literal_eval(defaults[0])
+        if not isinstance(counts, dict) or any(
+            not isinstance(name, str) or not PLUGIN.fullmatch(name) or name not in plugins
+            for name in counts
+        ):
+            raise ValueError("invalid shard consumer")
+        if any(type(count) is not int or not 1 <= count <= 256
+               for count in [default, *counts.values()]):
+            raise ValueError("invalid shard count")
+    except (OSError, UnicodeError, SyntaxError, ValueError, TypeError) as error:
+        raise CandidateValidationError("canonical CI file-shard policy is unreadable") from error
+    return counts, default
+
+
+def _sharded_smoke_rows(
+    root: Path, block: str, discovery: str, plugins: set[str], heavy: str,
+) -> list[str]:
+    if (
+        "matrix: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}" not in block
+        or "--shard-index ${{ matrix.shard_index }}" not in block
+        or "--shard-count ${{ matrix.shard_count }}" not in block
+        or "smoke_matrix: ${{ steps.set.outputs.smoke_matrix }}" not in discovery
+        or "--list --ci-matrix" not in discovery
+    ):
+        raise CandidateValidationError("canonical CI sharded smoke recipe is unavailable")
+    counts, default = _ci_shards(root, plugins)
+    consumers = sorted(plugins - {heavy})
+    if sum(counts.get(name, default) for name in consumers) > 256:
+        raise CandidateValidationError("canonical CI file-shard policy exceeds the matrix limit")
+    rows = []
+    for name in consumers:
+        count = counts.get(name, default)
+        rows.extend(
+            f"{name} ({index}/{count})" if count > 1 else name
+            for index in range(1, count + 1)
+        )
+    return rows
 
 
 def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
@@ -53,7 +128,9 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
             allowed_skips.add(name)
             continue
         substitutions = list(_MATRIX.finditer(name))
-        if not substitutions:
+        if identifier == "smoke" and name == _SHARDED_SMOKE_NAME:
+            rows = _sharded_smoke_rows(root, block, jobs["discover"], plugins, heavy[1])
+        elif not substitutions:
             if "\n      matrix:" in block or "${{" in name:
                 raise CandidateValidationError(f"unsupported CI job name/matrix: {identifier}")
             rows = [name]

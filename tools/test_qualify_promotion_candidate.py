@@ -190,6 +190,8 @@ def test_relabelled_receipt_cannot_claim_a_different_owning_promotion_attempt(ba
 
 def _candidate_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     workflow = tmp_path / "ci.yml"
+    runner = tmp_path / "run-plugin-tests.py"
+    runner.write_bytes((ROOT / "tools/run-plugin-tests.py").read_bytes())
     text = (ROOT / ".github/workflows/ci.yml").read_text("utf-8")
     # Emulate the reviewed candidate aggregate while the workflow-only bootstrap is separate.
     start = text.index("  promotion-gate:\n")
@@ -197,7 +199,14 @@ def _candidate_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     if "      - full\n" not in gate:
         gate = gate.replace("    needs:\n", "    needs:\n      - full\n", 1)
     workflow.write_text(before + gate, encoding="utf-8")
-    monkeypatch.setattr(inventory, "regular", lambda root, path: workflow)
+    regular = inventory.regular
+    sources = {
+        Path(".github/workflows/ci.yml"): workflow,
+        Path("tools/run-plugin-tests.py"): runner,
+    }
+    monkeypatch.setattr(
+        inventory, "regular", lambda root, path: sources.get(path) or regular(root, path),
+    )
     return workflow
 
 
@@ -208,11 +217,198 @@ def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregat
     required, allowed_skips, digest = inventory.required_jobs(ROOT)
     assert {"guards + lint", "full - agent-worktrees", "archive sources (windows-latest)"} <= required
     assert {"agent-bridge", "agent-index", "Promotion snapshot gate"} <= required
+    assert {f"agent-dispatch ({index}/4)" for index in range(1, 5)} <= required
+    assert "agent-dispatch" not in required
     assert any(name.startswith("fleet-manager (windows-latest,") for name in required)
     assert any(name.startswith("fleet-manager (ubuntu-latest,") for name in required)
     assert len(required) > 50
     assert len(allowed_skips) == 2
     assert len(digest) == 64
+
+
+@pytest.mark.parametrize("count", [1, 2, 4, 5])
+def test_inventory_derives_every_shard_from_the_declared_runner_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    text = runner.read_text("utf-8")
+    declaration = '_CI_SHARD_COUNTS: dict[str, int] = {"agent-dispatch": 4}'
+    assert text.count(declaration) == 1
+    runner.write_text(
+        text.replace(declaration, f'_CI_SHARD_COUNTS: dict[str, int] = {{"agent-dispatch": {count}}}'),
+        encoding="utf-8",
+    )
+    required, _skips, _digest = inventory.required_jobs(ROOT)
+    actual = {
+        name for name in required
+        if name == "agent-dispatch" or name.startswith("agent-dispatch (")
+    }
+    assert actual == (
+        {"agent-dispatch"} if count == 1
+        else {f"agent-dispatch ({index}/{count})" for index in range(1, count + 1)}
+    )
+    assert {"agent-bridge", "agent-index", "full - agent-worktrees"} <= required
+
+
+def test_inventory_accepts_an_unannotated_literal_shard_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    expected = inventory.required_jobs(ROOT)
+    text = runner.read_text("utf-8")
+    runner.write_text(text.replace("_CI_SHARD_COUNTS: dict[str, int]", "_CI_SHARD_COUNTS"),
+                      encoding="utf-8")
+    assert inventory.required_jobs(ROOT) == expected
+
+
+@pytest.mark.parametrize("replacement", [
+    "_CI_SHARD_COUNTS = dict()",
+    "_CI_SHARD_COUNTS = other = {'agent-dispatch': 4}",
+    "_CI_SHARD_COUNTS: dict[str, int] = {'agent-dispatch': 4}\n_CI_SHARD_COUNTS = {'agent-dispatch': 4}",
+])
+def test_inventory_refuses_nonliteral_chained_or_duplicate_shard_assignments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    text = runner.read_text("utf-8")
+    runner.write_text(
+        text.replace('_CI_SHARD_COUNTS: dict[str, int] = {"agent-dispatch": 4}', replacement),
+        encoding="utf-8",
+    )
+    with pytest.raises(CandidateValidationError, match="shard policy"):
+        inventory.required_jobs(ROOT)
+
+
+def test_inventory_ignores_shard_policy_reads_outside_the_matrix_function(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    expected = inventory.required_jobs(ROOT)
+    with runner.open("a", encoding="utf-8") as stream:
+        stream.write("\nunrelated = _CI_SHARD_COUNTS.get('agent-dispatch', 99)\n")
+        stream.write("\ndef unrelated_reader():\n    return _CI_SHARD_COUNTS.get('other', 98)\n")
+    assert inventory.required_jobs(ROOT) == expected
+
+
+@pytest.mark.parametrize("mutation", ["missing-function", "duplicate-function", "missing-default", "duplicate-default"])
+def test_inventory_refuses_an_absent_or_ambiguous_matrix_shard_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    text = runner.read_text("utf-8")
+    if mutation == "missing-function":
+        text = text.replace("def _ci_matrix(", "def unrelated_matrix(", 1)
+    elif mutation == "duplicate-function":
+        text += "\ndef _ci_matrix(plugins):\n    return _CI_SHARD_COUNTS.get('other', 1)\n"
+    elif mutation == "missing-default":
+        text = text.replace("_CI_SHARD_COUNTS.get(name, 1)", "1")
+    else:
+        text = text.replace(
+            "_CI_SHARD_COUNTS.get(name, 1)",
+            "_CI_SHARD_COUNTS.get(name, _CI_SHARD_COUNTS.get(name, 1))",
+        )
+    runner.write_text(text, encoding="utf-8")
+    with pytest.raises(CandidateValidationError, match="shard policy"):
+        inventory.required_jobs(ROOT)
+
+
+@pytest.mark.parametrize("counts", [
+    {"agent-dispatch": 0}, {"agent-dispatch": True}, {"agent-dispatch": 1.5},
+    {"agent-dispatch": 257}, {"bad/name": 4}, {"missing-qualification-consumer": 4},
+])
+def test_inventory_refuses_invalid_file_shard_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, counts: dict,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    text = runner.read_text("utf-8")
+    runner.write_text(
+        text.replace('{"agent-dispatch": 4}', repr(counts), 1), encoding="utf-8",
+    )
+    with pytest.raises(CandidateValidationError, match="shard policy"):
+        inventory.required_jobs(ROOT)
+
+
+@pytest.mark.parametrize("before,after", [
+    ("fromJson(needs.discover.outputs.smoke_matrix)", "fromJson(needs.discover.outputs.other)"),
+    ("--list --ci-matrix", "--list"),
+    ("--shard-index ${{ matrix.shard_index }}", "--unaccounted-index"),
+    ("--shard-count ${{ matrix.shard_count }}", "--unaccounted-count"),
+])
+def test_inventory_refuses_an_unaccounted_shard_recipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before: str, after: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    text = workflow.read_text("utf-8")
+    assert before in text
+    workflow.write_text(text.replace(before, after, 1), encoding="utf-8")
+    with pytest.raises(CandidateValidationError, match="sharded smoke recipe"):
+        inventory.required_jobs(ROOT)
+
+
+@pytest.mark.parametrize("index", [1, 2, 3, 4])
+@pytest.mark.parametrize("conclusion", ["missing", "failure", "cancelled", "skipped"])
+def test_actual_shard_inventory_requires_every_successful_executed_row(
+    backend: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    index: int, conclusion: str,
+) -> None:
+    _candidate_workflow(tmp_path, monkeypatch)
+    portfolio = inventory.required_jobs(ROOT)
+    monkeypatch.setattr(qualification, "required_jobs", lambda _root: portfolio)
+    backend["jobs"] = [
+        dict(id=number, name=name, status="completed", conclusion="success")
+        for number, name in enumerate(sorted(portfolio[0]), 1)
+    ]
+    receipt = _qualify()
+    assert _verify(receipt) == qualification.receipt_digest(receipt)
+    target = f"agent-dispatch ({index}/4)"
+    if conclusion == "missing":
+        backend["jobs"] = [job for job in backend["jobs"] if job["name"] != target]
+    else:
+        next(job for job in backend["jobs"] if job["name"] == target)["conclusion"] = conclusion
+    with pytest.raises(workflows.VerificationError):
+        _verify(receipt)
+
+
+def test_legacy_unsharded_inventory_does_not_require_new_runner_declarations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    text = workflow.read_text("utf-8")
+    text = text.replace(inventory._SHARDED_SMOKE_NAME, "${{ matrix.plugin }}")
+    text = text.replace(
+        "      matrix: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}",
+        "      matrix:\n        plugin: ${{ fromJson(needs.discover.outputs.smoke) }}",
+    )
+    text = text.replace(
+        "          --shard-index ${{ matrix.shard_index }} --shard-count ${{ matrix.shard_count }}\n",
+        "",
+    )
+    workflow.write_text(text, encoding="utf-8")
+    workflow.with_name("run-plugin-tests.py").write_text("# Legacy runner\n", encoding="utf-8")
+    required, _skips, _digest = inventory.required_jobs(ROOT)
+    assert "agent-dispatch" in required
+    assert not any(name.startswith("agent-dispatch (") for name in required)
+
+
+def test_inventory_refuses_a_shard_policy_exceeding_the_hosted_matrix_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    text = runner.read_text("utf-8")
+    assert "_CI_SHARD_COUNTS.get(name, 1)" in text
+    runner.write_text(
+        text.replace("_CI_SHARD_COUNTS.get(name, 1)", "_CI_SHARD_COUNTS.get(name, 256)"),
+        encoding="utf-8",
+    )
+    with pytest.raises(CandidateValidationError, match="matrix limit"):
+        inventory.required_jobs(ROOT)
 
 
 def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(

@@ -109,6 +109,68 @@ Conditional cutover's native contention checks retain their one-second limit,
 measured from actual holder acquisition. Earlier healthy publication/fixture I/O
 is not part of that contention interval; the native lock and whole-item deadline
 remain real and unchanged.
+Complete-suite CI sharding reuses the runner's sorted test-file discovery and
+contained execution. Supply both `--shard-index N --shard-count M` for exactly
+one plugin; indices are one-based and invalid or incomplete selectors refuse
+before environment preparation. Shards take alternating entries from the same
+selected file set, so their union is complete and each file belongs to exactly
+one shard. Existing `--test-file` selection precedes sharding; no node filter or
+explicit-tier override is added. Empty shards succeed without starting pytest,
+never falling back to directory-wide collection. Unsharded invocations retain
+their existing behavior and limits.
+
+Inspect the complete source manifests without preparing or executing tests:
+
+```powershell
+python tools\run-plugin-tests.py agent-dispatch --list-test-files
+python tools\run-plugin-tests.py agent-dispatch --list-test-files --shard-index 1 --shard-count 4
+python tools\run-plugin-tests.py agent-dispatch --list-test-files --shard-index 2 --shard-count 4
+python tools\run-plugin-tests.py agent-dispatch --list-test-files --shard-index 3 --shard-count 4
+python tools\run-plugin-tests.py agent-dispatch --list-test-files --shard-index 4 --shard-count 4
+```
+
+Omit `--list-test-files` to execute each shard through the existing managed venv,
+admission lease, isolated fixtures and per-group process-tree containment. Each
+CI matrix job has its own checkout; concurrent invocations in one checkout
+still honor the existing environment lease.
+
+The runner's own contained-pytest contract requires `pytest-timeout` alongside
+pytest and PyYAML; both native CI contract jobs install it explicitly.
+
+`ci.yml`'s per-plugin smoke matrix runs the complete ordinary `agent-dispatch`
+set as four shards under the unchanged 12-minute per-job ceiling. Other plugins
+use one shard. The existing required aggregate still depends on the whole
+`smoke` matrix with `fail-fast: false`, so any shard's failure or cancellation
+blocks it. This applies wherever that smoke job runs, including PR and dev/main
+push validation. Manual `full` and `validate-and-promote.yml` full validation
+remain unsharded; their selection, coverage and release policy are unchanged.
+
+The literal `_CI_SHARD_COUNTS` runner policy also supplies promotion
+qualification's expected smoke rows. Qualification reads that policy and the
+unique `_ci_matrix` default as data. It ignores unrelated policy readers,
+requires every named shard to have executed successfully, and refuses unknown
+matrix recipes or counts rather than dropping coverage. Historical unsharded
+CI declarations remain supported. The single literal policy assignment may be
+annotated or unannotated; nonliteral, chained and duplicate declarations refuse.
+
+Real stalled-probe regressions establish descendant readiness and birth-bound
+Job/group custody before the forced 0.8-second capture; that fixture input is
+not a bootstrap allowance or the production 30-second authentication timeout.
+Communication and retirement stay real. On Windows, known pending termination
+may receive one same-pinned-handle exit confirmation, capped at 1,000ms inside
+the existing five-second actor window with one second reserved for heartbeat
+and diagnostics. Failed/unknown observations remain fatal; identity, custody,
+absent stop, signaled exit and stable heartbeat must hold before watchdog
+expiry and fixture Job close. No production timeout or containment is changed.
+The finite Windows probe actors do not import the unrelated process runtime
+before publishing readiness. A poisoned-runtime-module regression proves this
+dependency boundary while retaining the ten-second readiness and five-second
+active windows.
+
+Windows census transport writes compact JSON directly to explicit UTF-8 stdout,
+without host formatting. Its native synthetic-data regression round-trips a
+command line longer than 400,000 characters with Unicode and control characters;
+real durable-launch and cutover tests still exercise the actual CIM inventory.
 
 The registered-repository Git-probe guard follows the real `repos._git` to
 `git_ops.git` call chain. It checks headless options at that subprocess owner,
