@@ -562,6 +562,8 @@ def create_pr(
     # reconcile down to the genuinely-live (or no) active PR.
     if not new and not branch and git_ops.has_remote(remote, cwd=worktree_path):
         while active_is_live and active is not None and active.branch:
+            if pr_publication_state.unpublished(active):
+                break
             if not pr_publish.head_branch_gone(repo, active, worktree_path):
                 break
             active.state = "merged"
@@ -725,7 +727,13 @@ def create_pr(
             f"Checkout '{wt_branch}' before create-pr."
         )}
 
-    reusing = bool(active_is_live and not new and active and active.branch == feature_branch)
+    provisional_retry = bool(
+        pr_publication_state.unpublished(active)
+        and active.branch == feature_branch
+        and active.provider == prcfg.provider
+        and active.repo == default_pr_repo
+    )
+    reusing = bool(active_is_live and not new and active and active.branch == feature_branch and not provisional_retry)
     ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
 
     # Re-run fast path: under the old reset-to-upstream scheme (or after a
@@ -764,7 +772,7 @@ def create_pr(
     # 'creating' up front so a later publish failure is recoverable.
     target_pr: PRRecord | None = None
     if record is not None:
-        if reusing and active is not None:
+        if (reusing or provisional_retry) and active is not None:
             target_pr = active
             target_pr.state = "creating"
             target_pr.branch = feature_branch

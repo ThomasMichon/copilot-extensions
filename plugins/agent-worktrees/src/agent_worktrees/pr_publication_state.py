@@ -95,3 +95,14 @@ def provisional_lease(pr, remote: str, branch: str, cwd: str) -> str | None:
     if tip:
         raise ValueError("Unleased provisional PR head already exists; inspect and reconcile the ambiguous push before retrying.")
     return ""
+
+
+def unpublished(pr: tracking.PRRecord | None) -> bool:
+    """Identify a provisional entry with no publication or provider evidence."""
+    return pr is not None and pr.state == "creating" and pr.number is None and not any(
+        getattr(pr, name) for name in (
+            "url", "base_sha", "head_sha", "patch_id", "rewrite_owner",
+            "rewrite_identity", "remote", "head_repo", "head_identity", "head_owner",
+            "head_observed_at", "head_observed_api_base", "attribution_head", "closed_at",
+        )
+    )
