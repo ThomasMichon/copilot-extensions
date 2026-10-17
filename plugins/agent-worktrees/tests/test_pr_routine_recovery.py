@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from test_pr_rebase import _advance, _prepare
 from test_pr_recovery_advanced_head import backed_publication, git, metadata, record
 
 from agent_worktrees import (
@@ -14,6 +15,7 @@ from agent_worktrees import (
     git_collab,
     git_ops,
     pr_publish,
+    pr_ops,
     pr_recovery,
     pr_rewrite,
     pr_routine_recovery,
@@ -94,6 +96,69 @@ def test_sync_forward_reconciles_before_retaining_next_transition(owned_publicat
 def invoke(command, config, wid, **kwargs):
     function = finalize.push_changes if command == "push-changes" else git_collab.sync_forward
     return function(wid, config, **kwargs)
+
+
+@pytest.mark.parametrize("recovery", ["ordinary", "after-reconciliation", "source-rebase"])
+def test_numbered_pr_preserves_verified_lost_ack_fallbacks(
+    pr_repo, monkeypatch, recovery,
+) -> None:
+    if recovery == "after-reconciliation":
+        real_slug = pr_publish.push_slug
+        config, wid, wt, remote, _saved, branch, _published = backed_publication(
+            pr_repo, monkeypatch, with_base=True,
+        )
+        monkeypatch.setattr(git_ops, "slug_from_url", lambda *a: "example/project")
+        monkeypatch.setattr(pr_publish, "push_slug", real_slug)
+        current = record(wid)
+        current.pr.rewrite_owner = f"{wid}:{branch}"
+        current.pr.rewrite_identity = pr_publish.push_identity("origin", cwd=str(wt))
+        tracking.save_record(current)
+        assert pr_routine_recovery.reconcile(config, record(wid), cwd=str(wt))
+    else:
+        config, wid, wt, remote, branch, _published = _prepare(pr_repo)
+        current = record(wid)
+        current.pr.number = 42
+        current.pr.repo = "example/project"
+        current.pr.url = "https://gitea.example.com/example/project/pulls/42"
+        tracking.save_record(current)
+        monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
+        monkeypatch.setattr(git_ops, "slug_from_url", lambda *a: "example/project")
+        monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
+        monkeypatch.setattr(pr_rewrite, "observe_pr", lambda config, pr: PullResult(
+            number=42, head_sha=pr_publish._tip("origin", branch, str(wt)),
+            head_ref=branch, head_url=str(remote),
+        ))
+    saved = record(wid).pr.head_sha
+    (wt / "accepted-feedback.txt").write_text("accepted source feedback\n")
+    git("add", "accepted-feedback.txt", cwd=wt)
+    git("commit", "-m", "accepted source feedback", cwd=wt)
+    accepted = git("rev-parse", "HEAD", cwd=wt)
+    push = git_ops.push
+
+    def lose_ack(*args, **kwargs):
+        assert push(*args, **kwargs)
+        return git_ops.PushResult(ok=False, stderr="transport acknowledgement lost")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(git_ops, "push", lose_ack)
+        assert not finalize.push_changes(wid, config)
+    assert record(wid).pr.number == 42
+    assert record(wid).pr.head_sha == saved
+    assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == accepted
+    (wt / "later-feedback.txt").write_text("retain unpublished feedback\n")
+    git("add", "later-feedback.txt", cwd=wt)
+    git("commit", "-m", "later feedback", cwd=wt)
+    if recovery == "source-rebase":
+        _advance(config, wt)
+        git("rebase", "origin/master", cwd=wt)
+        assert not git_ops.is_commit_ancestor(accepted, git("rev-parse", "HEAD", cwd=wt), cwd=str(wt))
+        monkeypatch.setattr(pr_publish, "_provider_head", lambda *a, **k: accepted)
+    source = git("rev-parse", "HEAD", cwd=wt)
+    assert finalize.push_changes(wid, config)
+    assert record(wid).pr.head_sha == source
+    assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == source
+    assert git("show", "HEAD:accepted-feedback.txt", cwd=wt) == "accepted source feedback"
+    assert git("show", "HEAD:later-feedback.txt", cwd=wt) == "retain unpublished feedback"
 
 
 @pytest.mark.parametrize("command", ["push-changes", "sync"])
