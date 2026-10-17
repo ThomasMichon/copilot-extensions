@@ -89,6 +89,9 @@ Scoped credential probes and forge operations use the existing captured
 process-tree runner with a 30-second timeout per command. Timeout reaps the
 command's descendants; failures report a fixed command group and numeric exit
 code without echoing arguments or credential-bearing output.
+The command adapter forwards `cwd`, environment and timeout to the contained
+capture runner. That runner owns fixed text capture and headless process-tree
+flags; incompatible or unknown process options refuse before execution.
 
 Azure DevOps work-item discovery has no natural per-repo boundary the way a
 GitHub `owner/name` repository does: an Azure DevOps `organization/project`

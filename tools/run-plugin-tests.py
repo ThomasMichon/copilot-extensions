@@ -575,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="print the resolved target plugins as a JSON array and exit "
                          "(feeds a CI matrix); honors --all/--changed/names and --exclude")
     ap.add_argument("--ci-matrix", action="store_true",
-                    help="with --list, expand agent-dispatch into four CI file shards")
+                    help="with --list, expand plugins into CI file shards per the runner policy")
     ap.add_argument("--pre-push", action="store_true",
                     help="hook mode: skip (exit 0) if uv is absent instead of failing")
     ap.add_argument("--timeout", "--subsuite-timeout", dest="subsuite_timeout",

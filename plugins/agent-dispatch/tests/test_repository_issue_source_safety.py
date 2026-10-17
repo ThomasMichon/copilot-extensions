@@ -411,6 +411,30 @@ def test_default_scoped_operation_uses_contained_capture(monkeypatch):
     assert calls[0][1]["env"] == {"GH_TOKEN": "synthetic-only"}
 
 
+def test_repository_command_preserves_real_child_cwd_and_fixed_capture_options(tmp_path):
+    completed = repository_github_auth.run_repository_command(
+        [sys.executable, "-c", "import os; print(os.getcwd())"],
+        cwd=tmp_path, capture_output=True, text=True, check=False,
+        **procutil.no_window_kwargs(),
+    )
+    assert completed.returncode == 0
+    assert os.path.samefile(completed.stdout.strip(), tmp_path)
+    assert completed.stderr == ""
+
+
+@pytest.mark.parametrize("options", [
+    {"capture_output": False}, {"text": False}, {"check": True},
+    {"creationflags": -1}, {"stdin": "synthetic-input"},
+])
+def test_repository_command_refuses_unsupported_options_before_capture(monkeypatch, options):
+    monkeypatch.setattr(
+        procutil, "run_background_capture",
+        lambda *_a, **_kw: pytest.fail("captured unsupported process options"),
+    )
+    with pytest.raises(ValueError, match="unsupported process options"):
+        repository_github_auth.run_repository_command(["gh", "api", "user"], **options)
+
+
 @pytest.mark.parametrize("old_state", ["reserved", "claimed", "released"])
 @pytest.mark.parametrize("new_state", ["claimed", "released"])
 def test_newer_in_place_snapshot_does_not_require_an_obsolete_predecessor(old_state, new_state):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import os
 import subprocess
 from typing import Any
 
@@ -14,11 +15,19 @@ _TIMEOUT_SECONDS = 30
 
 def run_repository_command(
     argv: list[str], *, timeout: float = _TIMEOUT_SECONDS,
-    env: Mapping[str, str] | None = None, **_kwargs: Any,
+    env: Mapping[str, str] | None = None,
+    cwd: str | os.PathLike[str] | None = None, **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
-    """Capture scoped commands privately and reap their full tree on timeout."""
+    """Forward execution context; the capture runner owns pipes and tree flags."""
+    fixed_options = {
+        "capture_output": True, "text": True, "check": False,
+        **procutil.no_window_kwargs(),
+    }
+    if any(key not in fixed_options or value != fixed_options[key]
+           for key, value in kwargs.items()):
+        raise ValueError("Repository GitHub command received unsupported process options")
     try:
-        result = procutil.run_background_capture(argv, timeout=timeout, env=env)
+        result = procutil.run_background_capture(argv, timeout=timeout, env=env, cwd=cwd)
     except (OSError, subprocess.SubprocessError):
         raise RuntimeError("Repository GitHub command failed") from None
     if result is None:

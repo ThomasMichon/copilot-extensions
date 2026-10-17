@@ -1050,3 +1050,20 @@ requested contract.
   preparation. The relevant CLI selection passes 18 tests.
 - Fatal lint and whitespace checks pass. These repairs still require a new
   published head, fresh review and hosted CI; no merge or rollout is claimed.
+
+### 2026-10-16 - Close the late command-adapter review
+
+- The scoped command adapter now explicitly forwards working directory as well
+  as environment and timeout. Compatibility options must match the contained
+  runner's fixed capture/headless contract; unknown or conflicting options
+  fail before execution rather than being silently discarded.
+- A real child verifies the forwarded working directory. Five rejection cases
+  cover incompatible capture, text, check, process flags and input options.
+  Complete contained source-safety/provider coverage passes 410 tests without
+  changing timeouts or process-tree custody.
+- CI matrix help now refers to runner policy instead of hard-coding a shard
+  count. The actual CLI help and 15 relevant matrix/selection tests pass;
+  affected Python lint and whitespace checks pass.
+- The previous published head's hosted CI succeeded. That result does not
+  validate these later edits: the next published head still needs fresh CI and
+  a passing review before merge.
