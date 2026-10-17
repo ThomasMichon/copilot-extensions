@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent plan, implementation and completion PRs targeting `dev`
 - **Created:** 2026-10-16
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Agent Fabric](../../../visions/agent-fabric/README.md), “Derive, don't duplicate”; standalone graceful composition
 - **Umbrella issue:** #7069
-- **Sub-issues:** None
+- **Sub-issues:** #7090 (validation fix-forward)
 
 ## Guiding Intent
 
@@ -52,27 +52,27 @@ is context for existing machine authority, not a new runtime code dependency.
 ## Plan
 
 ### Phase 1 — Reviewed source contract
-- [ ] Claim the deduplicated issue and land this plan-only PR before implementation.
-- [ ] Trace existing configuration, invocation and execution-space authority
+- [x] Claim the deduplicated issue and land this plan-only PR before implementation.
+- [x] Trace existing configuration, invocation and execution-space authority
   helpers; choose the smallest supported derivation contract.
 
 ### Phase 2 — Derived identity and propagation
-- [ ] Capture originating source context before daemon detach/cwd changes;
+- [x] Capture originating source context before daemon detach/cwd changes;
   recompute and validate against authoritative project/machine configuration.
-- [ ] Carry one resolved execution identity through every nested resolver caller.
-- [ ] Support start, restart and adoption from a source worktree without manually
+- [x] Carry one resolved execution identity through every nested resolver caller.
+- [x] Support start, restart and adoption from a source worktree without manually
   writing `local_execution_space`.
-- [ ] Preserve standalone bridge operation without requiring agent-worktrees.
+- [x] Preserve standalone bridge operation without requiring agent-worktrees.
   Reject missing/ambiguous bindings explicitly when authority cannot be derived.
-- [ ] Preserve native/guest and separately registered same-platform spaces;
+- [x] Preserve native/guest and separately registered same-platform spaces;
   never grant ownership from hostname, display alias, SSH profile or unverified
   ambient environment.
-- [ ] Define legacy selector compatibility without overriding contradictory
+- [x] Define legacy selector compatibility without overriding contradictory
   authority; update the directly affected configuration documentation and changefile.
 
 ### Phase 3 — Validate, land and close
-- [ ] Complete targeted then required contained plugin gates, lint and install-contract validation.
-- [ ] Complete REVIEW.md self-check, documentation-impact review and public privacy scan.
+- [x] Complete targeted then required contained plugin gates, lint and install-contract validation.
+- [x] Complete REVIEW.md self-check, documentation-impact review and public source-diff privacy scan.
 - [ ] Land the implementation through normal review/check/role gates; re-read this
   effort, resolve its checklists and land the Done/archive delta.
 - [ ] Release effort focus and finalize the source worktree; report release status
@@ -80,19 +80,19 @@ is context for existing machine authority, not a new runtime code dependency.
 
 ## Validation Plan
 
-- [ ] Regression for the original discovered-agent `_find_covering_agent`
+- [x] Regression for the original discovered-agent `_find_covering_agent`
   startup path, exercising the nested resolver.
-- [ ] Real source-worktree → authoritative identity → daemon context/config →
+- [x] Real source-worktree → authoritative identity → daemon context/config →
   nested resolver contract with no manual bridge selector.
-- [ ] Native/guest and same-platform independent spaces remain distinct; missing,
+- [x] Native/guest and same-platform independent spaces remain distinct; missing,
   ambiguous, platform-mismatched and contradictory bindings fail closed.
-- [ ] Standalone no-sibling and deliberate legacy-selector compatibility cases.
-- [ ] Fresh isolated configuration/startup check without touching a shared daemon.
-- [ ] Targeted tests followed by required contained plugin suites, ruff F/E9 and
+- [x] Standalone no-sibling and deliberate legacy-selector compatibility cases.
+- [x] Fresh isolated configuration/startup check without touching a shared daemon.
+- [x] Targeted tests followed by required contained plugin suites, ruff F/E9 and
   `check-install-contract`; stage new files before wrapper snapshots.
-- [ ] Record exercised validation tiers and explicit reasons for unavailable
+- [x] Record exercised validation tiers and explicit reasons for unavailable
   clean-room/external lanes; no deployment implied by unit success.
-- [ ] _(agent-recommended)_ Re-read changed configuration docs and inspect every
+- [x] _(agent-recommended)_ Re-read changed configuration docs and inspect every
   resolver constructor to catch sibling propagation omissions.
 
 ## Proposal
@@ -111,3 +111,81 @@ with implementation tests; standalone compatibility remains first-class.
 - Claimed #7069 after narrow dedup. Adjacent ownership fences retained.
 - Request read back against the approved exact quote; unchanged. No private
   deployment context included. Implementation awaits the plan review gate.
+
+### 2026-10-17 — Reviewed contract
+- Plan #7070 merged after Copilot approval with no findings and all CI passing.
+- Reuse Worktrees' `get machine`: its existing current-execution-space fence
+  validates canonical configured machine and platform. Invoke it through bridge's
+  same-installation peer launcher, not imports or a new ambient identity variable.
+- Capture source context before detach/chdir; adoption retains the stable source
+  repository for supervised starts. Context is a locator, never authority.
+- Keep standalone unscoped topology and legacy selectors usable without a sibling;
+  a discovered authoritative contradiction remains an error.
+
+### 2026-10-17 — Implementation and focused validation
+- Captured source context is non-persistent process data or an adoption-created
+  stable repository locator, never a stored derived key. Originating project
+  authority takes precedence; neutral/supervised starts require profile consensus.
+- Legacy selectors work without a sibling but cannot override a discovered
+  authoritative contradiction or bound-project refusal. Invalid identity/topology
+  configuration no longer becomes successful default configuration.
+- The original nested construction fails the new regression with the exact
+  missing-selector error; forwarding the derived key fixes it. Targeted runs
+  passed 242 tests, then 127 including added real linked-Git and routing-env checks.
+- A read-only native consumer check exercised the actual same-installation
+  Worktrees command from a registered source worktree, its canonical configured
+  machine authority, derived bridge identity and nested coverage resolver. A
+  second same-platform space remained remote; no selector/config/runtime was written.
+- Fresh isolated configuration, adoption and pre-chdir/startup fixtures cover
+  first-touch behavior. No disposable external host/guest rollout was performed:
+  this Windows source work owns no deployment lane or rollout authorization.
+  Guest/Linux cases are contract tests, not claims of native guest rollout.
+- Ruff F/E9, install-contract (13 plugins), documentation consistency and version
+  consistency passed. Full contained Bridge suite is in progress; its final
+  aggregate and implementation review remain outstanding.
+- The native portfolio exposed #7090: Python 3.14 reports late inner exceptions
+  from abandoned shield wrappers even when the task failure is consumed. Replaced
+  the reader's sample/command joins with non-cancelling waits, retaining ownership
+  and deadlines; validation covers cancellation during either join.
+
+### 2026-10-17 — Native portfolio complete
+- Covered all 242 Bridge test files through the contained runner. The first
+  75 files passed in three groups; the remainder passed in file-bounded runs.
+  The completed-slot admission matrix exceeded the unchanged 300-second group
+  budget, so every test function was run separately at the same limits, with
+  no omissions or increased item budgets. Normal platform/explicit-tier skips
+  remain visible; no host-state opt-in was used.
+- Fixed both real failures encountered: #7090's owned-reader join handling,
+  and the synthetic HTTP/2 redirect peer's premature reply before request-body
+  consumption. Its existing no-forward assertion remains, with an additional
+  positive body-consumption assertion. The full native peer module and registry
+  selection passed together (201 tests); reader/identity selection passed 67.
+- The final native broker fixture now starts from its own neutral cwd rather
+  than accidentally probing the caller's Git checkout through a mocked process
+  factory. Final portfolio files passed 201 tests with 20 platform skips.
+- Cross-plugin guards passed 9 tests. Rechecked ruff F/E9, install contract,
+  documentation/version consistency, whitespace and source-diff privacy.
+- No new daemon, lifecycle owner, endpoint or termination path was introduced.
+  Existing service/installer activation, passive cutover, singleton, drain and
+  production-lifetime mechanisms remain authoritative.
+- The publication guard identified the model source's missing contract-registry
+  fingerprint refresh. Updated its LF-normalized hash and explicitly classified
+  the topology-only locator addition as non-semantic for HTTP; no wire generation
+  or frozen wire fixture changes are warranted.
+- Local-agent/provider-only configurations have no machine inventory and therefore
+  select no registered execution authority, even with a residual legacy selector.
+  Nonempty topology selections remain strict. Added the actual local-only startup
+  regression. Completed sample timeout exceptions are observation failures,
+  distinct from a still-pending bounded join; both paths have direct coverage.
+- Captured source context is applied after configuration migration returns,
+  independent of replacement-model behavior. Startup tests cover both identity
+  and copied-model migrations. Derived-key validation now attributes failures
+  to the source-project binding rather than suggesting a manual bridge setting.
+- A cancelled sampling holder is an observation failure, distinct from
+  cancellation of the caller's wait (which still propagates). The updated
+  identity/config/reader/startup/broker selection passed 335 tests; contract
+  evidence and F/E9 lint remain clean.
+- Invalid profile locators and captured origins identify their exact profile/path;
+  reader failures and disagreeing authorities retain source provenance. Explicit
+  source-query deduplication preserves argv values and avoids repeated reads of
+  the same binding. Added duplicate-source and pre-write diagnostic regressions.

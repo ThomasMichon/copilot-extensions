@@ -18,7 +18,7 @@ sessions = {}
 evidence = {
     "prompts": 0, "answers": [], "http_versions": [], "deletes": 0,
     "auth_refused": 0, "auth_ok": 0, "redirect_followed": 0, "ws_cookies": 0,
-    "accepted_actions": 0,
+    "accepted_actions": 0, "redirect_body_bytes": 0,
     "created_sessions": 0,
 }
 
@@ -354,6 +354,11 @@ async def app(scope, receive, send):
             await conn.handle(json.loads(event["text"]))
     elif scope["type"] == "http":
         if scope["path"] == "/redirect":
+            while True:
+                event = await receive()
+                evidence["redirect_body_bytes"] += len(event.get("body", b""))
+                if not event.get("more_body"):
+                    break
             await respond(send, 307, headers=[(b"location", b"/forbidden")])
             return
         if scope["path"] == "/evidence":

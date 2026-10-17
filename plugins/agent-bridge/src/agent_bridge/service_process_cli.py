@@ -352,9 +352,13 @@ def _win_task_exists() -> bool:
 
 def _daemon_launch_argv() -> list[str]:
     """Argv that starts the foreground daemon without the Windows ``.cmd`` shim."""
+    from .execution_identity import source_repository
+
     core = _core()
+    source = source_repository(Path.cwd())
+    source_args = ["--source-worktree", str(source)] if source is not None else []
     if sys.executable:
-        return [sys.executable, "-m", "agent_bridge", "start"]
+        return [sys.executable, "-m", "agent_bridge", "start", *source_args]
     venv = os.path.join(core._INSTALL_DIR, "venv")
     py = (
         os.path.join(venv, "Scripts", "python.exe")
@@ -362,11 +366,11 @@ def _daemon_launch_argv() -> list[str]:
         else os.path.join(venv, "bin", "python")
     )
     if os.path.isfile(py):
-        return [py, "-m", "agent_bridge", "start"]
+        return [py, "-m", "agent_bridge", "start", *source_args]
     exe = shutil.which("agent-bridge")  # marketplace-isolation: allow legacy-compatibility
     if exe:
-        return [exe, "start"]
-    return ["agent-bridge", "start"]
+        return [exe, "start", *source_args]
+    return ["agent-bridge", "start", *source_args]
 
 
 def _daemon_root_env() -> dict[str, str]:

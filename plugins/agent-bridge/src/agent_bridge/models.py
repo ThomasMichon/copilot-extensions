@@ -670,6 +670,11 @@ class TopologyProfile(BaseModel):
 
     machines_yaml: str | None = None
     agents_config: str | None = None
+    source_repo: str | None = Field(
+        default=None,
+        description="Stable source repository captured by adoption; a configuration "
+        "locator, not an execution-space identity.",
+    )
     # System-wide spawn defaults applied to every **derived** agent in this
     # profile (the topology roster synthesized from machines.yaml). Derived agents
     # otherwise carry no copilot args, so the model target lived, redundantly, on

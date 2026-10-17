@@ -179,25 +179,25 @@ async def test_sample_completing_after_join_budget_is_exported_at_command_exit(
 
 
 @pytest.mark.asyncio
-async def test_distinct_asyncio_timeout_remains_pending(
+@pytest.mark.parametrize("failure", [TimeoutError, RuntimeError])
+async def test_completed_sample_failure_is_not_reported_as_pending(
     monkeypatch: pytest.MonkeyPatch,
+    failure: type[Exception],
 ) -> None:
-    class LegacyAsyncioTimeout(Exception):
-        pass
+    async def sample() -> CpuObservation:
+        raise failure("sample failed")
 
-    async def timeout(awaitable: object, *, timeout: float) -> None:
-        raise LegacyAsyncioTimeout()
-
-    monkeypatch.setattr(reader_observation.asyncio, "TimeoutError", LegacyAsyncioTimeout)
-    monkeypatch.setattr(reader_observation.asyncio, "wait_for", timeout)
     root = ProcessIdentity(123, None)
     observer = reader_observation.ReaderCpuObservation("test")
     sampler = OwnedProcessCpuSampler(root)
+    monkeypatch.setattr(sampler, "sample", sample)
     observation, issue = await observer._sample(sampler, root, None)
     assert observation is None
-    assert issue is not None and issue.reason == "sample_pending"
+    assert issue is not None and issue.reason == "sampling_failed"
     assert observer._sample_holder is not None
-    await observer._sample_holder
+    assert observer._sample_holder.done()
+    with pytest.raises(failure):
+        await observer._sample_holder
 
 
 @pytest.mark.asyncio
@@ -250,13 +250,31 @@ async def test_late_native_completion_sets_next_provider_sample_deadline(
 
 
 @pytest.mark.asyncio
+async def test_cancelled_sample_holder_does_not_cancel_observation():
+    root = ProcessIdentity(123, None)
+    observer = reader_observation.ReaderCpuObservation("test")
+    sampler = OwnedProcessCpuSampler(root)
+    holder = asyncio.create_task(asyncio.sleep(60))
+    holder.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await holder
+    observer._sample_holder = holder
+    observation, issue = await observer._sample(sampler, root, None)
+    assert observation is None
+    assert issue is not None and issue.reason == "sampling_failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "root", [ProcessIdentity(123, 456.0), None], ids=["sample-wait", "command-wait"],
+)
 async def test_detached_native_and_sample_failures_are_consumed(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    root: ProcessIdentity | None,
 ) -> None:
     command_release, sample_release = threading.Event(), threading.Event()
     sample_started = threading.Event()
-    root = ProcessIdentity(123, 456.0)
 
     def run(
         self: reader_command.OwnedReaderCommand,
@@ -265,6 +283,8 @@ async def test_detached_native_and_sample_failures_are_consumed(
         timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         self.receipt.set_result(root)
+        if root is None:
+            sample_started.set()
         assert command_release.wait(10)
         raise subprocess.TimeoutExpired(cmd, timeout)
 
@@ -285,6 +305,8 @@ async def test_detached_native_and_sample_failures_are_consumed(
         async with asyncio.timeout(2):
             while not sample_started.is_set():
                 await asyncio.sleep(0.001)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
         read.cancel()
         with pytest.raises(asyncio.CancelledError):
             await read
@@ -293,7 +315,7 @@ async def test_detached_native_and_sample_failures_are_consumed(
         async with asyncio.timeout(2):
             while not (
                 "command task failed (TimeoutExpired)" in caplog.text
-                and "sample task failed (RuntimeError)" in caplog.text
+                and (root is None or "sample task failed (RuntimeError)" in caplog.text)
             ):
                 await asyncio.sleep(0.001)
         del read

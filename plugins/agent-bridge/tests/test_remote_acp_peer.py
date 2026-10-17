@@ -406,6 +406,8 @@ async def test_actual_remote_redirect_refused_without_forwarding(peer, mode):
     async with httpx.AsyncClient(verify=context, trust_env=False) as probe:
         data = (await probe.get(url + "/evidence")).json()
     assert data["redirect_followed"] == 0
+    if mode == "streamable-http":
+        assert data["redirect_body_bytes"] > 0
     assert data["prompts"] == 0
     assert proc.poll() is None
 

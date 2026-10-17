@@ -120,7 +120,23 @@ def _cmd_start(args: argparse.Namespace) -> None:
     if launch_id and not passive:
         raise ValueError("a serving launch identity requires passive startup")
     cfg = load_config()
+    source = getattr(args, "source_worktree", None)
+    source_root = None
+    if source:
+        from pathlib import Path
+        from .execution_identity import source_repository
+
+        source_path = Path(source).expanduser()
+        if not source_path.is_absolute():
+            raise ValueError(f"Captured source worktree must be absolute: {source!r}")
+        source_root = source_repository(source_path)
+        if source_root is None:
+            raise ValueError(
+                f"Captured source repository {str(source_path)!r} is unavailable; rebind before starting"
+            )
     cfg = migrate_config(cfg)
+    if source_root is not None:
+        cfg._source_worktree = source_root
     write_default_config(cfg)
     if launch_id:
         from .serving_reconcile import existing_auth_token
@@ -618,6 +634,7 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
         help="Start as a passive cutover instance: do NOT self-publish the routing table (the deploy orchestrator flips it after a health check) and do NOT bind the credential relay (the active daemon owns it until cutover completes).",
     )
     start_p.add_argument("--serving-launch-id", help=argparse.SUPPRESS)
+    start_p.add_argument("--source-worktree", help=argparse.SUPPRESS)
     start_p.set_defaults(func=_cmd_start)
 
     acp_connect_p = sub.add_parser(

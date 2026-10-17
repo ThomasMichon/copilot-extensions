@@ -1,17 +1,21 @@
-"""Explicit daemon execution-space selection, independent of preference policy."""
+"""Daemon execution-space configuration and non-persistent source context."""
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pathlib import Path
+
+from pydantic import Field, PrivateAttr, field_validator
 
 from .preference_models import PreferencePolicyFields
 
 
 class ExecutionSpaceConfigFields(PreferencePolicyFields):
+    _source_worktree: Path = PrivateAttr(default_factory=Path.cwd)
+
     local_execution_space: str | None = Field(
         default=None,
-        description="Canonical registered execution-space key for this daemon; "
-        "physical hostname/grouping cannot substitute for this selector.",
+        description="Legacy standalone execution-space selector; must agree with "
+        "identity derived from authoritative source-project machine configuration.",
     )
 
     @field_validator("local_execution_space")

@@ -15,6 +15,7 @@ from agent_bridge import __main__ as m
 
 @pytest.fixture()
 def breakaway_refused(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     calls = []
 
     def popen(argv, **kwargs):

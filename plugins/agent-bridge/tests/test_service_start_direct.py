@@ -30,6 +30,7 @@ def _fast_time(monkeypatch):
 
 @pytest.fixture()
 def direct_env(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     _fast_time(monkeypatch)
     pid_file = tmp_path / "agent-bridge.pid"
     monkeypatch.setattr(m, "_PID_FILE", str(pid_file))

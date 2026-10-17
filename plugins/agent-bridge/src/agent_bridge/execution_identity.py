@@ -1,0 +1,146 @@
+"""Derive bridge identity through the owning project's existing authority."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+from agent_procutil import no_window_kwargs
+
+
+class ExecutionIdentityError(ValueError):
+    """The daemon cannot establish an unambiguous local execution binding."""
+
+
+def source_repository(path: Path) -> Path | None:
+    """Locate a source checkout, retaining its stable anchor across detach."""
+    from .config import _canonical_repo_root
+
+    path = path.expanduser().resolve()
+    for root in (path, *path.parents):
+        if (root / ".git").exists():
+            return _canonical_repo_root(root)
+        if (root / "HEAD").is_file() and (root / "objects").is_dir() and (root / "config").is_file():
+            return root
+    return None
+
+
+def _query(prefix: list[str], args: list[str], cwd: Path | None) -> subprocess.CompletedProcess:
+    from .session_lifecycle_cli import _agent_worktrees_environment
+
+    environment = {
+        key: value for key, value in _agent_worktrees_environment().items()
+        if not key.upper().startswith("GIT_")
+    }
+    try:
+        return subprocess.run(
+            [*prefix, *args], cwd=cwd, env=environment,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+            **no_window_kwargs(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        target = str(cwd) if cwd is not None else " ".join(args)
+        raise ExecutionIdentityError(
+            f"Cannot read source-project execution binding {target!r} from agent-worktrees"
+        ) from exc
+
+
+def resolve_execution_space(cfg, machines: dict) -> str | None:
+    """Resolve once per roster build; never persist a derived machine key."""
+    from . import agent_registry
+    from .session_lifecycle_cli import _agent_worktrees_launch_prefix
+    from .topology import load_control_plane_project
+
+    if not machines:
+        return None
+    legacy = getattr(cfg, "local_execution_space", None)
+    if not legacy and not any(
+        entry.execution_platform and not entry.legacy_key for entry in machines.values()
+    ):
+        return None
+    prefix = _agent_worktrees_launch_prefix()
+    identities: dict[str, set[str]] = {}
+    origin = getattr(cfg, "_source_worktree", None)
+    root = source_repository(Path(origin)) if origin is not None else None
+    if prefix:
+        sources: list[tuple[list[str], Path | None]] = []
+        if root is not None:
+            project = _query(prefix, ["get", "project"], root)
+            if project.returncode == 0:
+                sources.append(([], root))
+        if not sources:
+            for profile_name, profile in cfg.topologies.items():
+                source_repo = getattr(profile, "source_repo", None)
+                if source_repo is not None:
+                    source = Path(source_repo).expanduser()
+                    if not source.is_absolute():
+                        raise ExecutionIdentityError(
+                            f"Topology profile {profile_name!r} source_repo {source_repo!r} "
+                            "must be an absolute configuration locator"
+                        )
+                    source = source.resolve()
+                    if not source.is_dir():
+                        raise ExecutionIdentityError(
+                            f"Topology profile {profile_name!r} source repository {str(source)!r} "
+                            "is unavailable; re-adopt its binding"
+                        )
+                    sources.append(([], source))
+                elif profile.machines_yaml:
+                    source = source_repository(Path(profile.machines_yaml).expanduser().resolve().parent)
+                    project = load_control_plane_project(profile.machines_yaml)
+                    if source is not None:
+                        sources.append(([], source))
+                    elif project:
+                        sources.append((["--project", project], None))
+        seen: set[tuple[tuple[str, ...], Path | None]] = set()
+        for args, cwd in sources:
+            signature = (tuple(args), cwd)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            result = _query(prefix, [*args, "get", "machine"], cwd)
+            binding = str(cwd) if cwd is not None else " ".join(args)
+            if result.returncode:
+                raise ExecutionIdentityError(
+                    f"Source-project machine binding {binding!r} was refused; verify its configured "
+                    "machine and current execution platform: " + result.stderr.strip()
+                )
+            key = result.stdout.strip()
+            try:
+                agent_registry._detect_local_machine(machines, key)
+            except ValueError as exc:
+                raise ExecutionIdentityError(
+                    f"Source-project machine binding {binding!r} is not valid for this daemon: " + str(exc)
+                ) from exc
+            identities.setdefault(key, set()).add(binding)
+    if len(identities) > 1:
+        details = "; ".join(
+            f"{key!r} from {', '.join(repr(origin) for origin in sorted(origins))}"
+            for key, origins in sorted(identities.items())
+        )
+        raise ExecutionIdentityError(
+            "Adopted source projects select different execution spaces: "
+            + details + "; choose one source worktree"
+        )
+    derived = next(iter(identities), None)
+    if derived is not None and legacy is not None and derived != legacy:
+        raise ExecutionIdentityError(
+            "Legacy local_execution_space contradicts authoritative source-project machine configuration"
+        )
+    selected = derived or legacy
+    if selected is None:
+        reason = (
+            "No verified identity reader is available. "
+            if not prefix else "No source-project binding resolved. "
+        )
+        raise ExecutionIdentityError(
+            f"Missing source-project execution binding for independent registered spaces: {reason}"
+            "Start or adopt from a registered source worktree with configured machine authority. "
+            "Standalone bridges may retain an existing local_execution_space selector."
+        )
+    if derived is None:
+        try:
+            agent_registry._detect_local_machine(machines, selected)
+        except ValueError as exc:
+            raise ExecutionIdentityError("Legacy bridge selector is invalid: " + str(exc)) from exc
+    return selected

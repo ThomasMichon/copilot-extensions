@@ -1,0 +1,9 @@
+{
+  "comment": "Derive daemon execution identity from source-project machine authority, preserve nested resolver identity, and retain detached reader failure ownership",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

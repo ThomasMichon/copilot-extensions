@@ -151,6 +151,10 @@ def load_config() -> ServiceConfig:
                 "refusing caller-settings fallback"
             ) from exc
         except Exception as exc:
+            if isinstance(data, dict) and (
+                "local_execution_space" in data or "topologies" in data
+            ):
+                raise ValueError("Invalid execution-space or topology configuration; refusing identity fallback") from exc
             if isinstance(data, dict) and "remote_acp" in data:
                 raise ValueError(
                     "Invalid remote ACP configuration; refusing configuration fallback",
@@ -368,10 +372,11 @@ def _canonical_repo_root(repo: Path) -> Path:
     git = shutil.which("git")
     if not git:
         return repo
+    environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     try:
         top_proc = subprocess.run(
             [git, "-C", str(repo), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=environment,
             **no_window_kwargs(),
         )
         if top_proc.returncode != 0 or not (top_proc.stdout or "").strip():
@@ -380,7 +385,7 @@ def _canonical_repo_root(repo: Path) -> Path:
             return repo
         common_proc = subprocess.run(
             [git, "-C", str(repo), "rev-parse", "--git-common-dir"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=environment,
             **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
@@ -401,7 +406,7 @@ def _canonical_repo_root(repo: Path) -> Path:
     try:
         root_proc = subprocess.run(
             [git, "-C", str(anchor), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=environment,
             **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
@@ -492,6 +497,7 @@ def adopt_topology(
     cfg.topologies[profile_name] = TopologyProfile(
         machines_yaml=machines_yaml,
         agents_config=agents_config,
+        source_repo=str(repo),
     )
     save_config(cfg)
     return cfg

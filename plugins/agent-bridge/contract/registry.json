@@ -116,9 +116,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "463e459b58bc7df195f38843d1d1a56a9ad4b4a36ba4e7dd11d0402522b29fa0",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "e331a1ec42767780babd06068e553b1769b974f46968febf57ec726c07de55cf",
+          "semantic": false,
+          "non_semantic_reason": "Only local topology configuration gains an automatically captured source-repository locator; HTTP request/response models and wire generation are unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",

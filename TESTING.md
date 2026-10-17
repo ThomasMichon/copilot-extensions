@@ -27,6 +27,13 @@ each offer/accept transaction. No snapshot crosses a topology edit or retry;
 record/registry locks and native Git leases remain real. The ordinary item and
 suite deadlines are unchanged.
 
+Bridge's owned-reader cancellation tests cover both the sample join and the
+native-command join. Non-cancelling task waits retain detached ownership and
+existing deadlines while late failures are consumed without abandoned-shield
+exception reports, including on Python 3.14.
+The separate native HTTP/2 peer consumes the redirect request body before its
+307 response; its evidence probe verifies body consumption and no forwarding.
+
 Guest-environment coverage runs the actual Python, Bash and PowerShell CLIs
 with only operating-system observations substituted (account home, guest kind
 and machine-id). Each writer's private registration is read repeatedly by all
