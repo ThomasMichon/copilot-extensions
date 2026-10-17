@@ -26,7 +26,7 @@ from agent_procutil import no_window_kwargs
 from . import config as cfg
 from . import list_views_cli
 from . import tracking
-from .worktree_naming import session_worktree_prefix
+from .worktree_naming import session_worktree_allocation
 
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
 
@@ -65,18 +65,14 @@ def _expected_host_key(
     reachable_hosts: dict[tuple[str, str], bool],
 ) -> tuple[str, str] | None:
     """Infer the host machine/environment from a machine-stamped worktree id."""
-    matches: dict[tuple[str, str], int] = {}
-    for machine, platform in reachable_hosts:
-        for legacy in (False, True):
-            prefix = session_worktree_prefix(machine, platform, legacy=legacy) + "-"
-            if worktree_id.startswith(prefix):
-                host = (machine, platform)
-                matches[host] = max(matches.get(host, 0), len(prefix))
-    if not matches:
-        return None
-    longest = max(matches.values())
-    candidates = [host for host, length in matches.items() if length == longest]
-    return candidates[0] if len(candidates) == 1 else None
+    matches = [
+        (machine, platform)
+        for machine, platform in reachable_hosts
+        if session_worktree_allocation(
+            worktree_id.removesuffix("-k"), machine, platform,
+        ) is not None
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def annotate_delegate_graph(

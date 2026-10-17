@@ -16,7 +16,7 @@ from . import output, permissions, repos, sessions, state_root, tracking
 from . import worktree_creation
 from .launch_progress import step
 from .resume_seed import cold_start_error
-from .worktree_naming import session_worktree_id
+from .worktree_naming import session_worktree_allocation
 
 
 def _same_repository(anchor: str, checkout: str, *, branch: str | None = None) -> None:
@@ -107,16 +107,12 @@ def _prepare_permissions(anchor: str, worktree_path: str) -> None:
 
 def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
     platform = "win" if record.platform == "windows" else record.platform
-    match = re.fullmatch(
-        r".+-(\d{8}-\d{6})-([0-9a-f]{4}|[0-9a-f]{32})",
-        record.worktree_id,
+    allocation = session_worktree_allocation(
+        record.worktree_id, record.machine, record.platform,
     )
-    if match is None or record.worktree_id not in {
-        session_worktree_id(record.machine, record.platform, match[1], match[2], legacy=legacy)
-        for legacy in (False, True)
-    }:
+    if allocation is None:
         raise ValueError("retained New has no verifiable native creation allocation")
-    return match[1], match[2], platform
+    return *allocation, platform
 
 
 def _existing_pair(config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot):

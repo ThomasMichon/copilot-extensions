@@ -77,9 +77,10 @@ receipt, separate from the generated worktree name. Replaying the same request
 recovers that receipt's original allocation. Existing worktrees and historical
 UUID-suffixed admissions retain their exact names, including during creation
 repair and paired-knowledge recovery.
-When a caller's record is absent, delegate host inference accepts both name
-formats. Equal-length matches for different machine/environment identities
-remain unresolved rather than authorizing finalization from an ambiguous host.
+When a caller's record is absent, delegate host inference accepts both complete
+allocation formats, not partial machine/environment prefixes. Matches for
+different host identities remain unresolved rather than authorizing finalization
+from an ambiguous host.
 
 ### Replay-safe programmatic creation
 
