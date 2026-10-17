@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, serial per-phase contribution PRs targeting `dev`
 - **Created:** 2026-10-16
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees/pull-requests`:
   `reviewer-capable-provider`, `foreign-repo-pr-operations`,
   `conformance-verified-mock-provider`, and `one-surface-no-forking`;
@@ -78,19 +78,24 @@ proposal for review, not a claim of prior implementation or production consent.
 
 ### Phase 1 - Contract and evidence inventory
 
-- [ ] Reconcile each existing CLI operation and provider capability against
+- [x] Reconcile each existing CLI operation and provider capability against
   #7051. Record supported, unsupported, incomplete and unproven behavior
-  separately; retain existing owners and reusable tests.
-- [ ] Define the normalized structured results for provider/repository/PR
+  separately; retain existing owners and reusable tests. See the
+  [source and fixture inventory](provider-inventory.md).
+- [x] Define the normalized structured results for provider/repository/PR
   identity, source/head/base, draft/holds, consent, reviews, mergeability and
   terminal disposition. Preserve provider distinctions and incomplete evidence.
-- [ ] Define complete and incremental read semantics, durable identifiers,
+  See the [proposed normalized contract](contract.md).
+- [x] Define complete and incremental read semantics, durable identifiers,
   cursor validity and typed errors, including pagination and candidate changes.
-  Do not report a partial read as a complete result.
-- [ ] Define mutation authority and operation identity on the existing command
+  Do not report a partial read as a complete result. Defined in the contract;
+  adapter implementation and transport proof remain open below.
+- [x] Define mutation authority and operation identity on the existing command
   surface: stale candidate refusal, discussion ownership, authoritative
   read-back, and an explicit unresolved outcome where safe reconciliation is
   impossible. Do not promise exactly-once writes without provider evidence.
+  The contract distinguishes native conditional guarantees from preflight
+  checks; it does not claim that every provider already enforces them.
 
 ### Phase 2 - Complete, addressable reads and discussion operations
 
@@ -175,11 +180,42 @@ fixtures. Each implementation PR records its smallest relevant test command.
 
 ## Proposal
 
-The planning-only proposal passed review and merged in #7060. Contract
-implementation has not begun. No live test writes, credential configuration,
-service lifecycle or deployed host changes are authorized by the plan.
+The planning-only proposal passed review and merged in #7060. Phase 1 now
+records source/fixture evidence and an agent-recommended contract for review.
+No runtime contract implementation or lifecycle acceptance is complete.
+No live test writes, credential configuration, service lifecycle or deployed
+host changes are authorized by the plan.
 
 ## Journal
+
+### 2026-10-16 - Endpoint source prerequisite landed
+
+- #7074 merged as `b87c0723961c56dfab9a5e350529d4202e4f6497`,
+  closing the separately claimed source repair #7062. Canonical and vendored
+  endpoint publication/cleanup now share the native ownership-preserving lock.
+- Native Windows and POSIX library cases and the dispatch advertisement
+  regressions passed. This is source completion, not release or runtime
+  adoption; no deployed service was changed by this contribution.
+- #7051 remains open. The preserved Phase 1 contract/inventory delta is the
+  next serial review; none of its adapter implementation or multi-round
+  acceptance requirements is waived by the endpoint repair.
+
+### 2026-10-16 - Contract and evidence inventory
+
+- Compared the three real adapter tracks independently and retained their
+  source anchors in the [inventory](provider-inventory.md). Existing protocol
+  conformance is structural for real providers; mock lifecycle behavior is
+  not evidence of complete real-provider parity.
+- Defined the [proposed normalized contract](contract.md), including opaque
+  identities, collection completeness, scoped cursors, candidate authority,
+  actor checks and unresolved ambiguous writes. A preflight read is not an
+  atomic conditional write, and post-timeout absence does not authorize replay.
+- Existing provider/conformance fixtures passed 291 cases on native Windows
+  through the bounded repository runner. This is baseline evidence only;
+  every Validation Plan item remains open.
+- Next: review this Phase 1 delta, then implement complete/addressable reads
+  through the existing provider/CLI seams. Native mutation fence and recovery
+  capabilities require per-provider transport proof before being advertised.
 
 ### 2026-10-16 - Planning intake
 
