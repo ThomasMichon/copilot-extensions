@@ -745,6 +745,45 @@ def test_installation_repair_distinct_sources_refuse_shared_legacy_writer(repair
     assert not list(home.glob("*.ready"))
 
 
+def test_installation_repair_same_marketplace_plugins_refuse_shared_legacy_writer(
+    repair_fixture, monkeypatch,
+):
+    home, project, payload, _, _ = repair_fixture
+    peer = payload.parent / "agent-peer"
+    shutil.copytree(payload, peer)
+    for name in ("plugin.json", "payload-invocation.json", "installer-readiness.json"):
+        path = peer / name
+        value = json.loads(path.read_text().replace("agent-example", "agent-peer"))
+        if name == "payload-invocation.json":
+            value["legacyRuntimeRoot"] = ".agent-example"
+        write_json(path, value)
+    manifest = payload.parent / ".claude-plugin" / "marketplace.json"
+    value = json.loads(manifest.read_text())
+    value["plugins"].append({"name": "agent-peer", "source": "./agent-peer"})
+    write_json(manifest, value)
+    settings = project / ".github" / "copilot" / "settings.json"
+    value = json.loads(settings.read_text())
+    value["enabledPlugins"]["agent-peer@fixture"] = True
+    write_json(settings, value)
+    host = admit_host(project, home=home)
+    assert not host.refused and not host.report.findings
+    assert len(host.bindings) == 2
+    assert len({owner.installation.provenance.source_fingerprint
+                for owner in host.bindings.values()}) == 1
+    assert len({owner.installation.owner_id for owner in host.bindings.values()}) == 2
+    assert all(owner.refusal == "ordinary-legacy-writer-ambiguous"
+               for owner in host.bindings.values())
+    monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("executed"))
+    modules = [module.qualified_id for module in host.report.modules]
+    plan = repair_api.repair(project, home=home, modules=modules)
+    result = repair_api.repair(
+        project, home=home, modules=modules, apply=True, expected_plan_digest=plan["planDigest"],
+    )
+    assert len(result["outcomes"]) == 4 and result["status"] == "incomplete"
+    assert not any(row["attempted"] for row in result["outcomes"])
+    assert not list(home.glob("*.ready"))
+
+
 def test_installation_repair_cycle_refuses_before_any_invocation(repair_fixture, monkeypatch):
     _, _, payload, _, _ = repair_fixture
     path = payload / "installer-readiness.json"

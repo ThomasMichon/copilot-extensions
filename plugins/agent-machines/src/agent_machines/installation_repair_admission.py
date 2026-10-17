@@ -274,12 +274,12 @@ def admit_host(
     for owner_id, binding in tuple(bindings.items()):
         if binding.mode != "ordinary" or binding.legacy_root is None:
             continue
-        fingerprints = {
-            peer.installation.provenance.source_fingerprint
+        writers = {
+            peer.installation.owner_id
             for peer in bindings.values()
             if peer.mode == "ordinary" and peer.legacy_root == binding.legacy_root
         }
-        if len(fingerprints) > 1:
+        if len(writers) > 1:
             bindings[owner_id] = replace(binding, refusal="ordinary-legacy-writer-ambiguous")
     return HostAdmission(
         report=discover_modules(installations), bindings=bindings, refused=refused,

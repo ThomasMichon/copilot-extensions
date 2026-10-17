@@ -148,7 +148,9 @@ their conservatively retained obligations must not be dismissed as a retry.
 Ordinary downstream owners need declared no-self-provision and legacy-root
 protocols; inherited core-cell control variables are cleared. Linked/reparse
 targets, ambiguous owners and migration/deactivation/maintenance states refuse
-repair rather than guessing an installer. Validated active-core cells may be
+repair rather than guessing an installer. A legacy runtime root must have one
+qualified plugin owner, even when the competing plugins share a marketplace.
+Validated active-core cells may be
 observed, but **unready core-cell repair is not yet supported**: ordinary `init`
 actions are not cell-lifecycle permission. This command never creates cells,
 changes mode policy, enrolls machines, acquires capacity, or removes durable
