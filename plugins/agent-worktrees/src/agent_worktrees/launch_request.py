@@ -16,7 +16,7 @@ from pathlib import Path
 from . import config as cfg
 from . import launch_admission, launch_seed_state, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
-from .worktree_naming import session_worktree_id
+from .worktree_naming import parse_session_worktree_id, session_worktree_id
 
 MAX_REQUEST_BYTES = 7 * 1024
 
@@ -95,6 +95,10 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
         or Path(wid).name != wid or "/" in wid or "\\" in wid
     ):
         raise ValueError("Invalid stored launch admission worktree identity")
+    if receipt["suffix"] != request_id:
+        allocation = parse_session_worktree_id(wid)
+        if allocation is None or allocation[1:] != (receipt["timestamp"], receipt["suffix"]):
+            raise ValueError("Invalid stored launch admission allocation")
     return receipt
 
 

@@ -112,7 +112,7 @@ def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
     )
     if allocation is None:
         raise ValueError("retained New has no verifiable native creation allocation")
-    return *allocation, platform
+    return allocation[0], allocation[1], platform
 
 
 def _existing_pair(config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot):

@@ -71,10 +71,10 @@ def _expected_host_key(
     matches = [
         (machine, platform)
         for machine, platform in reachable_hosts
-        if allocation[0] in {
-            session_worktree_prefix(machine, platform, legacy=legacy)
-            for legacy in (False, True)
-        }
+        if allocation[0] in (
+            session_worktree_prefix(machine, platform),
+            session_worktree_prefix(machine, platform, legacy=True),
+        )
     ]
     return matches[0] if len(matches) == 1 else None
 

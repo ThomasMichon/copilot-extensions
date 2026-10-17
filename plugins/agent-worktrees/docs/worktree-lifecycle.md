@@ -76,7 +76,10 @@ machine name.
 
 Remote prompt admission keeps its request and seed identities in a durable
 receipt, separate from the generated worktree name. Replaying the same request
-recovers that receipt's original allocation. Existing worktrees and historical
+recovers that receipt's original allocation. Short-allocation receipts must
+agree with their recorded worktree ID, timestamp and suffix; inconsistent
+receipts are refused without rewriting the worktree record or staged prompt.
+Existing worktrees and historical
 UUID-suffixed admissions retain their exact names, including during creation
 repair and paired-knowledge recovery.
 When a caller's record is absent, delegate host inference accepts both complete

@@ -338,6 +338,40 @@ def test_short_allocation_collision_does_not_adopt_an_existing_worktree(
     assert len(tracking.list_records(tmp_path)) == 1
 
 
+@pytest.mark.parametrize("field", ["suffix", "timestamp", "worktree_id"])
+def test_short_receipt_allocation_mismatch_refuses_before_record_or_seed_changes(
+    tmp_path: Path, authority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, field: str,
+) -> None:
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    intent = _intent("new")
+    result = request.execute(config, intent)
+    record_path = tmp_path / f"{result['worktree_id']}.yaml"
+    record_before = record_path.read_bytes()
+    seed_path = launch_seed_state.state_path(record_path)
+    seed_before = seed_path.read_bytes()
+    path = request._admission_path(tmp_path, intent["request_id"])
+    receipt = request._read_admission(tmp_path, intent["request_id"])
+    receipt[field] = {
+        "suffix": "0000" if receipt["suffix"] != "0000" else "1111",
+        "timestamp": "20000101-000000" if receipt["timestamp"] != "20000101-000000" else "20000102-000000",
+        "worktree_id": "other-win-20000101-000000-abcd",
+    }[field]
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    damaged = path.read_bytes()
+
+    with pytest.raises(ValueError, match="Invalid stored launch admission allocation"):
+        request.execute(config, intent)
+    with pytest.raises(ValueError, match="Invalid stored launch admission allocation"):
+        request.inspect(intent["request_id"])
+
+    assert record_path.read_bytes() == record_before
+    assert seed_path.read_bytes() == seed_before
+    assert path.read_bytes() == damaged
+
+
 def test_unaccepted_new_cannot_recreate_removed_worktree(tmp_path, authority, monkeypatch):
     from agent_worktrees import worktree_creation
 
@@ -421,6 +455,14 @@ def test_decode_round_trip_preserves_shell_metacharacters():
     assert request.decode(encoded) == intent
     with pytest.raises(ValueError):
         request.decode(encoded + "!")
+
+
+@pytest.mark.parametrize("worktree_id", ["wt-a", ""])
+def test_new_protocol_request_rejects_an_existing_worktree_selector(worktree_id: str) -> None:
+    intent = {**_intent("new"), "worktree_id": worktree_id}
+    encoded = base64.b64encode(json.dumps(intent).encode("utf-8")).decode("ascii")
+    with pytest.raises(ValueError, match="New launch request cannot name an existing worktree"):
+        request.decode(encoded)
 
 
 @pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
@@ -525,7 +567,7 @@ def test_status_unstaged_resume_is_admission_incomplete(tmp_path, authority):
 ])
 @pytest.mark.parametrize("corruption", [
     "null", "[]", "{}", "missing-field", "bad-fingerprint",
-    "bad-flags", "bad-worktree", "bad-suffix",
+    "bad-flags", "bad-worktree", "bad-suffix", "bad-short-allocation",
 ])
 def test_corrupt_admission_is_structured_for_every_registered_handler(
     tmp_path, admission_config, verb, corruption,
@@ -552,6 +594,8 @@ def test_corrupt_admission_is_structured_for_every_registered_handler(
             receipt["accepted"] = "yes"
         elif corruption == "bad-suffix":
             receipt["suffix"] = "b" * 32
+        elif corruption == "bad-short-allocation":
+            receipt["suffix"] = "abcd"
         else:
             receipt["worktree_id"] = "../outside"
         damaged = json.dumps(receipt)
