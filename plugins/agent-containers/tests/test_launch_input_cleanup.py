@@ -72,3 +72,40 @@ def test_file_absence_is_not_a_consumption_receipt(tmp_path, monkeypatch):
         auth.wait_for_consumption("example-1", "vscode", _posix(tmp_path / "auth.env"), timeout=1)
     (directory / "consumed").write_text("1\n")
     auth.wait_for_consumption("example-1", "vscode", _posix(tmp_path / "auth.env"), timeout=1)
+
+
+@pytest.mark.guard
+def test_split_ram_auth_and_disk_wrapper_reaper_preserves_active_scope(tmp_path):
+    ram = tmp_path / "ram"
+    executables = tmp_path / "executables"
+    ram.mkdir()
+    executables.mkdir()
+    old = time.time() - 7200
+    for stem in ("a" * 32, "b" * 32, "c" * 32):
+        auth_directory = ram / (stem + ".env.d")
+        executable = executables / (stem + ".env.d")
+        executable.mkdir()
+        (executable / "copilot").write_text("nonsecret wrapper")
+        if stem != "c" * 32:
+            auth_directory.mkdir()
+            (auth_directory / "auth.env").write_text("synthetic credential")
+        for directory in (auth_directory, executable):
+            if directory.exists():
+                for path in (*directory.iterdir(), directory):
+                    os.utime(path, (old, old))
+    active = _posix(executables / ("b" * 32 + ".env.d") / "active.pid")
+    prefix = (
+        "start=$(sed 's/.*) //' /proc/$$/stat | awk '{print $20}'); "
+        f'printf "%s %s\\n" "$$" "$start" > {shlex.quote(active)}; '
+        f"touch -t 202001010000 {shlex.quote(_posix(executables / ('b' * 32 + '.env.d')))}; "
+    )
+    result = subprocess.run(
+        [_shell(), "-c", prefix + abandoned_cleanup_script(_posix(ram), _posix(executables))],
+        capture_output=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (ram / ("a" * 32 + ".env.d")).exists()
+    assert not (executables / ("a" * 32 + ".env.d")).exists()
+    assert (ram / ("b" * 32 + ".env.d") / "auth.env").exists()
+    assert (executables / ("b" * 32 + ".env.d") / "copilot").exists()
+    assert not (executables / ("c" * 32 + ".env.d")).exists()

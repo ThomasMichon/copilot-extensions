@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import posixpath
 import shlex
 
 from . import ssh_transport as transport
 from .copilot_auth_policy import LEGACY, trusted_auth_mode
+from .launch_storage import directory_guard, executable_directory
 from .resolver import resolve_copilot_cli_token_or_raise
 
 TOKEN_VARIABLE = "COPILOT_GITHUB_TOKEN"
@@ -17,9 +19,7 @@ def without_inference_token(environment: dict[str, str]) -> dict[str, str]:
 
 
 def launcher_directory(auth_env: str) -> str:
-    if auth_env.endswith(".d/auth.env"):
-        return auth_env.rsplit("/", 1)[0]
-    return auth_env + ".d"
+    return executable_directory(auth_env)
 
 
 def stage_env(container, user, values, writer, *, require_owner=False, config=None, fleet=None):
@@ -141,6 +141,13 @@ def prepare_launch(
             "refusing GH_TOKEN/GITHUB_TOKEN or repository-auth fallback. "
             "Select the intended host Copilot account, or explicitly opt into legacy mode."
         )
+    if cleanup_owner:
+        checked = transport._run([
+            "docker", "exec", "-u", user, container, "sh", "-c",
+            directory_guard(posixpath.dirname(cleanup_owner)),
+        ])
+        if checked.returncode:
+            raise RuntimeError("Copilot launch owner is not on private RAM-backed storage")
     token = resolve_copilot_cli_token_or_raise(config, fleet, container)
     if token is None:
         raise RuntimeError("host-copilot source returned no token; refusing repository-auth fallback")
@@ -163,14 +170,28 @@ def prepare_launch(
         raise RuntimeError("could not stage process-only Copilot authentication")
     staged_auth = auth_env
     if cleanup_owner:
+        if posixpath.dirname(cleanup_owner) != posixpath.dirname(staged_auth):
+            transport.cleanup_remote_env(container, user, staged_auth)
+            raise RuntimeError("Copilot authentication and launch owner require the same RAM directory")
         auth_env = cleanup_owner + ".d/auth.env"
     directory = launcher_directory(auth_env)
     script = launcher_script(native, auth_env)
-    move = f"mv -- {shlex.quote(staged_auth)} {shlex.quote(auth_env)} && " if cleanup_owner else ""
+    move = (
+        f"ln -T -- {shlex.quote(staged_auth)} {shlex.quote(auth_env)}\n"
+        f"rm -- {shlex.quote(staged_auth)}\n"
+        if cleanup_owner else ""
+    )
+    auth_directory = (
+        f"mkdir {shlex.quote(posixpath.dirname(auth_env))}\n"
+        if cleanup_owner else ""
+    )
     try:
         result = transport._run([
             "docker", "exec", "-i", "-u", user, container, "sh", "-c",
-            f"umask 077; mkdir {shlex.quote(directory)} && {move}"
+            directory_guard(posixpath.dirname(staged_auth)) +
+            auth_directory + move +
+            directory_guard(posixpath.dirname(directory), create=True, require_ram=False) +
+            f"mkdir {shlex.quote(directory)} && "
             f"cat > {shlex.quote(directory + '/copilot')} && "
             f"chmod 700 {shlex.quote(directory + '/copilot')}",
         ], input_text=script)

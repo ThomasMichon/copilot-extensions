@@ -340,15 +340,16 @@ def test_attached_rejoin_receipt_is_not_consumption(launch_seams, monkeypatch):
 def test_original_session_host_cleanup_handle_removes_companion_auth(launch_seams, monkeypatch):
     target, _ = launch_seams
     owner = "/home/user/.agent-containers/launch/" + "a" * 32 + ".env"
-    commands = []
+    commands: list[list[str]] = []
     monkeypatch.setattr(auth.transport, "_run", lambda argv, **kw:
         commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""))
     monkeypatch.setattr(cli, "cleanup_remote_env", real_cleanup_remote_env)
     monkeypatch.setattr(cli, "_trusted_session_host_context", lambda *a:
         TrustedContext(target.config, target.fleet, "vscode", "/workspace", ""))
     assert cli.main(["session-host-cleanup", "example-1", "--remote-env", owner]) == 0
-    assert owner + ".d/auth.env" in commands[0]
-    assert owner + ".d/copilot" in commands[0]
+    removal = next(command for command in commands if "rm" in command)
+    assert owner + ".d/auth.env" in removal
+    assert owner + ".d/copilot" in removal
 
 
 @pytest.mark.guard
@@ -368,6 +369,8 @@ def test_wrapper_transport_failure_cleans_staged_token_and_owner(launch_seams, m
     def run(argv, **kwargs):
         if "--secret-env-vars" in argv[-1]:
             return subprocess.CompletedProcess(argv, 0, "/usr/bin/copilot\n", "")
+        if "refuse_launch_storage" in argv[-1] and "cat >" not in argv[-1]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
         raise RuntimeError("synthetic wrapper transport failure")
 
     monkeypatch.setattr(auth.transport, "_run", run)
