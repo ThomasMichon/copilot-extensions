@@ -781,7 +781,8 @@ jobs:
     # on windows-latest.
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
-    timeout-minutes: 5
+    # Native composed Git fixtures share this bound with setup and toolchain checks.
+    timeout-minutes: 10
     outputs:
       run: ${{ steps.python-artifact-builder.outputs.run }}
     steps:
