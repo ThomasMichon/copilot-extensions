@@ -9,7 +9,7 @@ workstations elsewhere in the mesh.
 The design (Model C) keeps the strong guarantee where it belongs:
 
 - **Origin-owned lease.** The spawn reservation and the task lease stay on the
-  supervisor's (origin's) coordinator, so at-most-once is **fleet-wide**, not
+  supervisor's selected local/central coordinator, so at-most-once is **fleet-wide**, not
   per-pool-host. Only the *body* runs remotely; it drives the origin task back
   over the existing bidirectional SSH mesh (see
   :func:`agent_dispatch.embody.spawn_fleet_embodied_worker`). No new network bind
@@ -38,6 +38,7 @@ import uuid
 from collections.abc import Callable, Sequence
 
 from . import embody
+from .embody_prompts import validate_fleet_route
 from .procutil import run_ssh_command
 
 log = logging.getLogger("agent-dispatch.fleet")
@@ -115,6 +116,8 @@ class FleetSpawner:
     report its lease back (Model C). ``liveness`` is injectable for testing;
     it defaults to :func:`host_can_embody` (or :func:`host_can_bridge` in headless
     mode).
+    ``route`` retains an explicit origin-side local/central selector; when
+    omitted it follows this process's configured task authority.
 
     ``headless`` selects the **headless-fleet** body: instead of a CLI/mux embody
     on the pool host (which can hit the "Loading..." startup-seed hang), the body
@@ -134,6 +137,7 @@ class FleetSpawner:
         headless: bool = False,
         agent: str = embody.DEFAULT_HEADLESS_AGENT,
         charter: str | None = None,
+        route: str | None = None,
         all_repos: bool = False,
         verify_timeout: int = 0,
         liveness: LivenessFn | None = None,
@@ -150,6 +154,11 @@ class FleetSpawner:
         self.headless = bool(headless)
         self.agent = agent
         self.charter = charter
+        if route is None:
+            from .client_authority import default_authority
+
+            route = {"legacy": "", "local": " --local", "central": " --shared"}[default_authority()]
+        self.route = validate_fleet_route(route)
         if self.charter and not self.headless:
             # agent-worktrees embody has no charter-binding flag; the CLI-embody
             # fleet worker (spawn_fleet_embodied_worker) has no charter parameter
@@ -238,6 +247,7 @@ class FleetSpawner:
         # the remote body claims/completes the ORIGIN task under (its own worktree
         # cannot identify it to the origin). Stable for this spawn attempt.
         owner = f"fleet-{tid}-{uuid.uuid4().hex[:6]}"
+        routing = {"route": self.route} if self.route else {}
         try:
             if self.headless:
                 # Headless-fleet body: an agent-bridge ACP session on the pool
@@ -253,6 +263,7 @@ class FleetSpawner:
                     charter=self.charter,
                     repo=None if self.all_repos else task.get("repo"),
                     all_repos=self.all_repos,
+                    **routing,
                 )
             else:
                 result = self._spawn(
@@ -265,6 +276,7 @@ class FleetSpawner:
                     project=embody.project_for_task(task),
                     repo=None if self.all_repos else task.get("repo"),
                     all_repos=self.all_repos,
+                    **routing,
                     verify_timeout=self.verify_timeout,
                 )
         except embody.EmbodyUnavailable as exc:

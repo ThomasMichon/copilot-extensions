@@ -537,6 +537,7 @@ def spawn_fleet_embodied_worker(
     project: str | None = None,
     repo: str | None = None,
     all_repos: bool = False,
+    route: str = "",
     verify_timeout: int = 0,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
@@ -570,6 +571,7 @@ def spawn_fleet_embodied_worker(
         worker_id=worker_id,
         repo=repo,
         all_repos=all_repos,
+        **({"route": route} if route else {}),
     )
     remote_argv = ["agent-worktrees"]
     if project:
@@ -606,6 +608,7 @@ def spawn_fleet_headless_worker(
     charter: str | None = None,
     repo: str | None = None,
     all_repos: bool = False,
+    route: str = "",
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
     """Spawn a **headless agent-bridge ACP** body on a remote pool ``host``.
@@ -645,6 +648,7 @@ def spawn_fleet_headless_worker(
         worker_id=worker_id,
         repo=repo,
         all_repos=all_repos,
+        **({"route": route} if route else {}),
     )
     try:
         created = bridge_remote.LocalBridgeRemoteClient().create_session(
