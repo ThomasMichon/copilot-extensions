@@ -217,6 +217,7 @@ def test_powershell_source_initializer_uses_the_production_function(
         "$PluginDir = $Payload; $InstallDir = $Root; $ScriptDir = $Scripts",
         f"$PackageVersion = '{VERSION}'; $SrcVersion = $PackageVersion",
         "function Get-BootstrapPython { return $Python }",
+        _function(owner, "Get-SourceRuntimeIdentity", powershell=True),
         _function(owner, "Initialize-SourceRuntime", powershell=True),
         "Initialize-SourceRuntime",
         "@{ version = $SrcVersion; python = $VenvPython } | ConvertTo-Json -Compress",
@@ -232,6 +233,39 @@ def test_powershell_source_initializer_uses_the_production_function(
     expected = identity.runtime_version(VERSION, COMMIT, identity.assembly_hash(payload))
     assert data["version"] == expected
     assert expected in data["python"]
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+def test_powershell_source_refusal_keeps_helper_diagnostic(
+    payload: Path, tmp_path: Path, shell: str,
+) -> None:
+    executable = shutil.which(shell)
+    if executable is None:
+        pytest.skip(f"{shell} is unavailable")
+    (payload / "changed.py").write_text("VALUE = 2\n", encoding="utf-8")
+    owner = LIBRARY.parents[1] / "plugins" / "agent-bridge" / "scripts" / "install.ps1"
+    fixture = tmp_path / "source-diagnostic.ps1"
+    fixture.write_text("\n".join([
+        "param([string]$Python, [string]$Payload, [string]$Scripts)",
+        "$ErrorActionPreference = 'Stop'",
+        f"$PackageVersion = '{VERSION}'; $PluginDir = $Payload; $ScriptDir = $Scripts",
+        "function Get-BootstrapPython { return $Python }",
+        _function(owner, "Get-SourceRuntimeIdentity", powershell=True),
+        _function(owner, "Initialize-SourceRuntime", powershell=True),
+        "try { Initialize-SourceRuntime; exit 2 } catch {",
+        "  if ($ErrorActionPreference -ne 'Stop') { exit 3 }",
+        "  Write-Output $_.Exception.Message; exit 1",
+        "}",
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [executable, "-NoProfile", "-File", str(fixture), sys.executable,
+         str(payload), str(LIBRARY)],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "exit 1" in result.stdout
+    assert "Materialized payload bytes do not match the source identity" in result.stdout
 
 
 def test_bash_manifest_keeps_package_version_and_binds_source_generation(
@@ -297,6 +331,7 @@ def test_powershell_manifest_keeps_package_version_and_binds_source_generation(
         "function Write-Ok { }",
         _function(engine, "Write-DeployManifest", powershell=True),
         "Set-Item Function:\\Write-DeployManifestShared ${function:Write-DeployManifest}",
+        _function(owner, "Get-SourceRuntimeIdentity", powershell=True),
         _function(owner, "Initialize-SourceRuntime", powershell=True),
         _function(owner, "Write-DeployManifest", powershell=True),
         "Initialize-SourceRuntime",

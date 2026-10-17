@@ -127,7 +127,7 @@ def _assert_previous(tmp_path: Path, previous: dict[str, bytes]) -> None:
 
 def _ps_setup(tmp_path: Path, payload: Path) -> str:
     names = (
-        "Initialize-SourceRuntime", "Get-UvSourcePaths", "Get-PayloadLibRoots",
+        "Get-SourceRuntimeIdentity", "Initialize-SourceRuntime", "Get-UvSourcePaths", "Get-PayloadLibRoots",
         "Get-PayloadHash", "Test-PayloadUnchangedSinceAdmission",
         "Invoke-Install", "Invoke-Update", "Invoke-Stamp",
     )

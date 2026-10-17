@@ -490,6 +490,32 @@ function Get-BootstrapPython {
     return $null
 }
 
+function Get-SourceRuntimeIdentity {
+    param(
+        [string]$Payload = $PluginDir,
+        [string]$ExpectedVersion = '',
+        [string]$FailureContext = 'Source runtime identity validation failed'
+    )
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Source runtime validation requires a bootstrap Python interpreter' }
+    $arguments = @('-I', '-B', (Join-Path $ScriptDir 'versioned_runtime_source.py'),
+        '--payload', $Payload, '--package-version', $PackageVersion,
+        '--plugin', 'agent-bridge', '--format', 'json')
+    if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        # Windows PowerShell otherwise terminates before native stderr can be captured.
+        $ErrorActionPreference = 'Continue'
+        $result = @(& $py @arguments 2>&1)
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    $detail = ($result | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if ($code -ne 0) { throw "${FailureContext} (exit ${code}): $detail" }
+    return $detail.Trim()
+}
+
 function Initialize-SourceRuntime {
     $metadata = Join-Path $PluginDir 'runtime-source.json'
     try {
@@ -499,12 +525,7 @@ function Initialize-SourceRuntime {
     } catch [System.IO.DirectoryNotFoundException] {
         return
     }
-    $py = Get-BootstrapPython
-    if (-not $py) { throw 'Source runtime selection requires a bootstrap Python interpreter' }
-    $identity = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
-        --payload $PluginDir --package-version $PackageVersion --plugin agent-bridge --format json
-    if ($LASTEXITCODE -ne 0) { throw 'Source runtime identity validation failed' }
-    $script:SourceRuntimeIdentity = ('' + $identity).Trim()
+    $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
     $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
     $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
@@ -830,12 +851,8 @@ function Test-PayloadUnchangedSinceAdmission {
     param([string]$AdmittedHash = '', [string]$Admission = '', [switch]$SourceIdentityOnly)
     $selectedIdentity = Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue
     if ($selectedIdentity -or (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
-        $py = Get-BootstrapPython
-        if (-not $py) { throw 'Source runtime validation requires a bootstrap Python interpreter' }
-        $identity = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
-            --payload $PluginDir --package-version $PackageVersion --plugin agent-bridge `
-            --expected-runtime-version $SrcVersion --format json
-        if ($LASTEXITCODE -ne 0 -or (('' + $identity).Trim() -ne $selectedIdentity)) {
+        $identity = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
+        if ($identity -ne $selectedIdentity) {
             throw 'Source runtime identity changed after runtime selection; refusing publication'
         }
     }
@@ -1638,12 +1655,7 @@ function Write-DeployManifest {
     param([string]$PayloadHash = '')
     $fields = @{}
     if ($SrcVersion -ne $PackageVersion -or (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
-        $py = Get-BootstrapPython
-        if (-not $py) { throw 'Source runtime manifest requires a bootstrap Python interpreter' }
-        $json = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
-            --payload $PluginDir --package-version $PackageVersion --plugin agent-bridge `
-            --expected-runtime-version $SrcVersion --format json
-        if ($LASTEXITCODE -ne 0) { throw 'Source runtime identity changed before manifest publication' }
+        $json = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
         $data = $json | ConvertFrom-Json
         foreach ($property in $data.PSObject.Properties) { $fields[$property.Name] = $property.Value }
     }
@@ -2259,11 +2271,9 @@ function Invoke-Stamp {
     if ($sourceQualified) {
         # Prepared payloads already contain their complete, hashed assembly.
         # Rematerializing helpers or dependencies would change that identity.
-        $py = Get-BootstrapPython
-        $identity = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
-            --payload $snapTmp --package-version $PackageVersion --plugin agent-bridge `
-            --expected-runtime-version $SrcVersion --format json
-        if ($LASTEXITCODE -ne 0 -or (('' + $identity).Trim() -ne $script:SourceRuntimeIdentity)) {
+        $identity = Get-SourceRuntimeIdentity -Payload $snapTmp -ExpectedVersion $SrcVersion `
+            -FailureContext 'Stamped source snapshot failed identity validation; redirects were not published'
+        if ($identity -ne $script:SourceRuntimeIdentity) {
             throw 'Stamped source snapshot failed identity validation; redirects were not published'
         }
     } else {

@@ -1060,7 +1060,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(libs/versioned-runtime/|plugins/agent-bridge/(scripts/|pyproject\.toml$|plugin\.json$)|tools/(prepare_runtime_source|materialize_main|materialize_installer_engine|materialize_launch_wrapper_assets|uv_editable_ref|nested_uv_editable_ref|run-plugin-tests)\.py$|\.github/workflows/ci\.yml$)'; then
+            '^(libs/versioned-runtime/|plugins/agent-bridge/(scripts/|pyproject\.toml$|plugin\.json$)|tools/clean-room/scenarios/merged-dev-runtime/|tools/(prepare_runtime_source|materialize_main|materialize_installer_engine|materialize_launch_wrapper_assets|uv_editable_ref|nested_uv_editable_ref|run-plugin-tests)\.py$|\.github/workflows/ci\.yml$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -1430,7 +1430,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(libs/versioned-runtime/|plugins/agent-bridge/(scripts/|pyproject\.toml$|plugin\.json$)|tools/(prepare_runtime_source|materialize_main|materialize_installer_engine|materialize_launch_wrapper_assets|uv_editable_ref|nested_uv_editable_ref|run-plugin-tests)\.py$|\.github/workflows/ci\.yml$)'; then
+            '^(libs/versioned-runtime/|plugins/agent-bridge/(scripts/|pyproject\.toml$|plugin\.json$)|tools/clean-room/scenarios/merged-dev-runtime/|tools/(prepare_runtime_source|materialize_main|materialize_installer_engine|materialize_launch_wrapper_assets|uv_editable_ref|nested_uv_editable_ref|run-plugin-tests)\.py$|\.github/workflows/ci\.yml$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

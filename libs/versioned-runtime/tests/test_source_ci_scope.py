@@ -27,6 +27,8 @@ def test_source_runtime_lane_is_bounded_and_change_scoped(job: str) -> None:
         "tools/nested_uv_editable_ref.py",
         "plugins/agent-bridge/scripts/install.ps1",
         "plugins/agent-bridge/scripts/install.sh",
+        "tools/clean-room/scenarios/merged-dev-runtime/scenario.sh",
+        "tools/clean-room/scenarios/merged-dev-runtime/manifest.json",
         ".github/workflows/ci.yml",
     ):
         assert trigger.search(path), path
