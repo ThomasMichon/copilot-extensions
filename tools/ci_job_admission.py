@@ -33,7 +33,7 @@ def select_jobs(paths: Iterable[str], *, event: str) -> Admission:
     """Conservatively select the first standalone admission families."""
     if event != "pull_request":
         return Admission(True, True, True, "full-event")
-    fleet = manager = dispatch = False
+    paths = tuple(paths)
     for path in paths:
         if (
             not isinstance(path, str) or not path or "\\" in path
@@ -43,6 +43,8 @@ def select_jobs(paths: Iterable[str], *, event: str) -> Admission:
             or ":" in path
         ):
             raise ValueError("changed paths must be unambiguous repository-relative paths")
+    fleet = manager = dispatch = False
+    for path in paths:
         if path.startswith(("libs/", "tools/", ".github/")):
             return Admission(True, True, True, "shared-input")
         if path.startswith("fleet-manager/"):

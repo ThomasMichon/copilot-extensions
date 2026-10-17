@@ -959,7 +959,7 @@ jobs:
     # real CI.
     needs: discover
     if: >-
-      !cancelled() &&
+      always() && !cancelled() &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
         needs.discover.outputs.admission_validated == 'true' &&
@@ -990,7 +990,7 @@ jobs:
     # run-standalone-tests.py's prepare()).
     needs: discover
     if: >-
-      !cancelled() &&
+      always() && !cancelled() &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
         needs.discover.outputs.admission_validated == 'true' &&
@@ -1103,7 +1103,7 @@ jobs:
     name: fleet-manager (ubuntu-latest, ${{ matrix.partition.name }})
     needs: discover
     if: >-
-      !cancelled() &&
+      always() && !cancelled() &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
         needs.discover.outputs.admission_validated == 'true' &&
@@ -1149,7 +1149,7 @@ jobs:
     name: fleet-manager (windows-latest, ${{ matrix.partition.name }})
     needs: discover
     if: >-
-      !cancelled() &&
+      always() && !cancelled() &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
         needs.discover.outputs.admission_validated == 'true' &&

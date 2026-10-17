@@ -61,6 +61,14 @@ def test_ambiguous_paths_fail_instead_of_emitting_empty_success(path: str) -> No
         admission.select_jobs([path], event="pull_request")
 
 
+@pytest.mark.parametrize("widening", ["libs/shared/source.py", "new-consumer/source.py", "TESTING.md"])
+@pytest.mark.parametrize("invalid_first", [False, True])
+def test_widening_never_short_circuits_validation(widening: str, invalid_first: bool) -> None:
+    paths = ["../invalid.py", widening] if invalid_first else [widening, "../invalid.py"]
+    with pytest.raises(ValueError, match="repository-relative"):
+        admission.select_jobs(iter(paths), event="pull_request")
+
+
 def test_union_and_verified_empty_diff() -> None:
     selected = admission.select_jobs(
         ["worktree-manager/pyproject.toml", "fleet-manager/tests/test_plan.py"], event="pull_request",
@@ -139,6 +147,7 @@ def test_actual_job_admission_and_full_manual_override(job: str, key: str) -> No
     cfg = workflow()["jobs"][job]
     assert cfg["needs"] == "discover"
     expression = cfg["if"]
+    assert "always() && !cancelled()" in expression
     for event, base, promotion, discovery, validated, selected, cancelled, expected in (
         ("pull_request", "dev", "", "success", "true", "false", False, False),
         ("pull_request", "dev", "", "success", "true", "true", False, True),
@@ -155,6 +164,7 @@ def test_actual_job_admission_and_full_manual_override(job: str, key: str) -> No
         ("workflow_dispatch", "", "", "skipped", "", "", True, False),
     ):
         replacements = {
+            "always()": "True",
             "!cancelled()": repr(not cancelled),
             "github.event_name": repr(event),
             "github.event.pull_request.base.ref": repr(base),
