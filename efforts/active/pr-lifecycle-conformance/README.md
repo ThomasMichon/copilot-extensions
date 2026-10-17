@@ -175,9 +175,9 @@ fixtures. Each implementation PR records its smallest relevant test command.
 
 ## Proposal
 
-Planning only. Submit this effort through the repository's ordinary review gate
-before implementing the contract. No plugin runtime, production PR, credential
-configuration, service lifecycle or deployed host changes are authorized here.
+The planning-only proposal passed review and merged in #7060. Contract
+implementation has not begun. No live test writes, credential configuration,
+service lifecycle or deployed host changes are authorized by the plan.
 
 ## Journal
 
@@ -188,3 +188,11 @@ configuration, service lifecycle or deployed host changes are authorized here.
 - Operator confirmed the slug. Created the canonical public plan with explicit
   provider acceptance, safe ambiguous-write recovery and no rollout consent.
 - Implementation remains pending plan review.
+
+### 2026-10-16 - Proposal reviewed
+
+- #7060 merged after an exact-head Copilot approval and successful required
+  checks. #7051 remains open; no implementation or acceptance item is complete.
+- The next contract slice is Phase 1's provider/capability inventory. The driver
+  first retains the separately claimed endpoint-discovery repair #7062; that
+  repair does not implement or transfer this effort's lifecycle requirements.

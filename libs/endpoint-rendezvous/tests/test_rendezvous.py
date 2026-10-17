@@ -103,8 +103,12 @@ def test_on_disk_json_uses_endpoint_key(tmp_path):
 
 def test_write_is_atomic_no_temp_left(tmp_path):
     write_endpoint(tmp_path, "tcp", "127.0.0.1:1")
-    leftovers = [p.name for p in tmp_path.iterdir() if p.name != "endpoint.json"]
+    leftovers = [
+        p.name for p in tmp_path.iterdir()
+        if p.name not in ("endpoint.json", ".endpoint.lock")
+    ]
     assert leftovers == []
+    assert (tmp_path / ".endpoint.lock").is_file()
 
 
 def test_write_creates_runtime_dir(tmp_path):

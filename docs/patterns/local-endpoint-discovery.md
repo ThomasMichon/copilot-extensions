@@ -109,6 +109,14 @@ client computes the path from the service name with no lookup:
 - **Own the cleanup, tolerate the crash.** Remove the file on graceful shutdown;
   a client must still treat a *present-but-stale* file (dead `pid`, refused
   connection) as "not running," because a crash skips cleanup.
+- **Serialize publication and owner-checked cleanup.** A PID check followed by
+  an unprotected unlink can delete a successor's newer advertisement. Both
+  mutations share one stable, runtime-local OS lock; bounded acquisition
+  failures are explicit, and cleanup does not proceed without ownership of the
+  mutation transaction. Retain the lock file identity across endpoint removal.
+  Readers still consume the atomically published record without taking that
+  lock. Older non-cooperating writers require compatible rollout, not another
+  unprotected ownership read.
 - **Never require a central registry.** Each service owns *its own* file under
   *its own* runtime dir. There is no shared directory a service must register
   with — discovery stays peer-wise and à-la-carte (no single coordinator to

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve successor endpoint advertisements during predecessor cleanup.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
