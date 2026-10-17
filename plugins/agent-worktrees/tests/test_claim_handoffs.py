@@ -221,7 +221,7 @@ def test_terminal_transition_cannot_be_rewritten(handoff_state):
 
 def test_corrupt_registry_fails_closed_without_overwrite(handoff_state):
     path = claim_handoffs.registry_path()
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("version: 1\nbundles: [", encoding="utf-8")
     before = path.read_text(encoding="utf-8")
     with pytest.raises(claim_handoffs.ClaimHandoffError, match="cannot read"):

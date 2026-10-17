@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -163,6 +164,8 @@ def test_exact_canonical_labels_and_independent_execution_authority(receiving, c
     ("custom_ref", f"cref1:session:{OLD}:knowledge/child#session"),
     ("owner_refs", [f"{NEW}/knowledge/parent"]),
     ("resources", [{"kind": "pr", "ref": "example/project#1", "context": {"owner_machine": OLD}}]),
+    ("resources", [{"kind": "pr", "ref": "example/project#1", "handoff_bundle": "offered-bundle"}]),
+    ("resources", [{"kind": "pr", "ref": "example/project#1", "producer": None}]),
 ])
 def test_dependent_references_refuse_instead_of_partial_migration(receiving, capsys, field, value):
     root, _, _, _, _, _, _, write = receiving
@@ -197,6 +200,46 @@ def test_structured_peer_owner_reference_is_fenced(receiving, capsys):
     assert snapshot(root) == before
 
 
+@pytest.mark.parametrize("field", ["caller_worktree", "controller_ref", "owner_ref", "pair_ref", "owner_refs", "resource_ref"])
+def test_bare_id_peer_relationship_is_fenced_but_passive_strings_are_not(receiving, capsys, field):
+    root, _, _, _, _, _, directories, _ = receiving
+    peer = directories["knowledge"] / "peer.yaml"
+    value = {"controllers": [{"controller_ref": RECORD + "#session"}]} if field == "controller_ref" else {field: RECORD}
+    if field == "owner_refs":
+        value = {"owner_refs": [RECORD]}
+    elif field == "resource_ref":
+        value = {"resources": [{"kind": "worktree", "ref": RECORD}]}
+    peer.write_text(yaml.safe_dump(value), encoding="utf-8")
+    before = snapshot(root)
+    code, report = run(capsys, "--fix")
+    assert code == 1 and "inbound reference" in report["error"]
+    assert snapshot(root) == before
+    peer.write_text(yaml.safe_dump({"title": RECORD}), encoding="utf-8")
+    before = snapshot(root)
+    assert run(capsys)[0] == 0
+    assert snapshot(root) == before
+
+
+@pytest.mark.parametrize("endpoint", ["source", "consumer"])
+@pytest.mark.parametrize("state", ["offered", "accepted"])
+def test_handoff_registry_endpoints_are_fenced_even_without_record_links(receiving, capsys, endpoint, state):
+    root = receiving[0]
+    path = migration.claim_handoffs.registry_path()
+    path.parent.mkdir(parents=True)
+    bundle = {
+        "version": 1, "id": "bundle-one", "state": state,
+        "source": f"{NEW}/sample/source", "consumer": f"{NEW}/sample/consumer",
+        "claims": [{"kind": "pr", "ref": "example/project#1"}],
+        "offered_at": "now", "updated_at": "now",
+    }
+    bundle[endpoint] = f"{OLD}/{PROJECT}/{RECORD}"
+    path.write_text(yaml.safe_dump({"version": 1, "bundles": [bundle]}), encoding="utf-8")
+    before = snapshot(root)
+    code, report = run(capsys, "--fix")
+    assert code == 1 and "@claim-handoffs" in report["error"]
+    assert snapshot(root) == before
+
+
 def test_malformed_peer_inventory_fails_closed(receiving, capsys):
     root, _, _, _, _, _, directories, _ = receiving
     (directories["knowledge"] / "bad.yaml").write_text("machine: a\nmachine: b\n", encoding="utf-8")
@@ -214,12 +257,14 @@ def test_duplicate_identity_in_another_store_is_not_migrated(receiving, capsys):
     assert snapshot(root) == before
 
 
-def test_busy_record_lock_refuses_without_record_or_audit_write(receiving, capsys):
+@pytest.mark.parametrize("scope", ["record", "claim-handoffs"])
+def test_busy_record_lock_refuses_without_record_or_audit_write(receiving, capsys, scope):
     _, path, _, _, _, _, _, _ = receiving
     ready, release = threading.Event(), threading.Event()
 
     def holder():
-        with tracking._RecordLock(path, require_sidecar=True):
+        lock_path = path if scope == "record" else migration.claim_handoffs.registry_path()
+        with tracking._RecordLock(lock_path, require_sidecar=True):
             ready.set()
             assert release.wait(10)
 
@@ -236,6 +281,73 @@ def test_busy_record_lock_refuses_without_record_or_audit_write(receiving, capsy
         release.set()
         thread.join(5)
         assert not thread.is_alive()
+
+
+def test_canonical_registration_cannot_publish_during_owner_migration(receiving, capsys, monkeypatch):
+    root, path, _, _, _, registry, _, _ = receiving
+    entered, published = threading.Event(), threading.Event()
+    failures, owners = [], []
+    original_guard = pr_authority.guard
+    original_repair = migration.tracking_yaml_repair.apply_repair
+    destination = root / "registered-repositories.yaml"
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: destination)
+
+    @contextmanager
+    def observed_guard(**kwargs):
+        if threading.current_thread().name == "register-during-migration":
+            entered.set()
+        with original_guard(**kwargs):
+            yield
+
+    monkeypatch.setattr(pr_authority, "guard", observed_guard)
+
+    def register():
+        try:
+            repos.write_registry(registry)
+            owners.append(yaml.safe_load(path.read_bytes())["machine"])
+            published.set()
+        except Exception as exc:
+            failures.append(exc)
+
+    thread = threading.Thread(target=register, name="register-during-migration")
+
+    def repair_after_registration_attempt(*args):
+        thread.start()
+        assert entered.wait(5)
+        assert not published.is_set() and not destination.exists()
+        return original_repair(*args)
+
+    monkeypatch.setattr(migration.tracking_yaml_repair, "apply_repair", repair_after_registration_attempt)
+    try:
+        code, report = run(capsys, "--fix")
+        assert code == 0 and report["changed"]
+    finally:
+        if thread.ident is not None:
+            thread.join(5)
+    assert not thread.is_alive() and not failures
+    assert published.is_set() and owners == [NEW]
+
+
+def test_handoff_registry_lock_is_retained_through_record_commit(receiving, capsys, monkeypatch):
+    original_repair = migration.tracking_yaml_repair.apply_repair
+    acquired = []
+    registry = migration.claim_handoffs.registry_path()
+
+    def contender():
+        with tracking._RecordLock(registry, blocking=False) as lock:
+            acquired.append(lock.acquired)
+
+    def repair_while_registry_is_fenced(*args):
+        thread = threading.Thread(target=contender)
+        thread.start()
+        thread.join(5)
+        assert not thread.is_alive() and acquired == [False]
+        return original_repair(*args)
+
+    monkeypatch.setattr(migration.tracking_yaml_repair, "apply_repair", repair_while_registry_is_fenced)
+    assert run(capsys, "--fix")[0] == 0
+    with tracking._RecordLock(registry, blocking=False) as lock:
+        assert lock.acquired
 
 
 def test_changed_inventory_refuses_under_real_locks(receiving, capsys, monkeypatch):
@@ -334,7 +446,7 @@ def test_native_public_cli_report_uses_only_synthetic_registered_state(tmp_path)
     anchor = tmp_path / "sample"
     anchor.mkdir()
     (anchor / ".agent-worktrees").mkdir()
-    platform = "windows" if sys.platform == "win32" else "linux"
+    platform = cfg.detect_platform()
     checkout_root = tmp_path / "sample.worktrees"
     store = home / ".sample" / "worktrees"
     store.mkdir(parents=True)

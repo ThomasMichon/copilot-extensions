@@ -62,6 +62,11 @@ spelling are refused, including canonical claim refs and references in another
 project. Structured owner tuples and nested historical machine labels are
 fenced too; they are not treated as opaque harmless text. Duplicate or misplaced
 copies of the selected record also refuse.
+Known caller/controller/owner/pair and typed resource references also fence matching bare IDs,
+even without a machine qualifier; passive titles and notes do not. Producer-owned
+claims and `handoff_bundle` reservations refuse. The separate claim-handoff intent
+registry is inspected for source, consumer and claim endpoints, including retained
+terminal bundles, so a record without ledger links is not assumed independent.
 Nothing is relocated, pruned, settled, renamed or silently skipped.
 
 These refusals require a deliberate relationship/provider-owned migration, not
@@ -71,11 +76,12 @@ multi-record graph transfer or remote-provider ownership changes.
 ## Writes, receipts and interruption
 
 Apply uses the existing installation publication authority and nonblocking
-tracking sidecar locks, then repeats the complete inspection and compares its
+claim-handoff-registry and tracking sidecar locks, then repeats the complete inspection and compares its
 input bytes before writing. A busy lock, changed inventory or lost provenance
 refuses without changing the selected record. Current tracking writers fence
 new ownership references and reject stale full-record saves that would restore
-the old machine.
+the old machine. Canonical repository-registration publication uses the same
+authority, preventing a newly visible knowledge ledger from entering mid-repair.
 
 **Quiesce writers running older code before explicit offline recovery.** Older
 processes do not acquire newly introduced ownership fences; a source-only

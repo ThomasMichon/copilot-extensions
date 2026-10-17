@@ -200,7 +200,7 @@ def write_registry(registry: ReposRegistry) -> None:
     """Write repos.yaml with hand-formatted YAML."""
     path = _repos_yaml_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-
+    from . import pr_authority
     _rhdr = "# ~/.agent-worktrees/repos.yaml"  # marketplace-isolation: allow legacy
     lines = [
         _rhdr,
@@ -256,7 +256,7 @@ def write_registry(registry: ReposRegistry) -> None:
     else:
         lines.append("repos: {}")
 
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    pr_authority.write_registry(path, "\n".join(lines) + "\n")
 
 
 def _quote(v: str) -> str:

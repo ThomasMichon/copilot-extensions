@@ -107,7 +107,8 @@ def write_record(record: tracking.WorktreeRecord, path: Path, content: str) -> N
 
     A writer already holding a short record lock must never wait for the outer
     authority lock: a rewrite may need that record. Refuse immediately instead.
-    Ordinary stamps with unchanged PR authority do not contend with network I/O.
+    Ordinary stamps with unchanged PR and ownership relations do not contend
+    with network I/O.
     """
     current = tracking.load_record(path) if path.exists() else None
     if current is not None and current.machine != record.machine:

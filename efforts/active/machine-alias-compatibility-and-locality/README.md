@@ -199,7 +199,8 @@ _(Agent-recommended integration details for the requested #7057 capability.)_
   report partial/error outcomes honestly and make repeated apply idempotent.
 - [x] Pass focused regressions, lint, install-contract and metadata/documentation
   gates; add the agent-worktrees changefile. The final source candidate passes
-  179 affected tests, including native synthetic public-CLI report proof.
+  352 affected tests, including native synthetic public-CLI report proof,
+  canonical registration serialization and claim-handoff registry coverage.
 - [ ] Land the source candidate through final-head review and required dev CI.
 - [ ] Transfer explicit one-time local application to the coordinator with the
   retained clean source and public CLI commands. No runtime deployment, service
@@ -280,6 +281,20 @@ unrelated service changes or a second machine registry.
   partially migrated. This does not claim multi-record graph transfer.
 - Real-record recovery and rollout remain coordinator-owned and unexecuted by
   the source participant. The existing wider effort remains Active.
+
+### 2026-10-16 - Independent relationship authorities fenced
+- Bare caller, controller, owner, pair and typed resource references are durable
+  relationships, not passive strings. Their peer ledgers now fence matching
+  identities without requiring a machine qualifier; passive notes stay inert.
+- Claim reservations use `handoff_bundle`, and claim-handoff endpoints also live
+  outside worktree records. The repair inspects that registry, refuses retained
+  endpoints and producer-owned claims, and holds its native lock through commit.
+- Canonical repository registration now publishes through the existing
+  installation authority, excluding newly visible knowledge ledgers during the
+  final inspection/write boundary. A real concurrent-writer regression proves
+  registration waits until the record commit.
+- The fresh-home native CLI fixture uses the same platform detector as its
+  child, including WSL. Expanded affected validation passes 352 tests.
 
 ### 2026-10-16 - Guest source repair merged; release containment remains
 - #7009 merged as `6fe63b78740cc0adbf49fad4cd8970dca656ce83`, from exact head

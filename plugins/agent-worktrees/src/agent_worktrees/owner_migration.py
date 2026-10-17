@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from . import config as cfg, execution_spaces, output, pr_authority, repos, tracking
+from . import claim_handoffs, config as cfg, execution_spaces, output, pr_authority, repos, tracking
 from . import legacy_wsl_record_locality, tracking_claims, tracking_yaml_repair
 
 
@@ -76,11 +76,23 @@ def _inventory(project: str) -> dict[Path, tuple[str, bytes, dict]]:
                 raise ValueError(f"tracking record symlink refused: {path}")
             raw = path.read_bytes()
             result[path] = (name, raw, tracking_yaml_repair.strict_mapping(raw.decode("utf-8")))
+    handoffs = claim_handoffs.registry_path()
+    if handoffs.is_symlink():
+        raise ValueError("claim-handoff registry symlink refused")
+    if handoffs.exists():
+        raw = handoffs.read_bytes()
+        data = tracking_yaml_repair.strict_mapping(raw.decode("utf-8"))
+        claim_handoffs._load_registry_strict(handoffs)
+        result[handoffs] = ("@claim-handoffs", raw, data)
     return result
 
 
 def _references(value, prefix: str = ""):
     if isinstance(value, dict):
+        if value.get("kind") in ("worktree", "session") and isinstance(value.get("ref"), str):
+            ref = tracking.parse_claim_ref(value["ref"])
+            if ref is not None and not ref.is_qualified:
+                yield f"{prefix}.ref", ref
         project = value.get("project", value.get("repo"))
         if prefix and all(isinstance(item, str) and item for item in (
             value.get("machine"), project, value.get("worktree_id"),
@@ -96,7 +108,11 @@ def _references(value, prefix: str = ""):
     elif isinstance(value, str):
         decoded = tracking_claims.decanonicalize_ref(value)
         parsed = tracking.parse_claim_ref(decoded)
-        if parsed is not None and parsed.is_qualified:
+        field = re.sub(r"\[\d+\]", "", prefix.rsplit(".", 1)[-1])
+        if parsed is not None and (parsed.is_qualified or field in (
+            "caller_worktree", "controller_ref", "controllers",
+            "owner_ref", "pair_ref", "owner_refs", "pair_refs",
+        )):
             yield prefix, parsed
 
 
@@ -139,7 +155,8 @@ def _require_unlinked(data: dict, inventory, project: str, record_id: str, old: 
         if not isinstance(claims, list) or any(
             not isinstance(claim, dict)
             or claim.get("kind") not in ("pr", "bug", "issue", "effort")
-            or claim.get("handoff_id")
+            or claim.get("handoff_bundle") or claim.get("handoff_id")
+            or "producer" in claim
             for claim in claims
         ):
             raise ValueError(f"dependent {field} requires resource-owner migration; record-local repair refused")
@@ -151,13 +168,17 @@ def _require_unlinked(data: dict, inventory, project: str, record_id: str, old: 
             raise ValueError(f"duplicate or misplaced record identity in {store}/{path.stem}; relocation is not owner migration")
         for field, ref in _references(candidate):
             if (
-                ref.project == project and ref.worktree_id == record_id
-                and ref.machine.casefold() in (old.casefold(), new.casefold())
+                ref.worktree_id == record_id and (
+                    not ref.is_qualified or (
+                        ref.project == project
+                        and ref.machine.casefold() in (old.casefold(), new.casefold())
+                    )
+                )
             ):
                 raise ValueError(f"inbound reference in {store}/{path.stem}:{field}; migrate the relationship through its owner")
         if candidate is data:
             for field, ref in _references(candidate):
-                if ref.machine.casefold() == old.casefold():
+                if ref.machine and ref.machine.casefold() == old.casefold():
                     raise ValueError(f"embedded historical reference at {field}; record-local repair refused")
 
 
@@ -232,11 +253,18 @@ def _apply(project: str, record_id: str, old: str, new: str, observed):
         "worktree_id": record_id, "from_machine": old, "to_machine": new,
         "record": str(path), "before_sha256": digest,
         "after_sha256": hashlib.sha256(fixed.encode("utf-8")).hexdigest(),
-        "scanned_records": len(inventory), "state": "prepared",
+        "scanned_records": sum(store != "@claim-handoffs" for store, _, _ in inventory.values()),
+        "state": "prepared",
         "provenance": _provenance(config, data, new),
     }
     with pr_authority.guard(timeout=0), ExitStack() as stack:
+        handoffs = claim_handoffs.registry_path()
+        lock = stack.enter_context(tracking._RecordLock(handoffs, blocking=False))
+        if not lock.acquired:
+            raise TimeoutError("claim-handoff registry is busy; owner migration refused")
         for candidate in sorted(inventory, key=str):
+            if candidate == handoffs:
+                continue
             lock = stack.enter_context(tracking._RecordLock(candidate, blocking=False))
             if not lock.acquired:
                 raise TimeoutError("tracking record is busy; owner migration refused")
@@ -291,7 +319,8 @@ def targeted_doctor(args) -> int:
         observed = _inspect(project, args.migrate_owner, args.from_machine, args.to_machine)
         config, inventory, path, raw, data = observed
         report.update(
-            scanned_records=len(inventory), record=str(path),
+            scanned_records=sum(store != "@claim-handoffs" for store, _, _ in inventory.values()),
+            record=str(path),
             before_sha256=hashlib.sha256(raw).hexdigest(),
             provenance=_provenance(config, data, args.to_machine),
             checkout_exists=Path(data["worktree_path"]).exists(),
