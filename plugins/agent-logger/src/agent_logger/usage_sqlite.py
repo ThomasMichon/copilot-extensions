@@ -130,7 +130,10 @@ def _bounded_projection(columns: list[str]) -> str:
     for column in columns:
         quoted = f'"{column}"'
         if column in _TEXT:
-            valid = f"(typeof({quoted}) = 'text' AND length({quoted}) <= 2048)"
+            valid = (
+                f"(typeof({quoted}) = 'text' AND length({quoted}) <= 2048 "
+                f"AND length(CAST({quoted} AS BLOB)) <= 8192)"
+            )
         elif column in _INTEGERS:
             valid = f"(typeof({quoted}) = 'integer' AND {quoted} >= 0)"
         else:

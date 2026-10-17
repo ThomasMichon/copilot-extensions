@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 from pathlib import Path
 
 from agent_logger.sync.lock import sync_lock
@@ -35,6 +36,11 @@ class UsageEvidenceError(ValueError):
     """Unsafe, incompatible, conflicting or incomplete accounting evidence."""
 
 
+def evidence_lock_path(session: Path) -> Path:
+    """Keep producer-only lock writes outside the signed session tree."""
+    return session.with_name(f".{session.name}.usage-evidence.lock")
+
+
 def validate_values(values: object) -> dict:
     """Reject extra fields and invalid scalars rather than transporting content."""
     if not isinstance(values, dict) or not values:
@@ -50,7 +56,10 @@ def validate_values(values: object) -> dict:
         elif key in INTEGER_FIELDS:
             if type(value) is not int or value < 0:
                 raise UsageEvidenceError("accounting integer field is invalid")
-        elif type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        elif (
+            type(value) not in (int, float) or value < 0 or value > sys.float_info.max
+            or (type(value) is float and not math.isfinite(value))
+        ):
             raise UsageEvidenceError("accounting numeric field is invalid")
     return dict(values)
 
@@ -133,7 +142,7 @@ def merge_session_evidence(
     ):
         raise UsageEvidenceError("invalid accounting coverage")
     with publication_directory(session, create=False) as directory:
-        with sync_lock(session / "usage-evidence.json.lock", timeout=0, wait=False) as acquired:
+        with sync_lock(evidence_lock_path(session), timeout=0, wait=False) as acquired:
             if not acquired:
                 raise UsageEvidenceError("accounting evidence writer is busy")
             prior: bytes | None = None

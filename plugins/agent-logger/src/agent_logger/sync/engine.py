@@ -415,13 +415,14 @@ def run_sync(
         # Two-pair sync: publish the compressed archive store to
         # {machine}/archived/, compact the hub-only backlog, and reconcile away
         # the uncompressed hub duplicates.
-        if cfg.sync_compact["enabled"] and accounting_complete:
+        if cfg.sync_compact["enabled"]:
             arc = target.push_archives(cfg.compact_archive_root, machine)
             if arc.ok and arc.file_count:
                 print(f"session-sync: pushed {arc.file_count} archive file(s)")
             elif not arc.ok:
                 print(f"session-sync: archive push failed: {arc.detail}", file=sys.stderr)
 
+        if cfg.sync_compact["enabled"] and accounting_complete:
             opts = cfg.sync_compact
             from agent_logger.sync.compact import resolve_hub_tracked_paths
 

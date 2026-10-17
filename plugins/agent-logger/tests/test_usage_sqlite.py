@@ -179,6 +179,12 @@ def test_invalid_stored_scalars(tmp_path: Path, changes: dict[str, Any]) -> None
         read_sqlite_usage(path, {"chosen"})
 
 
+@pytest.mark.parametrize("model", ["\u00e9" * 2048, "\U0001f680" * 2048])
+def test_bounded_projection_preserves_multibyte_text(tmp_path: Path, model: str) -> None:
+    path = _store(tmp_path / "usage.db", [_row(model=model)])
+    assert read_sqlite_usage(path, {"chosen"})["chosen"][0]["values"]["model"] == model
+
+
 @pytest.mark.parametrize("column", ["input_tokens", "turn_index", "duration_ms", "request_multiplier"])
 def test_boolean_is_not_a_numeric_scalar(column: str) -> None:
     # SQLite stores SQL booleans as integers; guard the Python validation boundary too.

@@ -45,9 +45,10 @@ known values. This is evidence preservation, not resolved exact accounting.
 ## Failure and resource bounds
 
 Publication is serialized per session, uses pinned lexical directory ancestors
-and regular-file reads, and atomically replaces a flushed artifact. Unchanged
-bytes preserve mtime, avoiding perpetual resync. Corrupt prior artifacts are
-never reset to empty. Failed reads, conflicts, unsafe paths, concurrent writers
+and regular-file reads, and atomically replaces a flushed artifact. Producer
+lock files are siblings of session directories, outside the signed and archived
+session tree. Unchanged bytes preserve mtime, avoiding perpetual resync.
+Corrupt prior artifacts are never reset to empty. Failed reads, conflicts, unsafe paths, concurrent writers
 or exceeded limits retain the last-good artifact.
 
 One pass admits at most 10,000 directory entries and 20,000 selected store
@@ -55,14 +56,18 @@ rows. A ledger has at most 20,000 distinct records and 16 MiB. Transcript
 scans stop before exceeding 64 MiB, 200,000 events or a 4 MiB JSON line.
 An unfinished tail or concurrent transcript change is incomplete evidence,
 not a truncated successful capture. Accounting strings are bounded to 2,048
-characters. Limits refuse work rather than emit success-shaped partial data.
+characters, with an additional 8,192-byte SQLite projection limit so embedded
+NULs cannot bypass the pre-materialization bound. Numeric duration and multiplier
+values must fit a finite floating-point range. Limits refuse work rather than
+emit success-shaped partial data.
 
 Missing legacy sources are reported as coverage gaps, never fabricated zeros.
 Corruption, unsupported schemas and other capture failures are reported and
 make the pass fail even if raw session transfer succeeds. Raw transfer may
 continue; any gap or accounting failure prevents local and hub cold compaction
-for that pass. A missing legacy store alone is nonfatal to raw transfer, but
-the run explicitly reports incomplete accounting.
+for that pass, without blocking transfer of already-existing archives.
+A missing legacy store alone is nonfatal to raw transfer, but the run explicitly
+reports incomplete accounting.
 
 SQLite's standard-library connection reopens by filename rather than binding
 to the admitted no-follow file handle. Pinned ancestors and pre/post identity

@@ -16,7 +16,9 @@ from agent_logger.config import Config, load_config
 from agent_logger.sync import engine
 from agent_logger.sync.lock import sync_lock
 from agent_logger.usage_capture import capture_usage
-from agent_logger.usage_ledger import ARTIFACT, UsageEvidenceError, merge_session_evidence
+from agent_logger.usage_ledger import (
+    ARTIFACT, UsageEvidenceError, evidence_lock_path, merge_session_evidence,
+)
 from agent_logger.usage_transcript import read_transcript_usage
 
 
@@ -162,7 +164,7 @@ def test_usage_rejects_invalid_or_private_values(tmp_path: Path, field: str, val
 
 def test_usage_writer_contention_is_visible(tmp_path: Path) -> None:
     session = _session(tmp_path)
-    with sync_lock(session / "usage-evidence.json.lock", timeout=0):
+    with sync_lock(evidence_lock_path(session), timeout=0):
         with pytest.raises(UsageEvidenceError, match="busy"):
             merge_session_evidence(session, "s1", [_record()], coverage=_coverage())
 
@@ -258,7 +260,10 @@ def test_usage_bounds_preserve_prior(tmp_path: Path, monkeypatch) -> None:
         read_transcript_usage(session, "s1")
 
 
-@pytest.mark.parametrize("expression", ["zeroblob(8388608)", "printf('%.*c',8388608,'x')"])
+@pytest.mark.parametrize("expression", [
+    "zeroblob(8388608)", "printf('%.*c',8388608,'x')",
+    "char(0) || printf('%.*c',8388608,'x')",
+])
 def test_usage_sqlite_bounds_values_before_python_materialization(
     tmp_path: Path, monkeypatch, expression: str,
 ) -> None:
@@ -280,16 +285,79 @@ def test_usage_sqlite_bounds_values_before_python_materialization(
 
 
 @pytest.mark.guard
-def test_usage_engine_capture_precedes_signatures_and_syncs_sidecar(tmp_path: Path) -> None:
+def test_usage_engine_capture_precedes_signatures_and_syncs_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = _cfg(tmp_path)
     session = _session(cfg.sync_source)
     _db(cfg.sync_source)
+    target = engine.build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+    original_push = target.push
+    pushed = []
+
+    def push(*args, **kwargs):
+        pushed.append(args[2])
+        return original_push(*args, **kwargs)
+
+    monkeypatch.setattr(target, "push", push)
+    monkeypatch.setattr(engine, "build_target", lambda *a, **kw: target)
     assert engine.run_sync(cfg) == 0
     destination = tmp_path / "dest" / "synthetic" / "session-state" / "s1" / ARTIFACT
     assert destination.read_bytes() == (session / ARTIFACT).read_bytes()
     before = (session / ARTIFACT).stat().st_mtime_ns
+    assert pushed == [{"s1"}]
     assert engine.run_sync(cfg) == 0
     assert (session / ARTIFACT).stat().st_mtime_ns == before
+    assert pushed == [{"s1"}]
+
+
+@pytest.mark.parametrize("field", ["duration", "cost"])
+def test_usage_huge_numeric_record_retains_prior_and_allows_raw_transfer(
+    tmp_path: Path, field: str,
+) -> None:
+    cfg = _cfg(tmp_path)
+    session = _session(cfg.sync_source)
+    _db(cfg.sync_source)
+    assert engine.run_sync(cfg) == 0
+    prior = (session / ARTIFACT).read_bytes()
+    transcript = session / "events.jsonl"
+    event = json.loads(transcript.read_text())
+    event["data"]["usage"][field] = 10**400
+    transcript.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    assert engine.run_sync(cfg) == 1
+    assert (session / ARTIFACT).read_bytes() == prior
+    copied = tmp_path / "dest" / "synthetic" / "session-state" / "s1" / "events.jsonl"
+    assert copied.read_bytes() == transcript.read_bytes()
+
+
+@pytest.mark.parametrize("store", ["missing", "corrupt"])
+def test_usage_incomplete_capture_still_delivers_existing_archives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: str,
+) -> None:
+    from agent_logger.sessions import get_codec
+    from agent_logger.sync import compact
+
+    cfg = _cfg(tmp_path)
+    cfg._data["sync"]["compact"] = {"enabled": True}
+    _session(cfg.sync_source)
+    archived_session = _session(tmp_path / "old-source", "old")
+    cfg.compact_archive_root.mkdir(parents=True)
+    archive = cfg.compact_archive_root / "old.tar.gz"
+    get_codec("targz").archive_dir(archived_session, archive)
+    if store == "corrupt":
+        (cfg.sync_source / "session-store.db").write_bytes(b"corrupt")
+    target = engine.build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("incomplete accounting allowed compaction or reconciliation")
+
+    monkeypatch.setattr(compact, "compact_local", forbidden)
+    monkeypatch.setattr(target, "compact_backlog", forbidden)
+    monkeypatch.setattr(target, "reconcile_hub", forbidden)
+    monkeypatch.setattr(engine, "build_target", lambda *a, **kw: target)
+    assert engine.run_sync(cfg) == (1 if store == "corrupt" else 0)
+    delivered = tmp_path / "dest" / "synthetic" / "archived" / archive.name
+    assert delivered.read_bytes() == archive.read_bytes()
 
 
 def test_usage_engine_dry_run_has_no_accounting_artifact(tmp_path: Path) -> None:
@@ -297,7 +365,7 @@ def test_usage_engine_dry_run_has_no_accounting_artifact(tmp_path: Path) -> None
     session = _session(cfg.sync_source)
     assert engine.run_sync(cfg, dry_run=True) == 0
     assert not (session / ARTIFACT).exists()
-    assert not (session / "usage-evidence.json.lock").exists()
+    assert not evidence_lock_path(session).exists()
 
 
 def test_usage_engine_failure_keeps_raw_push_but_blocks_compaction(tmp_path: Path, monkeypatch) -> None:
