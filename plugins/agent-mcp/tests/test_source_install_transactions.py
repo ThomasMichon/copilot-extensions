@@ -114,6 +114,46 @@ def _payload(tmp_path: Path, plugin: str, *, source: bool = True) -> tuple[Path,
     return payload, identity.runtime_version
 
 
+def _instrument_source_main(payload: Path, code: str) -> str:
+    """Instrument only the isolated CLI copy, then seal its actual bytes."""
+    helper = payload / "scripts" / "versioned_runtime_source.py"
+    text = helper.read_text(encoding="utf-8")
+    entry = "    raise SystemExit(main())"
+    assert text.count(entry) == 1
+    injected = "\n".join("    " + line if line else "" for line in code.splitlines())
+    helper.write_text(text.replace(entry, injected + "\n" + entry), encoding="utf-8")
+    receipt = payload / "runtime-source.json"
+    identity = json.loads(receipt.read_text(encoding="utf-8"))
+    identity["assembly_hash"] = IDENTITY.assembly_hash(payload)
+    identity["runtime_version"] = IDENTITY.runtime_version(
+        VERSION, identity["source_commit"], identity["assembly_hash"],
+    )
+    receipt.write_text(json.dumps(identity), encoding="utf-8")
+    return identity["runtime_version"]
+
+
+def _instrument_snapshot_copy(payload: Path, mutation_target: str) -> str:
+    return _instrument_source_main(payload, f"""
+import shutil as _fixture_shutil
+_fixture_copytree = _fixture_shutil.copytree
+def _fixture_copy(source, destination, *args, **kwargs):
+    result = _fixture_copytree(source, destination, *args, **kwargs)
+    if Path(source).resolve() == Path({str(payload)!r}).resolve():
+        if {mutation_target!r} == 'original':
+            with (Path(source) / 'pyproject.toml').open('a', encoding='utf-8') as stream:
+                stream.write('changed')
+        elif {mutation_target!r} == 'snapshot':
+            (Path(destination) / 'corrupt.txt').write_text('changed', encoding='utf-8')
+        else:
+            receipt = Path(destination) / 'runtime-source.json'
+            identity = json.loads(receipt.read_text(encoding='utf-8'))
+            identity['source_tree'] = 'c' * 40
+            receipt.write_text(json.dumps(identity), encoding='utf-8')
+    return result
+_fixture_shutil.copytree = _fixture_copy
+""")
+
+
 def _run(tmp_path: Path, language: str, script: str) -> subprocess.CompletedProcess[str]:
     host = _host(language)
     harness = tmp_path / f"native.{language}"
@@ -336,6 +376,8 @@ def test_native_stamp_rechecks_copied_bytes_before_redirects(
     tmp_path: Path, plugin: str, language: str, mutation_target: str,
 ) -> None:
     payload, selected = _payload(tmp_path, plugin)
+    if mutation_target != "existing-tree":
+        selected = _instrument_snapshot_copy(payload, mutation_target)
     script = _setup(tmp_path, payload, plugin, language)
     if mutation_target == "existing-tree":
         snapshot = tmp_path / "install" / "snapshots" / selected
@@ -355,44 +397,19 @@ function Write-ServiceOk($value) {{ }}
 function Write-Ok($value) {{ }}
 function Deploy-SelfProvisioningBinstub {{ throw 'Unexpected redirect publication' }}
 function Materialize-SnapshotDependencies {{ throw 'Source snapshot was rematerialized' }}
-function Copy-Item {{
-    param($LiteralPath, $Destination, [switch]$Recurse, [switch]$Force)
-    Microsoft.PowerShell.Management\\Copy-Item -LiteralPath $LiteralPath `
-        -Destination $Destination -Recurse -Force
-    $path = if ('{mutation_target}' -eq 'original') {{
-        Join-Path $PluginDir 'pyproject.toml'
-    }} else {{ Join-Path (Split-Path -Parent $Destination) 'corrupt.txt' }}
-    Add-Content -LiteralPath $path -Value changed
-}}
 {_function(plugin, 'Invoke-Stamp', language)}
 Initialize-SourceRuntime
 Invoke-Stamp
 """
     else:
-        script += f"""
-cp() {{
-    command cp "$@"
-    if [[ '{mutation_target}' == original ]]; then
-        printf changed >> "$PLUGIN_DIR/pyproject.toml"
-    elif [[ '{mutation_target}' == snapshot ]]; then
-        printf changed > "${{@: -1}}/corrupt.txt"
-    elif [[ '{mutation_target}' == snapshot-tree ]]; then
-        "$(_bootstrap_python)" -c 'import json,sys; from pathlib import Path;
-p=Path(sys.argv[1]); d=json.loads(p.read_text()); d["source_tree"]="c"*40;
-p.write_text(json.dumps(d))' "${{@: -1}}/runtime-source.json"
-    fi
-}}
+        script += """
 _initialize_source_runtime
 _stamp_source_snapshot
 """
     result = _run(tmp_path, language, script)
     assert result.returncode != 0, result.stdout + result.stderr
     if mutation_target in ("snapshot-tree", "existing-tree"):
-        context = "Stamped" if mutation_target == "snapshot-tree" else "Existing"
-        assert (
-            f"{context} source snapshot identity differs from the selected source; "
-            "redirects were not published"
-        ) in result.stderr
+        assert "Source snapshot identity changed after runtime selection" in result.stderr
     for marker in ("current-version", "stamped-version", "payload-dir"):
         assert (tmp_path / "install" / marker).read_text() == "previous"
 

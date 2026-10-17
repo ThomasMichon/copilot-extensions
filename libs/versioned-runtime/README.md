@@ -233,7 +233,7 @@ release-before-settlement checks:
 
 ## Merged-source runtime identities
 
-`versioned_runtime_source.py` is the optional plugin-side identity adapter for
+`versioned_runtime_source.py` is the source identity adapter for
 non-editable, merged-source payloads. It distinguishes original package
 version, full Git commit/tree, materialized first-party assembly hash and
 runtime generation. It is separate from editable development claims and does
@@ -242,10 +242,20 @@ not grant installation ownership or release attestation.
 The adapter verifies the plugin/package identity, canonical assembly bytes
 and any caller-pinned runtime selection. Malformed or changed metadata
 refuses installation rather than falling back to the ordinary package slot.
-Agent Bridge is the initial native installer consumer; the synchronizer
-ships the same helper to every runtime plugin without changing their default
-installation behavior. Standalone distributions retain their existing core
-runtime-resource family because they do not consume plugin source metadata.
+The synchronizer ships the same helper to every runtime plugin without changing
+ordinary package-only installation behavior; the source-preparation guide names
+the native installer adopters. Independently deployed Python resolver bundles,
+including standalone distributions, carry it for exact-selection recovery.
+That does not introduce a managed installer into standalone consumers.
+
+`publish_source_snapshot(payload, root, identity)` serializes source copying,
+winner verification and publication with the existing construction lease scoped
+to `root/snapshots`, separately from runtime-slot construction. A complete
+candidate is renamed into place, never moved inside an existing winner. Identical
+writers reuse the verified winner without rewriting it; conflicting receipts or
+copies refuse publication. The adapter's `--snapshot-root` mode returns that
+snapshot path, with `--expected-source-identity` retaining the caller's complete
+initial identity across the process boundary.
 
 Source preparation and the metadata contract are documented at
 [`prepare_runtime_source`](../../tools/prepare_runtime_source.md). The
