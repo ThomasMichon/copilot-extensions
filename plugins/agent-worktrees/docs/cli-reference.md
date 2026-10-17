@@ -1087,9 +1087,11 @@ For a bare anchor, discovery and installers use a retained detached checkout
 of the configured default branch's commit under the project's state root,
 `service-sources/<anchor-key>/<commit>`. The checkout remains available for
 redirectors and source provenance; it is not a scratch directory. Existing
-checkouts with changed HEAD, tracked, untracked or ignored content are refused,
-not overwritten. They are not automatically garbage-collected, since installed
-services may still reference them.
+checkouts with changed HEAD, tracked content or non-ignored untracked files
+are refused, not overwritten. Repository-ignored installer build artifacts
+(such as Python bytecode caches) do not prevent later discovery or reuse.
+Checkouts are not automatically garbage-collected, since installed services
+may still reference them.
 
 Before `install`, `update` or `copy`, synchronization must succeed. Bare
 anchors use the existing safe bare-ref synchronization; ordinary anchors

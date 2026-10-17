@@ -28,6 +28,7 @@ def repository_template(tmp_path_factory):
     upstream.mkdir()
     _git(upstream, "init", "-b", "main")
     (upstream / "base.txt").write_text("base\n", encoding="utf-8")
+    (upstream / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
     _git(upstream, "add", ".")
     _git(upstream, "commit", "-qm", "Initial")
     anchor = tmp_path / "anchor"
@@ -145,7 +146,7 @@ def test_sync_failure_never_runs_installer(repository, failure, batch, capsys):
     assert "Deploying from current" not in text.err + text.out
 
 
-@pytest.mark.parametrize("mutation", ["tracked", "untracked", "ignored", "head"])
+@pytest.mark.parametrize("mutation", ["tracked", "untracked", "head"])
 def test_changed_pinned_checkout_refused_without_overwrite(repository, mutation):
     r = repository
     source = service_sources.resolve(r.anchor, r.config, deploy=True)
@@ -153,19 +154,21 @@ def test_changed_pinned_checkout_refused_without_overwrite(repository, mutation)
         (source / "base.txt").write_text("edited\n", encoding="utf-8")
     elif mutation == "untracked":
         (source / "local.txt").write_text("keep\n", encoding="utf-8")
-    elif mutation == "ignored":
-        exclude = Path(_git(source, "rev-parse", "--git-path", "info/exclude"))
-        if not exclude.is_absolute():
-            exclude = source / exclude
-        exclude.parent.mkdir(parents=True, exist_ok=True)
-        with exclude.open("a", encoding="utf-8") as stream:
-            stream.write("\nignored.txt\n")
-        (source / "ignored.txt").write_text("keep\n", encoding="utf-8")
     else:
         _git(source, "checkout", "--detach", "HEAD~1")
     with pytest.raises(RuntimeError, match="refusing to overwrite or deploy"):
         service_sources.resolve(r.anchor, r.config)
     assert not r.receipt.exists()
+
+
+def test_ignored_installer_build_artifacts_do_not_break_repeated_discovery(repository):
+    r = repository
+    source = service_sources.resolve(r.anchor, r.config, deploy=True)
+    cache = source / "__pycache__"
+    cache.mkdir()
+    (cache / "build.pyc").write_bytes(b"generated build artifact")
+    assert service_sources.resolve(r.anchor, r.config) == source
+    assert services_cli.cmd_services_dispatch(["status", "--json"]) == 0
 
 
 def test_nonbare_sync_retains_checkout_and_rejects_local_commits(repository):

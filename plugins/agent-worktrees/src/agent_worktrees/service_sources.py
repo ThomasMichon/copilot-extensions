@@ -61,7 +61,7 @@ def resolve(repo: Path, config: cfg.Config, *, deploy: bool = False) -> Path:
     if source.is_symlink():
         raise RuntimeError(f"Service source checkout is a symbolic link: {source}")
     actual = _git(source, "rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
-    changes = _git(source, "status", "--porcelain", "--untracked-files=all", "--ignored").stdout
+    changes = _git(source, "status", "--porcelain", "--untracked-files=all").stdout
     if actual != commit or changes.strip():
         raise RuntimeError(f"Service source checkout changed; refusing to overwrite or deploy: {source}")
     return source
