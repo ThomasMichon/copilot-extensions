@@ -436,6 +436,7 @@ if ($env:OS -eq 'Windows_NT') {
 #                           are pinned at. Junction-free, so these ARE the slot
 #                           (Link == Venv); rewritten to the new slot on cutover.
 $SrcVersion = $null
+$SourceRuntimeIdentity = $null
 $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
 if (Test-Path $pyprojForVer) {
     $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
@@ -500,10 +501,11 @@ function Initialize-SourceRuntime {
     }
     $py = Get-BootstrapPython
     if (-not $py) { throw 'Source runtime selection requires a bootstrap Python interpreter' }
-    $version = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
-        --payload $PluginDir --package-version $PackageVersion --plugin agent-bridge
+    $identity = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
+        --payload $PluginDir --package-version $PackageVersion --plugin agent-bridge --format json
     if ($LASTEXITCODE -ne 0) { throw 'Source runtime identity validation failed' }
-    $script:SrcVersion = ('' + $version).Trim()
+    $script:SourceRuntimeIdentity = ('' + $identity).Trim()
+    $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
     $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
     $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
         Join-Path $VenvDir 'Scripts\python.exe'
@@ -825,7 +827,19 @@ function Test-PayloadUnchangedSinceAdmission {
        $false (after reporting it) when it differs; the caller must then fail
        without publishing the marker or manifest, or activating. Nothing to
        verify when no slot was built ('reuse') or no hash was admitted. #>
-    param([string]$AdmittedHash = '', [string]$Admission = '')
+    param([string]$AdmittedHash = '', [string]$Admission = '', [switch]$SourceIdentityOnly)
+    $selectedIdentity = Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($selectedIdentity -or (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source runtime validation requires a bootstrap Python interpreter' }
+        $identity = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
+            --payload $PluginDir --package-version $PackageVersion --plugin agent-bridge `
+            --expected-runtime-version $SrcVersion --format json
+        if ($LASTEXITCODE -ne 0 -or (('' + $identity).Trim() -ne $selectedIdentity)) {
+            throw 'Source runtime identity changed after runtime selection; refusing publication'
+        }
+    }
+    if ($SourceIdentityOnly) { return $true }
     if ($Admission -eq 'reuse' -or -not $AdmittedHash) { return $true }
     $fresh = Get-PayloadHash
     if ($fresh -eq $AdmittedHash) { return $true }
@@ -2235,12 +2249,27 @@ function Invoke-Stamp {
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    $sourceQualified = [bool]$script:SourceRuntimeIdentity
+    $exclude = if ($sourceQualified) { @() } else {
+        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    }
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
-    Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
-    Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+    if ($sourceQualified) {
+        # Prepared payloads already contain their complete, hashed assembly.
+        # Rematerializing helpers or dependencies would change that identity.
+        $py = Get-BootstrapPython
+        $identity = & $py -I -B (Join-Path $ScriptDir 'versioned_runtime_source.py') `
+            --payload $snapTmp --package-version $PackageVersion --plugin agent-bridge `
+            --expected-runtime-version $SrcVersion --format json
+        if ($LASTEXITCODE -ne 0 -or (('' + $identity).Trim() -ne $script:SourceRuntimeIdentity)) {
+            throw 'Stamped source snapshot failed identity validation; redirects were not published'
+        }
+    } else {
+        Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
+        Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+    }
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     # A just-copied tree can be briefly held open by an antivirus/indexer scan,
     # failing the directory rename with "access denied"; retry a bounded few times.
@@ -2421,7 +2450,8 @@ function Invoke-Install {
     # not the mutable version label. A force rebuild/restart stays a dedicated
     # command, never a routine-reconcile side effect.
     $preLockHash = Get-PayloadHash
-    if (Test-SlotContentCurrent -PayloadHash $preLockHash) {
+    if (-not (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -and
+        (Test-SlotContentCurrent -PayloadHash $preLockHash)) {
         Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
         Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
         return
@@ -2435,6 +2465,7 @@ function Invoke-Install {
         Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
         exit 75
     }
+    [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
     # The transaction's single payload fingerprint (#5472): computed once under
     # the lock, BEFORE admission, and carried unchanged through admission, the
     # completion marker and the deploy manifest.
@@ -2496,6 +2527,7 @@ function Invoke-Install {
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
             throw 'Versioned slot health gate failed'
         }
+        [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
         if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
@@ -3143,6 +3175,7 @@ function Invoke-Update {
         Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
         exit 75
     }
+    [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
     # The transaction's single payload fingerprint (see Invoke-Install).
     $payloadHash = Get-PayloadHash
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
@@ -3281,6 +3314,12 @@ function Invoke-Update {
             Write-Step "Config migration skipped: $_"
         }
         Write-Ok 'Package updated'
+        # Completion is still part of the protected build: a late source
+        # identity failure must restart a predecessor stopped above.
+        if ($VersionedRuntime) {
+            [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
+            if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
+        }
     }
     catch {
         Write-Fail "Update failed: $_"
@@ -3324,7 +3363,6 @@ function Invoke-Update {
     # OLD daemon keeps serving from its own immutable slot until drained. No-op in
     # legacy mode.
     if ($VersionedRuntime) {
-        if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 

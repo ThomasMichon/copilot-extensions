@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import re
 
+
+def declares_stamp_provision(text: str, ext: str) -> bool:
+    """Whether an entrypoint declares both deferred-provisioning actions."""
+    if ext == "ps1":
+        return ("'stamp'" in text) and ("'provision'" in text)
+    return bool(re.search(r"\bstamp[)|]", text)) and bool(re.search(r"\bprovision[)|]", text))
+
+
 PERSISTENT_ENV_START = (
     "# === install-contract:test-persistent-environment "
     "-- keep byte-identical across installers ==="

@@ -298,3 +298,33 @@ def test_powershell_manifest_keeps_package_version_and_binds_source_generation(
         VERSION, COMMIT, identity.assembly_hash(payload),
     )
     assert data["runtime_source"]["source_commit"] == COMMIT
+
+
+def test_clean_room_source_scenario_applies_the_supplied_uv_index(tmp_path: Path) -> None:
+    bash = _bash()
+    if bash is None:
+        pytest.skip("native Bash is unavailable")
+    library = tmp_path / "clean-room-lib.sh"
+    library.write_text(
+        "cr_init() { :; }\n"
+        "phase() { printf '%s\\n' \"$UV_INDEX_URL\" \"$UV_DEFAULT_INDEX\" "
+        "\"$UV_EXTRA_INDEX_URL\"; exit 0; }\n",
+        encoding="utf-8",
+    )
+    scenario = (
+        LIBRARY.parents[1] / "tools" / "clean-room" / "scenarios"
+        / "merged-dev-runtime" / "scenario.sh"
+    )
+    index = "https://packages.example.com/simple"
+    environment = {
+        **os.environ, "CR_LIB": _posix(library), "CR_UV_INDEX": index,
+        "UV_INDEX_URL": "https://unselected.example.com/simple",
+        "UV_DEFAULT_INDEX": "https://unselected.example.com/simple",
+        "UV_EXTRA_INDEX_URL": "https://unselected.example.com/simple",
+    }
+    result = subprocess.run(
+        [bash, _posix(scenario)], env=environment, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [index, index, index]

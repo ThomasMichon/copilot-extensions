@@ -8,6 +8,10 @@ source "${CR_LIB:-$SELF_DIR/../../lib/clean-room-lib.sh}"
 export CR_SCENARIO_NAME
 cr_init
 
+if [ -n "${CR_UV_INDEX:-}" ]; then
+    export UV_INDEX_URL="$CR_UV_INDEX" UV_DEFAULT_INDEX="$CR_UV_INDEX" UV_EXTRA_INDEX_URL="$CR_UV_INDEX"
+fi
+
 SOURCE_REPO="${CR_SOURCE_REPO:-https://github.com/ThomasMichon/copilot-extensions.git}"
 SOURCE_COMMIT="${CR_SOURCE_COMMIT:-}"
 PLUGIN="${CR_SOURCE_PLUGIN:-agent-bridge}"

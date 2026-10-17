@@ -161,6 +161,16 @@ def test_inherited_git_selectors_cannot_redirect_admission(
     assert prepared.identity.source_commit == commit
 
 
+def test_prepare_rejects_publication_root_that_is_the_checkout(
+    repository: tuple[Path, str],
+) -> None:
+    root, commit = repository
+    with pytest.raises(source_runtime.SourcePreparationError, match="outside the checkout"):
+        source_runtime.prepare(root, commit, root.name, root.parent)
+    assert not _git(root, "status", "--porcelain", "--ignored")
+    assert not (root / "construction-locks").exists()
+
+
 def test_prepare_materializes_canonical_vendor_content(
     repository: tuple[Path, str], tmp_path: Path,
 ) -> None:

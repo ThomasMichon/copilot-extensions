@@ -145,7 +145,10 @@ def prepare(
     output = output.resolve()
     if not _PLUGIN.fullmatch(plugin):
         raise SourcePreparationError("Plugin must be one portable plugin identifier")
-    if output == source or source in output.parents:
+    publication_root = (output / plugin).resolve()
+    if output == source or source in output.parents or (
+        publication_root == source or source in publication_root.parents
+    ):
         raise SourcePreparationError("Source preparation output must be outside the checkout")
     head, tree = _admit(source, commit, branch)
     output.mkdir(parents=True, exist_ok=True)

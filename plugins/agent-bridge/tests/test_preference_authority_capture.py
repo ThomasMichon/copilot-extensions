@@ -18,6 +18,15 @@ from agent_bridge import preference_exec as terminal
 from agent_bridge.session_host import preference_spawn as host
 
 
+def _symlink_or_skip(link: Path, target: Path, *, directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as error:
+        if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+            pytest.skip("Native symbolic links require an unavailable Windows capability")
+        raise
+
+
 @pytest.fixture
 def capture_tool(monkeypatch: pytest.MonkeyPatch):
     repo = Path(__file__).resolve().parents[3]
@@ -135,10 +144,10 @@ def test_preference_authority_capture_refuses_linked_outputs_before_any_write(
     outside = tmp_path / "outside"
     if kind == "file":
         registry.rename(outside)
-        registry.symlink_to(outside)
+        _symlink_or_skip(registry, outside)
     elif kind == "parent":
         registry.parent.rename(outside)
-        registry.parent.symlink_to(outside, target_is_directory=True)
+        _symlink_or_skip(registry.parent, outside, directory=True)
     elif kind == "hardlink":
         os.link(registry, outside)
     elif kind == "directory":

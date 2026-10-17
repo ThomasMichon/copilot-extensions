@@ -605,8 +605,9 @@ _initialize_source_runtime() {
         _fail "Source runtime selection requires a bootstrap Python interpreter"
         return 1
     }
-    SRC_VERSION="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
-        --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-bridge)" || return 1
+    SOURCE_RUNTIME_IDENTITY="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+        --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-bridge --format json)" || return 1
+    SRC_VERSION="$("$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
     VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 }
 
@@ -753,6 +754,18 @@ _payload_unchanged_since_admission() {
     # when it differs; the caller must then fail without publishing the
     # marker or manifest, or activating. Nothing to verify when no slot was
     # built (reuse) or no hash was admitted.
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+        local py identity
+        py="$(_bootstrap_python)" || return 1
+        identity="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-bridge \
+            --expected-runtime-version "$SRC_VERSION" --format json)" || return 1
+        if [[ "$identity" != "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _fail "Source runtime identity changed after runtime selection; refusing publication"
+            return 1
+        fi
+    fi
+    [[ "${1:-}" != source-only ]] || return 0
     [[ "${SLOT_ADMISSION:-}" != reuse ]] || return 0
     [[ "${PAYLOAD_HASH_FIXED:-0}" == 1 && -n "${PAYLOAD_HASH:-}" ]] || return 0
     local fresh
@@ -1852,6 +1865,7 @@ do_install() {
     # Serialize concurrent installers (ce#776/#777 follow-up): wait for any
     # in-flight install; on timeout defer -- it lands the version.
     _require_install_lock
+    _payload_unchanged_since_admission source-only || exit 1
 
     # Immutable-slot admission (#5472, ce#776/#777): a published same-version
     # slot whose content matches and is already active is a no-op; one whose
@@ -1892,6 +1906,7 @@ do_install() {
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
+        _payload_unchanged_since_admission source-only || exit 1
         _versioned_mark_complete || exit 1
         _versioned_activate || exit 1
     fi
@@ -2513,6 +2528,7 @@ do_update() {
     # Serialize concurrent installers (see do_install): don't rebuild the venv
     # over an in-flight install/update. Defer on timeout.
     _require_install_lock
+    _payload_unchanged_since_admission source-only || exit 1
 
     # Immutable-slot admission (#5472) -- BEFORE the update marker, the drain,
     # or any stop, so a no-op or a refused update never disturbs the live
@@ -2618,7 +2634,14 @@ do_update() {
     # build whose sources changed after PAYLOAD_HASH was fixed is a failure
     # too: the never-published slot is discarded before marker, manifest or
     # activation.
-    if ! _update_core || ! _payload_unchanged_since_admission; then
+    # Keep the final identity check and completion inside this failure handler
+    # so even a late failure restarts a predecessor stopped above.
+    _update_complete_candidate() {
+        [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+        _payload_unchanged_since_admission source-only || return $?
+        _versioned_mark_complete || return $?
+    }
+    if ! _update_core || ! _payload_unchanged_since_admission || ! _update_complete_candidate; then
         _fail "Update failed"
         if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
             # The `venv` link was never swapped (activate runs only after a healthy
@@ -2653,7 +2676,6 @@ do_update() {
     # stable `venv` symlink onto it. In cutover mode the old daemon keeps serving
     # from its own immutable slot until drained. No-op in legacy mode.
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        _versioned_mark_complete || { _fail "Versioned completion publication failed"; exit 1; }
         _versioned_activate || { _fail "Versioned activate failed"; exit 1; }
     fi
 
