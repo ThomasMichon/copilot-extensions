@@ -523,7 +523,6 @@ class RepoConfig:
 @dataclass(frozen=True)
 class Config:
     """Top-level project configuration."""
-
     srcroot: str
     machine: str
     platform: str

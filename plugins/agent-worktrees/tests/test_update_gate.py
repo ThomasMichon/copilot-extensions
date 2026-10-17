@@ -107,8 +107,17 @@ def test_update_gate_honors_project_machine_precedence(tmp_path, monkeypatch, ov
 def test_update_gate_reports_invalid_registry(tmp_path, monkeypatch):
     anchor = _configure(tmp_path, monkeypatch, "windows")
     (anchor / "machines.yaml").write_text("machines: [\n", encoding="utf-8")
-    with pytest.raises(update_gate.MachineDetectionError):
+    with pytest.raises(update_gate.MachineDetectionError, match="agent-example"):
         update_gate._machine_gate_blocks("agent-example", "machine-gated", anchor)
+
+
+def test_empty_machine_setting_retains_existing_global_fallback(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, "windows")
+    project = tmp_path / "project.yaml"
+    data = yaml.safe_load(project.read_text(encoding="utf-8"))
+    data["machine"] = ""
+    project.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert cfg.load_config().configured_machine == "local-space"
 
 
 def test_universal_runtime_does_not_require_machine_config(monkeypatch):

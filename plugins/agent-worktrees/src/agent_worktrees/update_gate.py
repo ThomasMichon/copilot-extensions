@@ -52,7 +52,7 @@ def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
         # Never fall back to a bare hostname: detection raises on purpose when
         # an explicit execution space is required or the machine registry is
         # invalid, and launch-time reconcile refuses in that case too.
-        raise MachineDetectionError(str(error)) from error
+        raise MachineDetectionError(f"could not detect machine identity for {name}: {error}") from error
     gate = reconcile.load_runtime_gate(repo_dir)
     gate_present = reconcile.gate_manifest_present(repo_dir)
     return not reconcile.runtime_allowed(
