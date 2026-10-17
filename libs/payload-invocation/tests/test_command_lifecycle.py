@@ -602,7 +602,11 @@ def test_command_binding_real_installer_refuses_before_self_staging(
     pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
-@pytest.mark.parametrize("action", ["stamp", "install", "update"])
+@pytest.mark.parametrize("action", [
+    "stamp", "install", "update",
+    pytest.param("Install", marks=pytest.mark.skipif(os.name != "nt", reason="Windows action casing")),
+    pytest.param("uPdAtE", marks=pytest.mark.skipif(os.name != "nt", reason="Windows action casing")),
+])
 @pytest.mark.parametrize("windows_powershell", [False, pytest.param(
     True, marks=pytest.mark.skipif(
         os.name != "nt" or shutil.which("powershell.exe") is None,
@@ -636,13 +640,14 @@ def test_command_binding_native_selfstage_preserves_human_optin(
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert completed.stdout == ""
+    operation = action.lower()
     if action == "stamp":
         assert "[elapsed " not in completed.stderr
     else:
-        assert f"agent-worktrees/{action} starting [elapsed " in completed.stderr
-        assert f"agent-worktrees/{action} done exit 0 [duration " in completed.stderr
+        assert f"agent-worktrees/{operation} starting [elapsed " in completed.stderr
+        assert f"agent-worktrees/{operation} done exit 0 [duration " in completed.stderr
         assert all(re.fullmatch(
-            rf"\[\d{{2}}:\d{{2}}:\d{{2}}\.\d{{3}}Z\] agent-worktrees/{action} .+ "
+            rf"\[\d{{2}}:\d{{2}}:\d{{2}}\.\d{{3}}Z\] agent-worktrees/{operation} .+ "
             r"\[(?:elapsed|duration) \d+\.\d+s\]", line,
         ) for line in completed.stderr.splitlines()), completed.stderr
     smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text())

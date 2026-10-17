@@ -225,6 +225,29 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-17 - Preserve mixed-case PowerShell installer actions
+
+- A fresh review accepted the real-CLI fixture correction but reported a
+  previously missed Medium issue in its body despite displaying no open
+  threads: PowerShell accepts mixed-case `Install` and `Update`, whereas
+  the newly forwarded Python human-operation choices are lowercase.
+  This observation was treated as blocking, not as a clean verdict.
+- The extended native self-staging regression reproduced exit 2 for
+  `Install` before admission. Normalize only the human-operation label
+  with `ToLowerInvariant()`; the native child's original action and
+  remaining argument vector are untouched. Regenerated the entrypoint-bound
+  UTF-8 declaration after changing the installer.
+- The complete self-staging matrix now includes `Install` and `uPdAtE`
+  on PowerShell 7 and Windows PowerShell 5.1. Ten native cases passed
+  with ten POSIX-shell platform skips in 100.22 seconds, retaining the
+  original 30-second item and 300-second group limits. Stamp remains
+  unframed, native staging and cleanup remain verified, and actual
+  install/update output retains lowercase UTC/monotonic framing and
+  pending ownership rather than claiming a built runtime.
+- This one-line PowerShell correction does not change Bash's case-sensitive
+  action contract or require another updater. Fresh current-head review,
+  hosted CI, promoted release and authorized rollout remain separate gates.
+
 ### 2026-10-17 - Cover the standalone shared-library consumer in release metadata
 
 - Hosted `guards + lint` failed the changefile-presence check: the

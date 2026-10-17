@@ -112,6 +112,8 @@ mechanism.
 
 Standalone Worktrees `install` and `update` explicitly request
 `--human-operation install|update` from this existing admission parent.
+PowerShell keeps its case-insensitive action contract and forwards the original
+native action unchanged; only the human-operation label is normalized.
 It uses the canonical human formatter and redactor copied into a small
 payload-local `_lifecycle_human` package. All three assets, including the
 entrypoint-bound capability probe, come from `libs/update-telemetry`, not

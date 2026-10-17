@@ -199,7 +199,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         if ($Action -eq 'stamp') { $admissionArgs += '--deferred-runtime' }
         elseif ($Action -eq 'uninstall') { $admissionArgs += '--teardown' }
         if ($Action -in @('install', 'update')) {
-            $admissionArgs += @('--human-operation', $Action)
+            $admissionArgs += @('--human-operation', $Action.ToLowerInvariant())
         }
         $admissionPreviousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
