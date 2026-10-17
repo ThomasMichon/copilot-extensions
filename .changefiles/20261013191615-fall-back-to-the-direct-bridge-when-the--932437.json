@@ -1,9 +1,0 @@
-{
-  "comment": "Fall back to the direct bridge when the serve socket path cannot be resolved (for example a symlink loop)",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

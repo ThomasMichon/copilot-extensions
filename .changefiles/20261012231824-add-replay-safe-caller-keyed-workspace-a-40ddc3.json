@@ -1,9 +1,0 @@
-{
-  "comment": "Add replay-safe caller-keyed workspace allocation with durable intent, original-result replay, and pending/conflict/terminal refusal.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

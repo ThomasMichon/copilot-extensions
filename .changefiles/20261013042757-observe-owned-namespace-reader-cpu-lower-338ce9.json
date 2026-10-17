@@ -1,9 +1,0 @@
-{
-  "comment": "Observe owned namespace-reader CPU lower bounds with bounded sampling lifetime and content-free telemetry",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Isolate PowerShell host telemetry in native read-only diagnostic-helper fixtures without changing resolver deadlines or mutation assertions.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Isolate resident list-warm fixture clock from native transport deadlines",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

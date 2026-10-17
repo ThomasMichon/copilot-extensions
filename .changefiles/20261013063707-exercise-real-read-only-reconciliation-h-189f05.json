@@ -1,9 +1,0 @@
-{
-  "comment": "Exercise real read-only reconciliation helper boundaries with scoped native acceptance.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
