@@ -24,6 +24,11 @@ can contain local paths. `cr-report.json` records PASS/FAIL and classified jams,
 with each case's `runner.log` and `evidence/` directory. No result is inferred
 from an exit code alone: both cases must retain their terminal authority proof
 and successful cleanup trace. Skips, missing proof and partial runs fail.
+Lane-specific jam categories distinguish `runner-exit`, `runner-io`,
+`contained-timeout` and `proof-invalid`, retaining the concrete error alongside
+its log reference and targeted hint. POSIX run directories are created
+owner-only by `mkdtemp`; Windows callers must supply a private ACL-protected
+results root rather than treating POSIX mode bits as ACL enforcement.
 
 Each case has independent new containers, networks, Bridge state, signed
 credentials and native conversation. The worker is UID 1000 with only its

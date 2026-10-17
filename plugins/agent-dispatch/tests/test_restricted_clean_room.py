@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import stat
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -66,12 +69,17 @@ def test_clean_room_retains_two_independent_cases_and_original_limits(lane, tmp_
 
 @pytest.mark.parametrize("failure", [
     "nonzero", "skip", "malformed", "revocation", "cleanup", "refusals", "native", "rotation",
+    "timeout", "io",
 ])
 def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch, failure):
     calls = []
 
     def run(argv, **kwargs):
         calls.append(argv)
+        if failure == "timeout":
+            raise lane.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if failure == "io":
+            raise PermissionError("runner unavailable")
         root = Path(kwargs["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"])
         if failure != "skip":
             proof = _proof(root, "complete")
@@ -100,6 +108,28 @@ def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch
     assert report["result"] == "fail"
     assert len(calls) == 1 and len(report["stages"]) == 1
     assert report["jams"][0]["evidence"] == "complete/runner.log"
+    expected = {
+        "nonzero": "runner-exit", "timeout": "contained-timeout", "io": "runner-io",
+    }.get(failure, "proof-invalid")
+    assert report["jams"][0]["category"] == expected
+    assert report["jams"][0]["error_type"] == report["stages"][0]["error_type"]
+    assert report["jams"][0]["error"] == report["stages"][0]["error"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not prove a Windows ACL")
+def test_result_directory_is_created_owner_only_on_posix(lane, tmp_path, monkeypatch):
+    def run(root, **_kwargs):
+        assert stat.S_IMODE(root.stat().st_mode) == 0o700
+        assert root.stat().st_uid == os.getuid()
+        return {"result": "pass"}
+
+    monkeypatch.setattr(lane, "run", run)
+    monkeypatch.setattr(sys, "argv", [
+        "run.py", "--central-image", "candidate",
+        "--bridge-python", sys.executable, "--provider-python", sys.executable,
+        "--results-root", str(tmp_path),
+    ])
+    assert lane.main() == 0
 
 
 @pytest.mark.parametrize("failure", [
@@ -115,7 +145,10 @@ def test_docker_cleanup_confirms_absence_and_attempts_every_resource(monkeypatch
     def run(argv, **kwargs):
         calls.append(argv)
         inventory = "ls" in argv
-        name = argv[argv.index("--filter") + 1].removeprefix("name=") if inventory else argv[-1]
+        name = (
+            argv[argv.index("--filter") + 1].removeprefix("name=^/?").removesuffix("$")
+            if inventory else argv[-1]
+        )
         if not inventory:
             if name == "worker" and failure == "timeout":
                 raise module.subprocess.TimeoutExpired(argv, kwargs["timeout"])
