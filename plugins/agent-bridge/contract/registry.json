@@ -182,7 +182,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
-          "sha256": "f92a052889feda87ce29dd63b4e3f2fa42b8a21fc1dbae699a4f6a24ecbd0a8e",
+          "sha256": "6d60b6aa410991b2f45baae5187d9d549b9ca896bd0954a9881c4b2ca1b9e082",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -781,6 +781,30 @@
           "sha256": "65922704d1d7da731524b11bee54aca8b46f72598e3cdd0992d15cb75e3f700c",
           "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
           "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-37.json",
+          "sha256": "46d9ac3f68871931a1b4b86c45f96cda379413748fb30d0d29a4d4a31775bd83",
+          "role": "Generation-37 keyed workspace finalization refuses retryably without replacing allocation or native history",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-38.json",
+          "sha256": "043e66e289328af9075063ab370c6efeea70784ca4ed938b8e85c3b97e927af9",
+          "role": "Generation-38 keyed workspace finalization refuses retryably while retaining immutable generation-37 evidence and all prior capability floors",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-39.json",
+          "sha256": "b91b38fab8b6b777890587e450d16d7d081194a7cb22f7c07df63d35b03d880c",
+          "role": "Generation-39 keyed workspace finalization refuses retryably while retaining immutable generation-37 and generation-38 evidence and all prior capability floors",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-40.json",
+          "sha256": "842a83513c03496951cb8575ff8843be175fdd8f851e3ff4bcd7d2c9c63ee024",
+          "role": "Generation-40 keyed workspace finalization refuses retryably while retaining all three earlier immutable captures and the original allocation and native-history boundaries",
+          "generation": 40
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-37.json",
@@ -4011,6 +4035,46 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
           "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
           "capture_method": "Re-attest unchanged HTTP-40 packets against combined committed native-recovery and SSH-profile producers; real OpenSSH effective-config and encoded-command tests cover routing without a network connection."
+        },
+        {
+          "commit": "95cdb907d5ad1276a47960630a21b0e27d84a0bc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "27fee5e86ead7bbe780b194956e60c3d25c0dbe6",
+          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after clarifying optional-host validation and the retained legacy user keyword; native profile regressions retain both configured identities."
+        },
+        {
+          "commit": "f00cc454af9e1f3ed9b0d385672a00918cc75b4a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Capture the production start_request adapter's retryable finalizing refusal with the isolated exact-owner creation rig; retain historical provider-creation captures and the original allocation/native-history contract."
+        },
+        {
+          "commit": "fc629da128fc847a4a0a61b17c801e721be85461",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Re-attest the production start_request adapter's retryable finalizing refusal through the isolated exact-owner creation rig after integration with current generation 38; preserve the original allocation, native-history boundaries and generation-37 capture."
+        },
+        {
+          "commit": "fda4be76bf9d79a3b8e37025f8e6f3546b3cf737",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Re-attest the production start_request adapter's retryable finalizing refusal through the isolated exact-owner creation rig after integration with receipt generation 39; preserve the original allocation, native-history boundaries and both earlier immutable captures."
+        },
+        {
+          "commit": "1c6a10da4ca84f9861e2e3ae0ba2b6155ec5a50a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Re-attest the unchanged production start_request adapter's retryable finalizing refusal through the isolated exact-owner creation rig at HTTP generation 40; retain all three earlier immutable captures, the original allocation and native-history boundaries."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",

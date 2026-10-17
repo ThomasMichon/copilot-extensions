@@ -51,11 +51,17 @@ replays only the ground owner's same key; ambiguous native start requires
 reconciliation of the recorded session, never another `session/new`.
 Changed facts conflict. Removed/retired workspace or native results refuse,
 not fresh-create. Standalone embodiment grants no task/claim authority.
-An absent workspace observation does not prove disposal: a resident roster can
-precede the ground allocation. Missing rows and advisory, stale or malformed
-projection observations explicitly refuse while retaining the same allocation
-and creation key for reconciliation. They never permanently terminalize it or
-authorize another create. A positively observed terminal workspace or retired
+An absent workspace observation does not prove disposal. Exact identity reads
+use the ground owner's `record --worktree-id <id> --json`, independently of
+resident roster publication. Missing, unreadable, malformed or incompatible
+record responses explicitly refuse while retaining the same allocation and
+creation key for reconciliation. Old roster/projection responses are incompatible
+API shapes, not metadata authority. The durable `finalizing` status is valid
+metadata but refuses native creation or resumption with retryable
+`transition_pending`, preserving the keyed allocation rather than recording a
+permanent terminal result. Legacy `completed` remains a terminal status.
+Incompatible responses never permanently terminalize the
+allocation or authorize another create. A positively observed terminal workspace or retired
 native result still refuses replay. Ordinary same-key replay reconciles a
 previously terminalized pre-launch observation only when the ground owner now
 returns the same active, sessionless allocation and the original journal has
@@ -204,12 +210,30 @@ that an earlier launch did not happen. Historical and unknown effects retain
 their existing reconciliation requirement. No acquisition wire capability or
 protocol change is introduced by installed-owner resolution.
 
-Worktree identity preflight reads the exact current tracking record with
-`list --json --cache-only --worktree-id <id>`, avoiding global transcript scans
-and cached full-list results. Only tracking identity, path and terminal status
-are used from this row; cached display/session enrichment grants no authority.
+Worktree identity preflight reads one exact durable ground-owned record with
+`record --worktree-id <id> --json` in the execution project's namespace. The
+response must have integer `version: 1`, Boolean `ok: true`, and a `worktree`
+object matching the requested ID and execution repository, with a valid
+absolute path, known tracking status, and the version-1 creation/session/leg
+metadata fields. Missing fields are an incomplete response, never inferred
+absence of a holder. Workspace-qualified requests also
+compare that path to their retained allocation. The shared reader serves
+standalone keyed embodiment and task acquisition; it never scans tracking
+files or sessions, queries a roster, or substitutes another repository.
+An exact tracked allocation can therefore proceed before resident publication.
+Interactive and fleet roster displays retain their ordinary list projections.
+Opaque legacy backend/execution-leg metadata and unindexed session history
+cannot establish sessionlessness.
+
+An owner without this command, a missing executable, a nonzero owner exit, or
+missing/malformed/incompatible JSON is an explicit owner/capability failure.
+There is no fallback to `list`, and none of these failures proves disposal,
+terminal status, or absence of an earlier native start. Deploy a compatible
+ground owner before using this consumer; no acquisition protocol bump or
+additional certification/recovery API is introduced. Reading metadata itself
+grants no local execution, takeover or mutation authorization.
 The separate `head-session` read still verifies current native-head and
-handoff state. Missing, duplicate, mismatched or terminal records refuse, as
+handoff state. Missing, malformed, mismatched or terminal records refuse, as
 do unknown head authority and pending transitions.
 
 For an admitted new delivery, the bridge records the complete request in its
