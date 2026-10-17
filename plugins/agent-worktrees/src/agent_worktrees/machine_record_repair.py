@@ -9,6 +9,7 @@ import re
 import socket
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 import yaml
 from machine_transport import resolve_machine_selection
@@ -16,6 +17,14 @@ from machine_transport import resolve_machine_selection
 from . import config as cfg, execution_spaces, git_ops, output, pr_authority, repos, tracking
 from . import tracking_yaml_repair
 from .config_cache import ConfigCacheSession
+
+
+class Inspection(NamedTuple):
+    config: cfg.Config
+    path: Path
+    original: bytes
+    data: dict
+    proof: str
 
 
 class RepairAuditError(RuntimeError):
@@ -159,11 +168,12 @@ def _inspect(project: str, record_id: str, previous: str, target: str | None):
             receipt = json.loads(audit.read_text(encoding="utf-8"))
             if not isinstance(receipt, dict) or receipt.get("state") != "committed":
                 raise ValueError(f"prior machine-label repair has an incomplete audit: {audit}")
-    return config, path, observed, data, proof
+    return Inspection(config=config, path=path, original=observed, data=data, proof=proof)
 
 
-def _apply(project: str, record_id: str, previous: str, target: str | None, observed):
-    config, path, original, data, proof = observed
+def _apply(project: str, record_id: str, previous: str, target: str | None, observed: Inspection):
+    config, path, original = observed.config, observed.path, observed.original
+    data, proof = observed.data, observed.proof
     fixed = _replacement(original.decode("utf-8"), data, config.machine)
     digest = hashlib.sha256(original).hexdigest()
     audit = path.with_name(f"{path.name}.machine-label-{digest[:16]}.json")
@@ -172,8 +182,8 @@ def _apply(project: str, record_id: str, previous: str, target: str | None, obse
         # keeps receiving registration stable until the exact-byte commit.
         fresh = _inspect(project, record_id, previous, target)
         if (
-            fresh[1] != path or fresh[2] != original or fresh[4] != proof
-            or _binding(fresh[0]) != _binding(config)
+            fresh.path != path or fresh.original != original or fresh.proof != proof
+            or _binding(fresh.config) != _binding(config)
         ):
             raise ValueError("record or receiving proof changed; inspect again before repair")
         receipt = {
@@ -252,7 +262,7 @@ def targeted_doctor(args) -> int:
         if not project:
             raise ValueError("machine-record repair requires an explicitly selected project")
         observed = _inspect(project, record_id, previous, target)
-        config, path, original, data, proof = observed
+        config, original, data, proof = observed.config, observed.original, observed.data, observed.proof
         report.update(
             project=project, from_machine=previous, to_machine=config.machine,
             proof=proof, references="preserved",
