@@ -293,10 +293,17 @@ enforcement before migrating the complete contributor stack.
 
 - Request: "Perhaps wrap this into artfifacts in a checked-in effort journal
   as an exploration" rather than publishing an active or draft scenario.
-- Preserved five historical, unvalidated work-in-progress files in
+- Preserved five historical, unvalidated work-in-progress source snapshots in
   [`explorations/native-hook-composition/`](explorations/native-hook-composition/README.md),
-  outside clean-room scenario discovery. The exploration index records the
-  design, original hashes, necessary publication sanitization, and limitations.
+  packaged as [non-executable ZIP data](explorations/native-hook-composition/source-snapshots.zip)
+  outside clean-room scenario discovery. No standalone Python, shell, or
+  scenario manifest files remain in the exploration. The index records the
+  design, original and sanitized member hashes, necessary publication
+  sanitization, and limitations.
+- Packaging removes accidental source invocation exposure without changing
+  historical behavior. The archive has no entry point and all five members have
+  non-executable modes. Any re-execution requires deliberate extraction into a
+  disposable environment plus separate safety and validation work.
 - No artifact was executed or behaviorally repaired. In particular, invocation
   completeness is recorded but absent from the archived PASS predicate, and
   three fresh ACP sessions are not the supported launch-boundary matrix.

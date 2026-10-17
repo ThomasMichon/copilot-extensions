@@ -6,12 +6,21 @@ Phase 5 native-host seam.
 
 **Historical, unvalidated exploration artifacts. Not an installed, active, or
 draft clean-room scenario. Not evidence that any released runtime passes.**
-These five files were uncommitted work in progress from an older local
-exploration. Preservation does not execute, repair, or endorse them. Their
+The five source snapshots in [source-snapshots.zip](source-snapshots.zip) were
+uncommitted work in progress from an older local exploration. They are preserved
+as non-executable data, not standalone source files. Preservation does not
+execute, repair, or endorse them. Their
 original proof-oriented wording is a proposed rubric, not a result or a
 replacement for the effort's validation gates.
 
-**Do not run these archived files.** `fixture.py prepare --root ...` recursively
+**Do not execute the archived payload.** The ZIP has no `__main__.py`, contains
+only five regular-file members with non-executable `0644` modes, and has no
+standalone Python, shell, or scenario manifest files beside it. Re-execution
+requires deliberate extraction into a disposable environment and separately
+reviewed safety, activation, and validation work first. Extraction alone does
+not make the historical implementation safe or supported.
+
+In the archived snapshot, `fixture.py prepare --root ...` recursively
 deletes an existing root with `shutil.rmtree` without a sentinel or containment
 check. A mistaken argument can destroy unrelated data. The archive is for
 inspection only; any future runnable implementation needs a separately reviewed
@@ -19,10 +28,10 @@ destructive-operation safety boundary.
 
 ## Preserved design
 
-- [expected.md](expected.md) records the proposed rubric;
-  [manifest.json](manifest.json) records the intended inputs and three fresh
+- ZIP member `expected.md` records the proposed rubric;
+  `manifest.json` records the intended inputs and three fresh
   ACP sessions.
-- [fixture.py](fixture.py) generates two independent direct-output plugins.
+- ZIP member `fixture.py` generates two independent direct-output plugins.
   Each plain `sessionStart` hook emits its own 192-bit random canary as
   `additionalContext`, without a shared wrapper or composition authority.
 - Model-invisible invocation markers are intended to distinguish whether both
@@ -30,7 +39,7 @@ destructive-operation safety boundary.
 - The intended response is strict compact JSON with each expected canary once,
   lexically sorted, no invented token, and no tools or file reads to reconstruct
   missing context.
-- [setup.sh](setup.sh) and [post_check.sh](post_check.sh) preserve the original
+- ZIP members `setup.sh` and `post_check.sh` preserve the original
   disposable-environment preparation and post-check sketches. Their relative
   library references and generic container paths are historical; this directory
   is deliberately outside `tools/clean-room/scenarios/` discovery and is not a
@@ -57,6 +66,10 @@ the disabling entries take precedence, the plugins will not load. Future reuse
 must establish the actual settings-precedence behavior rather than assume the
 archive's installation path works.
 
+The archived setup script also does not check `activate` for success before
+reporting installation success; its `set -uo pipefail` does not imply `set -e`.
+That status message is not reliable evidence of readiness.
+
 The shell post-check's PASS text is abbreviated: the transcript predicate also
 checks strict JSON response count and absence of tool markers. Neither that
 message nor the original proof-oriented prose supersedes these limitations.
@@ -80,6 +93,27 @@ applied: one non-public runtime proposal reference in each of `expected.md`,
 `fixture.py`, and `manifest.json` was replaced with the generic phrase
 "native multi-hook composition". No executable behavior, proposed rubric, or
 known defect was changed. Both shell files are byte-for-byte preserved.
+
+Packaging changed only the storage form: the exact sanitized bytes are members
+of a standard ZIP, not executable source at the repository's HEAD. No bespoke
+archive runner or extraction tooling is supplied. Member read-back verified
+all five sanitized hashes below, non-executable modes, absence of an entry
+point, and decoded-content publication scanning without extracting or running
+the payload.
+
+| Archive | Bytes | SHA-256 |
+|---------|------:|---------|
+| `source-snapshots.zip` | 9720 | `5c64b5e386025be825d145afe2d2dbbec55d6ade08f1037de884c5f2cfeece4a` |
+
+Sanitized ZIP member SHA-256 values:
+
+| Member | Bytes | SHA-256 |
+|--------|------:|---------|
+| `expected.md` | 3303 | `d0a112d12d18e7d316344f02286135b353dbfd44d55c7d5f00d8f20816353784` |
+| `fixture.py` | 14941 | `946b052bce0b4c32bf3122cbfa08f4bb82c9a08242909cb7055b6517b59f0243` |
+| `manifest.json` | 3699 | `1b704fcd21e4b6fc465a402aa45794af8fcf772f82962d95244fe5c4fb245b99` |
+| `post_check.sh` | 1069 | `3c86f65cc308e578899d5bdbb667d45a049509912f392326629a564a4735224f` |
+| `setup.sh` | 1953 | `4e8e9b39d4b2372f2c3ee75f3204388cda50b6860068852294023afb5ab20044` |
 
 Original SHA-256 values, measured before rehoming:
 
