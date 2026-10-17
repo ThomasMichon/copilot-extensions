@@ -436,6 +436,32 @@ and `pr-merge` refuses (naming the reason) on a repo where the effective flow
 does not authorize that action. Full narrative in
 [worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
 
+### Routine publication reconciliation
+
+Normal `push-changes` and `git sync` automatically reconcile a lost publication
+acknowledgement when the source-owning checkout still has intact backed-sync
+evidence. The unique live numbered private PR must retain ordinary publication
+ownership and an exclusive destination. Fresh provider/ref observations must
+agree on the checkpoint's already accepted result, which must be an ancestor of
+the pinned, clean source commit. No confirmation token or ownership waiver is
+used. Unknown evidence, changed ownership/destination, and unrelated history
+remain refusals.
+
+Acknowledgement loss outside that settlement case still uses the existing
+verified publication paths: a non-forcing fast-forward retry, or an independently
+verified source replay after a rebase. The preflight checks ownership,
+destination and provider/ref agreement before deferring; it neither settles
+tracking nor authorizes a rewrite through this fallback. Corrupt recovery
+evidence still refuses rather than silently falling back.
+
+Reconciliation retains source, original saved and observed commits plus a private
+`agent-worktrees-pr-reconciliation-<id>.json` audit in the worktree's Git metadata.
+It settles tracking through the normal publication transaction without a push or
+PR edit. `push-changes` then publishes the pinned source with bounded, non-forcing
+transport and normal hooks; a racing unrelated remote update is not overwritten.
+`git sync` instead preserves the next backed transition before rebasing.
+Dry runs do not reconcile. Review/check/merge gates and rollout policy are unchanged.
+
 ### Explicit operator recovery
 
 Prefer invoking publication from the source-owning worktree's CWD. When that
@@ -474,7 +500,8 @@ settlement evidence `unusable` and disable settlement, not the rewrite preview.
 Invalid ref arguments and failed optional Git probes receive the same treatment.
 The imperfect evidence snapshot is confirmation-bound and preserved unchanged;
 it is neither repaired nor accepted as authority.
-Ordinary `push-changes` and `--rewrite-pr` retain their saved-lease refusal.
+Outside the routine backed reconciliation above, ordinary `push-changes` and
+`--rewrite-pr` retain their saved-lease refusal.
 Historical
 ownership, suffix and replay bookkeeping may be waived; provider-confirmed
 destination, exact remote lease, serialization, protected refs, clean source,

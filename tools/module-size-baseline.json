@@ -60,7 +60,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 6865,
   "plugins/agent-worktrees/src/agent_worktrees/claims_cli.py": 1006,
   "plugins/agent-worktrees/src/agent_worktrees/config.py": 2094,
-  "plugins/agent-worktrees/src/agent_worktrees/finalize.py": 2034,
+  "plugins/agent-worktrees/src/agent_worktrees/finalize.py": 1913,
   "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1747,
   "plugins/agent-worktrees/src/agent_worktrees/installer.py": 1708,
   "plugins/agent-worktrees/src/agent_worktrees/pr_contract.py": 1551,
