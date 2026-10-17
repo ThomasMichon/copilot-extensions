@@ -527,6 +527,7 @@ class Config:
     srcroot: str
     machine: str
     platform: str
+    configured_machine: str | None = field(default=None, kw_only=True)
     repo_name: str = ""
     repos: dict[str, RepoConfig] = field(default_factory=dict)
     knowledge_repo: str = ""
@@ -1088,6 +1089,7 @@ def _load_config_uncached(
     repository_assignment_raw = inrepo_profile_assignments.get(repo_name)
 
     config = Config(
+        configured_machine=configured_machine or None,
         srcroot=srcroot,
         machine=machine,
         platform=platform,

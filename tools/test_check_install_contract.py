@@ -72,6 +72,7 @@ def test_install_guard_runs_machine_gate_contract(monkeypatch, capsys) -> None:
     ("update_gate.py", "gate_present=gate_present", "gate_present=True"),
     ("update_gate.py", "load_runtime_gate(repo_dir)", "load_runtime_gate(Path('other'))"),
     ("update_gate.py", "gate_manifest_present(repo_dir)", "gate_manifest_present(Path('other'))"),
+    ("update_gate.py", "value=config.configured_machine", "value=None"),
     ("update_runtime.py", "if step.status:", "if False:"),
     ("reconcile.py", 'return machine in allowed', "return True"),
 ])

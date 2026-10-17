@@ -1396,6 +1396,11 @@ A plugin declares whether — and where — its runtime should be reconciled via
 | `universal` | Reconcile the runtime on **every** machine that enables the plugin (e.g. `agent-worktrees`, `agent-ssh`). |
 | `machine-gated` | Reconcile the runtime only on machines in the plugin's allowed set (e.g. `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-mcp`). |
 
+The unified updater resolves machine identity from layered local configuration,
+then canonicalizes that identity against the enabling repository's registry.
+It does not replace an explicitly configured execution space with hostname-only
+inference; missing required configuration or failed detection blocks preflight.
+
 The same scope governs the unified `update` flow: `update` rebuilds a
 `machine-gated` runtime only where the machine gate described below permits it
 (the same `runtime_allowed` decision), resolving the gate from the repository
