@@ -107,6 +107,10 @@ test("actual extension entry joins once with no startup read or extra authority"
     assert(!response.textResultForLlm.includes(secret));
     // The outer Python test feeds this actual entry-point capture to the CLI.
     console.log("ENTRY_CAPTURE=" + JSON.stringify(result.capture));
+    sdk.state.stringQuantity = true;
+    const rejected = JSON.parse((await tool.handler({}, invocation)).textResultForLlm);
+    withheld(rejected, "quota-projection-invalid");
+    console.log("ENTRY_STRING_RESULT=" + JSON.stringify(rejected));
 });
 
 test("old SDK shapes and missing invocation identity never read quota", async () => {
@@ -160,11 +164,13 @@ test("unexpected argument processing errors have a distinct sanitized diagnostic
     assert.deepEqual(f.calls, []);
 });
 
-test("string quantity magnitude is exact at the numeric-domain boundary", async () => {
+test("quantity types match the existing number-only capture reader", async () => {
     for (const [value, valid] of [
-        ["1000000000000000000", true], ["1000000000000000000.000", true],
-        ["999999999999999999.999999999999999999", true],
-        ["-1000000000000000000", true], ["0000000000000000001", true],
+        [1000, true], [1000000000000000000, true], [0.25, true],
+        [1000000000000000100, false],
+        ["1000", false], ["1000000000000000000", false], ["1000000000000000000.000", false],
+        ["999999999999999999.999999999999999999", false],
+        ["-1000000000000000000", false], ["0000000000000000001", false],
         ["1000000000000000001", false], ["1000000000000000000.000000000000000001", false],
         ["-1000000000000000001", false], ["-1000000000000000000.1", false],
     ]) {

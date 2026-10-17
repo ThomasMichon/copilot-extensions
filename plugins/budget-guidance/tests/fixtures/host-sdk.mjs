@@ -1,4 +1,4 @@
-export const state = { joins: 0, calls: [], options: null };
+export const state = { joins: 0, calls: [], options: null, stringQuantity: false };
 export async function joinSession(options) {
     state.joins++;
     state.options = options;
@@ -11,7 +11,8 @@ export async function joinSession(options) {
                     state.calls.push("quota");
                     return { isTbbUser: true, token: "sensitive-sentinel", snapshots: {
                         premium_interactions: { isUnlimitedEntitlement: false,
-                            entitlementRequests: 1000, usedRequests: 250,
+                            entitlementRequests: state.stringQuantity ? "1000" : 1000,
+                            usedRequests: 250,
                             tokenBasedBilling: true, resetDateEpochMs: 1896134400000 },
                     } };
                 },

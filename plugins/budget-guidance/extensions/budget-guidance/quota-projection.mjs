@@ -19,12 +19,7 @@ export function identifier(value) {
 function scalar(value, kind) {
     if (kind === "boolean") return typeof value === "boolean";
     if (kind === "quantity") {
-        if (typeof value === "number") return Number.isFinite(value) && Math.abs(value) <= 1e18;
-        if (typeof value !== "string" || !/^-?\d{1,19}(?:\.\d{1,18})?$/u.test(value)) return false;
-        const [whole, fraction = ""] = value.replace(/^-/u, "").split(".");
-        const magnitude = BigInt(whole);
-        return magnitude < 1000000000000000000n
-            || (magnitude === 1000000000000000000n && /^0*$/u.test(fraction));
+        return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e18;
     }
     if (kind === "instant") {
         return typeof value === "string" && value.length <= 40

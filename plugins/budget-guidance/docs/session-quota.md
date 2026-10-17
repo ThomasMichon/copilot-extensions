@@ -15,8 +15,9 @@ than zero, default 10, at most 30), and the paired `expectedLogin` and
 `expectedHost`. Provider evidence is copied only for an explicitly selected
 provider and optional quota ID. Unknown provider enums or malformed known
 fields fail closed rather than becoming optimistic defaults.
-String quantity magnitude checks are exact through the `1e18` boundary;
-floating-point rounding cannot admit an out-of-range decimal string.
+Quantities must be finite JSON numbers within the `1e18` magnitude bound,
+matching the existing Python capture reader. Numeric strings are rejected,
+not rounded or silently converted into successful captures.
 
 The payload entry `extensions/budget-guidance/extension.mjs` uses the standard
 plugin `extensions/<name>/extension.mjs` discovery convention; it requires no

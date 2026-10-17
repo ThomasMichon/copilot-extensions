@@ -36,3 +36,14 @@ def test_host_quota_entry_and_boundaries(tmp_path, capsys):
     assert reading["allowance"] == "1000"
     assert reading["calculated"] is None
     assert reading["advice"]["concurrency"] is None
+    rejection = next(line for line in result.stdout.splitlines() if "ENTRY_STRING_RESULT=" in line)
+    rejected = json.loads(rejection.split("ENTRY_STRING_RESULT=", 1)[1])
+    assert rejected["capture"] is None
+    assert rejected["diagnostics"] == ["quota-projection-invalid"]
+    capture["projection"]["snapshots"]["premium_interactions"]["entitlementRequests"] = "1000"
+    capture_path.write_text(json.dumps(capture), encoding="utf-8")
+    assert main([
+        "quota", "--capture", str(capture_path), "--session-id", "session-example", "--json",
+    ]) == 2
+    error = json.loads(capsys.readouterr().out)
+    assert error["error"] == "quota.entitlementRequests must be a finite number"

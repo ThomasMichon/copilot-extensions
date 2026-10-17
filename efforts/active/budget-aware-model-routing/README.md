@@ -281,6 +281,16 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Capture producer/reader type alignment
+
+- The next current-head review identified that exact string magnitude checks
+  still admitted a form the existing Python normalizer rejects. Narrowed the
+  transport to the incumbent number-only capture contract rather than
+  broadening normalization or converting strings through floating point.
+- The actual entry fixture now rejects a synthetic string quantity, and the
+  Python bridge confirms the same form is rejected by the existing CLI.
+  Numeric captures still remain caller-declared with no live forecasting.
+
 ### 2026-10-16 - Foreground capture review corrections
 
 - Addressed current-head review findings in the implementation PR: the Node
