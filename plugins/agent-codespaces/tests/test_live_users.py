@@ -28,6 +28,11 @@ def _master(pid=101, ppid=1, cfg=CFG):
     ))
 
 
+def _carrier(pid, ppid, **kw):
+    """A ``gh codespace ssh --stdio`` ProxyCommand stdio carrier for NAME."""
+    return ProcInfo(pid, ppid, ("gh", "codespace", "ssh", "-c", NAME, "--stdio"), **kw)
+
+
 def _own_cfg():
     from agent_codespaces.codespace_config import SSH_CONFIG_DIR
 
@@ -106,6 +111,53 @@ def test_own_process_is_never_reported():
     assert lu.live_users(NAME, table=_table(me)) == []
 
 
+def test_own_descendants_are_never_reported(monkeypatch):
+    """The stdio carrier this command's own session sync spawned (directly, or
+    under its own ssh client) is not another user of the box."""
+    me = os.getpid()
+    table = _table(
+        ProcInfo(me, 1, ("python",)),
+        _carrier(40001, me),
+        ProcInfo(40003, me, ("ssh", "-F", CFG, "cs.host", "true")),
+        ProcInfo(40005, 40003, ("sh", "-c", f"gh codespace ssh -c {NAME} --stdio")),
+        _carrier(40007, 40005),
+    )
+    assert lu.live_users(NAME, table=table) == []
+    monkeypatch.setattr(lu, "process_table", lambda: table)
+    lu.refuse_if_in_use(NAME, "delete")  # idle -> no raise
+
+
+def test_processes_outside_own_tree_are_still_reported():
+    """Excluding our own tree never hides a sibling, unrelated, or orphaned user."""
+    me = os.getpid()
+    table = _table(
+        ProcInfo(40011, 1, ("bash",)),
+        ProcInfo(me, 40011, ("python",)),
+        _carrier(40001, me),
+        ProcInfo(40013, 40011, ("ssh", "-F", CFG, "cs.host")),
+        ProcInfo(40015, 1, ("editor",)),
+        _carrier(40017, 40015),
+        _carrier(40019, 1),  # orphaned carrier of an exited session
+    )
+    roles = {u.pid: u.role for u in lu.live_users(NAME, table=table)}
+    assert roles == {40013: lu.ROLE_SSH, 40017: lu.ROLE_GH, 40019: lu.ROLE_GH}
+
+
+def test_reused_pid_does_not_adopt_an_older_process():
+    """Windows keeps a dead parent's pid as ``ppid`` and recycles pids: a process
+    created before its recorded parent is not that parent's descendant."""
+    me = os.getpid()
+    table = _table(
+        ProcInfo(me, 1, ("python",), started=200),
+        _carrier(40001, me, started=100),  # its real parent exited; pid reused
+        _carrier(40003, me, started=300),
+        _carrier(40005, me),  # creation time unknown: link trusted
+        ProcInfo(40007, me, ("sh",), started=250),
+        _carrier(40009, 40007, started=150),  # older than its recorded parent
+    )
+    assert [u.pid for u in lu.live_users(NAME, table=table)] == [40001, 40009]
+
+
 def test_lock_holder_listed_first_and_not_duplicated(monkeypatch):
     holder = lu.LiveUser(101, lu.ROLE_LOCK, "python -m bridge", "op=session-host")
     monkeypatch.setattr(lu, "lock_holder", lambda name, table=None: holder)
@@ -130,6 +182,28 @@ def test_windows_cmdline_split():
         '"C:\\Program Files\\OpenSSH\\ssh.exe" -F "C:\\Users\\u\\x.config" -N host')
     assert argv[0].endswith("ssh.exe") and argv[1:3] == ("-F", "C:\\Users\\u\\x.config")
     assert lu._basename(argv[0]) == "ssh"
+
+
+def test_windows_process_table_reads_creation_time(monkeypatch):
+    rows = [
+        {"ProcessId": 8, "ParentProcessId": 4, "CommandLine": "a.exe",
+         "Created": 133000000000000000},
+        {"ProcessId": 12, "ParentProcessId": 8, "CommandLine": "b.exe -x", "Created": None},
+        {"ProcessId": 16, "ParentProcessId": 8, "CommandLine": "c.exe", "Created": "soon"},
+        {"ProcessId": 20, "ParentProcessId": 8, "CommandLine": None, "Created": 1},
+    ]
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
+
+    monkeypatch.setattr(lu.subprocess, "run", fake_run)
+    table = lu._read_proc_windows()
+    assert [(p.pid, p.ppid, p.started) for p in table] == [
+        (8, 4, 133000000000000000), (12, 8, None), (16, 8, None),
+    ]
+    assert "CreationDate" in calls[0][-1] and "Created" in calls[0][-1]
 
 
 def test_codespaces_in_use_never_raises(monkeypatch):
@@ -398,6 +472,31 @@ def test_stop_rechecks_after_recovery_and_refuses_new_user(monkeypatch, tmp_path
 
     assert cli.main(["stop", NAME]) == 1
     assert "[BUSY]" in capsys.readouterr().err and stopped == []
+
+
+def test_stop_is_not_blocked_by_its_own_recovery_carrier(monkeypatch, tmp_path, capsys):
+    """Session recovery can leave this command's own stdio carrier running; the
+    final pre-stop check must not mistake it for another user."""
+    import ssh_manager.locks as locks
+
+    from agent_codespaces import __main__ as cli
+
+    monkeypatch.setattr(locks, "locks_dir", lambda: tmp_path)
+    monkeypatch.setattr(lu, "_RECHECK_SETTLE", 0.0)
+    me = ProcInfo(os.getpid(), 1, ("python",))
+    state = {"table": _table(me)}
+    monkeypatch.setattr(lu, "process_table", lambda: state["table"])
+
+    def sync(name, **kwargs):
+        state["table"] = _table(me, _carrier(40001, me.pid))  # our own carrier
+        return {"ok": True, "session_count": 1, "detail": ""}
+
+    monkeypatch.setattr(cli, "sync_codespace_sessions", sync)
+    stopped = []
+    monkeypatch.setattr(cli, "stop_codespace", lambda name: stopped.append(name) or True)
+
+    assert cli.main(["stop", NAME]) == 0
+    assert "[BUSY]" not in capsys.readouterr().err and stopped == [NAME]
 
 
 def test_recheck_settles_for_a_closing_connection(monkeypatch):

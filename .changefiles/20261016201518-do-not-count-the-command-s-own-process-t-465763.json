@@ -1,0 +1,9 @@
+{
+  "comment": "Do not count the command's own process tree (such as its stdio carrier) as a live codespace user, so delete/finalize/stop/prune no longer refuse on their own connection; guard parent links against PID reuse",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
