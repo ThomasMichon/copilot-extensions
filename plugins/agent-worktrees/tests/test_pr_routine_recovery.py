@@ -296,7 +296,7 @@ def test_dry_run_does_not_reconcile(owned_publication, command) -> None:
     assert not list(metadata(wt).glob("*pr-reconciliation-*.json"))
 
 
-def test_nonforcing_transport_preserves_racing_remote(owned_publication, monkeypatch) -> None:
+def test_nonforcing_transport_preserves_racing_remote(owned_publication, monkeypatch, capfd) -> None:
     config, wid, wt, remote, _saved, branch, published = owned_publication
     racing = git(
         "commit-tree", f"{published}^{{tree}}", "-p", published, "-m", "concurrent remote work",
@@ -312,7 +312,9 @@ def test_nonforcing_transport_preserves_racing_remote(owned_publication, monkeyp
         return push(*args, **kwargs)
 
     monkeypatch.setattr(git_ops, "push", race)
+    source = git("rev-parse", "HEAD", cwd=wt)
     assert not finalize.push_changes(wid, config)
+    assert f"Failed to push {source} to origin/{branch}" in capfd.readouterr().out
     assert len(calls) == 1
     assert not calls[0].get("force_with_lease", False)
     assert calls[0].get("force_with_lease_expect") is None
