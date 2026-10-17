@@ -41,7 +41,15 @@ def require_retirable(record: WorktreeRecord) -> None:
 
 def same_pair(before: WorktreeRecord, after: WorktreeRecord) -> bool:
     return (
-        before.is_paired, before.pair_id, before.pair_kind, before.pair_role, before.pair_ref
+        before.is_paired,
+        before.pair_id,
+        before.pair_kind,
+        before.pair_role,
+        before.pair_ref,
     ) == (
-        after.is_paired, after.pair_id, after.pair_kind, after.pair_role, after.pair_ref
+        after.is_paired,
+        after.pair_id,
+        after.pair_kind,
+        after.pair_role,
+        after.pair_ref,
     )

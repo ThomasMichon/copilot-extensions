@@ -3875,10 +3875,11 @@ class _RecordLock:
     Always check ``acquired`` inside a ``blocking=False`` ``with`` block before
     writing; for the default ``blocking=True`` it is always True.
 
-    **Scope -- keep the lock window to the RMW only (#4547).** Wrap exactly the
-    ``load_record -> mutate -> save_record`` window and **never hold the lock
-    across network or git I/O** (a fetch, push, rebase, or provider call). Two
-    consequences follow:
+    **Scope -- keep normal RMW locks short (#4547).** Do not hold across fetch,
+    push, rebase, or provider I/O. Cleanup is the deliberate exception: under
+    ``FinalizeLock``, its record-writer fence spans local removal so no new
+    responsibility appears between validation and deletion. Ordinary writers
+    use the following short-RMW protocol:
 
     - **Foreground CLI verbs** whose RMW is self-contained (``set-pr``,
       ``set-disposition``, ``mark-complete``, resume's ``mark_resumed``, the
