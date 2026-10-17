@@ -529,6 +529,7 @@ An accepted normal merge can enter a provider queue. `pr-merge --now` reads back
 the lifecycle state before reporting a completed merge; accepted but unfinished
 requests report `merge-pending` and retain the obligation to watch. An unreadable
 completion is explicit and never reported as landed.
+Completion lookup failures expose the exception type, not raw exception values.
 Merge-attempt receipts retain `merged` and `completion_verified` across providers.
 The latter is null when independent completion verification is unsupported.
 `checks_complete` reports whether both observed sources were readable/complete,

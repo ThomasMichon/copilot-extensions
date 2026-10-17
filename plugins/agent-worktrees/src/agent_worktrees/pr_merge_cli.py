@@ -458,7 +458,10 @@ def _pr_merge_now(
             else:
                 merge_confirmed = confirmation.merged
         except (ProviderError, OSError, ValueError, AttributeError) as exc:
-            observation_error = f"GitHub accepted the merge request but completion lookup failed: {exc}"
+            observation_error = (
+                "GitHub accepted the merge request but completion lookup failed "
+                f"({type(exc).__name__})"
+            )
         if observation_error or not merge_confirmed:
             rem = pc.pr_reminder(flow, "pr-watch", ok=not observation_error)
             message = observation_error or "GitHub accepted the merge request; completion is still pending"

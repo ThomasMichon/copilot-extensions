@@ -179,7 +179,32 @@ def test_normal_merge_unreadable_completion_never_claims_landed(monkeypatch, cap
     result = json.loads(capsys.readouterr().out)
     assert result["applied"] is True and result["merged"] is False
     assert result["completion_verified"] is False
-    assert "completion unavailable" in result["error"]
+    assert "completion lookup failed (ProviderError)" in result["error"]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+@pytest.mark.parametrize("failure_type", [
+    prov.ProviderError, OSError, ValueError, AttributeError,
+])
+def test_completion_lookup_diagnostics_do_not_expose_exception_values(
+    monkeypatch, capsys, json_output, failure_type,
+):
+    fake = _FakeProvider()
+
+    def unavailable(*args, **kwargs):
+        raise failure_type("fixture-private-completion-secret\nadditional private details")
+
+    fake.get_pull = unavailable
+    _patch_provider(monkeypatch, fake)
+    assert m._pr_merge_now(
+        _args(json=json_output), _prcfg(), _self_merge_flow(), apply=True,
+    ) == 1
+    captured = capsys.readouterr()
+    text = captured.out + captured.err
+    assert failure_type.__name__ in text
+    assert "fixture-private-completion-secret" not in text
+    assert "additional private details" not in text
+    assert "completion lookup failed" in text
 
 
 @pytest.mark.parametrize("expected_head", ["", "a" * 40])
