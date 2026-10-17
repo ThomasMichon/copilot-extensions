@@ -206,6 +206,9 @@ enqueue using `--target-machine` and let the selected central authority's
 supervisor acquire it instead. Spawned worker monikers and producer re-exec
 arguments retain explicit local/central routing. Installer-owned local
 start/stop commands remain local even when ordinary clients default central.
+Existing SSH fleet bodies retain that selector on commands relayed through
+their origin host as well, so an SSH login's different default cannot retarget
+an explicitly local-only task. Central credentials stay on the origin.
 
 This is an opt-in routing/authority contract, not a host deployment action.
 Apply configuration and restart affected long-lived clients through their

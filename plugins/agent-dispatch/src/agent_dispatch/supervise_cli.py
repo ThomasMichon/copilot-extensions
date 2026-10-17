@@ -768,6 +768,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         fleet = FleetSpawner(
             pool,
             origin=origin,
+            route=_spawn_route(args),
             headless=fleet_headless,
             agent=getattr(args, "headless_agent", None) or "task-worker",
             charter=getattr(args, "charter", None),
