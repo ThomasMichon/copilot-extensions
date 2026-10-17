@@ -1,0 +1,9 @@
+{
+  "comment": "Test canonical and self-contained installer engine layouts with real materialization and integrity refusals",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
