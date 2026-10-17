@@ -249,6 +249,8 @@ def test_vault_discovery_and_reads_do_not_inherit_worktrees_context(source, monk
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "foreign-worktrees-payload")
     assert "COPILOT_EXTENSIONS_CONTEXT" not in settings.discovery_environment()
     assert "COPILOT_PLUGIN_ROOT" not in settings.discovery_environment()
+    assert settings.discovery_environment()["AGENT_VAULT_NO_SELFPROVISION"] == "1"
+    assert settings.discovery_environment()["COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH"] == os.devnull
     assert settings.discovery_environment(vault)["COPILOT_EXTENSIONS_CONTEXT"] == vault
     source["env"]["COPILOT_EXTENSIONS_CONTEXT"] = vault
     selected = settings.source_environment(source)

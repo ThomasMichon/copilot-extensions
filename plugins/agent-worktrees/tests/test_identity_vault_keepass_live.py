@@ -28,6 +28,14 @@ def _fixture_module():
     return module
 
 
+def _gate_module():
+    path = Path(__file__).resolve().parents[2] / "agent-vault" / "tests" / "test_identity_payload_gate.py"
+    spec = importlib.util.spec_from_file_location("_identity_vault_payload_fixture", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _worktrees(fixture, *args: str, env=None, input=None):
     selected = dict(env or fixture.env)
     selected["AGENT_HOME"] = str(fixture.root / "worktrees-home")
@@ -125,10 +133,7 @@ def test_worktrees_context_crosses_actual_vault_payload_without_foreign_receipt(
     from test_registry_paths import _payload, _stamp
 
     helper = _fixture_module()
-    gate_path = Path(__file__).resolve().parents[2] / "agent-vault" / "tests" / "test_identity_payload_gate.py"
-    gate_spec = importlib.util.spec_from_file_location("_identity_vault_payload_fixture", gate_path)
-    gate = importlib.util.module_from_spec(gate_spec)
-    gate_spec.loader.exec_module(gate)
+    gate = _gate_module()
     home, vault_payload, runtime, installation, vault_context = gate.prepare_payload(tmp_path, mode)
     gate.prepare_runtime(runtime, vault_payload)
     aw_payload = _payload(tmp_path, "worktrees-payload")
@@ -178,6 +183,13 @@ def test_worktrees_context_crosses_actual_vault_payload_without_foreign_receipt(
                        "Source stored a foreign installation receipt")
         helper.require(Path(selected["env"]["AGENT_VAULT_CACHE_DIR"]).is_relative_to(runtime / "cache" / "identity"),
                        "Payload discarded the scoped identity cache")
+        before_status = _files(runtime)
+        status = subprocess.run(
+            [sys.executable, "-m", "agent_worktrees", "identity-vault", "status", "--json"],
+            env=caller, cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        )
+        helper.require(status.returncode == 0, "Configured payload status failed")
+        helper.require(_files(runtime) == before_status, "Configured status mutated vault runtime state")
         fixture.request({"action": "lock", "kpdb": fixture.database})
         verified = subprocess.run(
             [sys.executable, "-m", "agent_worktrees", "identity-vault", "verify", "--json"],
@@ -185,3 +197,32 @@ def test_worktrees_context_crosses_actual_vault_payload_without_foreign_receipt(
         )
         helper.require(verified.returncode == 0, "Persisted normal reader failed across payload boundary")
         helper.require(fixture.process.poll() is None, "Contained caller retired an independent resident")
+
+
+@pytest.mark.parametrize("mode", ["legacy", "namespaced"])
+@pytest.mark.parametrize("verb", ["status", "setup"])
+def test_cold_payload_discovery_never_provisions_or_activates(tmp_path, mode, verb):
+    gate = _gate_module()
+    home, payload, runtime, _installation, context = gate.prepare_payload(tmp_path, mode)
+    env = {
+        name: value for name, value in os.environ.items()
+        if not name.startswith(("AGENT_VAULT", "VAULT_", "IDENTITY_", "COPILOT_EXTENSIONS_"))
+        and name not in ("KPDB", "COPILOT_PLUGIN_ROOT")
+    }
+    env.update(HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(tmp_path / "aw-home"))
+    command = [
+        sys.executable, "-m", "agent_worktrees", "identity-vault", verb,
+        "--vault-argv", json.dumps(gate.launcher(payload)), "--json",
+    ]
+    if context:
+        command.extend(["--vault-context", context])
+    # Native PowerShell may create its own OS startup cache. Snapshot every
+    # product-owned state root, not the shell's unrelated profile cache.
+    state_roots = (home / ".copilot", home / ".copilot-extensions", runtime, tmp_path / "aw-home")
+    before = [_files(root) for root in state_roots]
+    result = subprocess.run(command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 1
+    assert json.loads(result.stderr)["ready"] is False
+    assert not (runtime / "versions").exists()
+    assert not (runtime / ".provision-status").exists()
+    assert [_files(root) for root in state_roots] == before

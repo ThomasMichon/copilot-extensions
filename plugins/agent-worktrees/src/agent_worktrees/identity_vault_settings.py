@@ -117,6 +117,7 @@ def source_environment(settings: dict) -> dict[str, str]:
     for key in ENV_KEYS | {"COPILOT_PLUGIN_ROOT", "PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"}:
         env.pop(key, None)
     env.update(settings["env"])
+    env["COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH"] = os.devnull
     return env
 
 
@@ -125,6 +126,8 @@ def discovery_environment(context: str | None = None) -> dict[str, str]:
     env = os.environ.copy()
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
         env.pop(key, None)
+    env["AGENT_VAULT_NO_SELFPROVISION"] = "1"
+    env["COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH"] = os.devnull
     if context:
         if not os.path.isabs(context):
             raise ValueError("vault installation context must be an absolute receipt path")

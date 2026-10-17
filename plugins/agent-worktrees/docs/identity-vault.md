@@ -40,11 +40,15 @@ Worktrees delegates context selection and key/cache operations to agent-vault's
 `identity-key context` and `identity-key setup` commands. It does not import vault
 code or manipulate KeePass itself. Only the selected entry is populated.
 Initial discovery removes a foreign worktrees receipt and lets the selected
-vault payload resolve and validate its own installation. For an explicitly
+vault payload resolve and validate its own installation. Discovery explicitly
+disables first-use provisioning: an unprepared runtime refuses without invoking
+an installer or activating a service, for both status and setup. For an explicitly
 selected/non-default installation, `--vault-context <absolute receipt>` supplies
 the owning receipt from its source-qualified catalog; the vault gate validates
 it. Subsequent vault calls carry that validated vault context, not worktrees'
 receipt. Worktrees keeps its own context for its readiness subprocess.
+Discovery and cache-only calls direct the launcher's optional boot trace to the
+OS null device so read-only probes do not create incidental runtime log files.
 
 After a successful fresh cache-loader/encryption probe, setup atomically stores non-secret
 `version`, exact `argv`, `entry` and pinned `env` in `identity-vault.json` beneath
