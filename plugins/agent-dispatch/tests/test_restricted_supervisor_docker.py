@@ -87,6 +87,18 @@ def _cleanup_docker(containers, networks):
     assert not failures, "\n".join(failures)
 
 
+def _register_docker_cleanup(request, containers, networks, trace):
+    def cleanup():
+        try:
+            _cleanup_docker(containers, networks)
+        except AssertionError:
+            trace("cleanup", "failed")
+            raise
+        trace("cleanup", "complete")
+
+    request.addfinalizer(cleanup)
+
+
 def _provider_runtime(python: str, destination: Path):
     identity = json.loads(_run(python, "-c", (
         "import json,sys,agent_containers;from importlib.metadata import version;"
@@ -107,7 +119,7 @@ def _provider_runtime(python: str, destination: Path):
 
 
 @pytest.mark.parametrize("outcome", ["complete", "abandon"])
-def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkeypatch, outcome):
+def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkeypatch, request, outcome):
     evidence = tmp_path
     if override := os.environ.get("AGENT_DISPATCH_E2E_EVIDENCE_DIR"):
         evidence = Path(override)
@@ -145,6 +157,7 @@ def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkey
     suffix = uuid.uuid4().hex[:12]
     network, central, worker = (f"restricted-proof-{part}-{suffix}" for part in ("net", "central", "worker"))
     management = f"restricted-proof-management-{suffix}"
+    _register_docker_cleanup(request, (worker, central), (network, management), trace)
     bridge_root, provider_root = tmp_path / "bridge", tmp_path / "provider"
     bridge_root.mkdir()
     provider_root.mkdir()
@@ -390,10 +403,6 @@ def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkey
                     )
                     assert ended.status_code == 204, ended.text
         finally:
-            try:
-                if process is not None:
-                    process.terminate()
-                    process.wait(timeout=15)
-            finally:
-                _cleanup_docker((worker, central), (network, management))
-                trace("cleanup", "complete")
+            if process is not None:
+                process.terminate()
+                process.wait(timeout=15)
