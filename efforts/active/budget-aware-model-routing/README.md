@@ -285,6 +285,15 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Verifier cannot pass with assertions disabled
+
+- Added an explicit optimization-mode refusal before installed-package
+  imports, and a negative scenario probe requiring that exact refusal.
+  Assertion stripping therefore cannot turn this validation into a false pass,
+  even if the helper is invoked manually with `-O`.
+- Made manifest decoding explicitly UTF-8. The actual scenario continues to
+  invoke the positive verifier through isolated, non-optimized Python.
+
 ### 2026-10-16 - Clean-room candidate lifetime and output contract
 
 - Added exit/failure cleanup for the scenario-owned temporary candidate root,

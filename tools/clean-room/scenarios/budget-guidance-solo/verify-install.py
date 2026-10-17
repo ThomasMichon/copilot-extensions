@@ -8,6 +8,9 @@ import subprocess
 import sys
 import tempfile
 
+if sys.flags.optimize:
+    raise SystemExit("verification requires assertions (run without -O)")
+
 import agent_procutil
 import budget_guidance
 
@@ -16,7 +19,7 @@ bin_path, snapshot = map(Path, sys.argv[1:])
 prefix = Path(sys.prefix)
 assert Path(budget_guidance.__file__).is_relative_to(prefix)
 assert Path(agent_procutil.__file__).is_relative_to(prefix)
-expected = json.loads((snapshot / "plugin.json").read_text())["version"]
+expected = json.loads((snapshot / "plugin.json").read_text(encoding="utf-8"))["version"]
 assert budget_guidance.__version__ == expected
 assert version("budget-guidance") == expected.replace("-dev", ".dev")
 original = snapshot / "src/budget_guidance/quota.py"

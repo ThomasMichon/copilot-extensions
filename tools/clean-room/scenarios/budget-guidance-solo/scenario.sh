@@ -88,6 +88,16 @@ fi
 pass "first-use version command succeeded without the original source"
 
 phase 3 "installed identity and offline posture"
+if capture "optimized-verifier-refusal" -- timeout 30 "$RUNTIME/bin/python" -I -O \
+    "$_SELF_DIR/verify-install.py" "$BIN" "$SNAPSHOT"; then
+    jam "pythonpath" "optimized verifier did not refuse" "verification must never skip assertions"
+    cr_finalize
+fi
+if ! grep -Fxq "verification requires assertions (run without -O)" \
+    "$CR_LOGDIR/optimized-verifier-refusal.log"; then
+    jam "pythonpath" "optimized verifier failed for an unexpected reason" "inspect optimized-verifier-refusal.log"
+    cr_finalize
+fi
 if capture "installed-contract" -- timeout 90 "$RUNTIME/bin/python" -I \
     "$_SELF_DIR/verify-install.py" "$BIN" "$SNAPSHOT"; then
     pass "installed identity and static/unavailable posture match the candidate"
