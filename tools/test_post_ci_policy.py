@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -105,6 +106,71 @@ def test_widen_only_keeps_ordinary_ceiling_checks_without_an_exact_baseline_gate
     assert "checks" in workflow["jobs"]["pr-gate"]["needs"]
 
 
+def _boolean_expression(expression: str, context: dict[str, str | bool]) -> bool:
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError("invalid condition syntax") from exc
+    allowed = (
+        ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not,
+        ast.Compare, ast.Eq, ast.NotEq, ast.Name, ast.Load, ast.Constant,
+    )
+    if any(type(value) not in (str, bool) for value in context.values()):
+        raise ValueError("condition context must contain only strings and booleans")
+    # Validate every branch before evaluation, including unreachable operands.
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed):
+            raise ValueError(f"unsupported condition node: {type(node).__name__}")
+        if isinstance(node, ast.Constant) and type(node.value) not in (str, bool):
+            raise ValueError("condition constants must be strings or booleans")
+        if isinstance(node, ast.Name) and node.id not in context:
+            raise ValueError(f"unknown condition name: {node.id}")
+
+    def boolean(value: str | bool) -> bool:
+        if type(value) is not bool:
+            raise ValueError("condition operand must be boolean")
+        return value
+
+    def evaluate(node: ast.AST) -> str | bool:
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bool)):
+            return node.value
+        if isinstance(node, ast.Name):
+            return context[node.id]
+        if isinstance(node, ast.UnaryOp):
+            return not boolean(evaluate(node.operand))
+        if isinstance(node, ast.BoolOp):
+            values = [boolean(evaluate(value)) for value in node.values]
+            return all(values) if isinstance(node.op, ast.And) else any(values)
+        if isinstance(node, ast.Compare):
+            values = [evaluate(node.left), *(evaluate(value) for value in node.comparators)]
+            return all(
+                left == right if isinstance(op, ast.Eq) else left != right
+                for left, op, right in zip(values, node.ops, values[1:])
+            )
+        raise ValueError(f"unsupported condition node: {type(node).__name__}")
+
+    return boolean(evaluate(tree))
+
+
+@pytest.mark.parametrize("expression", [
+    "__import__('os')", "event.__class__", "event[0]",
+    "[value for value in event]", "(lambda: True)()", "{'event': event}",
+    "event in 'pull_request'", "1 == 1", "None == None", "'true'",
+    "True or missing", "False and event.__class__", "True or event[0]",
+    "False and __import__('os')", "True or 1", "not event", "False and event",
+])
+def test_condition_evaluator_rejects_unsupported_expressions(expression: str) -> None:
+    with pytest.raises(ValueError):
+        _boolean_expression(expression, {"event": "pull_request"})
+
+
+def test_condition_evaluator_rejects_nonprimitive_context() -> None:
+    with pytest.raises(ValueError, match="context"):
+        _boolean_expression("True", {"event": 1})  # type: ignore[dict-item]
+
+
 def _ci_condition(
     condition: str, *, event: str, cancelled: bool = False,
     failed: bool = False, standalone: str = "true", base: str = "dev",
@@ -126,13 +192,11 @@ def _ci_condition(
         ("||", "or"),
     ]:
         condition = condition.replace(source, target)
-    result = eval(condition, {"__builtins__": {}}, {
+    return _boolean_expression(condition, {
         "event": event, "cancelled": cancelled, "failed": failed,
         "success": not failed, "standalone": standalone, "base": base,
         "promotion_run": promotion_run, "action": action,
     })
-    assert isinstance(result, bool)
-    return result
 
 
 @pytest.mark.parametrize("event,action,expected", [
@@ -272,7 +336,7 @@ def test_only_committed_same_repo_dev_ci_can_refresh_baseline(
         ("github.repository", "repo"),
     ]:
         condition = condition.replace(source, target)
-    assert eval(condition.replace("&&", "and").replace("||", "or"), {"__builtins__": {}}, {
+    assert _boolean_expression(condition.replace("&&", "and").replace("||", "or"), {
         "event": event, "branch": branch, "head_repo": "o/r" if same_repo else "fork/r",
         "repo": "o/r", "conclusion": conclusion,
     }) is expected
@@ -291,7 +355,7 @@ def test_only_committed_or_manual_success_can_enter_the_filter(event, conclusion
     executable = condition.replace(
         "github.event.workflow_run.conclusion", "conclusion",
     ).replace("github.event.workflow_run.event", "event").replace("&&", "and")
-    assert eval(executable, {"__builtins__": {}}, {"event": event, "conclusion": conclusion}) is expected
+    assert _boolean_expression(executable, {"event": event, "conclusion": conclusion}) is expected
 
 
 @pytest.fixture

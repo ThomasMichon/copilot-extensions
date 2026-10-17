@@ -64,6 +64,13 @@ mode when exercising the builder locally.
 
 ### Materialized candidate consumer gate
 
+Ordinary guard CI also exercises installer human-output declarations with
+explicit canonical and already-materialized source fixtures. Both use the real
+producer, materializer and runtime admission checker, including complete local
+engine/support assets, byte-stable reapplication and tamper refusal. A
+materialized installer correctly needs no second reference rewrite; a canonical
+installer must still demonstrate that rewrite and declaration rebinding.
+
 Before the checkout-free merger can advance `main`, the exact pushed candidate
 has a separate consumer gate. `materialized-candidate-plan` validates its
 immutable candidate/dev/main identities and builds the consumer matrix from

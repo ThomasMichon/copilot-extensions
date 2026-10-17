@@ -39,37 +39,113 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
         assert declaration == contract.human_output_declaration(script)
 
 
-def test_materialized_human_declaration_binds_rewritten_entrypoint(tmp_path):
+def _copy_real_installer_engine(root: Path) -> None:
+    contract = sync_installer_engine.ier
+    canonical = root / "libs" / "installer-engine"
+    canonical.mkdir(parents=True)
+    origin = REPO / "libs" / "installer-engine"
+    for asset in (*contract.FILES, *contract.support_files(origin)):
+        shutil.copyfile(origin / asset, canonical / asset)
+
+
+def _real_human_consumer(root: Path, name: str, layout: str) -> Path:
     import materialize_installer_engine
 
     contract = sync_installer_engine.ier
-    source = REPO / "plugins" / "agent-bridge"
+    consumer = root / "plugins" / name
+    scripts = _mk_plugin_scripts(root, name)
+    for asset in ("install.ps1", "install.sh", contract.HUMAN_HELPER):
+        shutil.copyfile(REPO / "plugins" / name / "scripts" / asset, scripts / asset)
+    for ext in ("ps1", "sh"):
+        script = scripts / f"install.{ext}"
+        ref = contract.find_engine_ref(script, ext)
+        if ref is None:
+            assert name == "agent-worktrees"
+            continue
+        old_line = (
+            contract.local_line(ext) if contract.is_local_ref(ref, consumer)
+            else contract.canonical_line(ext)
+        )
+        text = script.read_text(encoding="utf-8")
+        lines = text.splitlines(keepends=True)
+        assert sum(line.lstrip().startswith(old_line) for line in lines) == 1
+        script.write_text("".join(
+            line.replace(old_line, contract.canonical_line(ext), 1)
+            if line.lstrip().startswith(old_line) else line
+            for line in lines
+        ), encoding="utf-8")
+        assert contract.is_canonical_ref(
+            contract.find_engine_ref(script, ext), consumer, repo_root=root,
+        )
+    script = scripts / "install.ps1"
+    script.with_suffix(".human-output.json").write_text(
+        contract.human_output_json(script), encoding="utf-8",
+    )
+    assert layout in {"canonical", "materialized"}
+    if layout == "materialized":
+        log = materialize_installer_engine.materialize_ref_into(
+            source_consumer_dir=consumer, dest_consumer_dir=consumer,
+            canonical_root=root, dest_root=root,
+        )
+        assert not any(line.startswith("SKIP") for line in log), log
+        if name in contract.ADOPTERS:
+            assert any(line.startswith("OK") for line in log), log
+    return consumer
+
+
+@pytest.mark.parametrize("layout", ["canonical", "materialized"])
+def test_materialized_human_declaration_binds_rewritten_entrypoint(
+    tmp_path: Path, layout: str,
+) -> None:
+    import materialize_installer_engine
+
+    contract = sync_installer_engine.ier
+    source_root = tmp_path / "source"
+    _copy_real_installer_engine(source_root)
+    source = _real_human_consumer(source_root, "agent-bridge", layout)
     destination = tmp_path / "payload"
+    shutil.copytree(source, destination)
     scripts = destination / "scripts"
-    scripts.mkdir(parents=True)
-    for name in ("install.ps1", "install.sh", contract.HUMAN_HELPER, "install.human-output.json"):
-        shutil.copyfile(source / "scripts" / name, scripts / name)
     before = (scripts / "install.ps1").read_bytes()
     log = materialize_installer_engine.materialize_ref_into(
         source_consumer_dir=source, dest_consumer_dir=destination,
-        canonical_root=REPO, dest_root=tmp_path,
+        canonical_root=source_root, dest_root=tmp_path,
     )
-    assert any(line.startswith("OK") for line in log)
-    assert (scripts / "install.ps1").read_bytes() != before
-    assert (scripts / "installer-engine.ps1").is_file()
+    if layout == "canonical":
+        assert any(line.startswith("OK") for line in log), log
+        assert (scripts / "install.ps1").read_bytes() != before
+    else:
+        assert log == []
+        assert (scripts / "install.ps1").read_bytes() == before
+    for ext in ("ps1", "sh"):
+        assert contract.is_local_ref(
+            contract.find_engine_ref(scripts / f"install.{ext}", ext), destination,
+        )
+    canonical = source_root / "libs" / "installer-engine"
+    for asset in (*contract.FILES, *contract.support_files(canonical)):
+        assert (scripts / asset).read_bytes() == (canonical / asset).read_bytes()
     assert _human_admission()(scripts / "install.ps1")
+    snapshot = {path.name: path.read_bytes() for path in scripts.iterdir()}
+    assert materialize_installer_engine.materialize_ref_into(
+        source_consumer_dir=destination, dest_consumer_dir=destination,
+        canonical_root=source_root, dest_root=tmp_path,
+    ) == []
+    assert {path.name: path.read_bytes() for path in scripts.iterdir()} == snapshot
     with (scripts / contract.HUMAN_HELPER).open("a", encoding="ascii") as stream:
         stream.write("# drift\n")
     assert not _human_admission()(scripts / "install.ps1")
     with pytest.raises(ValueError, match="conflicting native human-output assets"):
         materialize_installer_engine.materialize_ref_into(
             source_consumer_dir=source, dest_consumer_dir=destination,
-            canonical_root=REPO, dest_root=tmp_path,
+            canonical_root=source_root, dest_root=tmp_path,
         )
 
 
 @pytest.mark.parametrize("in_place", [False, True])
-def test_whole_payload_human_contract(tmp_path, monkeypatch, in_place):
+@pytest.mark.parametrize("layout", ["canonical", "materialized"])
+def test_whole_payload_human_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, in_place: bool, layout: str,
+) -> None:
     import materialize_main
 
     contract = sync_installer_engine.ier
@@ -77,16 +153,10 @@ def test_whole_payload_human_contract(tmp_path, monkeypatch, in_place):
     monkeypatch.chdir(tmp_path)
     source_root = Path("source")
     destination = Path("payload")
+    _copy_real_installer_engine(source_root)
     for name in names:
         source = REPO / "plugins" / name
-        consumer = source_root / "plugins" / name
-        scripts = consumer / "scripts"
-        scripts.mkdir(parents=True)
-        # The complete native producer artifact, not unrelated Python sources
-        # or protocol-test corpora. All materializer owners still run below.
-        for asset in ("install.ps1", "install.sh", contract.HUMAN_HELPER,
-                      "install.human-output.json"):
-            shutil.copyfile(source / "scripts" / asset, scripts / asset)
+        consumer = _real_human_consumer(source_root, name, layout)
         (consumer / "pyproject.toml").write_text(
             f'[project]\nname = "{name}"\nversion = "0.0.0"\n', encoding="utf-8",
         )
@@ -100,10 +170,6 @@ def test_whole_payload_human_contract(tmp_path, monkeypatch, in_place):
                     target = source_root / data["canonicalDir"] / asset
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(origin, target)
-    canonical = source_root / "libs" / "installer-engine"
-    canonical.mkdir(parents=True, exist_ok=True)
-    for asset in (*contract.FILES, *contract.support_files(REPO / "libs" / "installer-engine")):
-        shutil.copyfile(REPO / "libs" / "installer-engine" / asset, canonical / asset)
     original = materialize_main.materialize_launch_wrapper_assets
 
     def later_owner(dest, *, canonical_root):

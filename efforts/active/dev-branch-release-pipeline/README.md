@@ -123,6 +123,10 @@ rewrite)._
 
 > We've accumulated over 50 actrive PRs in copilot-extensions; we desperately need main promotion and to make the CI pipeline shorter so we're not jammed in the queue. We don't have enough resources to sustain this test load
 
+The quoted wording and original spelling are preserved verbatim. Phase 9's
+operative plan below interprets the timing and recovery-first requirements;
+the quotations are not edited into implementation instructions.
+
 Phase 9 is the agent-recommended decomposition of this clarification. It does
 not grant a new main-path exception, relax byte integrity or silently change
 the separately owned main-control preservation policy. The original pipeline
@@ -766,10 +770,11 @@ _(Agent-recommended implementation and validation decomposition of the
       interrupting the executing Main qualification. Retain rolling Dev/manual
       validation and every current-head gate. While Main is canonically paused,
       the reviewed Dev-only policy may land without changing that pinned
-      qualification. After the current release is qualified and landed, activate
-      matching CI policy through the existing reviewed Main-control path before
-      resuming or qualifying newer source that asserts it. Recheck the pause
-      before the Dev merge; governed Main controls are never replaced silently.
+      qualification. The failed candidate has now been retired unmerged.
+      Activate matching CI policy through the existing reviewed Main-control
+      path after that retirement and before any fresh qualification or resume
+      containing source that asserts it. Recheck the pause before the Dev merge;
+      governed Main controls are never replaced silently.
 - [ ] Prove normal release and client compatibility, journal the result and
       retain responsibility for unresolved acceptance. A contract PR, source
       merge, tag, or green wrapper alone does not complete this phase.
@@ -955,6 +960,40 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-16 (PDT) - Retire failed candidate; repair release-layout qualification
+
+The paused replacement's full materialized-candidate CI failed the installer
+human-output guard before Main merge. Its fixture copied canonical wrappers
+without their local engine assets and required another rewrite even when the
+tested release wrapper was already materialized. Real materializer no-op
+behavior for a local reference was correct; no product hash waiver is needed.
+The operator authorized retiring only candidate PR #7113 and its parent/child
+validation runs. Both runs are terminal cancelled, the candidate is closed
+unmerged, and Main remains paused and unchanged. Published inputs and evidence
+are retained. The temporary noncritical CI intake request ended with that
+failure; it is not an ongoing hold or cancellation permission.
+
+The existing PR-only containment contribution now includes explicit canonical
+and materialized installer fixtures built from real consumer bodies and
+canonical assets. Both prove actual declaration admission, complete local
+engine/support bytes, byte-stable reapplication and tamper refusal; the
+whole-payload cases retain both build and in-place owner ordering. The focused
+fixture/policy modules pass 129 cases. The repaired fixture also passes all 45
+cases against an isolated archive of the exact failed candidate, without
+editing or republishing that candidate.
+
+Review found unsafe expression evaluation in the new policy test helper. All
+three such call sites in the module now share an explicit primitive-only AST
+evaluator, with unsupported syntax and unknown names rejected even in inactive
+branches. The request quotations remain verbatim, with an outside-quote
+explanation rather than rewritten operator wording.
+
+The former sequencing assumption below is superseded: the old candidate can no
+longer finish. Retire that attempt (done), land the reviewed Dev repair while
+the canonical pause remains set, activate matching reviewed Main CI controls,
+then qualify a fresh source through every normal gate. Neither this fixture
+fix nor a Dev merge proves release, latency or installed acceptance.
 
 ### 2026-10-17 - Retire obsolete CI and prepare PR-only cancellation containment
 
