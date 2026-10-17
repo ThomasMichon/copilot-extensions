@@ -229,7 +229,7 @@ class Native:
         pipe: int,
         *,
         server: bool,
-        expected: PeerIdentity | None,
+        expected: PeerIdentity,
     ) -> tuple[PeerIdentity, int]:
         """Pin a live process and reread the endpoint's native creator PID.
 
@@ -252,11 +252,10 @@ class Native:
                 refuse(Refusal.IDENTITY)
             if identity.principal != self.current_sid():
                 refuse(Refusal.PRINCIPAL)
-            if expected is not None:
-                if expected.principal != identity.principal:
-                    refuse(Refusal.PRINCIPAL)
-                if expected != identity:
-                    refuse(Refusal.IDENTITY)
+            if expected.principal != identity.principal:
+                refuse(Refusal.PRINCIPAL)
+            if expected != identity:
+                refuse(Refusal.IDENTITY)
             self.alive(process)
             return identity, process
         except BaseException:

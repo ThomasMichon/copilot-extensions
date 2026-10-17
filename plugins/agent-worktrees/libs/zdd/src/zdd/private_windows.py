@@ -88,7 +88,7 @@ class WindowsChannel:
         self,
         pipe: int,
         peer: PeerIdentity,
-        process: int,
+        process: int | None,
         *,
         api: Native | None = None,
     ) -> None:
@@ -322,7 +322,7 @@ class WindowsListener:
     def accept(
         self,
         deadline: Deadline,
-        expected: PeerIdentity | None = None,
+        expected: PeerIdentity,
     ) -> WindowsChannel:
         """Authenticate PID, creation time, process SID and connected token SID."""
         if not isinstance(expected, PeerIdentity):

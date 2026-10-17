@@ -436,6 +436,8 @@ bounded length (1 MiB maximum); unsupported versions, duplicate JSON keys,
 non-object payloads, non-finite values and oversized frames refuse explicitly.
 `PrivateIPCError` exposes only a fixed `Refusal` reason. Callers must not log,
 persist or include secret frames in exception values.
+Both native channel implementations refuse invalid read counts with
+`Refusal.SIZE` and non-byte writes with `Refusal.PROTOCOL`, before any I/O.
 
 Native channels retain peer process custody independently of frame contents:
 

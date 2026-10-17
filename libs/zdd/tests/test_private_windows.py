@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes as c
+import inspect
 import json
 import os
 import queue
@@ -15,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import Any, Iterator, get_type_hints
 
 import pytest
 
@@ -71,6 +72,16 @@ def test_connect_requires_expected_native_identity() -> None:
     with pytest.raises(PrivateIPCError) as caught:
         transport.connect(PATH, None, Deadline(1))
     assert caught.value.reason is Refusal.IDENTITY
+
+
+@pytest.mark.parametrize("operation", [transport.WindowsListener.accept, win.Native.pin_peer])
+def test_windows_peer_identity_is_required_in_public_signature(operation: Any) -> None:
+    assert inspect.signature(operation).parameters["expected"].default is inspect.Parameter.empty
+    assert get_type_hints(operation)["expected"] is PeerIdentity
+
+
+def test_windows_channel_constructor_allows_pre_authentication_process() -> None:
+    assert get_type_hints(transport.WindowsChannel.__init__)["process"] == int | None
 
 
 @pytest.mark.skipif(os.name == "nt", reason="non-Windows import/refusal contract")
@@ -274,7 +285,7 @@ def test_uncertain_cancel_retains_kernel_memory() -> None:
 def test_unknown_client_creation_time_refused_without_connect() -> None:
     listener = object.__new__(transport.WindowsListener)
     with pytest.raises(PrivateIPCError) as caught:
-        listener.accept(Deadline(1))
+        listener.accept(Deadline(1), expected=None)
     assert caught.value.reason is Refusal.IDENTITY
 
 

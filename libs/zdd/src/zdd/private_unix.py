@@ -85,7 +85,7 @@ class UnixChannel:
     def read_exact(self, count: int, deadline: Deadline) -> bytes:
         """Read exactly count bytes within the original request budget."""
         if type(count) is not int or count < 0:
-            raise ValueError("byte count must be nonnegative")
+            raise PrivateIPCError(Refusal.SIZE)
         with deadline_lock(self._lock, deadline):
             result = bytearray()
             try:
@@ -109,6 +109,8 @@ class UnixChannel:
 
     def write_all(self, data: bytes, deadline: Deadline) -> None:
         """Write all bytes without unbounded sendall or a fresh phase timeout."""
+        if not isinstance(data, bytes):
+            raise PrivateIPCError(Refusal.PROTOCOL)
         with deadline_lock(self._lock, deadline):
             remaining = memoryview(data)
             try:

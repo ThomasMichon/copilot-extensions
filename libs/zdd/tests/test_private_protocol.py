@@ -18,6 +18,8 @@ from zdd.private_protocol import (
     read_frame,
     write_frame,
 )
+from zdd.private_unix import UnixChannel
+from zdd.private_windows import WindowsChannel
 
 
 class MemoryChannel:
@@ -44,6 +46,25 @@ class MemoryChannel:
 
     def close(self) -> None:
         pass
+
+
+@pytest.mark.parametrize("channel_type", [UnixChannel, WindowsChannel])
+@pytest.mark.parametrize("count", [-1, True, 1.5, "1"])
+def test_native_read_size_refusal_precedes_io(channel_type: type, count: object) -> None:
+    channel = object.__new__(channel_type)
+    with pytest.raises(PrivateIPCError) as caught:
+        channel.read_exact(count, Deadline(1))
+    assert caught.value.reason is Refusal.SIZE
+
+
+@pytest.mark.parametrize("channel_type", [UnixChannel, WindowsChannel])
+@pytest.mark.parametrize("data", [None, "secret", bytearray(b"secret"), memoryview(b"secret")])
+def test_native_write_type_refusal_precedes_io(channel_type: type, data: object) -> None:
+    channel = object.__new__(channel_type)
+    with pytest.raises(PrivateIPCError) as caught:
+        channel.write_all(data, Deadline(1))
+    assert caught.value.reason is Refusal.PROTOCOL
+    assert "secret" not in str(caught.value)
 
 
 def test_roundtrip_and_one_shared_deadline() -> None:
