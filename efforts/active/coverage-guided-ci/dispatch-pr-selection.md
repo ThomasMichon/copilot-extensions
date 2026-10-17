@@ -129,3 +129,12 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
   (649 passed, 22 skipped, 22 exhaustive cases deselected); the unchanged
   target also passed in a network-disconnected devcontainer (58 passed,
   39 platform skips). These Linux results do not replace native Windows CI.
+- 2026-10-17: a cancelled hosted run still exposed two real Windows
+  absolute-path rejection failures: native normalization produced drive paths
+  that POSIX-only parsing treated as relative. Reject drive/UNC forms before
+  filesystem resolution while retaining native relative CLI paths. Review
+  also caught an implicated-test union masking an empty curated floor.
+  Validate the floor independently; regressions retain the implicated test
+  but block execution when every candidate costs 121 seconds against the
+  120-second budget, or all timing data is invalid. Fresh native and hosted
+  deadline evidence remains required.

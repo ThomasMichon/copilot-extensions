@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 EXTERNAL_TEST_ROOTS = {
     "worktree-manager": Path("worktree-manager"),
@@ -23,7 +23,7 @@ def validate_test_file(plugin_root: Path, value: str) -> Path:
     candidate = plugin_root / value
     invalid = (
         not value or "\\" in value or "\x00" in value
-        or path.is_absolute() or ".." in path.parts
+        or path.is_absolute() or bool(PureWindowsPath(value).drive) or ".." in path.parts
         or path.as_posix() != value
     )
     if not invalid:

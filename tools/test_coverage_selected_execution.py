@@ -171,6 +171,27 @@ def test_empty_curated_evidence_is_a_hard_error_not_only_guards(history):
         _plan(root, base, smoke_budget_s=0.00001)
 
 
+@pytest.mark.parametrize("failure", ["budget", "invalid-timings"])
+def test_implicated_tests_cannot_hide_an_empty_cross_cutting_floor(history, failure):
+    root, base, baseline = history
+    (root / "plugins/fixture/src/app.py").write_text("value = 999\nother = 3\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "implicated test with no affordable floor")
+    budget = 120
+    for info in baseline["tests"].values():
+        info["duration_s"] = 121 if failure == "budget" else None
+    decision = decisions.decide(
+        root, "example/project", "fixture", base,
+        {"plugins/fixture/src/app.py": [0, 1]},
+        fallback_runtime_budget_s=budget, include_smoke_floor=True,
+    )
+    assert decision.selected_tests == ("tests/test_app.py::test_implicated",)
+    assert decision.fallback_set is not None
+    assert decision.fallback_set["selected_tests"] == []
+    with pytest.raises(ValueError, match="empty selection for the smoke floor"):
+        _plan(root, base, smoke_budget_s=budget)
+
+
 @pytest.mark.parametrize("mode,exit_code", [("selected", 0), ("selected", 7), ("full", 0)])
 def test_execution_cli_preserves_failure_and_reports_complete_invocation(tmp_path, monkeypatch, capfd, mode, exit_code):
     script = Path(__file__).resolve().parent / "run-coverage-selected-tests.py"

@@ -15,7 +15,7 @@ TOOLS = Path(__file__).resolve().parent
 _previous_path = sys.path.copy()
 sys.path.insert(0, str(TOOLS))
 try:
-    from plugin_test_selection import load_selection
+    from plugin_test_selection import load_selection, validate_test_file
 
     spec = importlib.util.spec_from_file_location("exact_selection_runner", TOOLS / "run-plugin-tests.py")
     assert spec and spec.loader
@@ -107,6 +107,22 @@ def test_missing_manifest_fails_before_preparation(selection_fixture, monkeypatc
             plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,
             selection_file=root / "missing.json",
         )
+
+
+@pytest.mark.parametrize("value", [
+    "C:/tests/test_sample.py", "C:tests/test_sample.py", "c:/tests/test_sample.py",
+    "//server/share/tests/test_sample.py", "C:\\tests\\test_sample.py",
+    "\\\\server\\share\\tests\\test_sample.py",
+])
+def test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution(
+    selection_fixture, monkeypatch, value,
+):
+    root, _ = selection_fixture
+    monkeypatch.setattr(
+        Path, "resolve", lambda *_a, **_k: pytest.fail("resolved a non-relative test path"),
+    )
+    with pytest.raises(ValueError, match="existing, unlinked"):
+        validate_test_file(root, value)
 
 
 @pytest.mark.parametrize("node", ["test_selected[2]", "test_renamed", "test_selected[99]"])

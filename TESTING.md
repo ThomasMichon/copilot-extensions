@@ -1309,8 +1309,9 @@ changes outside the attributed source scope remain explicit fallback triggers.
 That fallback adds the measured smoke set without removing known implicated
 tests. No usable baseline (including an unavailable Release asset) visibly
 runs the full/default portfolio; it never means “guards only” or zero tests.
-An empty curated selection is an error. The pilot CLI also refuses an absent
-plugin test suite, so full fallback cannot become a successful no-suite skip.
+An empty curated smoke floor is an error even when attributed tests remain.
+The pilot CLI also refuses an absent plugin test suite, so full fallback cannot
+become a successful no-suite skip.
 
 `--selection-file PATH` on `run-plugin-tests.py` accepts a versioned JSON
 manifest, for example:
@@ -1329,7 +1330,10 @@ Use one named plugin and no other selection mode. Paths must identify existing,
 unlinked plugin-relative test files; node IDs must match collected items
 exactly, including parameter IDs. Missing/renamed nodes, empty files, malformed
 or empty evidence fail rather than silently deselecting everything. The
-contained invocation snapshots the validated manifest, neutralizes ambient and
+portable validator rejects POSIX absolute paths, Windows drive/UNC paths and
+drive-relative forms on every platform. Interactive `--test-file` still accepts
+native relative Windows separators before normalization.
+The contained invocation snapshots the validated manifest, neutralizes ambient and
 project `addopts`, and retains the existing isolation and process-tree limits.
 Ordinary unselected runs are unchanged. The hardened
 `run_tests_in_devcontainer.py` wrapper accepts the same flag: it transfers only

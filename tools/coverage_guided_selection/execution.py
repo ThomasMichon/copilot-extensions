@@ -77,6 +77,12 @@ def build_execution_payload(
         payload["execution"] = "full"
         payload["selection"] = None
         return payload
+    if result.fallback_set is None or not result.fallback_set.get("selected_tests"):
+        raise ValueError(
+            "coverage evidence produced an empty selection for the smoke floor; "
+            f"refusing selected execution (budget={smoke_budget_s:g}s, "
+            f"baseline={result.baseline_generation})"
+        )
     if not result.selected_tests:
         raise ValueError("coverage evidence produced an empty selection; refusing a guard-only pass")
     payload["execution"] = "selected"
