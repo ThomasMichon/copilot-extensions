@@ -692,7 +692,7 @@ DEFAULT_FETCH_TIMEOUT = 30.0
 
 def fetch(
     remote: str, *, cwd: str | Path, timeout: float | None = DEFAULT_FETCH_TIMEOUT,
-    isolated_repository: bool = False,
+    isolated_repository: bool = False, no_hooks: bool = False,
 ) -> None:
     """Fetch from a remote (auto-authenticating cross-account remotes; #29).
 
@@ -704,7 +704,7 @@ def fetch(
         git(
             *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet",
             cwd=cwd, timeout=timeout, isolated_repository=isolated_repository,
-            auth_acquisition=True,
+            auth_acquisition=True, **({"no_hooks": True} if no_hooks else {}),
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(

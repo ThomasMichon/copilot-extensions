@@ -1133,6 +1133,27 @@ Startup-folder host listener, so
 automatically (or reported as `dtssh-host-script-missing`). `agent-worktrees`
 itself is excluded -- use its own top-level `uninstall` verb.
 
+### Service source checkouts
+
+`services list`, `status`, single-service actions and batch actions resolve
+sources from the project anchor, never from an arbitrary active worktree.
+For a bare anchor, discovery and installers use a retained detached checkout
+of the configured default branch's commit under the project's state root,
+`service-sources/<anchor-key>/<commit>`. The checkout remains available for
+redirectors and source provenance; it is not a scratch directory. Existing
+checkouts with changed HEAD, tracked content or non-ignored untracked files
+are refused, not overwritten. Repository-ignored installer build artifacts
+(such as Python bytecode caches) do not prevent later discovery or reuse.
+Checkouts are not automatically garbage-collected, since installed services
+may still reference them.
+
+Before `install`, `update` or `copy`, synchronization must succeed. Bare
+anchors use the existing safe bare-ref synchronization; ordinary anchors
+retain their checkout and fast-forward workflow. Fetch failures, divergence,
+wrong branches and local-only commits now fail explicitly before discovery or
+installer execution instead of deploying stale source. Read-only list/status
+operations do not fetch or advance the anchor.
+
 ### Deployment ownership (`extensions.agent-worktrees.auto_update`)
 
 A `service.yaml` may set `extensions.agent-worktrees.auto_update: false` to

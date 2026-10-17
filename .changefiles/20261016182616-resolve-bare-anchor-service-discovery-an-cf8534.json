@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve bare-anchor service discovery and deployment from retained reviewed commit checkouts; fail explicitly on source synchronization errors.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
