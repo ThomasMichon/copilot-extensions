@@ -100,6 +100,7 @@ def test_registered_only_cli_refuses_malformed_remote(registry_path, tmp_path, c
     assert registry_path.read_bytes() == before
 
 
+@pytest.mark.guard
 def test_registered_only_native_cli_first_touch(tmp_path):
     home = tmp_path / "home"
     root = tmp_path / "tools"
@@ -140,6 +141,7 @@ def test_registered_only_native_cli_first_touch(tmp_path):
     assert registry.read_bytes() == before
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("body", [
     "repos: [", "repos: [invalid]", "repos:\n  invalid: null\n",
     "repos:\n  duplicate: {}\n  duplicate: {}\n",
@@ -155,6 +157,7 @@ def test_strict_inventory_refuses_corrupt_or_dropped_entries(registry_path, capf
         repos.list_repos(strict=True)
 
 
+@pytest.mark.guard
 def test_strict_inventory_missing_is_complete_but_legacy_json_is_not_an_attestation(registry_path, capfd):
     assert repos_cli.cmd_repos_dispatch(["list", "--strict", "--json"]) == 0
     assert json.loads(capfd.readouterr().out) == {"version": 1, "repos": [], "inventory_authority": "complete"}
@@ -163,10 +166,26 @@ def test_strict_inventory_missing_is_complete_but_legacy_json_is_not_an_attestat
     assert json.loads(capfd.readouterr().out) == {"version": 1, "repos": []}
 
 
+@pytest.mark.guard
 def test_strict_inventory_refuses_nonregular_registry(registry_path):
     registry_path.mkdir()
     with pytest.raises(repos.RepositoryResolutionError, match="regular file"):
         repos.list_repos(strict=True)
+
+
+@pytest.mark.guard
+def test_strict_inventory_dangling_link_is_unavailable_not_absent(registry_path, tmp_path, capfd):
+    missing = tmp_path / "missing-registry.yaml"
+    try:
+        registry_path.symlink_to(missing)
+    except OSError as exc:
+        pytest.skip(f"native symlink creation unavailable: {exc}")
+    with pytest.raises(repos.RepositoryResolutionError, match="could not be read"):
+        repos.list_repos(strict=True)
+    assert repos_cli.cmd_repos_dispatch(["list", "--strict", "--json"]) == 2
+    failure = json.loads(capfd.readouterr().out)
+    assert failure["error"] and "inventory_authority" not in failure
+    assert registry_path.is_symlink() and not missing.exists()
 
 
 @pytest.mark.guard

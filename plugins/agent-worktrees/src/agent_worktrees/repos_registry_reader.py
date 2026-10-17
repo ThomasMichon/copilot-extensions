@@ -42,9 +42,10 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
     try:
         if strict:
             try:
-                mode = path.stat().st_mode
+                path.lstat()
             except FileNotFoundError:
                 return ReposRegistry()
+            mode = path.stat().st_mode
             if not stat.S_ISREG(mode):
                 raise RepositoryResolutionError("repository registry must be a regular file")
         elif not path.exists():

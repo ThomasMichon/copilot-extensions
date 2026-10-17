@@ -1038,8 +1038,8 @@ to the effort after release.
 Machine consumers that need a complete inventory use `repos list --strict
 --json`. Success adds `inventory_authority: "complete"` to the existing
 `{repos: [...]}` envelope. A missing registry is a complete empty inventory;
-unreadable, malformed, duplicate-key or non-regular registry files fail with
-exit 2 rather than silently dropping entries. The command does not write,
+unreadable, dangling-link, malformed, duplicate-key or non-regular registry
+files fail with exit 2 rather than silently dropping entries. The command does not write,
 discover unregistered checkouts, clone or provision anything. Individual local
 checkout availability is separate: use `repos find <name> --registered-only
 --json` when a read or operation needs that repository's current root.

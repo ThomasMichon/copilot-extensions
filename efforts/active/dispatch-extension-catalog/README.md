@@ -587,3 +587,8 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   Manager's own compatibility/dependency selection passed three tests.
   Native POSIX FIFO execution and updated-head review/complete CI remain
   prerequisites rather than inferred Windows coverage.
+- Strict inventory distinguishes a missing directory entry from a dangling
+  registry symlink: only the former is authoritative absence. Entry `lstat`
+  precedes target resolution, so an unavailable target produces an explicit
+  error without an authority marker. Focused strict-inventory and native CLI
+  checks join the existing path-gated guard lane.
