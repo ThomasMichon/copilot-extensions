@@ -189,3 +189,12 @@ with implementation tests; standalone compatibility remains first-class.
   reader failures and disagreeing authorities retain source provenance. Explicit
   source-query deduplication preserves argv values and avoids repeated reads of
   the same binding. Added duplicate-source and pre-write diagnostic regressions.
+- Reconciled the source with current `dev`, preserving the independently merged
+  SSH-profile authority change. Only the shared effort index conflicted; its
+  transient status-summary edit is left for closure while this README remains
+  the canonical current status.
+- Legacy supervised profiles prefer their declared control-plane project over
+  incidental shared-topology storage. An installed optional reader with no
+  registered source project does not invalidate an existing standalone selector;
+  a bound machine-authority refusal still blocks. These regressions and the
+  current identity/startup/reader/SSH/native-peer selection passed 548 tests.

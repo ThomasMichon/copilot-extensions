@@ -62,12 +62,17 @@ def resolve_execution_space(cfg, machines: dict) -> str | None:
     identities: dict[str, set[str]] = {}
     origin = getattr(cfg, "_source_worktree", None)
     root = source_repository(Path(origin)) if origin is not None else None
+    bound_origin = False
+    unresolved_targets: set[str] = set()
     if prefix:
         sources: list[tuple[list[str], Path | None]] = []
         if root is not None:
             project = _query(prefix, ["get", "project"], root)
             if project.returncode == 0:
                 sources.append(([], root))
+                bound_origin = True
+            else:
+                unresolved_targets.add(str(root))
         if not sources:
             for profile_name, profile in cfg.topologies.items():
                 source_repo = getattr(profile, "source_repo", None)
@@ -86,20 +91,26 @@ def resolve_execution_space(cfg, machines: dict) -> str | None:
                         )
                     sources.append(([], source))
                 elif profile.machines_yaml:
-                    source = source_repository(Path(profile.machines_yaml).expanduser().resolve().parent)
                     project = load_control_plane_project(profile.machines_yaml)
-                    if source is not None:
-                        sources.append(([], source))
-                    elif project:
+                    if project:
                         sources.append((["--project", project], None))
+                    else:
+                        source = source_repository(Path(profile.machines_yaml).expanduser().resolve().parent)
+                        if source is not None:
+                            sources.append(([], source))
         seen: set[tuple[tuple[str, ...], Path | None]] = set()
         for args, cwd in sources:
             signature = (tuple(args), cwd)
             if signature in seen:
                 continue
             seen.add(signature)
-            result = _query(prefix, [*args, "get", "machine"], cwd)
             binding = str(cwd) if cwd is not None else " ".join(args)
+            if not bound_origin:
+                project = _query(prefix, [*args, "get", "project"], cwd)
+                if project.returncode:
+                    unresolved_targets.add(binding)
+                    continue
+            result = _query(prefix, [*args, "get", "machine"], cwd)
             if result.returncode:
                 raise ExecutionIdentityError(
                     f"Source-project machine binding {binding!r} was refused; verify its configured "
@@ -133,6 +144,8 @@ def resolve_execution_space(cfg, machines: dict) -> str | None:
             "No verified identity reader is available. "
             if not prefix else "No source-project binding resolved. "
         )
+        if unresolved_targets:
+            reason += "Unresolved sources: " + ", ".join(repr(target) for target in sorted(unresolved_targets)) + ". "
         raise ExecutionIdentityError(
             f"Missing source-project execution binding for independent registered spaces: {reason}"
             "Start or adopt from a registered source worktree with configured machine authority. "

@@ -151,7 +151,7 @@ def test_adopted_source_survives_neutral_cwd_and_recomputes_config(
     cfg._source_worktree = tmp_path
     calls = _authority(monkeypatch)
     assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-a"
-    assert calls == [(["get", "machine"], source)]
+    assert calls == [(["get", "project"], source), (["get", "machine"], source)]
     _authority(monkeypatch, "native-b")
     assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-b"
 
@@ -165,6 +165,40 @@ def test_invalid_source_locator_identifies_profile_and_path(source, tmp_path, mo
         execution_identity.resolve_execution_space(cfg, _spaces())
     assert "sample-profile" in str(error.value)
     assert repr(locator) in str(error.value)
+
+
+def test_declared_control_project_precedes_topology_storage_repository(source, tmp_path, monkeypatch):
+    machines = source / "machines.yaml"
+    machines.write_text("control_plane:\n  project: control-project\nmachines: {}\n", encoding="utf-8")
+    cfg = ServiceConfig(topologies={"shared": TopologyProfile(machines_yaml=str(machines))})
+    cfg._source_worktree = tmp_path
+    calls = _authority(monkeypatch)
+    assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-a"
+    assert calls == [
+        (["--project", "control-project", "get", "project"], None),
+        (["--project", "control-project", "get", "machine"], None),
+    ]
+
+
+def test_unregistered_optional_project_preserves_valid_legacy_selector(source, tmp_path, monkeypatch):
+    cfg = ServiceConfig(
+        local_execution_space="native-b",
+        topologies={"source": TopologyProfile(source_repo=str(source))},
+    )
+    cfg._source_worktree = tmp_path
+    calls = []
+
+    def query(prefix, args, cwd):
+        calls.append(args)
+        assert args[-1] == "project"
+        return subprocess.CompletedProcess([], 1, "", "project is not registered")
+
+    monkeypatch.setattr(execution_identity, "_query", query)
+    assert execution_identity.resolve_execution_space(cfg, _spaces()) == "native-b"
+    cfg.local_execution_space = None
+    with pytest.raises(execution_identity.ExecutionIdentityError, match="Unresolved sources"):
+        execution_identity.resolve_execution_space(cfg, _spaces())
+    assert calls == [["get", "project"], ["get", "project"]]
 
 
 @pytest.mark.parametrize("relative", [False, True])

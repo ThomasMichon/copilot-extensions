@@ -167,8 +167,10 @@ machine setting to maintain. Direct daemon launch captures the stable source
 repository before detach and working-directory changes. Adoption records that
 source repository automatically as `topologies.<profile>.source_repo`, so a
 supervised restart can recompute the identity without the caller's cwd.
-Older profiles can resolve their in-repository topology source or declared
-control-plane project. These are configuration locators, not identity authority.
+For older profiles, the declared control-plane project precedes the repository
+that happens to store shared topology; an in-repository topology source is the
+fallback when no control-plane project is declared. These are configuration
+locators, not identity authority.
 An originating registered source project takes precedence over profile locators;
 profiles supply context for a supervised or neutral-directory start. Without an
 originating project binding, all applicable profile bindings must agree.
@@ -190,6 +192,9 @@ binding instead of guessing a space.
 Local-agent/provider-only configurations with no machine inventory do not select
 an execution space at all: a residual legacy selector is inert in that mode,
 and no registered-space authority is inferred from it.
+An optional Worktrees installation that has not registered the source project
+does not supersede an existing valid standalone selector. Once project discovery
+succeeds, a refused machine-authority read is an error, never a legacy fallback.
 Keys cannot contain whitespace, path separators or reference delimiters, and
 must be unique without regard to case.
 
