@@ -199,12 +199,23 @@ def _check_source(payload: Path, version: str, identity) -> None:
         raise RuntimeError("Containers source identity changed after runtime selection")
 
 
-def stamp_source(root: Path, payload: Path, expected_version: str) -> Path:
+def _check_selected_source(identity, expected_identity: str | None) -> None:
+    if (
+        expected_identity is not None
+        and json.dumps(source.manifest_fields(identity), sort_keys=True) != expected_identity
+    ):
+        raise RuntimeError("Containers source identity changed after runtime selection")
+
+
+def stamp_source(
+    root: Path, payload: Path, expected_version: str, *, expected_identity: str | None = None,
+) -> Path:
     """Preserve the exact prepared closure for deferred first-use provisioning."""
     version = _package_version(payload)
     identity = source.read_source_identity(payload, version, plugin="agent-containers")
     if identity is None or identity.runtime_version != expected_version:
         raise RuntimeError("Containers stamped source changed after runtime selection")
+    _check_selected_source(identity, expected_identity)
     snapshots = root / "snapshots"
     snapshot = snapshots / expected_version
     if snapshot.exists():
@@ -229,6 +240,7 @@ def provision(
     uv: str | None = None,
     requested: str | None = None,
     expected_source_version: str | None = None,
+    expected_source_identity: str | None = None,
 ) -> dict:
     """Called under the installer's installation-wide transaction lock."""
     if not uv:
@@ -240,6 +252,7 @@ def provision(
     selected_version = identity.runtime_version if identity else version
     if expected_source_version is not None and expected_source_version != selected_version:
         raise RuntimeError("Containers source identity changed after runtime selection")
+    _check_selected_source(identity, expected_source_identity)
     profile = selected_profile(root, requested)
     profile_version = f"{version}{'.' if '+' in version else '+'}{profile}"
     runtime_version = (
@@ -355,19 +368,24 @@ def main() -> int:
     parser.add_argument("--profile", choices=PROFILES)
     parser.add_argument("--tsv", action="store_true")
     parser.add_argument("--expected-source-version")
+    parser.add_argument("--expected-source-identity")
     parser.add_argument("--stamp-source", action="store_true")
     args = parser.parse_args()
     try:
         if args.stamp_source:
             if not args.expected_source_version:
                 raise RuntimeError("Source stamping requires an exact selected source version")
-            print(stamp_source(args.root, args.payload, args.expected_source_version))
+            print(stamp_source(
+                args.root, args.payload, args.expected_source_version,
+                expected_identity=args.expected_source_identity,
+            ))
             return 0
         if not args.python:
             raise RuntimeError("Runtime provisioning requires a bootstrap Python interpreter")
         result = provision(
             args.root, args.payload, python=args.python, uv=args.uv, requested=args.profile,
             expected_source_version=args.expected_source_version,
+            expected_source_identity=args.expected_source_identity,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[agent-containers] {exc}", file=sys.stderr)

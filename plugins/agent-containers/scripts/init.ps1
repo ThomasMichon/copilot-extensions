@@ -292,6 +292,7 @@ if ($SrcVersion) {
 
 $PackageVersion = $SrcVersion
 $SourceSelected = $false
+$SourceRuntimeIdentity = '{}'
 function Get-SourceRuntimePython {
     $py = @('python3', 'python', 'py') | ForEach-Object {
         Get-Command $_ -ErrorAction SilentlyContinue
@@ -301,10 +302,14 @@ function Get-SourceRuntimePython {
 }
 
 function Get-SourceRuntimeVersion {
-    param([string]$ExpectedVersion = '')
+    param(
+        [string]$ExpectedVersion = '',
+        [ValidateSet('version', 'json')][string]$Format = 'version'
+    )
     $py = Get-SourceRuntimePython
     $arguments = @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_source.py'),
-        '--payload', $PluginDir, '--package-version', $PackageVersion, '--plugin', 'agent-containers')
+        '--payload', $PluginDir, '--package-version', $PackageVersion, '--plugin', 'agent-containers',
+        '--format', $Format)
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
     $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
@@ -319,7 +324,19 @@ try {
 } catch [IO.FileNotFoundException] {
 } catch [IO.DirectoryNotFoundException] {
 }
-if ($SourceSelected) { $SrcVersion = Get-SourceRuntimeVersion }
+if ($SourceSelected) {
+    $SourceRuntimeIdentity = Get-SourceRuntimeVersion -Format json
+    $SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
+}
+
+function Assert-SourceRuntimeIdentity {
+    if ($SourceSelected -or (Test-Path -LiteralPath $sourceMetadata)) {
+        $current = Get-SourceRuntimeVersion -ExpectedVersion $SrcVersion -Format json
+        if ($current -cne $SourceRuntimeIdentity) {
+            throw 'Source runtime identity changed after runtime selection; refusing publication'
+        }
+    }
+}
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
@@ -456,11 +473,13 @@ function Invoke-Stamp {
         $snapshot = Invoke-Hidden -FilePath $py -ArgList @(
             '-I', '-B', (Join-Path $PSScriptRoot 'runtime_profile.py'),
             '--root', $InstallDir, '--payload', $PluginDir, '--stamp-source',
-            '--expected-source-version', $SrcVersion
+            '--expected-source-version', $SrcVersion,
+            '--expected-source-identity', $SourceRuntimeIdentity
         ) -ErrorOutput ([ref]$nativeError)
         if ($LASTEXITCODE -ne 0) {
             throw "Source snapshot validation failed; redirects were not published: $snapshot$nativeError"
         }
+        Assert-SourceRuntimeIdentity
         $snapDir = $snapshot.Trim()
         [IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
@@ -556,9 +575,7 @@ if (-not (Enter-InstallLock)) {
 }
 
 try {
-if ($SourceSelected -or (Test-Path -LiteralPath $sourceMetadata)) {
-    [void](Get-SourceRuntimeVersion -ExpectedVersion $SrcVersion)
-}
+Assert-SourceRuntimeIdentity
 if ($Action -eq 'stamp') {
     if ($Profile) { throw 'Select a runtime profile with provision, not stamp' }
     Invoke-Stamp
@@ -681,11 +698,13 @@ $uv = Get-Command uv -ErrorAction SilentlyContinue
 if ($uv) { $profileArgs += @('--uv', $uv.Source) }
 if ($Profile) { $profileArgs += @('--profile', $Profile) }
 $profileArgs += @('--expected-source-version', $SrcVersion)
-$profileJson = & $pythonCmd @profileArgs
+$profileArgs += @('--expected-source-identity', $SourceRuntimeIdentity)
+$profileJson = Invoke-Hidden -FilePath $pythonCmd -ArgList $profileArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Fail 'Failed to provision the selected agent-containers runtime profile'
     exit 1
 }
+Assert-SourceRuntimeIdentity
 $profileResult = ($profileJson -join "`n") | ConvertFrom-Json
 $VenvDir = [string]$profileResult.venv
 $LinkDir = $VenvDir
@@ -702,9 +721,9 @@ Deploy-SelfProvisioningBinstub
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
 $kind = Get-SourceKind -PluginPath $PluginDir
-$ver = '0.0.0'
+$ver = if ($SourceSelected) { $PackageVersion } else { '0.0.0' }
 $pyproj = Join-Path $PluginDir 'pyproject.toml'
-if (Test-Path $pyproj) {
+if (-not $SourceSelected -and (Test-Path $pyproj)) {
     $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
     if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*', '$1') }
 }
