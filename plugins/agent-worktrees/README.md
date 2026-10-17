@@ -247,7 +247,10 @@ session's.
  anomalous-potato  [ win ]  test-chamber:8e45
 ```
 
-- **Machine** -- the host designation (black)
+- **Machine** -- the registered execution-space name (black). Historical
+  hostnames are resolved using the worktree's recorded platform, so native
+  and guest labels remain distinct without renaming worktrees or changing
+  their ownership.
 - **Environment** -- platform as a color-coded badge keyed on OS type
   (win = blue, wsl = purple, linux = orange), so a Windows pane and a WSL
   pane are distinguishable at a glance

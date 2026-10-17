@@ -705,7 +705,7 @@ def load_machines_yaml(
 
 
 def find_machine_entry(
-    entries: dict[str, MachineEntry], name: str,
+    entries: dict[str, MachineEntry], name: str, *, execution_platform: str | None = None,
 ) -> MachineEntry | None:
     """Look up a machine by key, alias, ``hostname`` field, or display_name
     (case-insensitive).
@@ -715,7 +715,9 @@ def find_machine_entry(
     the explicit ``hostname`` field lets a machine keyed by a friendly name still
     be found by its raw COMPUTERNAME. Returns None if no entry matches.
     """
-    return _mt_find_machine_entry(entries, name, reject_ambiguous=True)
+    return _mt_find_machine_entry(
+        entries, name, reject_ambiguous=True, execution_platform=execution_platform,
+    )
 
 
 def find_machine_metadata(
