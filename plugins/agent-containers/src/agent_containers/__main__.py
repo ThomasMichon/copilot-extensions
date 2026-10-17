@@ -24,11 +24,10 @@ import argparse
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 from dataclasses import asdict
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from agent_procutil import no_window_flags as _creation_flags
 
@@ -544,8 +543,7 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
 
 def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
     """Remove only a provider-created launch env path."""
-    from . import ssh_transport
-    from .launch_storage import directory_guard, launch_directory
+    from .session_host_context import guard_cleanup_path
 
     if args.expected_instance:
         from .session_host_context import cleanup_user
@@ -553,28 +551,9 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
         user = cleanup_user(args.expected_instance, args.expected_user)
     else:
         _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)
-    remote_env = PurePosixPath(args.remote_env)
-    canonical_ram = str(remote_env.parent) == launch_directory(user)
-    legacy_home = remote_env.parts[-3:-1] == (".agent-containers", "launch")
-    if (
-        not remote_env.is_absolute()
-        or len(remote_env.parts) < 4
-        or ".." in remote_env.parts
-        or not (canonical_ram or legacy_home)
-        or remote_env.suffix != ".env"
-        or not re.fullmatch(r"[0-9a-f]{32}", remote_env.stem)
-    ):
-        raise RuntimeError(
-            f"Refusing unsafe Session Host env cleanup path: {args.remote_env!r}"
-        )
-    ssh_transport._validate_target(args.expected_instance or args.name, user)
-    checked = ssh_transport._run([
-        "docker", "exec", "-u", user, args.expected_instance or args.name,
-        "sh", "-c", directory_guard(str(remote_env.parent), require_ram=canonical_ram),
-    ])
-    if checked.returncode:
-        raise RuntimeError("Refusing unsafe Session Host cleanup directory")
-    if cleanup_remote_env(args.expected_instance or args.name, user, str(remote_env)) is False:
+    target = args.expected_instance or args.name
+    remote_env = guard_cleanup_path(target, user, args.remote_env)
+    if cleanup_remote_env(target, user, remote_env) is False:
         raise RuntimeError("launch environment cleanup could not be confirmed")
     return 0
 
