@@ -326,19 +326,25 @@ def reconcile_gateway_ssh(plan: GatewaySSHPlan, *, authority: GatewaySSHAuthorit
         if not isinstance(current, GatewaySSHObservation):
             return result("blocked", "owner-observation-invalid")
         current_value = current.to_dict()
+        now = time.time()
+        if not (snapshot["observed_at"] <= now < snapshot["valid_until"]
+                and current_value["observed_at"] <= now < current_value["valid_until"]):
+            return result("blocked", "observation-expired")
         binding = set(snapshot) - {"observed_at", "valid_until"}
-        if (any(current_value[field] != snapshot[field] for field in binding)
-                or not current_value["observed_at"] <= time.time() < current_value["valid_until"]):
+        if any(current_value[field] != snapshot[field] for field in binding):
             return result("blocked", "observation-changed", observation=current)
         stage = "execution-authority"
         authorization = authority.authorize(plan, current, identity, timeout=remaining())
         if not isinstance(authorization, GatewaySSHAuthorization):
             return result("blocked", "execution-authorization-required")
+        now = time.time()
+        if not (snapshot["observed_at"] <= now < snapshot["valid_until"]
+                and current_value["observed_at"] <= now < current_value["valid_until"]):
+            return result("blocked", "observation-expired")
         if (authorization.plan_digest != plan.plan_digest
                 or authorization.observation_digest != current.observation_digest
                 or authorization.identity_digest != hashlib.sha256(identity).hexdigest()
-                or not time.time() < min(authorization.valid_until, snapshot["valid_until"],
-                                        current_value["valid_until"])):
+                or not now < authorization.valid_until):
             return result("blocked", "execution-authorization-mismatch")
         remaining()
     except _BudgetExpired:

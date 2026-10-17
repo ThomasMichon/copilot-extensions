@@ -398,6 +398,51 @@ def test_fresh_observation_time_is_not_mistaken_for_changed_generation(tmp_path)
     assert reconcile_gateway_ssh(plan, authority=authority, owner=owner).state == "reconciled"
 
 
+@pytest.mark.parametrize("future", [False, True])
+def test_invalid_owner_observation_window_requires_refresh_without_attaching_stale_state(
+    tmp_path, future,
+):
+    plan, authority, owner = setup(tmp_path)
+    current = owner.snapshot.to_dict()
+    now = int(time.time())
+    current.update(observed_at=now + 60 if future else 0,
+                   valid_until=now + 120 if future else 1)
+    owner.snapshot = GatewaySSHObservation.from_dict(current)
+    result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
+    assert (result.state, result.reason, result.effect) == ("blocked", "observation-expired", "none")
+    assert result.observation is None and result.to_dict()["reobserve_required"] is True
+    assert authority.calls == 0 and "reconcile" not in owner.calls
+    assert owner.profile.read_bytes() == b"drift"
+
+
+@pytest.mark.parametrize("phase", ["authenticate", "observe", "authorize"])
+def test_observation_expiry_during_adapter_stages_is_not_an_authorization_mismatch(
+    tmp_path, monkeypatch, phase,
+):
+    plan, authority, owner = setup(tmp_path)
+    clock = {"now": time.time()}
+    monkeypatch.setattr(runtime, "time", SimpleNamespace(
+        time=lambda: clock["now"], monotonic=time.monotonic,
+    ))
+    authority.override = GatewaySSHAuthorization(
+        plan.plan_digest, owner.snapshot.observation_digest,
+        fingerprint(b"verified-connection-node-a-generation-3"), int(clock["now"]) + 1000,
+    )
+    adapter = authority if phase == "authorize" else owner
+    original = getattr(adapter, phase)
+
+    def delayed(*args, **kwargs):
+        value = original(*args, **kwargs)
+        clock["now"] += 301
+        return value
+
+    monkeypatch.setattr(adapter, phase, delayed)
+    result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
+    assert (result.state, result.reason, result.effect) == ("blocked", "observation-expired", "none")
+    assert result.observation is None and result.to_dict()["reobserve_required"] is True
+    assert "reconcile" not in owner.calls and owner.profile.read_bytes() == b"drift"
+
+
 def test_expired_snapshot_and_pending_effect_never_start_execution(tmp_path):
     plan, authority, owner = setup(tmp_path)
     expired = owner.snapshot.to_dict()
