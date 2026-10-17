@@ -126,10 +126,6 @@ async def drive(directory: Path) -> dict:
     from ssh_manager.proxy import create_ssh_subprocess
 
     ssh = Path(os.environ["SSH_MANAGER_TEST_SSH"])
-    # A Win32-OpenSSH ancestor describes socket stdio; these children use pipes.
-    os.environ[DESCRIPTOR_STATE] = base64.b64encode(
-        struct.pack("<i4B", 0, 1, 1, 1, 0),
-    ).decode("ascii")
     empty_config = directory / "empty.config"
     empty_config.write_text("", encoding="utf-8")
     baseline = set(terminal_windows())
@@ -146,7 +142,12 @@ async def drive(directory: Path) -> dict:
     watcher = asyncio.create_task(monitor())
     cycles = []
     procutil_cycles = []
+    previous_state = os.environ.get(DESCRIPTOR_STATE)
     try:
+        # A Win32-OpenSSH ancestor describes socket stdio; these children use pipes.
+        os.environ[DESCRIPTOR_STATE] = base64.b64encode(
+            struct.pack("<i4B", 0, 1, 1, 1, 0),
+        ).decode("ascii")
         for cycle in range(2):
             procutil_cycles.append(
                 await drive_procutil_spawn(
@@ -226,8 +227,14 @@ async def drive(directory: Path) -> dict:
                 "ssh_returncode": process.returncode,
             })
     finally:
-        stop.set()
-        await watcher
+        try:
+            stop.set()
+            await watcher
+        finally:
+            if previous_state is None:
+                os.environ.pop(DESCRIPTOR_STATE, None)
+            else:
+                os.environ[DESCRIPTOR_STATE] = previous_state
     return {
         "parent_console_handle": console_window(),
         "procutil_cycles": procutil_cycles,

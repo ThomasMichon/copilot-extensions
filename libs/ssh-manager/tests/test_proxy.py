@@ -22,8 +22,9 @@ from ssh_manager.process import register_process_cleanup, run_process_cleanup
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("prior_state", [None, "original-parent-state"])
 async def test_native_probe_cancels_pipe_drain_even_when_cleanup_fails(
-    tmp_path, monkeypatch, cleanup_fails,
+    tmp_path, monkeypatch, cleanup_fails, prior_state,
 ):
     fixture = Path(__file__).parent / "fixtures" / "windows_proxy_probe.py"
     spec = importlib.util.spec_from_file_location("native_proxy_probe", fixture)
@@ -33,7 +34,10 @@ async def test_native_probe_cancels_pipe_drain_even_when_cleanup_fails(
     monkeypatch.setattr(probe, "console_window", lambda: 0)
     monkeypatch.setattr(probe, "terminal_windows", lambda: {})
     monkeypatch.setattr(probe, "drive_procutil_spawn", AsyncMock(return_value={}))
-    monkeypatch.setenv(probe.DESCRIPTOR_STATE, "original-parent-state")
+    if prior_state is None:
+        monkeypatch.delenv(probe.DESCRIPTOR_STATE, raising=False)
+    else:
+        monkeypatch.setenv(probe.DESCRIPTOR_STATE, prior_state)
     monkeypatch.setenv("SSH_MANAGER_TEST_SSH", sys.executable)
     monkeypatch.setenv("SSH_MANAGER_TEST_SSH_KIND", "native")
     drains = []
@@ -69,6 +73,8 @@ async def test_native_probe_cancels_pipe_drain_even_when_cleanup_fails(
             assert len(evidence["cycles"]) == 2
         assert len(drains) == (1 if cleanup_fails else 2)
         assert all(task.cancelled() for task in drains)
+        restored_state = os.environ.get(probe.DESCRIPTOR_STATE)
+        assert restored_state == prior_state
     finally:
         for task in drains:
             task.cancel()
@@ -90,8 +96,7 @@ async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
         "GH_TOKEN": "synthetic-account-value",
     }
     monkeypatch.setattr(proxy, "_is_windows", lambda: windows)
-    for name, value in inherited.items():
-        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(os, "environ", dict(inherited))
     explicit = {} if environment == "empty" else dict(inherited)
     before = dict(os.environ if environment == "ambient" else explicit)
     process = SimpleNamespace(wait=AsyncMock(return_value=0))
@@ -112,7 +117,7 @@ async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
     try:
         await proxy.create_ssh_subprocess(
             "ssh", "example",
-            config=SSHConfig("example", proxy_command="proxy" if has_proxy else None),
+            config=SSHConfig("example", user="probe", proxy_command="proxy" if has_proxy else None),
             **kwargs,
         )
         if windows:
