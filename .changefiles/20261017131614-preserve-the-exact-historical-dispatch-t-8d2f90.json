@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve the exact historical dispatch task-template migration fingerprint and verify owner-revision steering arguments through both real native task contributions.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -776,3 +776,25 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   native CI remain required external proof; normal release and authorized
   installed proof remain separate gates. Independent graphical adoption and
   the broader parity/production journeys remain open.
+
+### 2026-10-17 - Acceptance-time assertions and historical native fixtures
+
+- Current-head review identified four existing asynchronous HTTP assertions
+  reading live wake status as though it were immutable acceptance. Assert the
+  stored acceptance-time pending value instead, retaining every independent
+  delivered/failed/nonblocking check. A controlled interleaving finishes the
+  real queued wake before the route reads its receipt: acceptance stays pending,
+  current delivery is delivered, and the answer remains unconsumed.
+- Required CI run 39064748697 exposed a native consumer fixture deriving a
+  historical schema-v1 template from today's canonical argv. The new revision
+  argument changed those reconstructed bytes and correctly tripped its exact
+  historical checksum. Freeze the historical steering argv; do not change the
+  trusted checksum or production legacy-ownership guard.
+- The actual Manager registry now also proves both attributed task forms expand
+  the owner-revision argument, including fresh, historical and already-owned
+  registry cases. Keep the tests in their owning distribution, not a forbidden
+  dispatch-to-Manager import; include the Manager changefile.
+- Targeted dispatch receipt/card coverage passed 94 tests. Native Windows
+  Manager discovery, historical migration, ownership/refusal and form-expansion
+  coverage passed twenty tests; the broader Manager portfolio remains selected
+  by normal required CI. Updated-head review and full CI remain merge gates.

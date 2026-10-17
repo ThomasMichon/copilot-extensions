@@ -77,6 +77,33 @@ def test_card_replaced_between_client_read_and_post_is_rejected_by_the_owner(api
     assert queue.steer_log(task_id) == [] and queue.list_wakes(task_id) == []
 
 
+def test_worker_delivery_before_receipt_read_does_not_rewrite_acceptance(api, owner, monkeypatch):
+    queue, task_id = owner
+    original = queue.steer_receipt
+
+    def delivered_before_read(task, request):
+        wake = queue.claim_due_wake()
+        assert wake is not None
+        queue.finish_wake(wake.id, wake.delivery_token, delivered=True)
+        return original(task, request)
+
+    monkeypatch.setattr(queue, "steer_receipt", delivered_before_read)
+    response = api.post(
+        f"/tasks/{task_id}/steer/guarded",
+        json={
+            "fields": {"answer": "accepted"},
+            "expected_revision": queue.get(task_id).steering_revision,
+            "idempotency_key": "delivery-interleaving",
+        },
+    )
+    assert response.status_code == 200
+    receipt = response.json()["steer_receipt"]
+    assert receipt["acceptance"]["wake_status"] == "pending"
+    assert response.json()["steer_wake_status"] == receipt["wake_status"] == "delivered"
+    assert receipt["wake"]["id"] == receipt["acceptance"]["wake_operation_id"]
+    assert receipt["consumed_at"] is None and queue.steer_log(task_id)[0]["taken"] is False
+
+
 def test_sdk_lost_response_retries_exact_request_after_consumption_and_card_change(api, owner, monkeypatch):
     queue, task_id = owner
     revision = queue.get(task_id).steering_revision
