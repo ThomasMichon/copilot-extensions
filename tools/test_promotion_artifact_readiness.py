@@ -440,7 +440,8 @@ def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
             assert native["needs"] == job_id
             assert native["if"] == jobs[job_id]["if"]
             assert native["runs-on"] == "windows-latest"
-            assert native["timeout-minutes"] == jobs[job_id]["timeout-minutes"] == 5
+            assert native["timeout-minutes"] == 5
+            assert jobs[job_id]["timeout-minutes"] == 10
             assert "continue-on-error" not in native
             assert jobs[job_id]["outputs"]["run"] == "${{ steps.python-artifact-builder.outputs.run }}"
             assert all(

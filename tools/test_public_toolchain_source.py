@@ -128,11 +128,12 @@ def _artifact_scope(job_name: str) -> tuple[dict, str]:
     return jobs, expression.group(1)
 
 
-def test_windows_source_contracts_use_the_existing_second_budget_without_dropping_cases():
+def test_windows_source_contracts_keep_separate_budgets_without_dropping_cases():
     jobs, _ = _artifact_scope("checks")
     builder = jobs["windows-python-artifact-builder"]
     candidate = jobs["promotion-candidate-windows"]
-    assert builder["timeout-minutes"] == candidate["timeout-minutes"] == 5
+    assert builder["timeout-minutes"] == 10
+    assert candidate["timeout-minutes"] == 5
     assert candidate["needs"] == "windows-python-artifact-builder"
     composed = next(step for step in builder["steps"]
                     if step.get("name") == "Composed promotion artifact contracts (Windows)")

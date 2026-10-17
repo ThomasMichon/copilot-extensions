@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -947,27 +948,30 @@ def test_sh_mark_complete_reports_publication_result(
 def test_sh_call_sites_fail_on_refused_completion_and_guard_precedes_mutation() -> None:
     text = _INSTALL_SH.read_text(encoding="utf-8")
     assert "_versioned_mark_complete || exit 1\n" in text
-    assert (
-        '_versioned_mark_complete || { _fail "Versioned completion publication failed"; exit 1; }'
-        in text
-    )
     assert "|| true" not in _extract_sh("_versioned_mark_complete", text)
     update = _extract_sh("do_update", text)
     guard = update.index("if _guard_published_slot; then")
     assert guard < update.index("_write_update_marker\n")
     assert guard < update.index('_update_lifecycle_drain_stop "')
+    completion_match = re.search(
+        r"(?ms)^    _update_complete_candidate\(\) \{.*?^    \}", update,
+    )
+    assert completion_match is not None
+    completion = completion_match.group()
+    assert "_payload_unchanged_since_admission source-only || return $?" in completion
+    assert "_versioned_mark_complete || return $?" in completion
     install = _extract_sh("do_install", text)
     assert install.index("if _guard_published_slot; then") < install.index("_install_slot_build\n")
     # Post-build source verification precedes every publication/activation.
-    for body, verify in (
-        (install, "    _payload_unchanged_since_admission || exit 1\n"),
-        (update, "if ! _update_core || ! _payload_unchanged_since_admission; then\n"),
-    ):
-        assert body.index(verify) < min(
-            body.index("_versioned_mark_complete ||"),
-            body.index("_versioned_activate ||"),
-            body.rindex("_write_deploy_manifest\n"),
-        )
+    assert install.index("    _payload_unchanged_since_admission || exit 1\n") < min(
+        install.index("_versioned_mark_complete ||"),
+        install.index("_versioned_activate ||"),
+        install.rindex("_write_deploy_manifest\n"),
+    )
+    verify = "if ! _update_core || ! _payload_unchanged_since_admission || ! _update_complete_candidate; then"
+    assert update.index(verify) < min(
+        update.index("_versioned_activate ||"), update.rindex("_write_deploy_manifest\n"),
+    )
 
 
 @pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
