@@ -769,6 +769,25 @@ _Pending review of this plan._
   so no new provisioning clean-room lane applies. Current-head hosted normal
   execution, repeat, latest required CI, genuine review and actual merge remain
   owed before Phase4.
+- The complete seventh25-file group now passes716 cases with5 existing skips
+  in272.55 pytest seconds,282.05 including cleanup. This is below the existing
+  300-second deadline but still misses the240-second margin target; it is not
+  whole-plugin qualification.
+- Diagnose the missing current CI rather than assuming queue delay: the PR is
+  conflicting against advancing dev. Protect all eighteen owned commits with
+  a backup, consolidate their diff after successive replay conflicts, and
+  reconcile once onto dev027887e06949. Preserve the incoming stamp/provision
+  declaration helper, native Bash environment and quoted-argument proof along
+  with the owned retention guard and native-launcher refusals. Regenerate the
+  one merged Bridge human-output declaration from canonical source.
+  Range-diff retains the owned functional changes; the only disappearing
+  vision hunk is now already present upstream.
+- All13 install contracts, whole-repository F/E9, module ceilings and
+  transitive changefile coverage pass. The complete reconciled installer-guard
+  and generator selection passes235 cases with14 existing platform skips in
+  87.56 seconds. Predecessor894's hosted normal run remains in progress and is
+  retained as predecessor evidence only; fresh-head required CI and repeated
+  normal acceptance still precede merge.
 
 ### 2026-10-17 - Keep cold installer cleanup within the existing lifecycle budget
 - The fifth normal group reproduces a cold direct-hook failure: stamping
