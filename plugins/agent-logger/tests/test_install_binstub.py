@@ -9,6 +9,8 @@ import runpy
 import shutil
 import subprocess
 import sys
+import sysconfig
+import venv
 from importlib import metadata
 from pathlib import Path
 
@@ -99,16 +101,23 @@ result = subprocess.run(
 )
 site = Path(result.stdout.strip())
 assert site.resolve().is_relative_to(root.resolve())
-if 'setuptools>=83.0.0' in args:
-    source = fixture / 'setuptools'
-elif 'pyyaml>=6.0' in args:
-    source = fixture / 'PyYAML'
-else:
-    sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
-    assert len(sources) == 1, args
-    project = sources[0]
+
+def install_local(project, installed):
+    project = project.resolve()
     assert project.resolve().is_relative_to(root.resolve())
-    metadata = tomllib.loads((project / 'pyproject.toml').read_text())['project']
+    if project in installed:
+        return
+    installed.add(project)
+    data = tomllib.loads((project / 'pyproject.toml').read_text())
+    metadata = data['project']
+    local_sources = data.get('tool', {{}}).get('uv', {{}}).get('sources', {{}})
+    for requirement in metadata.get('dependencies', []):
+        match = re.match(r'[A-Za-z0-9][A-Za-z0-9._-]*', requirement)
+        assert match is not None, requirement
+        dependency = local_sources.get(match.group())
+        if dependency is not None:
+            assert isinstance(dependency, dict) and isinstance(dependency.get('path'), str)
+            install_local(project / dependency['path'], installed)
     name = metadata['name']
     version = metadata['version']
     source = project / 'src'
@@ -116,11 +125,20 @@ else:
     info = site / (name.replace('-', '_') + '-' + version + '.dist-info')
     info.mkdir(exist_ok=True)
     (info / 'METADATA').write_text('Metadata-Version: 2.1\\nName: ' + name + '\\nVersion: ' + version + '\\n')
+    shutil.copytree(source, site, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
     if name == 'agent-logger' and os.name != 'nt':
         launcher = python.parent / 'agent-logger'
         launcher.write_text('#!' + str(python) + '\\nfrom agent_logger.__main__ import main\\nraise SystemExit(main())\\n')
         launcher.chmod(0o755)
-shutil.copytree(source, site, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
+
+if 'setuptools>=83.0.0' in args:
+    shutil.copytree(fixture / 'setuptools', site, dirs_exist_ok=True)
+elif 'pyyaml>=6.0' in args:
+    shutil.copytree(fixture / 'PyYAML', site, dirs_exist_ok=True)
+else:
+    sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
+    assert len(sources) == 1, args
+    install_local(sources[0], set())
 with (fixture / 'installs.jsonl').open('a') as log:
     log.write(json.dumps(args) + '\\n')
 """,
@@ -316,6 +334,55 @@ def test_release_payload_materializes_activation_closure(tmp_path: Path) -> None
     lease = payload / "libs" / "single-instance-lease"
     assert (lease / "pyproject.toml").is_file()
     assert (lease / "src" / "single_instance_lease" / "operation.py").is_file()
+
+
+@pytest.mark.guard
+def test_offline_uv_installs_transitive_local_sources(tmp_path: Path) -> None:
+    for lib in (
+        "plugin-activation", "dropin-registry", "plugin-resolve", "single-instance-lease",
+    ):
+        shutil.copytree(
+            _PLUGIN_ROOT.parents[1] / "libs" / lib,
+            tmp_path / "libs" / lib,
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "tests"),
+        )
+    env = _isolated_install_env(tmp_path / "home")
+    _offline_uv(tmp_path, env)
+    uv = shutil.which("uv", path=env["PATH"])
+    assert uv is not None
+    runtime = tmp_path / "runtime"
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(runtime)
+    site = Path(sysconfig.get_path(
+        "purelib", vars={"base": str(runtime), "platbase": str(runtime)},
+    ))
+    shutil.copytree(tmp_path / "offline-uv" / "PyYAML", site, dirs_exist_ok=True)
+    python = (
+        runtime / "Scripts" / "python.exe" if os.name == "nt" else runtime / "bin" / "python"
+    )
+    commands = [
+        [
+            uv, "pip", "install", "--python", str(python), "--reinstall", "--quiet",
+            "--exclude-newer", "2000-01-01T00:00:00Z",
+            str(tmp_path / "libs" / "plugin-activation"),
+        ],
+        [
+            str(python), "-I", "-c",
+            "import json, plugin_activation, single_instance_lease;"
+            "print(json.dumps([plugin_activation.__file__,"
+            "plugin_activation.preservation.__file__, single_instance_lease.__file__,"
+            "single_instance_lease.operation.__file__]))",
+        ],
+    ]
+    for command in commands:
+        result = subprocess.run(
+            command, env=env, capture_output=True, text=True, timeout=10,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert all(
+        Path(module).is_relative_to(runtime) for module in json.loads(result.stdout)
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")

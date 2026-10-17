@@ -1042,3 +1042,27 @@ achieved by rearranging today's combined installer invocations.
   performance owner. No deadline increase, omitted coverage, competing
   constructor, retry waiver or installed update is authorized. Current-head
   review/CI, native budget closure and the parent running-state gate remain open.
+
+### 2026-10-16 - Offline package-effect closure corrected
+- The next hosted Logger run reached the snapshot-only CLI invocation and
+  reported `ModuleNotFoundError: single_instance_lease`; 482 other cases
+  passed with twenty-nine platform skips. This confirms a second fixture
+  defect, not a production UV dependency-resolution failure: the offline
+  double copied only each explicitly requested project's sources, ignoring
+  its declared local transitive dependencies.
+- The double now copies the declared local runtime dependency closure, with
+  fixture-root bounds and cycle protection. Real canonical package code,
+  constructor, admission, health, snapshot-only invocation and existing
+  assertions remain intact. No production installation loop was changed.
+- A focused native regression constructs a real fresh venv without pip,
+  invokes the actual offline-UV executable for plugin-activation and verifies
+  isolated imports and installed origins for activation, preservation, lease
+  and operation. It and the materialization regression pass in 49.09 seconds
+  combined under unchanged thirty-second item and 300-second group limits.
+  The first broader regression shape exceeded its item cap; reduced only its
+  redundant fixture/launcher preparation, not the package-effect/import checks.
+- The earlier Windows first-use deadline evidence does not prove the later
+  import succeeds; hosted end-to-end verification must cover that separately.
+  Existing native budget and running-state obligations remain open. The
+  preceding exact-head Copilot review reported no open issues, but the next
+  source head still owes its own review and CI.
