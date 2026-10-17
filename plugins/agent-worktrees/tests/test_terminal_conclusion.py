@@ -1325,6 +1325,79 @@ def test_reused_pid_does_not_keep_a_stale_lifecycle_lock(
         lock.release()
 
 
+def _stale_lock_with_guard_exit_cost(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from agent_worktrees import finalize_lock
+
+    path = tmp_path / ".finalize.lock"
+    path.write_text("123:111:token", encoding="utf-8")
+    monkeypatch.setattr(finalize_lock.locks, "pid_alive", lambda _pid: True)
+    monkeypatch.setattr(finalize_lock.locks, "process_start_time", lambda _pid: "222")
+    clock, entered = [0.0], []
+    real_time, real_guard = finalize_lock.time, tracking._RecordLock
+    monkeypatch.setattr(finalize_lock, "time", types.SimpleNamespace(
+        monotonic=lambda: clock[0], time=real_time.time, sleep=real_time.sleep,
+    ))
+
+    @contextmanager
+    def guard(*args, **kwargs):
+        try:
+            with real_guard(*args, **kwargs):
+                entered.append(args[0])
+                yield
+        finally:
+            clock[0] += 0.2
+
+    monkeypatch.setattr(tracking, "_RecordLock", guard)
+    return finalize_lock.FinalizeLock(path, timeout=0.1, stale_after=3600), entered, clock
+
+
+def test_stale_pid_claim_completes_under_original_guard_before_exit_cost(tmp_path, monkeypatch):
+    lock, entered, _ = _stale_lock_with_guard_exit_cost(tmp_path, monkeypatch)
+    try:
+        lock.acquire()
+        assert lock.held
+        assert lock.lock_path.read_text(encoding="utf-8") == lock.token
+        assert entered == [lock.guard_path]
+    finally:
+        lock.release()
+
+
+def test_stale_pid_claim_never_overwrites_reappearing_exact_token(tmp_path, monkeypatch):
+    lock, _, _ = _stale_lock_with_guard_exit_cost(tmp_path, monkeypatch)
+    original_unlink = Path.unlink
+    foreign = "999:222:foreign-token"
+
+    def replace_after_unlink(path, *args, **kwargs):
+        original_unlink(path, *args, **kwargs)
+        if path == lock.lock_path:
+            path.write_text(foreign, encoding="utf-8")
+
+    monkeypatch.setattr(Path, "unlink", replace_after_unlink)
+    with pytest.raises(TimeoutError):
+        lock.acquire()
+    assert not lock.held
+    assert lock.lock_path.read_text(encoding="utf-8") == foreign
+
+
+def test_stale_pid_claim_does_not_discharge_after_own_deadline(tmp_path, monkeypatch):
+    from agent_worktrees import finalize_lock
+
+    lock, _, clock = _stale_lock_with_guard_exit_cost(tmp_path, monkeypatch)
+    before = lock.lock_path.read_bytes()
+
+    def slow_owner_probe(pid):
+        if pid == 123:
+            clock[0] = 0.2
+        return "222"
+
+    monkeypatch.setattr(finalize_lock.locks, "process_start_time", slow_owner_probe)
+    with pytest.raises(TimeoutError):
+        lock.acquire()
+    assert not lock.held
+    assert lock.lock_path.read_bytes() == before
+
+
 def _pair_sibling(
     tmp_path,
     monkeypatch,
@@ -1485,6 +1558,414 @@ class TestReciprocalDisposal:
         assert sibling_record.kind == "bridge"
         assert sibling_record.status == "complete"
         assert not sibling_record.is_paired
+
+    @pytest.mark.parametrize("blocker", [None, "dirty", "live", "receipt", "record", "open-pr", "effort"])
+    def test_pair_progress_recovers_crash_after_sibling_unlink(self, tmp_path, monkeypatch, blocker):
+        sibling, sibling_path, sibling_worktree = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tracking.save_record
+
+        def crash_before_primary_unlink(record, path=None, **kwargs):
+            if path == record_path and not record.is_paired:
+                raise RuntimeError("injected crash after sibling publication")
+            return original(record, path, **kwargs)
+
+        monkeypatch.setattr(tracking, "save_record", crash_before_primary_unlink)
+        with pytest.raises(RuntimeError, match="injected crash"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        assert not tracking.load_record(sibling_path).is_paired
+        assert tracking.load_record(record_path).is_paired
+        monkeypatch.setattr(tracking, "save_record", original)
+        if blocker == "dirty":
+            (sibling_worktree / "valuable.txt").write_text("keep", encoding="utf-8")
+        elif blocker == "live":
+            monkeypatch.setattr(sessions, "has_mux_session", lambda identity: identity == sibling.worktree_id)
+        elif blocker == "receipt":
+            sibling_path.with_suffix(".terminal-pair.json").write_text("{}", encoding="utf-8")
+        elif blocker in {"record", "open-pr", "effort"}:
+            changed = tracking.load_record(sibling_path)
+            if blocker == "record":
+                changed.branch = "worktree/another-allocation"
+            elif blocker == "open-pr":
+                changed.pr = tracking.PRRecord(state="open", number=7, branch="feature/example")
+            else:
+                changed.follow_up = True
+            original(changed, sibling_path)
+        result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                           reservation_key="dispatch-task:task-1:1")
+        assert result["managed_gc_eligible"] is (blocker is None)
+        assert tracking.load_record(record_path).is_paired is (blocker is not None)
+
+    def test_pair_progress_blocks_native_gc_until_primary_unlink(self, tmp_path, monkeypatch):
+        from agent_worktrees import reap_cli
+
+        project_config_loader = tc.cfg.load_project_config
+        sibling, sibling_path, sibling_worktree = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tracking.save_record
+
+        def crash_primary(record, path=None, **kwargs):
+            if path == record_path and not record.is_paired:
+                raise RuntimeError("primary unlink interrupted")
+            return original(record, path, **kwargs)
+
+        monkeypatch.setattr(tracking, "save_record", crash_primary)
+        with pytest.raises(RuntimeError, match="primary unlink"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        monkeypatch.setattr(tracking, "save_record", original)
+        receipt = sibling_path.with_suffix(".terminal-pair.json")
+        before = record_path.read_bytes(), sibling_path.read_bytes(), receipt.read_bytes()
+        sibling_repo = types.SimpleNamespace(
+            anchor=str(tmp_path / "knowledge-proj-anchor"),
+            remote="origin", default_branch="main",
+        )
+        (tc.cfg.project_dir("knowledge-proj") / "config.yaml").write_text(json.dumps({
+            "repo_name": "knowledge-proj", "machine": "host",
+            "repos": {"knowledge-proj": {
+                "anchor": sibling_repo.anchor, "default_branch": "main",
+            }},
+        }), encoding="utf-8")
+        monkeypatch.setattr(tc.cfg, "load_project_config", project_config_loader)
+        removed, reasons = reap_cli._remove_managed_worktree(
+            tracking.load_record(sibling_path), sibling_repo, sibling_path.parent,
+        )
+        assert not removed and any("terminal-pair" in reason for reason in reasons)
+        assert sibling_worktree.exists()
+        assert (record_path.read_bytes(), sibling_path.read_bytes(), receipt.read_bytes()) == before
+        result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                           reservation_key="dispatch-task:task-1:1")
+        assert result["managed_gc_eligible"]
+        primary_removed, primary_reasons = reap_cli._remove_managed_worktree(
+            tracking.load_record(record_path), repo, record_path.parent,
+        )
+        assert not primary_removed and any("terminal-pair" in reason for reason in primary_reasons)
+        assert record_path.exists()
+        removed, reasons = reap_cli._remove_managed_worktree(
+            tracking.load_record(sibling_path), sibling_repo, sibling_path.parent,
+        )
+        assert removed and not reasons
+        assert not sibling_path.exists() and not receipt.exists()
+
+
+    @pytest.mark.parametrize("extra", [
+        {1: "non-string"}, {None: "null-key"},
+        {"metadata": {1: "integer", "1": "string"}},
+        {"metadata": [{True: "boolean-key"}]},
+    ], ids=["integer", "null", "nested-collision", "nested-list"])
+    def test_pair_receipt_non_string_keys_fail_closed(self, tmp_path, extra):
+        from agent_worktrees import reap_cli
+        from agent_worktrees import terminal_pair_progress as progress
+
+        primary = tracking.create_new_record(
+            "primary", "worktree/primary", str(tmp_path / "primary"), "demo", "host",
+            "windows", tmp_path / "demo" / "worktrees",
+        )
+        sibling = tracking.create_new_record(
+            "sibling", "worktree/sibling", str(tmp_path / "sibling"), "knowledge", "host",
+            "windows", tmp_path / "knowledge" / "worktrees",
+        )
+        for record, role, project, target in (
+            (primary, "harness", "knowledge", "sibling"),
+            (sibling, "knowledge", "demo", "primary"),
+        ):
+            record.owner, record.kind, record.status, record.origin = "dispatcher", "bridge", "complete", "delegate"
+            record.pair_id, record.pair_role, record.pair_kind = "pair", role, "worktree"
+            record.pair_ref = tracking.format_claim_ref("host", project, target)
+            tracking.save_record(record, record.yaml_path)
+        paired = sibling.yaml_path.read_bytes()
+        document = yaml.safe_load(paired)
+        sibling.yaml_path.write_text(yaml.safe_dump({**document, **extra}), encoding="utf-8")
+        before = primary.yaml_path.read_bytes(), sibling.yaml_path.read_bytes()
+        with pytest.raises(ValueError, match="string keys"):
+            progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
+        assert (primary.yaml_path.read_bytes(), sibling.yaml_path.read_bytes()) == before
+        assert not progress.receipt_path(sibling.yaml_path).exists()
+        assert not progress.receipt_path(primary.yaml_path).exists()
+        sibling.yaml_path.write_bytes(paired)
+        progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
+        for record in (primary, sibling):
+            for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+                setattr(record, field, None)
+            tracking.save_record(record, record.yaml_path)
+        document = yaml.safe_load(sibling.yaml_path.read_text(encoding="utf-8"))
+        sibling.yaml_path.write_text(yaml.safe_dump({**document, **extra}), encoding="utf-8")
+        paths = (primary.yaml_path, sibling.yaml_path, progress.receipt_path(primary.yaml_path),
+                 progress.receipt_path(sibling.yaml_path))
+        before = [path.read_bytes() for path in paths]
+        assert progress.gc_preservation_reason(sibling.yaml_path) == "terminal-pair-receipt-unverified"
+        removed, reasons = reap_cli._remove_managed_worktree(
+            sibling, types.SimpleNamespace(), sibling.yaml_path.parent,
+        )
+        assert not removed and reasons == ["terminal-pair-receipt-unverified"]
+        assert progress.reciprocal_snapshot(primary, sibling, sibling.yaml_path) is None
+        assert [path.read_bytes() for path in paths] == before
+
+    @pytest.mark.parametrize("damaged", ["primary", "sibling", "receipt"])
+    def test_pair_invalid_utf8_evidence_is_already_fail_closed(self, tmp_path, damaged):
+        from dataclasses import replace
+        from agent_worktrees import reap_cli
+        from agent_worktrees import terminal_pair_progress as progress
+
+        primary = tracking.create_new_record(
+            "primary", "worktree/primary", str(tmp_path / "primary"), "demo", "host",
+            "windows", tmp_path / "demo" / "worktrees",
+        )
+        sibling = tracking.create_new_record(
+            "sibling", "worktree/sibling", str(tmp_path / "sibling"), "knowledge", "host",
+            "windows", tmp_path / "knowledge" / "worktrees",
+        )
+        for record, role, project, target in (
+            (primary, "harness", "knowledge", "sibling"),
+            (sibling, "knowledge", "demo", "primary"),
+        ):
+            record.owner, record.kind, record.status, record.origin = "dispatcher", "bridge", "complete", "delegate"
+            record.pair_id, record.pair_role, record.pair_kind = "pair", role, "worktree"
+            record.pair_ref = tracking.format_claim_ref("host", project, target)
+            tracking.save_record(record, record.yaml_path)
+        progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
+        paired_primary = replace(primary)
+        for record in (primary, sibling):
+            for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+                setattr(record, field, None)
+            tracking.save_record(record, record.yaml_path)
+        paths = (primary.yaml_path, sibling.yaml_path, progress.receipt_path(sibling.yaml_path))
+        paths[("primary", "sibling", "receipt").index(damaged)].write_bytes(b"\xff")
+        before = [path.read_bytes() for path in paths]
+        assert progress.gc_preservation_reason(sibling.yaml_path) == "terminal-pair-receipt-unverified"
+        removed, reasons = reap_cli._remove_managed_worktree(
+            sibling, types.SimpleNamespace(), sibling.yaml_path.parent,
+        )
+        assert not removed and reasons == ["terminal-pair-receipt-unverified"]
+        if damaged != "primary":
+            assert progress.reciprocal_snapshot(paired_primary, sibling, sibling.yaml_path) is None
+        assert [path.read_bytes() for path in paths] == before
+
+    @pytest.mark.parametrize("changed_half", ["primary", "sibling"])
+    def test_pair_gc_readback_detects_change_during_identity_loading(self, tmp_path, monkeypatch, changed_half):
+        from agent_worktrees import reap_cli
+
+        sibling, sibling_path, sibling_worktree = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                           reservation_key="dispatch-task:task-1:1")
+        assert result["managed_gc_eligible"]
+        current = tracking.load_record(sibling_path)
+        paths = (record_path, sibling_path, record_path.with_suffix(".terminal-pair.json"),
+                 sibling_path.with_suffix(".terminal-pair.json"))
+        before = {path: path.read_bytes() for path in paths}
+        target = record_path if changed_half == "primary" else sibling_path
+        changed = before[target] + b"\nfixture_metadata: changed\n"
+        original = tracking.load_record
+
+        def mutate_after_loading(path, *args, **kwargs):
+            record = original(path, *args, **kwargs)
+            if path == target:
+                target.write_bytes(changed)
+            return record
+
+        monkeypatch.setattr(tracking, "load_record", mutate_after_loading)
+        removed, reasons = reap_cli._remove_managed_worktree(
+            current, repo, sibling_path.parent,
+        )
+        assert not removed and reasons == ["terminal-pair-record-changed"]
+        assert sibling_worktree.exists()
+        assert {path: path.read_bytes() for path in paths} == {**before, target: changed}
+
+    def test_pair_progress_interrupted_receipt_publication_keeps_reciprocity(self, tmp_path, monkeypatch):
+        sibling, sibling_path, _ = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tc.terminal_pair_progress.publish
+
+        def crash(*args, **kwargs):
+            raise RuntimeError("injected receipt publication failure")
+
+        monkeypatch.setattr(tc.terminal_pair_progress, "publish", crash)
+        with pytest.raises(RuntimeError, match="injected receipt"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        assert tracking.load_record(sibling_path).is_paired
+        assert tracking.load_record(record_path).is_paired
+        monkeypatch.setattr(tc.terminal_pair_progress, "publish", original)
+        result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                           reservation_key="dispatch-task:task-1:1")
+        assert result["managed_gc_eligible"] is True
+
+    def test_pair_progress_preserves_malformed_receipt_fields(self, tmp_path, monkeypatch):
+        sibling, sibling_path, _ = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tracking.save_record
+
+        def crash(record, path=None, **kwargs):
+            if path == record_path and not record.is_paired:
+                raise RuntimeError("injected partial pair")
+            return original(record, path, **kwargs)
+
+        monkeypatch.setattr(tracking, "save_record", crash)
+        with pytest.raises(RuntimeError, match="injected partial pair"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        monkeypatch.setattr(tracking, "save_record", original)
+        receipt_path = sibling_path.with_suffix(".terminal-pair.json")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        primary_before = record_path.read_bytes()
+        sibling_before = sibling_path.read_bytes()
+        for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+            for value in (1, "", " ", None, [], {}):
+                malformed = {**receipt, "sibling_pair": {**receipt["sibling_pair"], field: value}}
+                receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+                result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                                   reservation_key="dispatch-task:task-1:1")
+                assert result["reason"] == "pair-sibling-unresolved"
+                assert result["managed_gc_eligible"] is False
+                assert record_path.read_bytes() == primary_before
+                assert sibling_path.read_bytes() == sibling_before
+
+    def test_pair_progress_rejects_raw_pair_keys_after_unlink(self, tmp_path, monkeypatch):
+        sibling, sibling_path, _ = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tracking.save_record
+
+        def crash(record, path=None, **kwargs):
+            if path == record_path and not record.is_paired:
+                raise RuntimeError("injected partial pair")
+            return original(record, path, **kwargs)
+
+        monkeypatch.setattr(tracking, "save_record", crash)
+        with pytest.raises(RuntimeError, match="injected partial pair"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        monkeypatch.setattr(tracking, "save_record", original)
+        receipt_path = sibling_path.with_suffix(".terminal-pair.json")
+        primary_before = record_path.read_bytes()
+        sibling_before = sibling_path.read_text(encoding="utf-8")
+        receipt_before = receipt_path.read_bytes()
+        assert not any(field in yaml.safe_load(sibling_before)
+                       for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"))
+        for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+            for value in (False, "", None, 0, 1, "unsupported", [], {}):
+                sibling_path.write_text(
+                    sibling_before + f"{field}: {json.dumps(value)}\n", encoding="utf-8",
+                )
+                modified_before = sibling_path.read_bytes()
+                result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                                   reservation_key="dispatch-task:task-1:1")
+                assert result["reason"] == "pair-sibling-unresolved"
+                assert result["managed_gc_eligible"] is False
+                assert record_path.read_bytes() == primary_before
+                assert sibling_path.read_bytes() == modified_before
+                assert receipt_path.read_bytes() == receipt_before
+
+    @pytest.mark.parametrize("field", ["pair_id", "pair_role", "pair_ref", "pair_kind"])
+    @pytest.mark.parametrize("value", [False, "", None, 0, 1, "unsupported", [], {}],
+                             ids=["false", "empty", "null", "zero", "one", "text", "list", "dict"])
+    @pytest.mark.parametrize("mutation_at", ["early", "locked"])
+    def test_raw_pair_shape_rejected_before_native_or_liveness(
+        self, tmp_path, monkeypatch, field, value, mutation_at,
+    ):
+        from agent_worktrees import terminal_pair_progress
+
+        primary = tracking.create_new_record(
+            "primary", "worktree/primary", str(tmp_path / "primary"), "demo", "host",
+            "windows", tmp_path / "demo" / "worktrees",
+        )
+        sibling = tracking.create_new_record(
+            "sibling", "worktree/sibling", str(tmp_path / "sibling"), "knowledge-proj", "host",
+            "windows", tmp_path / "knowledge-proj" / "worktrees",
+        )
+        primary.origin = "delegate"
+        primary.dispatch_attempt = tracking.DispatchAttempt(
+            task_id="task-1", reservation_key="dispatch-task:task-1:1", attempt=1,
+            driver="dispatcher", supervisor="supervisor-1", creator_machine="host",
+        )
+        primary.owner = sibling.owner = "dispatcher"
+        sibling.kind, sibling.status, sibling.origin = "bridge", "complete", "delegate"
+        for record, role, project, target in (
+            (primary, "harness", "knowledge-proj", "sibling"),
+            (sibling, "knowledge", "demo", "primary"),
+        ):
+            record.pair_id, record.pair_role, record.pair_kind = "pair1", role, "worktree"
+            record.pair_ref = tracking.format_claim_ref("host", project, target)
+            tracking.save_record(record, record.yaml_path)
+        monkeypatch.setattr(tc.cfg, "project_dir", lambda name=None: tmp_path / str(name))
+        assert tc._reciprocal_pair_valid(primary, sibling, sibling.yaml_path)
+        terminal_pair_progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
+        for name in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+            setattr(sibling, name, None)
+        tracking.save_record(sibling, sibling.yaml_path)
+        assert tc._resolve_pair_sibling(primary) is not None
+        receipt = sibling.yaml_path.with_suffix(".terminal-pair.json")
+        before = {}
+
+        def inject():
+            with sibling.yaml_path.open("a", encoding="utf-8") as out:
+                out.write(f"{field}: {json.dumps(value)}\n")
+            before.update({path: path.read_bytes()
+                           for path in (primary.yaml_path, sibling.yaml_path, receipt)})
+
+        if mutation_at == "early":
+            inject()
+        else:
+            original_acquire = tc.finalize.FinalizeLock.acquire
+
+            def acquire(lock):
+                original_acquire(lock)
+                inject()
+
+            monkeypatch.setattr(tc.finalize.FinalizeLock, "acquire", acquire)
+
+        def forbidden(*args, **kwargs):
+            pytest.fail("untrusted raw pair shape reached native/liveness work")
+
+        monkeypatch.setattr(tc, "_session_is_live", forbidden)
+        monkeypatch.setattr(git_ops, "git", forbidden)
+        repo = types.SimpleNamespace(worktree_root=str(tmp_path), anchor=str(tmp_path),
+                                     remote="origin", default_branch="main")
+        result = _conclude(
+            primary.yaml_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+            reservation_key="dispatch-task:task-1:1",
+        )
+        assert result["reason"] == "pair-sibling-unresolved"
+        assert result["managed_gc_eligible"] is False
+        assert len(before) == 3
+        assert {path: path.read_bytes() for path in before} == before
 
     def test_blocks_on_sibling_with_unpushed_commits(self, tmp_path, monkeypatch):
         """A sibling with no porcelain dirtiness but local-only commits ahead

@@ -43,6 +43,7 @@ import httpx
 
 from .bridge_events import BridgeSubscription, SupervisorEventWake
 from .client import DispatchClient, DispatchError
+from .client_cleanup_recovery import HostBoundConclusionClient
 from .loop_governance import LoopGovernance
 from .queue import SpawnState, Status
 from .spawn_factories import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -117,6 +118,7 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
     _bounded_component_failure,
     _cleanup_envelope_state,
     _component_retry_meta,
+    _conclusion_retry_due,
     _conclusion_retry_meta,
     _conclusion_retry_payload,
     _conclusion_state,
@@ -225,6 +227,7 @@ class Supervisor(RestrictedStartupMixin):
             from . import remote_dispatch
 
             machine = remote_dispatch.local_machine()
+        self._conclusion_client = HostBoundConclusionClient(client, machine)
         lane_identity = json.dumps(
             {
                 "machine": machine,
@@ -794,7 +797,7 @@ class Supervisor(RestrictedStartupMixin):
             )
             if target_missing is True:
                 try:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         key,
                         conclusion_state=_CONCLUSION_COMPLETE,
                         conclusion_detail=json.dumps(
@@ -1479,6 +1482,17 @@ class Supervisor(RestrictedStartupMixin):
     _hold_pending_cleanup = staticmethod(_hold_pending_cleanup)
     _cleanup_envelope_state = staticmethod(_cleanup_envelope_state)
 
+    @staticmethod
+    def _validated_cleanup_claim(claim: dict) -> tuple[str, dict]:
+        token, reservation = claim.get("claim_token"), claim.get("reservation")
+        if not isinstance(token, str) or not token.strip():
+            log.warning("cleanup claim protocol error: missing or malformed token")
+            raise DispatchError(426, "cleanup claim lacks a valid token")
+        if not isinstance(reservation, dict):
+            log.warning("cleanup claim protocol error: missing reservation snapshot")
+            raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
+        return token, reservation
+
     def release_requested_bodies(self, *, now: float | None = None) -> int:
         """Retire proven-absent bodies and preserve cleanup obligations."""
         now = time.time() if now is None else now
@@ -1506,6 +1520,20 @@ class Supervisor(RestrictedStartupMixin):
                 continue
             body_already_released = res.get("state") in SpawnState.RELEASABLE
             can_release = body_already_released
+            claim_token: str | None = None
+            if body_already_released:
+                if not _conclusion_retry_due(res, now):
+                    continue
+                try:
+                    claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
+                    if not claim.get("claimed"):
+                        continue
+                    claim_token, claimed_reservation = self._validated_cleanup_claim(claim)
+                    self._conclusion_client.validate_spawn_conclusion_claim(res["key"], claim_token)
+                    res = claimed_reservation
+                except DispatchError:
+                    log.exception("failed to claim or validate cleanup retry for %s", res["key"])
+                    continue
             conclusion_session: str | None = None
             released_target_dir: str | None = None
             retry_payload = self._conclusion_retry_payload(res)
@@ -1514,7 +1542,6 @@ class Supervisor(RestrictedStartupMixin):
                 conclusion_session = str(recorded_acp)
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             local_sid = _parse_local_body_handle(res.get("session_handle"))
-            claim_token: str | None = None
             session_end = retry_payload.get("session_end")
             session_end_pending = (
                 isinstance(session_end, dict) and session_end.get("state") == _CONCLUSION_PENDING
@@ -1545,16 +1572,9 @@ class Supervisor(RestrictedStartupMixin):
                 if next_attempt_at > now:
                     continue
                 if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
-                    try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
-                    except DispatchError:
-                        continue
-                    if not claim.get("claimed"):
-                        continue
-                    claim_token = claim.get("claim_token")
                     held_payload = self._hold_pending_cleanup(retry_payload)
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             res["key"],
                             conclusion_state=_CONCLUSION_HELD,
                             conclusion_detail=json.dumps(
@@ -1566,27 +1586,6 @@ class Supervisor(RestrictedStartupMixin):
                         )
                     except DispatchError:
                         pass
-                    continue
-            if body_already_released and cleanup_envelope:
-                if not session_due and not worktree_due:
-                    continue
-                try:
-                    claim = self.client.claim_spawn_conclusion_retry(res["key"])
-                except DispatchError:
-                    log.exception(
-                        "failed to claim session cleanup retry for %s",
-                        res["key"],
-                    )
-                    continue
-                if not claim.get("claimed"):
-                    continue
-                claim_token = claim.get("claim_token")
-                try:
-                    self.client.validate_spawn_conclusion_claim(
-                        res["key"],
-                        claim_token,
-                    )
-                except DispatchError:
                     continue
             if session_due:
                 cleanup_sid = str(session_end.get("session_id") or local_sid or "")
@@ -1870,28 +1869,9 @@ class Supervisor(RestrictedStartupMixin):
                 }
                 conclusion_state = _CONCLUSION_HELD
             else:
-                if body_already_released and claim_token is None:
+                if body_already_released:
                     try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
-                    except DispatchError:
-                        log.exception(
-                            "failed to claim cleanup retry for %s",
-                            res["key"],
-                        )
-                        continue
-                    if not claim.get("claimed"):
-                        continue
-                    claim_token = claim.get("claim_token")
-                    try:
-                        self.client.validate_spawn_conclusion_claim(
-                            res["key"],
-                            claim_token,
-                        )
-                    except DispatchError:
-                        continue
-                elif body_already_released and claim_token is not None:
-                    try:
-                        self.client.validate_spawn_conclusion_claim(
+                        self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
                             claim_token,
                         )
@@ -1959,7 +1939,7 @@ class Supervisor(RestrictedStartupMixin):
                     detail_outcome,
                 )
                 if body_already_released:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         res["key"],
                         conclusion_state=conclusion_state,
                         conclusion_detail=conclusion_detail,
@@ -2240,7 +2220,7 @@ class Supervisor(RestrictedStartupMixin):
                         ),
                     }
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             reservation["key"],
                             conclusion_state=(
                                 _CONCLUSION_HELD
@@ -2264,7 +2244,7 @@ class Supervisor(RestrictedStartupMixin):
                     "next_attempt_at": 0,
                 }
                 try:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         reservation["key"],
                         conclusion_state=_CONCLUSION_PENDING,
                         conclusion_detail=json.dumps(
@@ -2298,7 +2278,7 @@ class Supervisor(RestrictedStartupMixin):
                         ),
                     }
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             reservation["key"],
                             conclusion_state=(
                                 _CONCLUSION_HELD
@@ -2374,6 +2354,11 @@ class Supervisor(RestrictedStartupMixin):
         )
         now = time.time()
         for res in reservations:
+            if (
+                res.get("release_requested")
+                and isinstance(self._conclusion_retry_payload(res).get("worktree_cleanup"), dict)
+            ):
+                continue
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -2421,7 +2406,7 @@ class Supervisor(RestrictedStartupMixin):
                         continue
                     if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         try:
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 conclusion_state=_CONCLUSION_HELD,
                                 conclusion_detail=res.get("conclusion_detail") or "{}",
@@ -2472,7 +2457,7 @@ class Supervisor(RestrictedStartupMixin):
                             else _CONCLUSION_PENDING
                         )
                         try:
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 conclusion_state=state,
                                 conclusion_detail=json.dumps(
@@ -2618,25 +2603,30 @@ class Supervisor(RestrictedStartupMixin):
                 if res.get("state") == SpawnState.SETTLED:
                     if not policy_applies or res.get("conclusion_state") != _CONCLUSION_PENDING:
                         continue
+                    if not _conclusion_retry_due(res, now):
+                        continue
+                    try:
+                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
+                        if not claim.get("claimed"):
+                            continue
+                        conclusion_claim_token, claimed = self._validated_cleanup_claim(claim)
+                        self._conclusion_client.validate_spawn_conclusion_claim(
+                            res["key"], conclusion_claim_token,
+                        )
+                        res = claimed
+                    except DispatchError:
+                        continue
                     prior_attempts, next_attempt_at = self._conclusion_retry_meta(res)
                     if next_attempt_at > now:
                         continue
                     if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         try:
-                            claim = self.client.claim_spawn_conclusion_retry(res["key"])
-                            if not claim.get("claimed"):
-                                continue
-                            claim_token = claim.get("claim_token")
-                            self.client.validate_spawn_conclusion_claim(
-                                res["key"],
-                                claim_token,
-                            )
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 detail=detail,
                                 conclusion_state=_CONCLUSION_HELD,
                                 conclusion_detail=res.get("conclusion_detail"),
-                                claim_token=claim_token,
+                                claim_token=conclusion_claim_token,
                             )
                         except DispatchError:
                             pass
@@ -2673,7 +2663,7 @@ class Supervisor(RestrictedStartupMixin):
                                     else _CONCLUSION_PENDING
                                 )
                                 try:
-                                    self.client.record_spawn_conclusion(
+                                    self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=state,
                                         conclusion_detail=json.dumps(
@@ -2706,7 +2696,7 @@ class Supervisor(RestrictedStartupMixin):
                                     else _CONCLUSION_PENDING
                                 )
                                 try:
-                                    self.client.record_spawn_conclusion(
+                                    self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=state,
                                         conclusion_detail=json.dumps(
@@ -2732,7 +2722,7 @@ class Supervisor(RestrictedStartupMixin):
                                     "same_owner_nudge": "delivered",
                                 }
                                 try:
-                                    res = self.client.record_spawn_conclusion(
+                                    res = self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=_CONCLUSION_PENDING,
                                         conclusion_detail=json.dumps(
@@ -2760,7 +2750,7 @@ class Supervisor(RestrictedStartupMixin):
                         continue
                 if policy_applies and conclusion_claim_token is None:
                     try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
+                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                     except DispatchError:
                         log.exception(
                             "failed to claim terminal cleanup retry for %s",
@@ -2769,12 +2759,14 @@ class Supervisor(RestrictedStartupMixin):
                         continue
                     if not claim.get("claimed"):
                         continue
-                    conclusion_claim_token = claim.get("claim_token")
                     try:
-                        self.client.validate_spawn_conclusion_claim(
+                        conclusion_claim_token, claimed = self._validated_cleanup_claim(claim)
+                        self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
                             conclusion_claim_token,
                         )
+                        res = claimed
+                        prior_attempts, _ = self._conclusion_retry_meta(res)
                     except DispatchError:
                         continue
                 outcome = (
@@ -2809,7 +2801,7 @@ class Supervisor(RestrictedStartupMixin):
                         separators=(",", ":"),
                     )
                     if conclusion_claim_token is not None:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             res["key"],
                             conclusion_state=conclusion_state,
                             conclusion_detail=encoded_conclusion,

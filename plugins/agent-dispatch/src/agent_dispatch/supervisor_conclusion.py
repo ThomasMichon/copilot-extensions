@@ -153,6 +153,8 @@ def _conclusion_state(outcome: dict) -> str:
         "removed",
         "already-removed",
     }:
+        if action in {"primed", "already-primed"} and outcome.get("managed_gc_eligible") is False:
+            return _CONCLUSION_PENDING
         return _CONCLUSION_COMPLETE
     if action == "failed" or reason in _TRANSIENT_CONCLUSION_REASONS:
         return _CONCLUSION_PENDING
@@ -193,3 +195,15 @@ def _conclusion_retry_meta(reservation: dict) -> tuple[int, float]:
     except (TypeError, ValueError):
         return 0, 0.0
     return attempts, next_at
+
+
+def _conclusion_retry_due(reservation: dict, now: float) -> bool:
+    payload = _conclusion_retry_payload(reservation)
+    if isinstance(payload.get("worktree_cleanup"), dict):
+        return any(
+            isinstance(payload.get(name), dict)
+            and payload[name].get("state") == _CONCLUSION_PENDING
+            and _component_retry_meta(payload[name])[1] <= now
+            for name in ("session_end", "worktree_cleanup")
+        )
+    return _conclusion_retry_meta(reservation)[1] <= now

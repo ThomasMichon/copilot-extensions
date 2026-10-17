@@ -943,6 +943,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             )
         sup = Supervisor(
             c,
+            machine=_registration_scope(args)[0],
             spawn_fn=spawn_fn,
             repo=repo,
             labels=args.label or None,

@@ -208,11 +208,64 @@ def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregat
     required, allowed_skips, digest = inventory.required_jobs(ROOT)
     assert {"guards + lint", "full - agent-worktrees", "archive sources (windows-latest)"} <= required
     assert {"agent-bridge", "agent-index", "Promotion snapshot gate"} <= required
+    assert {"agent-dispatch (shard 1/2)", "agent-dispatch (shard 2/2)"} <= required
+    assert "agent-dispatch" not in required
     assert any(name.startswith("fleet-manager (windows-latest,") for name in required)
     assert any(name.startswith("fleet-manager (ubuntu-latest,") for name in required)
     assert len(required) > 50
     assert len(allowed_skips) == 2
     assert len(digest) == 64
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing-shard", "matrix", "runner", "name", "output",
+    "collect-only", "filtered", "failure-masked",
+])
+def test_inventory_rejects_smoke_shard_recipe_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    text = workflow.read_text("utf-8")
+    if mutation == "missing-shard":
+        text = text.replace("('1/2', '2/2')", "('1/2',)")
+    elif mutation == "matrix":
+        text = text.replace("matrix: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}",
+                            "matrix: ${{ fromJson(needs.discover.outputs.smoke) }}")
+    elif mutation == "runner":
+        text = text.replace("format('--sub-suite-shard {0}', matrix.shard)", "''")
+    elif mutation == "name":
+        text = text.replace("format('{0} (shard {1})', matrix.plugin, matrix.shard)", "matrix.plugin")
+    elif mutation in ("collect-only", "filtered", "failure-masked"):
+        invocation = (
+            "run: python tools/run-plugin-tests.py ${{ matrix.plugin }} "
+            "${{ matrix.shard != '' && format('--sub-suite-shard {0}', matrix.shard) || '' }}"
+        )
+        suffix = {
+            "collect-only": " --collect-only",
+            "filtered": " -k selected_case",
+            "failure-masked": " || true",
+        }[mutation]
+        assert text.count(invocation) == 1
+        text = text.replace(invocation, invocation + suffix)
+    else:
+        text = text.replace("smoke_matrix: ${{ steps.set.outputs.smoke_matrix }}", "smoke_matrix: '[]'")
+    workflow.write_text(text, encoding="utf-8")
+    with pytest.raises(CandidateValidationError):
+        inventory.required_jobs(ROOT)
+
+
+@pytest.mark.parametrize("missing", ["agent-dispatch (shard 1/2)", "agent-dispatch (shard 2/2)"])
+def test_candidate_qualification_requires_each_smoke_shard(
+    backend: dict, monkeypatch: pytest.MonkeyPatch, missing: str,
+) -> None:
+    rows = {"agent-dispatch (shard 1/2)", "agent-dispatch (shard 2/2)"}
+    monkeypatch.setattr(qualification, "required_jobs", lambda root: (rows, set(), "e" * 64))
+    backend["jobs"] = [
+        {"id": index, "name": name, "status": "completed", "conclusion": "success"}
+        for index, name in enumerate(sorted(rows - {missing}), 1)
+    ]
+    with pytest.raises(workflows.VerificationError):
+        _qualify()
 
 
 def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(

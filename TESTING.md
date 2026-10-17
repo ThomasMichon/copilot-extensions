@@ -424,6 +424,12 @@ failure explicitly before starting later commands.
 `tools/test_installer_finalizers.py` exercises production cleanup and exclusive
 lock reacquisition in the same still-live Windows PowerShell host.
 
+The pre-commit hook runs staged guards in batches of 32 paths to stay within
+Windows child-command limits during large integrations. Every path is checked,
+later batches still run after a failure, and any failed batch blocks the commit.
+`python -m pytest -q tools/test_pre_commit_batches.py tools/test_hook_interpreter.py tools/test_check_large_files.py`
+exercises the real hook, spaced/flag-like paths, batch failures and existing guards.
+
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
 against the bundled `actions/github-script` runtime as well, download
@@ -462,6 +468,18 @@ python tools/run-plugin-tests.py --all                  # every plugin with a su
 python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.mark.guard checks
 python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
 ```
+
+Required CI runs Agent Dispatch as two `--sub-suite-shard 1/2` and
+`--sub-suite-shard 2/2` jobs under the unchanged 12-minute job deadline.
+Sharding assigns the existing sorted file-group sub-suites round-robin without
+changing their composition, containment limits, or test selection. Both shards
+must pass the required PR gate. The unsharded local command still runs the full
+suite sequentially. Candidate release qualification inventories both executed
+shard rows and requires the exact canonical runner line, rejecting appended
+collection/filter flags or shell failure masking. It refuses an unsupported
+matrix, invocation or shard recipe instead of silently narrowing the required
+portfolio. Sharding requires one named plugin and cannot combine with test-file,
+keyword, guard, or preparation-only filters; empty shards fail.
 
 For a focused lane, repeat `--test-file tests/test_name.py` with exactly one
 named plugin to avoid importing unrelated test modules. The selector accepts
