@@ -797,3 +797,29 @@ requested contract.
   passed. Further latency-sensitive validation is paused for a stable host
   window; temporal overlap with provisioning is not proven failure causality
   and grants neither a flake designation nor a validation waiver.
+
+- **Current complete cleanup consumer validation (PR #6542):** Resumed the
+  same preserved source candidate under coordinator ownership. The original
+  affected native clean-pair case passed within its unchanged item deadline.
+  All remaining reciprocal-pair cases then passed: 85 cases in 239.13 seconds,
+  with the settled clean-pair case excluded rather than counted twice.
+  Complete remaining terminal and launch-seed coverage passed 126 cases in
+  260.78 seconds. These disjoint contained runs cover both changed Worktrees
+  test files without raising item, suite or resource budgets.
+  Full changed Dispatch cleanup/ordinary-Bridge/conclusion files plus the
+  affected legacy-supervisor selector passed 254 cases in 165.92 seconds.
+  Shared lock and creation-request callers passed 48 cases with three platform
+  skips. Every invocation returned zero with containment and host-state guards
+  enabled; the earlier UNKNOWN timing and environment observations remain their
+  own recorded failures, not retroactively explained or called accepted flakes.
+  Current install contract, exact three changed source-module ceilings, F/E9
+  lint, headless guard, five-library vendor parity and effort structure pass.
+  The two pending review corrections preserve authoritative claimed retry
+  counts, positive stale-owner proof and all live/unknown/foreign ownership
+  refusals; raw reciprocal-shape rejection remains before native work and
+  repeated under lock. No business work is restarted and no held reservation
+  or production record is changed by this validation.
+  Proceed only through normal publication of this existing PR, fresh
+  resulting-head review, complete CI and the repository's merge profile.
+  Source merge remains separate from release, adopter operation and the
+  canonical recovery effort's full completion gate.
