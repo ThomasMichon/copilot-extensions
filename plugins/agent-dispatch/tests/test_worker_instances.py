@@ -119,6 +119,24 @@ def test_multiple_components_remain_composite_when_their_kinds_match():
     assert len(result["components"]) == 2
     assert all(component["kind"] == "supervised-lane" for component in result["components"])
 
+def test_component_metadata_preserves_supported_lane_scope_and_authored_label_order():
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    declaration = load_declaration({
+        "name": "scoped", "repos": "example/requests", "labels": ["zeta", "alpha"],
+    })
+    assert isinstance(declaration.repos, str)
+    assert declaration.labels == ("zeta", "alpha")
+    first = _component_metadata((declaration,), basis="source")
+    assert first == _component_metadata((declaration,), basis="source")
+    component, = first["components"]
+    assert component["repo_scope"] == "example/requests"
+    assert component["labels"] == ["zeta", "alpha"]
+    for unsupported in (["example/requests"], ("example/requests",)):
+        with pytest.raises(RegistrarError, match="lane string"):
+            load_declaration({"name": "invalid", "repos": unsupported, "labels": ["work"]})
+
 
 def test_unreadable_publication_never_projects_draft_components():
     receipt = create(activate=True)

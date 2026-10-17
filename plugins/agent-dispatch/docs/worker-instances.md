@@ -45,8 +45,10 @@ registration IDs. Discovery-error rows similarly contain no components.
 These additive fields let independent terminal and graphical consumers
 describe the same owning catalog without classifying sources from titles or
 reconstructing composed registrations. The Manager table shows Kind and its
-Details card lists the components. Existing IDs, edit revisions, form fields
-and activation semantics are unchanged.
+Details card lists the components. At standard terminal widths the secondary
+Kind column yields to the existing status, capacity, source and description
+columns; wider terminals show it alongside them. Existing IDs, edit revisions,
+form fields and activation semantics are unchanged.
 
 Descriptions, source attribution, validation, publication, capacity, effective
 disable overrides, and observed activity are separate facts. A recent local

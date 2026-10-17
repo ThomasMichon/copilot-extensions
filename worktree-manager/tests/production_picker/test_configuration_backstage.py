@@ -51,6 +51,10 @@ def test_workers_table_keeps_status_statistics_description_and_source_at_standar
     assert {column.key for column in fitted} == {
         "title", "enabled", "activity", "lanes", "provenance", "description",
     }
+    wide = TasksView(None)._fitted_columns(reg, 150)
+    assert {column.key for column in wide} == {
+        "title", "kind", "enabled", "activity", "lanes", "provenance", "description",
+    }
 
 
 def test_configuration_placement_is_additive_and_strict():

@@ -253,3 +253,20 @@ automation activation still require their applicable operational authorization.
   composite/publication checks and real-CLI first-touch projection assertions.
   Changed Python lint and the install-contract guard passed. No source/template
   activation, installed update or delivery claim is made.
+
+### 2026-10-17 - Catalog review and terminal compatibility correction
+
+- Current-head review returned Comment. Scope/container and label-order
+  suggestions were checked against the actual registrar: lane scope is a
+  validated string and labels are an ordered tuple. A new regression preserves
+  both supported contracts and rejects unsupported scope containers.
+- The additional component conversion is a bounded, in-memory projection,
+  without discovery, processes or network work; no cache or state/override
+  refactor was introduced without a demonstrated performance problem.
+- Required CI found that the secondary Kind column displaced Description at
+  standard width. Preserve all six existing columns at 118 columns and show
+  all seven at 150, including space for the existing dropped-column indicator.
+- The contained worker-instance suite passed 58 tests. The directly affected
+  Configuration backstage file passed 25 tests with one platform-specific
+  skip on Windows; changed Python lint passed. Updated-head review and
+  required CI remain prerequisites to merge.
