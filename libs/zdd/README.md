@@ -438,6 +438,8 @@ non-object payloads, non-finite values and oversized frames refuse explicitly.
 persist or include secret frames in exception values.
 Both native channel implementations refuse invalid read counts with
 `Refusal.SIZE` and non-byte writes with `Refusal.PROTOCOL`, before any I/O.
+Linux connection, acceptance, channel I/O and peer observation use native polling
+without the `FD_SETSIZE` ceiling; invalid descriptors remain explicit refusals.
 
 Native channels retain peer process custody independently of frame contents:
 

@@ -13,13 +13,30 @@ import threading
 from pathlib import Path
 
 from .diagnostics import process_start_time
-from .private_peer import PeerProcess
+from .private_peer import PeerProcess, _pidfd_exited
 from .private_protocol import Deadline, PeerIdentity, PrivateIPCError, Refusal, deadline_lock
 
 # Linux 6.5 added SO_PEERPIDFD. Numeric PID sampling cannot replace it:
 # an accepted socket may outlive its original peer after descriptor transfer.
 _SO_PEERPIDFD = 77
 _CREDENTIALS = struct.Struct("3i")
+
+
+def _poll_ready(
+    connection: socket.socket, *, write: bool, deadline: Deadline, peer: int = -1,
+) -> bool:
+    if connection.fileno() < 0:
+        raise PrivateIPCError(Refusal.CLOSED)
+    poller = select.poll()
+    poller.register(connection.fileno(), select.POLLOUT if write else select.POLLIN)
+    if peer >= 0:
+        poller.register(peer, select.POLLIN)
+    events = poller.poll(max(1, int(deadline.wait_slice() * 1000)))
+    if any(descriptor == peer for descriptor, _flags in events):
+        raise PrivateIPCError(Refusal.IDENTITY)
+    if any(flags & select.POLLNVAL for _descriptor, flags in events):
+        raise PrivateIPCError(Refusal.IO)
+    return bool(events)
 
 
 class UnixChannel:
@@ -66,19 +83,15 @@ class UnixChannel:
         deadline.remaining()
         if self._closed or self._pidfd < 0:
             raise PrivateIPCError(Refusal.CLOSED)
-        if select.select([self._pidfd], [], [], 0)[0]:
+        if _pidfd_exited(self._pidfd, 0):
             raise PrivateIPCError(Refusal.IDENTITY)
 
     def _wait(self, *, write: bool, deadline: Deadline) -> None:
         while True:
             self._check_alive(deadline)
-            reads = [self._pidfd] if write else [self._pidfd, self._socket]
-            ready, writable, _ = select.select(
-                reads, [self._socket] if write else [], [], deadline.wait_slice(),
-            )
-            if self._pidfd in ready:
-                raise PrivateIPCError(Refusal.IDENTITY)
-            if self._socket in ready or writable:
+            if _poll_ready(
+                self._socket, write=write, deadline=deadline, peer=self._pidfd,
+            ):
                 self._check_alive(deadline)
                 return
 
@@ -181,8 +194,7 @@ def connect(path: Path, expected: PeerIdentity, deadline: Deadline) -> UnixChann
         if result not in (0, errno.EINPROGRESS, errno.EAGAIN, errno.EWOULDBLOCK):
             raise PrivateIPCError(Refusal.IO)
         while result:
-            _r, writable, _x = select.select([], [connection], [], deadline.wait_slice())
-            if writable:
+            if _poll_ready(connection, write=True, deadline=deadline):
                 result = connection.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
                 if result:
                     raise PrivateIPCError(Refusal.IO)
@@ -234,8 +246,7 @@ class UnixListener:
             raise PrivateIPCError(Refusal.CLOSED)
         try:
             while True:
-                ready, _w, _x = select.select([self._socket], [], [], deadline.wait_slice())
-                if ready:
+                if _poll_ready(self._socket, write=False, deadline=deadline):
                     try:
                         connection, _address = self._socket.accept()
                     except (BlockingIOError, InterruptedError):

@@ -27,7 +27,7 @@ from zdd.private_protocol import (
     read_frame,
     write_frame,
 )
-from zdd.private_unix import UnixChannel, UnixListener, connect
+from zdd.private_unix import UnixChannel, UnixListener, _poll_ready, connect
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux native peer custody")
 
@@ -108,6 +108,58 @@ def test_real_process_framing_and_both_peer_identities(tmp_path: Path) -> None:
             channel.close()
     assert not path.exists()
     assert sorted(item.name for item in tmp_path.iterdir()) == []
+
+
+def test_closed_socket_poll_refuses_explicitly() -> None:
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    connection.close()
+    with pytest.raises(PrivateIPCError) as caught:
+        _poll_ready(connection, write=False, deadline=Deadline(1))
+    assert caught.value.reason is Refusal.CLOSED
+
+
+@pytest.mark.parametrize("high_descriptor", ["socket", "pidfd", "both"])
+def test_real_channel_io_and_peer_exit_above_fd_setsize(
+    tmp_path: Path, high_descriptor: str,
+) -> None:
+    import fcntl
+    import resource
+
+    if resource.getrlimit(resource.RLIMIT_NOFILE)[0] <= 1200:
+        pytest.skip("test needs an existing descriptor limit above 1200")
+    tmp_path.chmod(0o700)
+    with _process(tmp_path / "capture.sock", "echo") as (control, expected):
+        channel = connect(tmp_path / "capture.sock", expected, Deadline(1))
+        reference = None
+        try:
+            assert control.poll(1)
+            assert control.recv() == _identity()
+            if high_descriptor in ("socket", "both"):
+                original = channel._socket
+                channel._socket = socket.socket(
+                    fileno=fcntl.fcntl(original.fileno(), fcntl.F_DUPFD_CLOEXEC, 1100),
+                )
+                original.close()
+                channel._socket.setblocking(False)
+                assert channel._socket.fileno() >= 1100
+            if high_descriptor in ("pidfd", "both"):
+                original_pidfd = channel._pidfd
+                channel._pidfd = fcntl.fcntl(original_pidfd, fcntl.F_DUPFD_CLOEXEC, 1200)
+                os.close(original_pidfd)
+                assert channel._pidfd >= 1200
+            reference = channel.retain_peer(Deadline(1))
+            value = {"count": 17}
+            write_frame(channel, value, Deadline(1))
+            assert read_frame(channel, Deadline(1)) == value
+            control.send("finish")
+            reference.wait_exit(Deadline(2))
+            with pytest.raises(PrivateIPCError) as caught:
+                channel.read_exact(1, Deadline(1))
+            assert caught.value.reason is Refusal.IDENTITY
+        finally:
+            if reference is not None:
+                reference.close()
+            channel.close()
 
 
 @pytest.mark.parametrize("field", ["pid", "start_time", "principal"])
