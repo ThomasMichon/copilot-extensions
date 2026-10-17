@@ -22,11 +22,11 @@
     "historical_output_is_fresh": false
   },
   "captured_from": {
-    "commit": "ee591b72e932696b43e16334de8b95999901c258",
+    "commit": "440a69dfd3136eedd3e153c31bdf0f5584ba54f2",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 40,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-    "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
-    "source_sha256": "30ae8988e1ad5215aaed4b3b2e5c00121f8cfa3e72b9a7ae1ca89ff3905273c9"
+    "source_git_blob": "a761babc5786ddd6c497ee4037f117013e5f0dc4",
+    "source_sha256": "f2adc523c768c18244897f2ac423b61cd2291f7562e8c522a9c0203496da8963"
   }
 }

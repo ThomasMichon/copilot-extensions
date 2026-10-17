@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "5191c6bd19f12a6a4b98ea1a846f3206b36bbaba",
+    "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 39,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
-    "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
-    "source_sha256": "b16d9044ccd1f8fd37054825b4f4a6c4c6a4e2b4b79d2dd1b3b0f2a4086f9f95"
+    "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+    "source_sha256": "29de15b8101e4a1daa3ad11707136e62ffdd41cb45e91c9abee5e4e0035dc5c5"
   },
   "response": {
     "protocol_version": 39,
