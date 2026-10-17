@@ -16,8 +16,10 @@ def __getattr__(name: str) -> str:
         from importlib.metadata import PackageNotFoundError
         from importlib.metadata import version as _pkg_version
 
+        from .source_build import effective_runtime_version
+
         try:
-            return _pkg_version("agent-codespaces")
+            return effective_runtime_version(_pkg_version("agent-codespaces"))
         except PackageNotFoundError:
             return _FALLBACK_VERSION
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -34,6 +34,7 @@ def installed_owner(tmp_path, monkeypatch):
     scripts.mkdir(parents=True)
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime.py",
+        "versioned_runtime_source.py",
     ):
         shutil.copy2(PLUGIN / "scripts" / name, scripts)
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)

@@ -2093,7 +2093,7 @@ function Write-Binstubs {
     # Native service callers use the Python resolver without a payload or PATH.
     $scriptsDir = Join-Path $InstallDir 'scripts'
     New-Item -ItemType Directory -Path $scriptsDir -Force -ErrorAction Stop | Out-Null
-    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py')) {
+    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $r) -Destination (Join-Path $scriptsDir $r) -Force -ErrorAction Stop
     }
     if (-not $publishGlobalBinstubs) {

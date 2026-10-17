@@ -27,6 +27,7 @@ def diagnose_client():
     required = (
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
     )
     resource_digests = {}
     package = Path(__file__).absolute().parent

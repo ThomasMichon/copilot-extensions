@@ -258,6 +258,8 @@ def _prelude(ext: str, engine: Path = ENGINE) -> str:
             '_warn() { echo "$*" >&2; }\n_fail() { echo "$*" >&2; }\n'
             "_step() { :; }\n_ok() { :; }\nsleep() { :; }\n"
             f'. "{engine / "installer-engine.sh"}"\n'
+            f'PLUGIN_DIR="{PLUGIN}"\n'
+            f'. "{PLUGIN / "scripts" / "source-runtime.sh"}"\n'
         )
     return (
         "$ErrorActionPreference = 'Stop'\n"
@@ -267,6 +269,8 @@ def _prelude(ext: str, engine: Path = ENGINE) -> str:
         "function Write-Warn { param($Msg) Write-ServiceWarn $Msg }\n"
         "function Write-Ok { param($Msg) }\nfunction Start-Sleep { param($Seconds) }\n"
         f". '{engine / 'installer-engine.ps1'}'\n"
+        f"$PluginDir = '{PLUGIN}'\n"
+        f". '{PLUGIN / 'scripts' / 'source-runtime.ps1'}'\n"
     )
 
 
@@ -770,6 +774,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         "versioned_runtime.py",
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
     ):
         assert (snapshot / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
     for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
@@ -943,6 +948,7 @@ def test_codespaces_manifest_shared_writer_preserves_slot_and_source(tmp_path, e
     if ext == "sh" and os.name == "nt":
         pytest.skip("POSIX harness")
     env = _env(tmp_path)
+    version = tomllib.loads((PLUGIN / "pyproject.toml").read_text())["project"]["version"]
     root = tmp_path / "runtime"
     root.mkdir()
     if marketplace:
@@ -956,6 +962,8 @@ def test_codespaces_manifest_shared_writer_preserves_slot_and_source(tmp_path, e
             + f"""
 INSTALL_DIR='{root}'
 PLUGIN_DIR='{PLUGIN}'
+SRC_VERSION='{version}'
+_initialize_source_runtime
 VENV_DIR='{root}/versions/test'
 _git_info() {{ echo 'abc dev true'; }}
 _write_codespaces_deploy_manifest
@@ -968,6 +976,8 @@ _write_codespaces_deploy_manifest
             + f"""
 $InstallDir='{root}'
 $PluginDir='{PLUGIN}'
+$SrcVersion='{version}'
+Initialize-SourceRuntime
 $RepoRoot='original-root'
 $VenvDir='{root}/versions/build'
 $LinkDir='{root}/versions/selected'
@@ -1107,7 +1117,10 @@ def test_native_dev_generation_dependency_failure_preserves_working_runtime(tmp_
     root = tmp_path / "runtime"
     env = _env(tmp_path)
     base, helper = Path(sys._base_executable), PLUGIN / "scripts/versioned_runtime.py"
-    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime.py"):
+    for name in (
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py", "versioned_runtime.py",
+    ):
         shutil.copyfile(helper.with_name(name), tmp_path / name)
     if ext == "ps1":
         # The extracted Windows entry point must consume the real host venv layout.

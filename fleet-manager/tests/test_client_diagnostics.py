@@ -29,6 +29,7 @@ def installed(tmp_path, monkeypatch):
     for name in (
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
     ):
         data = b"resource bytes\n"
         (package / name).write_bytes(data)
@@ -51,6 +52,7 @@ def test_client_evidence_does_not_claim_release_or_controller_readiness(installe
     assert set(report["runtime_resource_sha256s"]) == {
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
     }
     assert report["runtime_resource_sha256s"]["_versioned_runtime.py"] == report["runtime_resource_sha256"]
 
@@ -60,7 +62,10 @@ def installed_runtime(installed, monkeypatch):
 
     distribution, package = installed
     library = Path(__file__).resolve().parents[2] / "libs" / "versioned-runtime"
-    for name in ("_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+    for name in (
+        "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
+    ):
         source = "versioned_runtime.py" if name == "_versioned_runtime.py" else name
         content = (library / source).read_bytes()
         (package / name).write_bytes(content)
@@ -73,6 +78,7 @@ def installed_runtime(installed, monkeypatch):
 
 @pytest.mark.parametrize("member", [
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    "versioned_runtime_source.py",
 ])
 def test_runtime_and_companion_replacement_after_admission_is_refused(installed, monkeypatch, member):
     staging, package = installed_runtime(installed, monkeypatch)
@@ -89,7 +95,9 @@ def test_runtime_and_companion_replacement_after_admission_is_refused(installed,
             pytest.fail("replaced executable bytes were admitted")
 
 
-@pytest.mark.parametrize("member", ["versioned_runtime_leases.py", "versioned_runtime_construction.py"])
+@pytest.mark.parametrize("member", [
+    "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py",
+])
 def test_companions_execute_only_retained_bytes_across_late_replacement(installed, monkeypatch, member):
     import sys
 
@@ -105,11 +113,15 @@ def test_companions_execute_only_retained_bytes_across_late_replacement(installe
     monkeypatch.setattr(staging, "_bytes", replaced)
     with staging._primitive() as runtime:
         prefix = runtime.__name__
-        for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+        for name in (
+            "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+            "versioned_runtime_source.py",
+        ):
             (package / name).write_text("raise AssertionError('late code executed')\n")
         assert runtime.ConstructionTimeout.__module__ == prefix + "_versioned_runtime_leases"
         assert "_runtime_construction_channels_close" in runtime.construction_shell_helpers("sh")
         assert runtime._runtime_component("versioned_runtime_construction").__name__ in sys.modules
+        assert runtime._runtime_component("versioned_runtime_source").__name__ in sys.modules
     assert not any(name == prefix or name.startswith(prefix + "_") for name in sys.modules)
 
 

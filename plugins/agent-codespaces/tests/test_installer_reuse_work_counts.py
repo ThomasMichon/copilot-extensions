@@ -25,7 +25,7 @@ pytestmark = pytest.mark.timeout(60)
 
 def _powershell_functions(tmp_path):
     for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
-                 "versioned_runtime_construction.py"):
+                 "versioned_runtime_construction.py", "versioned_runtime_source.py"):
         shutil.copyfile(PLUGIN / "scripts" / name, tmp_path / name)
     return _prelude("ps1") + "".join(_function("ps1", name) for name in (
         "Test-CodespacesRuntime", "Invoke-VersionedSlotClean", "Assert-Uv",

@@ -184,15 +184,19 @@ if ($_rtRoot) {
   # slot, matching versioned_runtime.resolve_python. Sorted version-aware (each
   # numeric run zero-padded so 0.1.0-dev185 > 0.1.0-dev50, not lexicographic).
   if (-not $AgentRtPy) {
-    $_rtSlots = Get-ChildItem (Join-Path $_rtRoot 'versions') -Directory -ErrorAction SilentlyContinue |
-      Sort-Object { _Rt-VersionKey $_.Name }
-    foreach ($_rtSlot in $_rtSlots) {
-      $p = _Rt-TrySlot $_rtSlot.Name
-      if ($p) {
-        $AgentRtPy = $p
-        $_rtTraceSource = 'newest'
-        $_rtTraceVersion = $_rtSlot.Name
-      }
+    $_rtSlots = @(Get-ChildItem (Join-Path $_rtRoot 'versions') -Directory -ErrorAction SilentlyContinue)
+    $_rtSourceSlots = @($_rtSlots | Where-Object { $_.Name -cmatch '[+.]source\.' })
+    if ($_rtSourceSlots.Count) {
+      [Console]::Error.WriteLine('Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback')
+    } else {
+        foreach ($_rtSlot in ($_rtSlots | Sort-Object { _Rt-VersionKey $_.Name })) {
+          $p = _Rt-TrySlot $_rtSlot.Name
+          if ($p) {
+            $AgentRtPy = $p
+            $_rtTraceSource = 'newest'
+            $_rtTraceVersion = $_rtSlot.Name
+          }
+        }
     }
   }
   if ($AgentRtPy) {

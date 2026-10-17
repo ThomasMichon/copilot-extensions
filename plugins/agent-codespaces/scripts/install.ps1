@@ -323,6 +323,7 @@ function Test-CodespacesRuntime {
 }
 
 function Invoke-VersionedActivate {
+    Assert-SourceRuntime
     <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
        junction onto it (first migration moves a legacy real `.venv` aside), then
        gc old slots keeping current + the previous-good. Returns $false on failure.
@@ -340,6 +341,7 @@ function Invoke-VersionedActivate {
     }
     if (-not (Invoke-VersionedMarkComplete)) { return $false }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    Assert-SourceRuntime
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
     if ($LASTEXITCODE -ne 0) {
@@ -547,6 +549,7 @@ function Test-PythonVenv {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -559,11 +562,13 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+    Assert-SourceRuntime
     return $true
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntime
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -672,6 +677,10 @@ function Install-PackageInto {
        Used only for distinct claimed development generations; never for a
        numbered release. #>
     param([string]$Python, [switch]$Editable)
+    Assert-SourceRuntime
+    if ($Editable -and $script:SourceRuntimeIdentity) {
+        throw 'A source-qualified runtime cannot use editable dependencies'
+    }
     if (-not (Test-Path (Join-Path $SshMgrDir 'pyproject.toml'))) {
         Write-ServiceErr "ssh-manager source not found at $SshMgrDir"
         return $false
@@ -734,6 +743,7 @@ function Install-PackageInto {
 }
 
 function Deploy-Package {
+    Assert-SourceRuntime
     <# Install agent-codespaces into its own venv and stamp build info. #>
     if ($script:RuntimeConstructionReuse) { return $true }
     if (-not (Install-PackageInto -Python $VenvPython)) { return $false }
@@ -757,7 +767,7 @@ function Deploy-VersionedRuntimeHelper {
        standing in a source checkout (docs/patterns/mutable-dev-slot.md
        Runtime accessibility). Publication must not leave a stale release helper. #>
     if (-not $VersionedRuntime) { return }
-    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime.py')) {
+    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime.py')) {
         $destination = Join-Path $InstallDir $name
         $temporary = "$destination.tmp-$([guid]::NewGuid().ToString('N'))"
         try {
@@ -881,6 +891,7 @@ function Invoke-Dev {
 # === end mutable-dev-slot ===
 
 function Deploy-Venv {
+    Assert-SourceRuntime
     <# Create the Python venv via uv. Deps come from pyproject at package
        install time -- no ad-hoc pyyaml here. #>
     if ((Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json')) -and
@@ -960,12 +971,25 @@ function Deploy-SelfProvisioningBinstub {
         New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $binDir = Join-Path $InstallDir 'bin'
+    New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+    foreach ($resolver in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $resolver) `
+            -Destination (Join-Path $binDir $resolver) -Force
+    }
 
     $ps1Path = Join-Path $LocalBin 'agent-codespaces.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
 $_root = Join-Path $env:USERPROFILE '.agent-codespaces'
 function _resolve_cs_py {
+    $resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+    if (Test-Path -LiteralPath $resolver) {
+        $env:AGENT_RT_ROOT = $_root
+        $AgentRtPy = $null
+        . $resolver
+        return $AgentRtPy
+    }
     function _version_key([string]$ver) {
         if ($ver -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') {
             $phase = if ($Matches[4]) { '0' } else { '1' }
@@ -1061,10 +1085,17 @@ exit /b %ERRORLEVEL%
 }
 
 function Write-CodespacesDeployManifest {
+    Assert-SourceRuntime
+    $fields = @{}
+    if ($script:SourceRuntimeIdentity) {
+        $data = $script:SourceRuntimeIdentity | ConvertFrom-Json
+        foreach ($property in $data.PSObject.Properties) { $fields[$property.Name] = $property.Value }
+    }
     Write-DeployManifest -Service 'agent-codespaces' -Plugin 'agent-codespaces' `
         -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir `
         -GetSourceKind { param($path) Get-SourceKind -PluginPath $path } `
-        -GetGitInfo { param($path) Get-GitInfo -Path $RepoRoot }
+        -GetGitInfo { param($path) Get-GitInfo -Path $RepoRoot } `
+        -VersionOverride $PackageVersion -AdditionalFields $fields
 }
 
 # -- Actions ---------------------------------------------------------------
@@ -1582,13 +1613,23 @@ function Invoke-Stamp {
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
     # Copy everything needed to `uv pip install .` from the slot (src, libs,
     # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Assert-SourceRuntime
+    $exclude = if ($script:SourceRuntimeIdentity) { @() } else {
+        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    }
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
-    Materialize-SnapshotDependencies -SnapshotDir $snapTmp
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    if (-not $script:SourceRuntimeIdentity) { Materialize-SnapshotDependencies -SnapshotDir $snapTmp }
+    Assert-SourceSnapshot -Snapshot $snapTmp
+    if ($script:SourceRuntimeIdentity -and (Test-Path -LiteralPath $snapDir)) {
+        Assert-SourceSnapshot -Snapshot $snapDir
+        Remove-Item -LiteralPath $snapTmp -Recurse -Force
+    } else {
+        if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    }
+    Assert-SourceSnapshot -Snapshot $snapDir
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-ServiceOk "Snapshot: $snapDir"
@@ -1601,6 +1642,17 @@ function Invoke-Stamp {
 $lifecycleMutex = $null
 $lifecycleHeld = $false
 try {
+    $ScriptDir = $PSScriptRoot
+    . (Join-Path $ScriptDir 'source-runtime.ps1')
+    if ($Action -in @('install', 'update', 'provision', 'stamp', 'dev')) {
+        Initialize-SourceRuntime
+        if ($Action -eq 'dev' -and $script:SourceRuntimeIdentity) {
+            throw 'A source-qualified payload cannot select a mutable development slot'
+        }
+    } else {
+        $PackageVersion = $SrcVersion
+        $SourceRuntimeIdentity = $null
+    }
     if ($Action -ne 'status') {
         # Marketplace self-staging runs below $InstallDir. Move every contender
         # off that tree before it waits, not only uninstall itself: otherwise a
@@ -1622,6 +1674,7 @@ try {
             throw 'Timed out waiting for another agent-codespaces lifecycle operation'
         }
     }
+    if ($Action -in @('install', 'update', 'provision', 'stamp', 'dev')) { Assert-SourceRuntime }
     switch ($Action) {
         'install'   { Invoke-Install }
         'uninstall' { Invoke-Uninstall }

@@ -149,7 +149,9 @@ def test_link_collision_revalidates_without_overwrite(tmp_path, monkeypatch, win
 def test_fresh_standalone_cli_publication_reuses_then_refuses(tmp_path):
     standalone = tmp_path / "standalone.py"
     shutil.copyfile(SOURCE, standalone)
-    for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+    for name in (
+        "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py",
+    ):
         shutil.copyfile(SOURCE.with_name(name), tmp_path / name)
     root = tmp_path / "runtime"
 

@@ -1833,7 +1833,7 @@ function Install-Engine {
     if ((Get-PayloadHash) -ne $payloadHash) { throw 'Engine payload changed during construction' }
     Complete-RuntimeConstruction -PayloadHash $payloadHash
     }
-    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime.py')) {
+    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime.py')) {
         Publish-FileAtomically -Path (Join-Path $EngineHome $name) `
             -Content ([IO.File]::ReadAllText((Join-Path $PSScriptRoot $name)))
     }

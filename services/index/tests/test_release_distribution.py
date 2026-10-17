@@ -38,7 +38,10 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
             primitive = distribution_root / "libs" / "versioned-runtime" / "versioned_runtime.py"
             primitive.parent.mkdir(parents=True)
             shutil.copy2(repo / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
-            for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+            for name in (
+                "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+                "versioned_runtime_source.py",
+            ):
                 shutil.copy2(repo / "libs/versioned-runtime" / name, primitive.with_name(name))
             shutil.copy2(
                 repo / "libs" / "versioned-runtime" / "standalone_build.py",

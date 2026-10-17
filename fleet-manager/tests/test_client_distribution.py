@@ -41,6 +41,7 @@ def project_at(root, *, nested=False):
     for name in (
         "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py", "standalone_build.py",
+        "versioned_runtime_source.py",
     ):
         shutil.copy2(LIBRARY / name, library / name)
     return project, library
@@ -97,7 +98,10 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         rows = list(csv.reader(io.StringIO(archive.read(name).decode())))
         expected = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
         assert [row for row in rows if row[0] == member] == [[member, expected, str(len(data))]]
-        for name in ("versioned_runtime_leases.py", "versioned_runtime_construction.py"):
+        for name in (
+            "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+            "versioned_runtime_source.py",
+        ):
             member = f"fleet_manager/{name}"
             content = (library / name).read_bytes()
             assert archive.namelist().count(member) == 1
@@ -183,6 +187,7 @@ def test_nested_service_directory_uses_same_canonical_resource(tmp_path):
 @pytest.mark.parametrize("resource", [
     "versioned_runtime.py", "versioned_runtime_leases.py",
     "versioned_runtime_construction.py", "standalone_build.py",
+    "versioned_runtime_source.py",
 ])
 @pytest.mark.parametrize("included_copy", [False, True])
 def test_missing_build_resource_is_not_a_successful_partial_wheel(tmp_path, resource, included_copy):
