@@ -1,0 +1,9 @@
+{
+  "comment": "Automatically reconcile backed, already accepted owned PR publications in normal push and sync flows without force or repeated confirmation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
