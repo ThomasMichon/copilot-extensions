@@ -143,6 +143,15 @@ def test_assembly_hash_excludes_build_outputs_not_runtime_packages(payload: Path
     assert identity.assembly_hash(payload) != before
 
 
+@pytest.mark.parametrize("directory", [".pytest_cache", ".ruff_cache", ".mypy_cache", "__pycache__"])
+def test_generated_analysis_caches_preserve_source_identity(payload: Path, directory: str) -> None:
+    source = identity.read_source_identity(payload, VERSION)
+    cache = payload / "src" / directory
+    cache.mkdir(parents=True)
+    (cache / "analysis.json").write_text('{"generated": true}', encoding="utf-8")
+    assert identity.read_source_identity(payload, VERSION) == source
+
+
 def test_absent_source_identity_keeps_existing_version(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert identity.main(["--payload", str(tmp_path), "--package-version", VERSION]) == 0
     assert capsys.readouterr().out.strip() == VERSION

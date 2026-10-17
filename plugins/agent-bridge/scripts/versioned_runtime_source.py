@@ -21,7 +21,7 @@ _PACKAGE_VERSION = re.compile(
     r"\d+\.\d+\.\d+(?:-dev\d+)?(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?"
 )
 _GENERATED = {
-    ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
+    ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
 }
 
 
