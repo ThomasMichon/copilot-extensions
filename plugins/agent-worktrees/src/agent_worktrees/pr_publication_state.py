@@ -113,6 +113,8 @@ def unpublished_retry(
     pr: tracking.PRRecord | None, branch: str, provider: str, repo: str,
 ) -> bool:
     """Match a never-published attempt without borrowing another destination."""
+    if unpublished(pr) and pr.branch == branch and (pr.provider, pr.repo) != (provider, repo):
+        raise ValueError("Unpublished PR destination changed; select a distinct head before retrying.")
     return bool(
         unpublished(pr) and pr is not None
         and (pr.branch, pr.provider, pr.repo) == (branch, provider, repo)

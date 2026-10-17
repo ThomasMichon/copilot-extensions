@@ -91,9 +91,15 @@ def test_provisional_retry_requires_same_destination(field: str) -> None:
         record, "pr/example", "github", "example/repo",
     )
     setattr(record, field, "different")
-    assert not pr_publication_state.unpublished_retry(
-        record, "pr/example", "github", "example/repo",
-    )
+    if field == "branch":
+        assert not pr_publication_state.unpublished_retry(
+            record, "pr/example", "github", "example/repo",
+        )
+    else:
+        with pytest.raises(ValueError, match="destination changed"):
+            pr_publication_state.unpublished_retry(
+                record, "pr/example", "github", "example/repo",
+            )
 
 
 def test_unpublished_retry_preserves_existing_local_branch(
@@ -113,3 +119,28 @@ def test_unpublished_retry_preserves_existing_local_branch(
     assert "already exists" in retry["error"]
     assert git_ops.git("rev-parse", branch, cwd=str(wt)).stdout.strip() == original
     assert len(tracking.load_record(path).prs) == 1
+
+
+@pytest.mark.parametrize("new", [False, True])
+def test_same_head_repository_change_refuses_without_mutation(
+    pr_repo: tuple, monkeypatch: pytest.MonkeyPatch, new: bool,
+) -> None:
+    config, wid, wt, _remote = pr_repo
+    monkeypatch.setattr(git_ops, "rebase", lambda *_args, **_kwargs: False)
+    assert not pr_ops.create_pr(
+        wid, config, title="Retry example", new=True, open_pr=False,
+    )["success"]
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    before = tracking.load_record(path)
+    branch = before.pr.branch
+    git_ops.git("branch", branch, cwd=str(wt))
+    original = git_ops.git("rev-parse", branch, cwd=str(wt)).stdout.strip()
+    result = pr_ops.create_pr(
+        wid, config, title="Retry example", target_repo="other/repository",
+        new=new, open_pr=False,
+    )
+    assert not result["success"]
+    assert "destination changed" in result["error"]
+    after = tracking.load_record(path)
+    assert after.prs == before.prs
+    assert git_ops.git("rev-parse", branch, cwd=str(wt)).stdout.strip() == original
