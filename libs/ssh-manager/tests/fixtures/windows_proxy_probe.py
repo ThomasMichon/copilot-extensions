@@ -205,9 +205,15 @@ async def drive(directory: Path) -> dict:
             try:
                 error = await asyncio.wait_for(wait_for_proxy(), timeout=8)
             finally:
-                await terminate_ssh_process_tree(process)
-                await run_process_cleanup(process)
-                await communication
+                try:
+                    await terminate_ssh_process_tree(process)
+                    await run_process_cleanup(process)
+                finally:
+                    communication.cancel()
+                    try:
+                        await communication
+                    except asyncio.CancelledError:
+                        pass
             if not marker.is_file():
                 raise RuntimeError(
                     "The synthetic native SSH proxy did not execute: "
