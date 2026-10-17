@@ -141,8 +141,9 @@ class FileOwner:
 class Authority:
     """Trusted fixture checks selected identity, current intent and desired bytes."""
 
-    def __init__(self, selected=None):
+    def __init__(self, selected=None, desired=None):
         self.selected = decision() if selected is None else selected
+        self.desired = {"fleet": fingerprint(b"selected-profile")} if desired is None else desired
         self.calls = 0
         self.refuse = False
         self.override = None
@@ -152,7 +153,7 @@ class Authority:
         self.calls += 1
         if (self.refuse or identity != b"verified-connection-node-a-generation-3"
                 or plan.to_dict()["decision"] != self.selected.to_dict()
-                or current.to_dict()["desired"] != {"fleet": fingerprint(b"selected-profile")}):
+                or current.to_dict()["desired"] != self.desired):
             raise PermissionError("private authorization reason")
         if self.override is not None:
             return self.override
@@ -196,6 +197,105 @@ def test_float_rounding_never_expands_the_owner_operation_budget(tmp_path, monke
         time=time.time, monotonic=lambda: instant,
     ))
     assert reconcile_gateway_ssh(plan, authority=authority, owner=owner).state == "reconciled"
+
+
+@pytest.mark.parametrize("phase", ["authenticate", "observe", "authorize"])
+def test_budget_expiry_before_effect_is_distinct_from_provider_unavailability(
+    tmp_path, monkeypatch, phase,
+):
+    plan, authority, owner = setup(tmp_path)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(runtime, "time", SimpleNamespace(
+        time=time.time, monotonic=lambda: clock["now"],
+    ))
+    adapter = authority if phase == "authorize" else owner
+    original = getattr(adapter, phase)
+
+    def delayed(*args, **kwargs):
+        value = original(*args, **kwargs)
+        clock["now"] += 31
+        return value
+
+    monkeypatch.setattr(adapter, phase, delayed)
+    result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
+    assert (result.state, result.reason, result.effect) == ("blocked", "operation-timeout", "none")
+    assert "reconcile" not in owner.calls and owner.profile.read_bytes() == b"drift"
+
+
+def test_budget_expiry_at_effect_entry_does_not_claim_an_uncertain_effect(tmp_path, monkeypatch):
+    plan, authority, owner = setup(tmp_path)
+    ticks = iter([0, 0, 0, 0, 0, 31])
+    monkeypatch.setattr(runtime, "time", SimpleNamespace(
+        time=time.time, monotonic=lambda: next(ticks),
+    ))
+    result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
+    assert (result.state, result.reason, result.effect) == ("blocked", "operation-timeout", "none")
+    assert "reconcile" not in owner.calls
+
+
+@pytest.mark.parametrize("phase,reason", [
+    ("authenticate", "target-authentication-timeout"),
+    ("observe", "owner-observation-timeout"),
+    ("authorize", "execution-authority-timeout"),
+])
+def test_provider_timeouts_have_explicit_stage_codes(tmp_path, monkeypatch, phase, reason):
+    plan, authority, owner = setup(tmp_path)
+
+    def expired(*args, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(authority if phase == "authorize" else owner, phase, expired)
+    result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
+    assert (result.state, result.reason, result.effect) == ("blocked", reason, "none")
+    assert "reconcile" not in owner.calls
+
+
+def test_late_effect_result_retains_observation_without_reporting_success(tmp_path, monkeypatch):
+    plan, authority, owner = setup(tmp_path)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(runtime, "time", SimpleNamespace(
+        time=time.time, monotonic=lambda: clock["now"],
+    ))
+    original = owner.reconcile
+
+    def delayed(*args, **kwargs):
+        value = original(*args, **kwargs)
+        clock["now"] += 31
+        return value
+
+    monkeypatch.setattr(owner, "reconcile", delayed)
+    result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
+    assert result.state == "unknown" and result.reason == "effect-verification-timeout"
+    assert result.observation == owner.snapshot and result.effect == "unknown"
+    assert result.to_dict()["observation"] == owner.snapshot.to_dict()
+    assert result.to_dict()["reobserve_required"] is True
+    assert owner.profile.read_bytes() == b"selected-profile"
+
+
+@pytest.mark.parametrize("state", ["configured", "offline", "disabled", "blocked"])
+def test_empty_managed_sets_are_representable_and_never_invent_projection_work(tmp_path, state):
+    selected = decision(state=state)
+    owner = FileOwner(tmp_path, selected)
+    owner.snapshot = observation(
+        selected, current={}, desired={},
+        protected_digest=fingerprint(owner.profile.read_bytes() + owner.unrelated.read_bytes()),
+    )
+    authority = Authority(selected, desired={})
+    plan = plan_gateway_ssh(selected, owner.snapshot)
+    assert plan.to_dict()["changes"] == []
+    result = reconcile_gateway_ssh(plan, authority=authority, owner=owner)
+    assert result.state == ("unchanged" if state == "configured" else state)
+    assert result.effect == "none" and "reconcile" not in owner.calls
+    assert owner.profile.read_bytes() == b"drift"
+    assert owner.unrelated.read_bytes() == b"unrelated-dtssh-and-user-profiles"
+
+
+@pytest.mark.parametrize("field", ["generation", "revision"])
+def test_observation_sequence_diagnostics_identify_the_invalid_field(field):
+    value = observation().to_dict()
+    value[field] = True
+    with pytest.raises(PlanError, match="SSH observation " + field):
+        GatewaySSHObservation.from_dict(value)
 
 
 def test_plan_and_observation_do_not_retain_mutable_aliases():

@@ -26,6 +26,10 @@ OPERATION_SECONDS = 30
 TARGET_FIELDS = ("machine", "environment", "controller", "backend")
 
 
+class _BudgetExpired(TimeoutError):
+    """Operation deadline expiry, distinct from a provider's transport timeout."""
+
+
 def _fingerprint(value):
     if not isinstance(value, str) or not SHA256.fullmatch(value):
         raise PlanError("SSH profile binding must be lowercase SHA-256")
@@ -47,8 +51,8 @@ def _target(value):
 
 
 def _profiles(value, *, absent=False):
-    if not isinstance(value, dict) or not 1 <= len(value) <= MAX_PROFILES:
-        raise PlanError("SSH profiles must be a nonempty bounded object")
+    if not isinstance(value, dict) or len(value) > MAX_PROFILES:
+        raise PlanError("SSH profiles must be a bounded object")
     for name, binding in value.items():
         identifier(name, "managed SSH profile")
         if not absent or binding is not None:
@@ -65,7 +69,7 @@ def _validate_observation(value):
     _target(value["target"])
     identifier(value["owner"], "SSH profile owner")
     for field in ("generation", "revision"):
-        integer(value[field], "SSH observation revision", minimum=1)
+        integer(value[field], "SSH observation " + field, minimum=1)
     for field in ("observed_at", "valid_until"):
         integer(value[field], "SSH observation time")
     if value["valid_until"] <= value["observed_at"]:
@@ -87,6 +91,7 @@ class GatewaySSHObservation:
     Bindings are digests of owner-resolved profile inputs, never paths, shell
     commands or credentials. ``protected_digest`` covers all unrelated state.
     Desired bindings require independent current-policy approval by authority.
+    Empty matching current/desired sets represent no managed projection work.
     """
 
     encoded: bytes
@@ -305,7 +310,7 @@ def reconcile_gateway_ssh(plan: GatewaySSHPlan, *, authority: GatewaySSHAuthorit
     def remaining():
         left = deadline - time.monotonic()
         if left <= 0:
-            raise TimeoutError
+            raise _BudgetExpired
         return min(float(OPERATION_SECONDS), left)
 
     stage = "target-authentication"
@@ -333,6 +338,10 @@ def reconcile_gateway_ssh(plan: GatewaySSHPlan, *, authority: GatewaySSHAuthorit
                                         current_value["valid_until"])):
             return result("blocked", "execution-authorization-mismatch")
         remaining()
+    except _BudgetExpired:
+        return result("blocked", "operation-timeout")
+    except TimeoutError:
+        return result("blocked", stage + "-timeout")
     except PermissionError:
         return result("blocked", stage + "-refused")
     except OSError:
@@ -340,12 +349,21 @@ def reconcile_gateway_ssh(plan: GatewaySSHPlan, *, authority: GatewaySSHAuthorit
     if value["state"] == "unchanged":
         return result("unchanged", "profiles-current", observation=current)
     try:
-        after = owner.reconcile(plan, authorization, timeout=remaining())
-        remaining()
+        timeout = remaining()
+    except _BudgetExpired:
+        return result("blocked", "operation-timeout")
+    try:
+        after = owner.reconcile(plan, authorization, timeout=timeout)
+    except TimeoutError:
+        return result("unknown", "effect-timeout", "unknown")
     except OSError:
         return result("unknown", "effect-outcome-unknown", "unknown")
     if not isinstance(after, GatewaySSHObservation):
         return result("unknown", "effect-observation-invalid", "unknown")
+    try:
+        remaining()
+    except _BudgetExpired:
+        return result("unknown", "effect-verification-timeout", "unknown", after)
     observed = after.to_dict()
     same = ("target", "owner", "generation", "policy_digest", "decision_digest",
             "desired", "protected_digest")
