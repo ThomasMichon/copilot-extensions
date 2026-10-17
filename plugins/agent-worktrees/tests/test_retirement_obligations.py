@@ -207,3 +207,70 @@ def test_direct_reaper_refuses_before_any_destructive_action(
     assert any("#42" in warning for warning in warnings)
     assert actions == []
     assert Path(record.worktree_path).exists()
+
+
+@pytest.mark.parametrize("checkout_managed", [False, True])
+def test_reaper_returns_structured_retirement_refusal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, checkout_managed: bool
+) -> None:
+    from agent_worktrees import __main__ as cli
+
+    reap = cli._reap_worktree
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    record = make_record(tmp_path, exists=False)
+    record.worktree_path = ""
+    record.branch = ""
+    record.checkout_managed = checkout_managed
+    path = harness.seed(record)
+    original = path.read_bytes()
+
+    def refuse(*_args: object) -> bool:
+        raise ValueError("Cannot retire wt1: PR #42 still open")
+
+    monkeypatch.setattr(tracking, "retire_record", refuse)
+
+    failures, warnings = reap(
+        record, info(S.COMPLETED), harness.repo, harness.tracking_dir
+    )
+
+    assert failures == 1
+    assert warnings == ["Cannot retire wt1: PR #42 still open"]
+    assert path.read_bytes() == original
+
+
+def test_changed_pair_defers_retirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        tracking.cfg, "project_dir", lambda name: tmp_path / str(name)
+    )
+    record = make_record(tmp_path)
+    path = tmp_path / "tracking" / f"{record.worktree_id}.yaml"
+    tracking.save_record(record, path)
+
+    def change_pair(latest: tracking.WorktreeRecord) -> None:
+        latest.pair_id = "new-pair"
+        latest.pair_role = "harness"
+        latest.pair_ref = "m/other/peer"
+        latest.pair_kind = "worktree"
+
+    mutate_record(path, change_pair)
+    original = path.read_bytes()
+
+    assert tracking.retire_record(record, path.parent) is False
+    assert path.read_bytes() == original
+
+
+def test_generic_blocker_does_not_echo_claim_references(tmp_path: Path) -> None:
+    from agent_worktrees.retirement_safety import retirement_blocker
+
+    record = make_record(tmp_path)
+    record.resources = [
+        tracking.ResourceClaim(
+            kind="pr", ref="https://example.com/private-reference", state="active"
+        )
+    ]
+    blocker = retirement_blocker(record)
+    assert blocker is not None
+    assert "1 held resource claim" in blocker.reason
+    assert record.resources[0].ref not in blocker.reason
