@@ -636,3 +636,31 @@ requested contract.
   separate open obligations under the canonical `versioned-singleton-manager`
   effort and #5655. A bounded supervisor, a progress snapshot or the existing
   Linux library does not close Windows custody or stalled-master recovery.
+
+### 2026-10-17 (UTC) - Complete current bounded and native consumer validation
+
+- Preserved the existing review corrections in local commit `c1f66c729` before
+  resuming validation. Current bounded receipt, scheduling, blocking-boundary
+  and recovery coverage passes all 104 cases, including the three cancellation
+  regressions. Full managed-companion coverage passes 52 cases with one platform
+  skip, including real native readiness, rollback and stop under the unchanged
+  item and aggregate deadlines.
+- Coupled master, health, companion, retention and native-gate tests initially
+  reported 216 passes and one skip, but the runner correctly returned 125 after
+  detecting a persistent machine-environment value change. No source reference
+  to that value or direct persistent-environment write was found in the selected
+  test files; the writer and cause remain unknown. No environment value was
+  printed, restored, ignored or added to an exemption.
+- Revalidated the complete affected consumer inventory in disjoint contained
+  groups: native gate one pass, master/health 97 passes, companion/retention
+  118 passes and one skip. Each invocation exited zero with the host-state guard
+  still enabled. These are fresh disjoint passing results, not a claim that the
+  earlier combined invocation passed or that its environment drift was explained.
+- Current install contract, module ceiling, focused F/E9 lint, headless-launch
+  guard, effort structure and five-library vendor parity pass. The existing
+  one-shot helper exemption remains moved with its extracted function; no
+  exemption count, lifecycle authority, test assertion or deadline increased.
+- Publish through the existing owned PR, obtain a fresh resulting-head review
+  and complete CI, and resolve the addressed findings with their actual
+  dispositions. Source validation does not establish deployment, independent
+  native custodian/adopter recovery or the parent fleet objective's completion.
