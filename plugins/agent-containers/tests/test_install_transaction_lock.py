@@ -83,7 +83,10 @@ def test_lock_is_acquired_after_self_stage_and_before_first_mutation(script: Pat
     assert text.count(LOCK_START) == 1
     assert text.index(SELF_STAGE_END) < text.index(SMOKE_END) < text.index(acquire)
     assert text.index(acquire) < text.index(first_mutation)
-    profile_call = "$profileJson = & $pythonCmd" if script.suffix == ".ps1" else 'profile_result="$("$PYTHON_CMD"'
+    profile_call = (
+        "$profileJson = Invoke-Hidden -FilePath $pythonCmd"
+        if script.suffix == ".ps1" else 'profile_result="$("$PYTHON_CMD"'
+    )
     assert text.index(acquire) < text.index(profile_call)
 
 
