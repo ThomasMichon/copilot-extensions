@@ -98,6 +98,35 @@ def invoke(command, config, wid, **kwargs):
     return function(wid, config, **kwargs)
 
 
+@pytest.mark.parametrize("command", ["push-changes", "sync"])
+def test_real_finalization_contention_is_reported_without_releasing_holder(
+    owned_publication, monkeypatch, capfd, command,
+) -> None:
+    config, wid, wt, remote, saved, branch, published = owned_publication
+    lock_class = finalize.FinalizeLock
+    lock_path = Path(config.default_repo.worktree_root) / ".finalize.lock"
+    holder = lock_class(lock_path, timeout=1, stale_after=3600)
+    holder.acquire()
+
+    def contender(path, **kwargs):
+        return lock_class(path, timeout=0.05, stale_after=3600)
+
+    monkeypatch.setattr(finalize, "FinalizeLock", contender)
+    try:
+        assert not invoke(command, config, wid)
+        assert "Timed out waiting for finalization lock" in capfd.readouterr().out
+        assert holder.held and lock_path.read_text() == holder.token
+        assert record(wid).pr.head_sha == saved
+        assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == published
+        assert not list(metadata(wt).glob("*pr-reconciliation-*.json"))
+    finally:
+        holder.release()
+    assert not lock_path.exists()
+    assert pr_routine_recovery.reconcile(config, record(wid), cwd=str(wt))
+    assert record(wid).pr.head_sha == published
+    assert not lock_path.exists()
+
+
 @pytest.mark.parametrize("recovery", ["ordinary", "after-reconciliation", "source-rebase"])
 def test_numbered_pr_preserves_verified_lost_ack_fallbacks(
     pr_repo, monkeypatch, recovery,
