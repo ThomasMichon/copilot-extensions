@@ -743,7 +743,8 @@ GitHub cannot filter this activity to base edits alone at workflow admission,
 so other PR edits also run CI; excluding main still prevents its redundant
 release-candidate invocation.
 
-Within each PR ref, newer CI supersedes an older head's executing run.
+Within each PR ref, a new head's `synchronize` event supersedes the older head's
+executing CI. Metadata-only edits do not restart the same head's validation.
 Cancelled PRs do not continue standalone Index jobs or allocate the final PR
 aggregate; an uncancelled dependency failure still reaches that required
 aggregate and reports failure. Dev pushes and manual qualification keep rolling

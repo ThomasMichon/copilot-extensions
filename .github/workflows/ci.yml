@@ -60,11 +60,11 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  # Obsolete PR heads cannot admit the current head, so stop their work.
+  # New PR heads supersede old work; metadata edits must not restart the same head.
   # Dev pushes and manual qualification retain rolling queue:single behavior:
   # a newer push replaces only pending work, never an executing validation.
   # This preserves the dev-advancement starvation protection from #3592.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 permissions:
   contents: read

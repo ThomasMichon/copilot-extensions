@@ -108,13 +108,14 @@ def test_widen_only_keeps_ordinary_ceiling_checks_without_an_exact_baseline_gate
 def _ci_condition(
     condition: str, *, event: str, cancelled: bool = False,
     failed: bool = False, standalone: str = "true", base: str = "dev",
-    promotion_run: str = "123",
+    promotion_run: str = "123", action: str = "",
 ) -> bool:
     condition = condition.removeprefix("${{").removesuffix("}}").strip()
     for source, target in [
         ("github.event.pull_request.base.ref", "base"),
         ("needs.discover.outputs.standalone_service", "standalone"),
         ("github.event_name", "event"),
+        ("github.event.action", "action"),
         ("inputs.promotion_run", "promotion_run"),
         ("!cancelled()", "not cancelled"),
         ("cancelled()", "cancelled"),
@@ -128,22 +129,29 @@ def _ci_condition(
     result = eval(condition, {"__builtins__": {}}, {
         "event": event, "cancelled": cancelled, "failed": failed,
         "success": not failed, "standalone": standalone, "base": base,
-        "promotion_run": promotion_run,
+        "promotion_run": promotion_run, "action": action,
     })
     assert isinstance(result, bool)
     return result
 
 
-@pytest.mark.parametrize("event,expected", [
-    ("pull_request", True), ("push", False), ("workflow_dispatch", False),
+@pytest.mark.parametrize("event,action,expected", [
+    ("pull_request", "synchronize", True),
+    ("pull_request", "edited", False),
+    ("pull_request", "opened", False),
+    ("pull_request", "reopened", False),
+    ("push", "", False),
+    ("workflow_dispatch", "", False),
 ])
-def test_only_superseded_pr_ci_is_cancelled(event: str, expected: bool) -> None:
+def test_only_superseded_pr_ci_is_cancelled(
+    event: str, action: str, expected: bool,
+) -> None:
     ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
     concurrency = ci["concurrency"]
     assert concurrency["group"] == "ci-${{ github.workflow }}-${{ github.ref }}"
     condition = concurrency["cancel-in-progress"]
     assert isinstance(condition, str)
-    assert _ci_condition(condition, event=event) is expected
+    assert _ci_condition(condition, event=event, action=action) is expected
 
 
 @pytest.mark.parametrize("job", [

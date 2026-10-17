@@ -967,14 +967,15 @@ Normal cancellation could not terminate `always()` jobs, so force cancellation
 was separately approved only for the ten remaining obsolete runs. Current-head
 checks, Dev CI, promotion and review runs were excluded.
 
-The proposed prevention cancels superseded PR runs and prevents cancelled PRs
+The proposed prevention cancels superseded PR runs only on head synchronization,
+not on metadata edits that would restart the same head, and prevents cancelled PRs
 from continuing standalone Index jobs or allocating the final required
 aggregate. Uncancelled dependency failures still reach that aggregate and
 report failure. Dev/manual rolling behavior and the promotion aggregate remain
 unchanged; no current-head coverage, timeout, permission or release gate is
 removed. Before implementation, seven regressions failed against the old
 policy. The focused policy/trusted-policy/publication portfolio now passes
-84 tests with 75 subtests and nine existing opt-in skips.
+87 tests with 75 subtests and nine existing opt-in skips.
 
 This source policy is not yet landed or active. The current promotion remains
 on its immutable Main controls and pinned source. A fresh canonical pause permits
