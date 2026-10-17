@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from itertools import permutations
 from types import SimpleNamespace
 
 import pytest
@@ -104,6 +105,63 @@ def test_only_matching_task_and_label_release_still_supersedes_a_claim(release_l
     expected = release if release_label == claim["label"] else claim
     assert _latest_reservations(_issue(7, reservations=(claim, release)))["backlog"] == expected
     assert _latest_reservations(_issue(7, reservations=(release, claim)))["backlog"] == expected
+
+
+@pytest.mark.parametrize("order", list(permutations(range(3))))
+@pytest.mark.parametrize("conflicting_task", [
+    {"task_id": "wrong-task"}, {}, {"task_id": None},
+], ids=["wrong-task", "missing-task", "null-task"])
+@pytest.mark.parametrize("release_override", [
+    {}, {"label": "previous-label"}, {"occurrence": 3600},
+], ids=["matching", "different-label", "older-occurrence"])
+def test_matching_release_evidence_survives_other_releases_in_every_order(
+    order, conflicting_task, release_override,
+):
+    claim = _reservation(state="claimed", task_id="task-real")
+    conflicting = _reservation(
+        state="released", reason="unrelated", **conflicting_task,
+    )
+    release = {
+        **claim, "state": "released", "reason": "finished", **release_override,
+    }
+    snapshots = (conflicting, release, claim)
+    issue = _issue(7, reservations=tuple(snapshots[index] for index in order))
+
+    expected = claim if release_override else release
+    assert _latest_reservations(issue)["backlog"] == expected
+
+
+@pytest.mark.parametrize("order", list(permutations(range(3))))
+@pytest.mark.parametrize("second_label", ["agent-reserved", "previous-label"])
+@pytest.mark.parametrize("release_override", [
+    {}, {"label": "unrelated-label"}, {"occurrence": 3600},
+], ids=["matching", "different-label", "older-occurrence"])
+def test_release_only_closes_its_own_claim_in_every_order(
+    order, second_label, release_override,
+):
+    claim_a = _reservation(state="claimed", task_id="task-a", at=7201)
+    claim_b = {**claim_a, "task_id": "task-b", "label": second_label}
+    release_a = {
+        **claim_a, "state": "released", "reason": "finished", **release_override,
+    }
+    snapshots = (claim_a, claim_b, release_a)
+    issue = _issue(7, reservations=tuple(snapshots[index] for index in order))
+
+    active = (claim_a, claim_b) if release_override else (claim_b,)
+    assert _latest_reservations(issue)["backlog"] in active
+
+
+@pytest.mark.parametrize("order", list(permutations(range(4))))
+@pytest.mark.parametrize("second_label", ["agent-reserved", "previous-label"])
+def test_all_matching_claims_released_in_every_order(order, second_label):
+    claim_a = _reservation(state="claimed", task_id="task-a", at=7201)
+    claim_b = {**claim_a, "task_id": "task-b", "label": second_label}
+    release_a = {**claim_a, "state": "released", "reason": "finished a"}
+    release_b = {**claim_b, "state": "released", "reason": "finished b"}
+    snapshots = (claim_a, claim_b, release_a, release_b)
+    issue = _issue(7, reservations=tuple(snapshots[index] for index in order))
+
+    assert _latest_reservations(issue)["backlog"] in (release_a, release_b)
 
 
 @pytest.mark.parametrize("stage,bootstrap_delay", [

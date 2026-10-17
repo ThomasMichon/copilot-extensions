@@ -1004,3 +1004,26 @@ requested contract.
 - These are targeted current-base results, not a complete native portfolio
   claim. The rewritten PR still requires fresh hosted CI and a current review
   before merge.
+
+### 2026-10-16 - Repair the fresh review and CI consumers
+
+- Review4300767243 exposed discarded matching-release evidence in a
+  three-snapshot fold. Reduction now retains both claims and releases by full
+  ownership identity within the selected occurrence. A matching release closes
+  only its owner, never another unreleased claim.
+- The 138 added permutation cases cover unrelated, missing and null task IDs,
+  two claims with one release, all matching releases, differing labels and
+  older occurrences. The coupled selection passes 475 tests; independent full
+  source-safety verification passes 196.
+- Hosted runner contracts exposed an outdated exact dependency-command guard.
+  Its expectation now includes the required timeout plugin without dropping
+  the other installer requirements.
+- Promotion qualification now derives every sharded smoke row from the runner's
+  single literal policy without executing candidate code. Unknown policies or
+  recipes fail closed, each required shard must have succeeded, and legacy
+  unsharded inventory remains supported. The qualification suite passes 64
+  tests; the combined affected CI contract bundle passes 294 with five platform
+  skips and 22 exhaustive-lane deselections.
+- These repairs require a new published head and fresh CI/review. No cancelled
+  duplicate run, partial report, stale approval or baseline observation is a
+  merge waiver; runtime rollout remains separately authorized.

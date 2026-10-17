@@ -343,6 +343,9 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     return py
 
 
+_CI_SHARD_COUNTS: dict[str, int] = {"agent-dispatch": 4}
+
+
 def _validate_shard(index: int, count: int) -> None:
     if type(index) is not int or type(count) is not int or not 1 <= index <= count:
         raise ValueError("shard selectors require integers with 1 <= shard-index <= shard-count")
@@ -352,7 +355,7 @@ def _ci_matrix(plugins: list[str]) -> dict[str, list[dict[str, str | int]]]:
     return {"include": [
         {"plugin": name, "shard_index": index, "shard_count": count}
         for name in plugins
-        for count in [4 if name == "agent-dispatch" else 1]
+        for count in [_CI_SHARD_COUNTS.get(name, 1)]
         for index in range(1, count + 1)
     ]}
 

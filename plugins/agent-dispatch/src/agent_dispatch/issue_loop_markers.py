@@ -145,14 +145,27 @@ def _parse_marker(
     return {**validated, "comment_author": author}
 
 
+def _ownership_key(reservation: dict[str, Any]) -> tuple[Any, ...]:
+    return tuple(reservation.get(field) for field in (
+        "loop", "issue", "occurrence", "label", "task_id",
+    ))
+
+
 def latest_reservations(issue: Any) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
+    claims: dict[tuple[Any, ...], dict[str, Any]] = {}
+    releases: dict[tuple[Any, ...], dict[str, Any]] = {}
     for reservation in issue.reservations:
         loop = reservation.get("loop")
         if not isinstance(loop, str):
             continue
         current = latest.get(loop)
         state = reservation.get("state")
+        if state == "released":
+            # Another release may occupy the accumulator before its claim appears.
+            releases[_ownership_key(reservation)] = reservation
+        elif state == "claimed":
+            claims[_ownership_key(reservation)] = reservation
         if current is None:
             # Providers edit trusted comments in place; the overwritten
             # predecessor need not appear in a fresh ownership snapshot.
@@ -201,4 +214,16 @@ def latest_reservations(issue: Any) -> dict[str, dict[str, Any]]:
                 and reservation.get("task_id") == current.get("task_id")
             ):
                 latest[loop] = reservation
+    for loop, current in latest.items():
+        current_key = _ownership_key(current)
+        active = {
+            key: claim for key, claim in claims.items()
+            if key[:3] == current_key[:3] and key not in releases
+        }
+        if active:
+            # A matching release closes only its owner, never another live claim.
+            if current_key not in active:
+                latest[loop] = next(iter(active.values()))
+        elif current.get("state") == "claimed":
+            latest[loop] = releases.get(current_key, current)
     return latest

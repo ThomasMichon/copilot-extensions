@@ -145,6 +145,12 @@ blocks it. This applies wherever that smoke job runs, including PR and dev/main
 push validation. Manual `full` and `validate-and-promote.yml` full validation
 remain unsharded; their selection, coverage and release policy are unchanged.
 
+The literal `_CI_SHARD_COUNTS` runner policy also supplies promotion
+qualification's expected smoke rows. Qualification reads that policy as data,
+requires every named shard to have executed successfully, and refuses unknown
+matrix recipes or counts rather than dropping coverage. Historical unsharded
+CI declarations remain supported.
+
 Real stalled-probe regressions establish descendant readiness and birth-bound
 Job/group custody before the forced 0.8-second capture; that fixture input is
 not a bootstrap allowance or the production 30-second authentication timeout.
