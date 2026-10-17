@@ -13,11 +13,18 @@ def launch_directory(user: str) -> str:
     return f"{RAM_ROOT}/agent-containers-{user}/launch"
 
 
+def executable_root_for_launch_dir(directory: str) -> str:
+    if directory.startswith(RAM_ROOT + "/agent-containers-"):
+        return EXEC_ROOT + directory[len(RAM_ROOT):]
+    return directory
+
+
 def executable_directory(auth_env: str) -> str:
     owner = auth_env.removesuffix(".d/auth.env")
-    if owner.startswith(RAM_ROOT + "/agent-containers-"):
-        return EXEC_ROOT + owner[len(RAM_ROOT):] + ".d"
-    return owner + ".d"
+    return posixpath.join(
+        executable_root_for_launch_dir(posixpath.dirname(owner)),
+        posixpath.basename(owner) + ".d",
+    )
 
 
 def directory_guard(

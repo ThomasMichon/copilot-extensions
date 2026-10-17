@@ -25,7 +25,12 @@ from ssh_manager import SSHConfig, build_remote_exec_args
 
 from .config import RUNTIME_DIR
 from .launch_input_cleanup import abandoned_cleanup_script
-from .launch_storage import directory_guard, executable_directory, launch_directory
+from .launch_storage import (
+    directory_guard,
+    executable_directory,
+    executable_root_for_launch_dir,
+    launch_directory,
+)
 
 log = logging.getLogger("agent-containers")
 
@@ -431,7 +436,7 @@ def write_remote_env(container: str, user: str, values: dict[str, str]) -> str |
         "docker", "exec", "-i", "-u", user, container,
         "sh", "-c",
         directory_guard(launch_dir, create=True) +
-        abandoned_cleanup_script(launch_dir, executable_directory(launch_dir + "/owner.env").rsplit("/", 1)[0]) + "\n" +
+        abandoned_cleanup_script(launch_dir, executable_root_for_launch_dir(launch_dir)) + "\n" +
         f"set -C; cat > {shlex.quote(remote_path.rsplit('/', 1)[1])}",
     ], input_text=payload)
     if written.returncode != 0:
@@ -483,7 +488,7 @@ def cleanup_remote_envs(container: str, user: str) -> None:
         "docker", "exec", "-u", user, container,
         "sh", "-c",
         directory_guard(launch_dir, create=True) +
-        abandoned_cleanup_script(launch_dir, executable_directory(launch_dir + "/owner.env").rsplit("/", 1)[0]),
+        abandoned_cleanup_script(launch_dir, executable_root_for_launch_dir(launch_dir)),
     ])
     if result.returncode != 0:
         raise RuntimeError(

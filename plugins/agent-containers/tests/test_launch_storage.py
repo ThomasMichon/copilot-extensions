@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -201,3 +202,88 @@ def test_session_host_rejects_foreign_or_unsafe_ram_handle(
             name="fixture", expected_instance=None,
             remote_env=parent + "/" + "a" * 32 + ".env",
         ))
+
+
+@pytest.mark.parametrize("unsafe", ["disk", "symlink", "permissions"])
+def test_session_host_cleanup_checks_actual_parent_before_any_deletion(
+    tmp_path: Path, ram_root: Path, local_transport: list,
+    monkeypatch: pytest.MonkeyPatch, unsafe: str,
+) -> None:
+    from agent_containers import __main__ as cli
+
+    if unsafe == "disk":
+        disk = tmp_path / "disk"
+        disk.mkdir()
+        monkeypatch.setattr(launch_storage, "RAM_ROOT", str(disk))
+    parent = Path(launch_storage.launch_directory("user"))
+    parent.mkdir(mode=0o700, parents=True)
+    if unsafe == "symlink":
+        outside = ram_root / "outside"
+        outside.mkdir(mode=0o700)
+        parent.rmdir()
+        parent.symlink_to(outside, target_is_directory=True)
+    elif unsafe == "permissions":
+        parent.chmod(0o755)
+    owner = parent / ("a" * 32 + ".env")
+    owner.write_text("must remain")
+    monkeypatch.setattr(
+        cli, "_trusted_session_host_context",
+        lambda *args: (None, None, "user", "/workspace"),
+    )
+    monkeypatch.setattr(cli, "cleanup_remote_env", lambda *args: pytest.fail("no deletion"))
+    with pytest.raises(RuntimeError, match="unsafe Session Host cleanup directory"):
+        cli._cmd_session_host_cleanup(SimpleNamespace(
+            name="fixture", expected_instance=None, remote_env=str(owner),
+        ))
+    assert owner.read_text() == "must remain"
+    assert len(local_transport) == 1
+    assert local_transport[0][1] is None
+
+
+def test_auth_promotion_refuses_a_destination_created_after_mkdir(
+    ram_root: Path, local_transport: list, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = ssh_transport.write_remote_env("fixture", "user", {"SETTING": "ordinary"})
+    assert owner is not None
+    destination = Path(owner + ".d/auth.env")
+    original = ssh_transport._run
+    observed: list[bool] = []
+
+    def interleaved(
+        args: list[str], *, input_text: str | None = None, timeout: float = 30,
+    ) -> subprocess.CompletedProcess[str]:
+        if "--secret-env-vars" in args[-1]:
+            return subprocess.CompletedProcess(args, 0, "/usr/bin/copilot\n", "")
+        if input_text and input_text.startswith("#!/bin/sh"):
+            args = [*args[:-1], args[-1].replace(
+                "ln -T --",
+                f"printf '%s' stale > {shlex.quote(str(destination))}\nln -T --",
+                1,
+            )]
+            result = original(args, input_text=input_text, timeout=timeout)
+            observed.append(result.returncode != 0 and destination.read_text() == "stale")
+            return result
+        return original(args, input_text=input_text, timeout=timeout)
+
+    monkeypatch.setattr(ssh_transport, "_run", interleaved)
+    monkeypatch.setattr(auth, "resolve_copilot_cli_token_or_raise", lambda *args: "synthetic")
+    with pytest.raises(RuntimeError, match="could not stage process-only Copilot launcher"):
+        auth.prepare_launch(
+            ContainersConfig(copilot_cli_account="example"), FleetConfig(),
+            "fixture", "user", cleanup_owner=owner,
+        )
+    assert observed == [True]
+    assert not Path(owner).exists()
+    assert not list(ram_root.rglob("auth.env"))
+
+
+@pytest.mark.parametrize("directory,expected", [
+    ("/dev/shm/agent-containers-user/launch", "/tmp/agent-containers-user/launch"),
+    ("/home/user/.agent-containers/launch", "/home/user/.agent-containers/launch"),
+])
+def test_executable_root_mapping_does_not_require_a_synthetic_owner(
+    directory: str, expected: str,
+) -> None:
+    assert launch_storage.executable_root_for_launch_dir(directory) == expected
+    assert launch_storage.executable_directory(directory + "/abc.env") == expected + "/abc.env.d"
+    assert launch_storage.executable_directory(directory + "/abc.env.d/auth.env") == expected + "/abc.env.d"

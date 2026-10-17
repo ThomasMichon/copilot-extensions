@@ -544,7 +544,8 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
 
 def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
     """Remove only a provider-created launch env path."""
-    from .launch_storage import launch_directory
+    from . import ssh_transport
+    from .launch_storage import directory_guard, launch_directory
 
     if args.expected_instance:
         from .session_host_context import cleanup_user
@@ -566,6 +567,13 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
         raise RuntimeError(
             f"Refusing unsafe Session Host env cleanup path: {args.remote_env!r}"
         )
+    ssh_transport._validate_target(args.expected_instance or args.name, user)
+    checked = ssh_transport._run([
+        "docker", "exec", "-u", user, args.expected_instance or args.name,
+        "sh", "-c", directory_guard(str(remote_env.parent), require_ram=canonical_ram),
+    ])
+    if checked.returncode:
+        raise RuntimeError("Refusing unsafe Session Host cleanup directory")
     if cleanup_remote_env(args.expected_instance or args.name, user, str(remote_env)) is False:
         raise RuntimeError("launch environment cleanup could not be confirmed")
     return 0

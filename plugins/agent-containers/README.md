@@ -426,6 +426,10 @@ non-symlink ancestors before reading credential input; an unavailable or
 unsafe RAM destination refuses the launch without a disk fallback. Final
 files are created with mode 0600 and exclusive, no-clobber writes. Companion
 authentication must share the validated RAM-backed launch owner directory.
+Promotion into a companion auth file is an exclusive same-filesystem link,
+followed by removing its staging name; an existing destination refuses rather
+than being replaced. Session Host cleanup also validates the actual parent
+filesystem, ownership, mode and non-symlink ancestry before deleting a handle.
 The credential-free executable wrapper and nonsecret lifecycle receipts live
 in a separate private `/tmp/agent-containers-<user>/launch` directory because
 Linux commonly mounts `/dev/shm` with `noexec`. Wrapper content contains only

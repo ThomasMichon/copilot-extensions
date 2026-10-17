@@ -176,7 +176,11 @@ def prepare_launch(
         auth_env = cleanup_owner + ".d/auth.env"
     directory = launcher_directory(auth_env)
     script = launcher_script(native, auth_env)
-    move = f"mv -- {shlex.quote(staged_auth)} {shlex.quote(auth_env)}\n" if cleanup_owner else ""
+    move = (
+        f"ln -T -- {shlex.quote(staged_auth)} {shlex.quote(auth_env)}\n"
+        f"rm -- {shlex.quote(staged_auth)}\n"
+        if cleanup_owner else ""
+    )
     auth_directory = (
         f"mkdir {shlex.quote(posixpath.dirname(auth_env))}\n"
         if cleanup_owner else ""

@@ -347,8 +347,9 @@ def test_original_session_host_cleanup_handle_removes_companion_auth(launch_seam
     monkeypatch.setattr(cli, "_trusted_session_host_context", lambda *a:
         TrustedContext(target.config, target.fleet, "vscode", "/workspace", ""))
     assert cli.main(["session-host-cleanup", "example-1", "--remote-env", owner]) == 0
-    assert owner + ".d/auth.env" in commands[0]
-    assert owner + ".d/copilot" in commands[0]
+    removal = next(command for command in commands if "rm" in command)
+    assert owner + ".d/auth.env" in removal
+    assert owner + ".d/copilot" in removal
 
 
 @pytest.mark.guard
