@@ -1512,17 +1512,45 @@ def prepare_worktree_base(
     )
 
 
+def _commit_sha(ref: str, *, cwd: str | Path) -> str:
+    """Return the commit *ref* resolves to, or ``""`` if it does not resolve."""
+    result = git(
+        "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
+        cwd=cwd, check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def create_worktree(
     anchor: str | Path,
     worktree_path: str,
     branch: str,
     start_point: str,
 ) -> None:
-    """Create a new git worktree on a new branch."""
-    git(
-        "worktree", "add", worktree_path, "-b", branch, start_point, "--quiet",
-        cwd=anchor,
-    )
+    """Create a new git worktree on a new branch.
+
+    ``git worktree add -b`` creates *branch* before checking it out and keeps
+    it when the checkout fails (e.g. a required clean/smudge filter whose
+    command is unavailable), even though it removes the partial worktree. On
+    failure, *branch* is deleted when this call created it and it still points
+    at *start_point*; git's original error is then re-raised unchanged.
+    """
+    branch_existed = local_branch_exists(branch, cwd=anchor)
+    base = _commit_sha(start_point, cwd=anchor)
+    try:
+        git(
+            "worktree", "add", worktree_path, "-b", branch, start_point, "--quiet",
+            cwd=anchor,
+        )
+    except GitError:
+        if not branch_existed and base:
+            try:
+                if _commit_sha(f"refs/heads/{branch}", cwd=anchor) == base:
+                    # git refuses to delete a branch checked out in any worktree.
+                    delete_branch(branch, cwd=anchor, force=True)
+            except Exception:
+                pass  # Best-effort: never mask git's original error.
+        raise
 
 
 def remove_worktree(anchor: str | Path, worktree_path: str) -> bool:

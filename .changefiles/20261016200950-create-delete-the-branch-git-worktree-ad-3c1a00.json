@@ -1,0 +1,9 @@
+{
+  "comment": "create: delete the branch git worktree add created when the checkout fails, instead of leaking an orphan branch",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
