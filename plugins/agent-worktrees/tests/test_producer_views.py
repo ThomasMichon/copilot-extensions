@@ -400,3 +400,32 @@ def test_shared_strict_yaml_loader_has_per_read_labels_and_located_errors() -> N
     with pytest.raises(ValueError, match="YAML document at line 3, column 3: 'field'"):
         load_strict_yaml_document(duplicate)
     assert load_strict_yaml_document("nested: {field: 1}") == {"nested": {"field": 1}}
+
+
+@pytest.mark.parametrize("metadata", [
+    None, [], "invalid", {"version": True}, {"phase": []}, {"recovery": {1: "value"}},
+])
+def test_projection_invalid_wire_shapes_are_sentinels_not_exceptions(metadata: object) -> None:
+    snapshot = ownership_snapshot([ObservedClaim("m/p/owner", "container", "bad", "active", "", metadata)], [])
+    assert not snapshot["complete"] and snapshot["issues"][0]["code"] == "invalid-producer"
+    assert snapshot["entries"][0]["producer"] == {"error": "invalid-producer-metadata"}
+    assert snapshot["entries"][0]["current_owner"] is None
+
+
+def test_strict_yaml_unhashable_key_keeps_label_and_location() -> None:
+    from agent_worktrees.strict_yaml import load_strict_yaml_document
+    with pytest.raises(ValueError, match="unhashable mapping key in fixture at line 1, column 3"):
+        load_strict_yaml_document("? [a, b]\n: value\n", label="fixture")
+
+
+@pytest.mark.parametrize("value", [b"binary", {"set"}, float("nan"), {1: "non-string-key"}])
+def test_full_producer_metadata_with_non_json_yaml_cannot_break_projection(value: object) -> None:
+    metadata = {
+        "version": 1, "lifetime": "disposable-owned", "token": "x" * 40,
+        "namespace": "raw-resource", "phase": "pending", "creator": "m/p/owner",
+        "recovery": {"value": value},
+    }
+    snapshot = ownership_snapshot([ObservedClaim("m/p/owner", "container", "bad", "active", "", metadata)], [])
+    assert not snapshot["complete"]
+    assert snapshot["entries"][0]["producer"] == {"error": "invalid-producer-metadata"}
+    json.dumps(snapshot, allow_nan=False)

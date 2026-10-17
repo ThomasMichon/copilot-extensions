@@ -16,11 +16,15 @@ def _mapping(loader: _StrictLoader, node: yaml.Node) -> dict:
     result = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node)
-        if key in result:
-            mark = key_node.start_mark
+        mark = key_node.start_mark
+        location = f"{loader.label} at line {mark.line + 1}, column {mark.column + 1}"
+        try:
+            duplicate = key in result
+        except TypeError as exc:
+            raise ValueError(f"unhashable mapping key in {location}") from exc
+        if duplicate:
             raise ValueError(
-                f"duplicate mapping key in {loader.label} at line {mark.line + 1}, "
-                f"column {mark.column + 1}: {key!r}"
+                f"duplicate mapping key in {location}: {key!r}"
             )
         result[key] = loader.construct_object(value_node)
     return result
