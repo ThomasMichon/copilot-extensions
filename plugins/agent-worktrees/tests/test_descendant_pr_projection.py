@@ -80,12 +80,12 @@ def test_parent_projects_child_pr_before_worktree_link_without_ledger_writes(gra
 
 def test_multihop_pr_dedup_preserves_own_pr_backfill(graph):
     _record(graph, "dependency", "leaf", [_pr(42)])
-    _record(graph, "dependency", "child", [
+    _record(graph, "dependency", "child-abcd", [
         _child("dependency", "leaf"), _pr(42),
         _pr(43, state="released"), _pr(44, state="at-rest"),
     ])
     parent = _record(
-        graph, "control", "parent", [_child("dependency", "child")],
+        graph, "control", "parent", [_child("dependency", "child-abcd")],
         prs=[tracking.PRRecord(state="open", number=7, repo="example/control")],
     )
     row = {}
@@ -95,7 +95,7 @@ def test_multihop_pr_dedup_preserves_own_pr_backfill(graph):
     )
 
     assert [entry["label"] for entry in row["claims_links"]] == [
-        "#7", "dependency#42", "WT dependency:hild",
+        "#7", "dependency#42", "WT dependency:abcd",
     ]
     assert row["claims_projection"]["inherited_pr_count"] == 1
     assert row["claims_link_count"] == 3
@@ -132,17 +132,22 @@ def test_settled_child_edges_are_not_followed(graph, state, monkeypatch):
     "other/dependency/child", "host/dependency/missing",
     "host/dependency/../../outside", "unqualified",
 ])
-def test_unresolvable_edges_are_visible_incomplete_not_empty_success(graph, ref):
+@pytest.mark.parametrize("current_only", [False, True])
+def test_unresolvable_edges_are_visible_incomplete_not_empty_success(graph, ref, current_only):
     parent = _record(graph, "control", "parent", [
         tracking.ResourceClaim(kind="worktree", ref=ref),
     ])
     row = {}
-    current.populate_claims(row, parent, None, current_only=True)
+    current.populate_claims(row, parent, None, current_only=current_only)
     assert row["claims_projection"] == {
         "inherited_pr_count": 0, "unresolved_count": 1, "complete": False,
     }
-    assert row["claims_links_complete"] is False
-    assert row["claims_assets"]["held_count"] == 1
+    if current_only:
+        assert row["claims_links_complete"] is False
+        assert row["claims_assets"]["held_count"] == 1
+    else:
+        assert "claims_links_complete" not in row
+        assert "claims_link_count" not in row
 
 
 def test_cycle_retains_found_pr_and_marks_projection_incomplete(graph):

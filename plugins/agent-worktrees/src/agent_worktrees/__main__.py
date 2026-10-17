@@ -1091,7 +1091,7 @@ def _worktree_to_dict(
     bridge_live_wts: set[str] | None = None,
     include_profile_assignment_history: bool = False,
     current_only: bool = False,
-    claim_records: dict | None = None,
+    claim_records: dict[tuple[str, str, str], tracking.WorktreeRecord] | None = None,
 ) -> dict:
     """Serialize a WorktreeRecord to a JSON-friendly dict.
 

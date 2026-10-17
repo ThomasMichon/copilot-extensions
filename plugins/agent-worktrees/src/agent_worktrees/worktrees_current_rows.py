@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tracking import WorktreeRecord
 
 from .worktrees_projection import MAX_TEXT_BYTES
 
@@ -11,7 +15,8 @@ MAX_CURRENT_CLAIM_LINKS = 8
 
 
 def populate_claims(
-    row: dict, record, active_pr, *, current_only: bool, claim_records: dict | None = None,
+    row: dict, record, active_pr, *, current_only: bool,
+    claim_records: dict[tuple[str, str, str], WorktreeRecord] | None = None,
 ) -> None:
     from . import claim_kinds_registry, claims_rank, claims_transitive_cli
 
@@ -59,7 +64,7 @@ def populate_claims(
             raise
         entries = []
     add_claims(row, record, entries, current_only=current_only)
-    if unresolved:
+    if current_only and unresolved:
         row["claims_links_complete"] = False
 
 
@@ -105,7 +110,7 @@ def materialize(
     """
     rows = []
     records = list(records)
-    claim_records = {
+    claim_records: dict[tuple[str, str, str], WorktreeRecord] = {
         (record.machine, record.repo, record.worktree_id): record
         for record in records
         if hasattr(record, "machine") and hasattr(record, "repo")

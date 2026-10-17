@@ -43,7 +43,7 @@ def transitive_obligations(
     _visited: set[tuple[str, str, str]] | None = None,
     _path: tuple[str, ...] = (),
     _record: tracking.WorktreeRecord | None = None,
-    _records: dict | None = None,
+    _records: dict[tuple[str, str, str], tracking.WorktreeRecord] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Recursively collect every unsettled, non-``session``-kind resource
     claim anywhere in ``worktree_id``'s subtree (itself + every worktree it
