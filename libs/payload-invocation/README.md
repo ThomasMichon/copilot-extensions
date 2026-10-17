@@ -107,6 +107,20 @@ is reported and leaves a fail-closed durable lock, not a ready-looking runtime;
 callers must not hard-kill the admitting parent as their normal deadline
 mechanism.
 
+Standalone Worktrees `install` and `update` explicitly request
+`--human-operation install|update` from this existing admission parent.
+It uses the canonical human formatter and redactor copied into a small
+payload-local `_lifecycle_human` package; no installed runtime, extra Python
+process or formatter process is needed. Native output is merged onto the
+human diagnostic stream with UTC prefixes and monotonic elapsed time, followed
+by the child's actual success/failure duration and exit code. PowerShell
+capture requires the existing entrypoint-bound UTF-8 declaration. The parent
+retains the same lease, argument vector, execution deadline and Job cleanup.
+Without explicit opt-in, child stdout and stderr remain inherited separately;
+catalogs, protocol callers and other lifecycle actions do not infer human mode
+from their output or environment. Structured-context installers retain their
+separate native owner; this does not wrap those entrypoints.
+
 Legacy `uninstall` uses the same ownership-validated transaction without a
 runtime-build reservation. The shared lock is a sibling of the canonical
 runtime root, so deleting that root cannot remove the lock or admit a concurrent

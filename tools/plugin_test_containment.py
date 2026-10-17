@@ -266,16 +266,23 @@ def isolated_environment(
 
 def _tree_size(path: Path) -> int:
     total = 0
-    try:
-        files = path.rglob("*")
-        for entry in files:
-            try:
-                if entry.is_file() and not entry.is_symlink():
-                    total += entry.stat().st_size
-            except OSError:
-                continue
-    except OSError:
-        pass
+    pending: list[Path | str] = [path]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
     return total
 
 
