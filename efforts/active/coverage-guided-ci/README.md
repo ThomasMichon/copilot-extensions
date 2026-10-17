@@ -742,6 +742,15 @@ _Pending review of this plan._
 ## Journal
 
 ### 2026-10-17 - Fix current CI fixture failures without restoring host access
+- Exact-head030422 normal run39024155420 also fails the unchanged aggregate:
+  910.70 seconds inclusive during group11 of18, which starts with159.812
+  seconds left. Its first ten pytest groups pass in48.42,17.67,97.00,80.99,
+  46.01,85.20,75.32,69.44,78.43 and125.27 seconds. Both companion portfolios
+  pass. This is better progress than the predecessor, but still not a complete
+  normal pass or evidence about the seven uncompleted groups. Do not spend
+  another normal run on these fixture-only CI corrections expecting a
+  performance result; current complete diagnostic timing and a meaningful
+  measured performance correction are needed before another qualification.
 - The predecessor normal run39021442073 fails at903.75 seconds inclusive,
   during group9 of18 with75.391 seconds remaining at that group's start.
   Its first eight pytest groups take68.23,22.03,134.82,151.95,71.04,
