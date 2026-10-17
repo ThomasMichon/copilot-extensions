@@ -1,16 +1,16 @@
-"""Exercise the native fleet matrix's exact changed-path and coverage selectors."""
+"""Exercise pre-allocation fleet admission and exact coverage partitions."""
 
 import re
 from pathlib import Path
 
 import pytest
 
+from ci_job_admission import select_jobs
+
 WORKFLOW = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml").read_text()
-PATTERNS = re.findall(r"'(\^\(fleet-manager/[^'\n]+)'; then", WORKFLOW)
 
 
 def test_native_fleet_partitions_preserve_selection_and_deadlines():
-    assert len(PATTERNS) == 1
     fleet = WORKFLOW.split("\n  fleet-native-linux:\n", 1)[1].split("\n  fleet-native-windows:", 1)[0]
     windows = WORKFLOW.split("\n  fleet-native-windows:\n", 1)[1].split("\n  agent-index-service-linux:", 1)[0]
     assert "runs-on: ubuntu-latest" in fleet
@@ -35,7 +35,12 @@ def test_native_fleet_partitions_preserve_selection_and_deadlines():
     ]
     assert "fail-fast: false" in fleet
     assert "continue-on-error" not in fleet
-    assert fleet.count("if: steps.fleet-contracts.outputs.run == 'true'") == 2
+    assert "Detect standalone fleet contract changes" not in fleet
+    for job in (fleet, windows):
+        assert "needs: discover" in job
+        assert "needs.discover.outputs.fleet_contracts == 'true'" in job
+        assert "needs.discover.outputs.admission_validated == 'true'" in job
+        assert "github.event_name != 'pull_request' ||" in job
     assert '-k "${{ matrix.partition.selector }}"' in fleet
     assert WORKFLOW.count(
         """'-m "not client_distribution_full and not observation_retention_full"'"""
@@ -56,9 +61,10 @@ def test_native_fleet_partitions_preserve_selection_and_deadlines():
     assert "&& 15 || 5" in fleet
     assert "&& 15 || 7" in windows
     assert (
-        "python tools/seasoned_uv.py --uv uv -- --system pytest && "
-        "python -m pytest -q tools/test_fleet_ci_scope.py"
+        "python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml && "
+        "python -m pytest -q tools/test_fleet_ci_scope.py tools/test_ci_job_admission.py"
     ) in fleet
+    assert "if: matrix.partition.name == 'planner'" in fleet
     for required in ("installation-context-windows", "vault-snapshot-windows"):
         assert f"      - {required}\n" in needs
         assert f"      - {required}\n" in promotion
@@ -78,11 +84,9 @@ def test_native_fleet_partitions_preserve_selection_and_deadlines():
     (".github/workflows/ci.yml", True),
     ("plugins/agent-bridge/README.md", False),
     ("visions/machine-fleet/README.md", False),
-    ("tools/run-standalone-tests.py.other", False),
-    ("unrelated/fleet-manager/config.py", False),
-    ("libs/agent-procutil-other/src/process.py", False),
+    ("tools/run-standalone-tests.py.other", True),
+    ("unrelated/fleet-manager/config.py", True),
+    ("libs/agent-procutil-other/src/process.py", True),
 ])
-def test_actual_workflow_regex_selects_only_fleet_and_runner_inputs(path, selected):
-    assert len(PATTERNS) == 1
-    for pattern in PATTERNS:
-        assert bool(re.search(pattern, path)) is selected
+def test_shared_admission_preserves_fleet_dependencies_and_widens_unknowns(path, selected):
+    assert select_jobs([path], event="pull_request").fleet is selected

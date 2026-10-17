@@ -9,6 +9,33 @@ and reactive automation this repo runs. `CONTRIBUTING.md` owns contributor
 requirements); this doc owns the *infrastructure* those steps run on top
 of — link here rather than restating any of it.
 
+## Standalone PR job admission
+
+The existing CI discovery job runs `tools/ci_job_admission.py` against explicit
+PR base/head commits before allocating fleet's twelve partition runners and
+the standalone Manager/Dispatch runners. Shared libraries, repository tooling
+and workflow changes widen admission conservatively; unknown inputs run all
+three families. Missing/malformed Git evidence fails discovery instead of
+claiming an empty selection.
+
+Manager also consumes engine sources and plugin-owned pivot data. Plugin changes
+therefore conservatively admit Manager; Dispatch plugin changes admit its
+standalone service too. This first slice does not assume those distribution
+boundaries isolate their source dependencies.
+
+An effort/document-only selection can skip those jobs without omitting the
+fixed `PR gate (required check)`. That aggregate requires successful discovery,
+validated boolean outputs and success from every selected standalone family;
+missing discovery or an unexpectedly skipped selected job fails.
+Non-PR push, full manual and promotion invocations retain their prior full
+standalone coverage, including manual runs where discovery deliberately skips.
+Required-context identity, cancellation controls, permissions and promotion
+gates are unchanged. This does not alter the other native/platform job lanes.
+
+See [the testing guide](../TESTING.md#the-turn-key-runner) for the contract
+selectors. A dev source merge does not activate governed main-owned control;
+its owner must review rollout and inspect actual job admission separately.
+
 ## Python artifact-builder toolchain policy
 
 `tools/build_python_artifacts.py` can run standalone and is also invoked by
