@@ -206,7 +206,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "5e995bb3a1515e09070c27add425632f4e02f38c14456509f27bbce20c730a5d",
+          "sha256": "72e9a7fb314b948238eae7fa0004778f3d3f17c899c08631547bf1efc3a4d8fa",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1573,6 +1573,18 @@
           "sha256": "6aaf466d5a11fdf1b769b3c2885255a1ef24d61a9e203979691d0aa53b0a1f31",
           "generation": 39,
           "role": "Retained published receipt-39 capture before SSH-profile identity correction"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-ssh-profile-generation-40.json",
+          "sha256": "d261256e82cea942236a3efa90fa097bd3fb4d44bf51c6af99e5e7d51164f392",
+          "role": "HTTP-40 unchanged wire shape with configured SSH-profile identity retained",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-ssh-profile-generation-40.json",
+          "sha256": "3c8416d74afceefa437a94b0af6fb04fa6de8c2624a51d960bbf10f0b6ff5a23",
+          "role": "HTTP-40 unchanged wire shape with configured SSH-profile identity retained",
+          "generation": 40
         }
       ],
       "provenance": [
@@ -3983,6 +3995,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
           "source_git_blob": "72bc966647f1b5a9714e63dd031dfaa0f58f4154",
           "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "57138b8432bb04b8903cc0c84925dbe8cb6207ab",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "e19fbf57d7e5798c9df5a1269b9ec332bc4d65b9",
+          "capture_method": "Re-attest unchanged HTTP-40 packets against combined committed native-recovery and SSH-profile producers; real OpenSSH effective-config and encoded-command tests cover routing without a network connection."
+        },
+        {
+          "commit": "57138b8432bb04b8903cc0c84925dbe8cb6207ab",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+          "capture_method": "Re-attest unchanged HTTP-40 packets against combined committed native-recovery and SSH-profile producers; real OpenSSH effective-config and encoded-command tests cover routing without a network connection."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",
