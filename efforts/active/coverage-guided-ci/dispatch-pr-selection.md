@@ -66,15 +66,20 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
 
 ## Plan and validation
 
-- [ ] Review and merge this proposal before activating required execution.
-- [ ] Measure real baseline curation and choose a bounded smoke budget with
+- [x] Review and merge this proposal before activating required execution.
+      Merged in [#7093](https://github.com/ThomasMichon/copilot-extensions/pull/7093).
+- [x] Measure real baseline curation and choose a bounded smoke budget with
       cross-cutting breadth evidence, not only a synthetic timing estimate.
-- [ ] Add strict contained node execution and regression coverage for invalid,
+      The 120-second floor covers 99.36% of 40,105 attributed lines across
+      all 234 baseline source files; real execution evidence is below.
+- [x] Add strict contained node execution and regression coverage for invalid,
       missing, renamed and empty node lists; ordinary full runs stay unchanged.
 - [ ] Wire coverage selection plus the additive smoke floor into the PR lane;
       test fresh, missing, stale, debt-saturated, unattributed and mixed diffs.
-- [ ] Demonstrate a runtime-covered regression is selected and fails, while
+- [x] Demonstrate a runtime-covered regression is selected and fails, while
       the corresponding clean selected invocation passes.
+      The opt-in real-coverage fixture proves clean/broken/repaired execution
+      and that the detecting test exceeds the smoke budget but is retained.
 - [ ] Measure an actual hosted required invocation inside the unchanged
       twelve-minute deadline, including setup and cleanup, before claiming
       the timeout repaired.
@@ -86,3 +91,22 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
 - 2026-10-16: proposed a bounded pilot using the existing mechanism.
   `agent-worktrees` remains shadow-only; nine published plugin pointers
   already include `agent-dispatch`. No required execution policy changed.
+- 2026-10-16: proposal #7093 merged after a clean current-head review and
+  successful complete required CI. Implementation is next; the execution
+  and hosted deadline proofs remain open. A real dispatch baseline curated
+  2,159 tests at a 120-second predicted budget, covering 99.36% of its
+  attributed lines across all 234 source files. The existing greedy
+  implementation itself took several minutes, so execution also needs
+  semantics-preserving curation acceleration, not a larger CI deadline.
+- 2026-10-16: implemented exact-node manifests, additive guards/changed test
+  files, fork-coordinate selection and the PR-only dispatch lane locally.
+  The existing curator now takes 0.74 seconds on the same real baseline and
+  returns the identical count, cost and breadth. One hundred randomized
+  baselines also match the original greedy ordering and accounting.
+  A real network-disconnected devcontainer invocation completed preparation,
+  execution and cleanup in 102.31 seconds: 2,285 passed, 7 skipped,
+  3,591 deselected; pytest itself took 77.52 seconds. This is local evidence,
+  not the still-required hosted twelve-minute proof. Focused runner,
+  curation and container-transport contracts passed (481 passed, 16 skipped);
+  the separate opted-in runtime-covered regression proof passed all 15
+  contracts, including the intentionally failing selected subprocess.

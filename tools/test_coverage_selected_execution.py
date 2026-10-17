@@ -1,0 +1,316 @@
+"""Strict selection uses fork coordinates and never turns no evidence green."""
+from __future__ import annotations
+
+import json
+import importlib.util
+import os
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from tools.coverage_guided_selection import ancestor_resolution as ar
+from tools.coverage_guided_selection import decide as decisions
+from tools.coverage_guided_selection import execution
+
+
+def _git(root: Path, *arguments: str) -> str:
+    return subprocess.check_output(
+        ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", *arguments],
+        cwd=root, text=True, env=ar.scrubbed_git_env(),
+    ).strip()
+
+
+@pytest.fixture
+def history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str, dict]:
+    source = tmp_path / "plugins/fixture/src"
+    source.mkdir(parents=True)
+    (source / "app.py").write_text("value = 2\nother = 3\n", encoding="utf-8")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "fixture base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    baseline = {
+        "schema_version": 3, "plugin": "fixture", "measured_commit": base,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "tests": {
+            "tests/test_app.py::test_implicated": {"duration_s": 10},
+            "tests/test_app.py::test_smoke": {"duration_s": 0.1},
+        },
+        "coverage": {
+            "plugins/fixture/src/app.py": {
+                "1": ["tests/test_app.py::test_implicated"],
+                "2": ["tests/test_app.py::test_smoke"],
+            },
+        },
+    }
+    monkeypatch.setattr(
+        decisions, "resolve_nearest_baseline",
+        lambda *_a, **_k: ar.ResolvedBaseline(baseline=baseline, baseline_commit=base),
+    )
+    monkeypatch.setattr(decisions, "fetch_baseline_asset", lambda *_a, **_k: baseline)
+    return tmp_path, base, baseline
+
+
+def _plan(root: Path, base: str, **overrides) -> dict:
+    options = {
+        "repo_root": root, "repo": "example/project", "plugin": "fixture",
+        "cov_source": "plugins/fixture/src", "base_ref": base, "head_ref": "HEAD",
+        "main_ref": "main", "smoke_budget_s": 0.1,
+        "commit_volume_threshold": 200, "age_threshold_seconds": 604800,
+    }
+    options.update(overrides)
+    return execution.build_execution_payload(**options)
+
+
+def test_replacement_selects_old_coverage_and_adds_fallback_without_budget_truncation(history):
+    root, base, _ = history
+    (root / "plugins/fixture/src/app.py").write_text("value = 999\nother = 3\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "runtime replacement")
+    payload = _plan(root, base)
+    assert payload["fork_commit"] == base
+    assert payload["mode"] == "fallback"
+    assert set(payload["selection"]["nodes"]) == {
+        "tests/test_app.py::test_implicated", "tests/test_app.py::test_smoke",
+    }
+    assert payload["fallback_set"]["total_runtime_s"] == 0.1
+    assert payload["selection"]["include_guards"]
+
+
+def test_empty_diff_still_executes_the_measured_cross_cutting_floor(history):
+    root, base, _ = history
+    payload = _plan(root, base)
+    assert payload["mode"] == "selected"
+    assert payload["selection"]["nodes"] == ["tests/test_app.py::test_smoke"]
+
+
+def test_changed_new_test_files_and_out_of_scope_changes_remain_visible(history):
+    root, base, _ = history
+    tests = root / "plugins/fixture/tests"
+    tests.mkdir()
+    (tests / "test_new.py").write_text("def test_added(): pass\n", encoding="utf-8")
+    (tests / "conftest.py").write_text("# fixture dependency\n", encoding="utf-8")
+    (root / "shared.py").write_text("dependency = True\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "new tests and shared dependency")
+    payload = _plan(root, base)
+    assert payload["selection"]["files"] == ["tests/test_new.py"]
+    assert payload["mode"] == "fallback"
+    assert {reason["file"] for reason in payload["selection_fallback_reasons"]} == {
+        "plugins/fixture/tests/test_new.py", "plugins/fixture/tests/conftest.py", "shared.py",
+    }
+
+
+@pytest.mark.parametrize("change", ["insertion", "deletion", "new", "binary", "rename"])
+def test_unusual_diff_shapes_do_not_disappear(history, change: str):
+    root, base, _ = history
+    source = root / "plugins/fixture/src/app.py"
+    if change == "insertion":
+        source.write_text("new = 1\nvalue = 2\nother = 3\n", encoding="utf-8")
+    elif change == "deletion":
+        source.write_text("other = 3\n", encoding="utf-8")
+    elif change == "new":
+        (source.parent / "new.py").write_text("new = 1\n", encoding="utf-8")
+    elif change == "binary":
+        source.write_bytes(b"\x00binary")
+    else:
+        source.rename(source.with_name("renamed.py"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "changed source shape")
+    payload = _plan(root, base)
+    assert payload["selection"]["nodes"]
+    if change == "deletion":
+        assert "tests/test_app.py::test_implicated" in payload["selection"]["nodes"]
+    else:
+        assert payload["mode"] == "fallback"
+
+
+@pytest.mark.parametrize("failure", ["missing", "fetch", "wrong-plugin"])
+def test_no_usable_baseline_explicitly_runs_full_default(history, monkeypatch, failure: str):
+    root, base, baseline = history
+    if failure == "missing":
+        monkeypatch.setattr(decisions, "resolve_nearest_baseline", lambda *_a, **_k: None)
+    elif failure == "wrong-plugin":
+        baseline["plugin"] = "other"
+    else:
+        def fetch(*_args, **_kwargs):
+            raise decisions.BaselineFetchError("fixture unavailable")
+        monkeypatch.setattr(decisions, "fetch_baseline_asset", fetch)
+    payload = _plan(root, base)
+    assert payload["execution"] == "full"
+    assert payload["selection"] is None
+
+
+@pytest.mark.parametrize("debt", ["age", "commits"])
+def test_debt_saturation_is_audited_and_curates_real_smoke(history, debt: str):
+    root, base, baseline = history
+    options = {}
+    if debt == "age":
+        baseline["generated_at"] = "2000-01-01T00:00:00+00:00"
+    else:
+        (root / "earlier.txt").write_text("intervening commit\n", encoding="utf-8")
+        _git(root, "add", ".")
+        _git(root, "commit", "-qm", "intervening commit")
+        _git(root, "commit", "--allow-empty", "-qm", "second intervening commit")
+        base = _git(root, "rev-parse", "HEAD")
+        options["commit_volume_threshold"] = 1
+    payload = _plan(root, base, **options)
+    assert payload["mode"] == "fallback"
+    assert payload["debt"]["exceeded"]
+    assert payload["selection"]["nodes"] == ["tests/test_app.py::test_smoke"]
+
+
+def test_empty_curated_evidence_is_a_hard_error_not_only_guards(history):
+    root, base, _ = history
+    with pytest.raises(ValueError, match="empty selection"):
+        _plan(root, base, smoke_budget_s=0.00001)
+
+
+@pytest.mark.parametrize("mode,exit_code", [("selected", 0), ("selected", 7), ("full", 0)])
+def test_execution_cli_preserves_failure_and_reports_complete_invocation(tmp_path, monkeypatch, mode, exit_code):
+    script = Path(__file__).resolve().parent / "run-coverage-selected-tests.py"
+    spec = importlib.util.spec_from_file_location("coverage_execution_cli", script)
+    assert spec and spec.loader
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    selection = {
+        "version": 1, "plugin": "agent-dispatch", "nodes": ["tests/test_x.py::test_x"],
+        "files": [], "include_guards": True,
+    }
+    payload = {
+        "execution": mode, "selection": selection if mode == "selected" else None,
+        "reason": "fixture", "baseline_generation": "fixture-generation",
+    }
+    monkeypatch.setattr(cli, "build_execution_payload", lambda **_k: payload)
+    commands = []
+    manifests = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        if "--selection-file" in command:
+            path = Path(command[command.index("--selection-file") + 1])
+            assert json.loads(path.read_text()) == selection
+            manifests.append(path)
+        return subprocess.CompletedProcess(command, exit_code)
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    output = tmp_path / "decision.json"
+    assert cli.main([
+        "--repo", "example/project", "--plugin", "agent-dispatch", "--base-ref", "fixture",
+        "--smoke-budget", "120", "--commit-volume-threshold", "200",
+        "--age-threshold-seconds", "604800", "--out", str(output),
+    ]) == exit_code
+    decision = json.loads(output.read_text())
+    assert decision["exit_code"] == exit_code
+    assert decision["invocation_seconds"] >= 0
+    assert "Complete invocation" in summary.read_text()
+    if mode == "selected":
+        assert commands[0][-4:] == ["--timeout", "540", "--plugin-timeout", "540"]
+        assert manifests and all(not path.exists() for path in manifests)
+    else:
+        assert commands[0][-1] == "agent-dispatch"
+        assert "--selection-file" not in commands[0]
+
+
+def test_ci_pilot_is_pr_only_and_does_not_increase_job_deadline():
+    import yaml
+
+    workflow = yaml.load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["smoke"]
+    assert "&& 12 || 8" in job["timeout-minutes"]
+    steps = {step.get("name"): step for step in job["steps"] if "name" in step}
+    selected = steps["Coverage-selected dispatch PR tests plus smoke and guards"]
+    assert selected["if"] == "matrix.plugin == 'agent-dispatch' && github.event_name == 'pull_request'"
+    assert "--smoke-budget 120" in selected["run"]
+    assert "--commit-volume-threshold 200" in selected["run"]
+    assert "--age-threshold-seconds 604800" in selected["run"]
+    ordinary = steps["Test ${{ matrix.plugin }}"]
+    assert ordinary["if"] == "matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'"
+    assert ordinary["run"] == "python tools/run-plugin-tests.py ${{ matrix.plugin }}"
+    assert workflow["env"]["COVERAGE_GUIDED_SELECTION_MODE"] == "shadow"
+    assert any(
+        step.get("run") == ordinary["run"]
+        for step in workflow["jobs"]["full"]["steps"]
+    )
+
+
+@pytest.mark.skipif(
+    os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1",
+    reason="opt-in real coverage collection and contained runtime regression",
+)
+def test_runtime_covered_regression_is_selected_and_fails(tmp_path, monkeypatch):
+    from tools.coverage_guided_selection.baseline import collect_baseline
+    from tools.test_plugin_test_selection import runner
+
+    plugin = tmp_path / "plugins/fixture"
+    source = plugin / "src"
+    tests = plugin / "tests"
+    source.mkdir(parents=True)
+    tests.mkdir()
+    (source / "app.py").write_text("def value():\n    return 2\n", encoding="utf-8")
+    (source / "other.py").write_text("def cheap():\n    return True\n", encoding="utf-8")
+    (plugin / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths=["tests"]\n', encoding="utf-8",
+    )
+    (tests / "conftest.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))\n",
+        encoding="utf-8",
+    )
+    (tests / "test_app.py").write_text(
+        "import time\nfrom app import value\nfrom other import cheap\n"
+        "def test_implicated():\n    time.sleep(.1)\n    assert value() == 2\n"
+        "def test_smoke():\n    assert cheap()\n",
+        encoding="utf-8",
+    )
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "clean runtime fixture")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    baseline = collect_baseline(
+        cwd=tmp_path, test_path="plugins/fixture/tests", cov_source="plugins/fixture/src",
+        plugin="fixture", measured_commit=base,
+    )
+    hot = "tests/test_app.py::test_implicated"
+    cold = "tests/test_app.py::test_smoke"
+    assert hot in baseline["coverage"]["plugins/fixture/src/app.py"]["2"]
+    budget = baseline["tests"][cold]["duration_s"] + 0.000001
+    assert baseline["tests"][hot]["duration_s"] > budget
+    monkeypatch.setattr(
+        decisions, "resolve_nearest_baseline",
+        lambda *_a, **_k: ar.ResolvedBaseline(baseline, base),
+    )
+    monkeypatch.setattr(decisions, "fetch_baseline_asset", lambda *_a, **_k: baseline)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    # Use a real managed environment, just like ordinary contained execution.
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    (runner.VENV_ROOT / "fixture").mkdir(parents=True)
+    monkeypatch.setattr(runner, "_has_pyproject", lambda _name: False)
+    manifest = tmp_path / "selection.json"
+    clean = _plan(tmp_path, base, smoke_budget_s=budget)
+    assert hot not in clean["selection"]["nodes"]  # the smoke budget cannot buy it
+    manifest.write_text(json.dumps(clean["selection"]), encoding="utf-8")
+    kwargs = dict(
+        reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,
+        selection_file=manifest,
+    )
+    assert runner.run_plugin("fixture", "uv", **kwargs) == 0
+    (source / "app.py").write_text("def value():\n    return 999\n", encoding="utf-8")
+    _git(tmp_path, "add", "plugins/fixture/src/app.py")
+    _git(tmp_path, "commit", "-qm", "introduce runtime regression")
+    broken = _plan(tmp_path, base, smoke_budget_s=budget)
+    assert hot in broken["selection"]["nodes"]
+    manifest.write_text(json.dumps(broken["selection"]), encoding="utf-8")
+    assert runner.run_plugin("fixture", "uv", **kwargs) == 1
+    # Restore the value with different byte length to avoid stale .pyc aliases.
+    (source / "app.py").write_text("def value():\n    return 2  # fixed\n", encoding="utf-8")
+    assert runner.run_plugin("fixture", "uv", **kwargs) == 0

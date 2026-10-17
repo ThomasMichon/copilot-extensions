@@ -1,0 +1,46 @@
+"""Apply an exact selection after collection, unioning guards and changed files."""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from plugin_test_selection import load_selection
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption("--exact-selection", type=Path)
+    parser.addoption("--selection-plugin")
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    path = config.getoption("--exact-selection")
+    if path is None:
+        return
+    try:
+        selection = load_selection(path, config.getoption("--selection-plugin"), Path.cwd())
+    except (OSError, ValueError) as error:
+        raise pytest.UsageError(f"invalid exact test selection: {error}") from error
+    available = {item.nodeid for item in items}
+    missing = set(selection.nodes) - available
+    if missing:
+        raise pytest.UsageError("selected test nodes were not collected:\n" + "\n".join(sorted(missing)))
+    files = set(selection.files)
+    empty_files = files - {item.nodeid.split("::", 1)[0] for item in items}
+    if empty_files:
+        raise pytest.UsageError("selected test files collected no tests: " + ", ".join(sorted(empty_files)))
+    requested = set(selection.nodes)
+    kept, deselected = [], []
+    for item in items:
+        if (
+            item.nodeid in requested or item.nodeid.split("::", 1)[0] in files
+            or (selection.include_guards and item.get_closest_marker("guard") is not None)
+        ):
+            kept.append(item)
+        else:
+            deselected.append(item)
+    if not kept:
+        raise pytest.UsageError("exact test selection collected no runnable items")
+    config.hook.pytest_deselected(items=deselected)
+    items[:] = kept

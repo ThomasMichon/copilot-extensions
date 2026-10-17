@@ -68,6 +68,64 @@ def _stub_host_devcontainer_cli(monkeypatch):
     monkeypatch.setattr(wrapper.shutil, "which", which)
 
 
+@pytest.mark.parametrize("form", ["--selection-file", "--selection-f"])
+def test_external_selection_is_validated_before_copying_and_rewritten(tmp_path, form):
+    tests = tmp_path / "plugins/fixture/tests"
+    tests.mkdir(parents=True)
+    (tests / "test_app.py").write_text("def test_value(): pass\n", encoding="utf-8")
+    manifest = tmp_path / "external.json"
+    payload = {
+        "version": 1, "plugin": "fixture", "nodes": ["tests/test_app.py::test_value"],
+        "files": [], "include_guards": True,
+    }
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    for arguments in (["fixture", form, str(manifest)], ["fixture", form + "=" + str(manifest)]):
+        raw = wrapper._selection.read_selection(arguments, wrapper._canonicalize_flag, tmp_path)
+        assert json.loads(raw) == payload
+        rewritten, host = wrapper._selection.rewrite_selection(
+            arguments, wrapper._canonicalize_flag, "/tmp/ce-selection-example.json",
+        )
+        assert rewritten == ["fixture", "--selection-file=/tmp/ce-selection-example.json"]
+        assert host == str(manifest)
+    payload["nodes"] = ["../private.py::test_value"]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="existing, unlinked"):
+        wrapper._selection.read_selection(
+            ["fixture", form, str(manifest)], wrapper._canonicalize_flag, tmp_path,
+        )
+
+
+def test_selection_staging_passes_only_validated_data_over_stdin(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return real_subprocess.CompletedProcess(command, 0, b"/tmp/ce-selection-example.json\n", b"")
+
+    monkeypatch.setattr(wrapper._selection.subprocess, "run", run)
+    assert wrapper._selection.stage_selection("container", "vscode", b'{"version":1}') == (
+        "/tmp/ce-selection-example.json"
+    )
+    assert calls[0][0][:7] == ["docker", "exec", "-i", "-u", "vscode", "container", "python"]
+    assert calls[0][1]["input"] == b'{"version":1}'
+    assert calls[0][1]["timeout"] == 30
+
+
+def test_network_enabled_preparation_never_runs_or_needs_the_selection(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(
+        wrapper._net_scope.subprocess, "run",
+        lambda command: commands.append(command) or real_subprocess.CompletedProcess(command, 0),
+    )
+    wrapper._net_scope.prepare_dependencies(
+        "devcontainer", tmp_path, "container", tmp_path / "config.json",
+        ["fixture", "--selection-file", "/tmp/ce-selection-example.json", "--timeout", "60"],
+        wrapper._canonicalize_flag,
+    )
+    assert commands[0][-4:] == ["fixture", "--timeout", "60", "--prepare-only"]
+    assert not any("selection" in argument for argument in commands[0])
+
+
 def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     monkeypatch.setenv("GIT_DIR", "/somewhere/else/.git")

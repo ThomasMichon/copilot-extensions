@@ -1283,6 +1283,71 @@ $env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
 The portable proxy contracts cover binary forwarding, routing identity, and
 timeout/cancellation cleanup and run in the Agent Bridge CI lane.
 
+## Coverage-selected dispatch PRs
+
+Only `agent-dispatch`'s pull-request lane uses coverage selection. Its unchanged
+twelve-minute job runs `tools/run-coverage-selected-tests.py`, which reuses
+`coverage_guided_selection.decide()` and the trusted main-history pointer /
+Release-asset baseline. Push, manual and promotion portfolios remain full;
+`agent-worktrees`' separate selection consumer remains shadow-only.
+
+The dispatch lane always unions three sets: exact diff-attributed test nodes,
+the existing weighted-set-cover smoke floor (120 seconds of measured baseline
+test costs, T0-T2/untiered candidates), and structural `guard` tests. Changed or
+new `tests/test_*.py` files run in full too. The smoke budget bounds only that
+floor, never the implicated tests or complete invocation. Current debt limits
+are 200 intervening commits and seven days. Curation uses compact line bitsets
+and lazy marginal-gain ranking, with the same greedy score/cost/node-ID ties
+and hard budget as the original algorithm.
+
+Diff attribution uses the merge-base's **old** changed line numbers, remapping
+the earned baseline to that fork point rather than invalidating it against the
+replacement being tested. Added lines, unrecognized/binary diff shapes, and
+changes outside the attributed source scope remain explicit fallback triggers.
+That fallback adds the measured smoke set without removing known implicated
+tests. No usable baseline (including an unavailable Release asset) visibly
+runs the full/default portfolio; it never means “guards only” or zero tests.
+An empty curated selection is an error.
+
+`--selection-file PATH` on `run-plugin-tests.py` accepts a versioned JSON
+manifest, for example:
+
+```json
+{
+  "version": 1,
+  "plugin": "agent-dispatch",
+  "nodes": ["tests/test_example.py::test_contract"],
+  "files": ["tests/test_changed.py"],
+  "include_guards": true
+}
+```
+
+Use one named plugin and no other selection mode. Paths must identify existing,
+unlinked plugin-relative test files; node IDs must match collected items
+exactly, including parameter IDs. Missing/renamed nodes, empty files, malformed
+or empty evidence fail rather than silently deselecting everything. The
+contained invocation snapshots the validated manifest, neutralizes ambient and
+project `addopts`, and retains the existing isolation and process-tree limits.
+Ordinary unselected runs are unchanged. The hardened
+`run_tests_in_devcontainer.py` wrapper accepts the same flag: it transfers only
+validated manifest data into the disposable container, strips the selection
+from dependency-only preparation, then executes it with networking removed.
+
+The `dispatch-selection` artifact records exact nodes, changed test files,
+baseline generation, debt, fallback reasons, predicted smoke cost and attributed
+line breadth. Complete invocation timing includes planning, dependency
+preparation, execution and cleanup, not just pytest's test timer. Guard and
+additional implicated/changed-file costs are not claimed to fit the predicted
+smoke-floor cost.
+
+Focused contracts live in `tools/test_coverage_selected_execution.py`,
+`tools/test_coverage_fallback_equivalence.py` and
+`tools/test_plugin_test_selection.py`. The first file's opt-in
+`test_runtime_covered_regression_is_selected_and_fails` (`CGS_RUN_INTEGRATION_TEST=1`)
+earns real runtime coverage, proves smoke alone cannot afford the detecting
+test, and checks the selected clean/broken/repaired executions. The manual
+coverage integration job runs that proof alongside baseline round-trip tests.
+
 ## Test portfolio invariants
 
 Owned-PR rebase publication keeps representative real-Git success, reviewer-race

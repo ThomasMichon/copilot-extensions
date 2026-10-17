@@ -130,6 +130,7 @@ def decide(
     age_threshold_seconds: float | None = None,
     fallback_runtime_budget_s: float = 300.0,
     eligible_tests: frozenset[str] | None = None,
+    include_smoke_floor: bool = False,
 ) -> SelectionDecision:
     """Decide which tests to run for `plugin` at `fork_commit`.
 
@@ -152,6 +153,9 @@ def decide(
     generation) -- each of those is a normal, auditable fallback reason,
     not an exception. Only a genuine git/plumbing failure inside the
     helpers this calls propagates.
+
+    `include_smoke_floor` unions the curated fallback into a fresh
+    selection too. Existing shadow consumers remain unchanged by default.
     """
     resolved = resolve_nearest_baseline(repo_root, plugin, fork_commit, main_ref=main_ref)
     if resolved is None:
@@ -242,7 +246,7 @@ def decide(
     )
 
     sel = select_tests(remapped, changed_lines)
-    if sel.fallback_triggered:
+    if sel.fallback_triggered or include_smoke_floor:
         # Same reasoning as the debt-exceeded branch above: curate from the
         # full baseline, not the remapped/invalidated one.
         fb = compute_fallback_set(
@@ -261,9 +265,12 @@ def decide(
         # for what's unattributed, never remove coverage already earned.
         combined_tests = tuple(sorted(set(sel.selected_tests) | set(fb.selected_tests)))
         return SelectionDecision(
-            mode="fallback",
+            mode="fallback" if sel.fallback_triggered else "selected",
             selected_tests=combined_tests,
-            reason=f"{SELECTION_FALLBACK_PREFIX}{reasons_str}",
+            reason=(
+                f"{SELECTION_FALLBACK_PREFIX}{reasons_str}"
+                if sel.fallback_triggered else f"{FRESH_SELECTION}; additive smoke floor"
+            ),
             baseline_generation=measured_commit,
             baseline_commit_on_main=resolved.baseline_commit,
             debt=assessment.as_dict(),
