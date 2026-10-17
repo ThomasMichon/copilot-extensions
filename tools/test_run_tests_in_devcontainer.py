@@ -107,6 +107,7 @@ def test_selection_staging_passes_only_validated_data_over_stdin(monkeypatch):
         "/tmp/ce-selection-example.json"
     )
     assert calls[0][0][:7] == ["docker", "exec", "-i", "-u", "vscode", "container", "python"]
+    assert "dir='/tmp'" in calls[0][0][-1]
     assert calls[0][1]["input"] == b'{"version":1}'
     assert calls[0][1]["timeout"] == 30
 

@@ -52,7 +52,7 @@ def read_selection(
 def stage_selection(container_id: str, remote_user: str, payload: bytes) -> str:
     program = (
         "import sys,tempfile\n"
-        "with tempfile.NamedTemporaryFile(prefix='ce-selection-',suffix='.json',delete=False) as f:\n"
+        "with tempfile.NamedTemporaryFile(prefix='ce-selection-',suffix='.json',dir='/tmp',delete=False) as f:\n"
         " f.write(sys.stdin.buffer.read())\n"
         " print(f.name)\n"
     )

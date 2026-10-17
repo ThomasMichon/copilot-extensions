@@ -239,6 +239,20 @@ def test_explicit_test_files_preserve_default_grouping_and_filter_only_collectio
     ) == [[tests / "nested/test_child.py", tests / "test_selected.py"]]
 
 
+@pytest.mark.parametrize("value", ["./tests/test_selected.py", "tests//test_selected.py"])
+def test_interactive_test_file_paths_are_normalized_without_changing_manifest_policy(selectable_tests, value):
+    assert runner._test_file_groups("example", 25, test_files=(value,)) == [
+        [selectable_tests / "test_selected.py"],
+    ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native path separators")
+def test_interactive_test_file_accepts_native_windows_separators(selectable_tests):
+    assert runner._test_file_groups(
+        "example", 25, test_files=("tests\\test_selected.py",),
+    ) == [[selectable_tests / "test_selected.py"]]
+
+
 @pytest.mark.parametrize("path", [
     "missing.py", "../test_selected.py", "test_selected.py", "nested",
 ])

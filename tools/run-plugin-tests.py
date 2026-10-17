@@ -56,6 +56,7 @@ import tomllib
 from pathlib import Path
 
 from seasoned_uv import run_uv_install
+# Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
 from plugin_test_selection import (
     TestSelection, load_selection, resolve_plugin_root, validate_test_file,
@@ -352,7 +353,7 @@ def _test_file_groups(
     if test_files:
         files = []
         for value in test_files:
-            candidate = validate_test_file(_plugin_dir(name), value)
+            candidate = validate_test_file(_plugin_dir(name), Path(value).as_posix())
             if candidate not in files:
                 files.append(candidate)
         files.sort()
