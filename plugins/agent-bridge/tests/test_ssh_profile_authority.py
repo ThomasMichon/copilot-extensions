@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -49,7 +50,8 @@ def _assert_profile(items):
     assert values["hostname"] == ["configured.example.invalid"]
     assert values["user"] == ["profile-user"]
     assert values["port"] == ["40222"]
-    assert {"profile-identity", "profile-identity-2"}.issubset(values["identityfile"])
+    identity_names = {Path(value).name for value in values["identityfile"]}
+    assert {"profile-identity", "profile-identity-2"}.issubset(identity_names)
     assert values["hostkeyalias"] == ["profile-host-key"]
     assert any(value.startswith("profile-proxy ") for value in values["proxycommand"])
 
@@ -82,6 +84,7 @@ async def test_remote_carrier_preserves_profile_identity(
     _assert_profile(acquired[0].effective_config)
     assert acquired[0].port is None
     assert acquired[0].user is None
+    assert acquired[0].identity_file is None
     assert ssh_profile.read_bytes() == before
 
 
@@ -104,6 +107,7 @@ async def test_acp_connection_preserves_profile_user(monkeypatch, ssh_profile):
     config = source.get_ssh_config()
     _assert_profile(config.effective_config)
     assert config.user is None
+    assert config.identity_file is None
     assert ssh_profile.read_bytes() == before
 
 

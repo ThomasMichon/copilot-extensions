@@ -495,10 +495,14 @@ async def _run_ssh(
 
 
 async def _run_ssh_ex(
-    host: str, user: str | None, project: str,
+    host: str | None, user: str | None, project: str,
     args: list[str] | None = None, *, timeout: float | None = None,
 ) -> tuple[str | None, str]:
-    """Return stdout/stderr without applying legacy user metadata to the SSH profile."""
+    """Run the profile and return stdout/stderr.
+
+    The legacy ``user`` keyword stays accepted for caller compatibility but
+    never overrides the SSH profile's login user.
+    """
     if not host:
         raise ValueError("SSH target requires a host (SSH alias)")
     sub = " ".join(shlex.quote(a) for a in (args if args is not None else ["list", "--json"]))
