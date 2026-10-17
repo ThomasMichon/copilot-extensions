@@ -64,5 +64,25 @@ function Assert-SourceSnapshot {
         if ($identity -ne $script:SourceRuntimeIdentity) {
             throw 'Stamped source snapshot failed identity validation; redirects were not published'
         }
+
     }
+}
+
+function Publish-SourceSnapshot {
+    Assert-SourceRuntime
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Source snapshot publication requires a bootstrap Python interpreter' }
+    $arguments = @('-I', '-B', (Join-Path $ScriptDir 'versioned_runtime_source.py'),
+        '--payload', $PluginDir, '--package-version', $PackageVersion,
+        '--plugin', 'agent-codespaces', '--expected-runtime-version', $SrcVersion,
+        '--expected-source-identity', $script:SourceRuntimeIdentity,
+        '--snapshot-root', $InstallDir)
+    $nativeError = ''
+    $snapshot = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        throw "Source snapshot publication failed (exit ${code}): $snapshot$nativeError"
+    }
+    Assert-SourceRuntime
+    return $snapshot.Trim()
 }

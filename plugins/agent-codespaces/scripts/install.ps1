@@ -1608,25 +1608,19 @@ function Invoke-Stamp {
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    # Copy everything needed to `uv pip install .` from the slot (src, libs,
-    # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
     Assert-SourceRuntime
-    $exclude = if ($script:SourceRuntimeIdentity) { @() } else {
-        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    }
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
-    }
-    if (-not $script:SourceRuntimeIdentity) { Materialize-SnapshotDependencies -SnapshotDir $snapTmp }
-    Assert-SourceSnapshot -Snapshot $snapTmp
-    if ($script:SourceRuntimeIdentity -and (Test-Path -LiteralPath $snapDir)) {
-        Assert-SourceSnapshot -Snapshot $snapDir
-        Remove-Item -LiteralPath $snapTmp -Recurse -Force
+    if ($script:SourceRuntimeIdentity) {
+        $snapDir = Publish-SourceSnapshot
     } else {
+        $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+        }
+        Materialize-SnapshotDependencies -SnapshotDir $snapTmp
         if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
         Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     }
