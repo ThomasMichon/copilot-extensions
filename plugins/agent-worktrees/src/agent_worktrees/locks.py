@@ -34,8 +34,6 @@ import tempfile
 import time
 from pathlib import Path
 
-import single_instance_lease
-
 # Bumped only on a breaking change to the on-disk shape; readers tolerate an
 # absent/unknown version (treat as legacy best-effort) so a rollout is safe.
 LOCK_SCHEMA = 1
@@ -63,6 +61,8 @@ def _pid_alive(pid: int) -> bool:
     """
     if pid <= 0:
         return False
+    import single_instance_lease
+
     return single_instance_lease.pid_alive(pid)
 
 
