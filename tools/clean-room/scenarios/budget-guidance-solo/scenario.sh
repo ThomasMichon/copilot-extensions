@@ -39,7 +39,7 @@ if ! FRESH="$(mktemp -d)"; then
     cr_finalize
 fi
 trap 'rm -rf -- "$FRESH"' EXIT
-if ! capture "copy-candidate" -- python3 - "$SOURCE" "$FRESH" <<'PY'
+if ! capture "copy-candidate" -- python3 -I - "$SOURCE" "$FRESH" <<'PY'
 import shutil
 import sys
 from pathlib import Path
@@ -60,7 +60,7 @@ if ! capture "stamp" -- timeout 120 bash "$FRESH/plugins/budget-guidance/scripts
     cr_finalize
 fi
 SNAPSHOT="$(cat "$HOME/.budget-guidance/payload-dir")"
-VERSION="$(python3 -c 'import json,sys; from pathlib import Path; print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["version"])' "$SNAPSHOT/plugin.json")"
+VERSION="$(python3 -I -c 'import json,sys; from pathlib import Path; print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["version"])' "$SNAPSHOT/plugin.json")"
 RUNTIME="$HOME/.budget-guidance/versions/$VERSION"
 BIN="$HOME/.local/bin/budget-guidance"
 if [ -d "$RUNTIME" ] || [ ! -x "$BIN" ] || [ ! -f "$SNAPSHOT/libs/agent-procutil/pyproject.toml" ]; then
@@ -68,7 +68,7 @@ if [ -d "$RUNTIME" ] || [ ! -x "$BIN" ] || [ ! -f "$SNAPSHOT/libs/agent-procutil
     cr_finalize
 fi
 pass "snapshot contains the local dependency; runtime is still absent"
-if ! capture "remove-original-copy" -- python3 - "$FRESH" <<'PY'
+if ! capture "remove-original-copy" -- python3 -I - "$FRESH" <<'PY'
 import shutil
 import sys
 from pathlib import Path
@@ -109,7 +109,7 @@ else
 fi
 
 phase 4 "isolated foreground extension contract"
-if ! capture "prepare-extension-fixture" -- python3 - "$SOURCE" "$SNAPSHOT" "$FRESH" <<'PY'
+if ! capture "prepare-extension-fixture" -- python3 -I - "$SOURCE" "$SNAPSHOT" "$FRESH" <<'PY'
 import shutil
 import sys
 from pathlib import Path
