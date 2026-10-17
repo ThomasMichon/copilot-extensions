@@ -77,6 +77,25 @@ def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypa
     launch.assert_not_called()
 
 
+def test_windows_owner_forwards_stdio_and_exit_status(monkeypatch):
+    from types import SimpleNamespace
+    from agent_bridge import worktree_owner_launch as launcher
+
+    monkeypatch.setattr(launcher, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(launcher.sys, "argv", ["launcher", "owner", "--json"])
+    monkeypatch.setattr(launcher, "_legacy_worktrees_runtime_prefix", lambda root: ["peer"])
+    monkeypatch.setattr(launcher, "_agent_worktrees_environment", lambda: {"SAFE": "1"})
+    monkeypatch.setattr(launcher, "no_window_kwargs", lambda: {"creationflags": 0x08000000})
+    call = Mock(return_value=7)
+    monkeypatch.setattr(launcher.subprocess, "call", call)
+    assert launcher.main() == 7
+    call.assert_called_once_with(
+        ["peer", "--json"], env={"SAFE": "1"},
+        stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+        creationflags=0x08000000,
+    )
+
+
 @pytest.fixture(params=["bash", "powershell"])
 def installation(tmp_path, monkeypatch, request):
     executable = "pwsh" if request.param == "powershell" else "bash"

@@ -23,6 +23,11 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _isolated_authority_profile(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path / "authority-profile")
+
+
 def load(wid):
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
@@ -40,10 +45,8 @@ def test_rewrite_provider_mismatch_never_resolves_credentials(pr_repo, monkeypat
         pr_rewrite.observe_pr(config, pr)
 
 
-def test_rewrite_provider_mismatch_refuses_before_destination_provider_lookup(pr_repo, monkeypatch):
-    config, wid, wt, remote = pr_repo
-    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
-    assert result["success"], result
+def test_rewrite_provider_mismatch_refuses_before_destination_provider_lookup(published_pr_repo, monkeypatch):
+    config, wid, wt, remote = published_pr_repo
     record = load(wid)
     record.pr.provider = "github"
     record.pr.number = 42
@@ -81,10 +84,8 @@ def test_provider_identity_generation_survives_network_window_snapshot(pr_repo, 
     assert current.pr.rewrite_owner == published.pr.rewrite_owner
 
 
-def test_rewrite_merges_attribution_stamp_during_actual_push(pr_repo, monkeypatch):
-    config, wid, wt, remote = pr_repo
-    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
-    assert result["success"], result
+def test_rewrite_merges_attribution_stamp_during_actual_push(published_pr_repo, monkeypatch):
+    config, wid, wt, remote = published_pr_repo
     record = load(wid)
     before = record.pr.head_sha
     record.pr.attribution_mode = ""
@@ -259,10 +260,8 @@ def test_publication_holds_authority_through_io_and_persistence(pr_repo, monkeyp
     assert probes
 
 
-def test_ordinary_publication_rechecks_authority_after_admission_wait(pr_repo, monkeypatch):
-    config, wid, wt, remote = pr_repo
-    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
-    assert result["success"], result
+def test_ordinary_publication_rechecks_authority_after_admission_wait(published_pr_repo, monkeypatch):
+    config, wid, wt, remote = published_pr_repo
     before = load(wid).pr.head_sha
     original = pr_authority.guard
     changed = False
@@ -286,10 +285,8 @@ def test_ordinary_publication_rechecks_authority_after_admission_wait(pr_repo, m
     assert not (Path(config.default_repo.worktree_root) / ".finalize.lock").exists()
 
 
-def test_ownership_stamping_merges_attribution_only_revision(pr_repo):
-    config, wid, wt, remote = pr_repo
-    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
-    assert result["success"], result
+def test_ownership_stamping_merges_attribution_only_revision(published_pr_repo):
+    config, wid, wt, remote = published_pr_repo
     record = load(wid)
     record.pr.rewrite_owner = record.pr.rewrite_identity = ""
     record.pr.attribution_mode = ""
@@ -309,10 +306,8 @@ def test_ownership_stamping_merges_attribution_only_revision(pr_repo):
 
 
 @pytest.mark.parametrize("stamp", ["attribution", "observation"])
-def test_rewrite_admission_allows_non_authority_stamp(pr_repo, monkeypatch, stamp):
-    config, wid, wt, remote = pr_repo
-    result = pr_ops.create_pr(wid, config, title="Feature", open_pr=False)
-    assert result["success"], result
+def test_rewrite_admission_allows_non_authority_stamp(published_pr_repo, monkeypatch, stamp):
+    config, wid, wt, remote = published_pr_repo
     record = load(wid)
     record.pr.attribution_mode = ""
     record.pr.pr_revision += 1

@@ -312,25 +312,29 @@ async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shut
 
     original.outcomes = [scan]
     old_task = cache._refresh_namespace("ns")
-    await asyncio.wait_for(started.wait(), timeout=2)
-    replacement = _ControllableResolver("ns")
-    resolver.unregister_namespace_resolver("ns")
-    resolver.register_namespace_resolver(replacement)
-    cache._reconcile_namespace_set()
-    await asyncio.wait_for(cancelled.wait(), timeout=2)
-    assert old_task in cache._owned_scans
-    assert not old_task.done()
-    await cache._refresh_namespace("ns")
-    assert cache._entries["ns"].rows == []
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        replacement = _ControllableResolver("ns")
+        resolver.unregister_namespace_resolver("ns")
+        resolver.register_namespace_resolver(replacement)
+        cache._reconcile_namespace_set()
+        await asyncio.wait_for(cancelled.wait(), timeout=2)
+        assert old_task in cache._owned_scans
+        assert not old_task.done()
+        await cache._refresh_namespace("ns")
+        assert cache._entries["ns"].rows == []
 
-    cancelled.clear()
-    stop_task = asyncio.create_task(cache.stop())
-    await asyncio.wait_for(cancelled.wait(), timeout=2)
-    release.set()
-    await asyncio.wait_for(stop_task, timeout=2)
-    assert old_task.done()
-    assert old_task not in cache._owned_scans
-    assert cache._entries["ns"].rows == []
+        cancelled.clear()
+        stop_task = asyncio.create_task(cache.stop())
+        await asyncio.wait_for(cancelled.wait(), timeout=2)
+        release.set()
+        await asyncio.wait_for(stop_task, timeout=2)
+        assert old_task.done()
+        assert old_task not in cache._owned_scans
+        assert cache._entries["ns"].rows == []
+    finally:
+        release.set()
+        await cache.stop()
 
 
 @pytest.mark.asyncio
@@ -1368,16 +1372,24 @@ async def test_abandoned_scans_report_is_never_applied_to_the_registry():
     replacement it already made."""
     resolver = AgentResolver({}, {})
     release = threading.Event()
+    started = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    counter_lock = threading.Lock()
     call_count = 0
     applied_reports = []
-    sentinel_report = object()
+    stale_report = object()
+    fresh_report = object()
 
     def _scan(*, force: bool = False):
         nonlocal call_count
-        call_count += 1
-        if call_count == 1:
+        with counter_lock:
+            call_count += 1
+            attempt = call_count
+        if attempt == 1:
+            loop.call_soon_threadsafe(started.set)
             release.wait(timeout=5.0)
-        return (sentinel_report, 0)
+            return (stale_report, 0)
+        return (fresh_report, 0)
 
     def _apply(report, start_generation):
         applied_reports.append(report)
@@ -1389,26 +1401,40 @@ async def test_abandoned_scans_report_is_never_applied_to_the_registry():
 
     # Exercise discovery itself: get_snapshot also calls list_agents, whose
     # synchronous discovery path would invoke these stubs outside this guard.
-    await asyncio.wait_for(
-        cache._maybe_refresh_discovery(force=True, max_wait=0.6), timeout=2.0,
+    first_caller = asyncio.create_task(
+        cache._maybe_refresh_discovery(force=True, max_wait=0.6),
     )
-    for _ in range(100):
-        if applied_reports:
-            break
-        await asyncio.wait_for(
-            cache._maybe_refresh_discovery(force=False, max_wait=0.6), timeout=2.0,
-        )
-        await asyncio.sleep(0.05)
-    else:
-        pytest.fail("the replacement (gen2) discovery attempt never applied")
-    assert len(applied_reports) == 1  # only the fresh, gen2 attempt applied
+    try:
+        await asyncio.sleep(0)
+        abandoned_task = cache._discovery_task
+        abandoned_generation = cache._discovery_generation
+        assert abandoned_task is not None
+        await asyncio.wait_for(started.wait(), timeout=2.0)
+        await asyncio.wait_for(first_caller, timeout=2.0)
+        for _ in range(100):
+            if applied_reports:
+                break
+            await asyncio.wait_for(
+                cache._maybe_refresh_discovery(force=False, max_wait=0.6), timeout=2.0,
+            )
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("the replacement discovery attempt never applied")
+        assert cache._discovery_generation > abandoned_generation
+        assert applied_reports
+        assert all(report is fresh_report for report in applied_reports)
 
-    release.set()  # unblock the orphaned gen1 attempt's worker thread
-    await asyncio.sleep(0.05)  # let its callback run, if it's going to
-    # The first, abandoned (gen1) attempt's report must never be applied,
-    # even after it finally returns -- the generation guard discards it
-    # before it ever reaches _apply_provider_report.
-    assert len(applied_reports) == 1
+        release.set()
+        await asyncio.wait_for(
+            asyncio.shield(abandoned_task), timeout=2.0,
+        )
+        assert all(report is fresh_report for report in applied_reports)
+    finally:
+        release.set()
+        await cache.stop()
+        if not first_caller.done():
+            first_caller.cancel()
+        await asyncio.gather(first_caller, return_exceptions=True)
 
 
 @pytest.mark.asyncio

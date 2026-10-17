@@ -1,0 +1,9 @@
+{
+  "comment": "Derive fresh publication authority from the exact captured transport URLs and batch literal NUL-framed remote settings without caching proofs or weakening lease, rebase, hook and ownership gates.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

@@ -9,7 +9,7 @@ from agent_worktrees import config as cfg
 from agent_worktrees import finalize_cli, git_ops, pr_ops, pr_publish, pr_rewrite, tracking
 from agent_worktrees import __main__ as cli
 from agent_worktrees.providers.base import PullResult
-from test_pr_rewrite import git, publish_and_rebase, record_for
+from test_pr_rewrite import git, record_for
 
 pytestmark = [
     pytest.mark.contract("agent_worktrees.pr_publish.legacy_rewrite"),
@@ -36,8 +36,12 @@ def legacy_record(wid, *, state="active", defect=""):
 
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
-def test_legacy_rewrite_single_public_command_after_rebase(pr_repo, scheme, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, scheme)
+def test_legacy_rewrite_single_public_command_after_rebase(rebased_pr_repo, scheme, request, monkeypatch):
+    config, wid, wt, remote, old = rebased_pr_repo
+    seed = request.getfixturevalue(f"_rebased_{scheme}_pr_seed")
+    seed_record = seed / "tracking" / f"{wid}.yaml"
+    seed_before = seed_record.read_bytes()
+    seed_refs = git("--git-dir", str(seed / "remote.git"), "show-ref", cwd=wt)
     legacy_record(wid)
     rec = record_for(wid)
     assert rec.active_pr().state == "active"
@@ -58,11 +62,13 @@ def test_legacy_rewrite_single_public_command_after_rebase(pr_repo, scheme, monk
     assert updated.pr.pr_revision > 0
     assert pr_publish._tip("origin", updated.pr.branch, str(wt)) == source
     assert git("rev-parse", "HEAD", cwd=wt) == source
+    assert seed_record.read_bytes() == seed_before
+    assert git("--git-dir", str(seed / "remote.git"), "show-ref", cwd=wt) == seed_refs
 
 
 @pytest.mark.parametrize("revision", [1, 17])
-def test_revised_legacy_record_can_intentionally_rewrite_its_own_head(pr_repo, revision, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_revised_legacy_record_can_intentionally_rewrite_its_own_head(rebased_refspec_pr_repo, revision, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     path = legacy_record(wid, defect="corrected")
     data = yaml.safe_load(path.read_text())
     data["prs"][-1]["pr_revision"] = revision
@@ -87,8 +93,8 @@ def test_revised_legacy_record_can_intentionally_rewrite_its_own_head(pr_repo, r
 
 
 @pytest.mark.parametrize("defect", ["number", "branch", "destination", "moved", "shared"])
-def test_revised_legacy_rewrite_requires_exact_live_authority(pr_repo, defect, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_revised_legacy_rewrite_requires_exact_live_authority(rebased_refspec_pr_repo, defect, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     path = legacy_record(wid, defect="corrected")
     rec = record_for(wid)
     observed = PullResult(number=42, head_sha=old, head_ref=rec.pr.branch, head_url=str(remote))
@@ -115,8 +121,8 @@ def test_revised_legacy_rewrite_requires_exact_live_authority(pr_repo, defect, m
 
 
 @pytest.mark.parametrize("defect", ["unattested", "partial", "provider-moved", "shared"])
-def test_legacy_rewrite_refuses_incompatible_evidence(pr_repo, defect, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_legacy_rewrite_refuses_incompatible_evidence(rebased_refspec_pr_repo, defect, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     path = legacy_record(wid, defect=defect)
     rec = record_for(wid)
     if defect == "shared":
@@ -138,10 +144,17 @@ def test_legacy_rewrite_refuses_incompatible_evidence(pr_repo, defect, monkeypat
 @pytest.mark.parametrize("state,expected,terminal", [
     ("active", "active", False), ("completed", "completed", True), ("abandoned", "abandoned", True),
 ])
-def test_legacy_provider_state_normalization(pr_repo, state, expected, terminal):
-    config, wid, wt, remote = pr_repo
-    assert pr_ops.create_pr(wid, config, title="Feature")["success"]
-    legacy_record(wid, state=state)
+def test_legacy_provider_state_normalization(record_repo, state, expected, terminal):
+    _config, wid, _wt, _remote = record_repo
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["prs"] = [{
+        "state": state, "branch": "pr/legacy", "provider": "gitea",
+        "repo": "example/project", "number": 42,
+        "url": "https://example.test/pulls/42",
+        "head_identity": "example.test/example/project",
+    }]
+    path.write_text(yaml.safe_dump(data))
     rec = record_for(wid)
     assert rec.prs[-1].state == expected
     assert tracking._pr_is_terminal(rec.prs[-1]) is terminal

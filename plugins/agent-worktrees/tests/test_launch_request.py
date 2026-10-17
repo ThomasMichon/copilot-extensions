@@ -499,7 +499,9 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
         "sys.stdout.reconfigure(encoding='utf-8');"
         "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
     )
-    command = remote_seed_launch.shell_command("pwsh", [sys.executable, "-c", script, encoded])
+    command = remote_seed_launch.shell_command(
+        "pwsh", [sys.executable, "-X", "utf8", "-c", script, encoded],
+    )
     result = subprocess.run(
         [pwsh, "-NoProfile", "-EncodedCommand", command.split()[-1]],
         capture_output=True, text=True, encoding="utf-8", timeout=20,

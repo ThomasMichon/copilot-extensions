@@ -3706,6 +3706,7 @@ function Copy-StampDirectory {
         [IO.File]::Copy($file, [IO.Path]::Combine($Destination, [IO.Path]::GetFileName($file)), $true)
     }
     foreach ($directory in [IO.Directory]::EnumerateDirectories($Source)) {
+        if ([IO.Path]::GetFileName($directory) -eq '__pycache__') { continue }
         Copy-StampDirectory $directory ([IO.Path]::Combine($Destination, [IO.Path]::GetFileName($directory)))
     }
 }
@@ -4235,7 +4236,7 @@ switch ($Action) {
 }
 
 } finally {
-    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+    if (Test-Path Function:\Stop-RuntimeConstruction) {
         Stop-RuntimeConstruction
     }
 }

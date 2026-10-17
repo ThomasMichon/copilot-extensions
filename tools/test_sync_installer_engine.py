@@ -538,6 +538,24 @@ def test_sync_repairs_missing_local_copy_when_wrappers_are_local(fake_repo):
     assert (scripts / "installer-engine.sh").read_text(encoding="utf-8") == "canonical sh\n"
 
 
+def test_shipped_dependency_support_matches_canonical_for_every_runtime():
+    root = Path(__file__).resolve().parents[1]
+    consumers = [
+        plugin for plugin in (root / "plugins").iterdir()
+        if (plugin / "pyproject.toml").is_file()
+        and any(
+            (plugin / "scripts" / f"{base}.{ext}").is_file()
+            for base in ("install", "init") for ext in ("ps1", "sh")
+        )
+    ]
+    assert consumers
+    for plugin in consumers:
+        for name in sync_installer_engine.ier.SUPPORT_FILES:
+            assert (plugin / "scripts" / name).read_bytes() == (
+                root / "libs" / "installer-engine" / name
+            ).read_bytes(), (plugin.name, name)
+
+
 def test_sync_removes_stale_local_copy_when_wrappers_are_canonical(fake_repo):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_canonical_refs(scripts)

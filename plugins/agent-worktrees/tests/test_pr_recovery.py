@@ -10,8 +10,30 @@ import pytest
 
 from agent_worktrees import config as cfg
 from agent_worktrees import finalize, git_collab, git_ops, pr_ops, pr_rebase, pr_recovery, tracking
+from conftest import _copy_pr_repo, _seed_directory
 
 pytestmark = pytest.mark.timeout(180)
+
+
+@pytest.fixture(scope="session")
+def _advanced_pr_seed(tmp_path_factory, _published_pr_seed):
+    with _seed_directory(tmp_path_factory, "recovery-advanced") as (seed, build):
+        if build:
+            with pytest.MonkeyPatch.context() as patch:
+                config, _, _, _ = _copy_pr_repo(_published_pr_seed, seed, patch)
+                _advance_upstream(config)
+        return seed
+
+
+@pytest.fixture
+def pr_repo(tmp_path, monkeypatch, _advanced_pr_seed):
+    """Copy actual published history and setup-only upstream advancement."""
+    return _copy_pr_repo(_advanced_pr_seed, tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def legacy_pr_repo(published_pr_repo):
+    return published_pr_repo
 
 
 def _git(*args, cwd):
@@ -22,22 +44,32 @@ def _record(wid):
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
-def _prepare(pr_repo, *, legacy=False):
-    config, wid, path, remote = pr_repo
-    branch = f"user/developer/topic-{git_ops.worktree_suffix(wid)}" if legacy else None
-    first = pr_ops.create_pr(wid, config, title="Owned change", branch=branch)
-    assert first["success"], first
-    if legacy:
-        record = _record(wid)
-        record.branch = wid
-        record.pr.base_sha = record.pr.patch_id = ""
-        tracking.save_record(record)
+def _advance_upstream(config):
     anchor = Path(config.default_repo.anchor)
     (anchor / "upstream.txt").write_text("new upstream work\n")
     _git("add", "upstream.txt", cwd=anchor)
     _git("commit", "-m", "advance upstream", cwd=anchor)
     _git("push", "origin", "master", cwd=anchor)
-    return config, wid, path, remote, first["branch"], first["head_sha"]
+
+
+def _prepare(pr_repo, *, legacy=False):
+    config, wid, path, remote = pr_repo
+    branch = f"user/developer/topic-{git_ops.worktree_suffix(wid)}" if legacy else None
+    if legacy:
+        first = pr_ops.create_pr(wid, config, title="Owned change", branch=branch)
+        assert first["success"], first
+        published_branch, published_head = first["branch"], first["head_sha"]
+    else:
+        published = _record(wid).pr
+        assert published is not None and published.state == "open"
+        published_branch, published_head = published.branch, published.head_sha
+    if legacy:
+        record = _record(wid)
+        record.branch = wid
+        record.pr.base_sha = record.pr.patch_id = ""
+        tracking.save_record(record)
+        _advance_upstream(config)
+    return config, wid, path, remote, published_branch, published_head
 
 
 def _point(path, *, pending=False):
@@ -85,9 +117,9 @@ def test_backup_failure_prevents_rebase_contract(tmp_path, monkeypatch, capsys):
 
 @pytest.mark.parametrize("checkout_head", [False, True], ids=["worktree", "private-head"])
 def test_backed_sync_publishes_legacy_pr_without_replay_journals(
-    pr_repo, monkeypatch, capsys, checkout_head,
+    legacy_pr_repo, monkeypatch, capsys, checkout_head,
 ):
-    config, wid, path, remote, branch, old = _prepare(pr_repo, legacy=True)
+    config, wid, path, remote, branch, old = _prepare(legacy_pr_repo, legacy=True)
     if checkout_head:
         _git("checkout", "-B", branch, old, cwd=path)
         record = _record(wid)
@@ -125,14 +157,14 @@ def test_backed_sync_publishes_legacy_pr_without_replay_journals(
 
 def test_sync_aborts_before_rebase_when_backup_cannot_be_written(pr_repo, monkeypatch):
     config, wid, path, _, _, old = _prepare(pr_repo)
-    original = git_ops.git
+    original = pr_rebase._git_bytes
 
     def fail_backup(*args, **kwargs):
         if args[:1] == ("update-ref",):
             raise git_ops.GitError(["git", *args], 1, "backup storage unavailable")
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(git_ops, "git", fail_backup)
+    monkeypatch.setattr(pr_rebase, "_git_bytes", fail_backup)
     assert not git_collab.sync_forward(wid, config)
     assert _git("rev-parse", "HEAD", cwd=path) == old
     assert not pr_recovery._path(str(path)).exists()
@@ -180,8 +212,11 @@ def test_recovery_ref_writes_ignore_inherited_foreign_git_context(pr_repo, monke
     )
 
 
-def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo):
+def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo, _advanced_pr_seed):
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
+    seed_record = _advanced_pr_seed / "tracking" / f"{wid}.yaml"
+    seed_tracking = seed_record.read_bytes()
+    seed_refs = _git("--git-dir", str(_advanced_pr_seed / "remote.git"), "show-ref", cwd=path)
     assert git_collab.sync_forward(wid, config)
     completed = _point(path)
     tip = _git("rev-parse", "HEAD", cwd=path)
@@ -193,6 +228,8 @@ def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo):
     _git("checkout", f"worktree/{wid}", cwd=path)
     assert finalize.push_changes(wid, config)
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+    assert seed_record.read_bytes() == seed_tracking
+    assert _git("--git-dir", str(_advanced_pr_seed / "remote.git"), "show-ref", cwd=path) == seed_refs
 
 
 def test_another_live_pr_checkpoint_does_not_replace_older_publication_authority(pr_repo):

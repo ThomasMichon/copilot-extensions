@@ -62,10 +62,16 @@ editable installation.
 the first adopter. Other manifests retain byte-identical catalogs. The optional
 `catalogBindingModule` vendors the same pure ownership code into the runtime
 package for its existing deploy-manifest publisher.
-Binding emitters use isolated Python, including the PowerShell launcher probe
-and selected helper process: neither the project working directory, inherited
-Python import paths, nor user-site startup hooks supply discovery code.
+Binding emitters use isolated Python. The PowerShell `py -3` bootstrap reports
+the selected interpreter and executes the payload helper in the same process;
+an unavailable interpreter falls back to a non-app-alias Python application,
+but a helper failure is not retried through another interpreter. Neither the
+project working directory, inherited Python import paths, nor user-site startup
+hooks supply discovery code.
 Only the explicitly addressed payload helper supplies binding code.
+PowerShell binding emitters honor the existing `COPILOT_EXTENSIONS_BOOT_TRACE`
+switch for stderr-only phase timestamps around interpreter discovery and binding.
+Tracing does not change catalog stdout, ownership checks, or installation state.
 
 The binding contains normalized source identity/fingerprint, plugin identity,
 and a selected installation only when its ownership has been validated.

@@ -678,6 +678,7 @@ async def test_native_cpu_receipt_and_telemetry(
     assert collector["failed"] == 0
     assert collector["wall_known"] == collector["thread_cpu_known"] == sample["sequence"]
     assert collector["wall_unknown"] == collector["thread_cpu_unknown"] == 0
+    # Incremental ledger additions and sum() can round differently.
     assert collector["thread_cpu_seconds"] == pytest.approx(sum(
         thread_reads[index + 1][1] - thread_reads[index][1]
         for index in range(0, len(thread_reads), 2)

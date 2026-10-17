@@ -444,9 +444,8 @@ def test_command_binding_catalog_disables_user_site_startup(
         launcher.write_text(
             "if ($args[0] -ne '-3') { throw 'Expected Python 3 launcher' }\n"
             "$probeArgs=@($args[1..($args.Count-1)])\n"
-            "$null=& $env:TEST_PYTHON @probeArgs\n"
-            "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
-            "Write-Output $env:TEST_PYTHON\n",
+            "& $env:TEST_PYTHON @probeArgs\n"
+            "exit $LASTEXITCODE\n",
             encoding="utf-8",
         )
         wrapper = home / "site-catalog.ps1"
@@ -637,6 +636,7 @@ def test_command_binding_real_catalog_read_only(
     if owned:
         _publish(binding_fixture)
     environment = _catalog_environment(binding_fixture)
+    environment.pop("COPILOT_EXTENSIONS_BOOT_TRACE", None)
     payload = binding_fixture["payload"]
     argv = (
         ["bash", str(payload / "scripts/emit-command-catalog.sh")]
@@ -666,11 +666,14 @@ def test_command_binding_real_catalog_read_only(
         assert _snapshot(binding_fixture["home"]) == before
     if host:
         host.close()
+        assert not any("::boot-trace::" in line for line in host.errors)
     assert _snapshot(binding_fixture["home"]) == before
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("launcher", ["py", "python", "alias-only"])
+@pytest.mark.parametrize("launcher", [
+    "py", "py-unavailable", "py-helper-failure", "py-empty", "python", "alias-only",
+])
 def test_command_binding_catalog_python_launcher_avoids_app_alias(
     binding_fixture: dict, launcher: str, powershell_host,
 ) -> None:
@@ -682,7 +685,13 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     launcher_path.write_text(
         "if ($args[0] -ne '-3') { throw 'Python launcher must select Python 3' }\n"
         "if (($args[1..6] -join ' ') -ne '-I -B -E -X utf8 -c') { throw 'Unexpected probe flags' }\n"
-        "Write-Output $env:TEST_PYTHON\nexit 0\n",
+        "if ($args[7] -notmatch 'runpy.run_path') { throw 'Binding requires a second Python process' }\n"
+        "if ($env:TEST_LAUNCHER -eq 'py-unavailable') { exit 103 }\n"
+        "if ($env:TEST_LAUNCHER -eq 'py-helper-failure') {\n"
+        "    Write-Output $env:TEST_PYTHON\n"
+        "    [Console]::Error.WriteLine('Binding helper failed')\nexit 7\n}\n"
+        "if ($env:TEST_LAUNCHER -eq 'py-empty') { Write-Output $env:TEST_PYTHON; exit 0 }\n"
+        "& $env:TEST_PYTHON @($args[1..($args.Count - 1)])\nexit $LASTEXITCODE\n",
         encoding="utf-8",
     )
     environment.update({
@@ -693,12 +702,12 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     wrapper.write_text(
         "function Get-Command {\n"
         "    param($Name,$CommandType,$ErrorAction)\n"
-        "    if ($Name -eq 'py' -and $env:TEST_LAUNCHER -eq 'py') {\n"
+        "    if ($Name -eq 'py' -and $env:TEST_LAUNCHER -like 'py*') {\n"
         "        return @{Source=$env:TEST_LAUNCHER_PATH}\n"
         "    }\n"
         "    if ($Name -eq 'python3') { return $null }\n"
         "    if ($Name -eq 'python') {\n"
-        "        if ($env:TEST_LAUNCHER -eq 'python') { return @{Source=$env:TEST_PYTHON} }\n"
+        "        if ($env:TEST_LAUNCHER -in @('python','py-unavailable')) { return @{Source=$env:TEST_PYTHON} }\n"
         "        return @{Source='C:\\Users\\example\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe'}\n"
         "    }\n"
         "}\n"
@@ -712,11 +721,28 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
     assert match, completed.stdout
     binding = json.loads(match.group(1))["binding"]
-    if launcher == "alias-only":
+    if launcher in {"alias-only", "py-helper-failure", "py-empty"}:
         assert binding["status"] == "unresolved"
-        assert binding["reason"] == "binding-interpreter-unavailable"
+        assert binding["reason"] == {
+            "alias-only": "binding-interpreter-unavailable",
+            "py-helper-failure": "binding-resolver-failed",
+            "py-empty": "binding-response-invalid",
+        }[launcher]
     else:
         assert binding["status"] == "selected", binding
+    if launcher == "py":
+        manifest_path = binding_fixture["legacy"] / "deploy-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["commandBinding"]["installationId"] = "foreign-installation"
+        _write(manifest_path, manifest)
+        completed = host.run([POWERSHELL, "-File", str(wrapper)])
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        envelope = json.loads(completed.stdout)
+        match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
+        assert match, completed.stdout
+        binding = json.loads(match.group(1))["binding"]
+        assert binding["status"] == "blocked"
+        assert binding["reason"] == "legacy-ownership-mismatch"
 
 
 @pytest.mark.parametrize("shell", [

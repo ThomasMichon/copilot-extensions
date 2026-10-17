@@ -4,20 +4,47 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 
 import pytest
 
+from conftest import _seed_directory
 from agent_worktrees import config as cfg, finalize, tracking
 from test_resource_producer import absence, call
-from test_transitive_finalize_integration import _env, _save_worktree
+from test_transitive_finalize_integration import MACHINE, PROJECT, _env, _git, _save_worktree
+
+
+@pytest.fixture(scope="session")
+def _final_owner_seed(tmp_path_factory):
+    with _seed_directory(tmp_path_factory, "resource-producer-finalize") as (seed, build):
+        if build:
+            with pytest.MonkeyPatch.context() as patch:
+                _env.__wrapped__(seed, patch)
+        return seed
 
 
 @pytest.fixture
-def final_owner(tmp_path, monkeypatch):
-    root, records, config = _env.__wrapped__(tmp_path, monkeypatch)
+def final_owner(tmp_path, monkeypatch, _final_owner_seed):
+    # Physical copies keep each case's refs and object stores independent.
+    for name in ("anchor", "origin.git"):
+        shutil.copytree(_final_owner_seed / name, tmp_path / name)
+    root = tmp_path
+    records = root / f".{PROJECT}" / "worktrees"
+    records.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: records)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: root / f".{PROJECT}")
+    monkeypatch.setattr(cfg, "install_dir", lambda: root / ".agent-worktrees")
+    _git("remote", "set-url", "origin", str(root / "origin.git"), cwd=root / "anchor")
+    config = cfg.Config(
+        srcroot=str(root), machine=MACHINE, platform="linux",
+        repo_name=PROJECT, repos={PROJECT: cfg.RepoConfig(
+            anchor=str(root / "anchor"), worktree_root=str(root),
+            default_branch="base", remote="origin",
+        )},
+    )
     _save_worktree(records, "owner")
     path = records / "owner.yaml"
     record = tracking.load_record(path)

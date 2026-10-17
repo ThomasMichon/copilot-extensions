@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse immutable PR and context-resolution fixture seeds with independently copied Git stores and repaired worktree links; preserve real Git test isolation and fresh per-case publication or rerun operations. Isolate irrelevant committed-config discovery for fixture-owned non-repository handoff anchors while retaining fresh topology and actual lease operations.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

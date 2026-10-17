@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse observed owned service identity for bounded cell-test cleanup and surface control errors instead of losing shutdown diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -53,12 +53,14 @@ import sys
 import tempfile
 import time
 import tomllib
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 from seasoned_uv import run_uv_install
 from plugin_test_containment import (
     ContainmentError,
     Limits,
+    UnreapedProcessError,
     isolated_environment,
     partition,
     run_contained,
@@ -80,6 +82,18 @@ EXTERNAL_TEST_DEPENDENCIES = {
 }
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
+
+
+class _TestSandbox(tempfile.TemporaryDirectory):
+    def __exit__(self, exc_type, exc_value, traceback):
+        if isinstance(exc_value, UnreapedProcessError):
+            self._finalizer.detach()
+            print(
+                f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
+                file=sys.stderr,
+            )
+            return False
+        return super().__exit__(exc_type, exc_value, traceback)
 
 # Plugins whose OWN test suites assert properties about OTHER plugins (a
 # repo-wide contract, not something scoped to their own diff) -- see
@@ -419,7 +433,7 @@ def run_plugin(
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
+    with _TestSandbox(
         # Deliberately short: this sandbox root sits at the top of a path
         # whose depth (home/.agent-logger/snapshots/<ver>/libs/<lib>/
         # build/bdist.win-amd64/wheel/...) can approach Windows' 260-char
@@ -430,9 +444,10 @@ def run_plugin(
         prefix=f"ce-{name[:4]}-",
         dir=sandbox_parent,
         ignore_cleanup_errors=True,
-    ) as raw_sandbox:
+    ) as raw_sandbox, ThreadPoolExecutor(max_workers=1) as cleanup_pool:
         sandbox = Path(raw_sandbox)
         basetemp = sandbox / "t"
+        cleanups: list[Future[None]] = []
         env = isolated_environment(
             os.environ,
             sandbox,
@@ -450,7 +465,8 @@ def run_plugin(
                     f"({plugin_timeout:g}s)",
                     file=sys.stderr,
                 )
-                return 124
+                returncode = 124
+                break
             group_limits = Limits(
                 wall_seconds=min(limits.wall_seconds, remaining),
                 max_processes=limits.max_processes,
@@ -460,6 +476,7 @@ def run_plugin(
             )
             group_temp = basetemp / f"g{index}"
             group_temp.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            group_temp.mkdir(mode=0o700, exist_ok=True)
             cmd = [
                 str(py),
                 "-m",
@@ -489,17 +506,32 @@ def run_plugin(
                 sandbox=sandbox,
                 limits=group_limits,
             )
+            # Reuse the framework's readonly-aware removal only after confirmed
+            # reaping, without lengthening the short Windows basetemp path.
+            cleanups.append(cleanup_pool.submit(
+                tempfile.TemporaryDirectory._rmtree, group_temp,
+            ))
             if returncode == 5 and (guards or kexpr) and not test_files:
                 continue
             if returncode != 0:
                 break
+        for cleanup in cleanups:
+            cleanup.result()
+    elapsed = time.monotonic() - plugin_started
+    if elapsed > plugin_timeout:
+        print(
+            f"[LIMIT] {name}: plugin aggregate timeout exceeded "
+            f"({plugin_timeout:g}s), including sandbox cleanup: {elapsed:.2f}s elapsed",
+            file=sys.stderr,
+        )
+        return 124
     # pytest exit code 5 == "no tests collected"; in --guards mode that just
     # means the plugin declares no guard-marked tests -- not a failure.
     if guards and returncode == 5 and not test_files:
         print(f"[SKIP] {name}: no guard-marked tests")
         return 0
     status = "PASS" if returncode == 0 else "FAIL"
-    print(f"[{status}] {name} (exit {returncode})")
+    print(f"[{status}] {name} (exit {returncode}) [{elapsed:.2f}s including cleanup]")
     return returncode
 
 

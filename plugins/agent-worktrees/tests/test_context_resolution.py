@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import shutil
 import types
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from agent_worktrees import config as cfg
 from agent_worktrees import git_ops
 from agent_worktrees import installer as inst
 from agent_worktrees import repos
+from conftest import _seed_directory
 
 # Captured at import time, before conftest.py's autouse
 # `_assume_valid_claimant_worktree` fixture ever gets a chance to patch it --
@@ -34,31 +36,38 @@ def _git(*args: str, cwd) -> str:
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
 
 
-@pytest.fixture
-def adopted_repo(tmp_path: Path, monkeypatch):
-    """A real anchor repo + one worktree, adopted as project ``myproj``.
+@pytest.fixture(scope="session")
+def _context_repo_seed(tmp_path_factory):
+    with _seed_directory(tmp_path_factory, "context-resolution") as (seed, build):
+        if build:
+            anchor = seed / "myrepo"
+            git_ops.git("init", "-b", "master", str(anchor))
+            _git("config", "user.email", "t@example.com", cwd=anchor)
+            _git("config", "user.name", "Test", cwd=anchor)
+            (anchor / "f.txt").write_text("x\n")
+            _git("add", "-A", cwd=anchor)
+            _git("commit", "-m", "init", cwd=anchor)
+            git_ops.git(
+                "worktree", "add", str(seed / "myrepo.worktrees" / "myrepo-wt-001"),
+                "-b", "worktree/myrepo-wt-001", "master", cwd=anchor,
+            )
+        return seed
 
-    Returns ``(anchor, wt_root, wt_path, wt_id, config)``. Stubs the projects
-    registry, repos registry, tracking dir, and ``load_config`` so resolution is
-    hermetic.
-    """
-    anchor = tmp_path / "myrepo"
-    wt_root = tmp_path / "myrepo.worktrees"
 
-    git_ops.git("init", "-b", "master", str(anchor))
-    _git("config", "user.email", "t@example.com", cwd=anchor)
-    _git("config", "user.name", "Test", cwd=anchor)
-    (anchor / "f.txt").write_text("x\n")
-    _git("add", "-A", cwd=anchor)
-    _git("commit", "-m", "init", cwd=anchor)
-
-    wt_root.mkdir()
+def _copy_context_repo(seed: Path, destination: Path):
+    shutil.copytree(seed, destination, dirs_exist_ok=True, copy_function=shutil.copyfile)
+    anchor = destination / "myrepo"
+    wt_root = destination / "myrepo.worktrees"
     wt_id = "myrepo-wt-001"
     wt_path = wt_root / wt_id
-    git_ops.git(
-        "worktree", "add", str(wt_path), "-b", f"worktree/{wt_id}", "master",
-        cwd=str(anchor),
-    )
+    _git("worktree", "repair", str(wt_path), cwd=anchor)
+    return anchor, wt_root, wt_path, wt_id
+
+
+@pytest.fixture
+def adopted_repo(tmp_path: Path, monkeypatch, _context_repo_seed):
+    """Independent real Git stores, with fresh registration and tracking."""
+    anchor, wt_root, wt_path, wt_id = _copy_context_repo(_context_repo_seed, tmp_path)
 
     monkeypatch.setattr(
         inst, "read_projects_registry",
@@ -96,6 +105,26 @@ def adopted_repo(tmp_path: Path, monkeypatch):
     )
 
     return anchor, wt_root, wt_path, wt_id, conf
+
+
+def test_context_repo_copies_preserve_seed_and_sibling(_context_repo_seed, tmp_path):
+    seed_before = {
+        path.relative_to(_context_repo_seed): path.read_bytes()
+        for path in _context_repo_seed.rglob("*") if path.is_file()
+    }
+    first, _, first_wt, _ = _copy_context_repo(_context_repo_seed, tmp_path / "first")
+    second, _, second_wt, _ = _copy_context_repo(_context_repo_seed, tmp_path / "second")
+    _git("branch", "only-first", cwd=first)
+    _git("config", "core.bare", "true", cwd=first)
+    (first_wt / "f.txt").write_text("changed\n")
+    assert Path(_git("rev-parse", "--show-toplevel", cwd=second_wt)).resolve() == second_wt.resolve()
+    assert _git("branch", "--list", "only-first", cwd=second) == ""
+    assert _git("rev-parse", "--is-bare-repository", cwd=second) == "false"
+    assert (second_wt / "f.txt").read_text() == "x\n"
+    assert seed_before == {
+        path.relative_to(_context_repo_seed): path.read_bytes()
+        for path in _context_repo_seed.rglob("*") if path.is_file()
+    }
 
 
 # ---------------------------------------------------------------------------

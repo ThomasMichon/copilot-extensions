@@ -5,9 +5,10 @@ Split out of ``finalize.py`` (module-size guard) -- see ``resolve_finalize_ref``
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
-from . import git_ops, output
+from . import git_ops, git_tree_diff, output
 
 #: The identity of the probe commit :func:`squash_landed` builds (never a ref's).
 _PROBE_IDENTITY = ("-c", "user.name=agent-worktrees", "-c", "user.email=agent-worktrees@localhost")
@@ -54,14 +55,20 @@ def squash_landed(branch: str, upstream: str, cwd: str) -> bool | None:
     comparison decides that). Writes one unreferenced probe commit object (no ref
     moves; ``git gc`` collects it)."""
     base = git_ops.git("merge-base", upstream, branch, cwd=cwd, check=False)
-    tree = git_ops.git("rev-parse", f"{branch}^{{tree}}", cwd=cwd, check=False)
-    if base.returncode != 0 or tree.returncode != 0:
+    base_sha = base.stdout.strip()
+    if base.returncode != 0 or not base_sha:
         return None
-    base_sha, tree_sha = base.stdout.strip(), tree.stdout.strip()
-    base_tree = git_ops.git("rev-parse", f"{base_sha}^{{tree}}", cwd=cwd, check=False)
-    if base_tree.returncode != 0 or not base_sha or not tree_sha:
+    trees = git_ops.git(
+        "rev-parse", "--revs-only", "--end-of-options", f"{branch}^{{tree}}", f"{base_sha}^{{tree}}",
+        cwd=cwd, check=False,
+    )
+    tree_ids = trees.stdout.splitlines()
+    if trees.returncode != 0 or len(tree_ids) != 2 or not all(
+        re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) for value in tree_ids
+    ):
         return None
-    if base_tree.stdout.strip() == tree_sha:
+    tree_sha, base_tree_sha = tree_ids
+    if base_tree_sha == tree_sha:
         return None
     probe = git_ops.git(*_PROBE_IDENTITY, "commit-tree", "--no-gpg-sign", tree_sha,
                         "-p", base_sha, "-m", "agent-worktrees landing probe",
@@ -109,20 +116,34 @@ def creation_point(ref: str, cwd: str) -> str:
     remotes = git_ops.git("remote", cwd=cwd, check=False).stdout.split()
     if "/" not in source or source.partition("/")[0] not in remotes:
         return ""
-    if git_ops.git("rev-parse", "--verify", "-q", f"refs/heads/{source}", cwd=cwd,
-                   check=False).returncode == 0:
-        return ""  # a local branch with that name: the message can't tell which it was
     remote = source.partition("/")[0]
-    created = ""
-    for logged in (f"refs/remotes/{source}", f"refs/remotes/{remote}/HEAD"):  # HEAD logs a clone
-        tracked = git_ops.git("reflog", "show", "--format=%H", logged, "--", cwd=cwd, check=False)
-        if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
-            created = sha
-            break
-    if not created:
+    remote_prefix = f"refs/remotes/{remote}/"
+    refs_r = git_ops.git(
+        "for-each-ref", "--format=%(refname)%09%(objectname)",
+        f"refs/heads/{source}", remote_prefix, cwd=cwd, check=False,
+    )
+    if refs_r.returncode != 0:
+        return ""
+    remote_tips = set()
+    for line in refs_r.stdout.splitlines():
+        name, separator, object_id = line.partition("\t")
+        if not separator or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", object_id):
+            return ""
+        if name == f"refs/heads/{source}":
+            return ""  # a local branch can shadow the source in the creation message
+        if name.startswith(remote_prefix):
+            remote_tips.add(object_id)
+    created = sha if sha in remote_tips else ""
+    if not created and remote_tips:
         held_now = git_ops.git("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
-                               f"refs/remotes/{remote}/", cwd=cwd, check=False)
+                               remote_prefix, cwd=cwd, check=False)
         created = sha if held_now.returncode == 0 and held_now.stdout.strip() else ""
+    if not created:
+        for logged in (f"refs/remotes/{source}", f"refs/remotes/{remote}/HEAD"):  # HEAD logs a clone
+            tracked = git_ops.git("reflog", "show", "--format=%H", logged, "--", cwd=cwd, check=False)
+            if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
+                created = sha
+                break
     return _later_resets_to_source(entries, created, source, cwd) if created else ""
 
 
@@ -131,11 +152,16 @@ def _later_resets_to_source(entries: list[str], created: str, source: str, cwd: 
     commit the source was proven to hold -- one its own remote-tracking reflog
     names (a sync to ``origin/main``'s then-tip): those commits were published, not
     made here. Stops at the first other move (a commit, a rebase, a reset elsewhere)."""
+    moves = list(reversed(entries[:-1]))
+    if not moves or not moves[0].partition("\t")[2].startswith(
+        ("branch: Reset to ", "reset: moving to "),
+    ):
+        return created
     tips = git_ops.git("reflog", "show", "--format=%H", f"refs/remotes/{source}", "--",
                        cwd=cwd, check=False)
     held = {ln.strip() for ln in tips.stdout.splitlines()} if tips.returncode == 0 else set()
     point = created
-    for entry in reversed(entries[:-1]):  # oldest first, after the creation
+    for entry in moves:  # oldest first, after the creation
         sha, _, subject = entry.partition("\t")
         if not subject.startswith(("branch: Reset to ", "reset: moving to ")) or sha.strip() not in held:
             break
@@ -192,25 +218,27 @@ def _blobs_on_upstream(branch: str, upstream: str, cwd: str) -> bool:
     if merge_base_r.returncode != 0:
         return False
 
-    diff_r = git_ops.git(
-        "diff", "--name-only", merge_base_r.stdout.strip(), branch,
-        cwd=cwd, check=False,
+    def run_git(*args: str):
+        return git_ops.git(*args, cwd=cwd, check=False)
+
+    try:
+        changed_files = git_tree_diff.read(run_git, merge_base_r.stdout.strip(), branch)
+        if not changed_files:
+            return True
+        branch_objects = {
+            file: after for file, (_before, after) in changed_files.items() if after.strip("0")
+        }
+        deleted_paths = changed_files.keys() - branch_objects.keys()
+        branch_objects.update(git_tree_diff.read_objects(run_git, branch, deleted_paths))
+        upstream_objects = git_tree_diff.read_objects(run_git, upstream, changed_files)
+    except git_tree_diff.TreeDiffError as exc:
+        output.warn(f"Cannot verify changed files on upstream: {exc}")
+        return False
+
+    return all(
+        branch_objects.get(file) == upstream_objects.get(file)
+        for file in changed_files
     )
-    changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]
-    if not changed_files:
-        return True
-
-    for file in changed_files:
-        b_blob = git_ops.git(
-            "rev-parse", f"{branch}:{file}", cwd=cwd, check=False
-        )
-        m_blob = git_ops.git(
-            "rev-parse", f"{upstream}:{file}", cwd=cwd, check=False
-        )
-        if b_blob.stdout.strip() != m_blob.stdout.strip():
-            return False
-
-    return True
 
 
 def resolve_finalize_ref(
@@ -287,5 +315,3 @@ def warn_if_tracked_branch_diverged(
         f"preserved (not deleted) through cleanup."
     )
     return True
-
-

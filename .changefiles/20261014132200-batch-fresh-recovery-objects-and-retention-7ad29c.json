@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve recovery commit objects in fresh native batches and retain their refs in one create-only atomic Git transaction without reusing publication proof.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

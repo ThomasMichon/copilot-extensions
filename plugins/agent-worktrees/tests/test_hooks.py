@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,59 @@ class TestConfigResolution:
         (cfg_dir / "config.yaml").write_text("pr:\n  enabled: true\n")
         assert hooks._pr_enabled(str(wt)) is True
         assert hooks._pr_enabled(str(anchor)) is True
+
+    def test_protected_branches_reads_committed_config_once_per_decision(
+        self, anchor_and_worktree, monkeypatch,
+    ):
+        from agent_worktrees import config as cfg
+
+        anchor, wt = anchor_and_worktree
+        remote = anchor.parent / "remote.git"
+        git_ops.git("init", "--bare", "-b", "master", str(remote))
+        _git("remote", "add", "origin", str(remote), cwd=anchor)
+        config_path = anchor / cfg.CANONICAL_INREPO_CONFIG_DIR / "config.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text("default_branch: master\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "config", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+        _git("remote", "set-head", "origin", "master", cwd=anchor)
+        load = cfg._load_inrepo_config
+        reads = []
+
+        def observed(path):
+            reads.append(path)
+            return load(path)
+
+        monkeypatch.setattr(cfg, "_load_inrepo_config", observed)
+        assert hooks._protected_branches(str(wt)) == ["master"]
+        assert reads == [str(anchor)]
+
+        config_path.write_text("default_branch: changed\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "changed config", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+        config_path.write_text("default_branch: uncommitted\n")
+        assert hooks._protected_branches(str(wt)) == ["changed"]
+        assert reads == [str(anchor), str(anchor)]
+
+    def test_empty_config_is_not_read_again_for_default_branch(self, monkeypatch):
+        reads = []
+
+        def empty(cwd):
+            reads.append(cwd)
+            return {}
+
+        monkeypatch.setattr(hooks, "_inrepo", empty)
+        monkeypatch.setattr(hooks, "_anchor_from_cwd", lambda cwd: None)
+        monkeypatch.setattr(
+            git_ops, "git",
+            lambda *args, **kwargs: subprocess.CompletedProcess(
+                args, 0, "origin/main\n", "",
+            ),
+        )
+        assert hooks._protected_branches("/irrelevant") == ["main"]
+        assert reads == ["/irrelevant"]
 
 
 class TestRegistryDefaultBranch:
@@ -143,6 +197,7 @@ class TestRegistryDefaultBranch:
             "    default_branch: dev\n"
         )
         assert hooks._default_branch(str(wt)) == "dev"
+        assert hooks._protected_branches(str(wt)) == ["dev"]
 
     def test_config_d_dropin_default_branch_honored(
         self, anchor_and_worktree, _isolate_agent_worktrees_home
@@ -169,6 +224,7 @@ class TestRegistryDefaultBranch:
             "    default_branch: dev\n"
         )
         assert hooks._default_branch(str(wt)) == "dev"
+        assert hooks._protected_branches(str(wt)) == ["dev"]
 
     def test_projects_yaml_legacy_fallback_honored(
         self, anchor_and_worktree, _isolate_agent_worktrees_home, monkeypatch
@@ -206,20 +262,20 @@ class TestRegistryDefaultBranch:
         anchor, wt = anchor_and_worktree
         monkeypatch.chdir(wt)
         monkeypatch.setattr(hooks, "_current_branch", lambda cwd: "master")
-        monkeypatch.setattr(hooks, "_default_branch", lambda cwd: "master")
+        monkeypatch.setattr(hooks, "_default_branch", lambda cwd, **kwargs: "master")
         assert hooks._pre_commit() == 1
 
     def test_allows_worktree_branch_commit(self, anchor_and_worktree, monkeypatch):
         anchor, wt = anchor_and_worktree
         monkeypatch.chdir(wt)
-        monkeypatch.setattr(hooks, "_default_branch", lambda cwd: "master")
+        monkeypatch.setattr(hooks, "_default_branch", lambda cwd, **kwargs: "master")
         # Real branch is worktree/wt-aaaa -> allowed
         assert hooks._pre_commit() == 0
 
     def test_allows_anchor_commit_on_default(self, anchor_and_worktree, monkeypatch):
         anchor, _ = anchor_and_worktree
         monkeypatch.chdir(anchor)
-        monkeypatch.setattr(hooks, "_default_branch", lambda cwd: "master")
+        monkeypatch.setattr(hooks, "_default_branch", lambda cwd, **kwargs: "master")
         # An UNREGISTERED (non-worktree-class) anchor is base-repo mode -> allowed.
         assert hooks._pre_commit() == 0
 
@@ -240,7 +296,7 @@ class TestRegistryDefaultBranch:
 
     def test_protected_branches_falls_back_to_default_branch(self, monkeypatch):
         monkeypatch.setattr(hooks, "_inrepo", lambda cwd: {})
-        monkeypatch.setattr(hooks, "_default_branch", lambda cwd: "master")
+        monkeypatch.setattr(hooks, "_default_branch", lambda cwd, **kwargs: "master")
         assert hooks._protected_branches("/irrelevant") == ["master"]
 
 

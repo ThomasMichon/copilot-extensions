@@ -509,23 +509,6 @@ def test_failed_identity_publication_leaves_no_partial_receipt(
     assert project_state.ensure_project_state("example").is_dir()
 
 
-def test_namespaced_project_state_requires_identity_receipt(
-    monkeypatch, tmp_path
-):
-    payload = _payload(tmp_path, "payload")
-    context, _ = _stamp(
-        tmp_path / "durable",
-        payload,
-        marketplace="missing-project-identity",
-        repository="Example-Org/Missing-Project-Identity-Marketplace",
-    )
-    _select(monkeypatch, context, payload)
-    _register_repo("example", "https://github.com/example/repo.git")
-
-    with pytest.raises(ValueError, match="identity receipt is unreadable"):
-        config.project_dir("example")
-
-
 def test_namespaced_registration_persists_cell_config_dir(
     monkeypatch, tmp_path
 ):
@@ -539,6 +522,9 @@ def test_namespaced_registration_persists_cell_config_dir(
     _select(monkeypatch, context, payload)
     _register_repo("example", "https://github.com/example/repo.git")
     monkeypatch.setattr(installer.output, "ok", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ValueError, match="identity receipt is unreadable"):
+        config.project_dir("example")
 
     installer.register_project("example")
 

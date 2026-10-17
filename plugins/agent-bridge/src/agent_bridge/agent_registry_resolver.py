@@ -5,9 +5,15 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import sys
 import threading
 from dataclasses import replace
 from typing import Any
+
+if sys.version_info >= (3, 11):
+    from asyncio import timeout as _namespace_timeout
+else:
+    from async_timeout import timeout as _namespace_timeout
 
 from dropin_registry import WarningTracker
 from machine_transport import AmbiguousMachineError, find_machine_entry
@@ -839,7 +845,9 @@ class AgentResolver(_ProviderDiscoveryMixin):
         if resolver_timeout <= 0:
             agents = await coro
         else:
-            agents = await asyncio.wait_for(coro, timeout=resolver_timeout)
+            # Keep provider execution in the holder task across repeated cancellation.
+            async with _namespace_timeout(resolver_timeout):
+                agents = await coro
         return [self._format_namespace_agent(prefix, agent, resolver) for agent in agents]
 
     def _format_namespace_agent(

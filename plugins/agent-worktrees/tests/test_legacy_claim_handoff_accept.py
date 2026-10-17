@@ -83,6 +83,17 @@ def graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.Fixtu
         )
         paths[role] = record.yaml_path
         anchors[role] = anchor
+    load_committed = cfg.inrepo_config_source.load_inrepo_config_from_committed_ref
+
+    def committed_config(anchor, *args, **kwargs):
+        # These fixture-owned anchors have only on-disk config, not Git refs.
+        if anchor in anchors.values():
+            return {}
+        return load_committed(anchor, *args, **kwargs)
+
+    monkeypatch.setattr(
+        cfg.inrepo_config_source, "load_inrepo_config_from_committed_ref", committed_config,
+    )
     source = "native-alias/source-project/wt-source"
     consumer = "example-host/consumer-project/wt-consumer"
     child_ref = "generated-host/child-project/wt-child"

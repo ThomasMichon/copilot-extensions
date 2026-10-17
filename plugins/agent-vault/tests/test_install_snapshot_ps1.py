@@ -573,6 +573,17 @@ def provisioned_snapshot(stamped_snapshot):
     state = stamped_snapshot
     home, snapshot, env, pwsh = state.home, state.snapshot, state.env, state.pwsh
     if os.name == "nt":
+        runner = home / "tmp" / "provision.ps1"
+        runner.write_text(
+            "param($Installer, $InstallRoot)\n"
+            "function Get-ScheduledTask {}\n"
+            "function Stop-ScheduledTask { throw 'unexpected service mutation' }\n"
+            "function Register-ScheduledTask { throw 'unexpected service mutation' }\n"
+            "function Set-ScheduledTask { throw 'unexpected service mutation' }\n"
+            "& $Installer provision -NoService -InstallDir $InstallRoot\n"
+            "exit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
         provision = subprocess.run(
             [
                 pwsh,
@@ -580,10 +591,8 @@ def provisioned_snapshot(stamped_snapshot):
                 "-ExecutionPolicy",
                 "Bypass",
                 "-File",
+                str(runner),
                 str(snapshot / "scripts" / "install.ps1"),
-                "provision",
-                "-NoService",
-                "-InstallDir",
                 str(home / ".agent-vault"),
             ],
             env=env,

@@ -1082,8 +1082,9 @@ def test_early_installer_utilities_are_powershell_51_safe_ascii():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
-def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path):
-    powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path, host):
+    powershell = shutil.which(host)
     if not powershell:
         pytest.skip("PowerShell is unavailable")
     source = tmp_path / "source [literal]"
@@ -1092,6 +1093,9 @@ def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path):
     (source / "empty").mkdir()
     (source / ".hidden" / "nested" / "payload.bin").write_bytes(bytes(range(256)))
     (source / "metadata.json").write_text('{"fixture": true}', encoding="utf-8")
+    for parent in (source, source / ".hidden" / "nested"):
+        (parent / "__pycache__").mkdir()
+        (parent / "__pycache__" / "cached.pyc").write_bytes(b"not source")
     installer = INSTALLER.read_text(encoding="utf-8")
     function = "function Copy-StampDirectory" + installer.split(
         "function Copy-StampDirectory", 1
@@ -1107,10 +1111,11 @@ def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path):
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
-    assert {str(path.relative_to(source)) for path in source.rglob("*")} == {
+    expected = [path for path in source.rglob("*") if "__pycache__" not in path.relative_to(source).parts]
+    assert {str(path.relative_to(source)) for path in expected} == {
         str(path.relative_to(destination)) for path in destination.rglob("*")
     }
-    for path in source.rglob("*"):
+    for path in expected:
         if path.is_file():
             assert (destination / path.relative_to(source)).read_bytes() == path.read_bytes()
 

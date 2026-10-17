@@ -1,0 +1,9 @@
+{
+  "comment": "Derive rewrite destination fields from one fresh snapshot and batch pinned replay trees within each decision, preserving independent publication rechecks and per-commit reconstruction.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

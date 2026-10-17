@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -36,6 +37,25 @@ def _rev(ref: str, cwd: str) -> str:
         "--no-replace-objects", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}",
         cwd=cwd, isolated_repository=True,
     ).stdout.strip()
+
+
+def _commits(refs: tuple[str, ...], cwd: str) -> tuple[str, ...]:
+    """Resolve this decision's commit objects in one fresh, NUL-input probe."""
+    from .pr_rebase import _git_bytes
+
+    if not refs or any(not isinstance(ref, str) or not ref or "\0" in ref for ref in refs):
+        raise ValueError("Recovery commit refs must be nonempty and NUL-free")
+    output = _git_bytes(
+        "cat-file", "--batch-check=%(objectname) %(objecttype)", "-z", cwd=cwd,
+        stdin=b"".join(f"{ref}^{{commit}}\0".encode() for ref in refs),
+    )
+    rows = output.split(b"\n")
+    if len(rows) != len(refs) + 1 or rows[-1] != b"" or any(
+        re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64}) commit", row) is None
+        for row in rows[:-1]
+    ):
+        raise ValueError("Recovery commit refs are missing, non-commit, or malformed")
+    return tuple(row.split(b" ", 1)[0].decode("ascii") for row in rows[:-1])
 
 
 def _path(cwd: str) -> Path:
@@ -93,23 +113,30 @@ def selected_pr(worktree_id: str, branch: str, record):
 
 
 def _retain_refs(point: RecoveryPoint, *, cwd: str) -> None:
+    from .pr_rebase import _git_bytes
+
+    updates = []
     for ref, head in (
         (point.local_ref, point.local_head),
         (point.published_ref, point.published_head),
         (point.lineage_ref, point.lineage_head),
     ):
         if ref:
-            git_ops.git(
-                "update-ref", ref, head, "0" * len(head),
-                cwd=cwd, isolated_repository=True,
-            )
+            if "\0" in ref or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", head) is None:
+                raise ValueError("Recovery refs require NUL-free names and complete object IDs")
+            updates.append(f"create {ref}\0{head}\0".encode())
+    if updates:
+        _git_bytes(
+            "update-ref", "--stdin", "-z", cwd=cwd,
+            stdin=b"start\0" + b"".join(updates) + b"prepare\0commit\0",
+        )
 
 
 def retain_rewrite(
     worktree_id: str, branch: str, source: str, pr, *, cwd: str,
 ) -> RecoveryPoint:
     """Retain an explicitly confirmed rewrite without inventing replay authority."""
-    local, published = _rev(source, cwd), _rev(pr.head_sha, cwd)
+    local, published = _commits((source, pr.head_sha), cwd)
     if local != source or published != pr.head_sha:
         raise ValueError("Confirmed source and published commit objects must exist before recovery publication.")
     namespace = hashlib.sha256(worktree_id.encode("utf-8")).hexdigest()[:24]
@@ -127,10 +154,13 @@ def retain_rewrite(
 
 def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> RecoveryPoint:
     """Retain committed local and recorded published tips before changing HEAD."""
-    local = _rev("HEAD", cwd)
-    onto = _rev(target, cwd)
     pr = selected_pr(worktree_id, branch, record)
-    published = _rev(pr.head_sha, cwd) if pr is not None and pr.head_sha else ""
+    refs = ("HEAD", target)
+    if pr is not None and pr.head_sha:
+        refs += (pr.head_sha,)
+    commits = _commits(refs, cwd)
+    local, onto = commits[:2]
+    published = commits[2] if len(commits) == 3 else ""
     lineage = local
     if published and not git_ops.is_commit_ancestor(published, local, cwd=cwd):
         previous = synced(record, pr, published, local, cwd=cwd)
@@ -225,10 +255,8 @@ def synced(record, pr, expected: str, head: str, *, cwd: str) -> RecoveryPoint |
         or not git_ops.is_commit_ancestor(point.target_head, point.synced_head, cwd=cwd)
     ):
         return None
-    if (
-        _rev(point.local_ref, cwd) != point.local_head
-        or _rev(point.published_ref, cwd) != expected
-        or _rev(point.lineage_ref, cwd) != point.lineage_head
+    if _commits((point.local_ref, point.published_ref, point.lineage_ref), cwd) != (
+        point.local_head, expected, point.lineage_head,
     ):
         return None
     return point

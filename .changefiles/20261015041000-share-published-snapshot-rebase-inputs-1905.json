@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse independently copied real-published snapshot inputs while preserving native rebase, lineage, lease and hook contracts.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Bind native pane ownership without launch-time C# compilation, retaining kernel kill-on-close and exact argument transport.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

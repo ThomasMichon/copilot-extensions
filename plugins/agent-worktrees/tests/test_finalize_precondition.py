@@ -14,6 +14,7 @@ already-merged PR.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,17 +46,17 @@ def _init_identity(repo: Path) -> None:
     _git("config", "user.name", "Test", cwd=repo)
 
 
-@pytest.fixture
-def refspec_worktree(tmp_path: Path) -> SimpleNamespace:
-    """Build a refspec-scheme worktree whose work is merged to origin/master.
+@pytest.fixture(scope="session")
+def _refspec_worktree_seed(tmp_path_factory) -> Path:
+    """Build the immutable refspec topology once, before any landing.
 
     Layout:
-      - ``origin.git`` bare remote with ``master`` carrying the merged work.
+      - ``origin.git`` bare remote with ``master`` carrying the base.
       - a clone checked out on ``worktree/<id>`` (never a local ``pr/<slug>``).
       - the remote has NO ``pr/<slug>`` head (auto-deleted on merge).
     """
+    tmp_path = tmp_path_factory.mktemp("finalize-precondition-seed")
     worktree_id = "anomalous-potato-wsl-test"
-    slug = "pr/some-fix-test"
 
     origin = tmp_path / "origin.git"
     _git("init", "--bare", "-b", "master", str(origin), cwd=tmp_path)
@@ -73,15 +74,62 @@ def refspec_worktree(tmp_path: Path) -> SimpleNamespace:
     # The refspec scheme keeps the worktree permanently on worktree/<id>.
     _git("checkout", "-b", f"worktree/{worktree_id}", cwd=clone)
     _commit(clone, "fix.txt", "the fix\n")
+    return tmp_path
 
+
+def _copy_refspec_worktree(source: Path, tmp_path: Path) -> SimpleNamespace:
+    """Copy all objects, refs and reflogs; only remote URLs need relocation."""
+    shutil.copytree(source, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile)
+    origin = tmp_path / "origin.git"
+    seed = tmp_path / "seed"
+    clone = tmp_path / "worktree"
+    for repo in (seed, clone):
+        _git("remote", "set-url", "origin", str(origin), cwd=repo)
     return SimpleNamespace(
         tmp_path=tmp_path,
         origin=origin,
         clone=clone,
         seed=seed,
-        worktree_id=worktree_id,
-        slug=slug,
+        worktree_id="anomalous-potato-wsl-test",
+        slug="pr/some-fix-test",
     )
+
+
+@pytest.fixture
+def refspec_worktree(tmp_path: Path, _refspec_worktree_seed: Path) -> SimpleNamespace:
+    return _copy_refspec_worktree(_refspec_worktree_seed, tmp_path)
+
+
+def _topology_snapshot(root: Path) -> dict[Path, bytes]:
+    return {
+        path.relative_to(root): path.read_bytes()
+        for path in root.rglob("*") if path.is_file()
+    }
+
+
+def test_refspec_copies_isolate_commits_and_pushes(tmp_path, _refspec_worktree_seed):
+    first = _copy_refspec_worktree(_refspec_worktree_seed, tmp_path / "first")
+    second = _copy_refspec_worktree(_refspec_worktree_seed, tmp_path / "second")
+    unchanged = {
+        root: _topology_snapshot(root)
+        for root in (_refspec_worktree_seed, second.tmp_path)
+    }
+    previous = _git("--git-dir", str(first.origin), "rev-parse", "master", cwd=first.origin)
+    _commit(first.clone, "isolated.txt", "only in the first copy\n")
+    head = _git("rev-parse", "HEAD", cwd=first.clone)
+    _git("push", "origin", "HEAD:refs/heads/master", cwd=first.clone)
+    assert _git("--git-dir", str(first.origin), "rev-parse", "master", cwd=first.origin) == head != previous
+    _commit(first.seed, "seed-only.txt", "only in the copied publisher\n")
+    _git("push", "origin", "HEAD:refs/heads/publisher", cwd=first.seed)
+    assert _git("--git-dir", str(first.origin), "rev-parse", "publisher", cwd=first.origin) == _git(
+        "rev-parse", "HEAD", cwd=first.seed,
+    )
+    for root, snapshot in unchanged.items():
+        assert _topology_snapshot(root) == snapshot
+        for relative in snapshot:
+            if "objects" in relative.parts:
+                assert relative.name != "alternates"
+                assert not (first.tmp_path / relative).samefile(root / relative)
 
 
 def _land_on_master(env: SimpleNamespace, *, squash: bool) -> None:
@@ -459,50 +507,21 @@ class TestContentExceedsMergedHeadFailsClosed:
     (returns True == "exceeds") rather than silently degrading into a
     permissive fast path on a future ref/record migration."""
 
-    def test_missing_head_sha(self, refspec_worktree):
+    def test_every_inconclusive_lookup_fails_closed(self, refspec_worktree):
         env = refspec_worktree
-        record = SimpleNamespace(pr=SimpleNamespace(head_sha=""))
         content_ref = f"worktree/{env.worktree_id}"
-        assert finalize_open_pr_gate.content_exceeds_merged_head(
-            record, content_ref, "origin/master", cwd=str(env.clone),
-        ) is True
-
-    def test_none_content_ref(self, refspec_worktree):
-        env = refspec_worktree
         head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
-        record = SimpleNamespace(pr=SimpleNamespace(head_sha=head_sha))
-        assert finalize_open_pr_gate.content_exceeds_merged_head(
-            record, None, "origin/master", cwd=str(env.clone),
-        ) is True
-
-    def test_unresolvable_head_sha(self, refspec_worktree):
-        env = refspec_worktree
-        record = SimpleNamespace(pr=SimpleNamespace(head_sha="0" * 40))
-        content_ref = f"worktree/{env.worktree_id}"
-        assert finalize_open_pr_gate.content_exceeds_merged_head(
-            record, content_ref, "origin/master", cwd=str(env.clone),
-        ) is True
-
-    def test_unresolvable_content_ref(self, refspec_worktree):
-        env = refspec_worktree
-        head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
-        record = SimpleNamespace(pr=SimpleNamespace(head_sha=head_sha))
-        assert finalize_open_pr_gate.content_exceeds_merged_head(
-            record, "no-such-ref-at-all", "origin/master", cwd=str(env.clone),
-        ) is True
-
-    def test_failed_rev_list_unresolvable_upstream(self, refspec_worktree):
-        """Distinct from the ref_exists(content_ref) short-circuit above:
-        content_ref and head_sha both resolve, but `upstream` doesn't --
-        `rev-list` itself errors (non-zero exit), the ``extra.returncode !=
-        0`` branch, never checked in isolation elsewhere."""
-        env = refspec_worktree
-        head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
-        record = SimpleNamespace(pr=SimpleNamespace(head_sha=head_sha))
-        content_ref = f"worktree/{env.worktree_id}"
-        assert finalize_open_pr_gate.content_exceeds_merged_head(
-            record, content_ref, "no-such-upstream-ref-at-all", cwd=str(env.clone),
-        ) is True
+        for label, recorded_head, ref, upstream in (
+            ("missing-head", "", content_ref, "origin/master"),
+            ("missing-content", head_sha, None, "origin/master"),
+            ("unresolvable-head", "0" * 40, content_ref, "origin/master"),
+            ("unresolvable-content", head_sha, "no-such-ref-at-all", "origin/master"),
+            ("rev-list-error", head_sha, content_ref, "no-such-upstream-ref-at-all"),
+        ):
+            record = SimpleNamespace(pr=SimpleNamespace(head_sha=recorded_head))
+            assert finalize_open_pr_gate.content_exceeds_merged_head(
+                record, ref, upstream, cwd=str(env.clone),
+            ) is True, label
 
 
 class TestMergedPrBlockMessageDistinguishesInconclusive:
