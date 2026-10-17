@@ -1,0 +1,20 @@
+{
+  "captured_from": {
+    "commit": "ee591b72e932696b43e16334de8b95999901c258",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 40,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "3d00ae22a1fec171ee977e3c91b618902b973ab0",
+    "source_sha256": "7dcba30c6b554d346d3f37bb39c4c2f2aec10d9f3a3c01322144634843850714"
+  },
+  "response": {
+    "protocol_version": 40,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "operation": "POST /api/v1/acquisitions",
+    "required_protocol_version": 32,
+    "unsupported_status": 426,
+    "unsupported_code": "unsupported_acquisition_protocol"
+  }
+}

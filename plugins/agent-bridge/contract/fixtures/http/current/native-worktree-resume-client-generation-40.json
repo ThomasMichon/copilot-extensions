@@ -1,0 +1,41 @@
+{
+  "captured_from": {
+    "commit": "ee591b72e932696b43e16334de8b95999901c258",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 40,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+    "source_git_blob": "8e5b05fea60fc6731dae15de4f0d3d15d734527a",
+    "source_sha256": "f69b14d54afc42013482491342aa5cf0fa65dd612d1c1c471d83497b45360766"
+  },
+  "response": {
+    "protocol_version": 40,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 40,
+    "native_history_replacement": false,
+    "owner_native_admission_version": 1
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example-worktree/resume/{mode}",
+    "modes": [
+      "acp",
+      "cli"
+    ]
+  },
+  "identity": {
+    "durable_session_id": "native-example-head",
+    "acp_session_id": "native-example-head"
+  },
+  "refusals": [
+    "head_unavailable",
+    "live_holder",
+    "owner_capability_missing"
+  ],
+  "singleton": {
+    "mode": "acp",
+    "first_initialization_only_without_history": true,
+    "strict_refuses_initialization": true
+  }
+}
