@@ -957,7 +957,13 @@ jobs:
     # The Worktree Manager is delivered OUTSIDE the plugin pipe, so the
     # per-plugin matrix below never runs its tests. This dedicated job gives it
     # real CI.
-    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    needs: discover
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.manager_contracts == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -982,7 +988,13 @@ jobs:
     # run-standalone-tests.py harness agent-index-service's own job uses,
     # which supplies the needed local path sources directly (see
     # run-standalone-tests.py's prepare()).
-    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    needs: discover
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.dispatch_contracts == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -1089,7 +1101,13 @@ jobs:
 
   fleet-native-linux:
     name: fleet-manager (ubuntu-latest, ${{ matrix.partition.name }})
-    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    needs: discover
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.fleet_contracts == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     strategy:
@@ -1116,30 +1134,11 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - id: fleet-contracts
-        name: Detect standalone fleet contract changes
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/(single-instance-lease|agent-procutil|versioned-runtime)/|\.github/workflows/ci\.yml$)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
       - name: Check fleet coverage partition
-        if: steps.fleet-contracts.outputs.run == 'true'
+        if: matrix.partition.name == 'planner'
         shell: bash
-        run: python tools/seasoned_uv.py --uv uv -- --system pytest && python -m pytest -q tools/test_fleet_ci_scope.py
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml && python -m pytest -q tools/test_fleet_ci_scope.py tools/test_ci_job_admission.py
       - name: Test fleet partition with installed package and host containment
-        if: steps.fleet-contracts.outputs.run == 'true'
         env:
           PYTEST_ADDOPTS: >-
             ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
@@ -1148,7 +1147,13 @@ jobs:
 
   fleet-native-windows:
     name: fleet-manager (windows-latest, ${{ matrix.partition.name }})
-    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    needs: discover
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.fleet_contracts == 'true'))
     runs-on: windows-latest
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}
     strategy:
@@ -1487,6 +1492,10 @@ jobs:
       smoke: ${{ steps.set.outputs.smoke }}
       heavy: ${{ steps.set.outputs.heavy }}
       standalone_service: ${{ steps.set.outputs.standalone_service }}
+      admission_validated: ${{ steps.admission.outputs.admission_validated }}
+      fleet_contracts: ${{ steps.admission.outputs.fleet_contracts }}
+      manager_contracts: ${{ steps.admission.outputs.manager_contracts }}
+      dispatch_contracts: ${{ steps.admission.outputs.dispatch_contracts }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1494,6 +1503,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - id: admission
+        name: Select standalone jobs before runner allocation
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python tools/ci_job_admission.py --event "$EVENT_NAME"
+          --base "$BASE_SHA" --head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       - id: set
         name: Resolve target plugins
         run: |
@@ -1862,6 +1880,25 @@ jobs:
           import sys
 
           results = json.loads(os.environ["NEEDS_JSON"])
+          discovery = results.get("discover", {})
+          outputs = discovery.get("outputs", {})
+          families = {
+              "fleet_contracts": ("fleet-native-linux", "fleet-native-windows"),
+              "manager_contracts": ("worktree-manager",),
+              "dispatch_contracts": ("agent-dispatch-service",),
+          }
+          if (discovery.get("result") != "success"
+                  or outputs.get("admission_validated") != "true"
+                  or any(outputs.get(key) not in ("true", "false") for key in families)):
+              print("Standalone job discovery is missing, failed, or invalid.")
+              sys.exit(1)
+          selected_skips = [
+              job for key, jobs in families.items() if outputs[key] == "true"
+              for job in jobs if results.get(job, {}).get("result") != "success"
+          ]
+          if selected_skips:
+              print("Selected standalone jobs did not succeed:", selected_skips)
+              sys.exit(1)
           bad = {name: info["result"] for name, info in results.items()
                  if info["result"] not in ("success", "skipped")}
           if bad:

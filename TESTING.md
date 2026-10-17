@@ -34,6 +34,15 @@ exception reports, including on Python 3.14.
 The separate native HTTP/2 peer consumes the redirect request body before its
 307 response; its evidence probe verifies body consumption and no forwarding.
 
+Standalone fleet, Manager and Dispatch PR jobs are admitted before runner
+allocation by `tools/ci_job_admission.py` in the existing discovery job.
+`tools/test_ci_job_admission.py` exercises pinned real-Git inputs, dependency/
+unknown-path widening, actual job expressions and required aggregate refusal;
+`tools/test_fleet_ci_scope.py` retains all six Linux/Windows partition contracts.
+The contract selection runs once per platform's planner partition, not twelve
+times. Non-PR full/manual/promotion coverage remains enabled even when discovery
+is skipped or fails; the existing aggregate still decides overall success.
+
 Guest-environment coverage runs the actual Python, Bash and PowerShell CLIs
 with only operating-system observations substituted (account home, guest kind
 and machine-id). Each writer's private registration is read repeatedly by all
