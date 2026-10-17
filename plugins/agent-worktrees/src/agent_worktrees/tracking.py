@@ -3253,11 +3253,17 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
       RECREATE a file a legitimate concurrent hard-delete had already
       removed (copilot-extensions#3749).
 
+    Open PRs and held outbound resources prohibit retirement, even when the
+    checkout is already gone. Re-read responsibility under the record lock;
+    stale caller snapshots cannot erase a newly acquired obligation.
+
     Returns ``True`` once the record is durably retired (tombstoned or
     deleted, or found already retired by a concurrent call); ``False`` if
-    deferred by a contended lock -- callers treat that as "retry on a later
-    reap pass," not a failure.
+    deferred by a contended lock or changed pair -- callers retry on a later
+    reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
+    from .retirement_safety import require_retirable, retirement_blocker, same_pair
+
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
     if record.is_paired:
@@ -3284,6 +3290,12 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
             if not path.exists():
                 return True
 
+            latest = load_record(path)
+            require_retirable(latest)
+            if not same_pair(record, latest):
+                return False
+            record = latest
+
             hard_delete_sibling = False
             if record.is_paired:
                 sibling: WorktreeRecord | None = None
@@ -3291,7 +3303,11 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     sibling = find_paired_record(record)
                 except Exception:
                     sibling = None
-                if sibling is not None and sibling.reaped_at:
+                if (
+                    sibling is not None
+                    and sibling.reaped_at
+                    and retirement_blocker(sibling) is None
+                ):
                     hard_delete_sibling = True
 
             if hard_delete_sibling:
@@ -3866,10 +3882,11 @@ class _RecordLock:
     Always check ``acquired`` inside a ``blocking=False`` ``with`` block before
     writing; for the default ``blocking=True`` it is always True.
 
-    **Scope -- keep the lock window to the RMW only (#4547).** Wrap exactly the
-    ``load_record -> mutate -> save_record`` window and **never hold the lock
-    across network or git I/O** (a fetch, push, rebase, or provider call). Two
-    consequences follow:
+    **Scope -- keep normal RMW locks short (#4547).** Do not hold across fetch,
+    push, rebase, or provider I/O. Cleanup is the deliberate exception: under
+    ``FinalizeLock``, its record-writer fence spans local removal so no new
+    responsibility appears between validation and deletion. Ordinary writers
+    use the following short-RMW protocol:
 
     - **Foreground CLI verbs** whose RMW is self-contained (``set-pr``,
       ``set-disposition``, ``mark-complete``, resume's ``mark_resumed``, the

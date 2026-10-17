@@ -106,10 +106,10 @@ from . import (
     locks,
     output,
     pane_lifecycle,
-    permissions,
+    permissions as permissions,
     pr_config,
     pr_ops,
-    procs,
+    procs as procs,
     profile_assignment,
     prune,
     reciprocal_presentation,
@@ -4366,102 +4366,9 @@ def _reap_worktree(
     repo: cfg.RepoConfig,
     tracking_path: Path,
 ) -> tuple[int, list[str]]:
-    """Remove one worktree: dir + branch + perms + tracking + tmux session.
-
-    Returns ``(failures, warnings)``. The caller must hold the finalization
-    lock. Shared by the batch ``cmd_cleanup`` loop and the per-worktree
-    (``--worktree-id``) path so both reap identically.
-    """
-    warnings: list[str] = []
-    failures = 0
-
-    if not rec.checkout_managed:
-        if not tracking.retire_record(rec, tracking_path):
-            # pr-attribution-codenames Phase 2 follow-up: a contended
-            # cross-process lock (e.g. a concurrent codename backfill)
-            # defers retirement rather than proceeding unsafely -- this
-            # external record is retried on a later reap pass.
-            warnings.append(
-                f"Tracking record for {rec.worktree_id} is busy (contended "
-                "lock) -- will retire on a later pass."
-            )
-            return 0, warnings
-        disposition_history.remove(rec.worktree_id)
-        handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
-        activity.log_event(
-            "external_worktree_tracking_retired",
-            worktree_id=rec.worktree_id,
-            path=rec.worktree_path,
-        )
-        return 0, warnings
-
-    if rec.worktree_path and Path(rec.worktree_path).exists():
-        # Tear down the owning mux session first, then terminate any lingering
-        # process whose cwd is still rooted in the worktree (a stray gh, a
-        # status-updater, a leftover shell). On Windows an open cwd handle keeps
-        # the directory locked, so this must happen *before* rmtree or the dir
-        # is left behind as an empty shell (issue dotfiles#139).
-        sessions.kill_tmux_session(rec.worktree_id)
-        try:
-            killed = procs.terminate_processes_under(rec.worktree_path)
-        except Exception:
-            killed = []
-        if killed:
-            names = ", ".join(f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
-            if names:
-                warnings.append(f"Terminated lingering process(es): {names}")
-            activity.log_event(
-                "worktree_procs_terminated",
-                worktree_id=rec.worktree_id,
-                count=sum(1 for k in killed if k["killed"]),
-            )
-
-        if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
-            warnings.append("Could not remove worktree via git -- forcing directory removal.")
-        wt_dir = Path(rec.worktree_path)
-        if wt_dir.exists():
-            # Locks may release a beat after the holding process dies; retry the
-            # tree removal briefly before giving up.
-            for attempt in range(4):
-                shutil.rmtree(wt_dir, ignore_errors=True)
-                if not wt_dir.exists():
-                    break
-                time.sleep(0.25 * (attempt + 1))
-            if wt_dir.exists():
-                warnings.append(f"Directory still present: {wt_dir}")
-                failures += 1
-
-    if rec.branch:
-        if not git_ops.delete_branch(rec.branch, cwd=repo.anchor, force=True):
-            warnings.append(f"Could not delete branch {rec.branch}")
-            failures += 1
-
-    # Clean up Copilot permissions and trusted_folders
-    if rec.worktree_path:
-        permissions.merge_permissions(repo.anchor, rec.worktree_path)
-        permissions.remove_trusted_folder(rec.worktree_path)
-
-    # Remove tracking YAML (or tombstone it, when paired -- #957/#220). The
-    # worktree checkout/branch are already gone by this point regardless of
-    # whether this succeeds -- a contended lock (pr-attribution-codenames
-    # Phase 2 follow-up) defers retirement to a later reap pass rather than
-    # deleting without real cross-process exclusivity.
-    if tracking.retire_record(rec, tracking_path):
-        disposition_history.remove(rec.worktree_id)
-        handoff_trace.remove_trace(cfg.active_project(), rec.worktree_id)
-    else:
-        warnings.append(
-            f"Tracking record for {rec.worktree_id} is busy (contended lock) "
-            "-- worktree/branch removed; record will retire on a later pass."
-        )
-
-    activity.log_event(
-        "worktree_reaped",
-        worktree_id=rec.worktree_id,
-        branch=rec.branch,
-        state=info.state.value,
-    )
-    return failures, warnings
+    """Compatibility entrypoint for the shared physical reaper."""
+    from .cleanup_reap import reap_worktree
+    return reap_worktree(rec, info, repo, tracking_path)
 
 
 def reap_one(
