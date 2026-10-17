@@ -735,7 +735,7 @@ actual repo-owner account, not this session's raw `gh auth` identity (a
 distinction the effort's own custom instructions describe but I hadn't
 seen play out concretely until checking `gh pr view --json author`). The
 real blocker was `identifier-leak-guard`: it correctly caught a personal
-Windows username (`tmichon`) pasted verbatim into an earlier journal
+Windows username pasted verbatim into an earlier journal
 entry's example error path (documenting the `agent-ssh` bash-shim
 finding) — fixed in the same PR by genericizing it to `your_user`, the
 denylist message's own suggested replacement. Confirmed via a repo grep
