@@ -3255,7 +3255,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     deferred by a contended lock or changed pair -- callers retry on a later
     reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
-    from .retirement_safety import require_retirable, retirement_blocker
+    from .retirement_safety import require_retirable, retirement_blocker, same_pair
 
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
@@ -3285,7 +3285,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
 
             latest = load_record(path)
             require_retirable(latest)
-            if latest.pair_ref != record.pair_ref or latest.is_paired != record.is_paired:
+            if not same_pair(record, latest):
                 return False
             record = latest
 
