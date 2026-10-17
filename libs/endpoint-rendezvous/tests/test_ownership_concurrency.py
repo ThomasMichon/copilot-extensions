@@ -172,6 +172,29 @@ def test_cleanup_does_not_create_an_absent_runtime(
     assert not absent.exists()
 
 
+@pytest.mark.parametrize("error", [PermissionError, TimeoutError])
+def test_cleanup_logs_runtime_stat_failure(
+    rendezvous: ModuleType, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture, tmp_path: Path, error: type[OSError],
+) -> None:
+    rendezvous.write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
+    endpoint = rendezvous.endpoint_file(tmp_path)
+    original = endpoint.read_bytes()
+    exists = Path.exists
+
+    def fail_probe(path: Path) -> bool:
+        if path == tmp_path:
+            raise error("injected runtime stat failure")
+        return exists(path)
+
+    monkeypatch.setattr(Path, "exists", fail_probe)
+    rendezvous.clear_endpoint(tmp_path, owner_pid=1001)
+    assert endpoint.read_bytes() == original
+    assert "Endpoint cleanup failed" in caplog.text
+    assert "injected runtime stat failure" in caplog.text
+    assert "Endpoint cleanup skipped" not in caplog.text
+
+
 def test_interrupted_native_acquisition_is_retried(
     rendezvous: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

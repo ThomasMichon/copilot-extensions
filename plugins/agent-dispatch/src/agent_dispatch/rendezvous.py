@@ -286,13 +286,14 @@ def clear_endpoint(runtime_dir: Path | str, *, owner_pid: int | None = None) -> 
     cleanup -- see :func:`is_stale`.
     """
     path = endpoint_file(runtime_dir)
-    if not path.parent.exists():
-        return
-    acquired = False
+    acquiring = False
     removed = False
     try:
+        if not path.parent.exists():
+            return
+        acquiring = True
         with _endpoint_lock(runtime_dir):
-            acquired = True
+            acquiring = False
             record = read_endpoint(runtime_dir)
             pid = owner_pid if owner_pid is not None else os.getpid()
             if record is not None and record.pid is not None and record.pid != pid:
@@ -303,7 +304,7 @@ def clear_endpoint(runtime_dir: Path | str, *, owner_pid: int | None = None) -> 
             path.unlink(missing_ok=True)
             removed = True
     except OSError as exc:
-        if not acquired and isinstance(exc, TimeoutError):
+        if acquiring and isinstance(exc, TimeoutError):
             _LOG.warning("Endpoint cleanup skipped: mutation lock timed out for %s", path)
         elif removed:
             _LOG.warning("Endpoint removed but mutation lock release failed for %s", path, exc_info=True)
