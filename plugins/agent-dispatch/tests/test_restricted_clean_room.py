@@ -41,7 +41,9 @@ def test_clean_room_retains_two_independent_cases_and_original_limits(lane, tmp_
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
         outcome = argv[argv.index("-k") + 1]
-        _proof(Path(kwargs["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"]), outcome)
+        evidence = Path(kwargs["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"])
+        assert not evidence.exists()
+        _proof(evidence, outcome)
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(lane.subprocess, "run", run)
@@ -100,7 +102,9 @@ def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch
     assert report["jams"][0]["evidence"] == "complete/runner.log"
 
 
-@pytest.mark.parametrize("failure", [None, "remaining", "inventory", "malformed", "nonstring", "timeout"])
+@pytest.mark.parametrize("failure", [
+    None, "substring-only", "remaining", "inventory", "malformed", "nonstring", "timeout",
+])
 def test_docker_cleanup_confirms_absence_and_attempts_every_resource(monkeypatch, failure):
     script = Path(__file__).with_name("test_restricted_supervisor_docker.py")
     spec = importlib.util.spec_from_file_location("restricted_docker_case", script)
@@ -127,10 +131,12 @@ def test_docker_cleanup_confirms_absence_and_attempts_every_resource(monkeypatch
                 return SimpleNamespace(returncode=0, stderr="", stdout="{")
             if failure == "nonstring":
                 return SimpleNamespace(returncode=0, stderr="", stdout="null")
+            if failure == "substring-only":
+                return SimpleNamespace(returncode=0, stderr="", stdout='"worker-suffix"\n')
         return SimpleNamespace(returncode=0, stderr="", stdout="")
 
     monkeypatch.setattr(module.subprocess, "run", run)
-    if failure:
+    if failure not in (None, "substring-only"):
         with pytest.raises(AssertionError, match="cleanup|inventory|still exists"):
             module._cleanup_docker(("worker", "central"), ("internal", "management"))
     else:

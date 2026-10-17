@@ -95,7 +95,7 @@ async function work() {
         await sleep(100);
     }
     const terminal = await request("POST", `/tasks/${task}/${outcome}`, outcome === "complete" ? {
-        worker_id: body.worker_id, result: {native, prompts, refused, rotated: true},
+        worker_id: body.worker_id, result: {native, prompts, refused, rotated},
     } : {
         worker_id: body.worker_id, permitted: true, reason: "offline witness failure",
     });
