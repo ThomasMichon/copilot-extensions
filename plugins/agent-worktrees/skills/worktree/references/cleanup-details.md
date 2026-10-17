@@ -34,8 +34,17 @@ This is a **fail-closed, in-tool writer fence**, not a universal filesystem
 lock: arbitrary external edits or raw git commands outside agent-worktrees can
 still race the local delete. `cleanup --worktree-id <id> --force` remains the
 documented, narrower exception: it still refreshes liveness under `FinalizeLock`
-and refuses an active/hosted session, but it deliberately bypasses the full
-dirty/WIP/claim/follow-up/branch-merge disposition.
+and refuses an active/hosted session, an open or unconfirmed PR, and held
+outbound resource obligations. It deliberately bypasses dirty/WIP,
+inbound-claimant, follow-up and branch-merge checks, not responsibility for
+unfinished PRs or owned children.
+
+Open PRs override `finalized` tracking and Git-completed content. The same
+obligation check runs before retiring a missing checkout and before archiving
+its tracking record. A stale open PR remains a hold until `--reconcile-prs`
+confirms its terminal state; held claims require ordinary settlement or an
+explicit accepted transfer. Neither a missing directory nor `--force` releases
+that responsibility.
 
 **Known limitation:** a record whose tracking `status` is already
 `finalized` can still mask genuinely new WIP or conversation-only content added
