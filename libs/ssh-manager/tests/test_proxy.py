@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -15,6 +16,63 @@ from agent_procutil import no_window_kwargs, windowless_python
 from ssh_manager import SSHConfig
 from ssh_manager import proxy
 from ssh_manager.process import register_process_cleanup, run_process_cleanup
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("environment", ["ambient", "explicit", "empty"])
+@pytest.mark.parametrize("has_proxy", [False, True])
+async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
+    monkeypatch, windows, environment, has_proxy,
+):
+    key = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
+    inherited = {
+        key: "synthetic-descriptors",
+        key.upper(): "synthetic-case-variant",
+        "OTHER_POSIX_FD_STATE": "keep",
+        "GH_TOKEN": "synthetic-account-value",
+    }
+    monkeypatch.setattr(proxy, "_is_windows", lambda: windows)
+    for name, value in inherited.items():
+        monkeypatch.setenv(name, value)
+    explicit = {} if environment == "empty" else dict(inherited)
+    before = dict(os.environ if environment == "ambient" else explicit)
+    process = SimpleNamespace(wait=AsyncMock(return_value=0))
+    spawn = AsyncMock(return_value=(process, None))
+    broker_environments = []
+    broker = SimpleNamespace(start=AsyncMock(return_value=34567), close=AsyncMock())
+
+    def make_broker(command, env, **kwargs):
+        broker_environments.append(env)
+        return broker
+
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(proxy, "_ProxyBroker", make_broker)
+    monkeypatch.setattr(proxy, "_resolve_shell", AsyncMock(return_value=None))
+    monkeypatch.setattr(proxy, "_split_windows_command", lambda command: ["proxy"])
+    monkeypatch.setattr(proxy, "_client_command", lambda *args, **kwargs: "client")
+    kwargs = {} if environment == "ambient" else {"env": explicit}
+    try:
+        await proxy.create_ssh_subprocess(
+            "ssh", "example",
+            config=SSHConfig("example", proxy_command="proxy" if has_proxy else None),
+            **kwargs,
+        )
+        if windows:
+            expected = {
+                name: value for name, value in before.items()
+                if name.casefold() != key.casefold()
+            }
+            assert spawn.await_args.kwargs["env"] == expected
+            if has_proxy:
+                assert broker_environments == [expected]
+        elif environment == "ambient":
+            assert "env" not in spawn.await_args.kwargs
+        else:
+            assert spawn.await_args.kwargs["env"] is explicit
+        assert dict(os.environ if environment == "ambient" else explicit) == before
+    finally:
+        await run_process_cleanup(process)
 
 
 @pytest.mark.asyncio

@@ -1076,8 +1076,15 @@ consoleless parent with native Windows OpenSSH and, when installed, Git for
 Windows. It checks displayed terminal windows and foreground changes using a
 synthetic proxy, without remote hosts or credentials:
 
+The windowless parent carries synthetic Win32-OpenSSH socket-descriptor metadata
+while its children receive newly redirected handles. Both cycles must reach the
+real SSH proxy, and the broker-owned proxy must not inherit that obsolete state.
+Portable contracts separately cover ambient, explicit and empty environments,
+case-insensitive key removal, retained unrelated entries, caller immutability,
+and unchanged POSIX handling.
+
 ```powershell
-$env:PYTHONPATH = Join-Path $PWD 'plugins\agent-bridge\libs\ssh-manager\src'
+$env:PYTHONPATH = "$(Join-Path $PWD 'libs\ssh-manager\src');$(Join-Path $PWD 'libs\agent-procutil\src')"
 $env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
 & .\.test-venvs\win32\agent-bridge\Scripts\python.exe -m pytest -q libs\ssh-manager\tests\test_proxy_windows.py
 ```
