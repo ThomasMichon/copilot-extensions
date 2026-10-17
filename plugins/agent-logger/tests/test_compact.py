@@ -242,6 +242,7 @@ def test_run_sync_folds_in_compaction(tmp_path: Path, monkeypatch) -> None:
         "machine": {"name": "testbox"},
         "sync": {
             "source": str(src),
+            "usage_capture": False,  # raw-only compaction fixture has no accounting store
             "target": "local",
             "targets": {"local": {"path": str(hub)}},
             "compact": {"enabled": True},

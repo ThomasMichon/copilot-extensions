@@ -2669,6 +2669,7 @@ def test_repo_allowlist_filters_sessions(tmp_path: Path) -> None:
     data = dict(load_config(home=tmp_path / "home").as_dict())
     data["sync"]["source"] = str(src)
     data["sync"]["repo_allowlist"] = ["dotfiles"]
+    data["sync"]["usage_capture"] = False  # raw transport fixture contains a dummy DB
     data["sync"]["targets"]["local"]["path"] = str(dest)
     cfg = Config(data, tmp_path / "home")
 

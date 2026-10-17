@@ -8,6 +8,7 @@ import tarfile
 import zipfile
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -292,6 +293,29 @@ def test_usage_engine_failure_keeps_raw_push_but_blocks_compaction(tmp_path: Pat
     assert not called
     assert (tmp_path / "dest" / "synthetic" / "session-state" / "s1" / "events.jsonl").exists()
     assert not (session / ARTIFACT).exists()
+
+
+@pytest.mark.parametrize("store_present", [True, False])
+def test_usage_engine_compaction_requires_complete_capture(
+    tmp_path: Path, monkeypatch, store_present: bool,
+) -> None:
+    from agent_logger.sync import compact
+
+    cfg = _cfg(tmp_path)
+    cfg._data["sync"]["compact"] = {"enabled": True}
+    session = _session(cfg.sync_source)
+    if store_present:
+        _db(cfg.sync_source)
+    called = []
+
+    def compact_after_capture(*args, **kwargs):
+        assert (session / ARTIFACT).is_file()
+        called.append(True)
+        return SimpleNamespace(compacted=0, failed=[])
+
+    monkeypatch.setattr(compact, "compact_local", compact_after_capture)
+    assert engine.run_sync(cfg) == 0
+    assert bool(called) is store_present
 
 
 def test_usage_engine_explicit_disable_and_invalid_config(tmp_path: Path) -> None:
