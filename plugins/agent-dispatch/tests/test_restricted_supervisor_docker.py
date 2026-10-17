@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -65,7 +66,7 @@ def _cleanup_docker(containers, networks):
                     argv, capture_output=True, text=True, timeout=30,
                     creationflags=no_window_flags(),
                 )
-                inventory = ["docker", kind, "ls", "--filter", f"name={name}"]
+                inventory = ["docker", kind, "ls", "--filter", f"name=^/?{re.escape(name)}$"]
                 if kind == "container":
                     inventory.append("--all")
                 inventory.extend(["--format", "{{json .Names}}" if kind == "container" else "{{json .Name}}"])
@@ -111,7 +112,7 @@ def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkey
     if override := os.environ.get("AGENT_DISPATCH_E2E_EVIDENCE_DIR"):
         evidence = Path(override)
         assert evidence.is_absolute()
-        evidence.mkdir(exist_ok=False)
+        evidence.mkdir(exist_ok=False)  # Never merge this proof with an earlier case.
     trace_path = evidence / "stages.jsonl"
 
     def trace(stage, event):

@@ -71,6 +71,7 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
         })
         started = time.monotonic()
         stage = {"case": outcome, "status": "fail", "log": f"{outcome}/runner.log"}
+        phase = "runner"
         try:
             with (case / "runner.log").open("wb") as log:
                 process = subprocess.run(
@@ -82,14 +83,27 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
                 )
             if process.returncode:
                 raise ValueError(f"Contained case exited {process.returncode}")
+            phase = "proof"
             verify_case(evidence, outcome)
             stage["status"] = "pass"
         except (OSError, ValueError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired) as exc:
             stage["error_type"] = type(exc).__name__
             stage["error"] = str(exc)
+            category = (
+                "contained-timeout" if isinstance(exc, subprocess.TimeoutExpired)
+                else "proof-invalid" if phase == "proof"
+                else "runner-exit" if isinstance(exc, ValueError)
+                else "runner-io"
+            )
+            hints = {
+                "contained-timeout": "Inspect the contained deadline failure; do not increase the budget or resample.",
+                "proof-invalid": "Inspect proof.json and stages.jsonl; exit zero is not complete authority evidence.",
+                "runner-exit": "Inspect the contained runner log and fix its actual failing contract.",
+                "runner-io": "Check prepared runtime paths and the caller-owned evidence directory permissions.",
+            }
             report["jams"].append({
-                "category": "bridge-service", "evidence": stage["log"],
-                "hint": "Inspect the contained runner and evidence logs; do not disable authorization or retry away a failure.",
+                "category": category, "evidence": stage["log"], "hint": hints[category],
+                "error_type": stage["error_type"], "error": stage["error"],
             })
         stage["duration_seconds"] = time.monotonic() - started
         report["stages"].append(stage)
