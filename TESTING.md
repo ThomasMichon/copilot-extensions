@@ -495,10 +495,11 @@ It uses a disposable, test-owned host Bridge/supervisor, a real central service
 container and a separate restricted worker on an internal network. No installed
 service, live account, shared Docker socket mount or cloud token is used.
 The offline ACP witness creates its actual native identity, then starts,
-reads, reports progress and completes its own task through authenticated HTTP.
+reads, reports progress and either completes or abandons its own task through
+authenticated HTTP, in independent fresh-container cases.
 It must reject cross-task, fleet-route and signature-tampering attempts, and
 observe protected task-file rotation by the trusted supervisor.
-Acceptance also waits for the witness's final proof after its post-completion
+Acceptance also waits for the witness's final proof after its terminal
 revocation check, not merely for the central task row to become completed.
 An older matching-label task with unmet capabilities must be deferred without
 an agent, allowing the subsequent eligible task to run in the same lane.
@@ -515,6 +516,12 @@ prepared Bridge/provider interpreters. Then run:
 ```powershell
 python tools\run-plugin-tests.py agent-dispatch --test-file tests\test_restricted_supervisor_docker.py
 ```
+
+For bounded execution, select `-k complete` and `-k abandon` in separate runner
+invocations, each with the original 300-second item / 360-second aggregate
+limits. The [host-driven clean-room lane](tools/clean-room/restricted-dispatch/README.md)
+does this automatically and retains a structured report plus both cases'
+proofs outside the checkout.
 
 The fixture owns its temporary Bridge state, provider runtime copy, containers
 and networks, and tears them down. Provider discovery uses an isolated legacy

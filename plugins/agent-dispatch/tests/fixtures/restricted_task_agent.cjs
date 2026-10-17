@@ -59,7 +59,8 @@ async function work() {
     assert.ok(!Object.hasOwn(JSON.parse(started.text), "task_token"));
     const payload = await request("GET", `/tasks/${task}/payload`);
     assert.equal(payload.status, 200, payload.text);
-    const other = JSON.parse(JSON.parse(payload.text).payload).other;
+    const {other, outcome} = JSON.parse(JSON.parse(payload.text).payload);
+    assert.ok(["complete", "abandon"].includes(outcome));
     const refused = [];
     for (const [method, path, data] of [
         ["GET", `/tasks/${other}`],
@@ -87,17 +88,20 @@ async function work() {
     }
     const heartbeat = await request("POST", `/tasks/${task}/heartbeat`, body);
     assert.equal(heartbeat.status, 200, heartbeat.text);
-    while (!fs.existsSync("/workspace/complete")) {
-        assert.ok(Date.now() < deadline, "host never released completion after renewal");
+    while (!fs.existsSync("/workspace/finish")) {
+        assert.ok(Date.now() < deadline, "host never released terminal operation after renewal");
         await sleep(100);
     }
-    const completed = await request("POST", `/tasks/${task}/complete`, {
+    const terminal = await request("POST", `/tasks/${task}/${outcome}`, outcome === "complete" ? {
         worker_id: body.worker_id, result: {native, prompts, refused, rotated: true},
+    } : {
+        worker_id: body.worker_id, permitted: true, reason: "offline witness failure",
     });
-    assert.equal(completed.status, 200, completed.text);
+    assert.equal(terminal.status, 200, terminal.text);
+    assert.equal(JSON.parse(terminal.text).status, outcome === "complete" ? "completed" : "abandoned");
     assert.equal((await request("GET", `/tasks/${task}`)).status, 403);
     publishProof({
-        native, prompts, refused, rotated: true, phase: "completed",
+        native, prompts, refused, rotated: true, phase: "terminal", outcome,
     });
 }
 

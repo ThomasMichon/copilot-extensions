@@ -1,0 +1,25 @@
+{
+  "name": "restricted-dispatch",
+  "description": "Fresh central and restricted worker containers exercise real supervisor delivery, signed task-only HTTP authority, rotation, completion and permitted abandonment.",
+  "tier": "P",
+  "family": "F1",
+  "runner": "host-driven",
+  "auth": {"cloud": "none", "task": "offline-generated, real signatures and authorization"},
+  "prereqs": {
+    "present": ["Linux Docker engine", "candidate central image", "candidate Bridge/provider test runtimes"],
+    "provisioned_by_flow": ["fresh central state", "fresh restricted worker", "isolated host Bridge"]
+  },
+  "boundaries": {
+    "host_socket_mounted": false,
+    "privileged_containers": false,
+    "worker_uid": 1000,
+    "central_and_worker_separate": true
+  },
+  "cases": ["complete", "abandon"],
+  "deadlines_seconds": {"pytest_item": 300, "contained_case": 360},
+  "expected_artifacts": ["cr-report.json", "<case>/runner.log", "<case>/evidence/proof.json", "<case>/evidence/stages.jsonl"],
+  "stages": [
+    {"n": 1, "title": "fresh completion with rotation and negative authority checks"},
+    {"n": 2, "title": "fresh permitted abandonment with terminal credential revocation"}
+  ]
+}

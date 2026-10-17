@@ -132,6 +132,12 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 
 ## Scenarios & the scenario contract
 
+The [restricted-dispatch proof](restricted-dispatch/README.md) is an opt-in,
+host-driven Tier-P lane with separate fresh central and restricted worker
+containers. It uses no privileged containers, mounted Docker socket or live
+cloud login, and proves both completion and permitted abandonment with
+task-only credentials. It is not selected through `-Scenario`.
+
 The [Komodo role-fleet proof](komodo-role-fleet/README.md) is a separate opt-in,
 host-driven multi-container integration lane. It requires explicit privileged
 nested-Docker approval and uses no host Docker socket or published ports.
