@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit optional JWT and DPoP identity verification with bounded single-owner replay fencing",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

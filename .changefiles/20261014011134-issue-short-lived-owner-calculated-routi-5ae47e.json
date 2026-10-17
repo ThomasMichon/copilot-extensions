@@ -1,9 +1,0 @@
-{
-  "comment": "Issue short-lived owner-calculated routing advice with budget posture.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

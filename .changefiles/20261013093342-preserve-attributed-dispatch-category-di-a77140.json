@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve attributed dispatch category discovery and cover disabled, stale and tampered pointers through the actual Picker registry",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

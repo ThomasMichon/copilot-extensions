@@ -1,9 +1,0 @@
-{
-  "comment": "Status-monitor generations (resident and cutover passive) launch through agent_procutil.spawn_daemon and log stdout/stderr to logs/status-monitor.log under the install root.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

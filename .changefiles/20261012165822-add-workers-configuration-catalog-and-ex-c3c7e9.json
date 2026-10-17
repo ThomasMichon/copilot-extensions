@@ -1,9 +1,0 @@
-{
-  "comment": "Add Workers configuration catalog and explicit user-local instance lifecycle",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

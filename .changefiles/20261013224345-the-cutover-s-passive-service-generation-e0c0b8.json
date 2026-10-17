@@ -1,9 +1,0 @@
-{
-  "comment": "The cutover's passive service generation launches through agent_procutil.spawn_daemon with a service-stdio.log; its uvicorn level defaults to warning unless AGENT_INDEX_LOG_LEVEL is set, keeping per-request lines out of that append-only log.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

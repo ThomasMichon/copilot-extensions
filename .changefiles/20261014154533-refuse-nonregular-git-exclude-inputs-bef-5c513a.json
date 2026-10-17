@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse nonregular Git exclude inputs before instruction-copy index discovery.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "The installer's direct start runs 'agent-bridge service start --direct' (spawn_daemon: Job breakaway, WMI broker fallback, install-root cwd, its own stdio logs) instead of a PowerShell Start-Process through conhost, which left the daemon inside the installer's Job.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

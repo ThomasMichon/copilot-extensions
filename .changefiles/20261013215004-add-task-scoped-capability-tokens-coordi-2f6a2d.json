@@ -1,9 +1,0 @@
-{
-  "comment": "Add task-scoped capability tokens (coordinator_tasks start/progress/complete/abandon/heartbeat) and wire lease.FencingGuard onto them, closing the agent-dispatch-fleet-authority effort's Phase 1 authorization gap: a caller presenting only a narrow task-scoped token (never the shared bearer) can now act on exactly one task, with claims re-checked against that task's current owner/session/fencing-epoch on every call.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}

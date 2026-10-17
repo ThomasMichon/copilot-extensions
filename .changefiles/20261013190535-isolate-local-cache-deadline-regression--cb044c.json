@@ -1,9 +1,0 @@
-{
-  "comment": "Isolate local-cache deadline regression clocks from launch instrumentation.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Reconcile the shipped inline declaration roster with the reviewed budget advisory boundary and improve stack failure diagnostics.",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

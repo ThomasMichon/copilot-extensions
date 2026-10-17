@@ -1,9 +1,0 @@
-{
-  "comment": "Repair SSH installer tests for canonical and materialized payload inputs",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

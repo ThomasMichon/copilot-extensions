@@ -1,9 +1,0 @@
-{
-  "comment": "Wake satellite intake from bounded SSE subscriptions with ready reconciliation, slower polling and independent presence",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

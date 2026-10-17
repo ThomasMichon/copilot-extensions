@@ -1,9 +1,0 @@
-{
-  "comment": "Align launch and cache-refresh test records with execution-space identity fences",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Declare and stage the portable identity dependency for isolated Worktree Manager runtimes, retaining configured native self-locality when legacy rosters omit the preferred name.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

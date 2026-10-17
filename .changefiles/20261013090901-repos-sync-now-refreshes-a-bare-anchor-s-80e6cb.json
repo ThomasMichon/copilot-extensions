@@ -1,9 +1,0 @@
-{
-  "comment": "repos sync now refreshes a bare anchor's checked-out files with its ref, refusing before the ref moves when the files are stale, dirty, or blocked.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
