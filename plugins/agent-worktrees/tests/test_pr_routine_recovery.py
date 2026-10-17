@@ -197,13 +197,15 @@ def test_numbered_pr_preserves_verified_lost_ack_fallbacks(
 @pytest.mark.parametrize("failure", [
     "provider-error", "provider-head", "provider-closed", "provider-number", "provider-branch",
     "provider-destination", "destination", "ownership", "duplicate", "evidence", "mutable-target",
-    "unrelated-source",
+    "unrelated-source", "missing-ref",
 ])
 def test_normal_entrypoints_refuse_unproved_reconciliation(
-    owned_publication, monkeypatch, command, failure,
+    owned_publication, monkeypatch, capfd, command, failure,
 ) -> None:
     config, wid, wt, remote, saved, branch, published = owned_publication
-    if failure.startswith("provider"):
+    if failure == "missing-ref":
+        monkeypatch.setattr(pr_publish, "_tip", lambda *a, **k: "")
+    elif failure.startswith("provider"):
         observed = PullResult(
             number=42, head_sha=published, head_ref=branch, head_url=str(remote),
         )
@@ -242,6 +244,8 @@ def test_normal_entrypoints_refuse_unproved_reconciliation(
     evidence = pr_recovery._path(str(wt)).read_bytes()
     monkeypatch.setattr(git_ops, "push", lambda *a, **k: pytest.fail("Refused recovery must not push."))
     assert not invoke(command, config, wid)
+    if failure == "missing-ref":
+        assert f"PR ref '{branch}' on remote 'origin'" in capfd.readouterr().out
     assert record(wid).pr.head_sha == saved
     assert git("rev-parse", "HEAD", cwd=wt) == source
     assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == published
@@ -405,10 +409,13 @@ def test_failed_tracking_settlement_is_explicit_and_does_not_push(
     monkeypatch.setattr(pr_publish, "record_reconciled_head", deny)
     monkeypatch.setattr(git_ops, "push", lambda *a, **k: pytest.fail("Unsettled tracking must not push."))
     assert not finalize.push_changes(wid, config)
-    assert "tracking not confirmed" in capfd.readouterr().out
+    diagnostic = capfd.readouterr().out
+    assert "tracking not confirmed" in diagnostic
     assert record(wid).pr.head_sha == saved
     assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == published
-    audit = json.loads(next(metadata(wt).glob("*pr-reconciliation-*.json")).read_text())
+    audit_path = next(metadata(wt).glob("*pr-reconciliation-*.json"))
+    assert str(audit_path) in diagnostic
+    audit = json.loads(audit_path.read_text())
     assert audit["outcome"] == "unknown"
 
 

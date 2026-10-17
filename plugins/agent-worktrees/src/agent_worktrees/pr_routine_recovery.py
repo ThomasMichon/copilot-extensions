@@ -59,7 +59,10 @@ def reconcile(config: Config, record: tracking.WorktreeRecord | None, *, cwd: st
             if observed == pr.head_sha:
                 return ""
             if not observed:
-                raise ValueError("Cannot confirm the existing PR ref for routine reconciliation.")
+                raise ValueError(
+                    f"Cannot confirm PR ref '{pr.branch}' on remote '{target.remote}' "
+                    "for routine reconciliation."
+                )
             return _settle(config, record, pr, target.remote, observed, cwd=cwd)
     except TimeoutError as exc:
         raise ValueError(f"Routine reconciliation lock timed out: {exc}") from exc
@@ -135,7 +138,7 @@ def _settle(
         tracking._atomic_write(path, json.dumps(audit, sort_keys=True) + "\n")
         raise ValueError(
             f"Routine reconciliation failed (tracking {'settled' if settled else 'not confirmed'}); "
-            f"inspect {path.name}: {exc}"
+            f"inspect {path}: {exc}"
         ) from exc
     activity.log_event("pr_publication_reconciled", worktree_id=record.worktree_id, branch=pr.branch)
     output.ok(f"Reconciled backed publication of PR head '{pr.branch}'; no push or PR edit.")
