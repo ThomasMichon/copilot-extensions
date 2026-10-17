@@ -6,7 +6,11 @@
 
 A failed pre-publication rebase retains one `creating` PR entry. Retrying the
 same branch, provider and repository reuses that entry, including its stable
-ID and frozen attribution decision, even with `create-pr --new`. Only an entry
+ID and frozen attribution decision, even with `create-pr --new`. Interleaved
+attempts search the full owning record for a unique same-head association.
+A successful resumed publication refreshes that entry's opening timestamp so
+subsequent no-selector updates target it, without changing unrelated attempts.
+Only an entry
 without any provider identity, publication lease, destination or observed-head
 evidence qualifies. It still follows fresh-publication rebase and absent-ref
 checks; this is not authority to rewrite an existing remote head.

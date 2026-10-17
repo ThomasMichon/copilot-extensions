@@ -943,7 +943,7 @@ def create_pr(
     # 7. Record the open state on the target PR (preserving any url/number
     #    already recorded for a reused live PR).
     if record is not None and target_pr is not None:
-        target_pr.state = "open"
+        pr_publication_state.settle_creation(record, target_pr, resumed=provisional_retry)
         target_pr.branch = feature_branch
         pr_publish.record_remote_identity(target_pr, publish_remote, remote, pushed.head_repo, getattr(pushed, "head_identity", ""), fork_owner)
         target_pr.base_sha = base_sha

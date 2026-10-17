@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import fields
+from datetime import datetime, timedelta
 
 from . import config as cfg, tracking
 
@@ -135,3 +136,17 @@ def retry_candidate(
     if candidates and unpublished_retry(candidates[0], branch, provider, repo):
         return candidates[0]
     return active
+
+
+def settle_creation(
+    record: tracking.WorktreeRecord, target: tracking.PRRecord, *, resumed: bool,
+) -> None:
+    """Make a successfully resumed attempt the default without changing its peers."""
+    target.state = "open"
+    if resumed:
+        latest = max((pr.opened_at or "" for pr in record.prs), default="")
+        now = tracking._now_iso()
+        target.opened_at = (
+            (datetime.fromisoformat(latest) + timedelta(microseconds=1)).isoformat()
+            if latest and latest >= now else now
+        )

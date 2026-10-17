@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import git_ops, pr_ops, pr_publication_state, tracking
+from agent_worktrees import finalize, git_ops, pr_ops, pr_publication_state, tracking
 
 pytestmark = pytest.mark.contract("agent_worktrees.pr_publish.publication_state")
 
@@ -173,3 +173,17 @@ def test_interleaved_retry_reuses_original_attempt(
     assert after.prs[1] == other
     assert sum(not tracking._pr_is_terminal(pr) and pr.branch == first.branch
                for pr in after.prs) == 1
+    assert after.active_pr().pr_id == first.pr_id
+    assert after.prs[0].attribution_mode == first.attribution_mode
+    assert after.prs[0].attribution_explicit == first.attribution_explicit
+    (_wt / "followup.txt").write_text("followup\n", encoding="utf-8")
+    git_ops.git("add", "followup.txt", cwd=str(_wt))
+    git_ops.git("commit", "-m", "followup", cwd=str(_wt))
+    assert finalize.push_changes(wid, config)
+    updated = tracking.load_record(path)
+    assert updated.active_pr().pr_id == first.pr_id
+    assert updated.prs[1] == other
+    assert updated.prs[0].head_sha == git_ops.git(
+        "--git-dir", str(_remote), "rev-parse", f"refs/heads/{first.branch}",
+        cwd=str(_wt),
+    ).stdout.strip()
