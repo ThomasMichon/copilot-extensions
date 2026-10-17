@@ -84,6 +84,10 @@ class ObservationScope:
         )
 
 
+def _scope_key(scope: ObservationScope):
+    return scope.origin, scope.project, scope.entity, scope.fields
+
+
 @dataclass(frozen=True)
 class OperationGrant:
     command: str
@@ -121,6 +125,10 @@ class Enrollment:
             raise AdmissionError("invalid-record")
         _items(self.reads, ObservationScope, MAX_GRANTS)
         _items(self.operations, OperationGrant, MAX_GRANTS)
+        object.__setattr__(self, "reads", tuple(sorted(self.reads, key=_scope_key)))
+        object.__setattr__(self, "operations", tuple(sorted(
+            self.operations, key=lambda item: (item.command, item.target, item.generation),
+        )))
 
     @property
     def binding(self):
@@ -167,6 +175,9 @@ class AuthoritySnapshot:
             grants += len(item.reads) + len(item.operations)
         if grants > MAX_GRANTS:
             raise AdmissionError("invalid-record")
+        object.__setattr__(self, "enrollments", tuple(sorted(
+            self.enrollments, key=lambda item: (item.subject, item.role, item.installation),
+        )))
 
 
 @dataclass(frozen=True)
@@ -178,11 +189,7 @@ class ObservationRead:
         _name(self.fleet)
         if self.scopes is not None:
             _items(self.scopes, ObservationScope, MAX_GRANTS)
-            object.__setattr__(self, "scopes", tuple(sorted(
-                self.scopes, key=lambda item: (
-                    item.origin, item.project, item.entity, item.fields,
-                ),
-            )))
+            object.__setattr__(self, "scopes", tuple(sorted(self.scopes, key=_scope_key)))
 
 
 Request = ObservationRead | OperationIntent
@@ -341,9 +348,7 @@ class AdmissionAuthority:
                 for branch in selected
             ):
                 raise AdmissionError("forbidden-scope")
-            return tuple(sorted(selected, key=lambda item: (
-                item.origin, item.project, item.entity, item.fields,
-            )))
+            return tuple(sorted(selected, key=_scope_key))
         value = request.to_dict()
         if (value["authority"], value["principal"], value["account"]) != (
             current.authority, enrolled.principal, enrolled.account,
@@ -407,7 +412,8 @@ class AdmissionAuthority:
             now = self._now()
             if now >= permit.expires_at:
                 raise AdmissionError("expired-permit")
-            if type(request) is not type(issued.request) or request != issued.request:
+            if (type(request) is not type(issued.request)
+                    or _request(request) != (permit.action, permit.request_digest)):
                 raise AdmissionError("request-mismatch")
             current = self._current()
             self._valid(current, issued.identity, self._now())

@@ -251,6 +251,43 @@ def test_unrelated_policy_change_does_not_expand_or_restart_view(harness):
     refuses("unknown-permit", harness.owner.revalidate, permit, request)
 
 
+def test_snapshot_and_nested_grant_permutations_preserve_same_revision(harness):
+    grants = (
+        OperationGrant("task.submit", "node-a", 7),
+        OperationGrant("task.submit", "node-b", 8),
+    )
+    initial = policy(enrollments=(
+        actor(operations=grants),
+        actor("principal-2", principal="actor-b", account="account-b", reads=(B,)),
+    ))
+    harness.current = initial
+    request = ObservationRead("fleet-a")
+    permit = harness.admit(request)
+    reordered = replace(initial, enrollments=tuple(
+        replace(item, reads=tuple(reversed(item.reads)),
+                operations=tuple(reversed(item.operations)))
+        for item in reversed(initial.enrollments)
+    ))
+    assert reordered == initial
+    harness.current = reordered
+    current = harness.owner.revalidate(permit, ObservationRead("fleet-a"))
+    assert current.resources == (A, B) and current.policy_revision == initial.revision
+    harness.current = replace(initial, enrollments=(actor(reads=(A,)),))
+    refuses("conflicting-policy", harness.admit)
+
+
+@pytest.mark.parametrize("original", [ObservationRead("fleet-a", (A, B)), intent()])
+def test_revalidation_binds_canonical_action_digest_not_request_instance(harness, original):
+    permit = harness.admit(original)
+    if isinstance(original, OperationIntent):
+        reconstructed = OperationIntent.from_dict(original.to_dict())
+    else:
+        reconstructed = ObservationRead("fleet-a", (B, A))
+    assert reconstructed is not original
+    current = harness.owner.revalidate(permit, reconstructed)
+    assert (current.action, current.request_digest) == (permit.action, permit.request_digest)
+
+
 def test_permits_cannot_be_reconstructed_transferred_or_extended(harness):
     request = ObservationRead("fleet-a")
     permit = harness.admit(request)
