@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import shutil
@@ -110,6 +111,23 @@ def _subprocess_test_environment() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(path_entries)
     return env
+
+
+@pytest.mark.parametrize("first", ["managed_integrity", "managed_runtime"])
+def test_managed_integrity_cold_import_order_preserves_contract(tmp_path, monkeypatch, first):
+    import agent_dispatch
+
+    for name in ("managed_integrity", "managed_runtime"):
+        monkeypatch.delitem(sys.modules, f"agent_dispatch.{name}")
+        monkeypatch.delattr(agent_dispatch, name)
+    importlib.import_module(f"agent_dispatch.{first}")
+    integrity = importlib.import_module("agent_dispatch.managed_integrity")
+    runtime = importlib.import_module("agent_dispatch.managed_runtime")
+    assert integrity._tree_digest is runtime._tree_digest
+    assert integrity._integrity_budget is runtime._integrity_budget
+    assert len(integrity._tree_digest(tmp_path)) == 64
+    with pytest.raises(runtime.ManagedRuntimeLockTimeout, match="integrity deadline expired"):
+        integrity._integrity_budget(0)
 
 
 @pytest.mark.parametrize("kind", ["preparation", "process", "other-environment", "foreign-domain"])
@@ -1119,20 +1137,28 @@ def test_managed_retention_root_lock_serializes_real_materialization_process(
     h = retention_harness
     old = h.generation("1")
     marker, release, completed = [tmp_path / name for name in ("building", "release", "cleaned")]
+    trace = tmp_path / "materialization-trace"
     policy_root = h.policy.root
     # The worker builds through the real materializer and waits while owning its root lock.
     code = (
-        "import json, sys, time\n"
+        "import sys, time\n"
+        "trace = open(sys.argv[5], 'w', buffering=1)\n"
+        "def record(stage): trace.write(f'{time.monotonic()} {stage}\\n')\n"
+        "record('entered')\n"
+        "import json\n"
         "from pathlib import Path\n"
         "from agent_dispatch.managed_runtime import ManagedRuntimeMaterializer\n"
+        "record('runtime-imported')\n"
         "from tests.test_managed_runtime import FakeRunner, _policy, _registration\n"
-        "root, plugin, marker, release = map(Path, sys.argv[1:])\n"
+        "record('fixture-imported')\n"
+        "root, plugin, marker, release = map(Path, sys.argv[1:5])\n"
         "policy = _policy(root)\n"
         "from dataclasses import replace\n"
         f"policy = replace(policy, root=Path({str(policy_root)!r}))\n"
         "runner = FakeRunner()\n"
         "def run(argv, cwd, environment):\n"
         "    if list(argv)[1:3] == ['pip', 'install']:\n"
+        "        record('building')\n"
         "        marker.touch()\n"
         "        deadline = time.monotonic() + 15\n"
         "        while not release.exists():\n"
@@ -1141,12 +1167,14 @@ def test_managed_retention_root_lock_serializes_real_materialization_process(
         "    runner(argv, cwd, environment)\n"
         "registration = _registration(plugin)\n"
         "registration['spec']['managed_runtime']['runtimes'][0]['version'] = '2'\n"
+        "record('materialize')\n"
         "ManagedRuntimeMaterializer(policy, runner=run).materialize(registration)\n"
     )
     worker_root = tmp_path / "worker"
     worker_root.mkdir()
     worker = subprocess.Popen(
-        [sys.executable, "-c", code, str(worker_root), str(h.plugin), str(marker), str(release)],
+        [sys.executable, "-c", code, str(worker_root), str(h.plugin), str(marker), str(release),
+         str(trace)],
         cwd=str(_PLUGIN_DIR),
         env=_subprocess_test_environment(),
         stdout=subprocess.PIPE,
@@ -1159,7 +1187,7 @@ def test_managed_retention_root_lock_serializes_real_materialization_process(
         deadline = time.monotonic() + 10
         while not marker.exists() and worker.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
-        assert marker.exists(), worker.communicate(timeout=1)
+        assert marker.exists(), trace.read_text() if trace.exists() else "interpreter not entered"
         plugin_identity = _plugin_identity(_authority(_registration(h.plugin))[0])
         other_registration = _registration(_project(tmp_path / "unrelated-plugin"))
         other_identity = _plugin_identity(_authority(other_registration)[0])

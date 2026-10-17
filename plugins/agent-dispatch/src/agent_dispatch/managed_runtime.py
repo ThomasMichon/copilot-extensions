@@ -22,6 +22,7 @@ from typing import Any, Protocol
 from plugin_activation import read_json_object
 
 from .install_paths import install_dir, uses_legacy_install_dir
+from .managed_integrity import _integrity_budget, _tree_digest  # re-exported for existing consumers
 from .procutil import no_window_kwargs
 from .registrar_reconcile import DECLARED_ID_PREFIX
 from .registrations import RegistrationKind
@@ -721,7 +722,8 @@ def _copy_file(source: Path, destination: Path) -> tuple[int, str]:
     return before.st_size, digest.hexdigest()
 
 
-def _hash_regular_file(path: Path, *, description: str) -> str:
+def _hash_regular_file(path: Path, *, description: str, deadline: float | None = None) -> str:
+    _integrity_budget(deadline)
     _reject_link(path, description=description)
     before = path.stat(follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
@@ -736,6 +738,7 @@ def _hash_regular_file(path: Path, *, description: str) -> str:
         ):
             raise ManagedRuntimeError(f"{description} changed while hashing")
         while chunk := stream.read(1024 * 1024):
+            _integrity_budget(deadline)
             digest.update(chunk)
     after = path.stat(follow_symlinks=False)
     if (
@@ -947,46 +950,6 @@ def _verify_windows_runtime_trust(
         raise ManagedRuntimeError(
             "managed runtime copied Windows Python files failed trust verification"
         )
-
-
-def _tree_digest(root: Path, *, excluded: frozenset[str] = frozenset()) -> str:
-    digest = hashlib.sha256()
-    for current, directories, files in os.walk(
-        root, topdown=True, followlinks=False, onerror=_walk_error
-    ):
-        current_path = Path(current)
-        _reject_link(current_path, description="managed runtime cell directory")
-        directories.sort()
-        files.sort()
-        for name in directories:
-            child = current_path / name
-            _reject_link(child, description="managed runtime cell directory")
-            if not stat.S_ISDIR(child.stat(follow_symlinks=False).st_mode):
-                raise ManagedRuntimeError(
-                    "managed runtime cell contains a non-directory entry"
-                )
-            relative = child.relative_to(root).as_posix()
-            mode = stat.S_IMODE(child.stat(follow_symlinks=False).st_mode)
-            digest.update(f"D\0{relative}\0{mode:o}\0".encode())
-        for name in files:
-            child = current_path / name
-            relative = child.relative_to(root).as_posix()
-            if relative in excluded:
-                continue
-            _reject_link(child, description="managed runtime cell file")
-            if not stat.S_ISREG(child.stat(follow_symlinks=False).st_mode):
-                raise ManagedRuntimeError(
-                    "managed runtime cell contains a special file"
-                )
-            digest.update(relative.encode("utf-8"))
-            mode = stat.S_IMODE(child.stat(follow_symlinks=False).st_mode)
-            digest.update(f"\0{mode:o}\0".encode("ascii"))
-            digest.update(
-                _hash_regular_file(
-                    child, description="managed runtime cell file"
-                ).encode("ascii")
-            )
-    return digest.hexdigest()
 
 
 def _runtime_paths_digest(paths: Sequence[Path]) -> str:

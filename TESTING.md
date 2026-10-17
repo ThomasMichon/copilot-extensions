@@ -287,6 +287,13 @@ heartbeat progress alone does not prove the independent reader connected.
 
 ### Native category view contracts
 
+The worker-instance first-touch CLI contract has independent catalog, save,
+activation and retry items. Each makes one real cold subprocess call under
+the existing 20-second subprocess and 30-second item bounds; prerequisite
+states use the same CLI parser/handler in-process against the fixture's real
+files. This preserves all four cold-entry boundaries without composing four
+permitted 20-second calls into one 30-second item.
+
 `plugins/agent-dispatch/tests/test_task_categories.py` gives each native view
 contract its own function-scoped coordinator/database and pytest item:
 `test_native_cli_category_view_contract[default-work|all-categories|maintenance-board|evidence]`.

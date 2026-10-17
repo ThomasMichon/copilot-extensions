@@ -9,12 +9,75 @@ already reads.
 from __future__ import annotations
 
 import time
+import math
+from collections.abc import Callable
 
 # A cycle running longer than this is flagged stalled. There is no single
 # per-declaration poll_interval visible here (the daemon multiplexes many),
 # so this is a coarse, deliberately generous floor -- a genuinely wedged
 # cycle runs for many minutes to indefinitely, not tens of seconds.
 SUPERVISOR_STALL_THRESHOLD_SECONDS = 180.0
+
+def supervisor_progress_observation(
+    runtime_status: dict | None, *, token_source: Callable[[int], str | None],
+    now: float | None = None,
+) -> dict:
+    """Read-only seam for the independently scheduled lifecycle owner.
+
+    Observation never confers restart/withdrawal authority. The lifecycle owner
+    must prove custody and settle pending mutations under its existing protocol.
+    """
+    result = {"state": "unknown", "recovery_permitted": False, "retain_authority": True}
+    if not isinstance(runtime_status, dict):
+        return result
+    generation = runtime_status.get("generation")
+    if not isinstance(generation, dict):
+        return result
+    pid, token = generation.get("pid"), generation.get("start_token")
+    if type(pid) is not int or pid <= 0 or not isinstance(token, str) or not token:
+        return result
+    if token_source(pid) != token:
+        return {**result, "state": "generation-unconfirmed"}
+    started, finished = runtime_status.get("cycle_started_at"), runtime_status.get("updated_at")
+    if (
+        not isinstance(started, (float, int)) or isinstance(started, bool)
+        or not math.isfinite(started)
+    ):
+        return result
+    observed_now = time.time() if now is None else now
+    if not math.isfinite(observed_now) or started > observed_now:
+        return result
+    if finished is not None and (
+        type(finished) not in (int, float)
+        or not math.isfinite(finished) or finished > observed_now
+    ):
+        return result
+    progress = runtime_status.get("progress")
+    last_progress = started
+    if isinstance(progress, dict):
+        stamp = progress.get("observed_at")
+        cycle = runtime_status.get("cycle_id")
+        if (
+            type(cycle) is int and type(progress.get("cycle_id")) is int
+            and progress["cycle_id"] == cycle
+            and progress.get("generation", generation) == generation
+            and type(stamp) in (int, float) and math.isfinite(stamp)
+            and started <= stamp <= observed_now
+        ):
+            last_progress = stamp
+    elapsed = observed_now - last_progress
+    state = "progressing"
+    if finished is None or finished < started:
+        if elapsed >= SUPERVISOR_STALL_THRESHOLD_SECONDS:
+            state = "stalled"
+    elif observed_now - finished >= SUPERVISOR_STALL_THRESHOLD_SECONDS:
+        state = "stalled"
+    return {
+        **result, "state": state, "generation": generation,
+        "cycle_id": runtime_status.get("cycle_id"),
+        "phase": progress.get("phase") if isinstance(progress, dict) else None,
+        "receipt_operations": progress.get("receipt_operations") if isinstance(progress, dict) else None,
+    }
 
 
 def supervisor_stall_seconds(runtime_status: dict | None) -> float | None:

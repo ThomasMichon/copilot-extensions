@@ -53,6 +53,9 @@ class Executor:
             self.finish(future, function, args)
         self.pending.clear()
 
+    def shutdown(self, *, wait=True, cancel_futures=False):
+        assert not self.pending
+
 
 class Process:
     def __init__(self, pid, resolution, events):
@@ -98,6 +101,7 @@ class Harness:
         self.indeterminate_health = set()
         self.time = 0.0
         self.executor = Executor()
+        self.daemons = []
         self.builder = FakeRunner()
         self.materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=self.build)
         self.state = tmp_path / "state"
@@ -147,7 +151,7 @@ class Harness:
         )
 
     def make_daemon(self):
-        return SupervisorDaemon(
+        daemon = SupervisorDaemon(
             self,
             "machine-a",
             companion_controller=self.controller,
@@ -157,6 +161,19 @@ class Harness:
             clock=lambda: self.time,
             sleep=self.advance,
         )
+        # These state-machine fixtures use a simulated clock and process table.
+        # Real concurrent providers and receipts are covered by the bounded/native suites.
+        daemon._provider_executor = Executor()
+        daemon._inventory_executor = Executor()
+        daemon._receipt_executor = Executor()
+        self.daemons.append(daemon)
+        return daemon
+
+    def shutdown(self):
+        self.executor.defer = False
+        self.executor.complete()
+        for daemon in reversed(self.daemons):
+            assert daemon.shutdown()
 
     def list_registrations(self, **kwargs):
         return self.registrations
@@ -205,7 +222,11 @@ class Harness:
 
 @pytest.fixture
 def harness(tmp_path, monkeypatch):
-    return Harness(tmp_path, monkeypatch)
+    instance = Harness(tmp_path, monkeypatch)
+    try:
+        yield instance
+    finally:
+        instance.shutdown()
 
 
 class TransitionGroupHarness(Harness):
@@ -318,7 +339,11 @@ class TransitionGroupHarness(Harness):
 
 @pytest.fixture
 def transition_group_harness(tmp_path, monkeypatch):
-    return TransitionGroupHarness(tmp_path, monkeypatch)
+    instance = TransitionGroupHarness(tmp_path, monkeypatch)
+    try:
+        yield instance
+    finally:
+        instance.shutdown()
 
 
 def test_first_launch_waits_for_materialization_and_records_ready_snapshot(harness):
@@ -338,6 +363,64 @@ def test_first_launch_waits_for_materialization_and_records_ready_snapshot(harne
         snapshot.runtimes[0].python
     )
     assert [event[0] for event in h.events][-3:] == ["launch", "release", "health"]
+
+
+def test_removed_active_companion_withdraws_selection_off_master(harness, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from tests.test_supervisor_daemon import FakeLauncher, _reg
+
+    h = harness
+    h.controller.monotonic = time.monotonic
+    h.daemon.reconcile_once()
+    snapshot = h.controller.selected_managed(h.rid)
+    assert snapshot is not None
+    selection = h.controller._selection_path(h.rid)
+    before = selection.read_bytes()
+    entered, release = threading.Event(), threading.Event()
+    original = h.controller._managed_retention()._withdrawal_snapshot
+    threads = []
+
+    def validate(*args, **kwargs):
+        threads.append(threading.get_ident())
+        entered.set()
+        assert release.wait(2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(h.controller._managed_retention(), "_withdrawal_snapshot", validate)
+    h.daemon._inventory_executor = ThreadPoolExecutor(max_workers=1)
+    h.daemon._receipt_executor = ThreadPoolExecutor(max_workers=2)
+    h.daemon._reconcile_call_budget = 0.05
+    h.daemon.launcher = FakeLauncher()
+    h.registrations = [_reg("unrelated", machine="machine-a")]
+    caller = threading.get_ident()
+    try:
+        started = time.monotonic()
+        summary = h.daemon.reconcile_once()
+        assert time.monotonic() - started < 0.5
+        assert summary.stopped == [h.rid]
+        assert summary.started == ["unrelated"]
+        deadline = time.monotonic() + 1
+        while not entered.is_set() and time.monotonic() < deadline:
+            started = time.monotonic()
+            h.daemon.reconcile_once()
+            assert time.monotonic() - started < 0.5
+            entered.wait(min(0.01, max(0.0, deadline - time.monotonic())))
+        assert entered.is_set()
+        assert caller not in threads
+        assert selection.read_bytes() == before
+        assert h.controller._receipt_operations
+        time.sleep(0.06)
+        release.set()
+        h.daemon._drain_tracked_futures(2)
+        assert h.daemon._shutdown_drained
+        for future in tuple(h.controller._receipt_operations.values()):
+            with pytest.raises(ManagedRuntimeError, match="deadline expired"):
+                future.result(2)
+        assert selection.read_bytes() == before
+        assert h.controller._operation_record(h.rid)["state"] == "unknown"
+        assert len(h.processes) == 1
+    finally:
+        release.set()
 
 
 def test_launch_snapshot_is_immutable_and_includes_complete_environment(harness, monkeypatch):
@@ -549,6 +632,7 @@ def test_uncertain_changed_authority_preserves_rollback_for_later_failure(harnes
 @pytest.mark.parametrize("disable", ["removed", "provider", "override"])
 def test_disable_discards_inflight_result_and_selected_launch(harness, disable):
     h = harness
+    h.controller.monotonic = time.monotonic
     h.daemon.reconcile_once()
     h.change()
     h.executor.defer = True
@@ -1178,10 +1262,10 @@ def test_selected_state_recovery_validate_is_bounded(harness):
 def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatch):
     plugin = _project(tmp_path)
     script = plugin / "service.py"
+    # Keep worker/probe startup stdlib-only; this exercises lifecycle, not helper imports.
     script.write_text(
         "import json, os, subprocess, sys, time\n"
         "from pathlib import Path\n"
-        "from agent_procutil import no_window_kwargs\n"
         "state = Path(os.environ['EXAMPLE_STATE'])\n"
         "stop = state.with_suffix('.stop')\n"
         "mode = os.environ['MODE']\n"
@@ -1194,7 +1278,7 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
         "    while not stop.exists(): time.sleep(0.05)\n"
         "elif sys.argv[1] == 'health':\n"
         "    subprocess.run([sys.executable.replace('pythonw.exe', 'python.exe'), '-c', 'pass'],\n"
-        "        check=True, **no_window_kwargs())\n"
+        "        check=True, creationflags=(subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0))\n"
         "    ready = state.exists() and json.loads(state.read_text(encoding='utf-8'))['mode'] == mode\n"
         "    print(json.dumps({'schema_version': 1, 'healthy': ready}))\n"
         "else:\n"
@@ -1214,6 +1298,7 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
     monkeypatch.setenv("EXAMPLE_STATE", str(marker))
     monkeypatch.setenv("MODE", "old")
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=FakeRunner())
+
     controller = DefaultCompanionController(
         tmp_path / "state", retention=ManagedRuntimeRetention(materializer.policy.root)
     )
@@ -1234,12 +1319,21 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
     try:
         assert daemon.reconcile_once().started == [rid]
         snapshot = daemon._units[rid].companion_resolution.managed_snapshot
+        first_process = daemon._units[rid].proc
         first = json.loads(marker.read_text(encoding="utf-8"))
         for _ in range(2):
             time.sleep(0.1)
             assert controller.health(snapshot.resolution()) is True
         monkeypatch.setenv("MODE", "bad")
         summary = daemon.reconcile_once()
+        if not summary.revived:
+            assert rid in daemon._managed_uncertain
+            observation = controller._receipt_availability[rid]
+            assert not observation.consumed
+            assert daemon._units[rid].proc is first_process
+            assert json.loads(marker.read_text(encoding="utf-8")) == first
+            observation.future.result(timeout=daemon._reconcile_call_budget)
+            summary = daemon.reconcile_once()
         assert summary.revived == [rid]
         restored = json.loads(marker.read_text(encoding="utf-8"))
         assert restored["mode"] == "old"

@@ -13,7 +13,7 @@
 
 # Detached children that are not resident daemons.
 plugins/agent-containers/src/agent_containers/docker_proxy.py::ensure_broker  not a plugin daemon: a per-call Docker relay broker owned by its caller
-plugins/agent-dispatch/src/agent_dispatch/companion.py::_run_captured  one-shot captured helper process, not a daemon
+plugins/agent-dispatch/src/agent_dispatch/companion_capture.py::_run_captured  one-shot captured helper process, not a daemon
 plugins/agent-dispatch/src/agent_dispatch/execution_cli.py::_spawn_detached_waiter  bounded execution waiter that exits with its task, not a daemon
 plugins/agent-index/src/agent_index/indexing/runner.py::TaskRunner._spawn_worker  per-task index worker with its own rotated worker.log, not a daemon
 plugins/agent-worktrees/src/agent_worktrees/__main__.py::_start_provisioning_if_needed  one-shot provisioning child, not a daemon

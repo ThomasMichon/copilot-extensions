@@ -22,7 +22,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Protocol
 
-from agent_procutil import contained_test_mode, detached_kwargs, no_window_kwargs
+from agent_procutil import contained_test_mode, detached_kwargs, no_window_kwargs  # noqa: F401 -- compatibility seams
 from plugin_activation import read_json_object, write_json_object_atomic
 
 from .install_paths import install_dir
@@ -33,6 +33,9 @@ from .managed_runtime import (
     _read_metadata,
 )
 from .managed_retention import ManagedRuntimeRetention
+from .managed_withdrawal import WithdrawalSnapshot
+from .companion_reconcile import ReceiptReconciliation
+from .companion_capture import _run_captured
 from .registrations import (
     RegistrationError,
     RegistrationKind,
@@ -449,46 +452,6 @@ def _request(registration: dict, *, machine: str | None, env: str) -> str:
             "environment": env,
         }
     )
-
-
-def _run_captured(
-    command: tuple[str, ...],
-    *,
-    cwd: str,
-    environment: Mapping[str, str],
-    timeout: float,
-    input_text: str | None = None,
-) -> subprocess.CompletedProcess[str]:
-    kwargs: dict[str, object] = (
-        no_window_kwargs() if os.name == "nt" else detached_kwargs()
-    )
-    try:
-        process = subprocess.Popen(  # noqa: S603 -- attributed fixed argv
-            list(command),
-            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-            env=dict(environment),
-            **kwargs,
-        )
-        try:
-            stdout, stderr = process.communicate(input_text, timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            if contained_test_mode():
-                process.kill()
-            elif os.name == "nt":
-                _terminate_windows_tree(process.pid)
-            else:
-                _terminate_posix_group(process.pid, grace=1.0)
-            stdout, stderr = process.communicate()
-            raise CompanionIndeterminate("companion command timed out") from exc
-        return subprocess.CompletedProcess(
-            command, process.returncode, stdout=stdout, stderr=stderr
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise CompanionIndeterminate(str(exc)) from exc
 
 
 def resolve_companion(
@@ -914,7 +877,8 @@ def _launch_gated(resolution: CompanionResolution) -> _GatedProcess:
         environment["COPILOT_COMPANION_GATE_FD"] = str(gate_read)
     try:
         process = subprocess.Popen(
-            [sys.executable, "-m", "agent_dispatch.companion_gate"],
+            # The stdlib-only gate must not initialize the coordinator package.
+            [sys.executable, str(Path(__file__).with_name("companion_gate.py"))],
             stdin=subprocess.DEVNULL,
             cwd=resolution.cwd,
             env=environment,
@@ -968,7 +932,7 @@ def _force_retire(process: CompanionProcess, *, strict: bool = False) -> None:
         process.wait(timeout=5)
 
 
-class DefaultCompanionController:
+class DefaultCompanionController(ReceiptReconciliation):
     """Real companion lifecycle with durable, creation-time-fenced receipts."""
 
     def __init__(
@@ -989,6 +953,7 @@ class DefaultCompanionController:
         self.sleeper = sleeper
         self.monotonic = monotonic
         self._retention = retention
+        self._init_receipt_reconciliation()
 
     def _managed_retention(self) -> ManagedRuntimeRetention:
         if self._retention is None:
@@ -996,6 +961,7 @@ class DefaultCompanionController:
         return self._retention
 
     def prepare_managed(self, snapshot: ManagedLaunchSnapshot) -> None:
+        self._assert_receipt_available(snapshot.to_dict()["registration"]["id"])
         self._managed_retention().prepare(snapshot, self.receipt_dir)
 
     def cleanup_managed(self) -> None:
@@ -1017,6 +983,7 @@ class DefaultCompanionController:
     def resolve(
         self, registration: dict, *, machine: str | None, env: str
     ) -> CompanionResolution | None:
+        self._assert_receipt_available(registration["id"])
         return self.resolver(registration, machine=machine, env=env, runner=self.runner)
 
     def _receipt_path(self, registration_id: str) -> Path:
@@ -1110,14 +1077,27 @@ class DefaultCompanionController:
             raise CompanionError("selected managed launch identity is inconsistent")
         return snapshot
 
-    def forget_managed(self, registration_id: str) -> None:
+    def forget_managed(self, registration_id: str, *, _operation: dict | None = None,
+                       _validated: WithdrawalSnapshot | None = None,
+                       _deadline: float | None = None) -> None:
         """Withdraw selection, not its published runtime cells."""
-        with self._managed_retention().withdraw_selection(registration_id, self.receipt_dir):
+        if _operation is None:
+            self._assert_receipt_available(registration_id)
+        with self._managed_retention().withdraw_selection(
+            registration_id, self.receipt_dir, deadline=_deadline, validated=_validated,
+        ):
+            if _operation is not None and (
+                self._receipt_generation(registration_id)["selection"]
+                != _operation["generation"]["selection"]
+                or registration_id in self._receipt_adopted
+            ):
+                raise CompanionIndeterminate("selection changed before withdrawal")
             self.selected_managed(registration_id)
             self._selection_path(registration_id).unlink(missing_ok=True)
 
     def retire_managed(self, registration_id: str) -> None:
         """Retire a revoked receipt even when no in-memory unit was adopted."""
+        self._assert_receipt_available(registration_id)
         path = self._receipt_path(registration_id)
         receipt = (
             _read_metadata(self.receipt_dir.absolute(), path.absolute())
@@ -1151,6 +1131,7 @@ class DefaultCompanionController:
 
     def _publish_selection(self, snapshot: ManagedLaunchSnapshot) -> None:
         registration_id = snapshot.to_dict()["registration"]["id"]
+        self._assert_receipt_available(registration_id)
         try:
             self._managed_retention().select(snapshot, self.receipt_dir)
         except (ManagedRuntimeLockTimeout, OSError) as exc:
@@ -1289,6 +1270,7 @@ class DefaultCompanionController:
         return _IdentityProcess(pid, token, self.token_source)
 
     def launch(self, resolution: CompanionResolution, *, fingerprint: str) -> CompanionLaunch:
+        self._assert_receipt_available(resolution.registration["id"])
         snapshot = resolution.managed_snapshot
         if snapshot is not None:
             resolution = snapshot.resolution()

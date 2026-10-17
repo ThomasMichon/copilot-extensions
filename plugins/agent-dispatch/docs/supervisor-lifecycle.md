@@ -5,6 +5,186 @@ The existing installer, runtime handoff, and retirement seams append structured
 zdd lifecycle writer and its bounded rotation. This is observability, not a
 watchdog or a claim that an earlier outage's requester has been identified.
 
+## Bounded reconciliation and progress
+
+The master establishes its shared wait budget before declaration discovery,
+registration reads and companion provider resolution. Pending reads retain the
+last confirmed desired state; unfinished providers cannot supply new launch
+authority. Registry reads and their nested snapshot copy share one bounded
+discovery operation; only the master accepts a completed snapshot. A slow copy
+retains the previous confirmed state without sacrificing nested-spec isolation.
+Before the first successful store snapshot or configured declaration
+snapshot, a pending read is explicitly indeterminate, not a confirmed empty
+registry: reconciliation defers
+before stopping units or scheduling receipt withdrawal. Receipt integrity runs
+in a separate two-worker pool, so a contended
+root lock or slow tree hash cannot occupy every health/runtime worker.
+Receipt inventory, including receipt/selection/operation metadata reads, runs on
+its own single-worker executor. The master consumes only completed results and
+keeps the latest adopted set authoritative while an inventory is in flight.
+Pending inventory is tracked alongside the operations it schedules; shutdown
+refreshes child futures after an inventory finishes within the same grace budget.
+Completed parents are pruned before sampling child futures, so a parent finishing
+during sampling cannot hide a still-running receipt operation from shutdown.
+Removing or pausing a running managed companion stops its process first, then
+updates the inventory's adopted set and queues its exact-generation withdrawal.
+Integrity scanning never runs inline on that master removal path; selection pins
+remain until confirmed withdrawal, including when the operation deadline expires.
+Unknown orphan operations are fences, not newly adopted units.
+Companion providers have a separate four-worker pool from authoritative
+declaration/registration discovery, so four long-running valid providers cannot
+hide unrelated additions or removals.
+An unresolved unmanaged provider also retains its receipt fence while its
+declaration remains present; lack of a confirmed launch is not withdrawal.
+Withdrawal invalidates a provider's cached authority even if its running future
+cannot be cancelled. That future remains tracked until it finishes; reintroducing
+the same declaration must resolve it afresh rather than consume a withdrawn result.
+Declaration conversion runs inside the discovery future. Coordinator mirroring
+uses one tracked publication batch on a separate single-worker pool: a slow
+register/remove cannot hold the master, and the batch checks its deadline
+between requests. Uncertain metadata writes are read back before an idempotent
+retry of that exact target; withdrawals stay suppressed until absence is
+confirmed by a scoped registry read started after publication withdrawal was
+confirmed. Earlier in-flight registry results are discarded, and cached registry
+rows remain suppressed during that wait. A changed declaration cannot submit a
+concurrent publication batch.
+Only the master harvests completed batch ledgers. Workers return partial custody
+with any unexpected failure; the master records it before surfacing the original
+exception, so an uncertain earlier write cannot become unstarted work.
+Missing and explicitly null declaration environments both use `default` for
+publication and readback comparison.
+Publication is metadata mirroring, not authority to replay task execution.
+Publication readback is deliberately registry-wide: an uncertain write retains
+its captured target even when its machine/environment differs from the next
+declaration. A scoped absence must not replay that older write or mistake an
+ID collision in another scope for a confirmed withdrawal. This read remains in
+the single tracked publication worker, never on the master.
+
+Each withdrawn receipt has one durable `*.reconcile-operation.json` record tied
+to its exact process receipt and selected launch generation. `pending`, `timeout`
+and `unknown` retain authority. Immutable state milestones in `reconcile-history`
+preserve prior operation generations; this slice does not prune that history.
+A new supervisor reads back the same generation;
+it never repeats an unconfirmed retirement or withdrawal. Completion requires
+absent receipts **and** confirmed retirement of the recorded process generation.
+Unmanaged receipts require the same exit confirmation as managed receipts.
+Completed operations are reaped before scheduling, and admission rotates through
+receipt identities so two unknown readbacks cannot starve a later withdrawal.
+Unsupported or missing process-receipt schema versions remain indeterminate and
+cannot authorize retirement. Corrupt metadata is logged per path or identity and
+retained, fencing that identity without aborting valid sibling scheduling or
+progress collection. Provider metadata failures use the same indeterminate contract.
+Local operation-metadata readers and atomic writers share bounded per-path locks,
+so a Windows reader cannot reject a simultaneous local atomic replacement or
+hold an unrelated identity's lock. Lock entries are released when their last
+user leaves. Master-side availability observations use the existing provider
+executor, with at most the remaining shared budget and a 50ms wait per check;
+unfinished metadata reads remain tracked through shutdown. A successful
+observation can serve nested checks in its consuming cycle, but expires before
+the next cycle. Operation-write attempts invalidate it before I/O, including
+committed writes whose response is lost; withdrawal invalidates unused results.
+Malformed operation state types remain indeterminate rather than escaping the
+per-identity corruption fence.
+Matching durable root selection pins must also be absent, including matching
+pins from another process-identity domain. Pin readback is non-mutating metadata
+inspection under the root lock and its deadline; a surviving pin keeps the
+operation unknown rather than authorizing cleanup or a duplicate launch.
+Restart identity readback and initial owner-token sampling use the receipt
+executor, never synchronous per-receipt process probes on the master. Owner
+sampling waits only for the remaining shared deadline; unfinished identity work
+stays in shutdown accounting. Late readback does not settle authority. A receipt
+deletion failure remains unknown and cannot schedule another destructive retirement.
+Completed owner probes are discarded on every outcome, so a transient probe
+error or unusable token is logged and fenced, then can retry in the same daemon.
+Receipt futures enter
+shutdown accounting even when a later record fails in the controller's pass;
+partial scheduling cannot be reported as a clean drain.
+Completed legacy reconciliation futures are cleared on success or failure;
+only genuinely pending work is retained. A worker-raised timeout is surfaced as
+a failed operation, not mistaken for a still-running wait.
+Receipt reconciliation invoked outside an active cycle uses a forward call
+budget; an existing cycle deadline, including an expired one, is not extended.
+Cycle deadline and admission-token references are cleared on both success and
+exception exits. A failed cycle retains its last phase for diagnosis rather
+than claiming completion; a later retry gets fresh cycle authority.
+Shutdown retires bounded executors and clears their active references even when
+work misses the grace window. A failed successor spawn can reclaim the singleton
+and create usable replacement pools; original futures and publication/receipt
+operations remain tracked rather than resubmitted. This is not native custody proof.
+Changed receipts are superseded rather than retired. The existing crash-safe OS
+lock primitive serializes the exact receipt operation. No new reservation store,
+force-release policy or automatic recovery scheduler is introduced.
+
+Selection integrity is verified while its durable root pin remains published,
+outside the root-wide bookkeeping lock. Before withdrawal the same scope and
+metadata are revalidated under that lock. Full content checks remain mandatory,
+including runtime caches; an expired integrity deadline does not accept a
+partial digest. Unknown outcomes are not authorization to delete caches or pins.
+Receipt retirement carries that verified snapshot into the final metadata-only
+scope, presence and record check; it never rehashes a runtime after irreversible
+retirement. Final pin withdrawal and absence verification share a separate
+one-second bookkeeping budget, so retirement exhausting the execution budget
+does not itself strand an otherwise valid selection. Metadata changes, lock
+contention or write failures still retain unknown authority.
+Captured command execution charges process-creation elapsed time against its
+timeout; post-timeout pipe draining has its own one-second deadline. The child
+is polled non-blockingly afterward to reap an exited direct child even
+when a descendant still holds its pipes; the timeout remains indeterminate.
+The OS process-creation call itself cannot be interrupted by this subprocess API.
+The containment gate runs its pinned, standard-library-only script directly,
+without initializing the coordinator package or resolving it through the
+contributed command's working directory.
+
+Runtime status records the master's PID/start token, cycle, phase and receipt
+operation states. `supervisor_health.supervisor_progress_observation` is a
+read-only seam for an **independently invoked existing lifecycle owner**; stale
+progress and process existence are different observations. Its results never
+authorize replacement, restart or withdrawal. Optional progress read/publication
+failures cannot abort desired-state reconciliation or hide completed mutations:
+they report fixed, sanitized reason/error categories through standard logging,
+limited to one warning per category per 30 seconds. Unavailable receipt progress
+is marked unknown (`null` with an observation error), not a confirmed empty list.
+Status-file read errors expose fixed I/O, JSON and object-shape classifications,
+not filesystem paths or raw exception text.
+Receipt metadata failures likewise expose only a fixed unavailable category,
+not the underlying filesystem exception or receipt path.
+A controller without a callable progress observation reports
+`receipt-progress-unsupported`; only a completed observation may report `[]`.
+Data/state failures in the final summary follow the same classified best-effort
+rules. The observer uses only finite, non-future progress timestamps from the
+current cycle and matching generation; future cycle starts and invalid or future
+completion timestamps (including booleans) are unknown, not healthy progress.
+A fresh phase can distinguish an advancing
+slow cycle from a wedge. A superseded writer cannot overwrite another generation's
+progress: both its PID and confirmed native start token must match the stored
+generation before publication. Missing receipt-operation observations remain
+unknown, including a cycle-start record that has no inventory yet. These
+observations still confer no recovery authority.
+Collection and filesystem publication are also off the master: one tracked
+progress worker coalesces the latest phase/cycle-start/final-status frames instead
+of accumulating a backlog behind a blocked status volume. Final summaries use
+completed cached observations or an explicit pending/unknown marker. Cycle-start
+and final-status I/O share this worker, and completion timestamps are captured by
+the master rather than refreshed by delayed publication.
+Completed probe futures are removed from cycle accounting; unfinished futures
+remain tracked through shutdown.
+The idle-worker handoff is atomic with producer admission, so a frame arriving
+as the worker finishes is not lost. A coalesced final summary from a superseded
+cycle cannot be written under the newer cycle's start marker. An inline update
+drains old-generation status I/O within the existing grace window before stopping
+any managed unit. If publication remains unresolved, it retains both the singleton
+and running units without arming spawn cooldown; it may hand off once publication
+settles.
+An unexpected exception escaping the optional progress worker is classified and
+logged when its completed future is collected. It cannot abort the next master
+phase; the newest frame starts a replacement worker without replaying a consumed
+publication.
+Independent watchdog invocation,
+custody/recovery and native platform proof remain integration gates of the
+tracked #5301/#5655 objectives. This slice neither implements a second watchdog nor
+claims that same-loop status writing proves independent recovery. The inner-lane
+conclusion boundary in #6185 is unchanged.
+
 ## Record contract
 
 The outer record contains UTC `ts`, emitting `pid`, source hostname `node`, `service`, `version` when
