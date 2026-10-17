@@ -707,13 +707,11 @@ def load_machines_yaml(
 def find_machine_entry(
     entries: dict[str, MachineEntry], name: str, *, execution_platform: str | None = None,
 ) -> MachineEntry | None:
-    """Look up a machine by key, alias, ``hostname`` field, or display_name
-    (case-insensitive).
+    """Resolve a key, alias, hostname or display name case-insensitively.
 
-    Hostnames are case-insensitive, so match without regard to case (Windows
-    reports COMPUTERNAME in mixed case but tooling often lowercases it). Matching
-    the explicit ``hostname`` field lets a machine keyed by a friendly name still
-    be found by its raw COMPUTERNAME. Returns None if no entry matches.
+    Execution context disambiguates physical metadata shared by native and guest
+    registrations. Without it, strict selection is unchanged. Return None when
+    no entry matches; ambiguous or conflicting selections raise.
     """
     return _mt_find_machine_entry(
         entries, name, reject_ambiguous=True, execution_platform=execution_platform,

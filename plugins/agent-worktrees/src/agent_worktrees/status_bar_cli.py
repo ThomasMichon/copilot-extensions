@@ -661,20 +661,11 @@ _ENV_BG: dict[str, str] = {
 
 
 def _resolve_machine_alias(machine: str, repo: str | None, platform: str) -> str:
-    """Normalize a raw/tracked machine value through machines.yaml's alias
-    resolution, mirroring ``cmd_machine_context``'s own resolution.
+    """Resolve a historical machine label without rewriting tracked identity.
 
-    A worktree's tracking record freezes ``machine`` at registration time (an
-    older raw hostname/COMPUTERNAME), and ``cfg.detect_machine()`` returns the
-    raw hostname when called with no ``repo_dir``. Neither path re-resolves
-    through ``machines.yaml``'s ``hostname:``/``alias:`` mapping the way
-    ``machine-context`` does, so a box whose COMPUTERNAME differs from its
-    canonical mesh key/alias (dotfiles machines.yaml's decoupled-hostname
-    convention) never gets its friendly name rendered here even though live
-    detection resolves it correctly elsewhere. The recorded platform selects
-    the native or guest execution space for historical physical-host values.
-    Fails open to the raw value on
-    any error -- this must never break the status segment.
+    The recorded platform disambiguates physical hostnames shared by native
+    and guest registrations. Missing or ambiguous topology retains the raw
+    label so unavailable metadata never blanks the status segment.
     """
     if not machine:
         return machine
