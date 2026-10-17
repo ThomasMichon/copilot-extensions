@@ -543,13 +543,10 @@ def spawn_fleet_embodied_worker(
 ) -> subprocess.CompletedProcess:
     """Spawn a CLI-backed autopilot body on a **remote pool ``host``** via SSH.
 
-    Runs ``agent-worktrees [--project <project>] embody --new --seed "<fleet
-    seed>" ...`` **on** ``host`` (its SSH alias) -- creating a fresh
-    detached worktree + Copilot session there, seeded
-    (:func:`fleet_autopilot_worker_prompt`) to drive the ``task_id`` lease back to
-    the ``origin`` coordinator over SSH (Model C). The remote ``embody --json``
-    handle rides the SSH stdout, so :func:`parse_handle` recovers the
-    worktree/session for the reservation record.
+    Remote ``agent-worktrees embody --new`` creates a detached worktree/session.
+    Its fleet seed relays lifecycle commands through ``origin``, preserving the
+    optional local/shared ``route``. The ``embody --json`` response supplies the
+    worktree/session handle for the origin-owned reservation.
 
     ``project`` names the target project explicitly (the ``--project`` global) --
     required in practice because the remote SSH command runs in the login CWD, not
@@ -613,16 +610,10 @@ def spawn_fleet_headless_worker(
 ) -> subprocess.CompletedProcess:
     """Spawn a **headless agent-bridge ACP** body on a remote pool ``host``.
 
-    The headless-fleet embodiment (Model C, headless variant). Runs
-    ``agent-bridge create <agent> "<fleet seed>" --no-wait`` **on** ``host`` (its
-    SSH alias) through the local Bridge carrier, with bounded SSH fallback only
-    when that capability is absent. This spawns a headless ACP session in that
-    host's own persistent agent-bridge service, seeded
-    (:func:`fleet_autopilot_worker_prompt`) to drive the ``task_id`` lease back to
-    the ``origin`` coordinator over SSH under the supervisor-assigned synthetic
-    ``owner``. The seed is **identical** to the CLI fleet body's
-    (:func:`spawn_fleet_embodied_worker`); only the *body* differs -- so a
-    headless-fleet task is driven exactly like a CLI-fleet one.
+    Use the local Bridge carrier, with bounded SSH fallback only when that
+    capability is absent. The pool host's persistent ACP session receives the
+    same fleet seed as a CLI body: lifecycle commands relay through ``origin``
+    under the explicit synthetic ``owner`` and retain local/shared ``route``.
 
     Why headless for the fleet: a seeded CLI/mux session can race the input caret
     and never deliver its startup seed (the documented "Loading..." hang), so a
