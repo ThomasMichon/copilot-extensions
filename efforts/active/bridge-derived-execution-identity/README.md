@@ -240,3 +240,9 @@ with implementation tests; standalone compatibility remains first-class.
   273 tests with 2 normal skips. Module-size, install, docs/version, F/E9 and
   whitespace gates passed again. No source owner protocol or mutation policy
   changed during reconciliation.
+- A further review caught explicitly present falsy machine values being treated
+  as absent provenance. Readonly certification now refuses empty/null/nonstring
+  bindings at the selected configuration tier without changing ordinary loader
+  fallback semantics. Regressions cover both tiers and an existing global
+  fallback. Legacy external launchers retain their original arguments rather
+  than receiving an unsupported private source-context flag.

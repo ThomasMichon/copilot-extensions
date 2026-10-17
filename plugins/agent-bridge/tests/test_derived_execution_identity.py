@@ -323,6 +323,22 @@ def test_discovery_coverage_propagates_derived_selector_to_nested_resolver(sourc
     assert cfg.local_execution_space is None
 
 
+@pytest.mark.parametrize("resolved", [False, True])
+def test_unverified_legacy_launcher_receives_no_new_hidden_flag(source, tmp_path, monkeypatch, resolved):
+    from types import SimpleNamespace
+
+    from agent_bridge import service_process_cli
+
+    monkeypatch.chdir(source)
+    monkeypatch.setattr(service_process_cli.sys, "executable", "")
+    monkeypatch.setattr(
+        service_process_cli, "_core", lambda: SimpleNamespace(_INSTALL_DIR=str(tmp_path)),
+    )
+    executable = str(tmp_path / "legacy-bridge") if resolved else None
+    monkeypatch.setattr(service_process_cli.shutil, "which", lambda name: executable)
+    assert service_process_cli._daemon_launch_argv() == [executable or "agent-bridge", "start"]
+
+
 def test_adopt_records_only_stable_source_locator(source, monkeypatch):
     path = source / "machines.yaml"
     path.write_text("machines: {}\n", encoding="utf-8")

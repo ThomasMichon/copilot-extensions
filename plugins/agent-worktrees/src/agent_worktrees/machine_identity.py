@@ -38,10 +38,16 @@ def configured_machine_binding(
     """Select the existing configured tier and optionally capture its provenance."""
     value = machine_raw.get("machine") or global_raw.get("machine")
     if capture is not None:
-        capture["source"] = (
-            "project-machine-config" if machine_raw.get("machine")
-            else "global-machine-config" if global_raw.get("machine") else "detected"
-        )
+        if "machine" in machine_raw:
+            capture["source"], explicit = "project-machine-config", machine_raw["machine"]
+        elif "machine" in global_raw:
+            capture["source"], explicit = "global-machine-config", global_raw["machine"]
+        else:
+            capture["source"], explicit = "detected", None
+        if capture["source"] != "detected" and (
+            not isinstance(explicit, str) or not explicit.strip()
+        ):
+            raise ValueError("configured machine binding must be a nonempty string")
     return value
 
 

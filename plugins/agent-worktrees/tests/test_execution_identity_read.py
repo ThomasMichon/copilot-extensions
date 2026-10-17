@@ -81,6 +81,33 @@ def test_provenance_cannot_be_asserted_by_another_yaml_setting(binding):
     assert "machine" not in result
 
 
+@pytest.mark.parametrize("machine", ["", None, 0, False, "   "])
+@pytest.mark.parametrize("source", ["local", "global"])
+def test_present_invalid_binding_is_refused_not_detected(binding, machine, source, capsys):
+    local, global_path, data, _ = binding
+    if source == "local":
+        global_path.write_text("machine: native-a\n", encoding="utf-8")
+        data["machine"] = machine
+        local.write_text(yaml.safe_dump(data), encoding="utf-8")
+    else:
+        global_path.write_text(yaml.safe_dump({"machine": machine}), encoding="utf-8")
+    assert execution_identity_read.cmd_get_execution_identity() == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "refused"
+    assert "nonempty string" in result["reason"]
+    assert "machine" not in result
+
+
+def test_readonly_provenance_does_not_change_ordinary_falsy_fallback(binding):
+    local, global_path, data, _ = binding
+    data["machine"] = ""
+    local.write_text(yaml.safe_dump(data), encoding="utf-8")
+    global_path.write_text("machine: native-b\n", encoding="utf-8")
+    assert cfg._load_config_uncached(
+        include_control_plane_related_pr=False, project="sample",
+    ).machine == "native-b"
+
+
 def test_guest_binding_is_separate_from_native_same_host(binding, monkeypatch):
     local, _, data, _ = binding
     data.update(machine="guest", platform="wsl")

@@ -167,6 +167,9 @@ machine setting to maintain. Direct daemon launch captures the stable source
 repository before detach and working-directory changes. Adoption records that
 source repository automatically as `topologies.<profile>.source_repo`, so a
 supervised restart can recompute the identity without the caller's cwd.
+The private detach argument is passed only through the current/installed
+Python module launcher. Unverified legacy PATH launchers retain their original
+arguments; they do not certify support for the new source-context contract.
 An adopted `source_repo` selects that source project's configuration ahead of
 the topology's legacy control-plane fallback, even when both locators exist.
 For older profiles without `source_repo`, the declared control-plane project precedes the repository

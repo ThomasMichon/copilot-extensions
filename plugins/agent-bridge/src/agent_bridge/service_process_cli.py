@@ -369,8 +369,8 @@ def _daemon_launch_argv() -> list[str]:
         return [py, "-m", "agent_bridge", "start", *source_args]
     exe = shutil.which("agent-bridge")  # marketplace-isolation: allow legacy-compatibility
     if exe:
-        return [exe, "start", *source_args]
-    return ["agent-bridge", "start", *source_args]
+        return [exe, "start"]
+    return ["agent-bridge", "start"]
 
 
 def _daemon_root_env() -> dict[str, str]:

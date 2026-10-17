@@ -39,6 +39,9 @@ the project is unregistered or no machine is configured.
 It carries a reason and no machine key. `refused` is a compatible rejection of an
 invalid configured binding, including ambiguous keys or platform mismatch, and
 exits nonzero.
+An explicitly present empty, null, nonstring or whitespace-only machine value
+is invalid, not an absent binding. This stricter readonly certification does
+not change the ordinary configuration loader's existing fallback behavior.
 
 Consumers must recognize the schema/version and positive configured provenance.
 An unknown command/schema/version is not authority. The older `get machine`
