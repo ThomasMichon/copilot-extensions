@@ -631,6 +631,19 @@ processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
 
+The required CI smoke matrix distributes agent-dispatch's complete file
+inventory across three independent jobs. `tools/ci_plugin_partitions.py` assigns
+whole ordinary 25-file groups round-robin and supplies explicit `--test-file`
+arguments to the unchanged contained runner. Every file belongs to exactly one
+partition, and every partition remains required by the PR/promotion aggregate;
+a failed or cancelled partition fails the gate. Local unfiltered runs remain
+sequential. Item, sub-suite, plugin and 12-minute job deadlines are unchanged.
+This addresses #6052's recurrence where all 5,933 tests passed but aggregate
+reporting/cleanup reached the job deadline. Partition-contract tests exercise
+the actual runner's file-selection boundary, native helper CLI, complete
+inventory and workflow/gate wiring; empty or invalid partitions refuse rather
+than silently falling back to a different suite.
+
 Agent-index's fleet-ingress tests select the same-checkout `fleet-manager[auth]`
 distribution explicitly during development preparation. Its runtime metadata
 keeps an ordinary versioned optional dependency, not an escaping standalone

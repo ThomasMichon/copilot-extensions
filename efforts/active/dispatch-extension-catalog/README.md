@@ -651,3 +651,26 @@ venue limitations explicitly; source merge is not promotion or installed proof.
   selection passed 305 tests with the two POSIX FIFO Windows skips explicit.
 - Current-head review, complete native CI, promotion and authorized installed
   proof remain separate gates. No service or deployed runtime changed.
+
+### 2026-10-17 - Approved source; complete-suite deadline correction
+
+- Current head `b9157488775c237a4cfedbd85fdbf9e571beaabe` received a Copilot
+  approving verdict with no unresolved issues. CI run 39052822914 then ran all
+  nine contained dispatch groups successfully: 5,933 passing tests and 35
+  explicit skips. The test step reported PASS at 17:26:17Z, but the job that
+  began at 17:14:17Z hit its unchanged 12-minute limit during final reporting
+  and cleanup. The required aggregate correctly refused that cancelled job.
+- Reconciled the recurrence with existing issue #6052; no competing open
+  correction exists. Distribute the same complete file inventory's existing
+  25-file process groups across three independent required CI jobs. Retain
+  every test, existing containment and all item/sub-suite/plugin/job budgets.
+  Local unfiltered invocation and other plugins remain unchanged.
+- Partition/runner contracts passed 69 tests with two native-platform skips,
+  including exhaustive disjoint coverage, preserved actual runner groups,
+  real helper CLI refusal/output and matrix/aggregate wiring. Native CI must
+  still exercise the new jobs before merge. This is not a forced retry,
+  accepted-flake exception, larger deadline or bypass.
+- Unit and lightweight consumer-boundary evidence are isolated. A separate
+  deployment clean room is inapplicable to CI-only scheduling; the next real
+  required workflow run is the available external venue. No installed runtime,
+  source activation or rollout changed.
