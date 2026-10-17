@@ -11,6 +11,12 @@ exploration. Preservation does not execute, repair, or endorse them. Their
 original proof-oriented wording is a proposed rubric, not a result or a
 replacement for the effort's validation gates.
 
+**Do not run these archived files.** `fixture.py prepare --root ...` recursively
+deletes an existing root with `shutil.rmtree` without a sentinel or containment
+check. A mistaken argument can destroy unrelated data. The archive is for
+inspection only; any future runnable implementation needs a separately reviewed
+destructive-operation safety boundary.
+
 ## Preserved design
 
 - [expected.md](expected.md) records the proposed rubric;
@@ -43,6 +49,17 @@ The proposed classification distinguishes invocation failure
 (`context-composition-incomplete`), with separate literal-mode and transport
 classifications. Because invocation completeness does not gate PASS, that
 distinction is not sufficient to validate the original proof claim.
+
+Activation is also unvalidated: `activate()` writes `enabledPlugins` entries
+with `False` values to user settings, while preparation enables them in repository
+settings. The name and setup success text are not evidence of activation; if
+the disabling entries take precedence, the plugins will not load. Future reuse
+must establish the actual settings-precedence behavior rather than assume the
+archive's installation path works.
+
+The shell post-check's PASS text is abbreviated: the transcript predicate also
+checks strict JSON response count and absence of tool markers. Neither that
+message nor the original proof-oriented prose supersedes these limitations.
 
 Three fresh ACP sessions would not establish the supported-version
 fresh/resume/noninteractive/ACP matrix, compaction behavior, or cross-platform
