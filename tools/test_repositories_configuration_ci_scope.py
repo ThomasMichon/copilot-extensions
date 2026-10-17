@@ -20,9 +20,12 @@ def test_real_native_consumer_is_separate_bounded_and_required():
     assert "repositories-configuration" in WORKFLOW["jobs"]["pr-gate"]["needs"]
     assert "repositories-configuration" in WORKFLOW["jobs"]["promotion-gate"]["needs"]
     assert WORKFLOW["jobs"]["worktree-manager"]["timeout-minutes"] == 6
-    full = WORKFLOW["jobs"]["worktree-manager"]["steps"][-1]
+    full = next(step for step in WORKFLOW["jobs"]["worktree-manager"]["steps"]
+                if step.get("name") == "Test worktree-manager")
     assert full["run"] == "uv run --extra dev pytest -q"
     assert "REPOSITORIES_CONFIG_TEST_PYTHON" not in full.get("env", {})
+    contract = next(step for step in JOB["steps"] if step.get("name") == "Repositories Configuration CI contract")
+    assert "tools/seasoned_uv.py --uv uv -- --system pytest pyyaml" in contract["run"]
     owner = next(step for step in JOB["steps"] if step.get("id") == "repositories-owner")
     ui = next(step for step in JOB["steps"] if step.get("name") == "Test real Repositories Configuration UI")
     assert owner["if"] == ui["if"] == "steps.repositories-configuration.outputs.run == 'true'"
