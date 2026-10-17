@@ -6,13 +6,9 @@ table so clients follow it, drain the old daemon's in-flight work, then retire
 the old daemon -- with no client ever dialing a dead port and no active turn
 hard-killed.
 
-The orchestration is **app-level and OS-agnostic** (the effort's deliberate
-conclusion: systemd and Windows Scheduled Tasks share almost no lifecycle
-surface, so the drain/handoff logic must not live in the service manager). All
-side-effecting collaborators -- spawning the passive daemon, health probing,
-the HTTP client, free-port selection -- are injected, so the sequence and its
-rollback are exercised by unit tests without real subprocesses. The thin CLI
-(`agent-bridge deploy`) wires the real implementations.
+Orchestration is app-level and OS-agnostic. Injected spawning, health, HTTP
+and free-port collaborators support isolated rollback tests; the deploy CLI
+wires the real implementations rather than delegating handoff to a service manager.
 
 Default sequence (each step before the commit point is reversible)::
 
@@ -730,6 +726,10 @@ class CutoverOrchestrator:
                 detail={"old_port": old.port if old is not None else None},
             )
 
+            if conditional and conditional.snapshot.activate_successor is not None:
+                conditional.activate_successor()
+                result.steps.append("published successor activated and ready")
+
             if old is not None and old.port != new_port:
                 if conditional is None:
                     old_client = make_client(old.base_url)
@@ -819,10 +819,14 @@ class CutoverOrchestrator:
 
             # Best-effort: hand the credential relay (9857) to the new daemon
             # once the old one has released it.
-            self._adopt_relay(
-                new_port, result, make_client=make_client,
-                adopt_relay=conditional.adopt_successor if conditional else None,
-            )
+            if conditional and conditional.snapshot.activate_successor is not None:
+                conditional.adopt_successor()
+                result.steps.append("successor resource adoption confirmed")
+            else:
+                self._adopt_relay(
+                    new_port, result, make_client=make_client,
+                    adopt_relay=conditional.adopt_successor if conditional else None,
+                )
 
             if conditional:
                 conditional.complete(result)

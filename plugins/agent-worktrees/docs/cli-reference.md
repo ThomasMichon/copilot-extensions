@@ -519,6 +519,16 @@ an optional automated-review check omitted by `gh pr checks`.
 not just required CI. A reviewer runner failure does not mean the required CI
 aggregate failed. Required-check completeness is separately verified at the
 admin merge boundary; these diagnostics neither weaken nor replace that gate.
+Direct GitHub merge tries the normal server-protected operation first, pinned
+to the expected head (or a freshly observed head). GitHub enforces its effective
+checks and reviews, including legitimate check reruns. If that operation refuses,
+only an already configured admin fallback can proceed, and its existing strict
+required-check verification still applies. A failed head lookup or changed head
+cannot authorize that fallback.
+An accepted normal merge can enter a provider queue. `pr-merge --now` reads back
+the lifecycle state before reporting a completed merge; accepted but unfinished
+requests report `merge-pending` and retain the obligation to watch. An unreadable
+completion is explicit and never reported as landed.
 `checks_complete` reports whether both observed sources were readable/complete,
 or is null for providers that do not supply diagnostic coverage. An empty
 failure list from an unsupported provider is not proof that no failure exists.

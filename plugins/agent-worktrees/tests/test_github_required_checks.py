@@ -43,10 +43,15 @@ class GitHubFixture:
         self.after_head = None
         self.after_base = None
         self.pr_reads = 0
+        self.normal_merge_fails = False
+        self.admin_merge_fails = False
 
     def invoke(self, argv, **kwargs):
         self.calls.append(argv)
         if argv[:3] == ["gh", "pr", "merge"]:
+            failed = self.admin_merge_fails if "--admin" in argv else self.normal_merge_fails
+            if failed:
+                return subprocess.CompletedProcess(argv, 1, "", "protected merge refused")
             return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[:3] == ["gh", "pr", "checks"]:
             assert "--required" in argv
@@ -289,6 +294,7 @@ def test_actual_admin_merge_is_guarded_and_pins_the_verified_head(monkeypatch, p
     from agent_worktrees.providers import github
 
     fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
     if not passed:
         fixture.checks = [{"name": "policy", "bucket": "pass"}]
     monkeypatch.setattr(github, "run_cli", fixture.invoke)
@@ -296,9 +302,119 @@ def test_actual_admin_merge_is_guarded_and_pins_the_verified_head(monkeypatch, p
     merges = [argv for argv in fixture.calls if argv[:3] == ["gh", "pr", "merge"]]
     if passed:
         assert result == ""
-        assert len(merges) == 1
-        assert "--admin" in merges[0]
-        assert merges[0][merges[0].index("--match-head-commit") + 1] == HEAD
+        assert len(merges) == 2
+        assert "--admin" not in merges[0] and "--admin" in merges[1]
+        assert all(argv[argv.index("--match-head-commit") + 1] == HEAD for argv in merges)
     else:
         assert "PR gate" in result
-        assert not merges
+        assert len(merges) == 1 and "--admin" not in merges[0]
+
+
+@pytest.mark.parametrize("admin", [False, True])
+def test_normal_merge_uses_server_verdict_without_rejecting_historical_failed_runs(monkeypatch, admin):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.fail = "policy"
+    fixture.runs.append({**fixture.runs[0], "conclusion": "failure"})
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    assert github.GitHubProvider().merge_pull("owner/project", 7, admin=admin) == ""
+    merges = [argv for argv in fixture.calls if argv[:3] == ["gh", "pr", "merge"]]
+    assert len(merges) == 1 and "--admin" not in merges[0]
+    assert merges[0][merges[0].index("--match-head-commit") + 1] == HEAD
+    assert fixture.pr_reads == 1
+    assert not any(argv[1:3] == ["api", "graphql"] for argv in fixture.calls)
+
+
+def test_normal_merge_failure_without_admin_permission_never_escalates(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, expected_head_sha=HEAD,
+    )
+    assert "protected merge refused" in result
+    assert len(fixture.calls) == 1 and "--admin" not in fixture.calls[0]
+
+
+def test_changed_head_after_normal_refusal_cannot_authorize_admin_fallback(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.after_head = "b" * 40
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull("owner/project", 7, admin=True)
+    assert "expected commit" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("head", ["", "bad", "b" * 39])
+@pytest.mark.parametrize("admin", [False, True])
+def test_normal_merge_without_valid_discovered_head_fails_before_mutation(monkeypatch, head, admin):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.head = head
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull("owner/project", 7, admin=admin)
+    assert "head identity" in result
+    assert not any(argv[:3] == ["gh", "pr", "merge"] for argv in fixture.calls)
+
+
+def test_admin_fallback_failure_preserves_normal_merge_diagnostic(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = fixture.admin_merge_fails = True
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull("owner/project", 7, admin=True)
+    assert "gh pr merge failed" in result and "gh admin merge failed" in result
+
+
+@pytest.mark.parametrize("expected", ["short", "--admin"])
+@pytest.mark.parametrize("admin", [False, True])
+def test_invalid_expected_normal_head_cannot_reach_merge(monkeypatch, expected, admin):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=admin, expected_head_sha=expected,
+    )
+    assert "full expected head" in result and not fixture.calls
+
+
+@pytest.mark.parametrize("admin", [False, True])
+def test_unreadable_normal_head_never_reaches_either_merge(monkeypatch, admin):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.fail = "pr"
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull("owner/project", 7, admin=admin)
+    assert "permission denied" in result
+    assert not any(argv[:3] == ["gh", "pr", "merge"] for argv in fixture.calls)
+
+
+def test_normal_merge_and_admin_fallback_keep_explicit_host_and_same_head(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    environments = []
+
+    def invoke(argv, **kwargs):
+        environments.append(kwargs.get("env"))
+        return fixture.invoke(argv)
+
+    monkeypatch.setattr(github, "run_cli", invoke)
+    assert github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, api_base="https://github.example.test/api/v3",
+    ) == ""
+    assert all(env["GH_HOST"] == "github.example.test" for env in environments)
+    merges = [argv for argv in fixture.calls if argv[:3] == ["gh", "pr", "merge"]]
+    assert len(merges) == 2
+    assert all(argv[argv.index("--match-head-commit") + 1] == HEAD for argv in merges)

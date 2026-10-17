@@ -8,6 +8,7 @@ context which has not registered is satisfied.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 from collections.abc import Callable
@@ -28,30 +29,84 @@ class RequiredChecksError(RuntimeError):
     pass
 
 
+def _target_parts(repo: str, number: int) -> list[str]:
+    if not isinstance(repo, str):
+        raise RequiredChecksError("required-check verification needs an owner/repository slug")
+    parts = repo.split("/")
+    if (
+        len(parts) != 2 or any(part in (".", "..") for part in parts)
+        or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo)
+    ):
+        raise RequiredChecksError("required-check verification needs an owner/repository slug")
+    if type(number) is not int or number <= 0:
+        raise RequiredChecksError("required-check verification needs a positive PR number")
+    return parts
+
+
+def _protected_merge_head(
+    repo: str, number: int, *, expected_head_sha: str, host: str,
+    invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
+) -> str:
+    _target_parts(repo, number)
+    if expected_head_sha:
+        if not isinstance(expected_head_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", expected_head_sha):
+            raise RequiredChecksError("normal merge requires a full expected head commit")
+        return expected_head_sha
+    result = invoke(["gh", "api", f"/repos/{repo}/pulls/{number}", "--hostname", host])
+    if result.returncode:
+        raise RequiredChecksError(
+            "normal merge head lookup failed: " + (result.stderr.strip() or result.stdout.strip())
+        )
+    try:
+        metadata = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RequiredChecksError("normal merge head lookup returned invalid JSON") from exc
+    head = metadata.get("head") if isinstance(metadata, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    if (
+        not isinstance(metadata, dict) or metadata.get("state") != "open"
+        or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
+    ):
+        raise RequiredChecksError("open PR head identity is unavailable or invalid")
+    return sha
+
+
 def merge_pull(
     repo: str, number: int, *, squash: bool, admin: bool,
     delete_source_branch: bool, expected_head_sha: str, host: str,
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
 ) -> str:
-    if admin:
-        try:
-            expected_head_sha = verified_merge_head(
-                repo, number, host=host, expected_head_sha=expected_head_sha, invoke=invoke,
-            )
-        except RequiredChecksError as exc:
-            return f"gh admin merge refused for {repo}#{number}: {exc}"
+    try:
+        expected_head_sha = _protected_merge_head(
+            repo, number, host=host, expected_head_sha=expected_head_sha, invoke=invoke,
+        )
+    except RequiredChecksError as exc:
+        return f"gh normal merge refused for {repo}#{number}: {exc}"
     args = ["gh", "pr", "merge", str(number), "--repo", repo]
     if squash:
         args.append("--squash")
-    if admin:
-        args.append("--admin")
     if delete_source_branch:
         args.append("--delete-branch")
     if expected_head_sha:
         args += ["--match-head-commit", expected_head_sha]
     result = invoke(args)
-    if result.returncode != 0:
-        return f"gh pr merge failed for {repo}#{number}: {result.stderr.strip() or result.stdout.strip()}"
+    if result.returncode == 0:
+        return ""
+    error = f"gh pr merge failed for {repo}#{number}: {result.stderr.strip() or result.stdout.strip()}"
+    if not admin:
+        return error
+    logging.getLogger(__name__).info(
+        "Normal GitHub merge refused for %s#%s; verifying configured admin fallback", repo, number,
+    )
+    try:
+        verified_merge_head(
+            repo, number, host=host, expected_head_sha=expected_head_sha, invoke=invoke,
+        )
+    except RequiredChecksError as exc:
+        return f"{error}; gh admin merge refused for {repo}#{number}: {exc}"
+    result = invoke([*args, "--admin"])
+    if result.returncode:
+        return f"{error}; gh admin merge failed: {result.stderr.strip() or result.stdout.strip()}"
     return ""
 
 
@@ -61,14 +116,7 @@ def verified_merge_head(
     host: str, expected_head_sha: str = "",
 ) -> str:
     """Return a pinned head only when all configured required checks pass."""
-    parts = repo.split("/")
-    if (
-        len(parts) != 2 or any(part in (".", "..") for part in parts)
-        or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo)
-    ):
-        raise RequiredChecksError("required-check verification needs an owner/repository slug")
-    if type(number) is not int or number <= 0:
-        raise RequiredChecksError("required-check verification needs a positive PR number")
+    parts = _target_parts(repo, number)
 
     def read_json(args: list[str]) -> object:
         argv = ["gh", *args]

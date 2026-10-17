@@ -7,6 +7,7 @@ neither caller environment nor public health payloads are a snapshot source.
 from __future__ import annotations
 
 import logging
+import inspect
 import math
 import os
 import socket
@@ -30,7 +31,12 @@ def _captured_call(
     operation: str, callback: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs,
 ) -> _T:
     try:
-        return callback(*args, **kwargs)
+        result = callback(*args, **kwargs)
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise TypeError("captured runtime callbacks must be synchronous")
+        return result
     except Exception as exc:
         raise CutoverError(
             f"captured runtime {operation} failed ({type(exc).__name__})"
@@ -46,6 +52,17 @@ class RuntimeAttestation:
     version: str | None
     config_identity: str
     ready: bool
+
+
+@dataclass(frozen=True)
+class RuntimePreparation:
+    """Verified passive resources, not serving readiness or route authority."""
+
+    pid: int | None
+    process_start_time: str | None
+    version: str | None
+    config_identity: str
+    prepared: bool
 
 
 @dataclass(frozen=True)
@@ -68,6 +85,23 @@ class RuntimeSnapshot:
     drain_predecessor: Callable[[Endpoint, Endpoint, float], dict] = field(repr=False)
     undrain_predecessor: Callable[[Endpoint], None] = field(repr=False)
     adopt_successor: Callable[[Endpoint], dict] = field(repr=False)
+    attest_prepared: Callable[[Endpoint], RuntimePreparation] | None = field(
+        default=None, repr=False,
+    )
+    activate_successor: Callable[[Endpoint], None] | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if (self.attest_prepared is None) != (self.activate_successor is None):
+            raise ValueError("passive preparation and active activation must be paired")
+        if self.attest_prepared is not None and (
+            not callable(self.attest_prepared) or not callable(self.activate_successor)
+            or any(
+                inspect.iscoroutinefunction(callback)
+                or inspect.iscoroutinefunction(getattr(callback, "__call__", None))
+                for callback in (self.attest_prepared, self.activate_successor)
+            )
+        ):
+            raise ValueError("two-phase runtime callbacks must be synchronous and callable")
 
 
 @dataclass(frozen=True)
@@ -140,6 +174,7 @@ class PreparedCutover:
         if snapshot is None or not snapshot.identity:
             raise CutoverError("authoritative effective runtime snapshot unavailable")
         self.snapshot = snapshot
+        self._activated = False
         if not self.matches(self.old):
             raise CutoverError("serving runtime configuration attestation mismatch")
         routing.validate_active(
@@ -202,7 +237,45 @@ class PreparedCutover:
             or self.new.pid == self.old_pid
         ):
             return False
-        return self.matches(self.new)
+        if self.snapshot.attest_prepared is None or self._activated:
+            return self.matches(self.new)
+        attested = _captured_call(
+            "preparation attestation", self.snapshot.attest_prepared, self.new,
+        )
+        if type(attested) is not RuntimePreparation:
+            raise CutoverError("captured runtime preparation has an invalid shape")
+        return (
+            attested.prepared is True
+            and type(attested.pid) is int and attested.pid == self.new.pid
+            and attested.process_start_time == self.new.process_start_time
+            and attested.version == self.new.version
+            and attested.config_identity == self.snapshot.identity
+            and diagnostics.process_start_time(self.new.pid) == self.new.process_start_time
+        )
+
+    def activate_successor(self) -> None:
+        """Activate only after publication; the receiver fences every mutation.
+
+        Do not hold the coordinator's routing lock across this callback: the
+        receiver acquires its own native authority at each resource transition.
+        Preparation cannot authorize predecessor drain or retirement.
+        """
+        callback = self.snapshot.activate_successor
+        if callback is None:
+            return
+        if self._activated or self.new is None:
+            raise CutoverError("successor activation state is invalid")
+        routing.validate_active(
+            self.orch.config_dir, self.new, lock_deadline=self.routing_deadline(),
+        )
+        if _captured_call("activation", callback, self.new) is not None:
+            raise CutoverError("captured runtime activation has an invalid shape")
+        if not self.matches(self.new):
+            raise CutoverError("activated successor readiness attestation mismatch")
+        routing.validate_active(
+            self.orch.config_dir, self.new, lock_deadline=self.routing_deadline(),
+        )
+        self._activated = True
 
     def verify_before_retire(self) -> None:
         if self.new is None or not self.matches(self.new):
@@ -259,7 +332,12 @@ class PreparedCutover:
         routing.validate_active(
             self.orch.config_dir, self.new, lock_deadline=self.routing_deadline()
         )
-        return _captured_call("adopt", self.snapshot.adopt_successor, self.new)
+        response = _captured_call("adopt", self.snapshot.adopt_successor, self.new)
+        if self.snapshot.activate_successor is not None and (
+            type(response) is not dict or response.get("adopted") is not True
+        ):
+            raise CutoverError("successor resource adoption unconfirmed")
+        return response
 
     def complete(self, result: CutoverResult) -> None:
         """Publish success and clear recovery only for the verified routed owner."""

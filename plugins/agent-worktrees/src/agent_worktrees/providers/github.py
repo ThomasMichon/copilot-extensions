@@ -518,9 +518,9 @@ class GitHubProvider:
     ) -> str:
         """Directly merge PR ``number`` via ``gh pr merge``.
 
-        The ``pr-merge <#> --now`` submitter-direct primitive. ``--squash`` keeps
-        the non-interactive merge method explicit; ``--admin`` is used only when
-        the configured review is non-blocking. ``delete_source_branch`` (default
+        The ``pr-merge <#> --now`` primitive uses explicit ``--squash`` merging.
+        A normal head-pinned merge comes first; configured ``--admin`` fallback
+        requires authoritative check verification. ``delete_source_branch`` (default
         ``True``, matching :meth:`request_auto_complete`'s own default) passes
         ``--delete-branch`` so the head branch is cleaned up on merge -- safe
         because ``finalize``/``pr-complete`` verify a merged PR against the
