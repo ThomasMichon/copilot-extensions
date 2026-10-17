@@ -323,9 +323,10 @@ public face:
   Closed-circuit repos may opt in to full raw source attribution
   (`pr.source_attribution: true`) in their own config.
 
-PR merges to `dev` are single-writer: update from `origin/dev` before
-publication or merge and re-check the changefile in case a concurrent merge
-already touched the same plugin.
+Independent PRs may merge to `dev` concurrently once each passes its own review,
+CI and mergeability gates; no shared merge slot or coordinator permission is
+required. Keep branches current, preserve changefiles and reconcile actual
+content conflicts or dependencies when another change touches the same plugin.
 
 <!-- visions:cross-repo-sequencing:start -->
 When a vision revision in this review-gated repository also drives a directly

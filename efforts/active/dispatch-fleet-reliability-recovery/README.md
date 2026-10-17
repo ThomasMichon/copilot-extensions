@@ -2,7 +2,8 @@
 
 - **Slug:** `dispatch-fleet-reliability-recovery`
 - **Repo:** copilot-extensions
-- **Branch(es):** Independent implementation worktrees; sequential merges.
+- **Branch(es):** Independent implementation worktrees; each PR merges after
+  its own required gates pass.
 - **Created:** 2026-10-12
 - **Status:** Active
 - **Vision:** agent-dispatch durable results, task/session attachment history and
@@ -23,7 +24,7 @@ Preserve the owning ground-layer, installer and configuration authorities.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Coordinator | Own the plan, integration, merge order and completion gate | Plan and integration worktree |
+| Coordinator | Own the plan, integration, dependency ordering and completion gate | Plan and integration worktree |
 | Category implementer | Task metadata, producers and category-specific views | Dedicated implementation worktree for #6466 |
 | Supervisor implementer | Bounded receipt reconciliation and progress recovery | Dedicated implementation worktree for #6467 |
 | Registry implementer | Named repository/resource bindings and validation | Dedicated implementation worktree for #6470 |
