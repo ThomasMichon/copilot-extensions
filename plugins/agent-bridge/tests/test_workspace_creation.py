@@ -65,7 +65,7 @@ def creation_rig(rig, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("generation", [37, 38])
+@pytest.mark.parametrize("generation", [37, 38, 39])
 async def test_finalizing_workspace_matches_frozen_retryable_http_refusal(creation_rig, generation):
     fixture = json.loads(
         (Path(__file__).resolve().parents[1] / "contract/fixtures/http/current"
