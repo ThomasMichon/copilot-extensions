@@ -113,6 +113,9 @@ def test_real_finalization_contention_is_reported_without_releasing_holder(
 
     monkeypatch.setattr(finalize, "FinalizeLock", contender)
     try:
+        with pytest.raises(ValueError, match="Routine reconciliation lock timed out") as refusal:
+            pr_routine_recovery.reconcile(config, record(wid), cwd=str(wt))
+        assert isinstance(refusal.value.__cause__, TimeoutError)
         assert not invoke(command, config, wid)
         assert "Timed out waiting for finalization lock" in capfd.readouterr().out
         assert holder.held and lock_path.read_text() == holder.token

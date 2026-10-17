@@ -45,8 +45,8 @@ def reconcile(config: Config, record: tracking.WorktreeRecord | None, *, cwd: st
     lock = FinalizeLock(
         Path(repo.worktree_root) / ".finalize.lock", timeout=budget, stale_after=budget,
     )
-    lock.acquire()
     try:
+        lock.acquire()
         wait = publication_deadline.lock_wait(repo.pr.push_timeout_seconds)
         with pr_authority.guard(timeout=wait), pr_publish.publish_lock(
             cwd, push_timeout_seconds=repo.pr.push_timeout_seconds,
@@ -61,6 +61,8 @@ def reconcile(config: Config, record: tracking.WorktreeRecord | None, *, cwd: st
             if not observed:
                 raise ValueError("Cannot confirm the existing PR ref for routine reconciliation.")
             return _settle(config, record, pr, target.remote, observed, cwd=cwd)
+    except TimeoutError as exc:
+        raise ValueError(f"Routine reconciliation lock timed out: {exc}") from exc
     finally:
         lock.release()
 
