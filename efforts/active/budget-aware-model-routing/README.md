@@ -281,6 +281,18 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-16 - Capture serialization resource bounds
+
+- The next current-head review identified allocation-before-check and duplicate
+  success serialization. Replaced whole-object `JSON.stringify` with bounded
+  incremental encoding that counts JSON escapes and UTF-8 bytes, stops early,
+  rejects cycles and excess depth, and returns the already-serialized response.
+- Added exact byte-boundary, escaping, surrogate, early-abort, cycle, and depth
+  regressions. The Python bridge now diagnoses missing/duplicate fixture
+  markers explicitly instead of raising an opaque iterator error.
+- Kept fixture cleanup strict: unexpected removal is a lifecycle defect, not a
+  reason to suppress every cleanup failure with force.
+
 ### 2026-10-16 - Capture producer/reader type alignment
 
 - The next current-head review identified that exact string magnitude checks

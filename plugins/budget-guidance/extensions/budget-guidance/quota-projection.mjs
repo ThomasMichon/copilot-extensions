@@ -4,11 +4,71 @@ const object = (value) => value !== null && typeof value === "object" && !Array.
 export class CaptureError extends Error {}
 
 export function boundedJson(value) {
-    const text = JSON.stringify(value);
-    if (typeof text !== "string" || Buffer.byteLength(text, "utf8") > MAX_BYTES) {
-        throw new CaptureError("capture-size-limit");
-    }
-    return text;
+    let bytes = 0;
+    const chunks = [];
+    const ancestors = new Set();
+    const count = (size) => {
+        bytes += size;
+        if (bytes > MAX_BYTES) throw new CaptureError("capture-size-limit");
+    };
+    const append = (text) => { count(text.length); chunks.push(text); };
+    const string = (text) => {
+        count(2);
+        for (let index = 0; index < text.length; index++) {
+            const code = text.charCodeAt(index);
+            if (code === 34 || code === 92) count(2);
+            else if (code < 32) count([8, 9, 10, 12, 13].includes(code) ? 2 : 6);
+            else if (code >= 0xd800 && code <= 0xdbff
+                && text.charCodeAt(index + 1) >= 0xdc00 && text.charCodeAt(index + 1) <= 0xdfff) {
+                count(4);
+                index++;
+            } else if (code >= 0xd800 && code <= 0xdfff) count(6);
+            else count(code < 128 ? 1 : code < 2048 ? 2 : 3);
+        }
+        // Only a string already proved to fit is ever materialized as JSON.
+        chunks.push(JSON.stringify(text));
+    };
+    const encode = (item, depth) => {
+        if (depth > 64) throw new CaptureError("capture-depth-limit");
+        if (item === null) return append("null");
+        if (typeof item === "string") return string(item);
+        if (typeof item === "number" || typeof item === "boolean") {
+            return append(JSON.stringify(item));
+        }
+        if (typeof item !== "object" || ancestors.has(item)) {
+            throw new CaptureError("quota-projection-invalid");
+        }
+        ancestors.add(item);
+        if (Array.isArray(item)) {
+            append("[");
+            for (let index = 0; index < item.length; index++) {
+                if (index) append(",");
+                encode(item[index] === undefined ? null : item[index], depth + 1);
+            }
+            append("]");
+        } else {
+            const prototype = Object.getPrototypeOf(item);
+            if (prototype !== null && prototype !== Object.prototype) {
+                throw new CaptureError("quota-projection-invalid");
+            }
+            append("{");
+            let first = true;
+            for (const key in item) {
+                if (!Object.hasOwn(item, key)) continue;
+                const member = item[key];
+                if (member === undefined) continue;
+                if (!first) append(",");
+                first = false;
+                string(key);
+                append(":");
+                encode(member, depth + 1);
+            }
+            append("}");
+        }
+        ancestors.delete(item);
+    };
+    encode(value, 0);
+    return chunks.join("");
 }
 
 export function identifier(value) {

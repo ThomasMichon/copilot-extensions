@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createQuotaTool } from "../extensions/budget-guidance/session-quota.mjs";
+import { boundedJson } from "../extensions/budget-guidance/quota-projection.mjs";
 
 const invocation = { sessionId: "session-example" };
 const secret = "sensitive-sentinel";
@@ -301,6 +302,37 @@ test("oversize nested metadata and invalid quota values never leak even on succe
         f.session.rpc.quota.get = async () => raw;
         withheld(await f.read());
     }
+});
+
+test("bounded serialization stops early and counts actual JSON escapes and UTF-8 bytes", async () => {
+    for (const value of [
+        null, true, 0.25, -0, Infinity, "a\"\\\n\u0001", "💡é界",
+        String.fromCharCode(0xd800), String.fromCharCode(0xdc00),
+        { a: "text", omitted: undefined, array: [1, undefined, null] },
+    ]) {
+        assert.equal(boundedJson(value), JSON.stringify(value));
+    }
+    assert.equal(Buffer.byteLength(boundedJson("x".repeat(65534))), 65536);
+    assert.throws(() => boundedJson("x".repeat(65535)), /capture-size-limit/u);
+    assert.equal(Buffer.byteLength(boundedJson("💡".repeat(16383) + "xx")), 65536);
+    assert.throws(() => boundedJson("💡".repeat(16384)), /capture-size-limit/u);
+    assert.throws(() => boundedJson("\u0001".repeat(10923)), /capture-size-limit/u);
+    const f = fixture();
+    const raw = { ...projection(), huge: "x".repeat(1000000) };
+    Object.defineProperty(raw, "later", {
+        enumerable: true,
+        get() { throw new Error("oversize traversal continued"); },
+    });
+    f.session.rpc.quota.get = async () => raw;
+    withheld(await f.read(), "capture-size-limit");
+    const cyclic = {};
+    cyclic.self = cyclic;
+    f.session.rpc.quota.get = async () => cyclic;
+    withheld(await f.read(), "quota-projection-invalid");
+    let nested = {};
+    for (let index = 0; index < 66; index++) nested = { child: nested };
+    f.session.rpc.quota.get = async () => nested;
+    withheld(await f.read(), "capture-depth-limit");
 });
 
 test("selected provider evidence is filtered, preserving business and reset diagnostics", async () => {

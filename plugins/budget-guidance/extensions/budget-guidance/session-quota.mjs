@@ -155,12 +155,12 @@ export function createQuotaTool(getSession) {
                             login: config.expectedLogin, host: config.host, quota_binding: "not-atomic",
                         };
                     }
-                    boundedJson(result);
+                    const response = respond(result);
                     check();
-                    return result;
+                    return response;
                 } catch (error) {
-                    return failure(error instanceof CaptureError ? error.message
-                        : "quota-acquisition-error", "error");
+                    return respond(failure(error instanceof CaptureError ? error.message
+                        : "quota-acquisition-error", "error"));
                 } finally {
                     // A timed-out public RPC may still be pending; never replace it with another.
                     pending = false;
@@ -170,10 +170,10 @@ export function createQuotaTool(getSession) {
                 const deadline = new Promise((resolve) => {
                     timer = setTimeout(() => {
                         expired = true;
-                        resolve(failure("quota-acquisition-timeout", "error"));
+                        resolve(respond(failure("quota-acquisition-timeout", "error")));
                     }, config.timeout * 1000);
                 });
-                return respond(await Promise.race([acquire(), deadline]));
+                return await Promise.race([acquire(), deadline]);
             } finally {
                 clearTimeout(timer);
             }

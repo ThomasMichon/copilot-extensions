@@ -6,10 +6,28 @@ from pathlib import Path
 import shutil
 import subprocess
 
+import pytest
+
 from budget_guidance.cli import main
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
+
+
+def _marker(result, marker):
+    matches = [line.split(marker, 1)[1] for line in result.stdout.splitlines() if marker in line]
+    assert len(matches) == 1, (
+        f"expected exactly one {marker} marker, got {len(matches)}\n"
+        f"{result.stdout}\n{result.stderr}"
+    )
+    return json.loads(matches[0])
+
+
+@pytest.mark.parametrize("output", ["", "MARKER={}\nMARKER={}\n"])
+def test_host_quota_marker_diagnoses_missing_or_duplicate_output(output):
+    result = subprocess.CompletedProcess([], 0, output, "synthetic-stderr")
+    with pytest.raises(AssertionError, match="expected exactly one MARKER="):
+        _marker(result, "MARKER=")
 
 
 def test_host_quota_entry_and_boundaries(tmp_path, capsys):
@@ -22,8 +40,7 @@ def test_host_quota_entry_and_boundaries(tmp_path, capsys):
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    entry = next(line for line in result.stdout.splitlines() if "ENTRY_CAPTURE=" in line)
-    capture = json.loads(entry.split("ENTRY_CAPTURE=", 1)[1])
+    capture = _marker(result, "ENTRY_CAPTURE=")
     capture_path = tmp_path / "capture.json"
     capture_path.write_text(json.dumps(capture), encoding="utf-8")
     assert main([
@@ -36,8 +53,7 @@ def test_host_quota_entry_and_boundaries(tmp_path, capsys):
     assert reading["allowance"] == "1000"
     assert reading["calculated"] is None
     assert reading["advice"]["concurrency"] is None
-    rejection = next(line for line in result.stdout.splitlines() if "ENTRY_STRING_RESULT=" in line)
-    rejected = json.loads(rejection.split("ENTRY_STRING_RESULT=", 1)[1])
+    rejected = _marker(result, "ENTRY_STRING_RESULT=")
     assert rejected["capture"] is None
     assert rejected["diagnostics"] == ["quota-projection-invalid"]
     capture["projection"]["snapshots"]["premium_interactions"]["entitlementRequests"] = "1000"

@@ -40,7 +40,10 @@ Failure returns `resultType: failure` with `status: unavailable` or `error`,
 a fixed diagnostic, and `capture: null`; no quota counters, raw auth responses,
 opaque SDK errors, upgrade links, or arbitrary provider metadata are returned.
 The entire quota input and entire rendered result are each bounded to 64 KiB
-UTF-8, including nested discarded metadata. A host without the public quota or
+UTF-8, including nested discarded metadata. Serialization counts escaped
+UTF-8 bytes incrementally and stops before materializing an oversize JSON
+string; nesting beyond 64 levels or cyclic/non-JSON objects fails explicitly.
+The success response is serialized once. A host without the public quota or
 requested auth-status API is unsupported. Never use a newer SDK declaration as
 proof that the current host implements it, or use a private connection or
 credential-bearing auth union as a fallback.
