@@ -302,6 +302,10 @@ unrelated service changes or a second machine registry.
   so ordinary `dataclasses.replace` and copies derived from read-only cache
   models preserve current-snapshot intent. A genuinely stale writer still
   refuses after an explicit label repair.
+- Native/Git proof is repeated under publication authority before the short
+  record-lock phase. The final exact-byte CAS catches intervening record writes;
+  no Git I/O occurs under a record lock. Only material receiving bindings are
+  compared, not incidental profile/preferences configuration.
 
 ### 2026-10-16 - Explicit owner-migration slice proposed
 - #7057 reserves the bounded capability; `chugging-ratchet` owns its source

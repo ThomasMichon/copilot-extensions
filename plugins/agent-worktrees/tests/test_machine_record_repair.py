@@ -67,7 +67,7 @@ def local_record(tmp_path, monkeypatch, git_checkout):
         alias="canonical-host", hostname="old-host",
     )}
     monkeypatch.setattr(repair.cfg, "project_name", lambda: "example")
-    monkeypatch.setattr(repair.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(repair.cfg, "load_config", lambda **kwargs: config)
     monkeypatch.setattr(repair.cfg, "tracking_dir", lambda: records)
     monkeypatch.setattr(repair.socket, "gethostname", lambda: "old-host")
     monkeypatch.setattr(repair.execution_spaces, "registry_for_config", lambda _: entries)
@@ -177,7 +177,7 @@ def test_no_roster_guest_target_cannot_relabel_native_record(
 ):
     config, path, _ = local_record
     monkeypatch.setattr(repair.execution_spaces, "registry_for_config", lambda _: {})
-    monkeypatch.setattr(cfg, "load_config", lambda: replace(config, machine=target))
+    monkeypatch.setattr(cfg, "load_config", lambda **kwargs: replace(config, machine=target))
     before = path.read_bytes()
     assert repair.targeted_doctor(arguments(fix=True)) == 1
     assert "environment" in json.loads(capsys.readouterr().out)["error"]

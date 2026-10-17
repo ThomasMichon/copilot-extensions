@@ -63,10 +63,13 @@ their independent integrity defects.
 
 ## Locking, backup and audit
 
-Apply takes the existing publication authority and selected-record lock, reloads
-receiving configuration, repeats native/Git or historical proof, and compares the
-exact original bytes before replacement. Busy locks, changed input or changed
-proof refuse. No graph-wide record-lock set is acquired.
+Apply takes the existing publication authority, reloads identity configuration
+without unrelated PR-policy discovery, and repeats native/Git or historical
+proof before acquiring the short selected-record lock. The lock covers only
+exact-byte recheck, receipt/backup and atomic replacement: no Git or network I/O
+runs while it is held. Changed material identity/project/anchor/namespace proof
+refuses; incidental preferences do not. Native path keys retain Windows case
+equivalence and POSIX case sensitivity. No graph-wide record-lock set is acquired.
 
 The existing private original-byte `.repair-<digest>.bak` backup and atomic
 replacement writer are reused. A `.machine-label-<digest>.json` receipt beside

@@ -26,6 +26,18 @@ class RepairAuditError(RuntimeError):
         self.backup, self.audit = backup, audit
 
 
+def _path_key(path: Path) -> str:
+    return os.path.normcase(str(path.resolve()))
+
+
+def _binding(config) -> tuple:
+    return (
+        config.machine, config.platform, config.repo_name,
+        _path_key(Path(config.default_repo.anchor)),
+        _path_key(Path(config.default_repo.worktree_root)),
+    )
+
+
 def _prove_local_alias(config, previous: str) -> None:
     platform = cfg.detect_platform()
     if platform not in ("windows", "linux") or config.platform != platform:
@@ -86,7 +98,7 @@ def _prove_history(data: dict, config) -> None:
         raise ValueError("removed checkout requires canonical worktree/knowledge registration")
     local_root = registered.local_path(config.platform)
     anchor = Path(config.default_repo.anchor)
-    if not local_root or Path(local_root).resolve() != anchor.resolve():
+    if not local_root or _path_key(Path(local_root)) != _path_key(anchor):
         raise ValueError("receiving project does not match its registered native repository")
     checkout = Path(data.get("worktree_path") or "")
     root = Path(config.default_repo.worktree_root)
@@ -94,8 +106,8 @@ def _prove_history(data: dict, config) -> None:
         not checkout.is_absolute() or not root.is_absolute()
         or checkout.is_symlink() or checkout.exists()
         or (root.exists() and not root.is_dir())
-        or checkout != root / data["worktree_id"]
-        or checkout.resolve() != root.resolve() / data["worktree_id"]
+        or os.path.normcase(str(checkout)) != os.path.normcase(str(root / data["worktree_id"]))
+        or _path_key(checkout) != os.path.normcase(str(root.resolve() / data["worktree_id"]))
     ):
         raise ValueError("removed checkout lacks exact registered worktree-namespace provenance")
     git_ops.git(
@@ -106,7 +118,7 @@ def _prove_history(data: dict, config) -> None:
 
 def _inspect(project: str, record_id: str, previous: str, target: str | None):
     with ConfigCacheSession().scope():
-        config = cfg.load_config()
+        config = cfg.load_config(include_control_plane_related_pr=False)
     if config.repo_name != project:
         raise ValueError("resolved project does not match the selected project")
     if target is not None and target != config.machine:
@@ -147,14 +159,15 @@ def _apply(project: str, record_id: str, previous: str, target: str | None, obse
     fixed = _replacement(original.decode("utf-8"), data, config.machine)
     digest = hashlib.sha256(original).hexdigest()
     audit = path.with_name(f"{path.name}.machine-label-{digest[:16]}.json")
-    with pr_authority.guard(timeout=0), tracking._RecordLock(path, blocking=False) as lock:
-        if not lock.acquired:
-            raise TimeoutError("tracking record is busy; machine-label repair refused")
+    with pr_authority.guard(timeout=0):
+        # Git/config proof precedes the short record lock; publication authority
+        # keeps receiving registration stable until the exact-byte commit.
         fresh = _inspect(project, record_id, previous, target)
-        if fresh[1:] != observed[1:] or fresh[0] != config:
+        if (
+            fresh[1] != path or fresh[2] != original or fresh[4] != proof
+            or _binding(fresh[0]) != _binding(config)
+        ):
             raise ValueError("record or receiving proof changed; inspect again before repair")
-        if audit.exists() or audit.is_symlink():
-            raise ValueError(f"prior machine-label audit exists; inspect before retrying: {audit}")
         receipt = {
             "version": 1, "scope": "machine-record", "state": "prepared",
             "project": project, "worktree_id": record_id,
@@ -164,13 +177,20 @@ def _apply(project: str, record_id: str, previous: str, target: str | None, obse
             "before_sha256": digest, "after_sha256": hashlib.sha256(fixed.encode("utf-8")).hexdigest(),
             "references": "preserved", "backup": f"{path.name}.repair-{digest[:16]}.bak",
         }
-        tracking._atomic_write(audit, json.dumps(receipt, indent=2) + "\n")
-        backup = tracking_yaml_repair.apply_repair(path, original, fixed)
-        receipt["state"] = "committed"
-        try:
+        with tracking._RecordLock(path, blocking=False) as lock:
+            if not lock.acquired:
+                raise TimeoutError("tracking record is busy; machine-label repair refused")
+            if path.is_symlink() or path.read_bytes() != original:
+                raise ValueError("record changed after proof; inspect again before repair")
+            if audit.exists() or audit.is_symlink():
+                raise ValueError(f"prior machine-label audit exists; inspect before retrying: {audit}")
             tracking._atomic_write(audit, json.dumps(receipt, indent=2) + "\n")
-        except OSError as exc:
-            raise RepairAuditError(backup, audit) from exc
+            backup = tracking_yaml_repair.apply_repair(path, original, fixed)
+            receipt["state"] = "committed"
+            try:
+                tracking._atomic_write(audit, json.dumps(receipt, indent=2) + "\n")
+            except OSError as exc:
+                raise RepairAuditError(backup, audit) from exc
     return backup, audit
 
 

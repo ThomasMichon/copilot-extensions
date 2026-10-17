@@ -187,7 +187,7 @@ def test_existing_non_git_directory_never_uses_history_fallback(history, capsys)
     assert snapshot(root) == before
 
 
-def test_changed_record_is_revalidated_inside_lock(history, capsys, monkeypatch):
+def test_changed_record_is_revalidated_before_commit(history, capsys, monkeypatch):
     _, _, path, _, _, _ = history
     inspect = repair._inspect
     calls = 0
@@ -204,6 +204,85 @@ def test_changed_record_is_revalidated_inside_lock(history, capsys, monkeypatch)
     assert code == 1 and "changed" in report["error"]
     assert yaml.safe_load(path.read_bytes())["machine"] == OLD
     assert not list(path.parent.glob("*.bak"))
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_git_proof_never_runs_under_a_record_lock(history, capsys, monkeypatch, existing):
+    _, config, _, data, _, _ = history
+    if existing:
+        anchor = config.default_repo.anchor
+        if git_ops.git("rev-parse", "--verify", "HEAD", cwd=anchor, check=False).returncode:
+            git_ops.git(
+                "-c", "user.name=Example", "-c", "user.email=example@example.com",
+                "commit", "--allow-empty", "-m", "fixture", cwd=anchor,
+            )
+        git_ops.git("worktree", "add", "--detach", data["worktree_path"], cwd=anchor)
+    record_lock, run_git = tracking._RecordLock, git_ops.git
+    held = []
+
+    class ObservedLock(record_lock):
+        def __enter__(self):
+            result = super().__enter__()
+            if self.acquired:
+                held.append(self)
+            return result
+
+        def __exit__(self, *args):
+            if self in held:
+                held.remove(self)
+            return super().__exit__(*args)
+
+    def proof_git(*args, **kwargs):
+        assert not held, "Git proof must precede the short record lock"
+        return run_git(*args, **kwargs)
+
+    monkeypatch.setattr(tracking, "_RecordLock", ObservedLock)
+    monkeypatch.setattr(git_ops, "git", proof_git)
+    assert run(capsys, "--fix")[0] == 0
+
+
+def test_incidental_configuration_change_does_not_change_receiving_authority(history, capsys, monkeypatch):
+    config = history[1]
+    calls = 0
+
+    def preferences_changed(**kwargs):
+        nonlocal calls
+        calls += 1
+        assert kwargs == {"include_control_plane_related_pr": False}
+        return replace(config, headless=calls > 1)
+
+    monkeypatch.setattr(cfg, "load_config", preferences_changed)
+    assert run(capsys, "--fix")[0] == 0
+    assert calls == 2
+
+
+def test_bytes_changed_after_proof_are_refused_before_audit(history, capsys, monkeypatch):
+    _, _, path, _, _, _ = history
+    inspect, record_lock = repair._inspect, tracking._RecordLock
+    calls = 0
+
+    def counted(*args):
+        nonlocal calls
+        calls += 1
+        return inspect(*args)
+
+    def another_writer_finished(target, **kwargs):
+        assert calls == 2
+        path.write_bytes(path.read_bytes() + b"# newer record stamp\n")
+        return record_lock(target, **kwargs)
+
+    monkeypatch.setattr(repair, "_inspect", counted)
+    monkeypatch.setattr(tracking, "_RecordLock", another_writer_finished)
+    code, report = run(capsys, "--fix")
+    assert code == 1 and "changed after proof" in report["error"]
+    assert yaml.safe_load(path.read_bytes())["machine"] == OLD
+    assert not list(path.parent.glob("*.json"))
+
+
+def test_path_key_retains_native_case_semantics(history):
+    anchor = Path(history[1].default_repo.anchor)
+    same = repair._path_key(anchor) == repair._path_key(Path(str(anchor).swapcase()))
+    assert same is (os.name == "nt")
 
 
 def test_busy_selected_record_refuses_before_receipt(history, capsys):
