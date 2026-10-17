@@ -104,6 +104,10 @@ def compute_fallback_set(
     # The universe is every line the *full* baseline attributes to any
     # test, regardless of eligibility -- see module docstring on why this
     # must not shrink when `eligible_tests` restricts candidates.
+    # Negative/NaN budgets cannot buy coverage; zero can still buy free tests.
+    if not runtime_budget_s >= 0:
+        return FallbackSet((), 0.0, 0.0 if universe_size else 1.0, universe_size)
+
     eligible_test_lines = (
         all_test_lines
         if eligible_tests is None
@@ -138,6 +142,7 @@ def compute_fallback_set(
         (-(eligible_test_lines[test].bit_count() / score_cost(test)),
          actual_cost[test], test, 0)
         for test in actual_cost
+        if actual_cost[test] <= runtime_budget_s
     ]
     heapq.heapify(candidates)
     selected: list[str] = []

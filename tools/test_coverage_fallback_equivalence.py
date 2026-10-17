@@ -7,6 +7,36 @@ import random
 import pytest
 
 from tools.coverage_guided_selection.fallback import compute_fallback_set
+from tools.coverage_guided_selection import fallback
+
+
+@pytest.mark.parametrize("budget", [-1, float("nan"), -float("inf")])
+def test_unusable_budget_skips_heap_but_keeps_universe_metrics(budget, monkeypatch):
+    monkeypatch.setattr(fallback.heapq, "heapify", lambda *_a: pytest.fail("built an unusable heap"))
+    baseline = {
+        "tests": {"test_free": {"duration_s": 0}},
+        "coverage": {"module.py": {"1": ["test_free"]}},
+    }
+    result = compute_fallback_set(baseline, budget)
+    assert result.selected_tests == ()
+    assert result.total_runtime_s == 0
+    assert result.universe_size == 1
+    assert result.covered_fraction == 0
+
+
+def test_zero_budget_still_selects_free_tests_and_infinite_budget_is_unbounded():
+    baseline = {
+        "tests": {"test_free": {"duration_s": 0}, "test_paid": {"duration_s": 1}},
+        "coverage": {"module.py": {"1": ["test_free"], "2": ["test_paid"]}},
+    }
+    zero = compute_fallback_set(baseline, 0)
+    assert zero.selected_tests == ("test_free",)
+    assert zero.total_runtime_s == 0
+    assert zero.covered_fraction == 0.5
+    infinite = compute_fallback_set(baseline, float("inf"))
+    assert set(infinite.selected_tests) == {"test_free", "test_paid"}
+    assert infinite.total_runtime_s == 1
+    assert infinite.covered_fraction == 1
 
 
 def _reference(baseline: dict, budget: float, eligible: frozenset[str] | None) -> dict:

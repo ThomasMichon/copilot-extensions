@@ -219,9 +219,8 @@ def test_execution_cli_preserves_failure_and_reports_complete_invocation(tmp_pat
 def test_ci_pilot_is_pr_only_and_does_not_increase_job_deadline():
     import yaml
 
-    workflow = yaml.load(
+    workflow = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(),
-        Loader=yaml.BaseLoader,
     )
     job = workflow["jobs"]["smoke"]
     assert "&& 12 || 8" in job["timeout-minutes"]

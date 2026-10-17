@@ -59,6 +59,10 @@ class TestSelection:
 
 def load_selection(path: Path, plugin: str, plugin_root: Path) -> TestSelection:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    return selection_from_payload(payload, plugin, plugin_root)
+
+
+def selection_from_payload(payload: object, plugin: str, plugin_root: Path) -> TestSelection:
     if (
         not isinstance(payload, dict)
         or set(payload) != {"version", "plugin", "nodes", "files", "include_guards"}

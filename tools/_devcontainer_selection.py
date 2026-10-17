@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from plugin_test_selection import load_selection, resolve_plugin_root
+from plugin_test_selection import selection_from_payload, resolve_plugin_root
 
 Canonicalize = Callable[[str], str]
 
@@ -45,7 +45,7 @@ def read_selection(
         raise ValueError(
             "selection plugin must match [a-z0-9]+(-[a-z0-9]+)*, for example agent-dispatch"
         )
-    selection = load_selection(Path(path), plugin, resolve_plugin_root(repo, plugin))
+    selection = selection_from_payload(payload, plugin, resolve_plugin_root(repo, plugin))
     return json.dumps(selection.as_dict()).encode("utf-8")
 
 

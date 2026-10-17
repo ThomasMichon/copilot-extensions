@@ -146,6 +146,30 @@ def test_network_enabled_preparation_never_runs_or_needs_the_selection(monkeypat
     assert not any("selection" in argument for argument in commands[0])
 
 
+def test_selection_admission_reads_the_manifest_once(tmp_path, monkeypatch):
+    tests = tmp_path / "plugins/fixture/tests"
+    tests.mkdir(parents=True)
+    (tests / "test_app.py").write_text("def test_value(): pass\n", encoding="utf-8")
+    manifest = tmp_path / "selection.json"
+    manifest.write_text(json.dumps({
+        "version": 1, "plugin": "fixture", "nodes": ["tests/test_app.py::test_value"],
+        "files": [], "include_guards": True,
+    }), encoding="utf-8")
+    original = Path.read_text
+    reads = []
+
+    def read(path, *args, **kwargs):
+        if path == manifest:
+            reads.append(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    assert wrapper._selection.read_selection(
+        ["fixture", "--selection-file", str(manifest)], wrapper._canonicalize_flag, tmp_path,
+    )
+    assert reads == [manifest]
+
+
 def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     monkeypatch.setenv("GIT_DIR", "/somewhere/else/.git")
