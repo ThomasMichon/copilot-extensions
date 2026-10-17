@@ -77,14 +77,18 @@ operation resolves the sibling through the existing installation-aware command
 helper, selects the repository account, obtains a fresh credential in memory,
 and verifies that credential's identity before using it. The operation's child
 environment carries the credential; the source does not change the parent or
-supervisor environment, switch global accounts, or persist a token. Missing
+supervisor environment, switch global accounts, or persist a token. One fresh
+credential environment serves all subcommands of a public discovery, reserve,
+claim or release operation; it is not cached on the provider or shared with a
+nested or later operation. Live pre-mutation identity checks still run. Missing
 integration, mismatched identity, empty/malformed output, and credential-command
 failure or warnings refuse the operation rather than falling back to ambient
 authentication. Omitted/`ambient` mode retains standalone `gh` behavior and
 requires no sibling. Both modes retain repository and pre-mutation checks.
 Scoped credential probes and forge operations use the existing captured
 process-tree runner with a 30-second timeout per command. Timeout reaps the
-command's descendants; failures do not echo credential-bearing output.
+command's descendants; failures report a fixed command group and numeric exit
+code without echoing arguments or credential-bearing output.
 
 Azure DevOps work-item discovery has no natural per-repo boundary the way a
 GitHub `owner/name` repository does: an Azure DevOps `organization/project`

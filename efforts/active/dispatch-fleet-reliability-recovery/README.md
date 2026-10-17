@@ -1027,3 +1027,26 @@ requested contract.
 - These repairs require a new published head and fresh CI/review. No cancelled
   duplicate run, partial report, stale approval or baseline observation is a
   merge waiver; runtime rollout remains separately authorized.
+
+### 2026-10-16 - Address current-head Medium review findings
+
+- Each public GitHub provider operation now resolves one fresh scoped child
+  environment and explicitly passes it through its subcommands. No provider or
+  global token cache is introduced; nested operations cannot replace the
+  caller's credentials, and each mutation retains live user/repository checks.
+- Scoped command errors expose only an allowlisted command group and numeric
+  exit code, never arguments, query/body content, stdout, stderr or credentials.
+  Fifteen regressions failed before these changes and pass afterward; the
+  complete source-safety/provider selection passes 404 tests through the
+  contained runner. Independent targeted verification passes all 15 cases.
+- Qualification locates its literal shard default only within the unique
+  `_ci_matrix` function. Unrelated policy readers no longer break inventory,
+  while missing or ambiguous matrix/default declarations still refuse
+  qualification. All 69 qualification tests pass.
+- The Low CLI-validation observation does not identify duplicate facts: early
+  validation checks the explicit argument mode, while later validation checks
+  the resolved target set after exclusions. Three added regressions prove that
+  excluding the only target refuses file, manifest and shard requests before
+  preparation. The relevant CLI selection passes 18 tests.
+- Fatal lint and whitespace checks pass. These repairs still require a new
+  published head, fresh review and hosted CI; no merge or rollout is claimed.

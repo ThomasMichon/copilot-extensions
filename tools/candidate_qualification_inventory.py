@@ -30,15 +30,21 @@ def _ci_shards(root: Path, plugins: set[str]) -> tuple[dict[str, int], int]:
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
             and node.target.id == "_CI_SHARD_COUNTS"
         ]
+        matrices = [
+            node for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_ci_matrix"
+        ]
+        if len(declarations) != 1 or len(matrices) != 1:
+            raise ValueError("expected one literal shard policy and matrix function")
         defaults = [
-            node.args[1] for node in ast.walk(module)
+            node.args[1] for node in ast.walk(matrices[0])
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id == "_CI_SHARD_COUNTS" and node.func.attr == "get"
             and len(node.args) == 2
         ]
-        if len(declarations) != 1 or len(defaults) != 1:
-            raise ValueError("expected one literal shard policy and default")
+        if len(defaults) != 1:
+            raise ValueError("expected one literal matrix shard default")
         counts, default = ast.literal_eval(declarations[0]), ast.literal_eval(defaults[0])
         if not isinstance(counts, dict) or any(
             not isinstance(name, str) or not PLUGIN.fullmatch(name) or name not in plugins

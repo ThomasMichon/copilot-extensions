@@ -251,6 +251,41 @@ def test_inventory_derives_every_shard_from_the_declared_runner_policy(
     assert {"agent-bridge", "agent-index", "full - agent-worktrees"} <= required
 
 
+def test_inventory_ignores_shard_policy_reads_outside_the_matrix_function(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    expected = inventory.required_jobs(ROOT)
+    with runner.open("a", encoding="utf-8") as stream:
+        stream.write("\nunrelated = _CI_SHARD_COUNTS.get('agent-dispatch', 99)\n")
+        stream.write("\ndef unrelated_reader():\n    return _CI_SHARD_COUNTS.get('other', 98)\n")
+    assert inventory.required_jobs(ROOT) == expected
+
+
+@pytest.mark.parametrize("mutation", ["missing-function", "duplicate-function", "missing-default", "duplicate-default"])
+def test_inventory_refuses_an_absent_or_ambiguous_matrix_shard_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    runner = workflow.with_name("run-plugin-tests.py")
+    text = runner.read_text("utf-8")
+    if mutation == "missing-function":
+        text = text.replace("def _ci_matrix(", "def unrelated_matrix(", 1)
+    elif mutation == "duplicate-function":
+        text += "\ndef _ci_matrix(plugins):\n    return _CI_SHARD_COUNTS.get('other', 1)\n"
+    elif mutation == "missing-default":
+        text = text.replace("_CI_SHARD_COUNTS.get(name, 1)", "1")
+    else:
+        text = text.replace(
+            "_CI_SHARD_COUNTS.get(name, 1)",
+            "_CI_SHARD_COUNTS.get(name, _CI_SHARD_COUNTS.get(name, 1))",
+        )
+    runner.write_text(text, encoding="utf-8")
+    with pytest.raises(CandidateValidationError, match="shard policy"):
+        inventory.required_jobs(ROOT)
+
+
 @pytest.mark.parametrize("counts", [
     {"agent-dispatch": 0}, {"agent-dispatch": True}, {"agent-dispatch": 1.5},
     {"agent-dispatch": 257}, {"bad/name": 4}, {"missing-qualification-consumer": 4},

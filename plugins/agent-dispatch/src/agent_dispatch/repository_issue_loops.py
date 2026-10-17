@@ -544,10 +544,18 @@ class GitHubProvider:
         self.auth = auth
         self._verified_repos: set[str] = set()
 
-    def _gh(self, *args: str) -> Any:
+    def _operation_environment(self, repo: str) -> Mapping[str, str] | None:
+        """Use one credential snapshot; mutations still reverify live identity."""
+        if self.auth != "repository":
+            return None
+        if repo != self.repository:
+            raise RuntimeError("GitHub repository differs from the scoped authentication target")
+        return repository_environment(self.repository, self.expected_login, runner=self.runner)
+
+    def _gh(self, *args: str, env: Mapping[str, str] | None = None) -> Any:
         options = {}
         if self.auth == "repository":
-            options["env"] = repository_environment(
+            options["env"] = env if env is not None else repository_environment(
                 self.repository, self.expected_login, runner=self.runner,
             )
             from .procutil import no_window_kwargs
@@ -555,32 +563,39 @@ class GitHubProvider:
             options.update(timeout=30, **no_window_kwargs())
         completed = self.runner(
             ["gh", *args],
-            check=False,
-            capture_output=True,
-            text=True,
+            check=False, capture_output=True, text=True,
             **options,
         )
         if int(completed.returncode) != 0:
             if self.auth == "repository":
-                raise RuntimeError("Repository GitHub operation failed")
+                group = {
+                    ("api", "user"): "api user", ("api", "graphql"): "api graphql",
+                    ("issue", "view"): "issue view", ("issue", "comment"): "issue comment",
+                    ("issue", "edit"): "issue edit",
+                }.get(args[:2], "api" if args[:1] == ("api",) else "other")
+                raise RuntimeError(
+                    f"Repository GitHub operation failed ({group}, exit {int(completed.returncode)})"
+                )
             raise RuntimeError(
                 f"GitHub operation failed: {str(completed.stderr or '').strip()}"
             )
         return completed
 
-    def _verify_identity(self, repo: str, *, allow_cache: bool = True) -> None:
+    def _verify_identity(
+        self, repo: str, *, allow_cache: bool = True, env: Mapping[str, str] | None = None,
+    ) -> None:
         if self.auth == "repository" and repo != self.repository:
             raise RuntimeError("GitHub repository differs from the scoped authentication target")
         if allow_cache and repo in self._verified_repos:
             return
-        login = str(self._gh("api", "user", "--jq", ".login").stdout or "").strip()
+        login = str(self._gh("api", "user", "--jq", ".login", env=env).stdout or "").strip()
         if login.casefold() != self.expected_login.casefold():
             raise RuntimeError(
                 "GitHub producer identity mismatch: expected "
                 f"{self.expected_login!r}, got {login!r}"
             )
         full_name = str(
-            self._gh("api", f"repos/{repo}", "--jq", ".full_name").stdout or ""
+            self._gh("api", f"repos/{repo}", "--jq", ".full_name", env=env).stdout or ""
         ).strip()
         if full_name.casefold() != repo.casefold():
             raise RuntimeError(
@@ -591,7 +606,8 @@ class GitHubProvider:
             self._verified_repos.add(repo)
 
     def list_open_issues(self, repo: str) -> list[Issue]:
-        self._verify_identity(repo)
+        env = self._operation_environment(repo)
+        self._verify_identity(repo, env=env)
         owner, name = repo.split("/", 1)
         issues = []
         cursor: str | None = None
@@ -608,7 +624,7 @@ class GitHubProvider:
             ]
             if cursor is not None:
                 args.extend(["-F", f"cursor={cursor}"])
-            response = self._gh(*args)
+            response = self._gh(*args, env=env)
             data = json.loads(response.stdout or "{}")
             if data.get("errors"):
                 raise RuntimeError(
@@ -672,35 +688,22 @@ class GitHubProvider:
             f"{_GITHUB_MAX_ISSUE_PAGES * _GITHUB_ISSUE_PAGE_SIZE}-issue scan"
         )
 
-    def _comment(self, repo: str, issue: Issue, payload: dict[str, Any]) -> None:
-        payload = {
-            key: value
-            for key, value in payload.items()
-            if key != "comment_author"
-        }
+    def _comment(
+        self, repo: str, issue: Issue, payload: dict[str, Any], *,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
+        payload = {key: value for key, value in payload.items() if key != "comment_author"}
         state = str(payload.get("state") or "reserved")
         summary = (
             f"Repository issue loop `{payload.get('loop')}` marked this issue "
             f"`{state}` for occurrence `{payload.get('occurrence')}`."
         )
         body = f"{summary}\n\n{_marker(payload)}"
-        self._verify_identity(repo, allow_cache=False)
-        existing_id = self._find_own_loop_comment(repo, issue, payload)
+        self._verify_identity(repo, allow_cache=False, env=env)
+        existing_id = self._find_own_loop_comment(repo, issue, payload, env=env)
         if existing_id is not None:
-            # Edit this loop's own single prior claims-management comment
-            # on this issue in place -- across occurrences, not just within
-            # one occurrence -- instead of always posting a new one: one
-            # evolving, clearly-marked comment per (issue, loop) is exactly
-            # as visible/distinguishable as a fresh comment per transition
-            # (reservation.comment's own validated requirement), just far
-            # less noisy in the issue's visible history and notifications
-            # over the issue's whole (potentially indefinite, e.g. a
-            # terminal-judgment stage:needs-vision issue) lifetime. Scoped
-            # to this loop specifically (not just our own authorship) so a
-            # losing loop's own `released` transition can never overwrite a
-            # different, concurrently-racing loop's still-active `reserved`/
-            # `claimed` comment -- each of the (up to 4) lanes racing for the
-            # same issue keeps its own persistent, evolving comment.
+            # Keep one evolving comment per issue/loop across occurrences.
+            # A losing loop must never overwrite another loop's active marker.
             self._gh(
                 "api",
                 "graphql",
@@ -711,6 +714,7 @@ class GitHubProvider:
                 f"id={existing_id}",
                 "-f",
                 f"body={body}",
+                env=env,
             )
             return
         self._gh(
@@ -721,30 +725,17 @@ class GitHubProvider:
             repo,
             "--body",
             body,
+            env=env,
         )
 
     def _find_own_loop_comment(
-        self, repo: str, issue: Issue, payload: dict[str, Any]
+        self, repo: str, issue: Issue, payload: dict[str, Any], *,
+        env: Mapping[str, str] | None = None,
     ) -> str | None:
-        """Return the GraphQL node id of this loop's own most recent
-        claims-management marker comment on this issue (same ``loop``,
-        authored by us), regardless of ``occurrence``, if one exists -- so
-        ``_comment`` edits it instead of posting a new one. Scoped to
-        ``loop`` (not just our own authorship) so a losing loop's own
-        ``released`` transition never overwrites a different, concurrently-
-        racing loop's still-active ``reserved``/``claimed`` comment. This
-        intentionally spans the issue's whole lifetime for a given loop
-        (not just one occurrence), so an issue that keeps getting reserved/
-        claimed/released by the same loop across many cadence ticks (e.g. a
-        terminal-judgment ``stage:needs-vision``/``needs-architecture-
-        triage`` issue swept again every cycle) accumulates exactly one
-        evolving comment per loop, not one per occurrence. A fresh fetch
-        (not ``issue.reservations``, which may already be stale by the time
-        a later transition like ``claim``/``release`` runs) since another
-        transition may have landed a comment since the caller last
-        discovered this issue. ``gh issue view --json comments`` returns
-        comments oldest-first, so the last match encountered is our most
-        recent one -- the one to keep editing forward.
+        """Find our latest trusted marker comment for this issue and loop.
+
+        Span occurrences; refetch because ``issue.reservations`` may be stale.
+        Comments are oldest-first, so the final matching authored marker wins.
         """
         viewed = self._gh(
             "issue",
@@ -754,6 +745,7 @@ class GitHubProvider:
             repo,
             "--json",
             "comments",
+            env=env,
         )
         comments = json.loads(viewed.stdout or "{}").get("comments") or []
         found_id: str | None = None
@@ -774,8 +766,9 @@ class GitHubProvider:
     def reserve(
         self, repo: str, issue: Issue, reservation: dict[str, Any]
     ) -> None:
-        self._comment(repo, issue, {**reservation, "issue": issue.number})
-        self._verify_identity(repo, allow_cache=False)
+        env = self._operation_environment(repo)
+        self._comment(repo, issue, {**reservation, "issue": issue.number}, env=env)
+        self._verify_identity(repo, allow_cache=False, env=env)
         self._gh(
             "issue",
             "edit",
@@ -784,11 +777,13 @@ class GitHubProvider:
             repo,
             "--add-label",
             reservation["label"],
+            env=env,
         )
 
     def claim(
         self, repo: str, issue: Issue, reservation: dict[str, Any], task_id: str
     ) -> None:
+        env = self._operation_environment(repo)
         self._comment(
             repo,
             issue,
@@ -798,6 +793,7 @@ class GitHubProvider:
                 "state": "claimed",
                 "task_id": task_id,
             },
+            env=env,
         )
 
     def release(
@@ -807,6 +803,7 @@ class GitHubProvider:
         reservation: dict[str, Any],
         reason: str,
     ) -> None:
+        env = self._operation_environment(repo)
         self._comment(
             repo,
             issue,
@@ -816,6 +813,7 @@ class GitHubProvider:
                 "state": "released",
                 "reason": reason,
             },
+            env=env,
         )
         viewed = self._gh(
             "issue",
@@ -825,6 +823,7 @@ class GitHubProvider:
             repo,
             "--json",
             "comments",
+            env=env,
         )
         comments = json.loads(viewed.stdout or "{}").get("comments") or []
         current = Issue(
@@ -856,7 +855,7 @@ class GitHubProvider:
             for value in _latest_reservations(current).values()
         )
         if not other_active:
-            self._verify_identity(repo, allow_cache=False)
+            self._verify_identity(repo, allow_cache=False, env=env)
             self._gh(
                 "issue",
                 "edit",
@@ -865,6 +864,7 @@ class GitHubProvider:
                 repo,
                 "--remove-label",
                 reservation["label"],
+                env=env,
             )
 
 

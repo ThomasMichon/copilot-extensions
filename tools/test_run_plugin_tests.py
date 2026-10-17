@@ -356,6 +356,18 @@ def test_explicit_file_selection_requires_one_execution_target(args):
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize("selection", [
+    ["--test-file", "tests/test_example.py"],
+    ["--list-test-files"],
+    ["--shard-index", "1", "--shard-count", "2"],
+])
+def test_explicit_selection_cannot_exclude_its_only_resolved_target(selection, monkeypatch):
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_a, **_kw: pytest.fail("prepared empty target"))
+    with pytest.raises(SystemExit) as error:
+        runner.main(["example", "--exclude", "example", *selection])
+    assert error.value.code == 2
+
+
 def test_explicit_empty_selection_is_not_a_guard_success(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "PLUGINS", tmp_path)
     tests = tmp_path / "example" / "tests"

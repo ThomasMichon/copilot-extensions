@@ -146,7 +146,8 @@ push validation. Manual `full` and `validate-and-promote.yml` full validation
 remain unsharded; their selection, coverage and release policy are unchanged.
 
 The literal `_CI_SHARD_COUNTS` runner policy also supplies promotion
-qualification's expected smoke rows. Qualification reads that policy as data,
+qualification's expected smoke rows. Qualification reads that policy and the
+unique `_ci_matrix` default as data. It ignores unrelated policy readers,
 requires every named shard to have executed successfully, and refuses unknown
 matrix recipes or counts rather than dropping coverage. Historical unsharded
 CI declarations remain supported.

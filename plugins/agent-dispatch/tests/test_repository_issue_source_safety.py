@@ -489,6 +489,147 @@ def _scoped_provider(monkeypatch, runner):
     )
 
 
+class ScopedOperationRunner(ScopedRunner):
+    def __init__(self):
+        super().__init__()
+        self.comments = []
+        self.on_view = self.on_comment = None
+        self.repository_name = "example/project"
+
+    def __call__(self, argv, **kwargs):
+        if argv[0] != "gh":
+            return super().__call__(argv, **kwargs)
+        self.calls.append((argv, kwargs))
+        assert kwargs["env"]["GH_TOKEN"] in self.tokens
+        assert kwargs["timeout"] > 0
+        if argv[1:3] == ["api", "user"]:
+            value = self.identity
+        elif argv[1:3] == ["api", "repos/example/project"]:
+            value = self.repository_name
+        elif argv[1:3] == ["issue", "view"]:
+            callback, self.on_view = self.on_view, None
+            if callback:
+                callback()
+            value = json.dumps({"comments": self.comments})
+        elif argv[1:3] == ["issue", "edit"]:
+            value = "{}"
+        elif argv[1:3] == ["issue", "comment"] or any(
+            "updateIssueComment" in argument for argument in argv
+        ):
+            body = (
+                argv[argv.index("--body") + 1] if "--body" in argv
+                else next(arg[5:] for arg in argv if arg.startswith("body="))
+            )
+            self.comments = [{
+                "id": "comment-node", "author": {"login": "issue-bot"}, "body": body,
+            }]
+            if self.on_comment:
+                self.on_comment()
+            value = "{}"
+        elif argv[1:3] == ["api", "graphql"]:
+            page = _graphql_page([_graphql_issue(7, comments=self.comments)])
+            if not any(argument.startswith("cursor=") for argument in argv):
+                page["data"]["repository"]["issues"]["pageInfo"] = {
+                    "hasNextPage": True, "endCursor": "next-page",
+                }
+            value = json.dumps(page)
+        else:
+            raise AssertionError(f"Unexpected command group: {argv[:3]}")
+        return SimpleNamespace(returncode=0, stdout=value, stderr="")
+
+
+def _public_operation(provider, operation):
+    arguments = ("example/project", _issue(7), _reservation())
+    if operation == "list_open_issues":
+        return provider.list_open_issues(arguments[0])
+    extra = ("task-real",) if operation == "claim" else (
+        ("finished",) if operation == "release" else ()
+    )
+    return getattr(provider, operation)(*arguments, *extra)
+
+
+@pytest.mark.parametrize("operation", ["list_open_issues", "reserve", "claim", "release"])
+@pytest.mark.parametrize("existing_comment", [False, True])
+def test_scoped_public_operation_resolves_once_and_renews_next_operation(
+    monkeypatch, operation, existing_comment,
+):
+    monkeypatch.setenv("GH_TOKEN", "ambient-only")
+    runner = ScopedOperationRunner()
+    if existing_comment:
+        runner.comments = [{
+            "id": "comment-node", "author": {"login": "issue-bot"},
+            "body": _marker(_reservation()),
+        }]
+    provider = _scoped_provider(monkeypatch, runner)
+    environments = []
+    for number in range(2):
+        start = len(runner.calls)
+        _public_operation(provider, operation)
+        assert len(runner.tokens) == number + 1
+        children = [kwargs["env"] for argv, kwargs in runner.calls[start:] if argv[0] == "gh"]
+        assert children and all(env is children[0] for env in children)
+        environments.append(children[0])
+        if operation in {"reserve", "release"}:
+            assert sum(argv[:3] == ["gh", "api", "user"] for argv, _ in runner.calls[start:]) == 3
+            assert sum(argv[:3] == ["gh", "api", "repos/example/project"] for argv, _ in runner.calls[start:]) == 2
+    assert environments[0] is not environments[1]
+    assert environments[0]["GH_TOKEN"] != environments[1]["GH_TOKEN"]
+    assert os.environ["GH_TOKEN"] == "ambient-only"
+    assert not any(isinstance(value, dict) and "GH_TOKEN" in value for value in vars(provider).values())
+
+
+@pytest.mark.parametrize("change", ["identity", "repository_name"])
+def test_scoped_reserve_reverifies_before_label_and_failure_does_not_cache_env(
+    monkeypatch, change,
+):
+    runner = ScopedOperationRunner()
+    runner.on_comment = lambda: setattr(runner, change, "another-value")
+    provider = _scoped_provider(monkeypatch, runner)
+    with pytest.raises(RuntimeError, match="identity mismatch"):
+        _public_operation(provider, "reserve")
+    assert len(runner.tokens) == 1
+    assert all(argv[:3] != ["gh", "issue", "edit"] for argv, _ in runner.calls)
+    runner.on_comment = None
+    setattr(runner, change, "issue-bot" if change == "identity" else "example/project")
+    _public_operation(provider, "reserve")
+    assert len(runner.tokens) == 2
+
+
+def test_scoped_nested_operation_cannot_replace_callers_child_environment(monkeypatch):
+    runner = ScopedOperationRunner()
+    provider = _scoped_provider(monkeypatch, runner)
+    runner.on_view = lambda: provider.list_open_issues("example/project")
+    _public_operation(provider, "reserve")
+    assert len(runner.tokens) == 2
+    edited = [kwargs["env"] for argv, kwargs in runner.calls if argv[:3] == ["gh", "issue", "edit"]]
+    assert len(edited) == 1 and edited[0]["GH_TOKEN"] == runner.tokens[0]
+
+
+@pytest.mark.parametrize("arguments,group", [
+    (("issue", "edit", "7", "--body", "synthetic-marker-secret"), "issue edit"),
+    (("api", "graphql", "-f", "query=synthetic-query-secret"), "api graphql"),
+    (("api", "repos/synthetic-endpoint-secret"), "api"),
+    (("synthetic-command-secret", "synthetic-argument-secret"), "other"),
+])
+def test_scoped_error_reports_only_fixed_group_and_returncode(monkeypatch, arguments, group):
+    runner = ScopedRunner()
+    provider = _scoped_provider(monkeypatch, runner)
+
+    def failed_operation(argv, **kwargs):
+        if argv == ["gh", *arguments]:
+            return SimpleNamespace(
+                returncode=17, stdout="synthetic-stdout-secret",
+                stderr="synthetic-stderr-secret " + runner.tokens[-1],
+            )
+        return runner(argv, **kwargs)
+
+    provider.runner = failed_operation
+    with pytest.raises(RuntimeError) as failure:
+        provider._gh(*arguments)
+    assert str(failure.value) == f"Repository GitHub operation failed ({group}, exit 17)"
+    assert "secret" not in str(failure.value) and runner.tokens[-1] not in str(failure.value)
+
+
 def test_scoped_credentials_are_renewed_and_never_change_parent_environment(monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "ambient-other-account")
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "dispatch-payload")
