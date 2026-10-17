@@ -254,9 +254,12 @@ def test_unrelated_policy_change_does_not_expand_or_restart_view(harness):
 def test_permits_cannot_be_reconstructed_transferred_or_extended(harness):
     request = ObservationRead("fleet-a")
     permit = harness.admit(request)
+    retained = dict(harness.owner._issued)
     refuses("unknown-permit", harness.owner.revalidate, replace(permit), request)
     refuses("unknown-permit", harness.owner.revalidate,
             replace(permit, expires_at=NOW + 86400), request)
+    assert harness.owner._issued == retained
+    permit = harness.owner.revalidate(permit, request)
     other = AdmissionAuthority(snapshot=harness.snapshot, clock=harness.clock)
     refuses("unknown-permit", other.revalidate, permit, request)
     harness.clock.value = permit.expires_at

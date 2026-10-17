@@ -400,9 +400,10 @@ class AdmissionAuthority:
         This library cannot make an external backend transaction atomic.
         """
         with self._lock:
-            issued = self._issued.pop(id(permit), None)
+            issued = self._issued.get(id(permit))
             if issued is None or issued.permit is not permit:
                 raise AdmissionError("unknown-permit")
+            del self._issued[id(permit)]
             now = self._now()
             if now >= permit.expires_at:
                 raise AdmissionError("expired-permit")

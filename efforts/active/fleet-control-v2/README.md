@@ -1572,16 +1572,16 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   split; no test, marker, workflow or budget is changed by this slice.
   Touched lint, install-contract validation and exact upstream retention-file
   equality pass.
-- #6743 merged at `2026-10-15T03:55:59Z`. The Gateway integration consumes
-  the accepted verifier without changing its implementation. Its earlier local
-  retention preparation is superseded by the exact current upstream test;
-  no alternative fixture optimization is carried forward.
-- #6743 actually merged at `2026-10-15T03:55:59Z`, commit
+- #6743 merged at `2026-10-15T03:55:59Z`, commit
   `00627e6bc768f353e5f402de0ed10ccf468764bc`. Final head
   `d71d8659edd69cbb279426c4d28b20c4ee2c7314` received genuine Copilot APPROVED
   review `5527674683`, zero open findings (Balanced effort), and all 50 observed
   checks succeeded or legitimately skipped before the managed self-merge.
   No failing/pending CI or unreviewed head was merged.
+  The Gateway integration consumes the accepted verifier without changing its
+  implementation. Earlier local retention preparation is superseded by the
+  exact current upstream test; no alternative fixture optimization is carried
+  forward.
 - At that merge checkpoint, re-read the complete parent Plan/Validation. Only the
   isolated identity-verification prerequisite is implemented; current
   enrollment/policy, provider outcomes, scoped observation/operation admission,
