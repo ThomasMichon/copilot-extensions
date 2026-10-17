@@ -36,6 +36,10 @@ first address cannot consume the other family's entire connection opportunity.
 The winning socket alone continues to TLS; every pending loser is closed on
 success, failure or deadline. This does not extend the request's budget, disable
 IPv6 or substitute a numeric address for certificate hostname verification.
+A connection winner uses one fresh monotonic sample to enforce expiry and set
+its remaining socket timeout. Reusing the loop's pre-connect or pre-select
+sample would extend an already elapsed deadline; a late-ready socket is closed
+rather than admitted after expiry.
 
 All listener connections are TLS, including loopback. All operation routes require
 the shared `jwt-pop-v1` verifier plus current enrollment and policy.

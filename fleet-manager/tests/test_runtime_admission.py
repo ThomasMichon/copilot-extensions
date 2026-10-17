@@ -324,6 +324,18 @@ def test_evidence_is_one_request_even_after_denial_and_bounded_in_time(harness):
             ObservationRead("fleet-a"), role="client", installation="client-a")
 
 
+def test_future_and_old_verification_times_have_distinct_prelookup_refusals(harness):
+    identity = harness.identity()
+    request = ObservationRead("fleet-a")
+    harness.clock.value = NOW - 1
+    refuses("invalid-identity", harness.owner.authorize, identity, request,
+            role="client", installation="client-a")
+    harness.clock.value = NOW + REQUEST_SECONDS
+    refuses("stale-identity", harness.owner.authorize, identity, request,
+            role="client", installation="client-a")
+    assert harness.calls == 0 and not harness.owner._evidence
+
+
 def test_capacity_refuses_without_evicting_live_handle_or_proof(harness):
     small = AdmissionAuthority(snapshot=harness.snapshot, clock=harness.clock, capacity=1)
     request = ObservationRead("fleet-a")

@@ -15,7 +15,7 @@ from test_gateway_runtime import running, scoped_backend, wait_gateway_slots
 
 
 def connect_fixture(monkeypatch, *, first_result=errno.EINPROGRESS, expire=False,
-                    clock_step=0):
+                    clock_step=0, connect_cost=0, ready_after=None):
     clock = [100.0]
     connections = []
     started = []
@@ -36,11 +36,16 @@ def connect_fixture(monkeypatch, *, first_result=errno.EINPROGRESS, expire=False
 
         def connect_ex(self, address):
             started.append((self.family, address, clock[0]))
+            clock[0] += connect_cost
             if len(started) == 1:
                 if first_result is None:
                     raise OSError("synthetic unreachable address")
                 return first_result
             return errno.EINPROGRESS if expire else 0
+
+        def getsockopt(self, level, option):
+            assert (level, option) == (socket.SOL_SOCKET, socket.SO_ERROR)
+            return 0
 
         def close(self):
             assert self not in selected
@@ -65,6 +70,10 @@ def connect_fixture(monkeypatch, *, first_result=errno.EINPROGRESS, expire=False
 
         def select(self, wait):
             assert 0 <= wait <= 101 - clock[0]
+            if ready_after is not None:
+                clock[0] += ready_after
+                return [(SimpleNamespace(fileobj=selected[-1]),
+                         gateway_transport.selectors.EVENT_WRITE)]
             clock[0] += wait
             return []
 
@@ -129,6 +138,30 @@ def test_wait_uses_one_current_clock_sample_and_unregisters_before_close(monkeyp
     with pytest.raises(GatewayError, match="transport-unavailable"):
         owner._connect_address(("localhost", 443))
     assert all(connection.closed for connection in connections)
+
+
+@pytest.mark.parametrize("mode,elapsed,accepted", [
+    ("immediate", 0.4, True), ("immediate", 1, False),
+    ("ready", 0.1, True), ("ready", 1, False),
+])
+def test_connection_winner_rechecks_current_deadline_after_connect_or_select(
+        monkeypatch, mode, elapsed, accepted):
+    owner, connections, _, clock = connect_fixture(
+        monkeypatch, first_result=0 if mode == "immediate" else errno.EINPROGRESS,
+        connect_cost=elapsed if mode == "immediate" else 0,
+        ready_after=elapsed if mode == "ready" else None,
+    )
+    if accepted:
+        winner = owner._connect_address(("localhost", 443))
+        try:
+            assert winner.timeout == pytest.approx(101 - clock[0])
+            assert winner.timeout < 1 and not winner.closed
+        finally:
+            winner.close()
+    else:
+        with pytest.raises(GatewayError, match="transport-unavailable"):
+            owner._connect_address(("localhost", 443))
+        assert all(connection.closed for connection in connections)
 
 
 def test_named_backend_resolves_and_keeps_tls_hostname(tmp_path):
