@@ -13,7 +13,7 @@ from jwcrypto import jwe, jwk
 
 from .gateway_auth import Signer, thumbprint, verify
 from .gateway_client import CredentialMaterial, GatewayClient
-from .gateway_contract import CREDENTIAL_ACTIONS, GatewayError, encode, require
+from .gateway_contract import CREDENTIAL_ACTIONS, GatewayError, encode, number, require
 from .planning import digest
 
 
@@ -95,6 +95,7 @@ class Controller:
             return "IDLE"
         claims = verify(result["dispatch"], self.client.discovery.jwks, self.client.discovery.issuer,
                         self.client.principal, lifetime=60)
+        dispatch_deadline = min(claims["exp"], number(claims.get("deadline"), 0))
         require(claims["sub"] == self.client.discovery.gateway and claims.get("fleet") == self.fleet
                 and claims.get("epoch") == self.client.epoch
                 and claims.get("controller") == self.client.principal
@@ -105,7 +106,6 @@ class Controller:
                     "recipient_jwk", "deadline", "subscription"}}
         recipient = claims["recipient_jwk"]
         require(thumbprint(recipient) == binding["recipient_jkt"], "recipient-mismatch")
-        dispatch_deadline = min(claims["exp"], claims["deadline"])
         remaining = dispatch_deadline - time.time()
         require(remaining > 0, "dispatch-expired")
         try:

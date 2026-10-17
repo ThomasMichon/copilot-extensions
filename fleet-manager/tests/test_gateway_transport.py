@@ -131,6 +131,34 @@ def test_all_pending_addresses_closed_at_original_deadline(monkeypatch):
     assert all(connection.closed for connection in connections)
 
 
+@pytest.mark.parametrize("families", [
+    (socket.AF_INET6, socket.AF_INET6, socket.AF_INET),
+    (socket.AF_INET, socket.AF_INET, socket.AF_INET6),
+    (socket.AF_INET6, socket.AF_INET, socket.AF_INET, socket.AF_INET),
+    (socket.AF_INET, socket.AF_INET, socket.AF_INET),
+])
+def test_address_interleaving_preserves_first_family_and_unequal_tails(monkeypatch, families):
+    owner, connections, started, _ = connect_fixture(monkeypatch, expire=True)
+    resolved = [
+        (family, (f"::a{index}", 443, 0, 0) if family == socket.AF_INET6
+         else (f"127.0.0.{index + 1}", 443))
+        for index, family in enumerate(families)
+    ]
+    monkeypatch.setattr(gateway_transport, "_addresses", lambda *args: resolved)
+    primary = [item for item in resolved if item[0] == families[0]]
+    alternate = [item for item in resolved if item[0] != families[0]]
+    expected = []
+    while primary or alternate:
+        if primary:
+            expected.append(primary.pop(0))
+        if alternate:
+            expected.append(alternate.pop(0))
+    with pytest.raises(GatewayError, match="transport-unavailable"):
+        owner._connect_address(("localhost", 443))
+    assert [(family, target) for family, target, _ in started] == expected
+    assert all(connection.closed for connection in connections)
+
+
 def test_wait_uses_one_current_clock_sample_and_unregisters_before_close(monkeypatch):
     owner, connections, _, _ = connect_fixture(
         monkeypatch, expire=True, clock_step=0.02,
