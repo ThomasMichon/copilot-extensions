@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** managed source `ticking-wrench`
 - **Created:** 2026-10-16
-- **Status:** Draft
+- **Status:** Active
 - **Umbrella issue:** #6681
 - **Sub-issues:** #5861; prerequisite owners #6030, #6240, #6424, #5789, #6443, #6804
 
@@ -24,7 +24,7 @@ and routing campaigns, not a replacement for their implementation or ownership.
 | Participant | Role | Reached via |
 |-------------|------|-------------|
 | `ticking-wrench` | Evidence-to-contract plan and proposed integration slice | #6681 and this effort |
-| Existing #6030 / #6240 / #6424 owners | Construction, role lifecycle and installation | Their existing issue threads; exact integration owner acceptance pending |
+| Existing #6030 / #6240 / #6424 owners | Construction, role lifecycle and installation | Retained owner accepted the exclusive source leaves; ordered shared wiring remains with that owner |
 | Existing #5789 / #6443 / #6804 owners | Routing, authentication, enrollment and Gateway integration | Their existing issue threads |
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
 | `wobbly-contraption` | Retained construction/admission/lifecycle integration | Existing #6030 / #6240 / #6424 source custody |
@@ -98,6 +98,7 @@ GatewaySSHPolicy.from_dict(value) -> GatewaySSHPolicy
 GatewaySSHPolicy.resolve(machine, environment) -> SSHPolicyDecision
 GatewaySSHPolicy.policy_digest -> str
 SSHPolicyDecision.to_dict() -> dict
+SSHPolicyDecision.decision_digest -> str
 ```
 
 The policy retains immutable normalized canonical bytes and its revision/digest.
@@ -198,12 +199,12 @@ onboarded merely because its source is published.
 
 ### Phase 1 - Reviewed integration and ownership
 
-- [ ] Reconcile this proposal with the existing parent plans and current source.
-- [ ] Obtain the retained setup/construction/admission/execution owners' exact
+- [x] Reconcile this proposal with the existing parent plans and current source.
+- [x] Obtain the retained setup/construction/admission/execution owners' exact
   interface and exclusive-file agreement.
-- [ ] Turn available adopter evidence into public synthetic failure fixtures;
+- [x] Turn available adopter evidence into public synthetic failure fixtures;
   retain private machine inventory only in its private elaboration.
-- [ ] Clear this proposal's normal review/publication gate before runtime work.
+- [x] Clear this proposal's normal review/publication gate before runtime work.
 
 ### Phase 2 - Driver and directional policy
 
@@ -252,8 +253,10 @@ onboarded merely because its source is published.
 
 ## Proposal
 
-Draft integration contract only. No managed setup/apply, enrollment, live
-rollout, lifecycle takeover or implementation completion is asserted.
+The proposal is reviewed and merged. Accepted policy/runtime source leaves are
+being implemented independently; shared setup integration remains with its
+retained owner. No managed setup/apply, enrollment, live rollout, lifecycle
+takeover or implementation completion is asserted.
 
 ## Journal
 
@@ -264,3 +267,24 @@ rollout, lifecycle takeover or implementation completion is asserted.
   rather than proposing another controller or profile writer.
 - Current setup/execution interface and retained source ownership remain an
   explicit implementation dependency, not an invented completed capability.
+
+### 2026-10-17 - Reviewed source-leaf implementation
+
+- Proposal #7056 merged after its current-head required CI passed. The retained
+  construction owner accepted the exclusive policy/runtime source leaves and
+  keeps shared construction, admission, execution and lifecycle integration.
+- Published the exact version-1 decision interface in #6681, comment
+  `6227785664`. The policy implementation preserves that interface and adds
+  synthetic directional, constrained-host, offline and malformed-input cases.
+- The runtime owner opened #7083 against the same interface. Its publication
+  is not a setup hook, external transport adapter or live deployment.
+- The policy leaf passed 253 selected policy/release-selection contracts in
+  the contained standalone runner, including a rebuilt installed package and
+  fresh native isolated consumers. Explicit negative controls keep denied or
+  blocked intermediate hosts from widening inbound permissions.
+- F/E9 lint, whitespace and install-contract checks passed. No installer or
+  first-provision path changed; full clean-room provisioning and live SSH
+  effects remain with the separately admitted adapter/setup integration.
+- Included the required generated `fleet-manager` patch changefile: its
+  coupled standalone content participates in the repository release guard.
+  No shared manifest or version number is edited manually.
