@@ -204,7 +204,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "ecad57c5b3c14a70f33d8031b25d9dc4e3df8a344ce6d585e26356358a818d9f",
+          "sha256": "5cfe4e5c81e16e1bb47394cc8acb000f7480638567b550c85a4998fec8db8a54",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1076,7 +1076,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-39.json",
-          "sha256": "27e4d5f8a782727fc2f8b77466a825ab0344936df1a063e89ab3ce86ed73a5bb",
+          "sha256": "a8a83257eb48d5c1d2e310095b6be9824eaadd60fb0782551e4e00b8e2d9910a",
           "generation": 39,
           "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
@@ -3093,6 +3093,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
           "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
           "capture_method": "Preserve independent receipt-39 packet and version-skew expectations after selecting configured SSH profiles without topology user or port overrides."
+        },
+        {
+          "commit": "95cdb907d5ad1276a47960630a21b0e27d84a0bc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "27fee5e86ead7bbe780b194956e60c3d25c0dbe6",
+          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after clarifying optional-host validation and the retained legacy user keyword; native profile regressions retain both configured identities."
         }
       ],
       "support_window": "HTTP generations 1 through 39 remain supported. Immutable native33, workspace34, qualified-peer35, provider-creation36, render-cache37 and remote-ACP38 evidence is retained independently from receipt generation 39.",
