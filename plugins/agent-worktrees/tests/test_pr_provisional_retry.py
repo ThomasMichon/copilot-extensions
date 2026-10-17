@@ -144,3 +144,32 @@ def test_same_head_repository_change_refuses_without_mutation(
     after = tracking.load_record(path)
     assert after.prs == before.prs
     assert git_ops.git("rev-parse", branch, cwd=str(wt)).stdout.strip() == original
+
+
+@pytest.mark.parametrize("explicit_branch", [False, True])
+def test_interleaved_retry_reuses_original_attempt(
+    pr_repo: tuple, monkeypatch: pytest.MonkeyPatch, explicit_branch: bool,
+) -> None:
+    config, wid, _wt, _remote = pr_repo
+    real_rebase = git_ops.rebase
+    monkeypatch.setattr(git_ops, "rebase", lambda *_args, **_kwargs: False)
+    for title in ("First attempt", "Other attempt"):
+        assert not pr_ops.create_pr(
+            wid, config, title=title, new=True, open_pr=False,
+        )["success"]
+    path = cfg.tracking_dir() / f"{wid}.yaml"
+    before = tracking.load_record(path)
+    first, other = before.prs
+    monkeypatch.setattr(git_ops, "rebase", real_rebase)
+    result = pr_ops.create_pr(
+        wid, config, title="First attempt", new=not explicit_branch,
+        branch=first.branch if explicit_branch else None, open_pr=False,
+    )
+    assert result["success"], result
+    after = tracking.load_record(path)
+    assert len(after.prs) == 2
+    assert after.prs[0].pr_id == first.pr_id
+    assert after.prs[0].head_sha == result["head_sha"]
+    assert after.prs[1] == other
+    assert sum(not tracking._pr_is_terminal(pr) and pr.branch == first.branch
+               for pr in after.prs) == 1

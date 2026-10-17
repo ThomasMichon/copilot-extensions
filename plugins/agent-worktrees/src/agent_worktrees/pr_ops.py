@@ -728,6 +728,7 @@ def create_pr(
         )}
 
     try:
+        active = pr_publication_state.retry_candidate(record, active, feature_branch, prcfg.provider, default_pr_repo)
         provisional_retry = pr_publication_state.unpublished_retry(active, feature_branch, prcfg.provider, default_pr_repo)
     except ValueError as exc:
         return {**base, "error": str(exc)}
@@ -761,7 +762,6 @@ def create_pr(
         )}
 
     orig_sha = _rev(wt_branch, cwd=worktree_path)
-
     target_pr: PRRecord | None = None
     if record is not None:
         if (reusing or provisional_retry) and active is not None:

@@ -119,3 +119,19 @@ def unpublished_retry(
         unpublished(pr) and pr is not None
         and (pr.branch, pr.provider, pr.repo) == (branch, provider, repo)
     )
+
+
+def retry_candidate(
+    record: tracking.WorktreeRecord | None, active: tracking.PRRecord | None,
+    branch: str, provider: str, repo: str,
+) -> tracking.PRRecord | None:
+    """Find one matching attempt across interleaved heads without merging identities."""
+    candidates = [
+        pr for pr in record.prs
+        if not tracking._pr_is_terminal(pr) and pr.branch == branch
+    ] if record is not None else []
+    if len(candidates) > 1:
+        raise ValueError("Multiple live PR associations share this head; reconcile them before retrying.")
+    if candidates and unpublished_retry(candidates[0], branch, provider, repo):
+        return candidates[0]
+    return active
