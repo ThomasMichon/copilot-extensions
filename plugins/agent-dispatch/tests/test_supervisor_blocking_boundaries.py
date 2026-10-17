@@ -191,6 +191,37 @@ def test_shutdown_refreshes_children_scheduled_by_finishing_inventory(tmp_path, 
             daemon.shutdown()
 
 
+def test_shutdown_samples_receipt_children_after_pruning_finishing_parent(monkeypatch):
+    controller = FakeCompanionController()
+    parent, child = Future(), Future()
+    parent.set_running_or_notify_cancel()
+    child.set_running_or_notify_cancel()
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", launcher=FakeLauncher(),
+        companion_controller=controller, reconcile_call_budget=0.05,
+    )
+    daemon._probe_inflight.add(parent)
+    daemon._shutdown_waited_futures = set()
+    daemon._shutdown_drained = True
+    controller.receipt_futures = lambda: (child,) if parent.done() else ()
+    original = daemon._prune_probe_inflight
+
+    def complete_inventory_then_prune():
+        if not parent.done():
+            parent.set_result(None)
+        original()
+
+    monkeypatch.setattr(daemon, "_prune_probe_inflight", complete_inventory_then_prune)
+    try:
+        daemon._drain_tracked_futures(0.01)
+        assert daemon._shutdown_drained is False
+        assert child in daemon._probe_inflight
+        assert not child.done()
+    finally:
+        child.set_result(None)
+        daemon.shutdown()
+
+
 def test_slow_cycle_start_status_writer_does_not_delay_discovery():
     entered, release = threading.Event(), threading.Event()
     daemon = SupervisorDaemon(

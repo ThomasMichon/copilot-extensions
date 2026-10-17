@@ -196,10 +196,10 @@ class BoundedReconciliation:
 
         deadline = time.monotonic() + timeout
         while True:
+            self._prune_probe_inflight()
             inventory = getattr(self._companion(), "receipt_futures", None)
             if callable(inventory):
                 self._probe_inflight.update(inventory())
-            self._prune_probe_inflight()
             pending = set(self._managed_runtime_inflight) | self._probe_inflight
             if self._managed_cleanup_future is not None:
                 pending.add(self._managed_cleanup_future)
@@ -398,3 +398,15 @@ class BoundedReconciliation:
         finally:
             if self._receipt_reconcile_future.done():
                 self._receipt_reconcile_future = None
+
+    def _withdraw_stopped_managed(self, desired: dict) -> None:
+        from .registrations import RegistrationKind
+
+        adopted = set(self._companion_resolutions) | {
+            rid for rid, unit in self._units.items()
+            if unit.kind == RegistrationKind.PLUGIN_COMPANION
+        } | (self._managed_uncertain & set(desired))
+        try:
+            self._reconcile_companion_receipts(adopted)
+        except (CompanionIndeterminate, OSError, ValueError, RuntimeError) as exc:
+            log.warning("stopped companion receipt withdrawal remains pending: %s", exc)

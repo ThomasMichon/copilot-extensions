@@ -1662,7 +1662,7 @@ class SupervisorDaemon(BoundedReconciliation):
                         and unit.registration.get("spec", {}).get("managed_runtime")
                         and rid not in self._managed_uncertain
                     ):
-                        self._companion().forget_managed(rid)
+                        self._withdraw_stopped_managed(desired)
 
         # 2. restart units whose definition changed
         grouped = self._reconcile_transition_groups(desired, summary, deadline=reconcile_deadline)

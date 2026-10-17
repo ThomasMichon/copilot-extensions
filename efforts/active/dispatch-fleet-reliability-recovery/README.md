@@ -664,3 +664,27 @@ requested contract.
   and complete CI, and resolve the addressed findings with their actual
   dispositions. Source validation does not establish deployment, independent
   native custodian/adopter recovery or the parent fleet objective's completion.
+
+### 2026-10-17 - Bound active removal and preserve shutdown child accounting
+
+- Fresh exact-head review `5555329271` confirms both previous High findings
+  resolved but identifies two Medium boundaries: active managed removal still
+  performs selection integrity synchronously after stop, and a parent inventory
+  completing between child sampling and pruning can hide a pending child.
+  New regressions reproduce both defects before production changes.
+- Managed removal now updates adoption through the existing tracked inventory
+  and generation-fenced receipt worker. A changed adopted set can queue fresh
+  inventory in the same cycle; no additional executor or destructive retry is
+  introduced. Selection and retention pins remain until verified withdrawal.
+  A blocked integrity scan does not delay an unrelated unit, and expiry keeps
+  the operation explicitly unknown with the selected bytes preserved.
+- Shutdown prunes completed parents before sampling receipt children, retaining
+  a late child in the same grace budget. The controlled parent-completion
+  interleaving can no longer report a clean drain with an untracked child.
+- Six focused removal, disable and shutdown controls pass. The full current
+  bounded/managed contract selection passes 158 cases with one platform skip,
+  including real native readiness/rollback/stop. State-machine removal controls
+  now share the real monotonic clock with real integrity deadline checks;
+  timeout and cleanup assertions are retained rather than enlarged.
+  Fresh publication/review/complete CI remain required. Native keeper/adopter
+  and live deployment acceptance are still separate open gates.

@@ -365,6 +365,58 @@ def test_first_launch_waits_for_materialization_and_records_ready_snapshot(harne
     assert [event[0] for event in h.events][-3:] == ["launch", "release", "health"]
 
 
+def test_removed_active_companion_withdraws_selection_off_master(harness, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from tests.test_supervisor_daemon import FakeLauncher, _reg
+
+    h = harness
+    h.controller.monotonic = time.monotonic
+    h.daemon.reconcile_once()
+    snapshot = h.controller.selected_managed(h.rid)
+    assert snapshot is not None
+    selection = h.controller._selection_path(h.rid)
+    before = selection.read_bytes()
+    entered, release = threading.Event(), threading.Event()
+    original = h.controller._managed_retention()._withdrawal_snapshot
+    threads = []
+
+    def validate(*args, **kwargs):
+        threads.append(threading.get_ident())
+        entered.set()
+        assert release.wait(2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(h.controller._managed_retention(), "_withdrawal_snapshot", validate)
+    h.daemon._inventory_executor = ThreadPoolExecutor(max_workers=1)
+    h.daemon._receipt_executor = ThreadPoolExecutor(max_workers=2)
+    h.daemon._reconcile_call_budget = 0.05
+    h.daemon.launcher = FakeLauncher()
+    h.registrations = [_reg("unrelated", machine="machine-a")]
+    caller = threading.get_ident()
+    try:
+        started = time.monotonic()
+        summary = h.daemon.reconcile_once()
+        assert time.monotonic() - started < 0.5
+        assert summary.stopped == [h.rid]
+        assert summary.started == ["unrelated"]
+        assert entered.wait(1)
+        assert caller not in threads
+        assert selection.read_bytes() == before
+        assert h.controller._receipt_operations
+        time.sleep(0.06)
+        release.set()
+        h.daemon._drain_tracked_futures(2)
+        assert h.daemon._shutdown_drained
+        for future in tuple(h.controller._receipt_operations.values()):
+            with pytest.raises(ManagedRuntimeError, match="deadline expired"):
+                future.result(2)
+        assert selection.read_bytes() == before
+        assert h.controller._operation_record(h.rid)["state"] == "unknown"
+        assert len(h.processes) == 1
+    finally:
+        release.set()
+
+
 def test_launch_snapshot_is_immutable_and_includes_complete_environment(harness, monkeypatch):
     h = harness
     h.daemon.reconcile_once()
@@ -574,6 +626,7 @@ def test_uncertain_changed_authority_preserves_rollback_for_later_failure(harnes
 @pytest.mark.parametrize("disable", ["removed", "provider", "override"])
 def test_disable_discards_inflight_result_and_selected_launch(harness, disable):
     h = harness
+    h.controller.monotonic = time.monotonic
     h.daemon.reconcile_once()
     h.change()
     h.executor.defer = True

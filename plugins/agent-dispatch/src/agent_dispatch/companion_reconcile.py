@@ -76,8 +76,9 @@ class ReceiptReconciliation:
                     elif not (future.done() and (entry.consumed or future.cancelled())):
                         continue
                     self._receipt_availability.pop(rid)
-        if self._receipt_inventory_future is None and self._receipt_inventory_tag != tag:
-            self._receipt_inventory_tag = tag
+        inventory_tag = (tag, frozenset(adopted))
+        if self._receipt_inventory_future is None and self._receipt_inventory_tag != inventory_tag:
+            self._receipt_inventory_tag = inventory_tag
             self._receipt_inventory_future = inventory_executor.submit(
                 self._inventory_snapshot, executor, operation_budget,
             )

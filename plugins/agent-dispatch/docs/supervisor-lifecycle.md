@@ -21,6 +21,12 @@ its own single-worker executor. The master consumes only completed results and
 keeps the latest adopted set authoritative while an inventory is in flight.
 Pending inventory is tracked alongside the operations it schedules; shutdown
 refreshes child futures after an inventory finishes within the same grace budget.
+Completed parents are pruned before sampling child futures, so a parent finishing
+during sampling cannot hide a still-running receipt operation from shutdown.
+Removing or pausing a running managed companion stops its process first, then
+updates the inventory's adopted set and queues its exact-generation withdrawal.
+Integrity scanning never runs inline on that master removal path; selection pins
+remain until confirmed withdrawal, including when the operation deadline expires.
 Unknown orphan operations are fences, not newly adopted units.
 Companion providers have a separate four-worker pool from authoritative
 declaration/registration discovery, so four long-running valid providers cannot
