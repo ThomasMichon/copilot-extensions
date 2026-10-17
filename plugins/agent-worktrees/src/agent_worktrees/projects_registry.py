@@ -8,25 +8,9 @@ from pathlib import Path
 
 def load_projects_document(content: str) -> object:
     """Parse safe YAML while rejecting duplicate keys at every mapping level."""
-    import yaml
+    from .strict_yaml import load_strict_yaml_document
 
-    class StrictLoader(yaml.SafeLoader):
-        pass
-
-    def mapping(loader, node):
-        if not isinstance(node, yaml.MappingNode):
-            raise ValueError("invalid mapping node in projects registry")
-        loader.flatten_mapping(node)
-        result = {}
-        for key_node, value_node in node.value:
-            key = loader.construct_object(key_node)
-            if key in result:
-                raise ValueError("duplicate mapping key in projects registry")
-            result[key] = loader.construct_object(value_node)
-        return result
-
-    StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
-    return yaml.load(content, Loader=StrictLoader)
+    return load_strict_yaml_document(content, label="projects registry")
 
 
 def parse_projects_registry(path: Path) -> dict:

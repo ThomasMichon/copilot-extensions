@@ -70,6 +70,55 @@ the token remains the stable operation handle. Same-identity bind is idempotent;
 different identity or a ref collision is refused without changing the pending
 claim. Recovery without the private fence requires a registered provider probe.
 
+## Read-only ownership views
+
+```bash
+agent-worktrees claims ownership --json
+agent-worktrees claims ownership --owner-ref machine/project/worktree --json
+agent-worktrees claims ownership --kind container --namespace raw-resource \
+  --identity-json '{"immutable_id":"opaque"}' --json
+```
+
+`ownership` derives both owner-to-resources and exact-resource-to-recorded-owner
+views from the existing ledger across **locally registered projects**. It does
+not create a registry, load provider code, call a daemon, probe execution spaces,
+bootstrap a runtime or write records. Legacy `claims owner` remains the separate
+best-effort lookup for general claim references.
+
+The version-1 `copilot-extensions.producer-ownership` result includes `complete`,
+`issues`, `entries` and `resolution`. Entries retain the record owner, original
+creator, generic state, phase, callback ref, handoff marker and producer metadata
+(including token, recovery, allocation epoch, opaque identity and terminal
+receipts when present). Pending and allocating responsibility remains visible.
+Accepted transfers must form one connected, creator-rooted chain with matching
+immutable metadata; closed receipts are history, not current ownership.
+
+Filters apply **after** checking all observed records and transfer chains.
+An identity filter compares the entire canonical JSON object, together with any
+kind/namespace selectors; it is not a partial match or provider-specific alias
+normalization. Identity keys are provider-defined; `immutable_id` above is only
+an opaque example, not a required field or canonical schema.
+Providers must choose an immutable physical identity independently
+of reservation labels. Use all three selectors for one exact resource.
+
+Unreadable/missing inputs, malformed raw claims or metadata, duplicate YAML keys,
+duplicate tokens/references, duplicate bound identities, unresolved transfers,
+remaining handoff markers and detected input changes make `complete` false.
+The command exits 1 and suppresses all `current_owner` conclusions, even when
+the uncertainty lies outside a requested owner filter. Invalid metadata is
+represented by the existing wire sentinel, never silently dropped as an empty
+ledger. Invalid command input exits 2.
+
+**This is an observational, non-transactional local snapshot, never authority
+to allocate, delete, settle or finalize.** File/directory stamp checks detect
+ordinary concurrent changes but do not supply an atomic cross-record read.
+`complete` means only that this local scan encountered no reported uncertainty;
+each entry's execution space remains `recorded-not-probed`. It does not establish
+provider availability or exclude owners in another machine, unregistered
+project or execution space. No matching entries means `not-observed`, never
+`unowned` or verified absence. `absence_proof` and `cleanup_authority` are always
+false. Normal per-owner transactions and finalization gates remain authoritative.
+
 ## Allocation permission and completion
 
 The integrated producer must follow **reserve, begin, create, bind, start**.
