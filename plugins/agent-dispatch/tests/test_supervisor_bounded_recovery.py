@@ -272,6 +272,99 @@ def test_publication_cancellation_preserves_owned_ids_until_readback():
             gate.set()
 
 
+@pytest.mark.parametrize("malformed_later_item", [False, True])
+def test_publication_worker_does_not_publish_ledger_before_caller_harvest(malformed_later_item):
+    import copy
+    from agent_dispatch.supervisor_daemon_registration_publish import BoundedDeclarationPublisher
+
+    class Client:
+        def __init__(self):
+            self.writes = []
+
+        def list_registrations(self, **kwargs):
+            return []
+
+        def register_registration(self, kind, spec, **kwargs):
+            self.writes.append(kwargs["reg_id"])
+            raise TimeoutError("response lost after publication")
+
+    client = Client()
+    publisher = BoundedDeclarationPublisher()
+    registrations = [_reg("a", machine="host")]
+    if malformed_later_item:
+        malformed = _reg("z", machine="host")
+        del malformed["spec"]
+        registrations.append(malformed)
+    wanted = {reg["id"]: reg for reg in registrations}
+    publisher.records = {rid: {"target": reg, "state": "pending"} for rid, reg in wanted.items()}
+    before = copy.deepcopy(publisher.records)
+    publisher.inflight_ids = set(wanted)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        publisher.future = pool.submit(publisher._advance, client, wanted, publisher.records,
+                                       time.monotonic() + 2)
+        try:
+            publisher.future.result(1)
+        except KeyError:
+            pass
+        assert publisher.records == before
+        if malformed_later_item:
+            with pytest.raises(KeyError, match="spec"):
+                publisher.poll(client, registrations, executor=pool, deadline=time.monotonic())
+        else:
+            publisher.poll(client, registrations, executor=pool, deadline=time.monotonic())
+        assert publisher.future is None
+        assert publisher.inflight_ids == set()
+        assert publisher.records["a"]["state"] == "unknown"
+        assert client.writes == ["a"]
+
+
+def test_publication_explicit_null_environment_uses_default_for_write_and_readback():
+    from agent_dispatch.supervisor_daemon_registration_publish import BoundedDeclarationPublisher
+
+    class Client:
+        def __init__(self):
+            self.row = None
+            self.writes = []
+
+        def list_registrations(self, **kwargs):
+            return [] if self.row is None else [self.row]
+
+        def register_registration(self, kind, spec, **kwargs):
+            assert kwargs["env"] == "default"
+            self.writes.append(kwargs["reg_id"])
+            self.row = {"id": kwargs["reg_id"], "kind": kind, "spec": spec,
+                        "machine": kwargs["machine"], "env": "default"}
+            raise TimeoutError("response lost after publication")
+
+    publisher, client = BoundedDeclarationPublisher(), Client()
+    registration = {**_reg("unit", machine="host"), "env": None}
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        publisher.poll(client, [registration], executor=pool, deadline=time.monotonic() + 1)
+        publisher.poll(client, [registration], executor=pool, deadline=time.monotonic() + 1)
+    assert client.writes == ["unit"]
+    assert publisher.records["unit"]["state"] == "confirmed"
+
+
+@pytest.mark.parametrize("failure", ["non-object", "invalid-json", "io"])
+def test_status_reader_uses_nonidentifying_error_categories(tmp_path, monkeypatch, failure):
+    from pathlib import Path
+    from agent_dispatch.supervisor_status_io import read_status
+
+    path = tmp_path / "private-status.json"
+    path.write_text("[]" if failure == "non-object" else "{", encoding="utf-8")
+    if failure == "io":
+        def denied(*args, **kwargs):
+            raise PermissionError(f"private observation {path}")
+        monkeypatch.setattr(Path, "read_text", denied)
+    payload, error = read_status(path)
+    assert payload is None
+    assert error == {
+        "non-object": "status-object-required", "invalid-json": "status-json-invalid",
+        "io": "status-read-unavailable",
+    }[failure]
+    assert str(path) not in error
+
+
 def test_progress_writer_rejects_another_live_generation(tmp_path, monkeypatch):
     import json
     import os

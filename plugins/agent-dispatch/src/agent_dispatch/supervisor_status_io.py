@@ -12,10 +12,12 @@ def read_status(path: Path) -> tuple[dict | None, str | None]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None, None
-    except (OSError, ValueError) as exc:
-        return None, str(exc)
+    except OSError:
+        return None, "status-read-unavailable"
+    except ValueError:
+        return None, "status-json-invalid"
     if not isinstance(payload, dict):
-        return None, f"{path}: expected a JSON object"
+        return None, "status-object-required"
     return payload, None
 
 

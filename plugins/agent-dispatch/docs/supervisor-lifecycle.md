@@ -45,6 +45,11 @@ confirmed by a scoped registry read started after publication withdrawal was
 confirmed. Earlier in-flight registry results are discarded, and cached registry
 rows remain suppressed during that wait. A changed declaration cannot submit a
 concurrent publication batch.
+Only the master harvests completed batch ledgers. Workers return partial custody
+with any unexpected failure; the master records it before surfacing the original
+exception, so an uncertain earlier write cannot become unstarted work.
+Missing and explicitly null declaration environments both use `default` for
+publication and readback comparison.
 Publication is metadata mirroring, not authority to replay task execution.
 Publication readback is deliberately registry-wide: an uncertain write retains
 its captured target even when its machine/environment differs from the next
@@ -134,6 +139,8 @@ failures cannot abort desired-state reconciliation or hide completed mutations:
 they report fixed, sanitized reason/error categories through standard logging,
 limited to one warning per category per 30 seconds. Unavailable receipt progress
 is marked unknown (`null` with an observation error), not a confirmed empty list.
+Status-file read errors expose fixed I/O, JSON and object-shape classifications,
+not filesystem paths or raw exception text.
 A controller without a callable progress observation reports
 `receipt-progress-unsupported`; only a completed observation may report `[]`.
 Data/state failures in the final summary follow the same classified best-effort

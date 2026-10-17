@@ -26,6 +26,12 @@ from .registrations import RegistrationKind
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
+
+def _environment(registration: dict) -> str:
+    value = registration.get("env")
+    return "default" if value is None else value
+
+
 class BoundedDeclarationPublisher:
     """Single tracked metadata batch; uncertain writes are read back before retry."""
 
@@ -37,12 +43,15 @@ class BoundedDeclarationPublisher:
         self.withdrawn_ids: set[str] = set()
         self.withdrawal_epoch = 0
 
-    def _harvest(self, records: dict[str, dict]) -> None:
+    def _harvest(self, outcome: tuple[dict[str, dict], Exception | None]) -> None:
+        records, error = outcome
         withdrawn = self.inflight_ids - set(records)
         if withdrawn - self.withdrawn_ids:
             self.withdrawal_epoch += 1
         self.withdrawn_ids.update(withdrawn)
         self.records = records
+        if error is not None:
+            raise error
 
     def observe_registry(self, ids: set[str], started_epoch: int) -> set[str] | None:
         if started_epoch != self.withdrawal_epoch:
@@ -76,29 +85,29 @@ class BoundedDeclarationPublisher:
                 if self.future.done():
                     raise
             else:
-                self._harvest(records)
-                self.future = None
-                self.inflight_ids = set()
+                try:
+                    self._harvest(records)
+                finally:
+                    self.future = None
+                    self.inflight_ids = set()
         return set(wanted) | set(self.records) | self.inflight_ids | self.seen_ids
 
     @staticmethod
     def _matches(row: dict | None, target: dict | None) -> bool:
         if target is None:
             return row is None
-        return row is not None and all(
-            row.get(key, "default" if key == "env" else None)
-            == target.get(key, "default" if key == "env" else None)
-            for key in ("kind", "spec", "machine", "env")
-        )
+        return (row is not None and _environment(row) == _environment(target)
+                and all(row.get(key) == target.get(key) for key in ("kind", "spec", "machine")))
 
-    def _advance(self, client, wanted: dict[str, dict], previous: dict[str, dict], deadline: float) -> dict:
+    @classmethod
+    def _advance(cls, client, wanted: dict[str, dict], previous: dict[str, dict],
+                 deadline: float) -> tuple[dict[str, dict], Exception | None]:
         wanted, records = copy.deepcopy(wanted), copy.deepcopy(previous)
         try:
-            return self._advance_batch(client, wanted, records, deadline)
-        finally:
-            # Publish the partial ledger even if a later malformed item aborts:
-            # earlier unknown writes must not be downgraded to unstarted work.
-            self.records = records
+            return cls._advance_batch(client, wanted, records, deadline), None
+        except Exception as exc:
+            # The caller harvests partial custody before re-raising the failure.
+            return records, exc
 
     @classmethod
     def _advance_batch(cls, client, wanted: dict[str, dict], records: dict[str, dict], deadline: float) -> dict:
@@ -130,7 +139,7 @@ class BoundedDeclarationPublisher:
                 else:
                     client.register_registration(
                         target["kind"], target["spec"], reg_id=rid,
-                        machine=target.get("machine"), env=target.get("env", "default"),
+                        machine=target.get("machine"), env=_environment(target),
                     )
             except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                 log.warning("declaration publication outcome unknown: error_type=%s", type(exc).__name__)
@@ -178,7 +187,7 @@ def publish_declared_registrations(
                 reg["spec"],
                 reg_id=rid,
                 machine=reg.get("machine"),
-                env=reg.get("env", "default"),
+                env=_environment(reg),
             )
         except Exception:  # pragma: no cover - coordinator reachability varies
             log.exception("failed to publish declared registration %s to the coordinator", rid)
