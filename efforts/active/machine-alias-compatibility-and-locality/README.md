@@ -199,8 +199,9 @@ _(Agent-recommended integration details for the requested #7057 capability.)_
   report partial/error outcomes honestly and make repeated apply idempotent.
 - [x] Pass focused regressions, lint, install-contract and metadata/documentation
   gates; add the agent-worktrees changefile. The final source candidate passes
-  352 affected tests, including native synthetic public-CLI report proof,
-  canonical registration serialization and claim-handoff registry coverage.
+  379 affected tests, including native synthetic public-CLI report proof,
+  canonical registration serialization, claim-handoff registry and follow-up
+  publication-race coverage.
 - [ ] Land the source candidate through final-head review and required dev CI.
 - [ ] Transfer explicit one-time local application to the coordinator with the
   retained clean source and public CLI commands. No runtime deployment, service
@@ -294,7 +295,10 @@ unrelated service changes or a second machine registry.
   final inspection/write boundary. A real concurrent-writer regression proves
   registration waits until the record commit.
 - The fresh-home native CLI fixture uses the same platform detector as its
-  child, including WSL. Expanded affected validation passes 352 tests.
+  child, including WSL. Expanded affected validation passes 379 tests.
+- Itemized follow-up references and retained release snapshots participate in
+  publication fencing too, including a new-peer save attempted after the final
+  inventory check. Passive titles, notes and summaries are not ownership edges.
 
 ### 2026-10-16 - Guest source repair merged; release containment remains
 - #7009 merged as `6fe63b78740cc0adbf49fad4cd8970dca656ce83`, from exact head

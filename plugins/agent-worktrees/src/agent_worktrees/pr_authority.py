@@ -132,6 +132,11 @@ def _ownership(record: tracking.WorktreeRecord | None) -> tuple:
         record.dispatch_attempt, record.execution_leg, record.session_backend,
         record.dispatch_attempt_raw, record.execution_leg_raw,
         record.session_backend_raw, record.controller_raw_entries,
+        tuple((claim.kind, claim.ref) for claim in record.last_finalize_released),
+        tuple(
+            (tuple((ref.kind, ref.ref) for ref in item.refs), item.result_ref, item.transfer_target)
+            for item in record.follow_ups if item.refs or item.result_ref or item.transfer_target
+        ),
     )
     return relationships if any(relationships) else ()
 

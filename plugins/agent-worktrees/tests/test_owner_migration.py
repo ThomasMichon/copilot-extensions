@@ -214,7 +214,7 @@ def test_bare_id_peer_relationship_is_fenced_but_passive_strings_are_not(receivi
     code, report = run(capsys, "--fix")
     assert code == 1 and "inbound reference" in report["error"]
     assert snapshot(root) == before
-    peer.write_text(yaml.safe_dump({"title": RECORD}), encoding="utf-8")
+    peer.write_text(yaml.safe_dump({"title": f"{OLD}/{PROJECT}/{RECORD}", "note": RECORD}), encoding="utf-8")
     before = snapshot(root)
     assert run(capsys)[0] == 0
     assert snapshot(root) == before
@@ -348,6 +348,43 @@ def test_handoff_registry_lock_is_retained_through_record_commit(receiving, caps
     assert run(capsys, "--fix")[0] == 0
     with tracking._RecordLock(registry, blocking=False) as lock:
         assert lock.acquired
+
+
+@pytest.mark.parametrize("field", ["refs", "result_ref", "transfer_target", "last_finalize_released"])
+def test_new_peer_obligation_reference_cannot_enter_after_final_inspection(receiving, capsys, monkeypatch, field):
+    _, path, _, _, _, _, _, _ = receiving
+    original_repair = migration.tracking_yaml_repair.apply_repair
+    peer_path = path.with_name("late-peer.yaml")
+    ref = f"{OLD}/{PROJECT}/{RECORD}"
+    item = tracking.FollowUpRecord(id="follow-one", summary="Retained obligation")
+    if field == "refs":
+        item.refs = [tracking.FollowUpRef(kind="resource-claim", ref=ref)]
+    elif field != "last_finalize_released":
+        setattr(item, field, ref)
+    peer = replace(tracking.load_record(path), worktree_id="late-peer", machine=NEW)
+    if field == "last_finalize_released":
+        peer.last_finalize_released = [tracking.ResourceClaim(kind="worktree", ref=ref)]
+    else:
+        peer.follow_ups = [item]
+    results = []
+
+    def new_peer_writer():
+        try:
+            tracking.save_record(peer, peer_path)
+        except TimeoutError:
+            results.append("fenced")
+
+    def commit_with_concurrent_new_peer(*args):
+        thread = threading.Thread(target=new_peer_writer)
+        thread.start()
+        thread.join(5)
+        assert not thread.is_alive() and results == ["fenced"] and not peer_path.exists()
+        return original_repair(*args)
+
+    monkeypatch.setattr(migration.tracking_yaml_repair, "apply_repair", commit_with_concurrent_new_peer)
+    code, report = run(capsys, "--fix")
+    assert code == 0 and report["changed"]
+    assert not peer_path.exists() and yaml.safe_load(path.read_bytes())["machine"] == NEW
 
 
 def test_changed_inventory_refuses_under_real_locks(receiving, capsys, monkeypatch):

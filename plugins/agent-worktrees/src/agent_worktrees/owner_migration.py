@@ -101,6 +101,11 @@ def _references(value, prefix: str = ""):
                 machine=value["machine"], project=project, worktree_id=value["worktree_id"],
             )
         for key, item in value.items():
+            if isinstance(item, str) and key in (
+                "title", "summary", "note", "reason", "bound_agent", "pending_seed",
+                "activity", "worktree_path", "branch", "path",
+            ):
+                continue
             yield from _references(item, f"{prefix}.{key}" if prefix else str(key))
     elif isinstance(value, list):
         for index, item in enumerate(value):

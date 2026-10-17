@@ -79,9 +79,12 @@ Apply uses the existing installation publication authority and nonblocking
 claim-handoff-registry and tracking sidecar locks, then repeats the complete inspection and compares its
 input bytes before writing. A busy lock, changed inventory or lost provenance
 refuses without changing the selected record. Current tracking writers fence
-new ownership references and reject stale full-record saves that would restore
+new ownership and follow-up references (including retained release snapshots),
+and reject stale full-record saves that would restore
 the old machine. Canonical repository-registration publication uses the same
 authority, preventing a newly visible knowledge ledger from entering mid-repair.
+Passive titles, notes, summaries and historical checkout paths are not dependency
+references, even when their text resembles a qualified worktree name.
 
 **Quiesce writers running older code before explicit offline recovery.** Older
 processes do not acquire newly introduced ownership fences; a source-only
