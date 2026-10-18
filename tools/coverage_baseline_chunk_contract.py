@@ -30,6 +30,7 @@ def test_workflow_keeps_deadline_enrollment_and_only_two_heavy_opt_ins() -> None
         "&& '2' || '1' }}"
     )
     assert '--workers "$BASELINE_WORKERS"' in step["run"]
+    assert step.get("continue-on-error", False) is False
     enrolled = [
         "agent-ssh", "agent-codespaces", "agent-containers", "agent-vault",
         "agent-logger", "agent-mcp", "agent-bridge", "agent-worktrees", "agent-dispatch",
@@ -39,6 +40,8 @@ def test_workflow_keeps_deadline_enrollment_and_only_two_heavy_opt_ins() -> None
     assert upload["if"] == step["if"]
     assert upload["with"]["name"] == "coverage-baseline-${{ matrix.plugin }}"
     assert upload["with"]["path"] == "${{ matrix.plugin }}.json"
+    assert upload.get("continue-on-error", False) is False
+    assert upload["with"]["if-no-files-found"] == "error"
     ci = yaml.safe_load((repo / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     names = {
         "Coverage-guided-ci selection prototype tests (Phase 0 pilot)",
@@ -202,6 +205,7 @@ def test_chunk_refuses_incomplete_evidence_and_keeps_diagnostics(
     monkeypatch.setattr(chunks.subprocess, "run", run)
     with pytest.raises(chunks.BaselineCollectionError) as caught:
         chunks.run_chunk(_spec(tmp_path))
+    assert 'chunk 1/6 ["tests"]' in str(caught.value)
     if failure == "timeout":
         assert "running" in str(caught.value) and "timed out after 300" in str(caught.value)
     else:

@@ -276,12 +276,10 @@ jobs:
         # loop's current synchronous work has actually finished.
         # Independent
         # of, and in addition to, the trusted `run-plugin-tests.py` run
-        # above -- this step's own failure never fails this job (see
-        # `continue-on-error` below): a baseline is optional evidence
-        # relative to `run-plugin-tests.py`'s own real test outcome, but
-        # the `promote` job's own "Verify enrolled coverage baselines were
-        # actually collected" step makes an ENROLLED plugin's baseline a
-        # hard requirement regardless -- keep this `if:` condition's
+        # above. Every enrolled baseline is required: a collector or upload
+        # failure must fail this source job, not leave a success-shaped
+        # result for missing evidence. The `promote` job also verifies the
+        # complete artifact set independently. Keep this `if:` condition's
         # plugin list in exact sync with that step's own list. Expand both
         # lists together as later pilots prove out. `--cov-source` is
         # derived from `matrix.plugin` (every plugin's own `src/` package
@@ -290,7 +288,6 @@ jobs:
         # hardcoded per plugin, so enrolling the next one only ever touches
         # this `if:` list and the `promote` job's matching one below.
         if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees","agent-dispatch"]'), matrix.plugin)
-        continue-on-error: true
         env:
           BASELINE_WORKERS: ${{ (matrix.plugin == 'agent-worktrees' || matrix.plugin == 'agent-dispatch') && '2' || '1' }}
         run: |
@@ -305,7 +302,6 @@ jobs:
             --out "${plugin}.json"
       - name: Upload coverage baseline - ${{ matrix.plugin }}
         if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees","agent-dispatch"]'), matrix.plugin)
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           # The ARTIFACT's own name carries the `coverage-baseline-` prefix
@@ -318,7 +314,7 @@ jobs:
           # exactly, or verification below silently fails every run.
           name: coverage-baseline-${{ matrix.plugin }}
           path: ${{ matrix.plugin }}.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
 
   worktree-manager:

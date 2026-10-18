@@ -63,9 +63,11 @@ def run_chunk(chunk: Chunk) -> dict:
     from tools.coverage_guided_selection.baseline import _subprocess_env
     from tools.plugin_test_containment import no_window_kwargs
 
+    paths = json.loads(chunk.command[-7])
+    label = f"chunk {chunk.index + 1}/{chunk.total} {json.dumps(paths)}"
     print(
         f"Collecting coverage baseline chunk {chunk.index + 1}/{chunk.total} "
-        f"({len(json.loads(chunk.command[-7]))} path(s), {chunk.timeout_s:g}s limit)",
+        f"({len(paths)} path(s), {chunk.timeout_s:g}s limit) {json.dumps(paths)}",
         flush=True,
     )
     try:
@@ -79,9 +81,12 @@ def run_chunk(chunk: Chunk) -> dict:
             **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
-        raise timeout_error(exc, timeout_s=chunk.timeout_s) from exc
+        error = timeout_error(exc, timeout_s=chunk.timeout_s)
+        raise BaselineCollectionError(
+            error.returncode, error.stdout, f"{label}\n{error.stderr}",
+        ) from exc
     if proc.returncode != 0:
-        raise BaselineCollectionError(proc.returncode, proc.stdout, proc.stderr)
+        raise BaselineCollectionError(proc.returncode, proc.stdout, f"{label}\n{proc.stderr}")
     try:
         result = json.loads(Path(chunk.output_file).read_text())
         if not isinstance(result, dict) or any(
@@ -90,7 +95,7 @@ def run_chunk(chunk: Chunk) -> dict:
             raise ValueError("driver output must contain duration and coverage mappings")
     except (OSError, ValueError) as exc:
         raise BaselineCollectionError(
-            -1, proc.stdout, f"{proc.stderr}\ninvalid coverage driver output: {exc}",
+            -1, proc.stdout, f"{label}\n{proc.stderr}\ninvalid coverage driver output: {exc}",
         ) from exc
     return result
 

@@ -1057,6 +1057,83 @@ recipe 661.114 seconds, below the unchanged 1,800-second job deadline. These
 local Linux results do not stand in for source review, current-head required
 checks, hosted qualification or verified publication.
 
+Source repair #7173 merged as
+`f4dec6df9788b75342605ec19c514439d55b6188` after actual current-head Copilot
+approval with no open findings and all three original required checks passed.
+The first review correctly identified that plugin test changes still require
+a changefile; the canonical patch entry was added, its actual guard passed and
+the corrected head's full CI run `39137863840` succeeded. No version manifest,
+CI requirement, baseline or validation limit was waived. Normal reconciliation
+retained the source worktree's pre-completion backup.
+
+The next stretch is only the matching reviewed Main workflow activation:
+the baseline-worker environment and CLI option, with the corrected five-file
+comment. Preserved Main CI keeps its existing selector; the helper pin, pause,
+product and control manifest remain unchanged. Only after that control is
+compatible may one fresh complete paused qualification earn hosted source,
+generated/native consumer, artifact and publication evidence. The source merge
+does not close Phase 9, authorize resume or satisfy natural-cycle/client gates.
+
+Workflow-only Main activation #7175 merged as
+`2561af5292f79185c01a25affaf8fb9c223366ef` after actual current-head Copilot
+approval with no open findings and the enforced Main source gate passed.
+Normal squash merge used no administrator override. The actual proposed Main
+files passed the reviewed source contract, and parsed comparison proved only
+the two baseline-step semantic fields changed. CI, the four-path control
+manifest, helper `b576e17ec2280c27866b0be550ff7b0604cfaa58`, pause and exposed
+product remained unchanged. A fresh complete paused qualification is the next
+owned gate; no release, resume or client adoption is inferred from activation.
+
+Qualification `39140871444` then admitted exact Dev
+`f4dec6df9788b75342605ec19c514439d55b6188` from Main `2561af5292`. It stopped
+without signing, candidate qualification, publication or product merge.
+Although all fourteen source jobs reported success, only eight of nine
+required baseline artifacts existed. Worktrees' full suite passed in 706
+seconds, but one instrumented chunk reached its unchanged 300-second limit;
+`continue-on-error` masked that failure and the empty upload as job success.
+Dispatch's full suite, baseline and upload succeeded. The terminal generation's
+Main hold was released; the pause and exposed product remain unchanged.
+
+Artifact construction independently refused the correctly materialized flat
+`agent-installation-context` library because its duplicated structural checks
+still required `src/`. The local repair reuses the materializer's existing
+declared-module policy for canonical and vendored closure discovery, including
+explicitly retained flat references. Missing modules, unsafe roots, symlinks and
+metadata refusals remain enforced. A real pinned-materializer-to-source-builder
+bridge and the full artifact contract cohort pass: 314 cases, four unchanged
+platform skips. The proposed helper also completes real unsigned construction
+for the exact failed Dev/Main pair in 390.252 seconds, exporting a nonempty
+thirteen-artifact index; nothing was signed or pushed.
+
+The timed-out cohort's 367-test progress trace matches the alias-slot matrix
+batch, not the later timestamp-only candidates. Profiling one actual case found
+185 uncached config loads and 730 YAML parses. The fixture now shares one
+per-case config snapshot and memoizes the real topology parser by exact path,
+mode and content, returning independent copies. Changed bytes reparse; final
+config/topology invariance and a freshness regression guard this test-only
+optimization. Production registry freshness is unchanged. The same instrumented
+cohort plus its comparison peer falls from 133.402 to 30.794 seconds locally:
+all 440 original IDs and tiers remain, with one added freshness guard.
+
+The complete isolated current Worktrees suite then passed: 12,290 passed and
+336 platform/capability skips across all eighteen groups in 308.805 seconds.
+The complete instrumented baseline passed in 340.121 seconds, retaining all
+12,626 cases and 368 covered files; every one of its 12,472 attributed test
+contexts names a retained case. The continuous 648.926-second full-plus-baseline
+run retains the original per-item/group/plugin bounds, two-worker opt-in and
+shared collector resource limits. This is local proposed-source proof, not a
+replacement for hosted qualification.
+
+The source workflow now makes enrolled collector/upload failures visible and
+retains the independent complete-artifact check. Chunk diagnostics identify the
+original index and test paths even after an active sibling drains. Local
+current-suite proof is complete; ordinary source review/CI and a matching
+reviewed immutable helper-pin/control activation still precede another fresh
+qualification. No
+test, baseline, time/resource bound or publication gate is waived. Existing
+unregistered `windows_only` marker warnings remain part of Phase 9's ordinary
+test-hygiene follow-up, not a reason to bypass validation.
+
 ### 2026-10-18 - Source suites pass; pinned materializer compatibility blocks composition
 
 Source #7164 merged as `0b5b636802a6988b59af45c9c5174d281be9592d` after actual

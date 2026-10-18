@@ -53,6 +53,11 @@ and durations merge across batches. A failed or timed-out batch aborts collectio
 without returning partial evidence or retrying a smaller subset. A successful
 upload step with no file does not satisfy the required baseline gate.
 
+An enrolled collector or upload failure fails its source job immediately;
+missing upload files are errors. The later complete-baseline-set check remains
+an independent publication requirement. Chunk failures identify their original
+index and exact test paths, including after a concurrent sibling drains.
+
 Worktrees and Dispatch opt into `--workers 2` for this separate baseline step.
 The two drivers retain independent coverage databases, reports, pytest temp
 roots and host-state sandboxes. They share **one** unchanged 900-second,

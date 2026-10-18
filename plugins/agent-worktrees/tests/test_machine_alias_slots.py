@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import base64
+from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -43,6 +45,22 @@ def world(tmp_path, monkeypatch):
         anchor=anchor, state=state, directory=directory, namespace=namespace,
         config_path=state / "config.yaml",
     )
+
+
+@pytest.fixture
+def parsed_topology_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Parse each cell's actual topology once; changed bytes remain fresh."""
+    original = cfg._parse_machines_yaml_file
+    parsed: dict[tuple[Path, bool, bytes], dict[str, cfg.MachineEntry]] = {}
+
+    def read(path: str | Path, *, require_alias: bool = True) -> dict[str, cfg.MachineEntry]:
+        source = Path(path)
+        key = (source.resolve(), require_alias, source.read_bytes())
+        if key not in parsed:
+            parsed[key] = original(source, require_alias=require_alias)
+        return deepcopy(parsed[key])
+
+    monkeypatch.setattr(cfg, "_parse_machines_yaml_file", read)
 
 
 def _topology(world, explicit):
@@ -178,8 +196,12 @@ def test_observed_hostname_without_metadata_keeps_record_and_launch_local(
 
 @pytest.mark.parametrize("explicit", [False, True], ids=["legacy-record", "new-record"])
 @pytest.mark.parametrize("platform,alias", CELLS)
+@pytest.mark.usefixtures("parsed_topology_cache")
+@cfg.cached_load_config_scope()
 def test_alias_slot_grid_preserves_strings_and_scopes(world, monkeypatch, explicit, platform, alias):
+    """Share one immutable config snapshot; record and handoff writes remain live."""
     _topology(world, explicit)
+    before_topology = (world.anchor / "machines.yaml").read_bytes()
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
     world.config_path.write_text(yaml.safe_dump({
         "repo_name": "example", "machine": alias, "platform": platform,
@@ -271,6 +293,23 @@ def test_alias_slot_grid_preserves_strings_and_scopes(world, monkeypatch, explic
     for path in paths.values():
         record = tracking.load_record(path)
         assert (record.machine, record.platform) == (alias, platform)
+    assert world.config_path.read_bytes() == before_config
+    assert (world.anchor / "machines.yaml").read_bytes() == before_topology
+
+
+def test_topology_fixture_returns_independent_results_and_reloads_changed_bytes(
+    world, parsed_topology_cache,
+):
+    _topology(world, False)
+    source = world.anchor / "machines.yaml"
+    first = cfg._parse_machines_yaml_file(source, require_alias=False)
+    first.clear()
+    assert cfg._parse_machines_yaml_file(source, require_alias=False)
+    document = yaml.safe_load(source.read_text(encoding="utf-8"))
+    document["machines"]["Example-Host"]["hostname"] = "Alternate-Host"
+    source.write_text(yaml.safe_dump(document), encoding="utf-8")
+    updated = cfg._parse_machines_yaml_file(source, require_alias=False)
+    assert updated["Example-Host"].hostname == "Alternate-Host"
 
 
 @pytest.mark.parametrize("platform,foreign", [("windows", "wsl"), ("wsl", "windows")])

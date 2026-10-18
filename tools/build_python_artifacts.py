@@ -204,8 +204,8 @@ def _validate_in_tree_lib_dir(label: str, unresolved: Path) -> Path:
     `uv_editable_ref.uv_editable_problems` (which enforces the ESCAPING
     dev-branch form's own requirements: `editable = true` and a path that
     escapes the consumer root -- both of which a correct in-tree vendored
-    copy must NOT have). Still refuses a missing directory, a missing
-    `src/`/`pyproject.toml`, or a symlink, so this script can never build
+    copy must NOT have). Still requires the materializer's accepted Python
+    source layout, `pyproject.toml`, and a symlink-free tree, so it never builds
     or describe a source a real materialization would consider incomplete.
     Takes the UNRESOLVED candidate path and checks `.is_symlink()` on it
     directly -- `Path.resolve()` follows symlinks, so checking a path
@@ -222,8 +222,10 @@ def _validate_in_tree_lib_dir(label: str, unresolved: Path) -> Path:
     canonical = unresolved.resolve()
     if not canonical.is_dir():
         raise ArtifactBuildError(f"{label}: {canonical} does not exist")
-    if not (canonical / "src").is_dir():
-        raise ArtifactBuildError(f"{label}: {canonical}/src does not exist")
+    if not uer.has_canonical_python_sources(canonical):
+        raise ArtifactBuildError(
+            f"{label}: {canonical}/src does not exist and no valid flat py-modules are declared"
+        )
     if not (canonical / "pyproject.toml").is_file():
         raise ArtifactBuildError(f"{label}: {canonical}/pyproject.toml is missing")
     nested = uer._find_symlink(canonical)
@@ -239,8 +241,8 @@ def _validate_in_tree_lib_dir(label: str, unresolved: Path) -> Path:
 def _validate_editable_canonical_ref(
     *, consumer_dir: Path, name: str, raw_path: str, lib: str
 ) -> Path:
-    """Full acceptance check for ONE escaping, `editable = true`
-    `[tool.uv.sources]` entry -- the exact rules
+    """Full acceptance check for one escaping canonical reference, including
+    explicitly retained flat modules -- the same rules
     `uv_editable_ref.uv_editable_problems` applies, but scoped to a single
     entry rather than a whole consumer's table. Applied uniformly at
     EVERY recursion depth (not only the originally requested top-level
@@ -273,10 +275,10 @@ def _validate_editable_canonical_ref(
             f"{consumer_dir}: {name} -> {raw_path} (resolved {canonical}) is "
             f"not libs/{lib}"
         )
-    if not (canonical / "src").is_dir():
+    if not uer.has_canonical_python_sources(canonical):
         raise ArtifactBuildError(
             f"{consumer_dir}: {name} -> {raw_path} (resolved {canonical}): "
-            "src does not exist"
+            "src does not exist and no valid flat py-modules are declared"
         )
     if not (canonical / "pyproject.toml").is_file():
         raise ArtifactBuildError(
@@ -348,37 +350,18 @@ def _add_vendored_lib(
 
 
 def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
-    """Every vendored lib ``consumer_dir`` needs, recursively, discovering
-    BOTH known `[tool.uv.sources]` shapes: the dev-branch live, escaping,
-    `editable = true` canonical-reference form
-    (`uv_editable_ref.find_uv_editable_refs`) AND an ordinary, non-editable
-    in-tree vendored copy (`find_in_tree_lib_sources`, validated with
-    `_validate_in_tree_lib_dir`) -- classified by the entry's `editable`
-    marker, not by whether its path escapes the immediate consumer's own
-    directory. Discovering only the editable form would miss every plugin
-    that vendors its libs in-tree by design (e.g. `agent-worktrees`), AND
-    find nothing at all once promotion's own materialization step has
-    rewritten every reference into exactly that in-tree form -- the real
-    state this tool actually runs against during promotion.
+    """Discover the materializer's complete recursive vendored-lib closure.
 
-    `uv_editable_ref.uv_editable_problems` -- the same acceptance check
-    `materialize_main.py` applies -- is run ONLY against the originally
-    requested ``consumer_dir`` (the plugin itself), where its "must escape
-    to the literal top-level `libs/<lib>` with `editable = true`" rule is
-    the correct, established contract. It is deliberately NOT re-applied
-    while recursing into an already-discovered vendored lib's own
-    `pyproject.toml`: a vendored lib legitimately cross-references a
-    SIBLING vendored lib one level up without `editable = true` (e.g.
-    `plugins/agent-worktrees/libs/plugin-activation` depending on
-    `../dropin-registry`) -- a real, already-shipped pattern that
-    `uv_editable_problems` was never designed to validate and would
-    otherwise wrongly reject as a broken canonical reference.
+    Accept escaping editable canonical references, explicitly retained flat
+    canonical sources, and noneditable in-tree/sibling copies. Validate the
+    top-level consumer with the shared materializer policy, then validate each
+    nested reference individually: a legitimate sibling reference need not
+    escape to top-level ``libs`` or carry ``editable = true``.
 
-    Recurses into each discovered lib's own `pyproject.toml` the same way
-    `materialize_main.py` does, so promotion's artifact set and its
-    materialized-tree enumeration never disagree. Returns
-    ``(lib_name, canonical_dir)`` pairs, each lib listed once (by name) even
-    if more than one consumer along the walk references it."""
+    Every library must retain the same declared Python layout, metadata and
+    containment guarantees before and after materialization. Return sorted
+    ``(lib_name, canonical_dir)`` pairs, refusing ambiguous same-name roots.
+    """
     out: dict[str, Path] = {}
     pending = [consumer_dir]
     seen_dirs: set[Path] = set()
@@ -408,24 +391,18 @@ def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
         in_tree_names = {name for name, _raw_path, _lib in in_tree_refs}
         for name, raw_path, lib, editable in escaping_refs:
             if not editable:
-                # Not the dev-branch live canonical form -- expected to be
-                # a sibling in-tree cross-reference that
-                # `find_in_tree_lib_sources`'s own, more tightly
-                # constrained scan of this same `current` also discovered.
-                # If it did NOT (e.g. the target escapes to somewhere
-                # outside every allowed `libs/` location), this reference
-                # would otherwise be silently dropped entirely -- neither
-                # validated-and-included nor rejected -- even though
-                # `materialize_nested_uv_editable_refs` would refuse the
-                # exact same reference. Fail closed instead of omitting it.
-                if name not in in_tree_names:
+                if name in in_tree_names:
+                    continue
+                if not (
+                    uer.is_safe_lib_name(lib)
+                    and uer.is_retained_flat_ref(current, name, LIBS_DIR / lib)
+                ):
                     raise ArtifactBuildError(
                         f"{current}: {name} -> {raw_path} is not editable = "
                         "true and does not resolve to an allowed in-tree "
                         "vendored-lib location -- refusing to silently omit "
                         "it from the artifact set"
                     )
-                continue
             # Validated per-entry at EVERY recursion depth (not only via
             # the top-level `uv_editable_problems` call above) -- a nested
             # lib can carry its own escaping, editable reference, and

@@ -157,11 +157,25 @@ print(json.dumps(report))
     nested = (destination / "libs/installer-readiness/pyproject.toml").read_text()
     assert 'path = "../installation-context"' in nested
     assert "editable" not in nested
+    return destination
 
 
 @pytest.mark.parametrize("helper", ["workflow", "obsolete"])
 def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helper):
     _assert_pinned_materializer(Path(__file__).resolve().parent.parent, tmp_path, helper)
+
+
+def test_source_artifact_builder_accepts_actual_pinned_materializer_output(tmp_path):
+    import build_python_artifacts as builder
+
+    destination = _assert_pinned_materializer(
+        Path(__file__).resolve().parent.parent, tmp_path, "workflow",
+    )
+    libraries = dict(builder.resolve_vendored_libs(destination))
+    assert {"installation-context", "installer-readiness"} <= libraries.keys()
+    assert all(
+        builder.uer.has_canonical_python_sources(path) for path in libraries.values()
+    )
 
 
 @pytest.mark.parametrize("helper", ["workflow", "obsolete"])

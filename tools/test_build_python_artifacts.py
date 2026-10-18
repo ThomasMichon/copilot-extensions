@@ -397,6 +397,88 @@ def test_resolve_vendored_libs_direct(fake_repo: Path):
     assert libs == [("widget", lib_dir.resolve())]
 
 
+def test_retained_flat_sources_survive_materialization_and_artifact_discovery(
+    fake_repo: Path,
+) -> None:
+    import materialize_main
+    import shutil
+
+    context = fake_repo / "libs" / "flat-context"
+    readiness = fake_repo / "libs" / "flat-readiness"
+    for root, name, module in (
+        (context, "demo-context", "context_module"),
+        (readiness, "demo-readiness", "readiness_module"),
+    ):
+        root.mkdir(parents=True)
+        (root / "pyproject.toml").write_text(
+            f'[project]\nname="{name}"\nversion="0.1.0"\n'
+            f'[tool.setuptools]\npy-modules=["{module}"]\n',
+            encoding="utf-8",
+        )
+        (root / f"{module}.py").write_text("VALUE = 'source bytes'\n", encoding="utf-8")
+    with (readiness / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(
+            '[tool.uv.sources]\n'
+            'demo-context={path="../flat-context",editable=false}\n',
+        )
+    consumer = fake_repo / "plugins" / "demo"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname="demo"\nversion="0.1.0"\n'
+        '[tool.uv.sources]\n'
+        'demo-context={path="../../libs/flat-context",editable=false}\n'
+        'demo-readiness={path="../../libs/flat-readiness",editable=false}\n',
+        encoding="utf-8",
+    )
+    assert uer.uv_editable_problems("demo", consumer) == []
+    assert dict(bpa.resolve_vendored_libs(consumer)) == {
+        "flat-context": context.resolve(), "flat-readiness": readiness.resolve(),
+    }
+    destination = fake_repo / "generated" / "plugins" / "demo"
+    shutil.copytree(consumer, destination)
+    log = materialize_main.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=destination,
+        canonical_root=fake_repo, dest_root=fake_repo / "generated",
+    )
+    assert not any(entry.startswith("SKIP") for entry in log), log
+    found = dict(bpa.resolve_vendored_libs(destination))
+    assert set(found) == {"flat-context", "flat-readiness"}
+    for lib, module in (("flat-context", "context_module"), ("flat-readiness", "readiness_module")):
+        assert found[lib] == (destination / "libs" / lib).resolve()
+        assert not (found[lib] / "src").exists()
+        assert (found[lib] / f"{module}.py").read_bytes() == (
+            fake_repo / "libs" / lib / f"{module}.py"
+        ).read_bytes()
+
+
+@pytest.mark.parametrize("invalid", ["missing", "undeclared", "duplicate", "symlink"])
+def test_artifact_discovery_refuses_invalid_flat_sources(
+    fake_repo: Path, invalid: str,
+) -> None:
+    consumer = fake_repo / "plugins" / "demo"
+    library = consumer / "libs" / "flat"
+    library.mkdir(parents=True)
+    modules = '["module", "module"]' if invalid == "duplicate" else '["module"]'
+    declaration = "" if invalid == "undeclared" else f"[tool.setuptools]\npy-modules={modules}\n"
+    (library / "pyproject.toml").write_text(
+        '[project]\nname="demo-flat"\nversion="0.1.0"\n' + declaration, encoding="utf-8",
+    )
+    if invalid != "missing":
+        module = library / "module.py"
+        if invalid == "symlink":
+            target = fake_repo / "external.py"
+            target.write_text("VALUE = 'outside'\n", encoding="utf-8")
+            try:
+                module.symlink_to(target)
+            except OSError:
+                pytest.skip("symlink creation unavailable")
+        else:
+            module.write_text("VALUE = 1\n", encoding="utf-8")
+    _write_in_tree_pyproject(consumer, sources={"demo-flat": "libs/flat"})
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_vendored_libs(consumer)
+
+
 def test_resolve_vendored_libs_recurses_nested(fake_repo: Path):
     plugin_dir = fake_repo / "plugins" / "demo"
     lib_a = _seed_valid_lib(fake_repo, "a")
