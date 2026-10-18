@@ -8,6 +8,7 @@ import os
 import stat
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -156,15 +157,30 @@ def test_pytest_retains_acceptance_failure_and_reports_cleanup_error_separately(
         "def test_primary(resources):\n    raise ValueError('primary-acceptance-failure')\n",
         encoding="utf-8",
     )
+    junit = tmp_path / "pytest-results.xml"
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", str(source)],
+        [sys.executable, "-m", "pytest", "-q", "--junitxml", str(junit), str(source)],
         cwd=tmp_path, capture_output=True, text=True, timeout=20,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "primary-acceptance-failure" in result.stdout
     assert "secondary-cleanup-failure" in result.stdout
-    assert "1 failed, 1 error" in result.stdout
+    suites = ET.parse(junit).getroot().iter("testsuite")
+    counts = [(int(suite.attrib["failures"]), int(suite.attrib["errors"])) for suite in suites]
+    assert sum(failures for failures, _errors in counts) == 1
+    assert sum(errors for _failures, errors in counts) == 1
+
+
+def test_case_directory_failure_is_reported_without_launch(lane, tmp_path, monkeypatch):
+    (tmp_path / "complete").write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(lane.subprocess, "run", lambda *a, **kw: pytest.fail("invalid directory launched"))
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "fail"
+    assert report["jams"][0]["category"] == "runner-io"
+    assert len(report["stages"]) == 1
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not prove a Windows ACL")
@@ -203,7 +219,7 @@ def test_docker_cleanup_confirms_absence_and_attempts_every_resource(monkeypatch
         if not inventory:
             if name == "worker" and failure == "timeout":
                 raise module.subprocess.TimeoutExpired(argv, kwargs["timeout"])
-            return SimpleNamespace(returncode=1, stderr="arbitrary localized removal diagnostic")
+            return SimpleNamespace(returncode=1, stdout="", stderr="arbitrary localized removal diagnostic")
         if name == "worker":
             if failure == "timeout":
                 raise module.subprocess.TimeoutExpired(argv, kwargs["timeout"])
