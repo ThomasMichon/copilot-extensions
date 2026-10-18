@@ -39,7 +39,7 @@ from agent_bridge.launch_runtime import executing_executable
 
 def authenticated_wire(spec, context, cookies=None):
     wire = (
-        HttpAcpTransport(spec, client=httpx.AsyncClient(
+        HttpAcpTransport(spec, client_factory=lambda: httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
             cookies=cookies,
         )) if spec.transport == "streamable-http"
@@ -138,7 +138,7 @@ async def test_actual_remote_lifecycle_permission_form_cancel_and_survival(peer,
 
     def transport(cookies=None):
         if mode == "streamable-http":
-            wire = HttpAcpTransport(spec, client=httpx.AsyncClient(
+            wire = HttpAcpTransport(spec, client_factory=lambda: httpx.AsyncClient(
                 http2=True, verify=context, trust_env=False,
                 timeout=5, follow_redirects=False, cookies=cookies,
             ))
@@ -194,12 +194,12 @@ async def test_actual_remote_lifecycle_permission_form_cancel_and_survival(peer,
         events.clear()
         prompt = asyncio.create_task(client.send_prompt("permission"))
         event = await wait_event(events, "permission_request", wire)
-        await client.cancel_prompt()
+        await asyncio.wait_for(client.cancel_prompt(), 5)
         assert (await asyncio.wait_for(prompt, 5))["stop_reason"] == "cancelled"
         assert not client.resolve_permission(event["request_id"], "allow/opaque")
         prompt = asyncio.create_task(client.send_prompt("wait"))
         await asyncio.sleep(0.1)
-        await client.cancel_prompt()
+        await asyncio.wait_for(client.cancel_prompt(), 5)
         assert (await asyncio.wait_for(prompt, 5))["stop_reason"] == "cancelled"
         with pytest.raises((ConnectionError, RemoteTransportError)):
             await asyncio.wait_for(client.send_prompt("drop"), 5)
@@ -244,7 +244,7 @@ async def test_actual_missing_approval_capability_refuses_before_prompt(peer, mo
         auth={"source": "none", "identity": "synthetic"},
     )
     wire = (
-        HttpAcpTransport(spec, client=httpx.AsyncClient(
+        HttpAcpTransport(spec, client_factory=lambda: httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
         )) if mode == "streamable-http" else WsAcpTransport(spec, ssl=context)
     )
@@ -267,11 +267,11 @@ async def test_actual_untrusted_tls_and_http1_are_not_fallbacks(peer):
         endpoint=url + "/acp", transport="streamable-http", allow_loopback_test=True,
         auth={"source": "none", "identity": "synthetic"},
     )
-    for client in [
-        httpx.AsyncClient(http2=True, trust_env=False),
-        httpx.AsyncClient(http2=False, trust_env=False, verify=context),
+    for client_factory in [
+        lambda: httpx.AsyncClient(http2=True, trust_env=False),
+        lambda: httpx.AsyncClient(http2=False, trust_env=False, verify=context),
     ]:
-        wire = HttpAcpTransport(spec, client=client)
+        wire = HttpAcpTransport(spec, client_factory=client_factory)
         try:
             with pytest.raises(RemoteTransportError):
                 await wire.send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
@@ -289,7 +289,7 @@ async def test_actual_sessionless_form_before_new_has_no_invented_session(peer, 
         auth={"source": "none", "identity": "synthetic"},
     )
     wire = (
-        HttpAcpTransport(spec, client=httpx.AsyncClient(
+        HttpAcpTransport(spec, client_factory=lambda: httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
         )) if mode == "streamable-http" else WsAcpTransport(spec, ssl=context)
     )
@@ -339,7 +339,7 @@ async def test_actual_service_resume_retains_history_as_replay_without_spawn(pee
             return "password=synthetic-credential\n\n"
 
     async def start(client, target, *, cookies=None):
-        wire = HttpAcpTransport(target, client=httpx.AsyncClient(
+        wire = HttpAcpTransport(target, client_factory=lambda: httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
             cookies=cookies,
         )) if mode == "streamable-http" else WsAcpTransport(target, ssl=context, cookies=cookies)
@@ -399,7 +399,7 @@ async def test_actual_remote_redirect_refused_without_forwarding(peer, mode):
         auth={"source": "none", "identity": "synthetic"},
     )
     wire = (
-        HttpAcpTransport(spec, client=httpx.AsyncClient(
+        HttpAcpTransport(spec, client_factory=lambda: httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
         )) if mode == "streamable-http" else WsAcpTransport(spec, ssl=context)
     )
@@ -431,7 +431,7 @@ async def test_answer_admitted_before_cancel_still_has_terminal_route(peer, mode
         auth={"source": "injected", "identity": "synthetic"},
     )
     wire = (
-        HttpAcpTransport(spec, client=httpx.AsyncClient(
+        HttpAcpTransport(spec, client_factory=lambda: httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
         )) if mode == "streamable-http" else WsAcpTransport(spec, ssl=context)
     )
@@ -464,7 +464,7 @@ async def test_answer_admitted_before_cancel_still_has_terminal_route(peer, mode
         question = await wait_event(events, "permission_request")
         assert client.resolve_permission(question["request_id"], "allow/opaque")
         await asyncio.wait_for(admitted.wait(), 5)
-        await client.cancel_prompt()
+        await asyncio.wait_for(client.cancel_prompt(), 5)
         await asyncio.wait_for(pending, 5)
         release.set()
         assert await asyncio.wait_for(client.send_prompt("fresh"), 5)
@@ -492,7 +492,7 @@ async def test_failure_closes_wire_and_sibling_resources_without_stop(peer, mode
         rpc_timeout_seconds=2, timeout_seconds=5, idle_seconds=5,
     )
     wire = (
-        HttpAcpTransport(spec, client=httpx.AsyncClient(
+        HttpAcpTransport(spec, client_factory=lambda: httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
         )) if mode == "streamable-http" else WsAcpTransport(spec, ssl=context)
     )
@@ -622,11 +622,11 @@ async def test_manager_stop_during_session_sse_open_keeps_attachment_stopped(
         wire = authenticated_wire(target, context, cookies)
         request = wire._request
 
-        async def gated(method, headers, content=None):
+        async def gated(method, headers, content=None, **kwargs):
             if method == "GET" and headers.get("Acp-Session-Id") and not entered.is_set():
                 entered.set()
                 await asyncio.Event().wait()
-            return await request(method, headers, content)
+            return await request(method, headers, content, **kwargs)
 
         wire._request = gated
         await original(client, target, transport=wire)

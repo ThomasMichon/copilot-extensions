@@ -1282,40 +1282,31 @@ def test_relay_ping_probe_command_round_trips_against_real_listener():
             capture_output=True, text=True, timeout=10,
         )
 
-    def _serve_ping_pong(port: int) -> None:
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("127.0.0.1", port))
-        srv.listen(1)
-        conn, _ = srv.accept()
-        conn.recv(4096)
-        conn.sendall(b"pong\n\n")
-        conn.close()
-        srv.close()
+    def _probe_listener(*, reply: bool) -> subprocess.CompletedProcess:
+        with socket.create_server(("127.0.0.1", 0)) as srv:
+            srv.settimeout(5)
 
-    def _serve_accept_only(port: int) -> None:
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("127.0.0.1", port))
-        srv.listen(1)
-        conn, _ = srv.accept()
-        conn.recv(4096)
-        conn.close()  # accepts the TCP connection but never answers
-        srv.close()
+            def serve() -> None:
+                conn, _ = srv.accept()
+                with conn:
+                    conn.settimeout(5)
+                    conn.recv(4096)
+                    if reply:
+                        conn.sendall(b"pong\n\n")
 
-    live_port, stale_port = 50711, 50712
+            thread = threading.Thread(target=serve)
+            thread.start()
+            try:
+                return _run_probe(srv.getsockname()[1])
+            finally:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
 
-    live_thread = threading.Thread(target=_serve_ping_pong, args=(live_port,))
-    live_thread.start()
-    live_result = _run_probe(live_port)
-    live_thread.join(timeout=5)
+    live_result = _probe_listener(reply=True)
     assert live_result.returncode == 0
     assert "OK" in live_result.stdout
 
-    stale_thread = threading.Thread(target=_serve_accept_only, args=(stale_port,))
-    stale_thread.start()
-    stale_result = _run_probe(stale_port)
-    stale_thread.join(timeout=5)
+    stale_result = _probe_listener(reply=False)
     assert stale_result.returncode != 0
     assert "OK" not in stale_result.stdout
 

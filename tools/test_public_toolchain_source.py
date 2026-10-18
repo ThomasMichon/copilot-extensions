@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import json
 import os
@@ -13,6 +14,12 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from _promotion_workflow_test_support import source_workflow
+from test_promotion_artifact_readiness import (
+    _materializer_git,
+    generated_materializer_checkout as generated_materializer_checkout,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import artifact_builder_cli as cli
@@ -118,9 +125,9 @@ def test_ci_dependency_policy_changes_trigger_age_guard(changed):
     assert re.search(expression.group(1), changed), changed
 
 
-def _artifact_scope(job_name: str) -> tuple[dict, str]:
-    root = Path(__file__).resolve().parents[1]
-    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
+def _artifact_scope(job_name: str, root: Path | None = None) -> tuple[dict, str]:
+    root = root if root is not None else Path(__file__).resolve().parents[1]
+    jobs = source_workflow(root, "ci.yml")["jobs"]
     detector = next(step for step in jobs[job_name]["steps"]
                     if step.get("id") == "python-artifact-builder")
     expression = re.search(r"grep -Eq -e '([^']+)' -e\s*\\\n\s*'([^']+)'", detector["run"])
@@ -130,6 +137,10 @@ def _artifact_scope(job_name: str) -> tuple[dict, str]:
 
 def test_windows_source_contracts_keep_separate_budgets_without_dropping_cases():
     jobs, _ = _artifact_scope("checks")
+    _assert_windows_source_contracts(jobs)
+
+
+def _assert_windows_source_contracts(jobs):
     builder = jobs["windows-python-artifact-builder"]
     candidate = jobs["promotion-candidate-windows"]
     publication = jobs["promotion-publication-windows"]
@@ -167,6 +178,99 @@ def test_windows_source_contracts_keep_separate_budgets_without_dropping_cases()
         assert {
             "windows-python-artifact-builder", "promotion-candidate-windows", "promotion-publication-windows",
         } <= set(jobs[gate]["needs"])
+
+
+@pytest.fixture
+def generated_source_controller(generated_materializer_checkout):
+    root = generated_materializer_checkout
+    preserved = _materializer_git(
+        root, "show", "refs/remotes/origin/main:.github/workflows/ci.yml",
+    )
+    (root / ".github/workflows/ci.yml").write_bytes(preserved)
+    _materializer_git(root, "add", ".github/workflows/ci.yml")
+    _materializer_git(
+        root, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "retain actual Main CI controller",
+    )
+    return root
+
+
+@pytest.mark.parametrize("layout", ["canonical", "generated"])
+def test_source_contracts_replay_exact_dev_without_changing_controller(
+    generated_source_controller, layout,
+):
+    from test_run_standalone_tests import _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive
+
+    root = (
+        Path(__file__).resolve().parents[1]
+        if layout == "canonical" else generated_source_controller
+    )
+    controller = root / ".github/workflows/ci.yml"
+    preserved = controller.read_bytes()
+    ci = source_workflow(root, "ci.yml")
+    promotion = source_workflow(root, "validate-and-promote.yml")
+    if layout == "generated":
+        dev = json.loads((root / ".github/release-pipeline-state.json").read_text())[
+            "last_promotion"
+        ]["dev_head"]
+        assert _materializer_git(root, "rev-parse", "HEAD").decode().strip() != dev
+        for name, actual in (("ci.yml", ci), ("validate-and-promote.yml", promotion)):
+            assert actual == yaml.safe_load(_materializer_git(
+                root, "show", f"{dev}:.github/workflows/{name}",
+            ))
+        assert preserved == _materializer_git(
+            root, "show", "refs/remotes/origin/main:.github/workflows/ci.yml",
+        )
+    for job in ("checks", "windows-python-artifact-builder"):
+        jobs, expression = _artifact_scope(job, root)
+        assert jobs == ci["jobs"]
+        assert expression == _artifact_scope(job)[1]
+    _assert_windows_source_contracts(ci["jobs"])
+    _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci["jobs"], promotion["jobs"])
+    assert controller.read_bytes() == preserved
+
+
+@pytest.mark.parametrize("dev", [None, "", "../outside", "f" * 40])
+def test_source_contracts_refuse_invalid_or_unavailable_lineage(generated_source_controller, dev):
+    state = generated_source_controller / ".github/release-pipeline-state.json"
+    state.write_text(json.dumps({"last_promotion": {"dev_head": dev}}))
+    expected = subprocess.CalledProcessError if dev == "f" * 40 else AssertionError
+    with pytest.raises(expected):
+        source_workflow(generated_source_controller, "ci.yml")
+
+
+@pytest.mark.parametrize("state", [{}, {"last_promotion": {}}])
+def test_source_contracts_require_recorded_lineage(generated_source_controller, state):
+    (generated_source_controller / ".github/release-pipeline-state.json").write_text(json.dumps(state))
+    with pytest.raises(KeyError):
+        source_workflow(generated_source_controller, "ci.yml")
+
+
+def test_source_contracts_require_lineage_file(generated_source_controller):
+    state = generated_source_controller / ".github/release-pipeline-state.json"
+    state.rename(state.with_suffix(".saved"))
+    with pytest.raises(FileNotFoundError):
+        source_workflow(generated_source_controller, "ci.yml")
+
+
+def test_source_contracts_still_reject_budget_and_dependency_regressions(generated_source_controller):
+    from test_run_standalone_tests import _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive
+
+    ci = source_workflow(generated_source_controller, "ci.yml")["jobs"]
+    promotion = source_workflow(generated_source_controller, "validate-and-promote.yml")["jobs"]
+    broken = copy.deepcopy(ci)
+    broken["windows-python-artifact-builder"]["timeout-minutes"] = 5
+    with pytest.raises(AssertionError):
+        _assert_windows_source_contracts(broken)
+    broken = copy.deepcopy(ci)
+    step = next(
+        step for step in broken["test-runner-windows"]["steps"]
+        if step.get("name") == "Test runner admission and isolation"
+    )
+    assert "pytest-timeout" in step["run"]
+    step["run"] = step["run"].replace("pytest-timeout", "")
+    with pytest.raises(AssertionError):
+        _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(broken, promotion)
 
 
 @pytest.mark.parametrize("job_name", ["checks", "windows-python-artifact-builder"])

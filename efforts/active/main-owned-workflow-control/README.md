@@ -1784,3 +1784,23 @@ hosted checks, review and a containing full validation remain required.
   whole-tree candidate construction separately exceeded its unchanged
   120-second internal builder limit before producing a receipt. No partial tree
   was accepted as a candidate and no builder deadline was increased.
+
+### 2026-10-18 - Generated candidate repair preserves independent control
+
+- The release campaign's latest source repair distinguishes recorded Dev
+  workflow contracts from the older preserved Main controller; 139 selected
+  cells pass without modifying the actual generated controller or its limits.
+  Canonical and real materialized Dispatch/Codespaces adoption modules retain
+  all original cells and missing-input negatives.
+- A reproduced Bridge HTTP/2 read-lock starvation defect receives an explicitly
+  authorized narrow transport repair (#7186), not a timeout or test waiver.
+  The full native suite passes 6,444 cases with 60 platform/opt-in skips in
+  341.274 seconds, including real PowerShell coverage. Candidate-only two-worker
+  admission retains the existing shared containment and eight-minute Main bound.
+- Main still needs a separately reviewed minimal CI worker-environment change
+  after this source repair lands. No Dev controller is copied wholesale, no
+  existing twelve-minute Dev limit is activated on Main, and the preservation
+  manifest, pause and helper pin are unchanged by this source slice.
+- Required review/checks, generated/native qualification, release and resume
+  remain open. Maintainer merge/rebase stewardship remains locally inert and
+  disabled; this validation repair neither configures authority nor enables it.

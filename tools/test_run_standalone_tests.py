@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from _promotion_workflow_test_support import source_workflow
+
 SCRIPT = Path(__file__).with_name("run-standalone-tests.py")
 SPEC = importlib.util.spec_from_file_location("run_standalone_tests", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -733,15 +735,17 @@ with owned_python(['-c', 'import time; time.sleep(120)'],
 
 
 def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
+    root = SCRIPT.parent.parent
+    _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(
+        source_workflow(root, "ci.yml")["jobs"],
+        source_workflow(root, "validate-and-promote.yml")["jobs"],
+    )
+
+
+def _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion):
     import shlex
-    import yaml
     from packaging.requirements import Requirement
 
-    workflows = SCRIPT.parent.parent / ".github" / "workflows"
-    ci = yaml.safe_load((workflows / "ci.yml").read_text(encoding="utf-8"))["jobs"]
-    promotion = yaml.safe_load(
-        (workflows / "validate-and-promote.yml").read_text(encoding="utf-8")
-    )["jobs"]
     discovery = next(step["run"] for step in ci["discover"]["steps"] if step.get("id") == "set")
     detector = next(
         step["run"] for step in ci["checks"]["steps"] if step.get("id") == "version-bump-engine"

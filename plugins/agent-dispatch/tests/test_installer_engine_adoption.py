@@ -613,6 +613,11 @@ def _fixture_checkout(tmp_path: Path, *, materialized: bool = False) -> Path:
     assert set(refs) == {"sh", "ps1"}
     if any(ier.is_canonical_ref(ref, plugin, repo_root=root) for ref in refs.values()):
         shutil.copytree(ENGINE, root / "libs/installer-engine")
+    # Native output declarations bind to the publisher's helper even when
+    # the input wrappers already consume payload-local engines.
+    publisher_engine = root / "libs/installer-engine"
+    publisher_engine.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ENGINE / ier.HUMAN_HELPER, publisher_engine / ier.HUMAN_HELPER)
     project_sources = tomllib.loads((plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
     for package, lib in LIBRARIES.items():
         source = (plugin / project_sources[package]["path"]).resolve()
@@ -643,6 +648,23 @@ def _fixture_checkout(tmp_path: Path, *, materialized: bool = False) -> Path:
         }, "release materialization must not mutate source"
         return dest
     return plugin
+
+
+@pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
+def test_fixture_checkout_accepts_already_materialized_input(tmp_path, monkeypatch, materialized):
+    generated = _fixture_checkout(tmp_path / "input", materialized=True)
+    monkeypatch.setattr(sys.modules[__name__], "PLUGIN", generated)
+    plugin = _fixture_checkout(tmp_path / "output", materialized=materialized)
+    refs = ier.plugin_ref_map(plugin)
+    assert set(refs) == {"sh", "ps1"}
+    for ref in refs.values():
+        assert ier.is_local_ref(ref, plugin)
+        assert ref.resolved().read_bytes() == (ENGINE / ref.file_name).read_bytes()
+    publisher_engine = tmp_path / "output/authoring/libs/installer-engine"
+    assert {path.name for path in publisher_engine.iterdir()} == {ier.HUMAN_HELPER}
+    assert ier.human_output_json(plugin / "scripts/install.ps1") == (
+        plugin / "scripts/install.human-output.json"
+    ).read_text(encoding="utf-8")
 
 
 def _snapshot_prelude() -> str:

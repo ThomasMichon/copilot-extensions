@@ -224,6 +224,16 @@ bounded validated adjustments. Overflow or stream loss invalidates the live
 connection, not a quiet fallback. Server SSE keepalives must arrive within the
 idle deadline. Compressed HTTP responses are refused to bound frame decoding.
 SSE accepts LF, CR and CRLF delimiters, including CRLF split across reads.
+Control POST/DELETE requests and each long-lived connection/session SSE reader
+own separate HTTP/2 client pools. A quiet reader cannot retain a shared network
+read lock while another stream has a completed response waiting to be consumed.
+These physical connections retain one logical ACP connection and a shared,
+in-memory scoped cookie jar; authentication, TLS verification, redirect refusal,
+complete POST-body validation and all deadlines are unchanged.
+Low-level HTTP transport tests/adapters inject `client_factory`, which must
+create a fresh client and independent transport pool on every call, instead of
+injecting one shared client. The factory carries custom trust configuration to
+every connection without copying private HTTP-client configuration.
 Failure also starts idempotent connection cleanup automatically: sibling
 consumers are cancelled and wire resources close without a later operator stop.
 Consumer-drain and wire-close phases each use the configured ordinary timeout.

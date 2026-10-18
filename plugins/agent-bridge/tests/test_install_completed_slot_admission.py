@@ -355,7 +355,7 @@ Rec 'START'
 try {{
 {action}
 }} finally {{
-    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {{
+    if (Test-Path Function:Stop-RuntimeConstruction) {{
         Stop-RuntimeConstruction
     }}
 }}
@@ -388,6 +388,17 @@ def test_ps1_completed_slot_admission(
     )
     if expected == _NOOP:
         assert "MARKER" not in _events(tmp_path)
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_harness_settles_a_defined_construction_function(tmp_path: Path) -> None:
+    result = _run_ps(_ps_harness(
+        tmp_path, "incomplete",
+        "function Stop-RuntimeConstruction { Rec 'SETTLED' }\nRec 'ACTION'",
+        libraries=False,
+    ))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _events(tmp_path) == ["START", "ACTION", "SETTLED"]
 
 
 @pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")

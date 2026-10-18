@@ -21,6 +21,27 @@ def source_owned(jobs: dict[str, Any]) -> bool:
     return "qualify-candidate" in jobs
 
 
+def source_workflow(root: Path, name: str) -> dict[str, Any]:
+    """Keep source contracts separate from a generated checkout's preserved controller."""
+    if not source_owned(workflow(root)["jobs"]):
+        return yaml.safe_load((root / ".github/workflows" / name).read_text("utf-8"))
+    state = json.loads((root / ".github/release-pipeline-state.json").read_text("utf-8"))
+    dev = state["last_promotion"]["dev_head"]
+    assert isinstance(dev, str) and re.fullmatch(r"[0-9a-f]{40}", dev), "invalid recorded Dev source"
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "--no-replace-objects", *args], cwd=root, env=env,
+            check=True, capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        ).stdout
+
+    assert git("rev-parse", "--verify", f"{dev}^{{commit}}").strip() == dev
+    return yaml.safe_load(git("show", f"{dev}:.github/workflows/{name}"))
+
+
 def heredoc(script: str) -> str:
     bodies = re.findall(r"<<'PY'\s*\n(.*?)^PY\s*$", script, re.M | re.S)
     assert len(bodies) == 1, "expected one complete literal workflow Python block"

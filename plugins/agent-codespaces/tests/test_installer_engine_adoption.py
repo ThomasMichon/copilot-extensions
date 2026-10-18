@@ -519,6 +519,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     sys.path.insert(0, str(REPO / "tools"))
     try:
         import materialize_main as mm
+        import uv_editable_ref as uer
     finally:
         sys.path.pop(0)
     repository = tmp_path / "publisher-repo"
@@ -539,6 +540,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
             for member in scripts.iterdir():
                 if member.name in (
                     "install.sh", "install.ps1",
+                    "installer-human-output.ps1", "install.human-output.json",
                     "installer-engine.sh", "installer-engine.ps1",
                     "installer_dependency_policy.py", "installer_dependency_config.py",
                 ):
@@ -563,8 +565,14 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
         skipped = [line for line in logs if line.startswith("SKIP")]
         assert not skipped, "\n".join(skipped)
     shutil.copytree(payload / "libs", repository / "libs")
+    # The fixture now owns canonical libraries, regardless of whether its
+    # input was authored with canonical or already-materialized metadata.
+    project_path = payload / "pyproject.toml"
+    project = tomllib.loads(project_path.read_text(encoding="utf-8"))
+    for spec in project["tool"]["uv"]["sources"].values():
+        lib = Path(spec["path"]).name
+        uer.rewrite_uv_source_to_editable(project_path, lib, f"../../libs/{lib}")
     shutil.rmtree(payload / "libs")
-    shutil.copyfile(PLUGIN / "pyproject.toml", payload / "pyproject.toml")
     engine = repository / "libs" / "installer-engine"
     engine.mkdir(parents=True, exist_ok=True)
     for name in (
@@ -676,10 +684,21 @@ def test_codespaces_canonical_reference_registration_and_release_materialization
     finally:
         sys.path.pop(0)
     assert "agent-codespaces" in ier.ADOPTERS
+    layouts = set()
     for ext in ("sh", "ps1"):
         ref = ier.find_engine_ref(PLUGIN / "scripts" / f"install.{ext}", ext)
-        assert ref is not None and ier.is_canonical_ref(ref, PLUGIN)
-        assert not (PLUGIN / "scripts" / ref.file_name).exists()
+        assert ref is not None
+        assert ier.source_match_count(PLUGIN / "scripts" / f"install.{ext}", ext) == 1
+        if ier.is_canonical_ref(ref, PLUGIN, repo_root=REPO):
+            layouts.add("canonical")
+            assert not ref.local_path.exists()
+        else:
+            layouts.add("local")
+            assert ier.is_local_ref(ref, PLUGIN)
+        assert ref.resolved().read_bytes() == (ENGINE / ref.file_name).read_bytes()
+        for name in ier.support_files(ENGINE):
+            assert (ref.resolved().parent / name).read_bytes() == (ENGINE / name).read_bytes()
+    assert len(layouts) == 1, "both language variants must select the same layout"
     payload = tmp_path / "release" / "plugins" / PLUGIN.name
     shutil.copytree(PLUGIN, payload, ignore=shutil.ignore_patterns("tests", "__pycache__"))
     logs = mm.materialize_uv_editable_refs(tmp_path / "release", canonical_root=REPO)
@@ -693,6 +712,68 @@ def test_codespaces_canonical_reference_registration_and_release_materialization
     project = tomllib.loads((payload / "pyproject.toml").read_text())
     for spec in project["tool"]["uv"]["sources"].values():
         assert (payload / spec["path"]).resolve().is_relative_to(payload)
+        assert (payload / spec["path"] / "pyproject.toml").is_file()
+        assert not spec.get("editable", False)
+
+
+def test_codespaces_explicit_canonical_fixture_materializes(tmp_path):
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        import installer_engine_ref as ier
+        import materialize_main as mm
+    finally:
+        sys.path.pop(0)
+    engine, sources = _attributed_library_sources(tmp_path / "input", "canonical")
+    plugin = sources[-1]
+    repository = plugin.parents[1]
+    shutil.copytree(ENGINE, engine, dirs_exist_ok=True)
+    # The ordering fixture retains generated transitive metadata. A canonical
+    # publisher must instead declare those sibling libraries editable too.
+    for library in (repository / "libs").iterdir():
+        if library != engine:
+            shutil.copyfile(
+                REPO / "libs" / library.name / "pyproject.toml", library / "pyproject.toml",
+            )
+    # Construct canonical input explicitly, including when this test itself
+    # is collected from a generated release whose wrappers are already local.
+    for ext in ("sh", "ps1"):
+        script = plugin / "scripts" / f"install.{ext}"
+        ref = ier.find_engine_ref(script, ext)
+        assert ref is not None
+        if ier.is_local_ref(ref, plugin):
+            text = script.read_text(encoding="utf-8")
+            assert text.count(ier.local_line(ext)) == 1
+            script.write_text(
+                text.replace(ier.local_line(ext), ier.canonical_line(ext)), encoding="utf-8",
+            )
+            ref.local_path.unlink()
+        ref = ier.find_engine_ref(script, ext)
+        assert ref is not None and ier.is_canonical_ref(ref, plugin, repo_root=repository)
+        assert not ref.local_path.exists()
+    script = plugin / "scripts/install.ps1"
+    script.with_suffix(".human-output.json").write_text(
+        ier.human_output_json(script), encoding="utf-8",
+    )
+    payload = tmp_path / "release/plugins" / PLUGIN.name
+    shutil.copytree(plugin, payload)
+    logs = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=plugin, dest_consumer_dir=payload,
+        canonical_root=repository, dest_root=tmp_path / "release",
+    )
+    logs += mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=plugin, dest_consumer_dir=payload,
+        canonical_root=repository, dest_root=tmp_path / "release",
+    )
+    assert not any(line.startswith("SKIP") for line in logs), "\n".join(logs)
+    for ext in ("sh", "ps1"):
+        ref = ier.find_engine_ref(payload / "scripts" / f"install.{ext}", ext)
+        assert ref is not None and ier.is_local_ref(ref, payload)
+        assert ref.resolved().read_bytes() == (ENGINE / ref.file_name).read_bytes()
+    assert (payload / "scripts/install.human-output.json").read_text(
+        encoding="utf-8",
+    ) == ier.human_output_json(payload / "scripts/install.ps1")
+    project = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
+    for spec in project["tool"]["uv"]["sources"].values():
         assert (payload / spec["path"] / "pyproject.toml").is_file()
         assert not spec.get("editable", False)
 

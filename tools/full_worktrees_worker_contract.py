@@ -12,6 +12,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ("ci.yml", "validate-and-promote.yml")
 FULL_STEP = "Full suite - ${{ matrix.plugin }}"
+BRIDGE_STEP = "Test ${{ matrix.plugin }}"
+BRIDGE_OPTIONS = (
+    "${{ matrix.plugin == 'agent-bridge' && inputs.promotion_run != '' "
+    "&& '-n 2 --dist=worksteal' || '' }}"
+)
 OPTIONS = {
     "ci.yml": (
         "${{ matrix.plugin == 'agent-worktrees' && inputs.promotion_run != '' "
@@ -55,7 +60,26 @@ def assert_workers_do_not_leak_into_guards_collection_or_baselines(workflow: str
         for step in job.get("steps", []):
             if _has_worker_option(step.get("env", {}).get("PYTEST_ADDOPTS")):
                 worker_steps.append((name, step.get("name")))
-    assert worker_steps == [("full", FULL_STEP)]
+    expected = [("full", FULL_STEP)]
+    if workflow == "ci.yml":
+        expected.insert(0, ("smoke", BRIDGE_STEP))
+    assert worker_steps == expected
+
+
+def assert_candidate_bridge_workers_share_the_existing_job_and_limits() -> None:
+    declaration = _workflow("ci.yml")
+    smoke = declaration["jobs"]["smoke"]
+    step = next(step for step in smoke["steps"] if step.get("name") == BRIDGE_STEP)
+    assert step["env"]["PYTEST_ADDOPTS"] == BRIDGE_OPTIONS
+    assert "python tools/run-plugin-tests.py" in step["run"]
+    assert "-k" not in step["run"] and "--guards" not in step["run"]
+    assert smoke["runs-on"] == "ubuntu-latest"
+    assert smoke["strategy"]["fail-fast"] is False
+    assert "continue-on-error" not in smoke and "continue-on-error" not in step
+    with (ROOT / "plugins/agent-bridge/pyproject.toml").open("rb") as source:
+        project = tomllib.load(source)["project"]
+    assert project["optional-dependencies"]["dev"].count("pytest-xdist>=3.8,<4") == 1
+    assert not any("pytest-xdist" in requirement.casefold() for requirement in project["dependencies"])
 
 
 def assert_xdist_is_a_worktrees_test_dependency_not_a_runtime_requirement() -> None:

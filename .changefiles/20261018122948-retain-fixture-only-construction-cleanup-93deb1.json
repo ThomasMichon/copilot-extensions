@@ -1,0 +1,9 @@
+{
+  "comment": "Retain fixture-only construction cleanup stages and Python stacks on native installer test timeouts without changing the deadline.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

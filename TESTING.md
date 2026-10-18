@@ -45,7 +45,7 @@ The source and candidate Linux full-suite declarations use exactly two
 work-stealing pytest workers for Worktrees only. Both workers remain inside the
 same runner-owned containment boundary and unchanged 30-second item,
 300-second group, 900-second plugin, process, memory and temporary-storage
-limits. Guard, collection, baseline and other-plugin steps do not inherit those
+limits. Guard, collection, baseline and unrelated steps do not inherit those
 worker options. The local runner remains serial unless explicitly configured;
 activation of preserved Main declarations is separately reviewed. These options
 do not count as complete budget evidence until the exact full run succeeds.
@@ -56,6 +56,18 @@ The initial paired disconnected Linux run executes all 17 groups with the same
 11,941 passes and 336 skips: serial 560.951 seconds versus two workers 348.064
 seconds, including preparation and cleanup. This is local execution evidence,
 not a substitute for the exact hosted release gates or Windows margin proof.
+
+Candidate Bridge validation also opts into exactly two work-stealing workers
+inside its existing ordinary Linux job. The owning `promotion_run` is required;
+older released Main validation without that input stays serial until the
+test-only dependency has shipped. This adds no matrix entry or parallel
+pipeline, retains every test and native subprocess boundary, and shares the
+same item/group/plugin, process, memory and temporary-storage limits. It does
+not increase the preserved Main job's eight-minute budget. Local complete
+execution and actual hosted candidate qualification remain separate gates.
+Its real relay-probe fixture reserves an ephemeral listener before starting
+the probe, and completed-slot harness cleanup looks up its optional function
+directly rather than searching unrelated commands or autoloading modules.
 
 The existing artifact-readiness suite also executes the immutable release
 materializer against current direct and nested retained-flat source references.
@@ -1660,6 +1672,10 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   absent. The native POSIX cutover integration waits for the exact spawned
   daemon's published control endpoint, not just `active.json` existence:
   conservative custody history may precede publication of the active route.
+  The native PowerShell owned-construction cleanup case records fixture-only
+  abort/reply/exit stages and Python stacks at eight-second intervals. An
+  unchanged 20-second subprocess timeout prints bounded diagnostic readback
+  before re-raising the original exception; no deployed helper is instrumented.
 - **agent-ssh:** transport rendering, managed OpenSSH fragment source identity,
   tri-state reconciliation, stale/duplicate quarantine, bounded warnings,
   report-only doctor parity, and reachability-vs-hygiene separation.

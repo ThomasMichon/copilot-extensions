@@ -1648,6 +1648,7 @@ jobs:
       - name: Test ${{ matrix.plugin }}
         if: matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'
         env:
+          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-bridge' && inputs.promotion_run != '' && '-n 2 --dist=worksteal' || '' }}
           PLUGIN: ${{ matrix.plugin }}
           PARTITION: ${{ matrix.partition }}
           PARTITIONS: ${{ matrix.partitions }}

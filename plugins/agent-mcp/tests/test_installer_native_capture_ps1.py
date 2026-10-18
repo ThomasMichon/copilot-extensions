@@ -31,19 +31,95 @@ def _helper() -> str:
     return ". " + _quote(INSTALLER.parent / "versioned_runtime_native.ps1") + "\n"
 
 
-def _run(host: str | None, script: str) -> subprocess.CompletedProcess[str]:
+def _cleanup_diagnostic_readback(directory: Path) -> str:
+    records = ["Fixture-only construction timeout diagnostics (original 20s bound):"]
+    for name in ("stages.log", "python-stacks.log"):
+        path = directory / name
+        try:
+            with path.open("rb") as stream:
+                data = stream.read(16385)
+        except OSError as error:
+            records.append(f"{name}: unavailable ({type(error).__name__})")
+            continue
+        records.append(f"--- {name} ---\n{data[:16384].decode('utf-8', 'replace')}")
+        if len(data) > 16384:
+            records.append("[truncated at 16384 bytes]")
+    return "\n".join(records)
+
+
+def _construction_diagnostics(
+    directory: Path,
+    helper: Path,
+    shell: str,
+    *,
+    interval: float = 8,
+) -> tuple[Path, str]:
+    directory.mkdir()
+    wrapper = directory / "construction_probe.py"
+    wrapper.write_text(
+        "import faulthandler\nimport runpy\n"
+        f"with open({str(directory / 'python-stacks.log')!r}, 'w') as stacks:\n"
+        f"    faulthandler.dump_traceback_later({interval!r}, repeat=True, file=stacks)\n"
+        "    try:\n"
+        f"        runpy.run_path({str(helper)!r}, run_name='__main__')\n"
+        "    finally:\n"
+        "        faulthandler.cancel_dump_traceback_later()\n",
+        encoding="utf-8",
+    )
+    prefix, boundary, cleanup = shell.rpartition("function script:Stop-RuntimeConstruction")
+    assert boundary, "construction cleanup adapter changed; update fixture diagnostics"
+    probes = (
+        ("$session.Process.StandardInput.WriteLine(", "abort-write", False),
+        ("$session.Process.StandardInput.Flush()", "abort-sent", True),
+        ("$line = $session.Process.StandardOutput.ReadLine()", "reply-wait", False),
+        ("$line = $session.Process.StandardOutput.ReadLine()", "reply-received", True),
+        ("$session.Process.WaitForExit()", "exit-wait", False),
+        ("$session.Process.WaitForExit()", "child-exited", True),
+    )
+    for needle, label, after in probes:
+        assert cleanup.count(needle) == 1, f"cleanup probe changed: {needle}"
+        mark = f"Write-ConstructionDiagnosticStage '{label}'"
+        cleanup = cleanup.replace(
+            needle, f"{needle}\n        {mark}" if after else f"{mark}\n        {needle}"
+        )
+    writer = f"""
+function Write-ConstructionDiagnosticStage([string]$Stage) {{
+    try {{
+        [IO.File]::AppendAllText({_quote(directory / "stages.log")},
+            [DateTime]::UtcNow.ToString('O') + ' ' + $Stage + [Environment]::NewLine)
+    }} catch {{
+        [Console]::Error.WriteLine(
+            "Construction diagnostic warning: could not record stage '$Stage': " +
+            $_.Exception.Message)
+    }}
+}}
+"""
+    return wrapper, writer + prefix + boundary + cleanup
+
+
+def _run(
+    host: str | None,
+    script: str,
+    *,
+    diagnostics: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     if host is None:
         pytest.skip("PowerShell host unavailable")
     script = "$ProgressPreference = 'SilentlyContinue'\n" + script
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-    return subprocess.run(
-        [host, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    try:
+        return subprocess.run(
+            [host, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.TimeoutExpired:
+        if diagnostics is not None:
+            print(_cleanup_diagnostic_readback(diagnostics), file=sys.stderr, flush=True)
+        raise
 
 
 @pytest.mark.parametrize("host", HOSTS)
@@ -177,6 +253,8 @@ def test_owned_construction_cleanup_preserves_primary_failure(
     helper = INSTALLER.parent / "versioned_runtime.py"
     adapter = runpy.run_path(str(INSTALLER.parent / "versioned_runtime_construction.py"))
     shell = adapter["construction_shell_helpers"]("ps1")
+    diagnostics = tmp_path / "cleanup diagnostics"
+    helper, shell = _construction_diagnostics(diagnostics, helper, shell)
     native = _helper()
     denial = "import sys; sys.stderr.write('dependency-fixture-denied\\n'); sys.exit(17)"
     root = tmp_path / "owned runtime"
@@ -218,6 +296,7 @@ Exit-InstallLock
 Write-Output 'lock-reacquired'
 exit $code
 """,
+        diagnostics=diagnostics,
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "original-policy-failure" in result.stderr
@@ -227,6 +306,114 @@ exit $code
     assert not (root / "versions" / "2.0").exists()
     assert (root / "current-version").read_text(encoding="utf-8") == "1.0"
     assert (old / "previous").read_text(encoding="utf-8") == "unchanged"
+    stages = (diagnostics / "stages.log").read_text(encoding="utf-8")
+    assert [line.split()[-1] for line in stages.splitlines()] == [
+        "abort-write",
+        "abort-sent",
+        "reply-wait",
+        "reply-received",
+        "exit-wait",
+        "child-exited",
+    ]
+
+
+def test_cleanup_diagnostic_readback_is_bounded_and_tolerates_missing_files(
+    tmp_path: Path,
+) -> None:
+    missing = _cleanup_diagnostic_readback(tmp_path)
+    assert "stages.log: unavailable (FileNotFoundError)" in missing
+    assert "python-stacks.log: unavailable (FileNotFoundError)" in missing
+    (tmp_path / "stages.log").write_bytes(b"abort-sent\n" + b"x" * 17000)
+    (tmp_path / "python-stacks.log").write_bytes(b"stack-frame\n\xff")
+    report = _cleanup_diagnostic_readback(tmp_path)
+    assert "abort-sent\n" in report
+    assert "stack-frame\n\ufffd" in report
+    assert "[truncated at 16384 bytes]" in report
+    assert len(report) < 17000
+
+
+def test_cleanup_timeout_retains_real_python_stacks_and_original_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helper = tmp_path / "blocked_fixture.py"
+    helper.write_text("import time\ntime.sleep(0.35)\n", encoding="utf-8")
+    adapter = runpy.run_path(str(INSTALLER.parent / "versioned_runtime_construction.py"))
+    diagnostics = tmp_path / "cleanup diagnostics"
+    wrapper, _ = _construction_diagnostics(
+        diagnostics,
+        helper,
+        adapter["construction_shell_helpers"]("ps1"),
+    )
+    assert "dump_traceback_later(8, repeat=True" in wrapper.read_text(encoding="utf-8")
+    diagnostics = tmp_path / "quick diagnostics"
+    wrapper, _ = _construction_diagnostics(
+        diagnostics,
+        helper,
+        adapter["construction_shell_helpers"]("ps1"),
+        interval=0.1,
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", str(wrapper)],
+        capture_output=True,
+        timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    original = subprocess.TimeoutExpired(
+        ["fixture-pwsh"],
+        20,
+        output=b"stdout-retained",
+        stderr=b"primary-failure-retained",
+    )
+
+    def expire(*args: object, **kwargs: object) -> None:
+        assert kwargs["timeout"] == 20
+        raise original
+
+    monkeypatch.setattr(subprocess, "run", expire)
+    with pytest.raises(subprocess.TimeoutExpired) as failure:
+        _run("fixture-pwsh", "", diagnostics=diagnostics)
+    error = failure.value
+    assert error is original
+    assert error.timeout == 20
+    assert error.output == b"stdout-retained"
+    assert error.stderr == b"primary-failure-retained"
+    report = capsys.readouterr().err
+    assert report.count("Timeout (") >= 2
+    assert str(helper) in report
+    assert "line 2 in <module>" in report
+    assert "stages.log: unavailable (FileNotFoundError)" in report
+
+
+@pytest.mark.parametrize("host", HOSTS)
+def test_cleanup_stage_write_failure_warns_without_replacing_primary_failure(
+    host: str | None,
+    tmp_path: Path,
+) -> None:
+    adapter = runpy.run_path(str(INSTALLER.parent / "versioned_runtime_construction.py"))
+    diagnostics = tmp_path / "cleanup diagnostics"
+    _, shell = _construction_diagnostics(
+        diagnostics,
+        INSTALLER.parent / "versioned_runtime.py",
+        adapter["construction_shell_helpers"]("ps1"),
+    )
+    (diagnostics / "stages.log").mkdir()
+    result = _run(
+        host,
+        shell
+        + """
+Write-ConstructionDiagnosticStage 'write-failure'
+[Console]::Error.WriteLine('primary-failure-retained')
+exit 17
+""",
+    )
+    assert result.returncode == 17
+    assert (
+        "Construction diagnostic warning: could not record stage 'write-failure':" in result.stderr
+    )
+    assert "primary-failure-retained" in result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows visibility contract")

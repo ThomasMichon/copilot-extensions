@@ -180,8 +180,12 @@ async def test_sse_request_uses_idle_budget_even_with_injected_client_timeout():
         auth={"source": "none", "identity": "synthetic"}, allow_loopback_test=True,
         timeout_seconds=1, idle_seconds=5,
     )
-    client = httpx.AsyncClient(transport=httpx.MockTransport(respond), timeout=0.1)
-    wire = HttpAcpTransport(spec, client=client)
+    wire = HttpAcpTransport(
+        spec,
+        client_factory=lambda: httpx.AsyncClient(
+            transport=httpx.MockTransport(respond), timeout=0.1,
+        ),
+    )
     try:
         for method in ("GET", "POST"):
             response = await wire._request(method, {})
@@ -375,7 +379,9 @@ async def test_stalled_sse_stream_has_an_independent_idle_deadline():
         auth={"source": "none", "identity": "synthetic"}, allow_loopback_test=True,
         idle_seconds=1,
     )
-    wire = HttpAcpTransport(spec, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    wire = HttpAcpTransport(
+        spec, client_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
     wire._connection_id = "synthetic-connection"
     try:
         await wire._open_stream(None)
@@ -412,7 +418,9 @@ async def test_sse_line_endings_and_chunk_boundaries(ending, split_bytes):
         endpoint="https://localhost/acp", transport="streamable-http",
         auth={"source": "none", "identity": "synthetic"}, allow_loopback_test=True,
     )
-    wire = HttpAcpTransport(spec, client=httpx.AsyncClient(transport=httpx.MockTransport(respond)))
+    wire = HttpAcpTransport(
+        spec, client_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+    )
     wire._connection_id = "synthetic"
     try:
         await wire._open_stream(None)
@@ -519,7 +527,7 @@ async def test_close_while_sse_get_opens_cannot_report_ready_success():
     wire = HttpAcpTransport(spec)
     wire._connection_id = "synthetic"
 
-    async def request(method, headers, content=None):
+    async def request(method, headers, content=None, **kwargs):
         if method == "GET":
             entered.set()
             await asyncio.Event().wait()

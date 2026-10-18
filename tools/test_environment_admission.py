@@ -679,5 +679,9 @@ def test_worktrees_xdist_is_test_only() -> None:
     worker_contract.assert_xdist_is_a_worktrees_test_dependency_not_a_runtime_requirement()
 
 
+def test_candidate_bridge_workers_share_the_existing_job_and_limits() -> None:
+    worker_contract.assert_candidate_bridge_workers_share_the_existing_job_and_limits()
+
+
 def test_worktrees_manual_main_bootstrap_stays_serial() -> None:
     worker_contract.assert_manual_main_validation_does_not_need_unshipped_test_dependencies()
