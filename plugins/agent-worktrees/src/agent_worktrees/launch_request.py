@@ -145,13 +145,30 @@ def _apply_admit(args: dict) -> dict:
 def execute(config, request: dict) -> dict:
     """Admit once; recover the same worktree after a lost response."""
     directory = cfg.tracking_dir()
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     detected_platform = cfg.detect_platform()
     request_id = request["request_id"]
-    suffix = secrets.token_hex(2) if request["kind"] == "new" else request_id
-    wid = request["worktree_id"] or session_worktree_id(
-        config.machine, detected_platform, timestamp, suffix,
-    )
+    # Reuse a prior New admission's allocation when one already exists (a
+    # retry or a concurrent racer), rather than generating a fresh
+    # timestamp/suffix that would only be discarded once the receipt is read
+    # back below -- keeps admission_args deterministic and auditable across
+    # retries. Resume always carries its own worktree_id and a request_id
+    # suffix, so its allocation is already deterministic; reusing a stored
+    # value there would also mask a genuine reused-identity mismatch that
+    # `_require_replay_identity` is meant to catch.
+    existing = None
+    if request["kind"] == "new":
+        with contextlib.suppress(FileNotFoundError):
+            existing = _read_admission(directory, request_id)
+    if existing is not None:
+        timestamp = existing["timestamp"]
+        suffix = existing["suffix"]
+        wid = existing["worktree_id"]
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        suffix = secrets.token_hex(2) if request["kind"] == "new" else request_id
+        wid = request["worktree_id"] or session_worktree_id(
+            config.machine, detected_platform, timestamp, suffix,
+        )
     fingerprint = hashlib.sha256(
         json.dumps(request, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()

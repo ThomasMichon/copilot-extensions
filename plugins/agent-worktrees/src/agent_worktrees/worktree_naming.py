@@ -30,7 +30,7 @@ def session_worktree_id(
 def parse_session_worktree_id(worktree_id: str) -> tuple[str, str, str] | None:
     """Read a complete allocation's prefix, timestamp and suffix."""
     match = re.fullmatch(
-        r"(.+)-(\d{8}-\d{6})-([0-9a-f]{4}|[0-9a-f]{32})", worktree_id,
+        r"(.+?)-(\d{8}-\d{6})-([0-9a-f]{4}|[0-9a-f]{32})", worktree_id,
     )
     return (match[1], match[2], match[3]) if match is not None else None
 
