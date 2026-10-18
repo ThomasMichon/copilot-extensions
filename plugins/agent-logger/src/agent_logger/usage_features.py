@@ -26,6 +26,23 @@ def _text(value: object) -> int:
     return len(value) if isinstance(value, str) else 0
 
 
+def _message_text(data: dict) -> int:
+    """Count visible text whether exposed as ``text`` or ``content`` (a plain
+    string or a block array of ``{"text": ...}`` entries)."""
+    text = data.get("text")
+    if isinstance(text, str):
+        return len(text)
+    content = data.get("content")
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        return sum(
+            len(item["text"]) for item in content
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
+        )
+    return 0
+
+
 def _identifier(value: object) -> str | None:
     if value is None or value == "":
         return None
@@ -43,7 +60,7 @@ def _tokens(value: object) -> int | None:
 
 
 def _output(data: dict) -> int:
-    result = _text(data.get("content"))
+    result = _message_text(data)
     reasoning = data.get("reasoningText")
     if isinstance(reasoning, str):
         result += len(reasoning)
@@ -117,6 +134,19 @@ class _Turn:
                     call.model = model or call.model
                     call.output_chars += count
                     call.emissions += 1
+            elif len(self.calls) == 0:
+                # No named call exists to attribute these emissions to and no
+                # distinct request boundary is observable either: aggregate
+                # every anonymous emission into one call rather than replaying
+                # the same prompt's input count once per ID-less emission.
+                merged = CallFeatures(self.index, None, None, self.input_chars)
+                for count, model in self.unlinked:
+                    if model and merged.model and model != merged.model:
+                        raise UsageEvidenceError("ambiguous root emission model")
+                    merged.model = model or merged.model
+                    merged.output_chars += count
+                    merged.emissions += 1
+                extra.append(merged)
             else:
                 for count, model in self.unlinked:
                     extra.append(CallFeatures(
@@ -193,7 +223,7 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
             original_id = candidate or original_id
             model = _identifier(data.get("model")) or model
         elif kind == "session.model_change":
-            model = _identifier(data.get("newModel") or data.get("model"))
+            model = _identifier(data.get("newModel") or data.get("modelId") or data.get("model"))
         elif kind == "session.compaction_complete":
             summary = data.get("summaryContent")
             if data.get("success") is not False:
@@ -207,7 +237,7 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
             resets += 1
             root_tools.clear()
         elif kind in ("user.message", "system.message"):
-            context += _text(data.get("content"))
+            context += _message_text(data)
             if data.get("attachments"):
                 warnings.add("nontext-input-not-reconstructed")
         elif kind == "assistant.turn_start" and not data.get("parentToolCallId"):

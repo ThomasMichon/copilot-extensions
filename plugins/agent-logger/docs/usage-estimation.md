@@ -40,26 +40,36 @@ root prompt, model, context or turn state. Child events do not become
 root-call quantities, and preserved/SQLite evidence records carrying their own
 `agent_id` are likewise excluded before pairing with root-call features.
 
-Output counts Unicode characters in recorded response content, one explicitly
-exposed plaintext reasoning representation, and emitted tool arguments.
+Output counts Unicode characters in recorded response content (plain text,
+``text``, or a text-block ``content`` array), one explicitly exposed plaintext
+reasoning representation, and emitted tool arguments.
 `reasoningText` takes precedence over the alternate `reasoningBlocks.blocks`
 representation; blocks admit `text`, `thinking`, or textual `summary` entries.
 Opaque/encrypted reasoning is excluded. Argument objects are serialized as
 compact JSON once; tool-execution echoes are not emitted arguments.
 
 Input exposure is the replayed visible-context character count at root turn
-start: user/system text, root emitted output and results of known root tool
-calls. Successful compaction replaces that count with `summaryContent`; a
-missing/nontext summary clears stale context, counts the compaction and warns.
+start: user/system text (plain text, ``text``, or a text-block ``content``
+array), root emitted output and results of known root tool calls. Successful
+compaction replaces that count with `summaryContent`; a missing/nontext
+summary clears stale context, counts the compaction and warns.
 `session.context_cleared` replaces it with `initialMessage`. Unlinked tool results
 are counted as a coverage gap, not guessed into context. Hidden instructions,
 tool definitions, nontext attachments, wire formatting and discarded context
 are not recovered. This is a feature proxy, not a tokenizer or reconstructed
 provider request.
 
-Models require evidence in usage, emitted messages, or explicit session/model
-change events. Workspace/global defaults are not historical model evidence.
-Missing attribution remains unknown.
+Models require evidence in usage, emitted messages, or an explicit
+`session.model_change` event (`newModel`, `modelId`, or `model`). Workspace/
+global defaults are not historical model evidence. Missing attribution remains
+unknown.
+
+A root turn with no identified API calls attributes every ID-less ("unlinked")
+emission in that turn to one aggregate anonymous call rather than replaying
+the same prompt's input-character count once per emission; a turn mixing
+exactly one named call with unlinked emissions merges them into that call,
+and a turn with two or more named calls keeps each unlinked emission separate
+(its call cannot be disambiguated).
 
 ## Measured pairing and copies
 

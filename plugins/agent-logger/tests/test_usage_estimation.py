@@ -250,3 +250,37 @@ def test_usage_estimation_review_regression_cli_reports_missing_calibration_meta
     assert not captured.out
     error = json.loads(captured.err)
     assert error["schema"] == "agent-logger.usage-error"
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("malformed_models,match", [
+    ({"model-a": ["input", "output"]}, "invalid calibration model"),
+    (
+        {"model-a": {"input": ["status"], "output": {"status": "unknown", "reason": "no-calls"}}},
+        "metric",
+    ),
+])
+def test_usage_estimation_review_regression_malformed_calibration_metrics_rejected(
+    malformed_models: dict, match: str, tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    """A calibration whose ``models`` metrics are lists instead of dicts must raise
+    the documented ``UsageEvidenceError``/CLI JSON error, never an uncaught
+    ``AttributeError``/``TypeError`` traceback."""
+    calibration = calibrate(cohort(), cohort="synthetic")
+    calibration["models"] = malformed_models
+    calibration["calibration_id"] = _digest({
+        key: value for key, value in calibration.items() if key != "calibration_id"
+    })
+    with pytest.raises(UsageEvidenceError, match=match):
+        estimate([document("old", measured=False)], calibration)
+    calibration_path = tmp_path / "calibration.json"
+    calibration_path.write_text(json.dumps(calibration))
+    features = tmp_path / "features.json"
+    features.write_text(json.dumps(document("historical", measured=False)))
+    args = [
+        "usage", "estimate", "--features", str(features), "--calibration", str(calibration_path),
+    ]
+    assert main(args) == 2
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert json.loads(captured.err)["schema"] == "agent-logger.usage-error"

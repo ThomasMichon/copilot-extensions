@@ -53,12 +53,14 @@ def pair_measured_features(features: dict, records: list[dict]) -> dict:
         if not isinstance(record, dict) or record.get("source") not in ("session-store", "transcript"):
             raise UsageEvidenceError("invalid measured feature source")
         values = validate_values(record.get("values"))
+        if values.get("parent_tool_call_id") or values.get("agent_id"):
+            # Child-owned records are excluded before root-identity checks so a
+            # child's distinct source_session_id cannot fail extraction.
+            continue
         for identity in (record.get("session_id"), values.get("source_session_id")):
             normalized = _identifier(identity)
             if identity is not None and (not normalized or normalized.lower() != features["session_id"]):
                 raise UsageEvidenceError("measured feature session identity mismatch")
-        if values.get("parent_tool_call_id") or values.get("agent_id"):
-            continue
         api = _identifier(values.get("api_call_id"))
         candidates = index.get(api, []) if api else []
         if len(candidates) != 1:

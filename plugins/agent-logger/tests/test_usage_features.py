@@ -372,3 +372,68 @@ def test_usage_features_review_regression_agent_owned_evidence_is_skipped_before
     assert result["evidence_join"]["paired_calls_by_source"] == {}
     assert result["evidence_join"]["unmatched_records"] == 0
     assert result["evidence_join"]["ambiguous_records"] == 0
+
+
+@pytest.mark.guard
+def test_usage_features_review_regression_child_owned_record_skips_root_identity_check() -> None:
+    """A child-owned record with a distinct source_session_id must be excluded
+    before the root-session-identity comparison, not fail it."""
+    result = features_from_events(fixture(), "original")
+    child_record = {"source": "session-store", "values": {
+        "api_call_id": "c2", "model": "model-a", "input_tokens": 999,
+        "agent_id": "child-agent", "source_session_id": "distinct-child-session",
+    }}
+    # Must not raise "measured feature session identity mismatch".
+    pair_measured_features(result, [child_record])
+    assert result["calls"][1]["input_tokens"] is None
+
+
+@pytest.mark.guard
+def test_usage_features_review_regression_text_and_content_block_shapes_counted() -> None:
+    """``data.text`` and a text-block ``content`` array are both counted,
+    matching the shapes agent-bridge's peek_snapshot already supports."""
+    via_text = features_from_events([
+        event("user.message", text="hello-text"),
+        event("assistant.turn_start"),
+        event("assistant.message", apiCallId="a", text="world-text"),
+    ], "s")
+    assert via_text["calls"][0]["input_chars"] == len("hello-text")
+    assert via_text["calls"][0]["output_chars"] == len("world-text")
+    via_blocks = features_from_events([
+        event("user.message", content=[{"text": "he"}, {"text": "llo"}, {"not_text": "x"}]),
+        event("assistant.turn_start"),
+        event("assistant.message", apiCallId="a", content=[{"text": "wo"}, {"text": "rld"}]),
+    ], "s")
+    assert via_blocks["calls"][0]["input_chars"] == len("hello")
+    assert via_blocks["calls"][0]["output_chars"] == len("world")
+
+
+@pytest.mark.guard
+def test_usage_features_review_regression_model_change_accepts_model_id() -> None:
+    """``session.model_change`` using ``data.modelId`` (not just ``newModel``/``model``)
+    must still attribute the model to subsequent calls."""
+    result = features_from_events([
+        event("session.model_change", modelId="model-from-id"),
+        event("assistant.turn_start"),
+        event("assistant.message", apiCallId="a", content="out"),
+    ], "s")
+    assert result["calls"][0]["model"] == "model-from-id"
+    assert "unknown-model" not in result["warnings"]
+
+
+@pytest.mark.guard
+def test_usage_features_review_regression_anonymous_emissions_not_double_counted() -> None:
+    """Two anonymous emissions in a turn with no named calls must not each
+    replay the full prompt's input-character count."""
+    result = features_from_events([
+        event("assistant.turn_start"),
+        event("user.message", content="hello"),
+        event("assistant.turn_start"),
+        event("assistant.message", content="first"),
+        event("assistant.message", content="second"),
+    ], "s")
+    anonymous = [call for call in result["calls"] if call["api_call_id"] is None]
+    assert len(anonymous) == 1
+    assert anonymous[0]["input_chars"] == len("hello")
+    assert anonymous[0]["emissions"] == 2
+    assert anonymous[0]["output_chars"] == len("first") + len("second")

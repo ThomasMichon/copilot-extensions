@@ -167,9 +167,14 @@ def validate_calibration(document: object) -> dict:
         policy = CalibrationPolicy(**document["policy"])
         policy.validate()
         for model, metrics in document["models"].items():
-            if not isinstance(model, str) or not model or len(model) > 2048 or set(metrics) != {"input", "output"}:
+            if (
+                not isinstance(model, str) or not model or len(model) > 2048
+                or not isinstance(metrics, dict) or set(metrics) != {"input", "output"}
+            ):
                 raise UsageEvidenceError("invalid calibration model")
             for metric in metrics.values():
+                if not isinstance(metric, dict):
+                    raise UsageEvidenceError("invalid calibration metric")
                 if metric["status"] == "unknown":
                     if not isinstance(metric["reason"], str):
                         raise UsageEvidenceError("calibration abstention reason is missing")
@@ -221,6 +226,6 @@ def validate_calibration(document: object) -> dict:
                     and metric["held_out_relative_error"]["p90"] > policy.max_p90_relative_error
                 ):
                     raise UsageEvidenceError("calibration violates its accuracy policy")
-    except (KeyError, TypeError, OverflowError) as exc:
+    except (KeyError, TypeError, AttributeError, OverflowError) as exc:
         raise UsageEvidenceError("malformed transcript calibration") from exc
     return document
