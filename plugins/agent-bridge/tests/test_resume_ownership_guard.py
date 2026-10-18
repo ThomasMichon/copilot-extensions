@@ -45,7 +45,7 @@ def client(tmp_db: Database, tmp_path: Path, monkeypatch) -> TestClient:
         resolve=Mock(return_value=SpawnTarget(type="local", cwd=path, project=config.project)),
     )
 
-    async def find(worktree_id, resolver):
+    async def find(worktree_id, resolver, *, cache=None):
         return "example", worktrees._WorktreeEntry(
             id=worktree_id, agent_name="example", machine="example",
             path=path, branch="worktree/example", status="active",

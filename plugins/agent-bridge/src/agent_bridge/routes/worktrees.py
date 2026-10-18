@@ -133,6 +133,11 @@ class WorktreeDiscoveryCache:
                 self._interval,
             )
         else:
+            # A completed (possibly cancelled) task from a prior
+            # periodic run must not linger: capture_worktrees() refuses
+            # any retained completed task regardless of the cancel flag.
+            self._task = None
+            self._cancel_requested = False
             log.info("Worktree periodic discovery disabled (on-demand only)")
 
     async def stop(self) -> None:

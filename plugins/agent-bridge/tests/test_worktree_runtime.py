@@ -167,6 +167,27 @@ async def test_restore_rejects_incomplete_or_coerced_observations(captured, muta
 
 
 @pytest.mark.asyncio
+async def test_capture_succeeds_after_restarting_in_on_demand_mode(captured):
+    # Regression: stopping a periodic cache, reconfiguring to on-demand
+    # (interval=0) and restarting must not leave the prior completed
+    # task or its cancel-requested flag in place -- capture_worktrees()
+    # refuses any retained completed task regardless of that flag, so
+    # on-demand capture would otherwise stay permanently unavailable.
+    app, _origins, _capture = captured
+    resolver = app.state.resolver
+    governance = LoopGovernance(helper=lambda checkpoint: {"status": "ready"})
+    cache = worktrees.WorktreeDiscoveryCache(interval=5)
+    cache.start(resolver, governance=governance)
+    await cache.stop()
+    assert cache._task is not None and cache._task.done()
+    cache.configure(interval=0)
+    cache.start(resolver, governance=governance)
+    assert cache._task is None and cache._cancel_requested is False
+    payload = capture_worktrees(cache, resolver, governance)
+    assert payload["entries"] == {}
+
+
+@pytest.mark.asyncio
 async def test_capture_succeeds_after_stop_start_restart_clears_cancel_flag(captured):
     # Regression: start() must clear _cancel_requested when it creates a
     # replacement periodic task. Otherwise an ordinary in-process
