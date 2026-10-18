@@ -1035,6 +1035,22 @@ cannot validate the new step by implication.
 The exact ordinary runner lane plus the complete qualification module passes
 594 cases with twelve platform skips after this correction.
 
+Current-head Windows CI and review then expose a clean-checkout fixture defect:
+shared clones do not inherit remote-tracking Main refs, and a local Main branch
+had masked that absence. Seed the fixture from the original checkout's exact
+canonical Main commit; a real-Git negative fixture has no local Main branch in
+either checkout and initially no cloned Main remote ref. Preserve the actual
+Main controller and source-lineage assertions.
+
+The same CI also reproduces the unresolved native purge signature #7020.
+Fixture-only timestamped phase output now distinguishes startup, engine load,
+real identity reads, home refusal and runtime purge at the unchanged twenty-
+second child deadline. Timeout readback is bounded and re-raises the original
+exception; all purge safety assertions remain. This is not a diagnosed cause
+or an accepted-flake claim. The full source-controller, standalone and install-
+contract guard modules pass 475 cases with five Windows-only skips after these
+changes; current-head hosted review/checks still decide admission.
+
 ### 2026-10-18 - Source and artifact repair passes; candidate qualification blocks publication
 
 Qualification `39152940504` admitted exact Dev
