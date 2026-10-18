@@ -80,6 +80,28 @@ abstracted; the requested mechanics and priorities are unchanged):
 > installing all remote-marketplace plugins and copying over all locally-sourced
 > in-worktree plugins.
 
+### Source-preservation clarification
+
+> A controller's local-path reference remains a local-path reference for the
+> bridged agent: a reflected copy on a remote machine or container, or the same
+> original location in the same execution world. A Git reference remains a Git
+> reference. The exception is an absolute local reference to a plugin defined
+> in the target repository: rebind it as a target-relative local-marketplace
+> reference.
+
+Source declarations and launch directories are distinct outputs. Installing a
+Git-sourced plugin does not authorize replacing its declared Git source with an
+installation-cache directory. ACP still receives the installed payload's local
+directory. A path into a Git checkout remains path-sourced when the controller
+chose that path. Worked examples must show both outputs, including the
+target-owned relocation exception and the authority of target-local overrides.
+
+Repository scoping is the default. Preparing a selected plugin must not enable
+it in unrelated repositories or mutate user-global marketplace and enablement
+preferences as a readiness workaround. Native repository-declared auto-install
+is distinct from global plugin-management commands; shared installation
+bookkeeping alone does not grant global activation.
+
 ## Plan
 
 ### Phase 0 - Reconcile and review
@@ -118,13 +140,21 @@ abstracted; the requested mechanics and priorities are unchanged):
 
 ### Phase 2 - Static local, remote SSH and privileged relay
 
-- [ ] Apply target-local registration before static local-loopback ACP
+- [ ] Preserve declared source kind through shared preparation in every
+  integrated venue: retain Git origin/revision/location declarations, retain
+  local references or reflected local copies, and rebind target-owned absolute
+  local references relative to the actual execution checkout.
+- [ ] Publish worked examples mapping controller selection and execution
+  location to target-local settings and the complete automatic ACP directory
+  set; cover source preservation, target ownership, mixed origins, installed
+  fallback and explicit target-local choices.
+- [ ] Apply target-local registration before static-registry local-loopback ACP
   launches, retaining existing own/related selection, native
   operator precedence and account/platform locality checks. Resolve local
   filesystem references without assuming a remote provider owns this path.
-- [ ] Apply the same registration barrier through the existing native local
-  CLI acquisition owner; settings-only consumer discovery is not proof that
-  this adapter prepares its target.
+- [ ] Apply the same registration barrier through the existing local
+  acquisition owner in CLI and ACP modes; settings-only consumer discovery is
+  not proof that this adapter prepares its target.
 - [ ] Apply the same contract to genuine remote static-registry SSH targets:
   target-owned resolution plus control-repository payload staging.
 - [ ] Resolve the privileged launch's real identity/filesystem context and
@@ -174,6 +204,13 @@ abstracted; the requested mechanics and priorities are unchanged):
   modes, with effective paths/settings and launch version recorded.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
   evidence or explicit tracked transfers.
+- [ ] Source-preservation examples agree with executable cases: local
+  same-world references retain the original path, remote local sources use
+  reflected paths, Git declarations remain Git declarations after installation,
+  and target-owned absolute paths become target-relative marketplace paths.
+- [ ] Git preparation and activation leave user-global preferences unchanged;
+  an unrelated repository using the same execution profile does not load the
+  target repository's selected plugins.
 - [x] Existing own-plugin, related-plugin, Session Host resume, and native
   repository settings behavior remain intact.
 
@@ -209,6 +246,32 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-18 - Source preservation and repository-scoped activation
+
+- Clarified the standing contract: local references stay local, Git references
+  stay Git-based, and an absolute local reference to target-owned content is
+  rebound relative to the actual execution checkout. Source declarations and
+  concrete ACP directories are distinct outputs.
+- Repository scope is the default. Native repository-declared Git auto-install
+  was exercised without global marketplace/install commands: the declaring
+  repository loaded the selected skill, user-global settings remained unchanged,
+  and a separate repository using the same profile did not load it.
+- The existing management CLI, cache-only reuse, and no-prompt ACP
+  initialization/session creation are not established scoped preparation
+  barriers. Normal startup activation is not by itself proof that acquisition
+  completed before the productive child. That readiness seam remains open;
+  no user-global activation or silent profile replacement is an acceptable
+  workaround.
+- Preserved the mixed-local-origin and installed-inventory corrections, with
+  242 shared contracts and focused Bridge coverage. An independent actual CLI
+  consumer loaded both original physical payloads from settings generated by
+  preparation, including the operation-owned local alias. Neither source catalog
+  was changed.
+- Added worked acceptance examples for ordinary local references, explicit
+  target choices, remote local copies, preserved Git sources, target-owned
+  relocation, mixed physical origins and legacy ACP inventory. These examples
+  do not close the source-preserving Git or deferred-adapter gates.
 
 ### 2026-10-18 - Static local ACP candidate and consumer proof
 

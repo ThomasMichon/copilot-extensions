@@ -3,7 +3,7 @@
 - **Subject:** The dispatch **venue** layer — how the coordination layer launches, reaches, authenticates, and monitors a Copilot agent in a remote venue (a GitHub CodeSpace, a local Docker container, or a directly SSH-registered machine/local checkout), via the `agent-codespaces`, `agent-containers`, and static-registry SSH/local dispatch paths.
 - **Scope:** leaf (cross-cutting capability across the venue providers)
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md)
 - **Parent vision:** [agent-fabric](../agent-fabric/README.md)
 
@@ -196,8 +196,8 @@ headed CLI and a headless ACP agent executing there. Selected remote-marketplace
 plugins are installed and locally sourced worktree payloads are reflected into
 the execution environment before registration; local venues may reference
 already-local payloads.
-The target checkout's `.github/copilot/settings.local.json` declares the local
-marketplace paths and enabled identities without replacing unrelated settings
+The target checkout's `.github/copilot/settings.local.json` preserves the
+selected marketplace sources and enabled identities without replacing unrelated settings
 or requiring user-global registration. The operation owns only the reflected
 entries it creates in `extraKnownMarketplaces` and `enabledPlugins`, not those
 maps wholesale. Each launch mode also receives the explicit plugin-directory
@@ -209,6 +209,29 @@ complete, before either mode launches.
 A copy or registration
 failure is not a successful, plugin-equipped launch. Restricted venues retain
 their explicit no-automatic-projection boundary.
+
+### plugin-source-preserving-projection
+Projection preserves the controller's declared source, not merely the bytes of
+an installed payload. A local source remains a local filesystem reference:
+same-execution-world launches use the same original location, while remote
+launches reference the reflected copy in the execution environment. A Git source
+remains a Git source with its selected repository, revision and plugin location;
+an installed cache is availability, not a replacement acquisition authority.
+A directory does not become Git-sourced merely because it happens to be a Git
+checkout.
+
+Preparation does not grant user-global activation. Repository-selected plugins
+are enabled only for that repository by default, without changing unrelated
+repositories' effective plugins or user-global marketplace and enablement
+preferences. Shared native installation storage does not broaden selection;
+broader installation or activation requires explicit operator intent.
+
+An absolute local reference to a plugin defined by the target repository is
+rebound to that plugin relative to the actual target execution checkout. It does
+not pin a controller-side repository anchor or create a second reflected copy
+of target-owned content. These source semantics remain the same across venues
+and launch modes; explicit directory arguments still identify the concrete
+payload available to the executing process.
 
 ## Behaviors
 

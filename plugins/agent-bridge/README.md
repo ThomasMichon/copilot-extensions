@@ -360,6 +360,12 @@ execution/ACP capability limits.
 
 ## Responsibility boundary
 
+The [projection acceptance examples](docs/plugin-projection-examples.md) map
+controller declarations and execution locations to target-local settings and
+ACP directory arguments, including source preservation, repository scoping and
+target-owned relocation. They distinguish the required outputs from adapters
+whose integration remains open in the active effort.
+
 Ordinary static local ACP targets prepare plugins after real Worktrees
 allocation (or an explicit existing cwd), before either the raw child or local
 Session Host starts. Related selection and payload declarations prefer the
