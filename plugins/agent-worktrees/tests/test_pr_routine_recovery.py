@@ -193,6 +193,147 @@ def test_numbered_pr_preserves_verified_lost_ack_fallbacks(
     assert git("show", "HEAD:later-feedback.txt", cwd=wt) == "retain unpublished feedback"
 
 
+def test_legacy_reconciliation_persists_destination_binding(pr_repo, monkeypatch) -> None:
+    """A compatible legacy PR (rewrite ownership dropped, only the original
+    attested ``head_identity`` surviving) still has its verified destination
+    carried forward by *settlement* (the backed-sync path, not the ordinary
+    push retry), so a later remote repoint is refused instead of silently
+    publishing to the new repository."""
+    from test_pr_break_glass import _recovered_pr
+
+    real_slug = pr_publish.push_slug
+    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    real_identity = pr_publish.push_identity("origin", cwd=str(wt))
+    current = record(wid)
+    # Stamp the legacy evidence (``head_identity``, no rewrite ownership)
+    # *before* the backed-sync checkpoint below is retained: the checkpoint's
+    # association binds to ``head_identity``, so changing it afterward would
+    # invalidate the very evidence this test means to exercise.
+    current.pr.head_identity = real_identity
+    current.pr.rewrite_owner = ""
+    current.pr.rewrite_identity = ""
+    branch = current.pr.branch = f"pr/owned-topic-{git_ops.worktree_suffix(wid)}"
+    current.pr.base_sha = git("merge-base", saved, "origin/master", cwd=wt)
+    current.pr.patch_id = pr_ops._patch_id(current.pr.base_sha, saved, cwd=str(wt))
+    tracking.save_record(current)
+    git("--git-dir", str(remote), "update-ref", f"refs/heads/{branch}", saved, cwd=wt)
+    git("reset", "--hard", saved, cwd=wt)
+    assert git_collab.sync_forward(wid, config)
+    published = git("rev-parse", "HEAD", cwd=wt)
+    git("--git-dir", str(remote), "fetch", "--no-tags", str(wt), published, cwd=wt)
+    git("--git-dir", str(remote), "update-ref", f"refs/heads/{branch}", published, saved, cwd=wt)
+    (wt / "unpublished.txt").write_text("keep this unpublished\n")
+    git("add", "unpublished.txt", cwd=wt)
+    git("commit", "-m", "local follow-up", cwd=wt)
+    monkeypatch.setattr(git_ops, "slug_from_url", lambda *a: "example/project")
+    monkeypatch.setattr(pr_publish, "push_slug", real_slug)
+    assert not record(wid).pr.rewrite_identity
+
+    # The lost-acknowledgement retry settles tracking through routine
+    # reconciliation's legacy fallback; its verified destination must now be
+    # recorded, not just checked in passing.
+    assert finalize.push_changes(wid, config)
+    source = git("rev-parse", "HEAD", cwd=wt)
+    assert record(wid).pr.head_sha == source != published != saved
+    assert record(wid).pr.rewrite_identity == real_identity, (
+        "legacy reconciliation must persist the verified destination binding"
+    )
+
+    # Repointing the remote afterward must be refused by the now-persisted
+    # destination, never silently republished to the new repository.
+    git("config", "remote.origin.pushurl", str(remote.parent / "elsewhere.git"), cwd=wt)
+    (wt / "after-repoint.txt").write_text("after repoint\n")
+    git("add", "after-repoint.txt", cwd=wt)
+    git("commit", "-m", "after repoint", cwd=wt)
+    before = record(wid).pr.head_sha
+    assert not finalize.push_changes(wid, config)
+    assert record(wid).pr.head_sha == before
+
+
+def test_routine_recovery_preserves_private_head_checkout_retry(pr_repo, monkeypatch) -> None:
+    """A numbered, open PR checked out on its own tracked private head (not
+    'worktree/<id>') -- an explicitly supported checkout, see finalize.py's
+    on_feature handling -- must still reach the verified lost-ack retry
+    instead of being blocked by --rewrite-pr's own branch requirement."""
+    config, wid, wt, remote, branch, _published = _prepare(pr_repo, scheme="snapshot")
+    current = record(wid)
+    current.pr.number = 42
+    current.pr.repo = "example/project"
+    current.pr.url = "https://gitea.example.com/example/project/pulls/42"
+    current.pr.head_identity = pr_publish.push_identity("origin", cwd=str(wt))
+    current.pr.rewrite_owner = ""
+    current.pr.rewrite_identity = ""
+    tracking.save_record(current)
+    monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
+    monkeypatch.setattr(git_ops, "slug_from_url", lambda *a: "example/project")
+    monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
+    monkeypatch.setattr(pr_rewrite, "observe_pr", lambda config, pr: PullResult(
+        number=42, head_sha=pr_publish._tip("origin", branch, str(wt)),
+        head_ref=branch, head_url=str(remote),
+    ))
+    saved = record(wid).pr.head_sha
+    (wt / "accepted-feedback.txt").write_text("accepted source feedback\n")
+    git("add", "accepted-feedback.txt", cwd=wt)
+    git("commit", "-m", "accepted source feedback", cwd=wt)
+    push = git_ops.push
+
+    def lose_ack(*args, **kwargs):
+        assert push(*args, **kwargs)
+        return git_ops.PushResult(ok=False, stderr="transport acknowledgement lost")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(git_ops, "push", lose_ack)
+        assert not finalize.push_changes(wid, config)
+    assert record(wid).pr.head_sha == saved
+
+    # Check out the tracked private head directly -- the supported
+    # alternative to 'worktree/<id>' (finalize.py on_feature) -- rather than
+    # staying on the worktree branch, before retrying.
+    git("checkout", branch, cwd=wt)
+    (wt / "later-feedback.txt").write_text("retain unpublished feedback\n")
+    git("add", "later-feedback.txt", cwd=wt)
+    git("commit", "-m", "later feedback", cwd=wt)
+    source = git("rev-parse", "HEAD", cwd=wt)
+    assert finalize.push_changes(wid, config)
+    assert record(wid).pr.head_sha == source
+    assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == source
+    assert git("show", "HEAD:accepted-feedback.txt", cwd=wt) == "accepted source feedback"
+    assert git("show", "HEAD:later-feedback.txt", cwd=wt) == "retain unpublished feedback"
+
+
+def test_push_changes_refuses_branch_switch_after_reconciliation(
+    owned_publication, monkeypatch,
+) -> None:
+    """A checkout switch to a different tracked PR's branch in the window
+    between routine reconciliation (which releases its locks) and the later
+    push-time PR selection must never let the first PR's pinned source be
+    published to the second PR's destination."""
+    config, wid, wt, remote, saved, branch, published = owned_publication
+    current = record(wid)
+    second = replace(
+        current.pr, pr_id="second-live-pr", branch="pr/second-topic",
+        number=None, url="", rewrite_owner="", rewrite_identity="",
+    )
+    current.prs.append(second)
+    tracking.save_record(current)
+    git("branch", second.branch, cwd=wt)
+
+    real_reconcile = pr_routine_recovery.reconcile
+
+    def reconcile_then_switch_branch(config, record_arg, *, cwd):
+        result = real_reconcile(config, record_arg, cwd=cwd)
+        git("checkout", second.branch, cwd=str(wt))
+        return result
+
+    monkeypatch.setattr(pr_routine_recovery, "reconcile", reconcile_then_switch_branch)
+    monkeypatch.setattr(
+        git_ops, "push", lambda *a, **k: pytest.fail("Mismatched branch switch must not push."),
+    )
+    assert not finalize.push_changes(wid, config)
+    assert record(wid).pr.head_sha == saved
+    assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == published
+
+
 @pytest.mark.parametrize("command", ["push-changes", "sync"])
 @pytest.mark.parametrize("failure", [
     "provider-error", "provider-head", "provider-closed", "provider-number", "provider-branch",

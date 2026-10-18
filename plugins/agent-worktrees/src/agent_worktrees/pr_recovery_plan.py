@@ -116,13 +116,16 @@ def revalidate(
     config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
     operation: pr_break_glass.RecoveryPreview, *, remote: str,
     observe: Callable[[Config, tracking.PRRecord], PullResult], cwd: str,
+    allow_feature_head: bool = False,
 ) -> None:
     """Refuse changed input after retention; transport still CASes the exact ref."""
     pr_publication_state.require_current(record, pr)
-    if not git_ops.is_clean(cwd=cwd) or git_ops._get_current_branch_safe(cwd) != record.branch:
+    current_branch = git_ops._get_current_branch_safe(cwd)
+    on_owning_head = current_branch == record.branch or (allow_feature_head and current_branch == pr.branch)
+    if not git_ops.is_clean(cwd=cwd) or not on_owning_head:
         raise ValueError("Recovery source branch or working tree changed before publication.")
     source = git_ops.git(
-        "--no-replace-objects", "rev-parse", "--verify", f"refs/heads/{record.branch}",
+        "--no-replace-objects", "rev-parse", "--verify", "HEAD",
         cwd=cwd, isolated_repository=True,
     ).stdout.strip()
     target = pr_publish.push_target(config.default_repo, pr, cwd)

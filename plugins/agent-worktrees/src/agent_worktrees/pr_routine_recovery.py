@@ -74,10 +74,11 @@ def _settle(
     config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
     remote: str, observed: str, *, cwd: str,
 ) -> str:
-    pr_rewrite._validate(record.worktree_id, config, record, cwd)
+    pr_rewrite._validate(record.worktree_id, config, record, cwd, pr=pr, allow_feature_head=True)
     if not git_ops.is_clean(cwd=cwd):
         raise ValueError("Commit working-tree changes before routine PR reconciliation.")
     identity = pr_publish.push_identity(remote, cwd=cwd)
+    legacy_destination = not pr.rewrite_identity
     if not identity or identity != (pr.rewrite_identity or pr_rewrite.legacy_identity(pr, cwd)):
         raise ValueError("Routine reconciliation requires the original publication destination.")
     source = pr_recovery._rev("HEAD", cwd)
@@ -87,6 +88,7 @@ def _settle(
     )
     pr_recovery_plan.revalidate(
         config, record, pr, operation, remote=remote, observe=pr_rewrite.observe_pr, cwd=cwd,
+        allow_feature_head=True,
     )
     if operation.action != "settle-publication":
         if operation.evidence_status == "unusable" or not _verified_fallback(
@@ -122,14 +124,27 @@ def _settle(
             "source": point.local_ref, "saved": point.published_ref, "observed": observed_ref,
         }
         tracking._atomic_write(path, json.dumps(audit, sort_keys=True) + "\n")
-        pr_rewrite._validate(record.worktree_id, config, record, cwd)
+        pr_rewrite._validate(record.worktree_id, config, record, cwd, pr=pr, allow_feature_head=True)
         pr_recovery_plan.revalidate(
             config, record, pr, operation, remote=remote, observe=pr_rewrite.observe_pr, cwd=cwd,
+            allow_feature_head=True,
         )
         settlement_attempted = True
         pr_publish.record_reconciled_head(
             config, record, pr, observed, rebase_base_sha=operation.rebase_base_sha,
         )
+        if legacy_destination:
+            # The identity above was only verified through the dynamic legacy
+            # fallback; without persisting it, a later remote repoint leaves
+            # push_checked() with no saved destination to reject against.
+            ownership_error = pr_publish.record_rewrite_ownership(
+                config, record, pr, pr.branch, observed, identity,
+            )
+            if ownership_error:
+                output.warn(
+                    f"Reconciled backed publication, but could not record its "
+                    f"verified destination: {ownership_error}"
+                )
         settled = True
         audit["outcome"] = "succeeded"
         tracking._atomic_write(path, json.dumps(audit, sort_keys=True) + "\n")

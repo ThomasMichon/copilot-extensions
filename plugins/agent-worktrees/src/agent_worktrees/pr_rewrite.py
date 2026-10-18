@@ -37,18 +37,25 @@ def legacy_identity(pr: tracking.PRRecord, cwd: str) -> str:
 
 
 def _validate(worktree_id: str, config: Config, record: tracking.WorktreeRecord | None,
-              cwd: str, *, recovery: bool = False) -> tracking.PRRecord:
+              cwd: str, *, recovery: bool = False, pr: tracking.PRRecord | None = None,
+              allow_feature_head: bool = False) -> tracking.PRRecord:
     repo = config.default_repo
-    pr = record.active_pr() if record else None
+    if pr is None:
+        pr = record.active_pr() if record else None
     states = ("open", "active", "creating") if recovery else ("open", "active")
     if not repo.pr.enabled or record is None or pr is None or pr.state not in states:
         raise ValueError("--rewrite-pr requires an open tracked PR, never direct/shared publication.")
     if pr.provider and pr.provider != repo.pr.provider:
         raise ValueError("Tracked PR provider differs from configuration; refusing credential resolution.")
     branch = f"worktree/{worktree_id}"
+    current_branch = git_ops._get_current_branch_safe(cwd)
+    # A tracked private-head checkout (HEAD on the PR's own feature branch,
+    # not the worktree branch) is a supported source for routine settlement
+    # only -- it never grants --rewrite-pr's history-replacement authority.
+    on_owning_head = current_branch == branch or (allow_feature_head and current_branch == pr.branch)
     if (record.worktree_id != worktree_id or record.repo.lower() != config.repo_name.lower() or record.branch != branch
             or Path(record.worktree_path).resolve() != Path(cwd).resolve()
-            or git_ops._get_current_branch_safe(cwd) != branch):
+            or not on_owning_head):
         raise ValueError("--rewrite-pr requires the owning worktree on its recorded worktree branch.")
     if pr.repo and pr.repo.lower() != (git_ops.remote_slug(repo.remote, cwd=cwd) or "").lower():
         raise ValueError("Tracked PR belongs to another repository; nothing was pushed.")

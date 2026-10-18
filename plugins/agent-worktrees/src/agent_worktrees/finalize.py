@@ -287,9 +287,14 @@ def push_changes(
     # PR mode: push the feature branch, not master.
     if repo.pr.enabled and record and record.pr and record.pr.branch:
         reconciled_source = ""
+        reconciled_branch = ""
         if not dry_run:
             from . import pr_routine_recovery
             from .providers.base import ProviderError
+            # Pin the checkout reconciliation actually ran against: a pinned
+            # source is only safe to pair with the PR selected from this same
+            # branch -- never a different one checked out afterward.
+            reconciled_branch = git_ops._get_current_branch_safe(worktree_path)
             try:
                 reconciled_source = pr_routine_recovery.reconcile(config, record, cwd=worktree_path)
             except (OSError, ValueError, git_ops.GitError, ProviderError) as exc:
@@ -297,6 +302,7 @@ def push_changes(
                 return False
         return _push_changes_pr(
             worktree_id, config, record, dry_run=dry_run, reconciled_source=reconciled_source,
+            reconciled_branch=reconciled_branch,
         )
 
     # PRs required: refuse to push directly to the default branch. The only
@@ -747,6 +753,7 @@ def _push_changes_pr(
     *,
     dry_run: bool = False,
     reconciled_source: str = "",
+    reconciled_branch: str = "",
 ) -> bool:
     """PR-mode push-changes: incrementally update the open PR head, not master.
 
@@ -778,6 +785,18 @@ def _push_changes_pr(
         )
 
     head = git_ops._get_current_branch_safe(worktree_path)
+    if reconciled_source and head != reconciled_branch:
+        # Reconciliation pinned a source against whichever PR the earlier
+        # checkout selected; its locks are released by the time we get here.
+        # A checkout switch in that window could otherwise pair that pinned
+        # source with a *different* PR's destination below. Refuse rather
+        # than risk publishing one PR's source to another PR's branch.
+        output.err(
+            "The checked-out branch changed after routine reconciliation "
+            f"(was '{reconciled_branch}', now '{head}'); nothing was pushed. "
+            "Retry push-changes."
+        )
+        return False
     on_wt = head == wt_branch
     on_feature = bool(head and any(p.branch == head for p in record.prs))
     if not (on_wt or on_feature):
