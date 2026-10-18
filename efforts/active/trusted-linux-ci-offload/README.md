@@ -667,3 +667,18 @@ instead of taking ownership of that campaign.
 - Current sequencing uses qualified Dev-to-Main guard delivery before final
   ARC selection, rather than expanding workflow-only policy to copy Python
   helpers. Hosted selection and the explicit physical READY gate remain intact.
+
+### 2026-10-17 - Literal Main evidence and dedicated-contract review
+
+- Refreshed both live API and fetched Main identities; both still resolve to
+  `a2f59e9dae82738ba2537e9a58196cd5cca0e3c8`. Rebuilt fresh workflow-only
+  overlays and captured literal failure sections, full logs and immutable
+  input/output closures without porting tests or changing their assertions.
+- All three exact old-source portfolios remain failed: 146 passed, 2 failed.
+  Guard commands pass; the two failing node IDs and literal diagnostics are
+  retained for #6237's classification. No green Main qualification, Main
+  candidate publication or mutation is inferred.
+- Dev review found that whitespace normalization could accept a setup command
+  split across shell lines. The dedicated contract now compares parsed values
+  directly and has an independent negative newline fixture. The coupled Dev
+  portfolio passed 252 cases under the bounded supervisor.

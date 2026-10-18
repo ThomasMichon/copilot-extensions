@@ -161,7 +161,7 @@ def _validate_review_setup(workflow: dict[str, Any]) -> list[str]:
             },
         },
     }
-    if runner not in REVIEW_RUNNERS or _canonical(workflow) != _canonical(expected):
+    if runner not in REVIEW_RUNNERS or workflow != expected:
         return [f"{REVIEW_WORKFLOW}: setup does not match the reviewed contract"]
     return []
 

@@ -51,6 +51,11 @@ BAD_SETUPS: list[tuple[tuple[str, ...], object]] = [
     ((*JOB, "steps"), [{
         "name": "Complete minimal review setup",
         "timeout-minutes": "5",
+        "run": 'echo\n"Copilot Code Review setup complete."',
+    }]),
+    ((*JOB, "steps"), [{
+        "name": "Complete minimal review setup",
+        "timeout-minutes": "5",
         "run": 'echo "Copilot Code Review setup complete."; curl example.com',
     }]),
     (("jobs", "extra"), {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}),
