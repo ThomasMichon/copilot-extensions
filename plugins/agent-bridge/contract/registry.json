@@ -206,7 +206,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "19680160107507c54e2f3541993a6bba4bd052e54ba18c9b6ed3a8e511619074",
+          "sha256": "f38e9374840d2b9560a1eed954e0a4906e968ed15849239f041e04c1cf6feeea",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -290,7 +290,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
-          "sha256": "824535a7d5c3bfaf1726bcbd8c1a56e4cca627f1544081b5161b7fbcc56219b0",
+          "sha256": "1f0ee4f1599af18cdf3f1184af115eb660a2f8d1ff23db812cfac342667132f5",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -1456,7 +1456,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-40.json",
-          "sha256": "395a7a36978d4e1d3167774b5a96d468473790b0b12b205e66c66bacd3cf7956",
+          "sha256": "0d77e011cbba36340934cd301d16e4849128728335dd9c56634c09aa6a94e737",
           "role": "Generation-40 combined receipt/native producer evidence: worktrees.py",
           "generation": 40
         },
@@ -1534,7 +1534,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-40.json",
-          "sha256": "3feefc6bb4417af50720d6afe33fbe2904542e3ff5d5d807d65ec49d25051ec2",
+          "sha256": "06457ac92aa2488c52332cc973a9d1edede6ddd02facb8aca023cadec04b7861",
           "role": "Generation-40 combined receipt/native producer evidence: singleton_resume.py",
           "generation": 40
         },
@@ -4067,6 +4067,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
           "source_git_blob": "479172e6483513d6ecd60652ac2c995c94603a2e",
           "capture_method": "Re-attest unchanged HTTP-40 wire vectors after resolving native resume through the app-bound worktree cache instead of the process-global one; the owner-boundary route and payload shape are unaffected."
+        },
+        {
+          "commit": "0977c7bd5bc3c3163bb5c36e498c0fd79f477b04",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "fcea1e7ac8a723a4b590750c6da45702273f2ad1",
+          "capture_method": "Re-attest unchanged HTTP-40 wire vectors after clearing the periodic-discovery cancel-requested flag on restart; the capture/restore/wire contract is unaffected."
+        },
+        {
+          "commit": "0977c7bd5bc3c3163bb5c36e498c0fd79f477b04",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+          "capture_method": "Re-attest unchanged HTTP-40 wire vectors after resolving the singleton-anchor fresh-init resume path through the app-bound worktree cache instead of the process-global one; the owner-boundary route and payload shape are unaffected."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",
