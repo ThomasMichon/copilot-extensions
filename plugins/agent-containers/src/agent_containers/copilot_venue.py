@@ -261,16 +261,21 @@ def cmd_copilot(
                     args.name, user, values, write_remote_env,
                     config=config, fleet=target.fleet,
                 )
+                from .plugin_preparation import attached_launch_command, stage_for_attached_launch
+                prepared_context = {}
+                preparation = stage_for_attached_launch(
+                    args, target, remote_env=remote_env, relay_port=relay_port,
+                    prepared_context=prepared_context,
+                )
+                remote_command = attached_launch_command(
+                    remote_command, prepared_context.get("workspace"),
+                )
                 if auth_env:
                     remote_command = auth.wrap_manager_shell(remote_command, auth_env, remote_env)
                 elif remote_env:
                     from .ssh_transport import build_remote_command
                     remote_command = build_remote_command(remote_command, remote_env)
-                from .plugin_preparation import stage_for_attached_launch
-                remote_command = stage_for_attached_launch(
-                    args, target, remote_env=remote_env,
-                    relay_port=relay_port,
-                ) + remote_command
+                remote_command = preparation + remote_command
                 spawn_cmd = build_ssh_command(
                     ssh_config, remote_command,
                     reverse_forwards=reverse_forwards, pty=True,

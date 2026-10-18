@@ -76,7 +76,8 @@ def plugin_plan(repo: str | None, config, sources=(), *, repo_roots=()) -> dict:
 
 async def prepare_plugins(manager, name: str, repo: str | None, config, workspace: str,
                           sources=(), *, worktree_id: str | None = None, repo_roots=(),
-                          prelude: str = "", relay_port: int | None = None) -> list[str]:
+                          prelude: str = "", relay_port: int | None = None,
+                          prepared_context: dict | None = None) -> list[str]:
     from ._ssh_retry import exec_with_retry
 
     plan = plugin_plan(repo, config, sources, repo_roots=repo_roots)
@@ -102,7 +103,18 @@ async def prepare_plugins(manager, name: str, repo: str | None, config, workspac
     )
     if result.exit_code:
         raise RuntimeError(f"Required target plugin preparation failed: {result.stderr.strip()}")
-    return parse_prepared(result.stdout)
+    directories = parse_prepared(result.stdout)
+    if prepared_context is not None:
+        prepared_context["workspace"] = workspace
+    return directories
+
+
+def attached_launch_command(command: str, workspace: str) -> str:
+    if not isinstance(workspace, str) or not workspace.startswith("/") or "\0" in workspace:
+        raise RuntimeError("Attached launch requires its prepared execution checkout")
+    words = shlex.split(command)
+    inner = words[2] if len(words) == 3 and words[:2] == ["bash", "-lc"] else command
+    return f"bash -lc {shlex.quote(f'cd -- {shlex.quote(workspace)} && {inner}')}"
 
 
 async def require_relay_ready(manager, name: str, port: int) -> None:
@@ -126,7 +138,9 @@ def disabled_plugin(source: str) -> dict:
     return selection_spec({"source": source, "enable": False})
 
 
-async def prepare_attached(args, config, *, on_ready=None, release=None) -> None:
+async def prepare_attached(
+    args, config, *, on_ready=None, release=None, prepared_context: dict | None = None,
+) -> None:
     from ssh_manager import CodespaceConfigSource, ConnectionManager
     from .__main__ import _lookup_codespace_repo
     from venue_copilot import live_session_for
@@ -161,6 +175,7 @@ async def prepare_attached(args, config, *, on_ready=None, release=None) -> None
             getattr(args, "stage_plugins", []), worktree_id=args.worktree_id,
             repo_roots=getattr(args, "plugin_roots", []),
             prelude=prelude, relay_port=port,
+            **({"prepared_context": prepared_context} if prepared_context is not None else {}),
         )
         if on_ready is not None:
             on_ready(not args.no_relay)

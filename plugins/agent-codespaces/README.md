@@ -245,6 +245,9 @@ honored here:
   its CLI child still exists. A genuine remote rejoin still reuses that child
   without replacing its active bindings or replaying its seed. Guaranteed
   surviving Session Host reattachment does not rewrite registration.
+  Attached CLI launch carries the exact prepared execution checkout into the
+  child login shell; its quoted `cd` runs after login profiles, including when
+  explicit worktree resolution selected a checkout other than the default.
   See [`plugin-resolve`](../../libs/plugin-resolve/README.md#trusted-venue-preparation)
   for preservation, selected-asset topology, companion diagnostics, and
   installation-cache details. Dependency declarations never expand the

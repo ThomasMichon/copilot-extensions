@@ -16,7 +16,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _stub_plugin_preparation(monkeypatch):
-    monkeypatch.setattr("agent_containers.plugin_preparation.stage_for_attached_launch", lambda *a, **kw: "")
+    def stage(args, target, *, prepared_context=None, **kwargs):
+        if prepared_context is not None:
+            prepared_context["workspace"] = target.workspace_folder
+        return ""
+    monkeypatch.setattr("agent_containers.plugin_preparation.stage_for_attached_launch", stage)
     monkeypatch.setattr("agent_containers.container_shims.deploy", lambda *a, **kw: None)
     monkeypatch.setattr("agent_containers.container_shims.git_credential_environment", lambda: {})
     monkeypatch.setattr("agent_containers.copilot_process_auth.stage_env", lambda *a, **kw: None)
@@ -177,6 +181,7 @@ def test_attached_live_ledger_requires_preparation_before_remote_decision(
     def stage(args, target, **kwargs):
         events.append("stage")
         assert args.stage_plugins == [{"source": "sample@synthetic", "enable": False}]
+        kwargs["prepared_context"]["workspace"] = target.workspace_folder
         return "REQUIRED_PLUGIN_PREPARATION && "
 
     def run(argv, **kwargs):

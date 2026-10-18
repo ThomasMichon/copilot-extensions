@@ -100,6 +100,7 @@ def publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         _git(["init", "-q", "-b", "main"], repo)
         _git(["config", "user.name", "Test"], repo)
         _git(["config", "user.email", "test@example.com"], repo)
+        _git(["config", "core.autocrlf", "false"], repo)
         (repo / "README.md").write_text("publication fixture\n", encoding="utf-8")
         base = _commit(repo, "Main control")
         _git(["checkout", "-qb", "dev"], repo)

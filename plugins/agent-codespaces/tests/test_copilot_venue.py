@@ -9,6 +9,7 @@ between them is exercised end-to-end without a real CodeSpace.
 from __future__ import annotations
 
 import argparse
+import shlex
 from unittest.mock import patch
 
 import pytest
@@ -20,8 +21,12 @@ from agent_codespaces.__main__ import _interactive_ssh
 
 @pytest.fixture(autouse=True)
 def _stub_plugin_preparation(monkeypatch):
-    from unittest.mock import AsyncMock
-    monkeypatch.setattr("agent_codespaces.plugin_preparation.prepare_attached", AsyncMock())
+    async def prepare(*a, on_ready, release, prepared_context=None):
+        if prepared_context is not None:
+            prepared_context["workspace"] = "/workspaces/prepared"
+        on_ready(False)
+        await release()
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.prepare_attached", prepare)
 
 
 class TestInteractiveSshReverseForwardsAndRemoteCommand:
@@ -309,15 +314,16 @@ class TestCmdCopilotAnchorDefault:
         monkeypatch.setattr("agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857)
         monkeypatch.setattr("agent_codespaces.relay_token.token_for", lambda *a, **kw: "synthetic")
 
-        async def prepare(*a, on_ready, release):
+        async def prepare(*a, on_ready, release, prepared_context):
             events.extend(["fallback-forward-ready", "install-copy-settings"])
+            prepared_context["workspace"] = "/workspaces/prepared"
             on_ready(True)
             await release()
             events.append("cleanup")
 
         def interactive(name, forwards, **kwargs):
             assert forwards == ["9280:127.0.0.1:9280"]
-            assert kwargs["remote_command"] == "CHILD"
+            assert shlex.split(kwargs["remote_command"])[2] == "cd -- /workspaces/prepared && CHILD"
             events.append("child")
             return 0
 
@@ -443,7 +449,9 @@ class TestCmdCopilotAnchorDefault:
         def fake_interactive_ssh(name, forwards, relay_port=None, relay_token=None,
                                   remote_command=None):
             seen_reverse_forwards.extend(forwards)
-            assert remote_command == "agent-worktrees copilot --worktree-id wt-A"
+            assert shlex.split(remote_command)[2] == (
+                "cd -- /workspaces/prepared && agent-worktrees copilot --worktree-id wt-A"
+            )
             return 0
 
         monkeypatch.setattr(

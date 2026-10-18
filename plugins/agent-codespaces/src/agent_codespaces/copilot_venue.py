@@ -575,7 +575,9 @@ def _cmd_copilot_connect(
         )
 
     def connect(remote_command: str) -> int:
-        with _attached_preparation(args, config) as relay_ready:
+        from .plugin_preparation import attached_launch_command
+        prepared_context = {}
+        with _attached_preparation(args, config, prepared_context=prepared_context) as relay_ready:
             forwards = [
                 spec for spec in reverse_forwards
                 if not relay_ready or spec != f"{relay_port}:127.0.0.1:{relay_port}"
@@ -583,7 +585,9 @@ def _cmd_copilot_connect(
             return interactive_ssh(
                 args.name, forwards,
                 relay_port=relay_port, relay_token=relay_token,
-                remote_command=remote_command,
+                remote_command=attached_launch_command(
+                    remote_command, prepared_context.get("workspace"),
+                ),
             )
 
     try:
@@ -605,7 +609,7 @@ def _cmd_copilot_connect(
 
 
 @contextmanager
-def _attached_preparation(args, config):
+def _attached_preparation(args, config, *, prepared_context=None):
     """Keep async relay supervision alive while SSH owns the main thread/TTY."""
     import asyncio
     from .plugin_preparation import prepare_attached
@@ -640,6 +644,7 @@ def _attached_preparation(args, config):
             try:
                 await prepare_attached(
                     args, config, on_ready=prepared, release=stopped.wait,
+                    **({"prepared_context": prepared_context} if prepared_context is not None else {}),
                 )
             except BaseException as exc:
                 if not isinstance(exc, asyncio.CancelledError) or not stop_requested.is_set():

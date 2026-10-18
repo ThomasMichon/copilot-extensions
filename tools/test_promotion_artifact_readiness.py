@@ -603,8 +603,15 @@ def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
                 step["if"] == "needs.windows-python-artifact-builder.outputs.run == 'true'"
                 for step in native["steps"]
             )
+            publication = jobs["promotion-publication-windows"]
+            assert publication["needs"] == job_id
+            assert publication["if"] == native["if"]
+            assert publication["runs-on"] == "windows-latest"
+            assert publication["timeout-minutes"] == 5
+            assert "continue-on-error" not in publication
             for gate in ("pr-gate", "promotion-gate"):
                 assert "promotion-candidate-windows" in jobs[gate]["needs"]
+                assert "promotion-publication-windows" in jobs[gate]["needs"]
             selected = next(
                 step for step in native["steps"]
                 if step.get("name") == "Native candidate readiness and retry contracts (Windows)"

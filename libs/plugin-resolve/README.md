@@ -105,6 +105,9 @@ harness-only roles still apply. Required relative assets of selected payloads
 retain their source-relative topology. README/contribution links and script
 root expressions do not expand the copy to enclosing checkouts. Cache directories,
 environment-secret files, linked paths and escapes remain excluded or refused.
+Environment basenames (`.env` / `.env.*`) are matched case-insensitively, with
+the existing `.example`, `.sample` and `.template` suffix exceptions likewise
+case-insensitive. No additional filename patterns are inferred.
 
 `selection_spec` normalizes a legacy source string or a mapping with `source`
 and optional `enable` (default `True`). It requires a non-empty string and an

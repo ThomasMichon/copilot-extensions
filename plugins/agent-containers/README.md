@@ -285,6 +285,9 @@ creation; a genuine rejoin still reuses the running child without changing its
 active bindings or replaying its seed. Guaranteed surviving Session Host
 reattachment skips preparation. Restricted fleets remain outside host plugin
 projection.
+Attached CLI launch binds its child login shell to the exact checkout selected
+for preparation, after login profiles run. A worktree resolver's returned path
+wins over conventional workspace metadata; failure to enter it prevents launch.
 
 See [`plugin-resolve`](../../libs/plugin-resolve/README.md#trusted-venue-preparation)
 for settings ownership, isolated installation cache, retained snapshots and

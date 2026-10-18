@@ -90,6 +90,7 @@ def repo(tmp_path: Path) -> Path:
     _git(["init", "-q", "-b", "main"], root)
     _git(["config", "user.name", "Test"], root)
     _git(["config", "user.email", "test@example.com"], root)
+    _git(["config", "core.autocrlf", "false"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)

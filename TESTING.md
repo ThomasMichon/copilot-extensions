@@ -1576,11 +1576,13 @@ Individual diagnostic/wrapper selections retain their two-minute limits.
 The separate Windows runner, payload-CWD and Fleet job keeps its ordinary
 seven-minute budget; the Linux runner keeps its ordinary five-minute budget.
 
-Native promotion readiness/retry cases have their own five-minute
-`Native promotion candidate contracts (Windows)` job. It consumes the governed
-artifact builder's changed-path output instead of duplicating detection, and
-both jobs gate PR and promotion snapshots. The same native cases and selectors
-run without exhausting the builder's cumulative five-minute budget.
+Native promotion readiness/retry and source-owned qualification/publication
+contracts run in separate parallel Windows jobs, each retaining its own
+five-minute budget. Both consume the governed artifact builder's changed-path
+output instead of duplicating detection, and both gate PR and promotion
+snapshots. All existing cases and selectors remain; the independent groups no
+longer compete for one cumulative deadline. Constant job identities remain
+compatible with the source-owned qualification inventory.
 
 Source-qualified catalog no-write cases invoke the unchanged PowerShell script
 twice in one real, initialized host. Host-only initialization stops CLR startup

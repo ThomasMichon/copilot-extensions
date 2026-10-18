@@ -835,7 +835,7 @@ jobs:
     needs: windows-python-artifact-builder
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
-    # Retain the native cases without exhausting the builder's cumulative bound.
+    # Independent contract groups retain separate five-minute bounds.
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -857,6 +857,24 @@ jobs:
           tools/test_verify_promotion_workflows.py
           tools/test_tag_promotion.py
           -k 'native or binary_read'
+
+  promotion-publication-windows:
+    name: Source-owned promotion publication contracts (Windows)
+    needs: windows-python-artifact-builder
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
       - name: Source-owned qualification and publication contracts (Windows)
         if: needs.windows-python-artifact-builder.outputs.run == 'true'
         run: >-
@@ -1824,6 +1842,7 @@ jobs:
       - checks
       - windows-python-artifact-builder
       - promotion-candidate-windows
+      - promotion-publication-windows
       - windows-hooks
       - construction-macos
       - bootstrap-killswitch-powershell-5-1
@@ -1895,6 +1914,7 @@ jobs:
       - checks
       - windows-python-artifact-builder
       - promotion-candidate-windows
+      - promotion-publication-windows
       - windows-hooks
       - construction-macos
       - worktree-manager

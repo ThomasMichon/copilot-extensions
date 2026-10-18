@@ -116,3 +116,125 @@ def test_attached_stage_only_transfers_script_then_defers_execution_to_forwarded
     assert "cat >" in calls[0][0]
     assert prefix.startswith('bash "$HOME/.acp-staged-plugins/preparation/')
     assert prefix.endswith(" && ")
+
+
+def test_attached_stage_retains_exact_resolved_worktree(monkeypatch):
+    import json
+    from agent_containers.plugin_preparation import _script
+    seen = []
+    monkeypatch.setattr(
+        "agent_containers.plugin_preparation.build_prepare_script",
+        lambda plan, workspace: seen.append(workspace) or "PREPARE",
+    )
+
+    def run(command, stdin, **kwargs):
+        return 0, json.dumps({
+            "action": "exec", "worktree_id": "selected", "work_dir": "/actual/selected ' checkout",
+        }), ""
+
+    context = {}
+    _script(
+        SimpleNamespace(worktree_id="selected"),
+        SimpleNamespace(actual_profile="trusted", workspace_folder="/conventional/wrong"),
+        run_input=run, prepared_context=context,
+    )
+    assert context == {"workspace": "/actual/selected ' checkout"}
+    assert seen == [context["workspace"]]
+
+
+@pytest.mark.parametrize("login_project", ["neutral", "wrong-project"])
+@pytest.mark.parametrize("worktree", [False, True])
+@pytest.mark.parametrize("missing", [False, True])
+def test_attached_child_login_uses_prepared_checkout_with_real_bash(
+    tmp_path, login_project, worktree, missing,
+):
+    import os
+    import shutil
+    import shlex
+    import subprocess
+    from pathlib import Path
+    from venue_copilot import build_copilot_remote_command
+    from agent_containers.plugin_preparation import attached_launch_command
+
+    shell = shutil.which("bash")
+    if os.name == "nt":
+        git = shutil.which("git")
+        candidate = Path(git).parents[1] / "bin" / "bash.exe" if git else None
+        shell = str(candidate) if candidate and candidate.is_file() else None
+    if shell is None:
+        pytest.skip("requires native Bash")
+
+    def remote(path):
+        value = path.resolve().as_posix()
+        return f"/{value[0].lower()}{value[2:]}" if os.name == "nt" else value
+
+    prepared = tmp_path / "prepared 'quoted; $ checkout"
+    settings = prepared / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    (settings / "settings.local.json").write_text('{"prepared":true}', encoding="utf-8")
+    home, wrong = tmp_path / "home", tmp_path / login_project
+    home.mkdir()
+    wrong.mkdir()
+    if login_project == "wrong-project":
+        wrong_settings = wrong / ".github" / "copilot"
+        wrong_settings.mkdir(parents=True)
+        (wrong_settings / "settings.local.json").write_text('{"wrong":true}')
+    (home / ".bash_profile").write_text('cd -- "$LOGIN_CWD"\nexport FIXTURE_LOGIN=1\n')
+    consumer, result = tmp_path / "consumer.sh", tmp_path / "result"
+    consumer.write_text(
+        'test "$FIXTURE_LOGIN" = 1 || exit 21\n'
+        'test -f .github/copilot/settings.local.json || exit 22\n'
+        '{ pwd; cat .github/copilot/settings.local.json; printf "\\n%s\\n" "$@"; } > "$RESULT"\n',
+        encoding="utf-8",
+    )
+    env = {**os.environ, "HOME": remote(home), "LOGIN_CWD": remote(wrong),
+           "CONSUMER": remote(consumer), "RESULT": remote(result), "CHERE_INVOKING": "1"}
+
+    def run(command):
+        return subprocess.run(
+            [shell, "-c", 'agent-worktrees() { bash "$CONSUMER" "$@"; }; '
+             'export -f agent-worktrees; eval "$COMMAND"'],
+            env={**env, "COMMAND": command}, cwd=prepared, capture_output=True, text=True,
+            timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    producer = build_copilot_remote_command("selected ' worktree", anchor=not worktree, ensure_mux=False)
+    for legacy in (producer, f"cd -- {shlex.quote(remote(prepared))} && {producer}"):
+        prior = run(legacy)
+        if login_project == "wrong-project":
+            assert prior.returncode == 0
+            assert '{"wrong":true}' in result.read_text()
+            result.unlink()
+        else:
+            assert prior.returncode != 0
+    workspace = remote(prepared / "missing") if missing else remote(prepared)
+    launched = run(attached_launch_command(producer, workspace))
+    if missing:
+        assert launched.returncode != 0 and not result.exists()
+    else:
+        assert launched.returncode == 0, launched.stderr
+        text = result.read_text(encoding="utf-8")
+        assert text.splitlines()[0] == remote(prepared)
+        assert '{"prepared":true}' in text
+        assert ("selected ' worktree" in text) is worktree
+
+
+@pytest.mark.parametrize("workspace", [None, "", "relative", "/bad\0path"])
+def test_attached_command_refuses_missing_or_invalid_prepared_root(workspace):
+    from agent_containers.plugin_preparation import attached_launch_command
+    with pytest.raises(RuntimeError, match="prepared execution checkout"):
+        attached_launch_command("agent-worktrees copilot --anchor", workspace)
+
+
+def test_failed_staging_never_publishes_attached_execution_context(monkeypatch):
+    from agent_containers.plugin_preparation import stage_for_attached_launch
+
+    def script(*a, prepared_context, **kwargs):
+        prepared_context["workspace"] = "/prepared/execution"
+        return "PREPARE", lambda *a, **kw: (1, "", "copy failed")
+
+    monkeypatch.setattr("agent_containers.plugin_preparation._script", script)
+    context = {}
+    with pytest.raises(RuntimeError, match="copy failed"):
+        stage_for_attached_launch(object(), object(), prepared_context=context)
+    assert context == {}

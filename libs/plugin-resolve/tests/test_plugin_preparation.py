@@ -1232,6 +1232,48 @@ def test_inherited_git_selectors_cannot_redirect_the_supplied_checkout(tmp_path,
     assert not (other / ".github").exists()
 
 
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("filename, permitted", [
+    (".env", False), (".env.production", False),
+    (".ENV", False), (".ENV.production", False), (".eNv.local", False),
+    (".EnV.DeVeLoPmEnT", False), (".env.EXAMPLE.backup", False),
+    (".ENV.SAMPLE.old", False), (".env.TEMPLATE.secret", False),
+    (".env.example", True), (".ENV.EXAMPLE", True), (".env.EXAMPLE", True),
+    (".env.SaMpLe", True), (".env.TeMpLaTe", True),
+    (".eNv.production.SaMpLe", True), (".ENV.local.TeMpLaTe", True),
+    (".Env.SAMPLE", True), (".eNv.TeMpLaTe", True),
+    (".environment", True), (".ENVIRONMENT", True), ("settings.env", True),
+])
+def test_reflection_environment_basename_policy_matches_native_staging(
+    tmp_path, filename, permitted, nested,
+):
+    host = tmp_path / "control"
+    local_plan(host)
+    payload = host / ".ai" / "sample"
+    directory = payload / "references" if nested else payload
+    directory.mkdir(exist_ok=True)
+    marker = b"SYNTHETIC_ENV_CASE_MARKER\n"
+    (directory / filename).write_bytes(marker)
+    guide = host / ".ai" / "support" / "guide.md"
+    guide.parent.mkdir()
+    guide.write_text("Synthetic required sibling guide", encoding="utf-8")
+    skill = payload / "skills" / "example"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("[guide](../../../support/guide.md)", encoding="utf-8")
+    plan = build_plan([{"source": "sample@local"}], [host])
+    with tarfile.open(fileobj=io.BytesIO(base64.b64decode(plan["plugins"][0]["archive"]))) as archive:
+        contents = {item.name: archive.extractfile(item).read() for item in archive.getmembers()}
+    member = (directory / filename).relative_to(host).as_posix()
+    assert (member in contents) is permitted
+    if permitted:
+        assert contents[member] == marker
+    else:
+        assert not any(marker in content for content in contents.values())
+    assert contents[".ai/support/guide.md"] == b"Synthetic required sibling guide"
+    assert ".ai/sample/skills/example/SKILL.md" in contents
+    assert ".ai/sample/plugin.json" in contents
+
+
 def test_script_root_expressions_do_not_reflect_ancestor_directories(tmp_path):
     host = tmp_path / "control"
     local_plan(host)

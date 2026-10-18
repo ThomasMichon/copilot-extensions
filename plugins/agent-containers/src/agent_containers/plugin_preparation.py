@@ -14,7 +14,7 @@ from plugin_resolve.reflection import (
 )
 
 
-def _script(args, target, *, run_input=None, remote_env=None, relay_port=None):
+def _script(args, target, *, run_input=None, remote_env=None, relay_port=None, prepared_context=None):
     if target.actual_profile != "trusted":
         raise RuntimeError("Restricted containers cannot receive plugin projection")
     specs = [selection_spec(value) for value in getattr(args, "stage_plugins", [])]
@@ -57,6 +57,8 @@ def _script(args, target, *, run_input=None, remote_env=None, relay_port=None):
         )
         wait = f"until timeout 3 bash -c {shlex.quote(probe)}; do sleep 0.25; done"
         prefix += f"timeout 5 bash -c {shlex.quote(wait)}\n"
+    if prepared_context is not None:
+        prepared_context["workspace"] = workspace
     return prefix + script, run_input
 
 
@@ -70,13 +72,28 @@ def prepare_plugins(args, target, *, run_input=None, remote_env=None, relay_port
     return parse_prepared(output)
 
 
-def stage_for_attached_launch(args, target, *, remote_env=None, relay_port=None) -> str:
+def attached_launch_command(command: str, workspace: str) -> str:
+    if not isinstance(workspace, str) or not workspace.startswith("/") or "\0" in workspace:
+        raise RuntimeError("Attached launch requires its prepared execution checkout")
+    words = shlex.split(command)
+    inner = words[2] if len(words) == 3 and words[:2] == ["bash", "-lc"] else command
+    return f"bash -lc {shlex.quote(f'cd -- {shlex.quote(workspace)} && {inner}')}"
+
+
+def stage_for_attached_launch(
+    args, target, *, remote_env=None, relay_port=None, prepared_context=None,
+) -> str:
     """Execute preparation inside the foreground SSH channel owning the -R."""
-    script, run_input = _script(args, target, remote_env=remote_env, relay_port=relay_port)
+    context = {}
+    script, run_input = _script(
+        args, target, remote_env=remote_env, relay_port=relay_port, prepared_context=context,
+    )
     digest = hashlib.sha256(script.encode()).hexdigest()
     path = f"$HOME/.acp-staged-plugins/preparation/{digest}.sh"
     command = f'mkdir -p "$HOME/.acp-staged-plugins/preparation" && cat > "{path}" && chmod 700 "{path}"'
     rc, _out, error = run_input(command, script.encode(), timeout=60)
     if rc:
         raise RuntimeError(f"Could not stage required plugin preparation: {error.strip()}")
+    if prepared_context is not None:
+        prepared_context.update(context)
     return f'bash "{path}" >&2 && '

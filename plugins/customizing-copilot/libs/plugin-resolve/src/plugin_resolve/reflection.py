@@ -52,9 +52,10 @@ def identity(source: str) -> tuple[str, str]:
 
 
 def _allowed(path: Path) -> bool:
+    name = path.name.lower()
     return not any(part in _EXCLUDED for part in path.parts) and not (
-        path.name == ".env" or path.name.startswith(".env.")
-        and not path.name.endswith((".example", ".sample", ".template"))
+        name == ".env" or name.startswith(".env.")
+        and not name.endswith((".example", ".sample", ".template"))
     )
 
 

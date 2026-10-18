@@ -45,6 +45,7 @@ def repo(tmp_path: Path) -> Path:
     _git(["config", "user.email", "t@example.com"], root)
     _git(["config", "commit.gpgsign", "false"], root)
     _git(["config", "tag.gpgsign", "false"], root)
+    _git(["config", "core.autocrlf", "false"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)
