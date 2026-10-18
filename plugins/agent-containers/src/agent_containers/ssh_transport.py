@@ -434,12 +434,20 @@ def write_remote_env(container: str, user: str, values: dict[str, str]) -> str |
         f"export {name}={shlex.quote(value)}\n"
         for name, value in sorted(values.items())
     )
+    name = shlex.quote(remote_path.rsplit("/", 1)[1])
     written = _run([
         "docker", "exec", "-i", "-u", user, container,
         "sh", "-c",
         preparation_guard(user) +
         abandoned_cleanup_script(launch_dir, executable_root_for_launch_dir(launch_dir)) + "\n" +
-        f"set -C; cat > {shlex.quote(remote_path.rsplit('/', 1)[1])}",
+        # noclobber (`set -C`) only refuses to overwrite an *existing regular
+        # file*; POSIX explicitly excludes special files (e.g. /dev/null) and
+        # symlinks from that protection, so a pre-placed symlink to a
+        # nonregular target would silently consume stdin and still report
+        # success. Refuse any pre-existing leaf, of any kind, first.
+        f"if test -e {name} || test -L {name}; then "
+        "echo 'refusing to overwrite an existing launch destination' >&2; exit 1; fi\n"
+        f"set -C; cat > {name}",
     ], input_text=payload)
     if written.returncode != 0:
         raise RuntimeError(

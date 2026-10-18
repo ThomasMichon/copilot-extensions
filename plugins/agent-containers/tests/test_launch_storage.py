@@ -170,6 +170,26 @@ def test_existing_final_symlink_is_never_followed(
     assert outside.read_text() == "unchanged"
 
 
+def test_nonregular_final_collision_is_never_silently_consumed(
+    ram_root: Path, local_transport: list, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A symlink to a nonregular target (e.g. /dev/null) bypasses noclobber.
+
+    POSIX noclobber only refuses to overwrite an *existing regular file*;
+    special files and symlinks are explicitly excluded from that protection.
+    Staging must refuse such a collision outright rather than silently
+    consuming the credential payload while still reporting success.
+    """
+    first = ssh_transport.write_remote_env("fixture", "user", {"SETTING": "ordinary"})
+    assert first is not None
+    collision = Path(first).with_name("b" * 32 + ".env")
+    collision.symlink_to("/dev/null")
+    monkeypatch.setattr(ssh_transport.uuid, "uuid4", lambda: SimpleNamespace(hex="b" * 32))
+    with pytest.raises(RuntimeError, match="Failed to stage"):
+        ssh_transport.write_remote_env("fixture", "user", {"SECRET": "synthetic-only"})
+    assert collision.resolve(strict=False) == Path("/dev/null")
+
+
 @pytest.mark.parametrize("symlink", [False, True])
 def test_disk_or_symlink_cleanup_owner_refuses_before_source(
     tmp_path: Path, ram_root: Path, local_transport: list,
