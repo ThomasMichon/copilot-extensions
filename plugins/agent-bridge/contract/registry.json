@@ -1570,7 +1570,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-40.json",
-          "sha256": "e105620c9052edb2e04a3e61ea4690e876a439fc9d85fa477e62ea8499a8f51c",
+          "sha256": "e87fdf2d5e2c942d347d552ec7dd315f96d4632771c3a8e12d84a851f0c59bf1",
           "role": "Generation-40 combined receipt/native producer evidence: session_core.py",
           "generation": 40
         },
@@ -4943,6 +4943,14 @@
           "capture_method": "Committed-source compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
         },
         {
+          "commit": "6d6a03a93349dd376642dc29ca7ffc5ebe83cec2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1142f8e923ef78803ef423af8989725b28fc0e5e",
+          "capture_method": "Committed-source re-attestation of unchanged generation-40 provider creation and refresh vectors after excluding controller-only local metadata from provider classification. Validate the retained wire values and capability floors with test_provider_creation, test_provider_creation_stdio and test_contract_registry; test_session_manager covers persisted local cold resume and genuine provider refresh. Historical fixtures and provenance remain unchanged."
+        },
+        {
           "commit": "d73e640e35b90800ebba360113179a9c8cbd4d40",
           "plugin_version": "0.4.1-dev3",
           "generation": 40,
@@ -5994,7 +6002,7 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_session_host.py",
-          "sha256": "d53b777d64463e4e6e71b0ce5e7334f5eadabdc922dfd43d866361d982050c96",
+          "sha256": "aa7e47fe00f47b5df3ce0a21a4fa38d2005b33882633e4ffc93d793da573c13f",
           "semantic": false,
           "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape."
         }

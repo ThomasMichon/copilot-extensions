@@ -24,7 +24,8 @@ from .registration import (
     _installation_home, _operator_settings, _settings_document,
     atomic_json, checkout_lock, register_prepared, strict_json,
 )
-from .settings import RepoPluginSettings
+from .settings import RepoPluginSettings, local_marketplace_path
+from .inventory import inventory_paths, installed_item
 
 _GIT_SELECTORS = {
     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX",
@@ -228,6 +229,7 @@ def prepare(
     with checkout_lock(state_dir):
         ownership = strict_json(state_dir / "ownership.json")
         native_settings = _operator_settings(repo, ownership)
+    inventory = inventory_paths(repo, environment) if local_mode == "reference" else None
     host_sources = {item["source"] for item in request["plugins"]}
     marketplaces = {**request.get("marketplaces", {}), **native_settings.marketplaces}
     host_selection = []
@@ -242,7 +244,10 @@ def prepare(
             selected = _plan_item(
                 item, (repo, native_settings), marketplaces,
                 allow_external=True, existing_root=staging,
-                required=item["source"] in native_settings.enabled or bool(item.get("resolve_on_target")),
+                required=(
+                    native_settings.enabled.get(item["source"], False) if local_mode == "reference"
+                    else item["source"] in native_settings.enabled
+                ) or bool(item.get("resolve_on_target")),
                 local_mode=local_mode,
             )
         host_selection.append(selected if selected is not None else item)
@@ -253,7 +258,10 @@ def prepare(
         _name, marketplace = identity(source)
         owner_settings = native_settings
         declarations = marketplaces
-        if marketplace not in native_settings.marketplaces:
+        if (
+            marketplace not in native_settings.marketplaces
+            and not (local_mode == "reference" and source in ownership.get("inventorySources", {}))
+        ):
             projected = _settings_document(
                 repo / ".github" / "copilot" / "settings.local.json"
             ).get("extraKnownMarketplaces", {}).get(marketplace)
@@ -270,6 +278,57 @@ def prepare(
             local_mode=local_mode,
         ))
     selected = [*host_selection, *native_selection]
+    if local_mode == "reference":
+        occupied = {}
+        for item in selected:
+            _name, marketplace = identity(item["source"])
+            native_root = local_marketplace_path(marketplace, native_settings, repo_dir=repo)
+            if native_root is not None:
+                occupied[marketplace] = native_root.resolve()
+        projected = []
+        for item in selected:
+            reference = item.get("reference")
+            if reference is None:
+                projected.append(item)
+                continue
+            logical = item["source"]
+            name, marketplace = identity(logical)
+            root = Path(reference["marketplace_root"]).resolve()
+            previous_root = occupied.setdefault(marketplace, root)
+            if root != previous_root:
+                digest = hashlib.sha256(f"{marketplace}\0{root}".encode()).hexdigest()[:16]
+                alias = f"{marketplace[:40]}-venue-{digest}"
+                source = f"{name}@{alias}"
+                previous_alias = ownership.get("pluginIdentities", {}).get(logical)
+                if (
+                    alias in native_settings.marketplaces
+                    and previous_alias != source
+                ):
+                    raise ValueError(f"Reference marketplace alias collides with an authored registration: {alias}")
+                if alias in native_settings.marketplaces:
+                    item = _plan_item(
+                        {"source": source, "enable": item["enable"]}, (repo, native_settings),
+                        native_settings.marketplaces, allow_external=True, local_mode="reference",
+                    )
+                else:
+                    definition = reference["definition"]
+                    item = {
+                        **item, "source": source,
+                        "reference": {
+                            **reference,
+                            "definition": {
+                                **definition, "source": {
+                                    **definition["source"],
+                                    "manifestName": item["catalog"]["name"],
+                                },
+                            },
+                        },
+                    }
+                item["logical_source"] = logical
+                if native_settings.enabled.get(logical) is False:
+                    item["enable"] = False
+            projected.append(item)
+        selected = projected
     payloads = {}
     roots = {}
     enabled = {}
@@ -280,16 +339,32 @@ def prepare(
         if source in payloads:
             continue
         _name, marketplace = identity(source)
+        if inventory is not None and "marketplace" in item:
+            registered = _settings_document(inventory[0] / "settings.json").get(
+                "extraKnownMarketplaces", {},
+            ).get(marketplace)
+            payload = inventory[0] / "installed-plugins" / marketplace / _name
+            if registered == item["marketplace"] and payload.is_dir():
+                item = {**item, **installed_item(source, *inventory)}
         if item.get("resolve_on_target"):
             if marketplace not in native_settings.marketplaces:
-                raise ValueError(f"Required target marketplace is undeclared: {marketplace}")
-            item = _plan_item(
-                item, (repo, native_settings), native_settings.marketplaces,
-                allow_external=True, existing_root=staging,
-                local_mode=local_mode,
-            )
+                if inventory is None:
+                    raise ValueError(f"Required target marketplace is undeclared: {marketplace}")
+                item = {**item, **installed_item(source, *inventory)}
+                item.pop("resolve_on_target")
+            else:
+                item = _plan_item(
+                    item, (repo, native_settings), native_settings.marketplaces,
+                    allow_external=True, existing_root=staging,
+                    local_mode=local_mode,
+                )
             if item.get("resolve_on_target"):
                 raise ValueError(f"Required target plugin could not be resolved: {source}")
+        if "inventory" in item:
+            payloads[source] = item["inventory"]["payload"]
+            enabled[source] = item["enable"]
+            publications[source] = item
+            continue
         reference = item.get("reference")
         if reference is not None:
             if local_mode != "reference":
@@ -358,6 +433,7 @@ def prepare(
         repo, payloads, enabled, roots, state_dir=state_dir, publications=publications,
         diagnostics=requirements, initial_owned_plugins=ownership.get("enabledPlugins", {}),
         check_cancelled=check_cancelled,
+        inventory=inventory,
     )
     if diagnostics is not None:
         diagnostics.extend(requirements)

@@ -268,6 +268,35 @@ recovery. Native operator origins, disablement, locking, atomic publication
 and effective-selection checks remain the same. Copy mode is still the default
 for all existing remote callers.
 
+When controller and native selections use the same marketplace name but
+different physical catalogs, native registration stays unchanged. Controller
+references use a deterministic operation-owned `<marketplace>-venue-<digest>`
+registration with `source.manifestName` identifying the original catalog.
+The receipt's `pluginIdentities` maps logical selections to projected qualified
+identities; preparation returns logical keys for ACP. Mapping alone never
+selects a plugin. Original logical disablement and explicit alias disablement
+are honored; contradictory explicit alias enablement and logical disablement
+fail without overwriting the operator's edit. Explicit alias-origin edits are
+replanned against that authored catalog. Unselected unchanged owned aliases
+are pruned, while operator-edited entries remain intact.
+
+Reference mode also preserves installed-only ACP fallback when no marketplace
+origin is declared. It validates the qualified payload beneath the child-selected
+`COPILOT_HOME/installed-plugins`, and validates registrations and catalogs when
+available using the selected cache environment. Absent optional catalog metadata
+does not invalidate a previously usable manifest-only ACP payload. This path
+neither invents a remote origin nor invokes installation, copies payloads, or
+writes source catalogs. Repository-local enablement is still published, and ACP
+receives the existing directory. A manifest-only manual inventory is **not**
+proof of settings-only native CLI discovery; native acquisition remains outside
+this local ACP integration.
+The selected home's `settings.json` directory declarations are a fallback after
+repository/controller authority: a valid registered local catalog resolves its
+live original payload even without an installed copy. That grounded catalog can
+be registered directly in repository-local settings. Its home provenance is
+retained in `inventorySources` so a later launch under a different child home
+does not mistake an old generated projection for current inventory authority.
+
 `prepare(..., environment=child_env)` passes that environment to Git and the
 isolated native installer after removing Git selectors. Omission retains the
 ambient-environment contract. `check_cancelled` may stop preparation between

@@ -1161,13 +1161,238 @@ def test_same_named_plugins_remain_marketplace_qualified(tmp_path):
     assert len(set(result.values())) == 2
 
 
-def test_native_plugins_in_the_same_marketplace_remain_resolvable(tmp_path):
+@pytest.mark.parametrize("mode", ["copy", "reference"])
+def test_native_plugins_in_the_same_marketplace_remain_resolvable(tmp_path, mode):
     target = tmp_path / "target"
     local_plan(target, name="native")
     init_checkout(target)
-    plan = local_plan(tmp_path / "host")
-    result = prepare({"repo": str(target), **plan})
+    host = tmp_path / "host"
+    plan = local_plan(host)
+    if mode == "reference":
+        plan = build_plan([{"source": "sample@local"}], [host], local_mode=mode)
+    request = {"repo": str(target), **plan, "local_mode": mode}
+    original_catalogs = [(root / ".ai" / "marketplace.json").read_bytes() for root in (host, target)]
+    result = prepare(request)
     assert set(result) == {"sample@local", "native@local"}
+    assert prepare(request) == result
+    if mode == "reference":
+        assert Path(result["sample@local"]) == host / ".ai" / "sample"
+        assert Path(result["native@local"]) == target / ".ai" / "native"
+        assert [(root / ".ai" / "marketplace.json").read_bytes() for root in (host, target)] == original_catalogs
+        settings = read_repo_settings(target)
+        assert settings.marketplaces["local"]["source"]["path"] == "./.ai"
+        assert settings.enabled["native@local"] is True
+        alias = next(source for source in settings.enabled if source.startswith("sample@"))
+        assert alias != "sample@local"
+        assert settings.marketplaces[alias.split("@")[1]]["source"]["manifestName"] == "local"
+        assert resolve_repo_plugins(target).resolved == {
+            alias: host / ".ai" / "sample", "native@local": target / ".ai" / "native",
+        }
+        assert not list((target / ".git").rglob("marketplace.json"))
+        assert not list((target / ".git").rglob("snapshots"))
+
+
+def test_mixed_reference_alias_operator_choices_and_owned_cleanup(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target, name="native")
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    prepare(request)
+    settings_path = target / ".github" / "copilot" / "settings.local.json"
+    settings = json.loads(settings_path.read_text())
+    alias = next(source for source in settings["enabledPlugins"] if source.startswith("sample@"))
+    settings["enabledPlugins"][alias] = False
+    atomic_json(settings_path, settings)
+    assert set(prepare(request)) == {"native@local"}
+    assert json.loads(settings_path.read_text())["enabledPlugins"][alias] is False
+
+    replacement = tmp_path / "replacement"
+    local_plan(replacement)
+    settings = json.loads(settings_path.read_text())
+    settings["extraKnownMarketplaces"][alias.split("@")[1]]["source"]["path"] = str(replacement / ".ai")
+    settings["enabledPlugins"][alias] = True
+    atomic_json(settings_path, settings)
+    assert Path(prepare(request)["sample@local"]) == replacement / ".ai" / "sample"
+    assert Path(prepare(request)["sample@local"]) == replacement / ".ai" / "sample"
+    base = target / ".github" / "copilot" / "settings.json"
+    value = json.loads(base.read_text())
+    value["enabledPlugins"]["sample@local"] = False
+    atomic_json(base, value)
+    settings = json.loads(settings_path.read_text())
+    settings["enabledPlugins"][alias] = False
+    atomic_json(settings_path, settings)
+    assert "sample@local" not in prepare(request)
+
+
+def test_reference_alias_cleanup_does_not_keep_selection_alive(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target, name="native")
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    result = prepare({"repo": str(target), "plugins": [], "local_mode": "reference"})
+    assert set(result) == {"native@local"}
+    settings = read_repo_settings(target)
+    assert not any("-venue-" in source for source in settings.enabled)
+    assert not any("-venue-" in source for source in settings.marketplaces)
+
+
+@pytest.mark.parametrize("related", [False, True])
+def test_reference_installed_inventory_uses_child_home_without_network_or_catalog_writes(
+    tmp_path, related,
+):
+    target, home, cache = tmp_path / "target", tmp_path / "child-home", tmp_path / "child-cache"
+    init_checkout(target)
+    payload = home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper"})
+    if related:
+        plan = build_plan([{"source": "helper@catalog"}], [], local_mode="reference")
+    else:
+        directory = target / ".github" / "copilot"
+        directory.mkdir(parents=True)
+        atomic_json(directory / "settings.json", {"enabledPlugins": {"helper@catalog": True}})
+        plan = {"plugins": []}
+    environment = {**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(cache)}
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    for _ in range(2):
+        result = prepare(request, environment=environment, copilot_command=("must-not-run",))
+        assert result == {"helper@catalog": str(payload)}
+        assert read_repo_settings(target).enabled["helper@catalog"] is True
+        assert read_repo_settings(target).marketplaces == {}
+    assert not list(target.rglob("marketplace.json"))
+    assert not list(home.rglob("marketplace.json"))
+    assert not list(target.rglob("snapshots"))
+
+
+@pytest.mark.parametrize("bad", ["missing", "name", "namespace", "manifest", "registration", "catalog"])
+def test_reference_installed_inventory_rejects_bad_qualified_metadata(tmp_path, bad):
+    target, home, cache = tmp_path / "target", tmp_path / "home", tmp_path / "cache"
+    init_checkout(target)
+    payload = home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    manifest = {"name": "helper"}
+    if bad == "name":
+        manifest["name"] = "other"
+    if bad == "namespace":
+        manifest["marketplace"] = "other"
+    if bad != "missing":
+        atomic_json(payload / "plugin.json", manifest)
+    else:
+        payload.rmdir()
+    if bad == "manifest":
+        (payload / "plugin.json").write_text("{broken")
+    if bad == "registration":
+        atomic_json(home / "settings.json", {"extraKnownMarketplaces": {"catalog": {"source": "invalid"}}})
+    if bad == "catalog":
+        catalog = cache / "marketplaces" / "opaque"
+        catalog.mkdir(parents=True)
+        atomic_json(catalog / "marketplace.json", {
+            "name": "catalog", "owner": {"name": "Synthetic"}, "plugins": [],
+        })
+    plan = build_plan([{"source": "helper@catalog"}], [], local_mode="reference")
+    with pytest.raises(ValueError):
+        prepare(
+            {"repo": str(target), **plan, "local_mode": "reference"},
+            environment={**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(cache)},
+            copilot_command=("must-not-run",),
+        )
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_reference_installed_inventory_validates_available_local_catalog_and_operator_disable(tmp_path):
+    target, home, cache = tmp_path / "target", tmp_path / "home", tmp_path / "cache"
+    init_checkout(target)
+    original = tmp_path / "original"
+    local_plan(original, name="helper", marketplace="catalog")
+    payload = home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper", "version": "1.2.3"})
+    atomic_json(home / "settings.json", {
+        "extraKnownMarketplaces": {"catalog": {"source": {"source": "directory", "path": str(original / ".ai")}}},
+    })
+    plan = build_plan([{"source": "helper@catalog"}], [], local_mode="reference")
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    environment = {**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(cache)}
+    assert prepare(request, environment=environment) == {
+        "helper@catalog": str(original / ".ai" / "helper"),
+    }
+    path = target / ".github" / "copilot" / "settings.local.json"
+    value = json.loads(path.read_text())
+    value["enabledPlugins"]["helper@catalog"] = False
+    atomic_json(path, value)
+    assert prepare(request, environment=environment) == {}
+    # An explicit target origin remains authoritative over that installed copy.
+    value["enabledPlugins"]["helper@catalog"] = True
+    value["extraKnownMarketplaces"]["catalog"] = {
+        "source": {"source": "directory", "path": str(original / ".ai")},
+    }
+    atomic_json(path, value)
+    assert prepare(request, environment=environment) == {
+        "helper@catalog": str(original / ".ai" / "helper"),
+    }
+
+
+def test_child_registered_live_local_catalog_needs_no_installed_copy_and_reloads_home(tmp_path):
+    target = tmp_path / "target"
+    init_checkout(target)
+    directory = target / ".github" / "copilot"
+    directory.mkdir(parents=True)
+    atomic_json(directory / "settings.json", {"enabledPlugins": {"helper@catalog": True}})
+    request = {"repo": str(target), "plugins": [], "local_mode": "reference"}
+    for name in ("first", "second"):
+        original, home = tmp_path / name / "original", tmp_path / name / "home"
+        local_plan(original, name="helper", marketplace="catalog")
+        home.mkdir()
+        atomic_json(home / "settings.json", {
+            "extraKnownMarketplaces": {
+                "catalog": {"source": {"source": "directory", "path": str(original / ".ai")}},
+            },
+        })
+        environment = {**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(home / "cache")}
+        for _ in range(2):
+            assert prepare(request, environment=environment, copilot_command=("must-not-run",)) == {
+                "helper@catalog": str(original / ".ai" / "helper"),
+            }
+        assert not (home / "installed-plugins").exists()
+        assert resolve_repo_plugins(target).resolved == {"helper@catalog": original / ".ai" / "helper"}
+    legacy_home = tmp_path / "legacy"
+    payload = legacy_home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper"})
+    assert prepare(
+        request, copilot_command=("must-not-run",),
+        environment={**os.environ, "COPILOT_HOME": str(legacy_home), "COPILOT_CACHE_HOME": str(legacy_home / "cache")},
+    ) == {"helper@catalog": str(payload)}
+    assert read_repo_settings(target).marketplaces == {}
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_declared_remote_selection_reuses_matching_qualified_local_inventory(tmp_path, native):
+    target, home = tmp_path / "target", tmp_path / "home"
+    init_checkout(target)
+    payload = home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper"})
+    definition = {"source": {"source": "github", "repo": "example/registered"}}
+    atomic_json(home / "settings.json", {"extraKnownMarketplaces": {"catalog": definition}})
+    if native:
+        directory = target / ".github" / "copilot"
+        directory.mkdir(parents=True)
+        atomic_json(directory / "settings.json", {
+            "enabledPlugins": {"helper@catalog": True}, "extraKnownMarketplaces": {"catalog": definition},
+        })
+    plan = build_plan(
+        [{"source": "helper@catalog"}], [], marketplaces={"catalog": definition}, local_mode="reference",
+    )
+    assert prepare(
+        {"repo": str(target), **plan, "local_mode": "reference"},
+        environment={**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(home / "cache")},
+        copilot_command=("must-not-run",),
+    ) == {"helper@catalog": str(payload)}
 
 
 def test_documentation_links_do_not_expand_payload_closure(tmp_path):

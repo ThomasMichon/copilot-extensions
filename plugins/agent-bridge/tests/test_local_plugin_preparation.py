@@ -446,3 +446,68 @@ async def test_real_related_file_selection_from_actual_local_registry_target(tmp
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert consumer.returncode == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", ["own", "related"])
+async def test_existing_installed_fallback_uses_actual_child_inventory(
+    tmp_path, monkeypatch, selection,
+):
+    root = checkout(tmp_path / "target")
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    if selection == "related":
+        directory = controller / ".agent-worktrees"
+        directory.mkdir()
+        (directory / "related.yaml").write_text(
+            "related:\n  sample-project:\n    plugins:\n      - source: helper@catalog\n",
+        )
+    else:
+        directory = root / ".github" / "copilot"
+        directory.mkdir(parents=True)
+        atomic_json(directory / "settings.json", {"enabledPlugins": {"helper@catalog": True}})
+    child_home, daemon_home = tmp_path / "child-home", tmp_path / "daemon-home"
+    for home, namespace in ((child_home, "catalog"), (child_home, "other"), (daemon_home, "catalog")):
+        payload = home / "installed-plugins" / namespace / "helper"
+        payload.mkdir(parents=True)
+        atomic_json(payload / "plugin.json", {"name": "helper"})
+    monkeypatch.setenv("COPILOT_HOME", str(daemon_home))
+    monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+    target = target_for(root, controller)
+    target.env = {"COPILOT_HOME": str(child_home), "COPILOT_CACHE_HOME": str(tmp_path / "child-cache")}
+    selected = str(child_home / "installed-plugins" / "catalog" / "helper")
+    for _ in range(2):
+        args, _, _ = await transport.resolve_local_launch(target)
+        assert selected in args
+        assert not any(str(daemon_home) in arg for arg in args)
+        assert not any(str(child_home / "installed-plugins" / "other") in arg for arg in args)
+        settings = json.loads((root / ".github" / "copilot" / "settings.local.json").read_text())
+        assert settings["enabledPlugins"]["helper@catalog"] is True
+        assert settings["extraKnownMarketplaces"] == {}
+    assert not list(child_home.rglob("marketplace.json"))
+
+
+@pytest.mark.asyncio
+async def test_mixed_physical_reference_origins_reach_local_acp(
+    tmp_path, isolated_selection,
+):
+    root, controller = checkout(tmp_path / "target"), tmp_path / "controller"
+    host = marketplace(controller)
+    native = root / ".ai" / "native"
+    native.mkdir(parents=True)
+    atomic_json(native / "plugin.json", {"name": "native", "version": "1.0.0"})
+    atomic_json(native.parent / "marketplace.json", {
+        "name": "local", "owner": {"name": "Synthetic"},
+        "plugins": [{"name": "native", "source": "native"}],
+    })
+    directory = root / ".github" / "copilot"
+    directory.mkdir(parents=True)
+    atomic_json(directory / "settings.json", {
+        "enabledPlugins": {"native@local": True},
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    target = target_for(root, controller)
+    for _ in range(2):
+        args, _, _ = await transport.resolve_local_launch(target)
+        assert str(host) in args and str(native) in args
+    assert not list((root / ".git").rglob("marketplace.json"))

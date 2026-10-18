@@ -162,6 +162,7 @@ def register_prepared(
     *, state_dir: Path, publications: dict[str, dict],
     diagnostics: list[dict], initial_owned_plugins: dict[str, bool],
     check_cancelled=lambda: None,
+    inventory: tuple[Path, Path] | None = None,
 ) -> dict:
     """Merge only unclaimed or unchanged owned keys; return effective directories.
 
@@ -212,6 +213,14 @@ def register_prepared(
             k: v for k, v in receipt.get("referenceMarketplaces", {}).items()
             if owned_marketplaces.get(k) == v
         }
+        identities = {
+            logical: projected for logical, projected in receipt.get("pluginIdentities", {}).items()
+            if projected in plugins and logical not in payloads
+        }
+        inventory_sources = {
+            source: origin for source, origin in receipt.get("inventorySources", {}).items()
+            if source in plugins
+        }
         reconciled_marketplaces: set[str] = set()
         for source, raw in payloads.items():
             check_cancelled()
@@ -220,10 +229,34 @@ def register_prepared(
             manifest = plugin_manifest(payload)
             if manifest.get("name") != name:
                 raise ValueError(f"Prepared payload identity mismatch: {source}")
-            root = Path(roots[marketplace]).resolve()
-            payload.relative_to(root)
             details = publications[source]
+            inventory_sources.pop(source, None)
+            if "inventory_origin" in details:
+                inventory_sources[source] = details["inventory_origin"]
+            if "inventory" in details:
+                from .inventory import installed_item
+
+                verified = installed_item(source, *inventory)
+                if verified.get("inventory") != details["inventory"]:
+                    raise ValueError(f"Installed inventory changed during preparation: {source}")
+                authority = operator.marketplaces.get(marketplace)
+                if authority is not None and verified["inventory"]["registration"] != authority:
+                    raise ValueError(f"Installed inventory does not match target-native origin: {source}")
+                if (
+                    source in receipt.get("inventorySources", {})
+                    and marketplace in owned_marketplaces
+                    and marketplace not in operator.marketplaces
+                ):
+                    marketplaces.pop(marketplace, None)
+                    owned_marketplaces.pop(marketplace, None)
+                    reference_marketplaces.pop(marketplace, None)
+                if source not in plugins or source in owned_plugins:
+                    plugins[source] = operator.enabled.get(source, enabled.get(source, True))
+                    owned_plugins[source] = plugins[source]
+                continue
             reference = details.get("reference")
+            root = Path(reference["marketplace_root"] if reference else roots[marketplace]).resolve()
+            payload.relative_to(root)
             if reference is not None:
                 definition = reference["definition"]
                 settings = RepoPluginSettings(marketplaces={marketplace: definition})
@@ -278,13 +311,40 @@ def register_prepared(
                     })
                 elif marketplace in origins and current != prior_marketplaces.get(marketplace):
                     origin_active[marketplace] = False
-                if native_remote or current is None or marketplace in owned_marketplaces:
+                native_reference = (
+                    reference is not None and authority is not None
+                    and local_marketplace_path(marketplace, operator, repo_dir=repo) is not None
+                    and local_marketplace_path(marketplace, operator, repo_dir=repo).resolve() == root
+                )
+                if native_remote or (current is None and not native_reference) or marketplace in owned_marketplaces:
                     marketplaces[marketplace] = definition
                     owned_marketplaces[marketplace] = definition
                 reconciled_marketplaces.add(marketplace)
             if source not in plugins or source in owned_plugins:
                 plugins[source] = operator.enabled.get(source, enabled.get(source, True))
                 owned_plugins[source] = plugins[source]
+            logical = details.get("logical_source")
+            if logical is not None:
+                identities[logical] = source
+                if operator.enabled.get(logical) is False:
+                    if source in plugins and plugins[source] is not False:
+                        # Keep the operator's alias value, but never activate a
+                        # logical selection explicitly disabled in authored config.
+                        if source not in owned_plugins:
+                            raise ValueError(f"Alias enablement conflicts with disabled logical source: {logical}")
+                    plugins[source] = False
+                    if source in owned_plugins:
+                        owned_plugins[source] = False
+        identities = {logical: projected for logical, projected in identities.items() if projected in plugins}
+        alias_names = {split_source(projected)[1] for projected in receipt.get("pluginIdentities", {}).values()}
+        for marketplace in alias_names:
+            if (
+                marketplace in owned_marketplaces and marketplace not in operator.marketplaces
+                and not any(split_source(source)[1] == marketplace for source in plugins)
+            ):
+                marketplaces.pop(marketplace, None)
+                owned_marketplaces.pop(marketplace, None)
+                reference_marketplaces.pop(marketplace, None)
         effective = RepoPluginSettings(
             enabled={**operator.enabled, **plugins},
             marketplaces={**operator.marketplaces, **marketplaces},
@@ -294,6 +354,17 @@ def register_prepared(
             name, marketplace = split_source(source)
             local = local_marketplace_path(marketplace, effective, repo_dir=repo)
             if local is None:
+                authority = effective.marketplaces.get(marketplace)
+                kind = authority.get("source", {}).get("source") if isinstance(authority, dict) else None
+                if inventory is not None and (authority is None or kind in REMOTE_MARKETPLACE_SOURCE_KINDS):
+                    from .inventory import installed_item
+
+                    verified = installed_item(source, *inventory)
+                    if "inventory" not in verified:
+                        raise ValueError(f"Registered local inventory catalog was not prepared: {source}")
+                    if authority is not None and verified["inventory"]["registration"] != authority:
+                        raise ValueError(f"Installed inventory does not match target-native origin: {source}")
+                    resolved[source] = verified["inventory"]["payload"]
                 continue
             if marketplace in catalogs and local.resolve() == Path(roots[marketplace]).resolve():
                 manifest = catalogs[marketplace]
@@ -323,6 +394,13 @@ def register_prepared(
                         "status": "disabled" if effective.enabled.get(dependency) is False
                         else "outside-selection",
                     })
+        reverse = {projected: logical for logical, projected in identities.items()}
+        logical_result = {}
+        for source, directory_path in resolved.items():
+            logical = reverse.get(source, source)
+            if logical in logical_result and logical_result[logical] != directory_path:
+                raise ValueError(f"Multiple physical payloads claim one logical identity: {logical}")
+            logical_result[logical] = directory_path
         for marketplace, catalog in catalogs.items():
             check_cancelled()
             atomic_json(Path(roots[marketplace]) / "marketplace.json", catalog)
@@ -332,6 +410,8 @@ def register_prepared(
             "marketplaceOrigins": origins,
             "marketplaceOriginActive": origin_active,
             "referenceMarketplaces": reference_marketplaces,
+            "pluginIdentities": identities,
+            "inventorySources": inventory_sources,
         })
         atomic_json(path, data)
-        return resolved
+        return logical_result
