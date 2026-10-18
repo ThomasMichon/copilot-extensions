@@ -1256,7 +1256,7 @@ def _path_write_lock(path: Path) -> threading.RLock:
         return lk
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def _atomic_write(path: Path, content: str | bytes) -> None:
     """Write content to a file atomically via temp + atomic replace.
 
     Serialized per path by an in-process lock (so the picker's own background
@@ -1272,7 +1272,7 @@ def _atomic_write(path: Path, content: str) -> None:
     with _path_write_lock(path):
         fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         try:
-            os.write(fd, content.encode())
+            os.write(fd, content if isinstance(content, bytes) else content.encode())
             os.close(fd)
             _replace_with_retry(tmp, str(path))
         except BaseException:

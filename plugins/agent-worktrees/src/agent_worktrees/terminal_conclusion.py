@@ -15,6 +15,7 @@ from typing import Any
 
 from . import config as cfg
 from . import finalize, git_ops, sessions, tracking
+from . import terminal_pair_progress
 
 DISPOSABLE_CLI_POLICY = "disposable-cli"
 DISPATCH_ATTEMPT_POLICY = "dispatch-attempt"
@@ -249,25 +250,10 @@ def _reciprocal_pair_valid(
     """
     if sibling.worktree_id != sibling_path.stem:
         return False
-    if Path(sibling.worktree_path).name != sibling.worktree_id:
-        return False
-    if sibling.branch != f"worktree/{sibling.worktree_id}":
-        return False
-    current_pair_id = (record.pair_id or "").strip()
-    sibling_pair_id = (sibling.pair_id or "").strip()
-    if not current_pair_id or current_pair_id != sibling_pair_id:
-        return False
-    current_role = (record.pair_role or "").strip()
-    sibling_role = (sibling.pair_role or "").strip()
-    if {current_role, sibling_role} != {"harness", "knowledge"}:
-        return False
-    if (record.pair_kind or "").strip() != "worktree" or (sibling.pair_kind or "").strip() != "worktree":
-        return False
-    sibling_ref = sibling.pair_claim_ref
-    expected = tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)
-    if sibling_ref is None or sibling_ref.canonical() != expected:
-        return False
-    return True
+    return terminal_pair_progress.reciprocal_identity_valid(
+        terminal_pair_progress.primary_identity(record),
+        terminal_pair_progress.primary_identity(sibling),
+    )
 
 
 def _resolve_pair_sibling(
@@ -290,9 +276,26 @@ def _resolve_pair_sibling(
         sibling = tracking.load_record(path)
     except Exception:
         return None
-    if not _reciprocal_pair_valid(record, sibling, path):
+    if not _pair_progress_valid(record, sibling, path):
         return None
     return sibling, path
+
+
+def _pair_progress_valid(record, sibling, path) -> bool:
+    if _reciprocal_pair_valid(record, sibling, path):
+        return True
+    snapshot = terminal_pair_progress.reciprocal_snapshot(record, sibling, path)
+    return snapshot is not None and _reciprocal_pair_valid(record, snapshot, path)
+
+
+def _pair_shape_unresolved(record, *, policy, reservation_key, owner) -> bool:
+    return (
+        record.is_paired
+        and policy == DISPATCH_ATTEMPT_POLICY
+        and (record.pair_kind or "").strip() != "anchor"
+        and _dispatch_ownership_confirmed(record, reservation_key=reservation_key, owner=owner)
+        and _resolve_pair_sibling(record) is None
+    )
 
 
 def _sibling_ancestry_reason(sibling: tracking.WorktreeRecord) -> str | None:
@@ -444,7 +447,9 @@ def _dispatch_pair_clearance(
     return True, None
 
 
-def _conclude_pair_sibling(record: tracking.WorktreeRecord) -> dict[str, Any]:
+def _conclude_pair_sibling(
+    record: tracking.WorktreeRecord, *, primary_path: Path | None = None,
+) -> dict[str, Any]:
     """Dispose of the RECIPROCAL sibling of a dispatch-owned pair, once the
     harness half's own conclusion has just been decided and persisted
     under lock. Re-resolves and re-locks the sibling's own record file
@@ -478,7 +483,7 @@ def _conclude_pair_sibling(record: tracking.WorktreeRecord) -> dict[str, Any]:
     try:
         with tracking._RecordLock(sibling_path, timeout=3, require_sidecar=True):
             sibling = tracking.load_record(sibling_path)
-            if not _reciprocal_pair_valid(record, sibling, sibling_path):
+            if not _pair_progress_valid(record, sibling, sibling_path):
                 return {"action": "skipped", "reason": "pair-sibling-identity-mismatch"}
             if live_reason := _session_is_live(sibling):
                 return {"action": "skipped", "reason": live_reason}
@@ -490,10 +495,21 @@ def _conclude_pair_sibling(record: tracking.WorktreeRecord) -> dict[str, Any]:
                 sibling.kind in tracking.MANAGED_KINDS
                 and sibling.status in {"complete", "finalized"}
             )
+            if already_primed and not sibling.is_paired:
+                if primary_path is not None:
+                    snapshot = terminal_pair_progress.reciprocal_snapshot(record, sibling, sibling_path)
+                    if snapshot is None:
+                        return {"action": "skipped", "reason": "pair-sibling-identity-mismatch"}
+                    terminal_pair_progress.publish(
+                        record, snapshot, sibling_path, primary_path=primary_path,
+                    )
+                return {"action": "already-primed", "worktree_id": sibling.worktree_id}
             sibling.kind = "bridge"
             sibling.owner = record.owner
             sibling.origin = "delegate"
             tracking.update_status(sibling, "complete", save=False)
+            tracking.save_record(sibling, sibling_path)
+            terminal_pair_progress.publish(record, sibling, sibling_path, primary_path=primary_path)
             # Discharge the pairing link -- see the docstring above.
             sibling.pair_id = None
             sibling.pair_role = None
@@ -557,6 +573,10 @@ def conclude_disposable_worktree(
         "session": {"action": "skipped", "reason": "not-attempted"},
         "managed_gc_eligible": False,
     }
+    # Read-only preservation preflight; eligible paths are revalidated under lock.
+    if _pair_shape_unresolved(record, policy=policy, reservation_key=reservation_key, owner=owner):
+        result.update(action="skipped", reason="pair-sibling-unresolved")
+        return result
 
     lock = finalize.FinalizeLock(
         Path(repo.worktree_root) / ".finalize.lock",
@@ -614,6 +634,9 @@ def conclude_disposable_worktree(
                         reason="driver-owner-mismatch",
                     )
                     return result
+            if _pair_shape_unresolved(record, policy=policy, reservation_key=reservation_key, owner=owner):
+                result.update(action="skipped", reason="pair-sibling-unresolved")
+                return result
             live_reason = _session_is_live(record)
             if live_reason:
                 result.update(action="skipped", reason=live_reason)
@@ -871,7 +894,7 @@ def conclude_disposable_worktree(
                     }
                     pairing_discharged = True
                 else:
-                    sibling_result = _conclude_pair_sibling(record)
+                    sibling_result = _conclude_pair_sibling(record, primary_path=record_path)
                     pairing_discharged = sibling_result.get("action") in (
                         "primed", "already-primed",
                     )

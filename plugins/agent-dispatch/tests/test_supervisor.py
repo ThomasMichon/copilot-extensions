@@ -215,6 +215,7 @@ class QueueBackedClient:
         conclusion_detail,
         detail=None,
         claim_token=None,
+        claimant_machine=None,
     ):
         return asdict(
             self._q.record_spawn_conclusion(
@@ -223,12 +224,13 @@ class QueueBackedClient:
                 conclusion_detail=conclusion_detail,
                 detail=detail,
                 claim_token=claim_token,
+                claimant_machine=claimant_machine,
             )
         )
 
-    def claim_spawn_conclusion_retry(self, key):
+    def claim_spawn_conclusion_retry(self, key, *, claimant_machine=None):
         reservation, claimed, claim_token = (
-            self._q.claim_spawn_conclusion_retry(key)
+            self._q.claim_spawn_conclusion_retry(key, claimant_machine=claimant_machine)
         )
         return {
             "claimed": claimed,
@@ -236,9 +238,9 @@ class QueueBackedClient:
             "reservation": asdict(reservation),
         }
 
-    def validate_spawn_conclusion_claim(self, key, claim_token):
+    def validate_spawn_conclusion_claim(self, key, claim_token, *, claimant_machine=None):
         return asdict(
-            self._q.validate_spawn_conclusion_claim(key, claim_token)
+            self._q.validate_spawn_conclusion_claim(key, claim_token, claimant_machine=claimant_machine)
         )
 
     def heartbeat(self, task_id, worker_id):

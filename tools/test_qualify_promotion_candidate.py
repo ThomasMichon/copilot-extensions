@@ -342,6 +342,32 @@ def test_partition_matrix_requires_its_explicit_discovery_and_name_contract(
         inventory.required_jobs(ROOT)
 
 
+@pytest.mark.parametrize("mutation", [
+    "collect-only", "filtered", "failure-masked", "partition-env", "selection",
+])
+def test_partition_runner_requires_the_complete_executed_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    text = workflow.read_text("utf-8")
+    invocation = '          python tools/run-plugin-tests.py "$PLUGIN" "${args[@]}"'
+    if mutation in ("collect-only", "filtered", "failure-masked"):
+        suffix = {
+            "collect-only": " --collect-only",
+            "filtered": " -k selected_case",
+            "failure-masked": " || true",
+        }[mutation]
+        old, new = invocation, invocation + suffix
+    elif mutation == "partition-env":
+        old, new = "PARTITION: ${{ matrix.partition }}", "PARTITION: 0"
+    else:
+        old, new = 'mapfile -t args <<< "$files"', "args=(--collect-only)"
+    assert text.count(old) == 1
+    workflow.write_text(text.replace(old, new), encoding="utf-8")
+    with pytest.raises(CandidateValidationError, match="discovered partitions"):
+        inventory.required_jobs(ROOT)
+
+
 @pytest.mark.parametrize("partition", [1, 2, 3])
 @pytest.mark.parametrize("conclusion", ["missing", "failure", "cancelled"])
 def test_every_actual_dispatch_partition_must_execute_successfully(

@@ -15,6 +15,20 @@ _NON_CANDIDATE = {
     "pr-gate": "github.event_name == 'pull_request'",
     "coverage-guided-selection-integration": "inputs.promotion_run == ''",
 }
+_PARTITIONED_SMOKE_STEP = """      - name: Test ${{ matrix.plugin }}
+        env:
+          PLUGIN: ${{ matrix.plugin }}
+          PARTITION: ${{ matrix.partition }}
+          PARTITIONS: ${{ matrix.partitions }}
+        run: |
+          args=()
+          if [ "$PARTITIONS" -gt 1 ]; then
+            files=$(python tools/ci_plugin_partitions.py files \\
+              --plugin "$PLUGIN" --partition "$PARTITION" --partitions "$PARTITIONS")
+            mapfile -t args <<< "$files"
+          fi
+          python tools/run-plugin-tests.py "$PLUGIN" "${args[@]}"
+"""
 
 
 def _smoke_rows(root: Path, plugins: set[str]) -> tuple[list[str], str]:
@@ -121,6 +135,10 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
                     not in jobs["discover"]
                     or 'echo "smoke_matrix=$SMOKE_MATRIX" >> "$GITHUB_OUTPUT"'
                     not in jobs["discover"]
+                    or re.findall(
+                        r"(?ms)^      - name: Test \$\{\{ matrix\.plugin \}\}\n.*?(?=^      - |\Z)",
+                        block,
+                    ) != [_PARTITIONED_SMOKE_STEP]
                 ):
                     raise CandidateValidationError("canonical smoke job no longer uses discovered partitions")
                 values, partition_source = _smoke_rows(root, plugins - {heavy[1]})

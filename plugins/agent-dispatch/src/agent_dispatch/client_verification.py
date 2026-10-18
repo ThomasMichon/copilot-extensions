@@ -12,7 +12,7 @@ class VerificationClientMixin:
     def append_event_note(self, task_id: str, *, sender: str, note: str) -> dict:
         headers = dict(self._control_headers())
         if self._control_token:
-            from .coordinator_auth import scoped_control_token
+            from .control_token import scoped_control_token
 
             headers["X-Agent-Dispatch-Sender-Proof"] = scoped_control_token(
                 self._control_token,

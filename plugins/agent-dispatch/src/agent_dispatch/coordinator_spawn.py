@@ -111,7 +111,22 @@ class RetireSpawnBody(ReservationDetailBody):
 
 
 class ValidateConclusionClaimBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     claim_token: str
+    claimant_machine: str | None = None
+
+
+class ClaimConclusionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    claimant_machine: str | None = None
+
+
+class RecordConclusionBody(ReservationDetailBody):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    claimant_machine: str | None = None
 
 
 class RearmSpawnBody(BaseModel):
@@ -147,6 +162,8 @@ def register_spawn_routes(
     def rejected(event: str, detail: dict[str, object]) -> None:
         logging.getLogger("agent-dispatch").warning("%s: %s", event, detail)
     control_auth = _make_control_auth(control_token, rejected)
+    from .coordinator_cleanup_recovery import register as register_cleanup_recovery
+    register_cleanup_recovery(app, queue, bus, control_auth)
 
     @app.post(
         "/spawn-reservations/tasks/{task_id}/authorize-fresh",
@@ -461,7 +478,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion")
-    def record_spawn_conclusion(key: str, body: ReservationDetailBody) -> dict:
+    def record_spawn_conclusion(key: str, body: RecordConclusionBody) -> dict:
         if not body.conclusion_state or body.conclusion_detail is None:
             raise HTTPException(
                 status_code=400,
@@ -474,16 +491,18 @@ def register_spawn_routes(
                 conclusion_detail=body.conclusion_detail or "",
                 detail=body.detail,
                 claim_token=body.claim_token,
+                claimant_machine=body.claimant_machine,
             )
         )
         bus.publish({"type": "spawn.conclusion", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion/claim")
-    def claim_spawn_conclusion_retry(key: str) -> dict:
+    def claim_spawn_conclusion_retry(key: str, body: ClaimConclusionBody | None = None) -> dict:
+        body = body if body is not None else ClaimConclusionBody()
         try:
             reservation, claimed, claim_token = (
-                queue.claim_spawn_conclusion_retry(key)
+                queue.claim_spawn_conclusion_retry(key, claimant_machine=body.claimant_machine)
             )
         except TaskError as exc:
             msg = str(exc)
@@ -506,6 +525,7 @@ def register_spawn_routes(
             lambda: queue.validate_spawn_conclusion_claim(
                 key,
                 body.claim_token,
+                claimant_machine=body.claimant_machine,
             )
         )
         return result

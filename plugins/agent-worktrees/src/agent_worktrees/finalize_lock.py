@@ -36,6 +36,19 @@ class FinalizeLock:
         self.held = False
         self.guard_path = lock_path.with_name(f"{lock_path.name}.guard")
 
+    def _claim(self) -> None:
+        fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(self.token)
+        except BaseException:
+            try:
+                self.lock_path.unlink()
+            except OSError:
+                pass
+            raise
+        self.held = True
+
     def acquire(self) -> None:
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         start = time.monotonic()
@@ -51,21 +64,7 @@ class FinalizeLock:
                     require_sidecar=True,
                 ):
                     if not self.lock_path.exists():
-                        fd = os.open(
-                            self.lock_path,
-                            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                            0o600,
-                        )
-                        try:
-                            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                                handle.write(self.token)
-                        except BaseException:
-                            try:
-                                self.lock_path.unlink()
-                            except OSError:
-                                pass
-                            raise
-                        self.held = True
+                        self._claim()
                         return
                     try:
                         observed = self.lock_path.read_text(encoding="utf-8").strip()
@@ -102,11 +101,17 @@ class FinalizeLock:
                         stale = age > self.stale_after
                     if stale:
                         try:
+                            if time.monotonic() - start >= self.timeout:
+                                raise TimeoutError("Timed out waiting for finalization lock.")
+                            self.lock_path.unlink()
+                            if time.monotonic() - start >= self.timeout:
+                                raise TimeoutError("Timed out waiting for finalization lock.")
+                            # Retain the guard across stale proof and exclusive claim.
+                            self._claim()
                             output.warn(
                                 f"Stale lock detected (age: {int(age)}s) -- breaking."
                             )
-                            self.lock_path.unlink()
-                            continue
+                            return
                         except OSError:
                             if time.monotonic() - start > self.timeout:
                                 raise TimeoutError(

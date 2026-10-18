@@ -281,6 +281,23 @@ def _parse_label_max_attempts(items: list[str] | None) -> dict[str, int]:
 def _cmd_reservations(args: argparse.Namespace) -> int:
     """Operator visibility + manual control over spawn reservations."""
     with _client(args) as c:
+        if args.reservations_command in {"retry-cleanup", "cleanup-history"}:
+            try:
+                if args.reservations_command == "cleanup-history":
+                    return _emit(c.cleanup_recovery_history(args.key))
+                machine, _env = _registration_scope(args)
+                if not machine:
+                    print("agent-dispatch reservations retry-cleanup: current host identity unavailable", file=sys.stderr)
+                    return 2
+                return _emit(c.recover_held_cleanup(
+                    args.key, expected_generation=args.expected_generation,
+                    current_host=machine, apply=args.apply,
+                    expected_preview=args.expected_preview, reason=args.reason,
+                    request_id=args.request_id,
+                ))
+            except DispatchError as exc:
+                print(f"agent-dispatch reservations {args.reservations_command}: {exc}", file=sys.stderr)
+                return 2
         if args.reservations_command == "list":
             rows = c.list_reservations(task_id=args.task, state=args.state, limit=args.limit)
             return _emit(rows)
@@ -537,6 +554,19 @@ def register_reservations_command(subparsers: Any) -> None:
     rp = res_sub.add_parser("settle", help="mark a reservation settled (attempt over)")
     rp.add_argument("key")
     rp.add_argument("--detail")
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "retry-cleanup", help="preview held housekeeping recovery; never restart completed work",
+    )
+    rp.add_argument("key", help="exact retired reservation key")
+    rp.add_argument("--expected-generation", type=int, required=True)
+    rp.add_argument("--apply", action="store_true")
+    rp.add_argument("--expected-preview", help="exact token from preview")
+    rp.add_argument("--request-id", help="stable idempotency id for an apply request")
+    rp.add_argument("--reason", help="auditable reason (required on apply)")
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser("cleanup-history", help="read preserved housekeeping failure history")
+    rp.add_argument("key")
     rp.set_defaults(func=_cmd_reservations)
     rp = res_sub.add_parser(
         "rearm",

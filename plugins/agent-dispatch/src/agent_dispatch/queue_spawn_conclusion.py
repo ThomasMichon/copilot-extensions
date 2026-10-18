@@ -45,6 +45,14 @@ def _conclusion_payload(raw: object) -> dict[str, object]:
 class SpawnConclusionMixin:
     """``TaskQueue`` mixin: spawn-reservation conclusion-claim lifecycle."""
 
+    def recover_held_cleanup(self, key: str, **kwargs) -> dict:
+        from .cleanup_recovery import recover
+        return recover(self, key, **kwargs)
+
+    def cleanup_recovery_history(self, key: str) -> list[dict]:
+        from .cleanup_recovery import history
+        return history(self, key)
+
     def record_spawn_conclusion(
         self,
         key: str,
@@ -53,6 +61,7 @@ class SpawnConclusionMixin:
         conclusion_detail: str,
         detail: str | None = None,
         claim_token: str | None = None,
+        claimant_machine: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Persist conclusion progress on an active or retired reservation."""
@@ -60,9 +69,7 @@ class SpawnConclusionMixin:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT state, conclusion_state, conclusion_detail, "
-                "cleanup_claim_token, cleanup_claim_expires_at, "
-                "worktree, reserved_at "
+                "SELECT * "
                 "FROM spawn_reservations WHERE key = ?",
                 (key,),
             ).fetchone()
@@ -87,6 +94,8 @@ class SpawnConclusionMixin:
                     and row["conclusion_state"] == "pending"
                 ),
             )
+            from .cleanup_recovery import validate_recovery
+            validate_recovery(self, conn, row, claimant_machine=claimant_machine)
             if claim_token is not None:
                 newer = _newer_worktree_reservation(conn, row, key)
                 if newer is not None:
@@ -119,6 +128,7 @@ class SpawnConclusionMixin:
         key: str,
         *,
         claim_seconds: float = 300.0,
+        claimant_machine: str | None = None,
         now: float | None = None,
     ) -> tuple[SpawnReservation, bool, str | None]:
         """Claim a retired cleanup retry without racing worktree reuse."""
@@ -138,6 +148,8 @@ class SpawnConclusionMixin:
             ):
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} has no retired pending cleanup")
+            from .cleanup_recovery import validate_recovery
+            validate_recovery(self, conn, row, check_allocation=False, claimant_machine=claimant_machine)
             try:
                 current_expiry = float(row["cleanup_claim_expires_at"] or 0)
             except (TypeError, ValueError):
@@ -145,20 +157,7 @@ class SpawnConclusionMixin:
             if row["cleanup_claim_token"] and current_expiry > ts:
                 conn.execute("COMMIT")
                 return SpawnReservation._from_row(row), False, None
-            blocker = None
-            if row["worktree"]:
-                blocker = conn.execute(
-                    "SELECT key FROM spawn_reservations "
-                    "WHERE key <> ? AND (worktree = ? OR inherited_worktree = ?) "
-                    "AND reserved_at > ? "
-                    "ORDER BY reserved_at DESC LIMIT 1",
-                    (
-                        key,
-                        row["worktree"],
-                        row["worktree"],
-                        row["reserved_at"],
-                    ),
-                ).fetchone()
+            blocker = _newer_worktree_reservation(conn, row, key)
             claim_token = None
             if blocker is not None:
                 payload: dict[str, object] = {
@@ -168,6 +167,9 @@ class SpawnConclusionMixin:
                 }
                 conclusion_state = "held"
             else:
+                # Newer worktrees transition durably to held above; only a
+                # real lease grant needs the remaining allocation fences.
+                validate_recovery(self, conn, row, claimant_machine=claimant_machine)
                 claim_token = uuid.uuid4().hex
                 payload = {
                     **_conclusion_payload(row["conclusion_detail"]),
@@ -209,6 +211,7 @@ class SpawnConclusionMixin:
         key: str,
         claim_token: str,
         *,
+        claimant_machine: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Revalidate a cleanup lease and worktree fence before side effects."""
@@ -228,6 +231,8 @@ class SpawnConclusionMixin:
                 claim_token,
                 now=ts,
             )
+            from .cleanup_recovery import validate_recovery
+            validate_recovery(self, conn, row, claimant_machine=claimant_machine)
             newer = _newer_worktree_reservation(conn, row, key)
             if newer is not None:
                 conn.execute("COMMIT")

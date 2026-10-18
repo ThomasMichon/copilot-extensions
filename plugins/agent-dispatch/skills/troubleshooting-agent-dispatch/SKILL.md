@@ -27,6 +27,14 @@ Use [Emitter recovery](../../docs/emitter-recovery.md) for source eligibility,
 report-first diagnosis, and explicit renewal-fenced repair. Verify each host's
 current source declarations; a stale checkout is not an identity-detector bug.
 
+For **completed work with held terminal housekeeping**, use
+[held cleanup recovery](../../docs/cleanup-recovery.md), not failed-task rearm.
+After correcting the underlying fault, preview the exact reservation with
+`reservations retry-cleanup <key> --expected-generation <generation>`.
+Apply only that preview with an audit reason and a stable request ID; the
+existing supervisor owns the leased retry and all disposal guards. No pruning,
+forced removal, task requeue or guessed record repair is part of recovery.
+
 > **Before you start — use the payload-local session commands.**
 > The agent-dispatch, agent-bridge, and agent-mcp session command catalogs
 > each supply an exact `argv[0]` owned by that plugin's own payload. Replace

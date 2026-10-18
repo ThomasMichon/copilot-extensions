@@ -578,6 +578,12 @@ failure explicitly before starting later commands.
 `tools/test_installer_finalizers.py` exercises production cleanup and exclusive
 lock reacquisition in the same still-live Windows PowerShell host.
 
+The pre-commit hook runs staged guards in batches of 32 paths to stay within
+Windows child-command limits during large integrations. Every path is checked,
+later batches still run after a failure, and any failed batch blocks the commit.
+`python -m pytest -q tools/test_pre_commit_batches.py tools/test_hook_interpreter.py tools/test_check_large_files.py`
+exercises the real hook, spaced/flag-like paths, batch failures and existing guards.
+
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
 against the bundled `actions/github-script` runtime as well, download
@@ -690,6 +696,9 @@ The PR-only coverage-selected dispatch lane below instead requests one matrix
 row through `--single-job-plugin agent-dispatch`. Selection and its evidence
 artifact run once, not once per complete-suite partition. The explicit matrix
 override leaves every other plugin and the default full partition policy intact.
+Qualification requires the complete canonical execution step, including its
+partition environment and file selection. Appended collection/filter flags,
+shell failure masking and changed partition selection refuse qualification.
 
 Agent-index's fleet-ingress tests select the same-checkout `fleet-manager[auth]`
 distribution explicitly during development preparation. Its runtime metadata
