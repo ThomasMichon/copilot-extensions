@@ -3,7 +3,7 @@
 - **Subject:** Operator-steerable composition of agents, durable work, and planning
 - **Scope:** branch (links focused capability children)
 - **Status:** Active
-- **Last revised:** 2026-10-10
+- **Last revised:** 2026-10-18
 
 ## Purpose & Intent
 
@@ -21,7 +21,7 @@ These four layers describe responsibilities, not new stores or deployment units.
 |-------|----------------|
 | Base | Portable agents use tools and resources through isolated identity, claims, authorization, bounded capacity, and reliable venue launch and resume. |
 | Task | Durable goals represent issues, efforts, maintenance, incidents, and reviews, with priorities, dependencies, restrictions, acceptance, and one rightful execution owner. |
-| Orchestrator | Specialized agents derive reviewed efforts, issues, and tasks from visions, reality evidence, and operator intent; prioritize within delegated authority and watch and recover the fleet. |
+| Orchestrator | Specialized agents hold standing portfolio charters, synthesize cross-contribution intent and guidance, derive reviewed work, prioritize within delegated authority, and watch and recover the fleet. |
 | Planner | Quick ephemeral operator conversations develop visions, metrics, docs, decisions, and reports; accepted durable intent graduates into the appropriate owning construct. |
 
 The children refine independently meaningful subjects:
@@ -57,6 +57,22 @@ proposals, and derive reviewable work through the existing effort, issue, and
 task owners. They schedule only within delegated priorities and capacity, and
 recover or fence failed execution without inventing a parallel lifecycle.
 
+### standing-portfolio-oversight
+
+A portfolio Orchestrator oversees the full contribution corpus without replacing
+dedicated per-change reviewers. It synthesizes themes and goals across
+contributions, publishes shared guidance, identifies dependencies and conflicting
+scope, and prioritizes within its delegated charter without asking the operator
+about every routine decision. It proposes and drives vision revisions through
+their existing reviewed publication and owner-authorization paths; neither
+oversight nor a vision proposal expands its own authority.
+
+The [reviewer consultation contract](../../plugins/agent-dispatch/reviewer/README.md#portfolio-consultation)
+connects independent reviews to this shared judgment without making the
+Orchestrator an omniscient super-worker or granting it each reviewer's execution
+authority. Dispatch carries durable charter relationships and scoped steering;
+bridge hosts and messages agents, while worktrees retains durable agency.
+
 ### lightweight-planning
 
 Planning conversations can remain ephemeral. Not every question, exploration,
@@ -64,6 +80,14 @@ report, or draft becomes a task. Accepted standing intent belongs in visions or
 decisions; accepted execution belongs in durable goals with explicit acceptance.
 
 ## Behaviors
+
+### reconcile-the-corpus
+
+The Orchestrator coalesces consultations, prioritizes actual blockers and shared
+themes, and avoids repeated unchanged assessments or replies. It periodically
+reconciles the full corpus: summaries and event delivery are useful evidence,
+not the sole truth. Missing or stale evidence remains explicit rather than
+becoming an invented complete picture.
 
 ### inspect-steer-and-return
 

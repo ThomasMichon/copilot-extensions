@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-16
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -83,6 +83,36 @@ notification. It does **not** run agents, decide priority policy, or embody a
 worker; those belong to the layers around it. Its transport posture matches the
 rest of the fabric's control plane: it is reached **over the fabric's secured
 mesh**, never a raw public listener (see the parent vision's transport rule).
+
+### Standing charters and linked consultations
+
+Dispatch preserves the relationship between a standing portfolio charter and
+its independently owned contribution tasks. It mediates permission-scoped
+consultation and steer delivery, coalesced wakes, observation, and recovery
+through its existing authorities, not a second queue, daemon, or lease store.
+Authority over one task alone never permits writing to an arbitrary other
+task. Guidance reaches the rightful owner of the still-current review revision;
+changed heads cannot inherit stale steer as an applicable decision.
+
+The [factory Orchestrator](../../agent-fabric/agentic-factory/README.md#standing-portfolio-oversight)
+owns conceptual synthesis and judgment. The deterministic coordinator and
+supervisor carry and supervise that work without acquiring those judgments.
+The [reviewer vision](reviewer/README.md#portfolio-consultation) owns when
+consultation gates a consequential review decision.
+
+### Charter lifetime and continuity
+
+A standing charter remains active across sweeps, child contributions, agent
+turns, context windows, and idle waits; none alone is its completion condition.
+Its owner-authorized completion or withdrawal criteria govern settlement.
+Native current-owner context rollover preserves the mandate, owner, workspace,
+and task. It is neither task completion nor a retry or re-embodiment.
+
+That continuity does not recover a crashed process or unavailable host, nor
+authorize ownership transfer. Those events still require durable supervision,
+recovery, and identity fencing through the existing task, hosting, and worktree
+owners. A true escalation waits visibly for an authorized owner to answer or
+redirect it; capacity pressure never forces completion to free a slot.
 
 ### The supervisor — the singleton that runs registered work
 Where the coordinator is the single-writer **store**, the **supervisor** is the
