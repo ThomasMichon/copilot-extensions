@@ -929,15 +929,10 @@ jobs:
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF"
       - name: Download coverage baselines (pilot plugins only; best-effort)
         if: steps.decide.outputs.proceed == 'true'
-        # Not every promotion run has a baseline artifact yet (only the
-        # pilot plugin(s) in `full`'s own Coverage-baseline step produce
-        # one, and that step is itself best-effort / continue-on-error) --
-        # `actions/download-artifact` has no built-in "zero matches is
-        # fine" mode for `pattern`, so this step tolerates that itself
-        # rather than failing the whole promotion over optional evidence.
-        # The NEXT step enforces the real guarantee: any plugin actually
-        # enrolled in collection must have produced one, or promotion fails
-        # loudly -- this step alone never silently drops that requirement.
+        # Only enrolled plugins produce baselines. Tolerate a failed pattern
+        # download here so the NEXT step reports the exact missing plugin set.
+        # Collection/upload already fail their source jobs; this separate gate
+        # also refuses missing evidence after download.
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -946,16 +941,10 @@ jobs:
           merge-multiple: true
       - name: Verify enrolled coverage baselines were actually collected
         if: steps.decide.outputs.proceed == 'true'
-        # `continue-on-error: true` on both the `full` job's own collection
-        # step and this job's download step above means every failure
-        # point along the way is individually soft -- collection failing,
-        # the artifact never existing, or the download failing would all
-        # otherwise let promotion succeed with no baseline recorded at
-        # all, defeating the "correlation loop never silently breaks"
-        # Behavior for a plugin that IS supposed to have one. This step is
-        # the one hard gate: an ENROLLED plugin's baseline is REQUIRED,
-        # never optional -- only a plugin not yet in this list is allowed
-        # to have none.
+        # Independently require the complete enrolled set after download,
+        # including when the best-effort download step itself failed.
+        # An enrolled baseline is never optional; only plugins outside this
+        # list may have none.
         #
         # Keep this list in exact sync with `full` job's own
         # `if: matrix.plugin == '...'` collection-step condition above --
