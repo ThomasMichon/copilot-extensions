@@ -1050,6 +1050,12 @@ exception; all purge safety assertions remain. This is not a diagnosed cause
 or an accepted-flake claim. The full source-controller, standalone and install-
 contract guard modules pass 475 cases with five Windows-only skips after these
 changes; current-head hosted review/checks still decide admission.
+The next Windows run passes the original 216 artifact-contract cases but
+exposes CRLF translation in the new regression's hand-authored Git alternates
+file. A real-Git negative control reproduces exit 128 with CRLF and success
+with LF against the same object store. Write exact LF bytes and assert the
+absence of CR; all twelve source-contract cases then pass locally. This is a
+fixture serialization repair, not a source-lineage or Windows coverage waiver.
 
 ### 2026-10-18 - Source and artifact repair passes; candidate qualification blocks publication
 

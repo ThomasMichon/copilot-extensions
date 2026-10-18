@@ -220,9 +220,10 @@ def test_source_contracts_retain_main_from_actions_checkout_without_local_main(
     objects = _materializer_git(
         original, "rev-parse", "--path-format=absolute", "--git-path", "objects",
     ).decode().strip()
-    (actions / ".git/objects/info/alternates").write_text(
-        Path(objects).as_posix() + "\n", encoding="utf-8",
-    )
+    alternate = actions / ".git/objects/info/alternates"
+    # Git treats a CRLF terminator as part of the object-directory path.
+    alternate.write_bytes((Path(objects).as_posix() + "\n").encode("utf-8"))
+    assert b"\r" not in alternate.read_bytes()
     _materializer_git(actions, "update-ref", "refs/heads/source-fixture", dev)
     _materializer_git(actions, "update-ref", "refs/remotes/origin/main", main)
     generated = tmp_path / "generated-without-main"
