@@ -106,3 +106,48 @@ def test_malformed_embedded_fixture_cannot_fall_back_to_shared_source(
         installers._copy_payload(tmp_path / "payload")
 
     assert _snapshot(plugin_source.parents[1]) == before
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+def test_fixture_omits_its_own_tests_and_caches_but_preserves_payload_inputs(
+    plugin_source: Path, tmp_path: Path, embedded: bool,
+):
+    _write_plugin_manifest(plugin_source, embedded=embedded)
+    dependency = (
+        plugin_source / "libs" / "agent-procutil" if embedded
+        else plugin_source.parents[1] / "libs" / "agent-procutil"
+    )
+    _write_dependency(dependency, "owning")
+    inputs = {
+        plugin_source / "scripts" / "install.ps1": b"native installer\r\n",
+        plugin_source / "src" / "budget_guidance" / "__init__.py": b"package\xff",
+        dependency / "tests" / "retained.bin": b"\x00\xff\r\n",
+    }
+    for path, content in inputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    for directory in ("tests", "__pycache__", ".pytest_cache"):
+        (plugin_source / directory).mkdir()
+        (plugin_source / directory / "irrelevant").write_bytes(b"not a build input")
+    before = _snapshot(plugin_source.parents[1])
+    target = tmp_path / "payload"
+
+    installers._copy_payload(target)
+
+    assert (target / "scripts" / "install.ps1").read_bytes() == inputs[
+        plugin_source / "scripts" / "install.ps1"
+    ]
+    assert (target / "src" / "budget_guidance" / "__init__.py").read_bytes() == b"package\xff"
+    assert (target / "libs" / "agent-procutil" / "tests" / "retained.bin").read_bytes() == b"\x00\xff\r\n"
+    for directory in ("tests", "__pycache__", ".pytest_cache"):
+        assert not (target / directory).exists()
+    assert _snapshot(plugin_source.parents[1]) == before
+
+
+def test_fixture_propagates_copy_worker_failure(plugin_source: Path, tmp_path: Path, monkeypatch):
+    def fail_copy(*args, **kwargs):
+        raise OSError("fixture copy refused")
+
+    monkeypatch.setattr(installers.shutil, "copy2", fail_copy)
+    with pytest.raises(OSError, match="fixture copy refused"):
+        installers._copy_payload(tmp_path / "payload")

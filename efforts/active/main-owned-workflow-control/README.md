@@ -1688,3 +1688,25 @@ hosted checks, review and a containing full validation remain required.
   are withdrawn after bounded diagnosis establishes no safe further fixture
   fix. The captured construction/venv/seasoning evidence is shared with the
   retained #6928 owner; it is not a new watchdog implementation or a waiver.
+
+### 2026-10-18 - Bound native fixture work without extending deadlines
+
+- The retained installer fixture removes no-op file-pointer and engine scans:
+  this payload declares neither reference. Its real dependency materializer,
+  embedded integrity assertions and both existing stamp-layout cases remain.
+- Copy only the payload inputs, excluding the fixture's own top-level tests
+  and runtime caches. At most sixteen workers copy files, with every result
+  awaited and errors propagated. New guards preserve script/package/dependency
+  bytes and source immutability in both layouts, including dependency test data.
+- The stdlib-only fake UV driver uses isolated no-site Python; native children
+  receive explicit executable/module paths and disabled PowerShell telemetry.
+  The real installer, controlled dependency failure, clean retry and old-slot
+  assertions remain. No production installer or shared construction code changes.
+- The affected installer/fixture modules pass 17 cases with seven platform
+  skips in 42.42 seconds. The complete native source suite then passes 431 cases
+  with 45 platform/opt-in skips in 69.69 seconds. Item, child and group limits
+  remain thirty, forty-five and three hundred seconds respectively.
+- These observations close the previously failing local source run, not a
+  diagnosis of every historical timeout. Current-head hosted Linux and actual
+  materialized consumer qualification, review and required checks remain gates;
+  additional runner capacity is not a test-result waiver.
