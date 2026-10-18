@@ -94,8 +94,8 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
     from .client import DispatchError
     from .client_authority import require_explicit_claim_authority
 
+    require_explicit_claim_authority(args)
     try:
-        require_explicit_claim_authority(args)
         with _core()._client(args, ensure=False) as c:
             task = c.get(args.task_id)
     except DispatchError as exc:
