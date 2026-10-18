@@ -15,11 +15,17 @@ import pytest
 
 from agent_worktrees import launch_seed_exec, launch_seed_state, sessions, tracking
 
+pytestmark = pytest.mark.guard
+
 
 @pytest.fixture
 def native_panes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, str]]:
     tmux = shutil.which("tmux")
-    if os.name == "nt" or tmux is None:
+    if os.name == "nt":
+        pytest.skip("requires native POSIX tmux")
+    if tmux is None:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            pytest.fail("native tmux pane guards require tmux in POSIX CI")
         pytest.skip("requires native POSIX tmux")
 
     monkeypatch.chdir(tmp_path)
