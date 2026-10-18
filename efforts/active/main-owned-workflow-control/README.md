@@ -74,6 +74,15 @@ Related review-request repair #6233 was already released; do not repeat it.
 > isn't perfect, so we as maintainers always need a way to forcbly self-merge as
 > a worst-case, but we don't want agents reaching for that button prematurely.
 
+**2026-10-18 - Maintainer completion automation (verbatim, with an unrelated
+implementation reference generalized):**
+
+> One thing we can do is develop one more background automation in GitHub which, similar to request-review-if-maintainer, operates on maintainer-owned PRs, and helps admin-merge PRs form maintainers which have passed CI, have an Approved stamp from Copilot (and no change requests from anyone else), and are tagged with auto-merge. It should also take care of auto-rebase, similar to [the existing review automation], leaving only conflict resolution to originals submitters. If we add this, then hopefully we can make agents know to just set auto-merge and let PRs go through.
+
+Only the implementation reference is generalized; the requested merge gates,
+label consent, automatic rebase and submitter conflict ownership are preserved.
+The implementation and activation decomposition below is agent-recommended.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -154,7 +163,8 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Fence/drain old release writers and demonstrate one canary, concurrent
   control repair, repeated promotion and rollback preserving current control.
 - [ ] Restore/verify any separately authorized temporary policy adjustment
-  before resuming ordinary publication; no new bypass actor or broad credential.
+  before resuming ordinary publication; that restoration adds no bypass actor
+  or broad credential.
 
 ### Phase 5 - Finish validation and automation consolidation
 
@@ -177,6 +187,51 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `test_dependency_version_updates_use_the_contribution_branch` guards this
   contract, and live Dependabot #6710 targets dev. Event-normalized invocation
   savings remain part of Phase 1 measurement, not an inferred result here.
+
+### Phase 5a - Opt-in Maintainer merge and rebase stewardship
+
+_(Agent-recommended implementation of the October 18 operator request;
+implementation follows review of this amendment. Authority setup and live
+enablement require their own explicit acceptance.)_
+
+- [ ] Reuse the existing invited-collaborator plus root CODEOWNERS Maintainer
+  boundary. Propose an initial Dev-only, same-repository, nondraft scope:
+  exclude Main, generated release candidates and the promotion publisher.
+  Require the `auto-merge` consent label and respect configured holds.
+- [ ] Evaluate fresh current-head required CI, including required check-source
+  identities, and the latest actual current-head Copilot `APPROVED` verdict
+  after any reopen or base-change epoch.
+  Reject active change requests from every other reviewer. Paginate history;
+  a later `COMMENTED` or pending review does not clear a human negative.
+- [ ] Use native GitHub `REBASE` with expected-head compare-and-swap when an
+  update is necessary for a clean, policy-compliant merge. Do not substitute a
+  merge update, execute PR hooks/code, resolve conflicts or reuse old-head
+  approval/CI. Return genuine conflicts to the original submitter with one
+  deduplicated notification; races and unknown responses are not conflicts.
+- [ ] Implement a short, event-driven trusted-default-Main reconciler, with
+  bounded manual/catch-up recovery for event-order gaps. Treat trigger data as
+  hints and re-read actual PR state before each write. Do not hold runners
+  waiting for CI/reviews, launch review waves or retry uncertain writes blindly.
+- [ ] Keep mutation authority out of head-controlled review events and
+  untrusted checkouts. Prefer a short-lived, single-repository automation
+  identity with only needed permissions. A new App, credential, review-only
+  bypass entry or live enablement needs explicit operator approval; existing
+  human exemptions and the licensed review-request credential do not imply it.
+  CI protections and Main publication requirements remain unchanged.
+- [ ] Prove external rebase compatibility with the owning managed worktree:
+  stale local publication refuses, unpublished work/backups survive, and a
+  later verified squash merge supports `pr-complete` and claim settlement.
+  Extend existing provider/lifecycle seams only if focused tests expose a gap.
+- [ ] Land the implementation disabled through reviewed Dev contribution and
+  normal qualified promotion. Keep it Dev-owned unless an independently
+  governed critical-control requirement is separately approved; do not expand
+  the Main preservation allowlist merely because the job is privileged.
+- [ ] After authority acceptance, prove report-only operation and one
+  explicitly consented rebase/new-CI/new-approval/merge canary. Verify both
+  CI-first and review-first event ordering and the actual mutation identity.
+  Only then update contribution guidance and the managed consent binding so
+  agents opt in, watch the actual merge, and reconcile their worktrees.
+  A label or delivered request alone is never completion.
 
 ### Phase 6 - Observe and complete
 
@@ -212,6 +267,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
   rollback and policy restoration are demonstrated.
 - [ ] Consolidation: distinct stress/Windows/heavy coverage retained and
   failure routing assigned; no unowned required failure.
+- [ ] Maintainer steward policy: missing/stale/spoofed/pending/failed CI,
+  incomplete review pagination, old-head Copilot approval, persistent human
+  change requests, label removal, holds, drafts, forks and Main targets refuse
+  without mutation.
+- [ ] Maintainer steward races: head movement, base movement, rate limits,
+  ambiguous rebase/merge responses and duplicate events never force a write,
+  reuse old evidence or silently manufacture success. State the provider's
+  head-CAS versus base-freshness guarantees honestly.
+- [ ] Maintainer steward isolation/lifecycle: trusted Main code and accepted
+  scoped credentials only; no PR-code execution, Main/publisher bypass or
+  review-runner route change. Actual canary proves new-head CI/review delivery,
+  conflict return and managed local reconciliation before enablement.
 
 ## Proposal
 
