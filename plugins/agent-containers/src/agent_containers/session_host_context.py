@@ -89,9 +89,13 @@ def guard_cleanup_path(target: str, user: str, remote_env: str) -> str:
             f"Refusing unsafe Session Host env cleanup path: {remote_env!r}"
         )
     ssh_transport._validate_target(target, user)
+    # missing_ok=True: a missing RAM root (e.g. after a container restart
+    # clears /dev/shm) must not block the idempotent cleanup contract that
+    # still has to remove surviving /tmp wrappers and receipts;
+    # directory_guard still refuses a symlinked ancestor either way.
     checked = ssh_transport._run([
         "docker", "exec", "-u", user, target,
-        "sh", "-c", directory_guard(str(path.parent), require_ram=canonical_ram),
+        "sh", "-c", directory_guard(str(path.parent), require_ram=canonical_ram, missing_ok=True),
     ])
     if checked.returncode:
         raise RuntimeError("Refusing unsafe Session Host cleanup directory")

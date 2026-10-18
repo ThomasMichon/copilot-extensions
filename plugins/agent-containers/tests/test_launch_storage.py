@@ -358,3 +358,61 @@ def test_unsafe_executable_root_blocks_reaping_staging_and_cleanup(
         ssh_transport.cleanup_remote_envs("fixture", "user")
     assert list(ram_root.rglob("*.env")) == [Path(owner)]
     assert sentinel.read_text() == "must remain"
+
+
+@pytest.mark.parametrize("scope", ["auth", "executable"])
+def test_symlinked_per_launch_scope_refuses_cleanup_deletion(
+    tmp_path: Path, ram_root: Path, local_transport: list,
+    monkeypatch: pytest.MonkeyPatch, scope: str,
+) -> None:
+    """A symlinked `<uuid>.env.d` scope must not redirect `rm -f` elsewhere.
+
+    The root-level guards alone are not enough: `cleanup_remote_env` deletes
+    files *inside* the per-launch `.env.d` scopes, so each scope itself must
+    be refused when it is a symlink, independent of the valid root it sits
+    under.
+    """
+    owner = ssh_transport.write_remote_env("fixture", "user", {"SETTING": "ordinary"})
+    assert owner is not None
+    executable = Path(launch_storage.executable_directory(owner))
+    executable.parent.mkdir(mode=0o700, parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o700)
+    auth_directory = Path(owner + ".d")
+    if scope == "auth":
+        sentinel = outside / "auth.env"
+        sentinel.write_text("must remain")
+        auth_directory.symlink_to(outside, target_is_directory=True)
+        executable.mkdir(mode=0o700)
+    else:
+        sentinel = outside / "copilot"
+        sentinel.write_text("must remain")
+        auth_directory.mkdir(mode=0o700)
+        executable.symlink_to(outside, target_is_directory=True)
+    assert ssh_transport.cleanup_remote_env("fixture", "user", owner) is False
+    assert sentinel.read_text() == "must remain"
+    assert Path(owner).exists()
+
+
+def test_session_host_cleanup_is_idempotent_with_missing_ram_root(
+    ram_root: Path, local_transport: list, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing RAM root (e.g. after a container restart) must not block
+    removal of surviving `/tmp` executable-root artifacts.
+    """
+    from agent_containers import __main__ as cli
+
+    owner = str(Path(launch_storage.launch_directory("user")) / ("a" * 32 + ".env"))
+    executable = Path(launch_storage.executable_directory(owner))
+    for directory in (executable.parent.parent, executable.parent, executable):
+        directory.mkdir(mode=0o700)
+    (executable / "copilot").write_text("nonsecret wrapper")
+    assert not Path(launch_storage.launch_directory("user")).exists()
+    monkeypatch.setattr(
+        cli, "_trusted_session_host_context",
+        lambda *args: (None, None, "user", "/workspace"),
+    )
+    assert cli._cmd_session_host_cleanup(SimpleNamespace(
+        name="fixture", expected_instance=None, remote_env=owner,
+    )) == 0
+    assert not executable.exists()

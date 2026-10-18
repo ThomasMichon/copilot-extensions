@@ -455,15 +455,20 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> bo
     _validate_target(container, user)
     executable = executable_directory(remote_path)
     try:
+        in_ram = remote_path.startswith(launch_directory(user) + "/")
         parent = posixpath.dirname(remote_path)
-        guard = directory_guard(
-            parent,
-            require_ram=remote_path.startswith(launch_directory(user) + "/"),
-            missing_ok=True,
-        )
+        guard = directory_guard(parent, require_ram=in_ram, missing_ok=True)
         executable_parent = posixpath.dirname(executable)
         if executable_parent != parent:
             guard += directory_guard(executable_parent, require_ram=False, missing_ok=True)
+        # The root guards above only validate the storage roots; the
+        # per-launch `<uuid>.env.d` scopes below are what the `rm -f` below
+        # actually deletes into, so a symlinked scope must be refused here
+        # too, before any deletion follows it.
+        auth_directory = remote_path + ".d"
+        guard += directory_guard(auth_directory, require_ram=in_ram, missing_ok=True)
+        if executable != auth_directory:
+            guard += directory_guard(executable, require_ram=False, missing_ok=True)
         checked = _run([
             "docker", "exec", "-u", user, container, "sh", "-c", guard,
         ])
