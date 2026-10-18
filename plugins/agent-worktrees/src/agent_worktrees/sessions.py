@@ -2147,21 +2147,7 @@ def mux_active_pane(worktree_id: str, *, mux: str | None = None) -> str | None:
     before a cutover so it can be retired afterward. Returns None if the session
     or mux is unavailable.
     """
-    import subprocess
-
-    mux_bin = _mux_bin(mux)
-    target = _mux_session_target(worktree_id, mux_bin)
-    try:
-        r = subprocess.run(
-            [mux_bin, "display-message", "-p", "-t", target, "#{pane_id}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode != 0:
-            return None
-        pane = r.stdout.strip()
-        return pane or None
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    return mux_active_pane_named(mux_session_name(worktree_id), mux=mux)
 
 
 def mux_active_pane_named(
@@ -2174,6 +2160,9 @@ def mux_active_pane_named(
 
     mux_bin = _mux_bin(mux)
     target = _mux_named_session_target(session_name, mux_bin)
+    if mux_bin != "psmux":
+        # display-message takes a pane target, not a session-only target.
+        target += ":"
     try:
         result = subprocess.run(
             [mux_bin, "display-message", "-p", "-t", target, "#{pane_id}"],
