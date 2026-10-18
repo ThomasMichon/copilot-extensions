@@ -130,21 +130,23 @@ def _settle(
             allow_feature_head=True,
         )
         settlement_attempted = True
+        if legacy_destination:
+            # The identity above was only verified through the dynamic legacy
+            # fallback; persist it *before* advancing the tracked head, and
+            # refuse outright on failure -- a silently-unrecorded destination
+            # would leave push_checked() with nothing to reject a later
+            # remote repoint against.
+            ownership_error = pr_publish.record_rewrite_ownership(
+                config, record, pr, pr.branch, pr.head_sha, identity,
+            )
+            if ownership_error:
+                raise ValueError(
+                    f"Routine reconciliation could not record its verified "
+                    f"destination: {ownership_error}"
+                )
         pr_publish.record_reconciled_head(
             config, record, pr, observed, rebase_base_sha=operation.rebase_base_sha,
         )
-        if legacy_destination:
-            # The identity above was only verified through the dynamic legacy
-            # fallback; without persisting it, a later remote repoint leaves
-            # push_checked() with no saved destination to reject against.
-            ownership_error = pr_publish.record_rewrite_ownership(
-                config, record, pr, pr.branch, observed, identity,
-            )
-            if ownership_error:
-                output.warn(
-                    f"Reconciled backed publication, but could not record its "
-                    f"verified destination: {ownership_error}"
-                )
         settled = True
         audit["outcome"] = "succeeded"
         tracking._atomic_write(path, json.dumps(audit, sort_keys=True) + "\n")
@@ -171,8 +173,13 @@ def _verified_fallback(
         return True
     from . import pr_rebase
 
+    # The supported source is whichever checkout routine settlement already
+    # admitted -- the worktree branch or the PR's own tracked private head
+    # (see pr_rewrite._validate's allow_feature_head) -- never a hardcoded
+    # worktree/<id>, which would mismatch HEAD on a rebased private head.
+    checked_out = git_ops._get_current_branch_safe(cwd) or record.branch
     proof = pr_rebase.verify(
-        record, config.default_repo, remote, f"{record.branch}:refs/heads/{pr.branch}",
+        record, config.default_repo, remote, f"{checked_out}:refs/heads/{pr.branch}",
         pr.head_sha, cwd=cwd,
     )
     return proof is not None and git_ops.is_commit_ancestor(observed, proof.old_source, cwd=cwd)

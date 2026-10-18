@@ -309,19 +309,31 @@ def test_push_changes_refuses_branch_switch_after_reconciliation(
     push-time PR selection must never let the first PR's pinned source be
     published to the second PR's destination."""
     config, wid, wt, remote, saved, branch, published = owned_publication
+    # Snapshot mode is what exercises finalize.py's on_wt/on_feature branch
+    # selection (the vulnerable path); refspec mode rejects the switched
+    # checkout earlier, before ever reaching it.
+    config = replace(config, repos={config.repo_name: replace(
+        config.default_repo, pr=replace(config.default_repo.pr, head_scheme="snapshot"),
+    )})
     current = record(wid)
     second = replace(
         current.pr, pr_id="second-live-pr", branch="pr/second-topic",
         number=None, url="", rewrite_owner="", rewrite_identity="",
     )
-    current.prs.append(second)
+    # Prepend, not append: an unnumbered copy otherwise inherits the same
+    # ``opened_at`` and would win active_pr()'s list-order tie-break by
+    # virtue of being appended last, silently deselecting the numbered PR
+    # reconciliation is meant to settle.
+    current.prs.insert(0, second)
     tracking.save_record(current)
     git("branch", second.branch, cwd=wt)
 
     real_reconcile = pr_routine_recovery.reconcile
+    reconciled: dict[str, str] = {}
 
     def reconcile_then_switch_branch(config, record_arg, *, cwd):
         result = real_reconcile(config, record_arg, cwd=cwd)
+        reconciled["source"] = result
         git("checkout", second.branch, cwd=str(wt))
         return result
 
@@ -330,7 +342,12 @@ def test_push_changes_refuses_branch_switch_after_reconciliation(
         git_ops, "push", lambda *a, **k: pytest.fail("Mismatched branch switch must not push."),
     )
     assert not finalize.push_changes(wid, config)
-    assert record(wid).pr.head_sha == saved
+    assert reconciled.get("source"), "reconciliation should have pinned a settled source"
+    # Reconciliation settles tracking to the already-observed remote tip
+    # (``published``) and returns the newer local HEAD only as the pinned
+    # source for a follow-up push -- the refused push below must still see
+    # that settled tracking, not the original unsettled ``saved`` value.
+    assert record(wid).pr.head_sha == published
     assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == published
 
 
