@@ -106,24 +106,84 @@ class TrustedHarnessTests(unittest.TestCase):
             self.assertTrue(callable(control._paths))
 
 
+@dataclass
+class _ShellResult:
+    returncode: int
+    stdout: str
+    stderr: str
+    output: str
+
+
 class _ShellFixture(unittest.TestCase):
     def shell(
         self, body: str, env: dict[str, str], *, timeout: float = 10,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> _ShellResult:
         bash = shutil.which("bash")
         git = shutil.which("git")
-        child_env = {"PATH": os.defpath, "GITHUB_OUTPUT": "/dev/stdout", **env}
+        child_env = {"PATH": os.defpath, **env}
         if os.name == "nt":
             native = Path(git).resolve().parent.parent / "bin/bash.exe" if git else None
             bash = str(native) if native is not None and native.is_file() else None
             child_env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\Windows")
         if bash is None:
             self.skipTest("Native Bash (Git for Windows on Windows) is required for literal shell fixtures")
-        return subprocess.run(
-            [bash, "--noprofile", "--norc", "-e"], input=body, text=True,
-            capture_output=True, timeout=timeout, env=child_env,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
+        with tempfile.TemporaryDirectory(prefix="literal-shell-") as directory:
+            output = Path(directory) / "github-output"
+            output.write_text("", encoding="utf-8")
+            child_env["GITHUB_OUTPUT"] = output.as_posix()
+            completed = subprocess.run(
+                [bash, "--noprofile", "--norc", "-e"], input=body, text=True,
+                capture_output=True, timeout=timeout, env=child_env,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            return _ShellResult(
+                completed.returncode, completed.stdout, completed.stderr,
+                output.read_text(encoding="utf-8"),
+            )
+
+
+class ShellFixtureTests(_ShellFixture):
+    def test_windows_shell_launch_is_native_and_consoleless(self) -> None:
+        fake_os = types.SimpleNamespace(name="nt", defpath="synthetic-path",
+                                        environ={"SYSTEMROOT": "synthetic-windows"})
+        resolved = {"bash": "/wsl/bash.exe", "git": "/native/git/cmd/git.exe"}
+        with (
+            mock.patch.object(sys.modules[__name__], "os", fake_os),
+            mock.patch("shutil.which", side_effect=resolved.get),
+            mock.patch.object(Path, "resolve", lambda path, **kwargs: path),
+            mock.patch.object(Path, "is_file", return_value=True),
+            mock.patch.object(subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True),
+            mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run,
+        ):
+            self.shell("exit 0", {}, timeout=5)
+        argv = run.call_args.args[0]
+        self.assertEqual(Path(argv[0]), Path("/native/git/bin/bash.exe"))
+        self.assertEqual(run.call_args.kwargs["creationflags"], 0x08000000)
+        self.assertEqual(run.call_args.kwargs["env"]["SYSTEMROOT"], "synthetic-windows")
+        self.assertEqual(run.call_args.kwargs["timeout"], 5)
+
+    def test_output_uses_an_owned_file_and_preserves_process_channels(self) -> None:
+        for returncode in (0, 7):
+            with self.subTest(returncode=returncode):
+                outputs = []
+
+                def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+                    output = Path(kwargs["env"]["GITHUB_OUTPUT"])
+                    self.assertNotEqual(output.as_posix(), "/dev/stdout")
+                    self.assertNotEqual(output.as_posix(), "/unowned/output")
+                    self.assertTrue(output.is_file())
+                    output.write_text("proceed=true\n", encoding="utf-8")
+                    outputs.append(output)
+                    return subprocess.CompletedProcess(argv, returncode, "notice\n", "diagnostic\n")
+
+                with mock.patch("subprocess.run", side_effect=run):
+                    completed = self.shell("exit 0", {"GITHUB_OUTPUT": "/unowned/output"}, timeout=5)
+                self.assertEqual(completed.returncode, returncode)
+                self.assertEqual(completed.stdout, "notice\n")
+                self.assertEqual(completed.stderr, "diagnostic\n")
+                self.assertEqual(completed.output, "proceed=true\n")
+                self.assertEqual(len(outputs), 1)
+                self.assertFalse(outputs[0].exists())
 
 
 class PromotionJobAdmissionTests(_ShellFixture):
@@ -183,7 +243,7 @@ class PromotionJobAdmissionTests(_ShellFixture):
                 )
                 completed = self.shell("set -u\n" + command, {}, timeout=5)
                 self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-                decisions = [line for line in completed.stdout.splitlines() if line.startswith("proceed=")]
+                decisions = completed.output.splitlines()
                 self.assertEqual(decisions, [f"proceed={str(proceed).lower()}"])
                 if not proceed and not overrides.keys() & {
                     "needs.gate.result", "needs.gate.outputs.is_dev",
@@ -499,25 +559,6 @@ class BoundaryTests(_ShellFixture):
         self.assertNotEqual(self.shell(body, {"RELEASE_HELPERS_SHA": "0" * 40}).returncode, 0)
         self.assertEqual(self.shell(body, {"RELEASE_HELPERS_SHA": CONTROL}).returncode, 0)
 
-    def test_windows_shell_launch_is_native_and_consoleless(self) -> None:
-        fake_os = types.SimpleNamespace(name="nt", defpath="synthetic-path",
-                                        environ={"SYSTEMROOT": "synthetic-windows"})
-        resolved = {"bash": "/wsl/bash.exe", "git": "/native/git/cmd/git.exe"}
-        with (
-            mock.patch.object(sys.modules[__name__], "os", fake_os),
-            mock.patch("shutil.which", side_effect=resolved.get),
-            mock.patch.object(Path, "resolve", lambda path, **kwargs: path),
-            mock.patch.object(Path, "is_file", return_value=True),
-            mock.patch.object(subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True),
-            mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run,
-        ):
-            self.shell("exit 0", {}, timeout=5)
-        argv = run.call_args.args[0]
-        self.assertEqual(Path(argv[0]), Path("/native/git/bin/bash.exe"))
-        self.assertEqual(run.call_args.kwargs["creationflags"], 0x08000000)
-        self.assertEqual(run.call_args.kwargs["env"]["SYSTEMROOT"], "synthetic-windows")
-        self.assertEqual(run.call_args.kwargs["timeout"], 5)
-
     def test_only_manual_trusted_main_can_admit_paused_qualification(self) -> None:
         body = script(step(self.jobs["gate"], "mode"))
         env = {
@@ -527,7 +568,7 @@ class BoundaryTests(_ShellFixture):
         }
         accepted = self.shell(body, env)
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        self.assertIn("qualification_only=true", accepted.stdout)
+        self.assertIn("qualification_only=true", accepted.output)
         for key, value in [
             ("GITHUB_EVENT_NAME", "repository_dispatch"), ("GITHUB_REF", "refs/heads/dev"),
             ("DEFAULT_REF", "refs/heads/dev"), ("WORKFLOW_SHA", DEV), ("RUN_SHA", ""),
@@ -537,7 +578,7 @@ class BoundaryTests(_ShellFixture):
         automatic = self.shell(body, {**env, "REQUESTED_QUALIFICATION_ONLY": "false",
                                       "GITHUB_EVENT_NAME": "repository_dispatch"})
         self.assertEqual(automatic.returncode, 0)
-        self.assertIn("qualification_only=false", automatic.stdout)
+        self.assertIn("qualification_only=false", automatic.output)
 
     def test_pause_is_preserved_and_normal_dispatch_cannot_bypass_it(self) -> None:
         code = python_body(script(step(self.jobs["promote"], "ready")))

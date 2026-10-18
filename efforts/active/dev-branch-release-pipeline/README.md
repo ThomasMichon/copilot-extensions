@@ -991,6 +991,27 @@ unqualified. Historical preparation entries below retain their original
 in-flight state; the later outcome and disconnected diagnostic are recorded
 in their own 2026-10-17 entries.
 
+### 2026-10-17 - Prove Git for Windows output capture before updating the repair
+
+The next hosted Windows job, `117588931328` in `39097888644`, exposed the
+remaining inherited fixture assumption: every one of the 33 decision cases
+reported `/dev/stdout: No such file or directory`. Native Bash was executing;
+this was neither a timeout nor an accepted flake.
+
+The shared fixture now uses a pre-created, test-owned `GITHUB_OUTPUT` file
+with a forward-slash native path and keeps its contents separate from process
+stdout and stderr. Dedicated guards prove file ownership, cleanup, independent
+channels and unchanged nonzero exit propagation. The native launch guard runs
+outside the intentionally skipped legacy-controller class.
+
+Before another source push, the exact repaired fixture was executed on real
+native Windows under its bounded Job supervisor: all four affected methods
+passed without skips, including all 33 real Bash decision cases. Each child
+retains the five-second limit and consoleless launch. The coupled Linux
+portfolio passes 171 cases with 10 existing legacy-controller skips and 152
+subtests; the complete prepared Main boundary passes 24 cases. These witnesses
+do not replace the required current-head hosted CI or release qualification.
+
 ### 2026-10-17 - Repair the native admission fixture before another qualification
 
 The hosted Windows candidate-contract run `39084596299` reported 31 failed
