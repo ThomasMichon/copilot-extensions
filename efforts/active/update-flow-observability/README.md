@@ -134,6 +134,8 @@ matrix below are _(agent-recommended)_ implementation details.
   and current/changed/first-touch aggregate ordering (#6933).
 - [x] Verify Codespaces source-level admitted reuse and health/content/schema
   refusals through real native construction adapters (#6940).
+- [x] Remove PowerShell UV acquisition from admitted healthy reuse while
+  preserving fresh-construction acquisition and cleanup (#7054).
 - [ ] Reconcile Bridge serving-version drift through the admitted runtime's
   existing cutover path rather than returning a misleading local-content
   no-op or rebuilding an already current slot (#6826).
@@ -223,8 +225,305 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-17 - Keep standalone build guards independent of runtime imports
+
+- The approved candidate's actual CI failed seven installer-engine guard
+  cases because their standalone file loader still addressed the Worktrees
+  compatibility shim after the capability implementation moved. An
+  installed local runtime could mask that new import dependency; this was
+  a regression caused by the move, not an unrelated failure to bypass.
+- The guard now loads the shared stdlib-only capability source directly.
+  A new real `python -I -S -B` regression first reproduced the missing
+  `update_telemetry` import, then verified a real packaged declaration with
+  neither runtime package imported. Existing declaration, rewrite, tamper
+  and whole-payload assertions are retained.
+- CI's merge tree contained newer canonical/materialized fixture coverage
+  from #7124. The smaller pre-sync local result was not accepted as that
+  matrix. Committed the repair, retained a backup, and used managed sync
+  to pull forward 29 upstream commits. All follow-up patches remained
+  equivalent; upstream fixture expansions were preserved, not copied away
+  or dropped from this PR.
+- The complete synchronized 47-case guard suite passed on Windows in
+  73.39 seconds and on an exact-code native Linux snapshot in 4.21 seconds,
+  including the new bare-interpreter proof. An earlier concurrent Windows
+  attempt hit the unchanged 30-second item bound and recorded an 18-second
+  filesystem scan; it is not a pass. Final validation ran serially, with
+  no item/group/resource limit increase or fixture/assertion removal.
+- Installer-engine, installation-context and payload generation checks
+  remained synchronized after pulling forward. The prior approval applies
+  to the old head; the repaired, synchronized candidate still owes fresh
+  review, hosted CI and an actual merge before this slice is landed.
+
+### 2026-10-17 - Classify unattributed-source diagnostics as warnings
+
+- Review found the existing unattributed-source admission diagnostic was
+  passed directly to generic progress, omitting the human warning state.
+  The existing warning callback is now defined before lease admission and
+  reused there; timeout/cancellation diagnostics and plain stderr retain
+  their existing behavior. Regenerated both lifecycle consumers.
+- A real-lease regression first reproduced the missing warning classification.
+  It covers human and plain output with a real failed child, exact exit 37,
+  one source diagnostic, retained unattributed pending ownership, unresolved
+  selection and released lease. The plain variant uses file-descriptor
+  capture so the native child's inherited streams remain real file handles.
+- The complete stdio file plus the existing unattributed admission,
+  requalification and explicit-policy refusal cases passed 18 Windows
+  cases in 33.29 seconds. An exact-code native Linux snapshot passed
+  eleven cases with four Windows-only skips in 8.19 seconds, including
+  both new real-lease variants and the existing fresh-bootstrap/generation
+  contracts; its separate compatibility-export import also passed.
+  Original containment limits remain unchanged.
+- Classification does not grant ownership or change mutation policy,
+  child status, redaction or machine streams. Fresh hosted review and CI,
+  followed by release and authorized running-state proof, remain open.
+
+### 2026-10-17 - Preserve mixed-case PowerShell installer actions
+
+- A fresh review accepted the real-CLI fixture correction but reported a
+  previously missed Medium issue in its body despite displaying no open
+  threads: PowerShell accepts mixed-case `Install` and `Update`, whereas
+  the newly forwarded Python human-operation choices are lowercase.
+  This observation was treated as blocking, not as a clean verdict.
+- The extended native self-staging regression reproduced exit 2 for
+  `Install` before admission. Normalize only the human-operation label
+  with `ToLowerInvariant()`; the native child's original action and
+  remaining argument vector are untouched. Regenerated the entrypoint-bound
+  UTF-8 declaration after changing the installer.
+- The complete self-staging matrix now includes `Install` and `uPdAtE`
+  on PowerShell 7 and Windows PowerShell 5.1. Ten native cases passed
+  with ten POSIX-shell platform skips in 100.22 seconds, retaining the
+  original 30-second item and 300-second group limits. Stamp remains
+  unframed, native staging and cleanup remain verified, and actual
+  install/update output retains lowercase UTC/monotonic framing and
+  pending ownership rather than claiming a built runtime.
+- This one-line PowerShell correction does not change Bash's case-sensitive
+  action contract or require another updater. Fresh current-head review,
+  hosted CI, promoted release and authorized rollout remain separate gates.
+
+### 2026-10-17 - Cover the standalone shared-library consumer in release metadata
+
+- Hosted `guards + lint` failed the changefile-presence check: the
+  `update-telemetry` source change also fans out to its Worktree Manager
+  consumer, but this PR's pending changefiles covered only the eleven
+  plugins. The narrower local plugin-only check missed that standalone
+  consumer; it was not a passing substitute for the actual CI guard.
+- Added the required Worktree Manager patch changefile through the existing
+  changefile tool. No version was hand-edited and no runtime code changed.
+  Publication is gated on the exact CI guard against its explicit base
+  and the repaired committed head. The hosted check and fresh review
+  remain required; this metadata repair does not waive either.
+
+### 2026-10-17 - Restore complete runtime fixtures for real CLI dispatch
+
+- Review of #7119 found three real-CLI cases incorrectly using the thinner
+  dispatch-only fixture. Their earlier passing results could use an ambient
+  Worktrees installation and are not accepted as isolated runtime evidence.
+  Those three results are superseded, not defended as a speed optimization.
+- Restored the complete copied runtime and materialized declared dependencies
+  for active-context selection, provisioning and concurrent first use.
+  Each case now explicitly requires its copied `__main__.py`; selection and
+  provisioning also assert real version output, as single-flight already did.
+  Dispatch-only fixtures remain confined to explicit stubs and pre-dispatch
+  refusals, not real CLI execution.
+- An initial complete-fixture attempt exceeded the unchanged 30-second item
+  bound before context stamping and is not a pass. Bounded instrumentation
+  measured fixture copying and native dispatch separately without changing
+  implementation or safety checks. Final uninstrumented acceptance passed
+  all three restored cases plus the existing no-site import-origin/version
+  regression: four passed in 68.02 seconds. Individual calls took 16.82,
+  17.96, 20.34 and 12.02 seconds respectively, below the original item bound;
+  the 300-second group and resource limits are unchanged.
+- The no-site case loads only the external YAML dependency explicitly and
+  proves the copied Worktrees configuration and transport modules originate
+  inside the staged payload before executing the real CLI. No import graph,
+  version assertion or ownership/governance check was replaced by a stub.
+  This repair changes Windows-only test fixture callsites, not production
+  runtime behavior. Hosted review/CI and the remaining effort/rollout gates
+  stay open.
+
+### 2026-10-16 - Honor an explicitly disabled composed-status switch
+
+- Review of #7119 found that the new PowerShell opt-in precondition tested
+  parameter presence rather than its switch value. Explicitly splatting
+  `WithContextValidation = $false` therefore rejected ordinary status
+  without expected-context arguments and rejected unrelated actions.
+- A real native regression first reproduced all four failures: ordinary
+  status and source identity, each on Windows PowerShell 5.1 and
+  PowerShell 7. The precondition now tests the switch value, matching the
+  existing execution branch. All eleven vendored runners are synchronized.
+- The complete native bootstrap file plus enabled composed-status and
+  changed-receipt consumer regressions passed 18 cases in 77.49 seconds.
+  Disabled calls emit the same parsed JSON as omission; enabled calls still
+  require the explicit action/expectations and independently revalidate
+  changed receipts. Original item, process and aggregate bounds remain.
+- This PowerShell-only repair changes no Bash/Python runner or production
+  installation. Native Windows entrypoint tests cover the changed contract;
+  full fresh-machine construction and live rollout remain outside this
+  source slice while the existing release and deployment holds apply.
+  Current-head hosted review and CI must clear after publication.
+
+### 2026-10-16 - Keep the lifecycle capability source plugin-independent
+
+- Review of #7119 identified a real source-ownership coupling: generic
+  payload generation read its capability probe from Worktrees. Moved that
+  unchanged implementation into `update_telemetry.capabilities`; the old
+  Worktrees module re-exports the same API. Generated bootstrap assets
+  remain unchanged and require no installed runtime.
+- A regression generates and verifies another eligible plugin's two human
+  helper packages from a minimal source root with no Worktrees plugin.
+  Runtime compatibility exports are the shared owner's actual objects.
+  Windows focused generation, lifecycle and real producer contracts passed:
+  32 passed, one platform skip in 57.30 seconds. Exact-snapshot native Linux
+  bootstrap/generation coverage passed nine cases with four platform skips;
+  a separate isolated import verified every compatibility export against
+  that snapshot's shared source. Original containment limits are unchanged.
+- The additional Linux Worktrees test-file attempt could not collect in the
+  available Dispatch test environment (missing `machine_transport`); the
+  existing Worktrees environment has no pytest. Neither attempt is a pass.
+  The actual relocated import contract was instead exercised directly in
+  the contained snapshot process; the full native producer matrix above
+  ran in the available Windows Worktrees environment. No dependencies were
+  installed or production runtimes modified to obtain this evidence.
+- All 13 generated manifests, Python lint and the install-contract gate
+  passed. This is a source-only review repair; required current-head review
+  and CI must clear again after publication. The remaining presentation,
+  whole-flow cost, promoted-release and parent-launch gates stay open.
+
+### 2026-10-16 - Reuse native types, never governance results
+
+- A private two-caller trace found the first caller spending 7.6 seconds
+  in initial governance and another 11.3 seconds in fresh pre/post checks;
+  the second waited 12.3 seconds for the provision lock, then entered its
+  own fresh check. The lock was already released before CLI execution.
+- Invoke the canonical runner in the launcher's existing PowerShell host,
+  in an independent child script scope on every check. This retains only
+  native helper types; receipt hashes and all governance reads reset on
+  every invocation. Both native hosts prove the same dispatcher PID runs
+  two or three real checks as appropriate, and actual policy changes at
+  either provision boundary still refuse dispatch with exit 126.
+- Thirteen focused native cases passed with unchanged deadlines. The
+  original two-caller case passed in that lane and in the later complete
+  file prefix. The complete file then exceeded its 300-second aggregate
+  budget, not an item deadline; complete acceptance now requires both
+  documented complementary generator partitions, never a selected pass
+  alone. No case or assertion is removed and no limit is raised.
+- A separate full-graph import trace measured 8.687 seconds importing,
+  versus 6.078 seconds without unused disposable bytecode writes.
+  Worktrees fixtures now suppress those writes, retaining all real
+  imports, version checks and staged-dependency origin assertions.
+- Current source acceptance now covers all 111 Windows generator cases
+  through the two complementary partitions: 96 passed and 15 platform
+  skips. The larger partition completed in 279.44 seconds; real staged
+  imports took 22.94 seconds and original concurrent first-use 20.88
+  seconds. No timeout or missing case is counted as a pass.
+- Complete Windows lifecycle/output and binding file groups passed
+  separately (54 passed/12 platform skips and 28 passed/6 platform skips).
+  A native-filesystem Linux snapshot of the same candidate passed all
+  four files together: 139 passed/66 platform skips in 110.08 seconds.
+  Canonical generation, installation-context and installer-engine adopter
+  checks, Python lint and the install contract passed. An independent
+  staged-diff review found no significant issues.
+- The clean-room contract tier exercises actual isolated admission,
+  self-staging and subprocess boundaries on both native hosts; it is not
+  proof of a full installed runtime construction. The hardened-container
+  attempt remains blocked before tests by its metadata TLS failure.
+  Production rollout is not attempted while existing deployment holds
+  remain. Hosted PR review/CI, release and parent completion gates stay open.
+
+### 2026-10-16 - Attribute native governance cost and retain fresh validation
+
+- A fresh synthetic status trace attributed 4.814 of 10.059 seconds to
+  146 canonical path calls. Native final-path resolution itself took only
+  about 60-90 milliseconds across those calls; repeated provider existence
+  probes, not the final-path safety primitive, dominated that part of the
+  work. Uncached native positive probes retain the original provider check
+  for negative/error cases. A subsequent source status measured 4.109
+  seconds, with no ownership or receipt checks removed.
+- The Worktrees Windows dispatcher now requests status plus its independent
+  expected-root/plugin context validation in the same interpreter. Validation
+  still runs fresh after status, and every initial, pre-provision and
+  post-provision generation comparison remains. Default status JSON is
+  unchanged. Both Windows dispatch branches release the provisioning lock
+  before running the CLI, matching the existing POSIX lifetime.
+- Nine focused native cases passed under the unchanged item/suite limits,
+  including the original two-caller single-flight case. PowerShell 7 and
+  Windows PowerShell 5.1 both proved composed/separate result equivalence,
+  refusal after a receipt changes between the two reads, and actual runtime
+  access to the released lock on the locked-fast and provisioned paths.
+  Native existence coverage separately proves literal paths, directories,
+  deletion without stale caching, and provider-error propagation.
+- Complete Windows generator acceptance is still blocked: a broader run
+  passed 37 cases before the copied full-dependency import fixture exceeded
+  its 30-second item limit while materializing a canonical dependency.
+  That case passed separately in 11.29 seconds (5.813 seconds copying,
+  0.938 materializing and 5.078 importing); the discrepancy is not waived
+  as pre-existing. A diagnostic replay of the eight new native cases plus
+  the complete copied-runtime import passed all nine in 112.67 seconds;
+  dependency materialization itself took 2.484 seconds in that replay.
+  The fixture inventory identified 422 test files plus 42 documentation/skill
+  files being copied despite not being consumed by these runtime contracts.
+  Those authoring/test files are now excluded from the Worktrees fixture;
+  its runtime sources, complete materialized dependency graph, and real
+  import/version assertions remain. Keep publication blocked until the
+  complete original-deadline generator lane is green. Installed
+  rollout, other output producers and the parent completion gates stay open.
+- A later broader run passed 42 cases, including the complete dependency
+  import, but again timed out on first-use. Inspection found the containment
+  monitor repeatedly rescanning the growing fixture corpus with three
+  path-stat operations per file. On the retained completed sandbox, the
+  original walk took 2.750 seconds; a fresh `scandir` walk took 0.141 seconds
+  and returned the identical 69,613,770 bytes across 4,342 files. The old
+  scan could exceed its own two-second sampling cadence and continuously
+  compete with the tests it monitored.
+- Replaced only that metadata enumeration, retaining fresh walks, symlink
+  exclusion, the sampling interval, and every resource limit. Native tests
+  still terminate a real over-budget child tree. That test, nested-file and
+  link accounting, all native bootstrap/argument guards, and the current
+  lifecycle output suite passed together: 26 cases in 69.68 seconds.
+  The next complete generator run passed 43 cases, including copied-runtime
+  import and original first-use, but the two-caller case still exceeded its
+  30-second item limit in that accumulated run. Its focused passing receipt
+  does not close this discrepancy. Attribute both callers' remaining phases
+  before another implementation or unchanged suite retry. None of these
+  results is an installed-runtime or rollout receipt.
+
+### 2026-10-16 - Standalone admission-parent candidate and remaining probe cost
+
+- Added explicit human-output opt-in to the existing Worktrees admission
+  parent for standalone `install` and `update`. Bootstrap formatter,
+  redactor and encoding-capability assets are generated from their existing
+  canonical sources; rendering starts no additional interpreter. Default
+  lifecycle streams, arguments, lease ownership and strict Job cleanup
+  remain unchanged. Stamp, teardown and protocol callers do not infer human
+  mode from output or ambient state.
+- Native Linux validation of exact staged tree
+  `25e199e6e3179459d4e54f3ffdeaf3b532c9a84b` passed 116 lifecycle,
+  output and generator cases with 43 platform skips, on native storage
+  under the existing limits. Windows output coverage passed 12 cases;
+  separate real admission/self-stage cases passed on both PowerShell 7
+  and Windows PowerShell 5.1, including strict human-line grammar.
+  These are bounded fresh synthetic consumers, not installed rollout.
+- Broader Windows generator acceptance is not green. A stale isolated
+  test dependency was repaired through the normal test-environment
+  preparation flow, but the real namespaced first-use case still exceeds
+  its unchanged 30-second item deadline. Native boot tracing attributes
+  roughly 15 seconds to initial resolution/validation and another
+  11 seconds to the pre-provision governance recheck, before the required
+  post-provision recheck. Cold native-type initialization alone measured
+  only 1.301 seconds in PowerShell 7 and 1.152 seconds in Windows
+  PowerShell; it is not established as the dominant cause.
+- Keep publication blocked while attributing that remaining cost. Fixture
+  experiments must not replace the real governance checks, drop first-use
+  coverage or increase deadlines. Other standalone/contextual producers,
+  early/late Bash output, whole-flow cost measurements and authorized
+  promoted installation remain open. No production update or admission
+  change is implied by this source candidate.
+
 ### 2026-10-16 - Remove unnecessary UV acquisition on admitted reuse
 
+- Merged #7054 as `be1ab20e995845c78454b49b73b21de62d782867` after
+  current-head approval with no findings and successful CI. Pulled the
+  continuing worktree forward; this is source completion, not installation.
 - Moved Codespaces PowerShell UV acquisition after canonical admission and
   its healthy-reuse return, matching Bash without changing either safety gate.
   The real acquisition helper now performs zero UV subprocesses on reuse.

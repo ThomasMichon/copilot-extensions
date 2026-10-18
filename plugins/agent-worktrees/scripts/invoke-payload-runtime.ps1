@@ -206,20 +206,24 @@ $policyPresent = (
     (Test-Path -LiteralPath $policy) -or
     $null -ne (Get-Item -LiteralPath $policy -Force -ErrorAction SilentlyContinue)
 )
-$statusArgs = @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
-    'status',
-    '-PayloadRoot', $payloadRoot,
-    '-PluginId', 'agent-worktrees',
-    '-LegacyRoot', $legacyRoot
-)
+$statusArgs = @{
+    Action = 'status'
+    PayloadRoot = $payloadRoot
+    PluginId = 'agent-worktrees'
+    LegacyRoot = $legacyRoot
+    WithContextValidation = $true
+    ExpectedPluginId = 'agent-worktrees'
+    ExpectedPayloadRoot = $payloadRoot
+}
 if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-    $statusArgs += @('-Context', $env:COPILOT_EXTENSIONS_CONTEXT)
+    $statusArgs.Context = $env:COPILOT_EXTENSIONS_CONTEXT
     $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
     1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
-    $statusArgs += @('-DurableHome', $durableHome)
+    $statusArgs.DurableHome = $durableHome
 }
-$resolutionJson = @(& $hostExe @statusArgs)
+# Invoke in a child script scope, retaining native types but no receipt state
+# between the initial, pre-provision and post-provision checks.
+$resolutionJson = @(& $modeRunner @statusArgs)
 if ($LASTEXITCODE -ne 0) {
     [Console]::Error.WriteLine(
         '[agent-worktrees] installation context could not be resolved.'
@@ -342,28 +346,8 @@ else {
 
 $validatedNamespaceGeneration = ''
 if ($actualMode -ceq 'namespaced') {
-    $validationDurableHome = $context
-    1..5 | ForEach-Object {
-        $validationDurableHome = Split-Path -Parent $validationDurableHome
-    }
-    $validationArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
-        'validate',
-        '-Context', $context,
-        '-DurableHome', $validationDurableHome,
-        '-ExpectedPluginId', 'agent-worktrees',
-        '-ExpectedPayloadRoot', $payloadRoot
-    )
-    $validationJson = @(& $hostExe @validationArgs)
-    if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine(
-            '[agent-worktrees] installation context validation failed.'
-        )
-        exit 126
-    }
-    try {
-        $validatedContext = ($validationJson -join "`n") | ConvertFrom-Json
-    } catch {
+    $validatedContext = $resolution.contextValidation
+    if ($null -eq $validatedContext) {
         [Console]::Error.WriteLine(
             '[agent-worktrees] installation context validation was malformed.'
         )
@@ -379,7 +363,7 @@ if ($actualMode -ceq 'namespaced') {
 }
 
 function Test-InstallationResolutionCurrent {
-    $currentJson = @(& $hostExe @statusArgs)
+    $currentJson = @(& $modeRunner @statusArgs)
     if ($LASTEXITCODE -ne 0) { return $false }
     try {
         $current = ($currentJson -join "`n") | ConvertFrom-Json
@@ -403,15 +387,8 @@ function Test-InstallationResolutionCurrent {
         ) {
             return $false
         }
-        $currentValidationJson = @(& $hostExe @validationArgs)
-        if ($LASTEXITCODE -ne 0) { return $false }
-        try {
-            $currentValidated = (
-                $currentValidationJson -join "`n"
-            ) | ConvertFrom-Json
-        } catch {
-            return $false
-        }
+        $currentValidated = $current.contextValidation
+        if ($null -eq $currentValidated) { return $false }
         return (
             [string]$currentValidated.namespaceGeneration -ceq
                 $validatedNamespaceGeneration -and
@@ -524,6 +501,8 @@ try {
     $python = Resolve-AgentWorktreesRuntime
     Write-BootTrace 'resolver-loaded'
     if ($python) {
+        $lock.Dispose()
+        $lock = $null
         Write-BootTrace 'dispatch' 'locked-fast'
         Invoke-AgentWorktreesRuntime $python
     }
@@ -587,6 +566,8 @@ try {
     $python = Resolve-AgentWorktreesRuntime
     Write-BootTrace 'resolver-loaded'
     if ($python) {
+        $lock.Dispose()
+        $lock = $null
         Write-BootTrace 'dispatch' 'provisioned'
         Invoke-AgentWorktreesRuntime $python
     }

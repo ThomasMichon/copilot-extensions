@@ -127,6 +127,39 @@ def _required_context_multi_manifest(tmp_path: Path) -> Path:
     return path
 
 
+def test_binding_human_assets_do_not_require_worktrees_source(tmp_path, monkeypatch):
+    manifest = _required_context_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["catalogBinding"] = True
+    data["catalogBindingModule"] = "src/agent_machines/_command_binding.py"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    primitive = manifest.parent / "scripts/installation-context/installation_context.py"
+    primitive.parent.mkdir()
+    primitive.write_text("# fixture\n", encoding="utf-8")
+    root = tmp_path / "source"
+    shared = root / "libs/update-telemetry/src/update_telemetry"
+    shared.mkdir(parents=True)
+    for name in ("human.py", "redact.py", "capabilities.py"):
+        shutil.copyfile(REPO / "libs/update-telemetry/src/update_telemetry" / name, shared / name)
+    roster = root / ".github/plugin/marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(json.dumps({"plugins": [
+        {"name": "agent-machines", "source": "./plugins/agent-machines"},
+    ]}), encoding="utf-8")
+    project = root / "plugins/agent-machines/pyproject.toml"
+    project.parent.mkdir(parents=True)
+    project.write_text("", encoding="utf-8")
+    monkeypatch.setattr(generator, "REPO", root)
+
+    assert not (root / "plugins/agent-worktrees").exists()
+    assert generator.process_manifest(manifest, check=False) == []
+    assert generator.process_manifest(manifest, check=True) == []
+    for parent in (manifest.parent / "scripts", manifest.parent / "src/agent_machines"):
+        assert (parent / "_lifecycle_human/capabilities.py").read_text(encoding="utf-8") == (
+            shared / "capabilities.py"
+        ).read_text(encoding="utf-8")
+
+
 def _write_runtime_completion(slot: Path, version: str) -> None:
     (slot / ".install-complete.json").write_text(
         json.dumps(
@@ -627,63 +660,50 @@ def _activate_agent_machines_context(
     return context.parent
 
 
-def _copied_agent_worktrees_payload(tmp_path: Path) -> Path:
+def _copied_agent_worktrees_payload(tmp_path: Path, *, dispatch_only: bool = False) -> Path:
     payload = tmp_path / "agent-worktrees"
-    shutil.copytree(
-        REPO / "plugins" / "agent-worktrees",
-        payload,
-        ignore=_payload_copy_ignore(REPO / "plugins" / "agent-worktrees"),
-    )
-    _stage_payload_dependencies(payload, source_consumer=REPO / "plugins" / "agent-worktrees")
+    source = REPO / "plugins" / "agent-worktrees"
+    ignore_runtime = _payload_copy_ignore(source)
+
+    def ignore(directory, names):
+        excluded = ignore_runtime(directory, names)
+        if Path(directory) == source:
+            # These runtime/dispatch fixtures do not consume the authoring corpus.
+            excluded.update({"tests", "docs", "skills"})
+            if dispatch_only:
+                excluded.update({"src", "libs"})
+        return excluded
+
+    shutil.copytree(source, payload, ignore=ignore)
+    if not dispatch_only:
+        _stage_payload_dependencies(payload, source_consumer=source)
     return payload
 
 
 def _stamp_agent_worktrees_context(
     tmp_path: Path,
     payload: Path,
-    pwsh: str,
 ) -> Path:
+    # Receipt setup uses its real owner API; the contract below is native dispatch,
+    # not repeated shell startup for constructing those input receipts.
     version = json.loads(
         (payload / "plugin.json").read_text(encoding="utf-8")
     )["version"]
-    result = subprocess.run(
-        [
-            pwsh,
-            "-NoProfile",
-            "-File",
-            str(REPO / "libs" / "installation-context" / "installation-context.ps1"),
-            "stamp",
-            "-SourceJson",
-            '{"source":"github","repo":"example-org/example-marketplace"}',
-            "-MarketplaceKey",
-            "example",
-            "-PluginId",
-            "agent-worktrees",
-            "-PayloadRoot",
-            str(payload),
-            "-PayloadVersion",
-            version,
-            "-PayloadOrigin",
-            "explicit",
-            "-ExpectedNamespaceGeneration",
-            "0",
-            "-ExpectedInstallGeneration",
-            "0",
-            "-DurableHome",
-            str(tmp_path / "durable"),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
+    result = installation_context.stamp_context(
+        payload_version=version, payload_origin="explicit",
+        expected_namespace_generation=0, expected_install_generation=0,
+        plugin_id="agent-worktrees", payload_root=payload,
+        durable_home=tmp_path / "durable",
+        source_descriptor={"source": "github", "repo": "example-org/example-marketplace"},
+        marketplace_key="example",
     )
-    return Path(json.loads(result.stdout)["installReceipt"])
+    return Path(result["installReceipt"])
 
 
 def _activate_agent_worktrees_context(
     tmp_path: Path,
     home: Path,
     context: Path,
-    pwsh: str,
 ) -> Path:
     install = json.loads(context.read_text(encoding="utf-8"))
     namespace = json.loads(
@@ -703,44 +723,16 @@ def _activate_agent_worktrees_context(
     )
     environment = os.environ.copy()
     environment.update({"HOME": str(home), "USERPROFILE": str(home)})
-    result = subprocess.run(
-        [
-            pwsh,
-            "-NoProfile",
-            "-File",
-            str(REPO / "libs" / "installation-context" / "installation-context.ps1"),
-            "activation-cas",
-            "-Context",
-            str(context),
-            "-ExpectedMarketplaceId",
-            install["marketplaceId"],
-            "-ExpectedPluginId",
-            "agent-worktrees",
-            "-ExpectedNamespaceGeneration",
-            str(namespace["generation"]),
-            "-ExpectedInstallGeneration",
-            str(install["generation"]),
-            "-ExpectedActivationGeneration",
-            "0",
-            "-ActivationMode",
-            "namespaced",
-            "-ActivationState",
-            "active",
-            "-LegacyDisposition",
-            "absent",
-            "-LegacyProbeJson",
-            '{"declared":true,"result":"absent","checkedAt":"2026-01-01T00:00:00Z"}',
-            "-LegacyRoot",
-            str(home / ".agent-worktrees"),
-            "-DurableHome",
-            str(tmp_path / "durable"),
-        ],
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=True,
+    installation_context.compare_and_swap_activation(
+        context=context, expected_marketplace_id=install["marketplaceId"],
+        expected_plugin_id="agent-worktrees",
+        expected_namespace_generation=namespace["generation"],
+        expected_install_generation=install["generation"], expected_activation_generation=0,
+        activation_mode="namespaced", activation_state="active", legacy_disposition="absent",
+        legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+        legacy_root=home / ".agent-worktrees", durable_home=tmp_path / "durable",
+        environment=environment,
     )
-    json.loads(result.stdout)
     return context.parent
 
 
@@ -761,9 +753,222 @@ def _agent_worktrees_test_environment(
                 ]
             ),
             "TEST_PYTHON": sys.executable,
+            # Copied payloads are disposable; avoid writing an unused bytecode corpus.
+            "PYTHONDONTWRITEBYTECODE": "1",
         }
     )
     return environment
+
+
+NATIVE_POWERSHELL_HOSTS = list(dict.fromkeys(filter(None, (
+    shutil.which("pwsh"), shutil.which("powershell"),
+))))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows context semantics")
+@pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
+def test_worktrees_composed_status_preserves_independent_validation(tmp_path: Path, host: str) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    _activate_agent_worktrees_context(tmp_path, home, context)
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
+    native = payload / "scripts" / "installation-context" / "installation-context.ps1"
+    prefix = [host, "-NoProfile", "-File", str(native)]
+    status = [
+        "status", "-PayloadRoot", str(payload), "-PluginId", "agent-worktrees",
+        "-LegacyRoot", str(home / ".agent-worktrees"),
+        "-Context", str(context), "-DurableHome", str(tmp_path / "durable"),
+    ]
+    expectations = ["-ExpectedPluginId", "agent-worktrees", "-ExpectedPayloadRoot", str(payload)]
+
+    def invoke(arguments: list[str]) -> dict[str, object]:
+        result = subprocess.run(
+            [*prefix, *arguments], env=environment, capture_output=True, text=True,
+            timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    ordinary = invoke(status)
+    assert ordinary["status"] == "ready"
+    assert "contextValidation" not in ordinary
+    expected = invoke([
+        "validate", "-Context", str(context),
+        "-DurableHome", str(tmp_path / "durable"), *expectations,
+    ])
+    composed = invoke([*status, "-WithContextValidation", *expectations])
+    assert composed.pop("contextValidation") == expected
+    assert composed == ordinary
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows context semantics")
+@pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
+def test_worktrees_composed_status_revalidates_changed_receipt(tmp_path: Path, host: str) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    _activate_agent_worktrees_context(tmp_path, home, context)
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
+    receipt = Path(json.loads(context.read_text(encoding="utf-8"))["namespaceReceipt"])
+    changed = json.loads(receipt.read_text(encoding="utf-8"))
+    changed["generation"] += 1
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text(json.dumps(changed), encoding="utf-8")
+    environment.update({
+        "TEST_NAMESPACE_RECEIPT": str(receipt),
+        "TEST_NAMESPACE_REPLACEMENT": str(replacement),
+    })
+    native = payload / "scripts" / "installation-context" / "installation-context.ps1"
+    source = native.read_text(encoding="utf-8")
+    status_call = "$result = Resolve-InstallationStatus $resolvedCopilotHome $resolvedProjectRoot $resolvedDurableHome"
+    assert source.count(status_call) == 1
+    native.write_text(source.replace(
+        status_call, status_call + "\n"
+        "[IO.File]::WriteAllText($env:TEST_NAMESPACE_RECEIPT, "
+        "[IO.File]::ReadAllText($env:TEST_NAMESPACE_REPLACEMENT))",
+    ), encoding="utf-8")
+    result = subprocess.run(
+        [host, "-NoProfile", "-File", str(native), "status",
+         "-PayloadRoot", str(payload), "-PluginId", "agent-worktrees",
+         "-LegacyRoot", str(home / ".agent-worktrees"),
+         "-Context", str(context), "-DurableHome", str(tmp_path / "durable"),
+         "-WithContextValidation", "-ExpectedPluginId", "agent-worktrees",
+         "-ExpectedPayloadRoot", str(payload)],
+        env=environment, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 1
+    assert not result.stdout.strip()
+    assert "changed after it was validated" in result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows provision file-lock sharing")
+@pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
+@pytest.mark.parametrize("branch", ["locked-fast", "provisioned"])
+def test_worktrees_releases_provision_lock_before_runtime_dispatch(
+    tmp_path: Path, host: str, branch: str,
+) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin_root = _activate_agent_worktrees_context(tmp_path, home, context)
+    native = payload / "scripts" / "installation-context" / "installation-context.ps1"
+    native_source = native.read_text(encoding="utf-8")
+    native.write_text(native_source.replace(
+        "$ErrorActionPreference = 'Stop'",
+        "[IO.File]::AppendAllText($env:TEST_STATUS_CALLERS, [string]$PID + "
+        "[Environment]::NewLine)\n$ErrorActionPreference = 'Stop'", 1,
+    ), encoding="utf-8")
+    status_callers = tmp_path / "status-callers.txt"
+    resolver = payload / "scripts" / "resolve-runtime.ps1"
+    if branch == "locked-fast":
+        resolver.write_text(
+            "$countFile = Join-Path $PSScriptRoot 'resolve-count'\n"
+            "$count = if (Test-Path -LiteralPath $countFile) { "
+            "[int][IO.File]::ReadAllText($countFile) } else { 0 }\n"
+            "[IO.File]::WriteAllText($countFile, [string]($count + 1))\n"
+            "$AgentRtPy = if ($count -gt 0) { $env:TEST_PYTHON } else { $null }\n",
+            encoding="utf-8",
+        )
+    else:
+        resolver.write_text("$AgentRtPy = $null\n", encoding="utf-8")
+        (payload / "scripts" / "install.ps1").write_text(
+            "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
+            "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'resolve-runtime.ps1'), "
+            "'$AgentRtPy = $env:TEST_PYTHON')\n", encoding="utf-8",
+        )
+    package = payload / "src" / "agent_worktrees"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import os\nfrom pathlib import Path\n"
+        "with (Path(os.environ['AGENT_RT_ROOT']) / '.provision.lock').open('r+b'):\n"
+        "    print('lock-released')\n", encoding="utf-8",
+    )
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update({
+        "COPILOT_EXTENSIONS_CONTEXT": str(context),
+        "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
+        "TEST_STATUS_CALLERS": str(status_callers),
+    })
+    result = subprocess.run(
+        [host, "-NoProfile", "-File", str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
+         "--version"],
+        env=environment, capture_output=True, text=True, timeout=25,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "lock-released"
+    dispatch = [
+        event for event in _read_jsonl(plugin_root / "logs" / "activity.jsonl")
+        if event["phase"] == "dispatch"
+    ]
+    assert [event["path"] for event in dispatch] == [branch]
+    callers = status_callers.read_text(encoding="utf-8").splitlines()
+    assert len(callers) == (2 if branch == "locked-fast" else 3)
+    assert set(callers) == {str(dispatch[0]["pid"])}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows governance revalidation")
+@pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
+@pytest.mark.parametrize("boundary", ["before-provision", "after-provision"])
+def test_worktrees_in_process_checks_refuse_changed_policy(
+    tmp_path: Path, host: str, boundary: str,
+) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin_root = _activate_agent_worktrees_context(tmp_path, home, context)
+    change_policy = (
+        "[IO.File]::WriteAllText($env:TEST_POLICY, "
+        "'{\"schema\":\"copilot-extensions.installation-mode\",\"version\":1,"
+        "\"installationMode\":{\"enabled\":false}}')\n"
+    )
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        (change_policy if boundary == "before-provision" else "") + "$AgentRtPy = $null\n",
+        encoding="utf-8",
+    )
+    install_record = tmp_path / "installed.txt"
+    (payload / "scripts" / "install.ps1").write_text(
+        "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
+        "[IO.File]::WriteAllText($env:TEST_INSTALL_RECORD, 'installed')\n" + change_policy,
+        encoding="utf-8",
+    )
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update({
+        "COPILOT_EXTENSIONS_CONTEXT": str(context),
+        "TEST_POLICY": str(home / ".copilot-extensions" / "installation-mode.json"),
+        "TEST_INSTALL_RECORD": str(install_record),
+    })
+    result = subprocess.run(
+        [host, "-NoProfile", "-File", str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
+         "--version"],
+        env=environment, capture_output=True, text=True, timeout=25,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 126, result.stderr
+    assert not result.stdout.strip()
+    assert "governance changed" in result.stderr
+    assert install_record.exists() == (boundary == "after-provision")
+    assert not any(
+        event["phase"] == "dispatch"
+        for event in _read_jsonl(plugin_root / "logs" / "activity.jsonl")
+    )
 
 
 def test_copied_worktrees_ignores_ambient_materialized_dependencies(tmp_path: Path) -> None:
@@ -789,6 +994,7 @@ def test_copied_worktrees_import_and_version_use_staged_dependencies(tmp_path: P
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     sources = environment["PYTHONPATH"].split(os.pathsep)
     assert all(Path(source).is_relative_to(payload) for source in sources)
+    assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
     script = """
 import importlib.util, json, pathlib, runpy, sys
 # Load only the external YAML dependency, without enabling ambient site-packages.
@@ -881,7 +1087,7 @@ def test_agent_worktrees_requested_context_never_falls_back_to_legacy(
     pwsh = shutil.which("pwsh")
     assert pwsh
     payload = _copied_agent_worktrees_payload(tmp_path)
-    context = _stamp_agent_worktrees_context(tmp_path, payload, pwsh)
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
     environment = _agent_worktrees_test_environment(home, payload)
@@ -921,10 +1127,11 @@ def test_agent_worktrees_active_context_selects_only_its_cell_root(
     pwsh = shutil.which("pwsh")
     assert pwsh
     payload = _copied_agent_worktrees_payload(tmp_path)
-    context = _stamp_agent_worktrees_context(tmp_path, payload, pwsh)
+    assert (payload / "src" / "agent_worktrees" / "__main__.py").is_file()
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
-    plugin_root = _activate_agent_worktrees_context(tmp_path, home, context, pwsh)
+    plugin_root = _activate_agent_worktrees_context(tmp_path, home, context)
     root_record = tmp_path / "selected-root.txt"
     (payload / "scripts" / "resolve-runtime.ps1").write_text(
         "[IO.File]::WriteAllText($env:TEST_ROOT_RECORD, $env:AGENT_RT_ROOT)\n"
@@ -954,6 +1161,7 @@ def test_agent_worktrees_active_context_selects_only_its_cell_root(
     )
 
     assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("agent-worktrees ")
     assert root_record.read_text(encoding="utf-8") == str(plugin_root)
     assert not (home / ".agent-worktrees").exists()
 
@@ -968,10 +1176,11 @@ def test_agent_worktrees_active_context_provisions_only_its_cell_root(
     pwsh = shutil.which("pwsh")
     assert pwsh
     payload = _copied_agent_worktrees_payload(tmp_path)
-    context = _stamp_agent_worktrees_context(tmp_path, payload, pwsh)
+    assert (payload / "src" / "agent_worktrees" / "__main__.py").is_file()
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
-    plugin_root = _activate_agent_worktrees_context(tmp_path, home, context, pwsh)
+    plugin_root = _activate_agent_worktrees_context(tmp_path, home, context)
     install_record = tmp_path / "install-record.txt"
     (payload / "scripts" / "resolve-runtime.ps1").write_text(
         "$AgentRtPy = $null\n",
@@ -1010,6 +1219,7 @@ def test_agent_worktrees_active_context_provisions_only_its_cell_root(
     )
 
     assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("agent-worktrees ")
     assert install_record.read_text(encoding="utf-8") == (
         f"install|{plugin_root}|{context}"
     )
@@ -1026,10 +1236,11 @@ def test_agent_worktrees_namespaced_first_use_is_single_flight(
     pwsh = shutil.which("pwsh")
     assert pwsh
     payload = _copied_agent_worktrees_payload(tmp_path)
-    context = _stamp_agent_worktrees_context(tmp_path, payload, pwsh)
+    assert (payload / "src" / "agent_worktrees" / "__main__.py").is_file()
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
-    _activate_agent_worktrees_context(tmp_path, home, context, pwsh)
+    _activate_agent_worktrees_context(tmp_path, home, context)
     install_record = tmp_path / "install-record.txt"
     (payload / "scripts" / "resolve-runtime.ps1").write_text(
         "$AgentRtPy = $null\n",

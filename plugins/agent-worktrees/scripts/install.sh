@@ -91,6 +91,9 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 elif [[ "$__aw_action" == uninstall ]]; then
                     __aw_admission_args+=(--teardown)
                 fi
+                if [[ "$__aw_action" == install || "$__aw_action" == update ]]; then
+                    __aw_admission_args+=(--human-operation "$__aw_action")
+                fi
                 "$__aw_admission_python" "${__aw_admission_args[@]}" --run-lifecycle -- \
                     "$__aw_admission_bash" "$SCRIPT_DIR/install.sh" "${__aw_args[@]}"
                 exit $?

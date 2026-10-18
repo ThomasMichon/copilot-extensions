@@ -689,6 +689,17 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             generated[lifecycle_path] = (TEMPLATES.parent / "command_lifecycle.py").read_text(
                 encoding="utf-8"
             )
+            human_root = lifecycle_path.parent / "_lifecycle_human"
+            # Bootstrap cannot import a runtime that the admitted child has yet to build.
+            for name, source in (
+                ("__init__.py", REPO / "libs/update-telemetry/src/update_telemetry/human.py"),
+                ("redact.py", REPO / "libs/update-telemetry/src/update_telemetry/redact.py"),
+                ("capabilities.py", REPO / "libs/update-telemetry/src/update_telemetry/capabilities.py"),
+            ):
+                asset = human_root / name
+                if asset in generated or asset in protected_paths:
+                    raise ValueError(f"{manifest}: generated path collision: {asset}")
+                generated[asset] = source.read_text(encoding="utf-8")
     return generated
 
 

@@ -70,6 +70,11 @@ def binding_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     primitive = _load(
         ROOT / "libs/installation-context/installation_context.py", "binding_primitive"
     )
+    if primitive._is_wsl_guest():
+        environment["WSL_DISTRO_NAME"] = "Fixture Guest"
+        primitive.register_guest_environment(
+            "Fixture Guest", environment=environment, os_profile=home,
+        )
     original = primitive._current_environment
 
     def current_environment(**arguments: Any) -> Any:

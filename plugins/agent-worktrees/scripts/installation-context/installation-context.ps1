@@ -38,7 +38,8 @@ param(
     [string]$LegacyRoot,
     [string]$LegacyProbeJson,
     [string]$LegacyProbeFile,
-    [string]$PolicyPath
+    [string]$PolicyPath,
+    [switch]$WithContextValidation
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1964,16 +1965,25 @@ function Get-ReceiptTimestamp($Object, [string]$Name, [string]$Default) {
     return $value
 }
 
+function Test-CanonicalPathExists([string]$Path) {
+    # Canonicalization supplies absolute filesystem paths. Keep the provider's
+    # negative/error behavior without paying its lookup cost for native hits.
+    if ([IO.File]::Exists($Path) -or [IO.Directory]::Exists($Path)) {
+        return $true
+    }
+    return (Test-Path -LiteralPath $Path)
+}
+
 function Canonical-Path([string]$Path, [switch]$MustExist) {
     if ([string]::IsNullOrWhiteSpace($Path)) { Fail 'A required path is empty.' }
     $expanded = [Environment]::ExpandEnvironmentVariables($Path)
     $fullPath = [IO.Path]::GetFullPath($expanded)
-    if ($MustExist -and -not (Test-Path -LiteralPath $fullPath)) {
+    if ($MustExist -and -not (Test-CanonicalPathExists $fullPath)) {
         Fail "Path does not exist: $Path"
     }
     $existing = $fullPath
     $tail = New-Object Collections.Generic.List[string]
-    while (-not (Test-Path -LiteralPath $existing)) {
+    while (-not (Test-CanonicalPathExists $existing)) {
         $leaf = Split-Path -Leaf $existing
         if (-not $leaf) { break }
         $tail.Insert(0, $leaf)
@@ -1981,7 +1991,7 @@ function Canonical-Path([string]$Path, [switch]$MustExist) {
         if (-not $parent -or $parent -eq $existing) { break }
         $existing = $parent
     }
-    if (Test-Path -LiteralPath $existing) {
+    if (Test-CanonicalPathExists $existing) {
         if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
             try { $fullPath = [CeFinalPath]::Resolve($existing) }
             catch { Fail "Cannot resolve final Windows path '$existing': $($_.Exception.Message)" }
@@ -6379,6 +6389,14 @@ try {
         'status',
         'probe-legacy'
     ) 'Action'
+    if ($WithContextValidation) {
+        if ($Action -cne 'status') {
+            Fail '-WithContextValidation is valid only for status.'
+        }
+        if (-not $ExpectedPluginId -or -not $ExpectedPayloadRoot) {
+            Fail '-WithContextValidation requires -ExpectedPluginId and -ExpectedPayloadRoot.'
+        }
+    }
     $expectedPayloadRootSupplied = $PSBoundParameters.ContainsKey('ExpectedPayloadRoot')
     $expectedPayloadVersionSupplied = $PSBoundParameters.ContainsKey('ExpectedPayloadVersion')
     $script:ExpectedCurrentVersionSupplied = $PSBoundParameters.ContainsKey(
@@ -6496,6 +6514,17 @@ try {
     }
     elseif ($Action -eq 'status' -or $Action -eq 'probe-legacy') {
         $result = Resolve-InstallationStatus $resolvedCopilotHome $resolvedProjectRoot $resolvedDurableHome
+        if ($WithContextValidation -and $result.actualMode -ceq 'namespaced' -and
+            $result.status -cin @('ready', 'deactivation-required')) {
+            $validationDurableHome = [string]$result.context
+            1..5 | ForEach-Object {
+                $validationDurableHome = Split-Path -Parent $validationDurableHome
+            }
+            $validatedContext = Validate-ContextReceipt `
+                $result.context $validationDurableHome '' `
+                $ExpectedPluginId $ExpectedPayloadRoot ''
+            $result | Add-Member -NotePropertyName contextValidation -NotePropertyValue $validatedContext
+        }
     }
     elseif ($Action -eq 'activation-cas') {
         $result = Invoke-ActivationCas $resolvedDurableHome
