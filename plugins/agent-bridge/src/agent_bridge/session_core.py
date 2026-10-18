@@ -313,6 +313,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             venue={
                 **(resolved.venue or {}),
                 _REQUEST_OVERRIDES_KEY: {
+                    **overrides,
                     "env": dict(request_env),
                     "copilot_args": list(request_copilot_args),
                 },

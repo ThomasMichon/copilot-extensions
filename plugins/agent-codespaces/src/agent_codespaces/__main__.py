@@ -298,6 +298,10 @@ def main(argv: list[str] | None = None) -> int:
              "fold into the launch as --plugin-dir. Repeatable. Set by the "
              "agent-bridge dispatch path; dispatch-scoped, not globally enabled.",
     )
+    from .plugin_preparation import disabled_plugin
+    ssh_parser.add_argument(
+        "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
+    )
     ssh_parser.add_argument(
         "--force", action="store_true",
         help="Take over the target if another SSH operation is already in "
@@ -799,11 +803,16 @@ def main(argv: list[str] | None = None) -> int:
     # ``agent_codespaces`` in the bridge venv, so an agent-codespaces bugfix
     # reaches the dispatch path from agent-codespaces' OWN venv with no bridge
     # redeploy (retires the #733 class). Mirror the ``acp-model-flags`` seam.
-    sub.add_parser(
+    provision_parser = sub.add_parser(
         "provision-command",
         help="Print the idempotent bash command that (re)installs the CodeSpace "
         "relay/auth helpers (the dispatch-path provision step); --codespace adds repo hooks.",
-    ).add_argument("--codespace", default=None)
+    )
+    provision_parser.add_argument("--codespace", default=None)
+    provision_parser.add_argument(
+        "--phase", choices=("all", "helpers", "hooks"), default="all",
+        help="Separate helper deployment from authenticated hooks after relay readiness.",
+    )
     relay_env_p = sub.add_parser(
         "relay-launch-env",
         help="Print JSON {prelude, port} for a detached CodeSpace launch's "
@@ -845,8 +854,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Git remote URL for the requested repo (clone-if-missing).",
     )
     ns_resolve_p.add_argument(
-        "--stage-plugin", dest="stage_plugin", action="append", default=[],
+        "--stage-plugin", dest="stage_plugins", action="append", default=[],
         help="Related-repo plugin source to stage (repeatable).",
+    )
+    ns_resolve_p.add_argument(
+        "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
     )
     ns_target_p = sub.add_parser(
         "namespace-target-repo",
@@ -858,6 +870,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Exit 0 if the codespace is reachable/startable, else exit 1.",
     )
     ns_ready_p.add_argument("name", help="Codespace name")
+    plugin_plan_p = sub.add_parser("plugin-plan", help="Print the selected plugin preparation plan as JSON")
+    plugin_plan_p.add_argument("name")
+    plugin_plan_p.add_argument("--repo")
+    plugin_plan_p.add_argument(
+        "--plugin-root", dest="plugin_roots", action="append", default=[], metavar="PATH",
+        help="Controller checkout to prefer for payload lookup (repeatable, highest priority first).",
+    )
 
     # --- relay-profile (declarative credential-relay seam for agent-bridge #892 Inc 2)
     sub.add_parser(
@@ -1021,6 +1040,13 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_relay_launch_env(args)
         if args.command == "namespace-list":
             return _cmd_namespace_list()
+        if args.command == "plugin-plan":
+            from .plugin_preparation import plugin_plan
+            print(json.dumps(plugin_plan(
+                args.repo or _lookup_codespace_repo(args.name), load_merged_config(),
+                repo_roots=args.plugin_roots,
+            )))
+            return 0
         if args.command == "namespace-resolve":
             return _cmd_namespace_resolve(args)
         if args.command == "namespace-target-repo":
@@ -1468,6 +1494,12 @@ def _ssh_session(
                     manager, args.name, config, relay_env=relay_env,
                 )
 
+            # Repo hooks may create the execution checkout preparation requires.
+            await _provision_repo_hooks(
+                manager, args.name, config, getattr(args, "repo", None),
+                relay_env=relay_env,
+            )
+
             # Register CodeSpace-scoped plugins (the CodeSpace-scoped axis) via
             # BOTH lanes: (1) the CodeSpace user settings so they load for
             # interactive / `copilot -p` launches (incl. a human opening the
@@ -1477,17 +1509,15 @@ def _ssh_session(
             # (the dispatch) ignores enabledPlugins and only surfaces plugin
             # skills via --plugin-dir. Best-effort; needs the relay up for the
             # payload pre-install.
-            if not args.no_relay:
+            if not getattr(args, "skip_plugin_preparation", False):
                 cs_plugin_dirs = await _register_codespace_plugins(
                     manager, args.name, getattr(args, "repo", None), config,
+                    sources=getattr(args, "stage_plugins", []),
+                    worktree_id=getattr(args, "plugin_worktree_id", None),
+                    repo_roots=getattr(args, "plugin_roots", []),
+                    prelude=relay_env, relay_port=None if args.no_relay else relay_port,
                 )
 
-            # Run repo-declared provision hooks (by-convention extras from the
-            # adopted repo's .copilot-extensions/agent-codespaces/config.yaml).
-            # Best-effort, idempotent.
-            await _provision_repo_hooks(
-                manager, args.name, config, getattr(args, "repo", None),
-            )
             tracker.reached(ConnectStage.TARGET_BINSTUB)
 
         # Verify the host has local auth for every domain the session's git
@@ -1516,13 +1546,7 @@ def _ssh_session(
         # fold their --plugin-dir paths into the launch. Best-effort: a staging
         # failure drops that plugin but never blocks the dispatch.
         plugin_dirs: list[str] = list(cs_plugin_dirs)
-        if not args.no_relay and not minimal_provision:
-            plugin_dirs += await _stage_plugins(
-                manager,
-                args.name,
-                getattr(args, "stage_plugins", []),
-                repo_roots=getattr(config, "source_paths", ()) or (),
-            )
+        # Related sources already passed the same install/copy/register barrier.
         # NB: the repo-own ``.ai`` lane is intentionally NOT folded here. A
         # CodeSpace ACP dispatch never runs through this front-owns-stdio ``ssh``
         # path -- ``session_manager`` refuses a non-Session-Host codespace target
@@ -1965,133 +1989,23 @@ async def _provision_harness(
 
 
 async def _register_codespace_plugins(
-    manager, name: str, repo: str | None, config
+    manager, name: str, repo: str | None, config, *, workspace: str | None = None,
+    sources=(), worktree_id: str | None = None, repo_roots=(),
+    prelude: str = "", relay_port: int | None = None,
 ) -> list[str]:
-    """Register CodeSpace-scoped plugins into the CodeSpace + return their dirs.
+    """Install/copy all selections, then register locally before either launch."""
+    from .plugin_preparation import prepare_plugins
 
-    The **CodeSpace-scoped** plugin axis, delivered via BOTH lanes:
-    - **user settings (interactive lane):** resolves the harness's
-      ``codespacePlugins`` for this CodeSpace's workspace repo -- both those
-      swept from installed harness plugins AND the operator-declared
-      ``.copilot-extensions/agent-codespaces/config.yaml`` ``codespace_plugins`` list
-      (:func:`codespace_plugins.resolve_codespace_plugins`) -- and writes them
-      into the CodeSpace's user ``~/.copilot/settings.json`` + pre-installs the
-      payloads (see :mod:`codespace_register`). Honored by interactive /
-      ``copilot -p``.
-    - **``--plugin-dir`` (dispatch lane):** ``copilot --acp`` (the agent-bridge
-      dispatch) does **NOT** honor ``enabledPlugins`` -- only ``--plugin-dir``
-      surfaces plugin skills under ``--acp``. So this returns the on-CodeSpace
-      payload dirs (the ones the register step just installed) for the caller to
-      fold into the acp launch as ``--plugin-dir`` args.
-
-    A ``codespacePlugins`` source backed by a **local** (``.ai``/``directory``)
-    marketplace -- the harness repo's own onboard marketplace -- can't be
-    ``copilot plugin install``-ed on an egress-restricted CodeSpace (its
-    repo-relative ``path`` doesn't exist there). Those specs are split out
-    (:func:`codespace_plugins.partition_local_specs`) and delivered by **staging
-    the host payload** into a ``--plugin-dir`` (the same tar+base64 copy the
-    related-repo lane uses); only the remote-marketplace specs go through the
-    register + pre-install lane.
-
-    Best-effort and idempotent for ordinary failures; explicit installation
-    refusals propagate. Returns ``[]`` when there is nothing to register.
-    """
-    from .codespace_plugins import (
-        parse_operator_plugins,
-        partition_local_specs,
-        plugin_names_from_enabled,
-        resolve_codespace_plugins,
+    validate_context()
+    repo = repo or _lookup_codespace_repo(name)
+    workspace = workspace or config.resolved_workspace_folder_for(repo)
+    if not workspace:
+        raise RuntimeError("Plugin preparation requires the execution checkout")
+    return await prepare_plugins(
+        manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
+        repo_roots=repo_roots,
+        prelude=prelude, relay_port=relay_port,
     )
-    from .codespace_register import build_register_command, codespace_plugin_dirs
-    from .config import repo_copilot_settings
-
-    try:
-        validate_context()
-        # The dispatch path doesn't pass --repo, so resolve the CodeSpace's
-        # workspace repo ourselves (needed to apply repo-scoped codespacePlugins
-        # entries; global entries apply regardless). A single `gh` lookup, only
-        # paid when we don't already know the repo.
-        if repo is None:
-            repo = _lookup_codespace_repo(name)
-
-        # Repo-scoped config is canonical (NOT the user ~/.copilot/settings.json):
-        # the marketplace registry + harness-plugin enablement come from the
-        # adopted control-plane repo's .github/copilot/settings.json. Keeps
-        # internal marketplace definitions out of user state, and lets the register
-        # step carry whichever marketplaces the selected plugins reference.
-        repo_settings = repo_copilot_settings(getattr(config, "source_paths", []) or [])
-        enabled_names = plugin_names_from_enabled(repo_settings.get("enabledPlugins"))
-        marketplaces = repo_settings.get("extraKnownMarketplaces") or {}
-
-        # Merge the operator-declared globals (.copilot-extensions/agent-codespaces/config.yaml
-        # `codespace_plugins`)
-        # with the set swept from installed harness plugins.
-        operator_specs = parse_operator_plugins(
-            getattr(config, "codespace_plugins", []) or []
-        )
-        specs = resolve_codespace_plugins(
-            repo,
-            extra_specs=operator_specs,
-            enabled_names=enabled_names,
-            enabled_sources=repo_settings.get("enabledPlugins"),
-            repo_roots=getattr(config, "source_paths", ()) or (),
-        )
-
-        # Split by marketplace kind. A local (`.ai`/`directory`) marketplace is
-        # repo-relative on the *host* and cannot be `copilot plugin install`-ed on
-        # an egress-restricted CodeSpace -- so its payload is STAGED from the host
-        # (tar+base64 copy -> --plugin-dir), exactly like the related-repo lane.
-        # Remote-marketplace specs keep the register + enable + pre-install lane
-        # (which also serves the interactive / `copilot -p` launches via user
-        # settings). Both contribute --plugin-dir paths for the --acp dispatch.
-        local_specs, remote_specs = partition_local_specs(specs, marketplaces)
-
-        dirs: list[str] = []
-
-        command = build_register_command(remote_specs, marketplaces=marketplaces)
-        if command:
-            wrapped = f"bash -l -c {shlex.quote(command)}"
-            # Settings merge is quick; the pre-install (`copilot plugin install`)
-            # clones the marketplace over the relay, so allow a generous window.
-            result = await exec_with_retry(manager, name, wrapped, timeout=240.0)
-            if result.exit_code == 0:
-                log.info(
-                    "Registered %d CodeSpace-scoped plugin(s) on %s: %s",
-                    len(remote_specs), name,
-                    ", ".join(s.source for s in remote_specs),
-                )
-                # Fold the just-installed payloads into the --acp launch: the
-                # dispatch ignores enabledPlugins, so --plugin-dir is required.
-                dirs += codespace_plugin_dirs(remote_specs)
-            else:
-                log.warning(
-                    "CodeSpace plugin registration on %s exited %s: %s",
-                    name, result.exit_code, result.stderr.strip(),
-                )
-
-        # Stage local-marketplace codespacePlugins from the host payload and fold
-        # their dirs into the launch. Best-effort per source (see _stage_plugins).
-        if local_specs:
-            staged = await _stage_plugins(
-                manager,
-                name,
-                [s.source for s in local_specs],
-                repo_roots=getattr(config, "source_paths", ()) or (),
-            )
-            if staged:
-                log.info(
-                    "Staged %d local-marketplace CodeSpace plugin(s) on %s: %s",
-                    len(staged), name,
-                    ", ".join(s.source for s in local_specs),
-                )
-            dirs += staged
-
-        return dirs
-    except ContextRefused:
-        raise
-    except Exception as exc:
-        log.warning("CodeSpace plugin registration on %s failed: %s", name, exc)
-    return []
 
 
 async def _verify_remote_auth(
@@ -2307,7 +2221,7 @@ def _lookup_codespace_repo(name: str) -> str | None:
 
 async def _provision_repo_hooks(
     manager, name: str, config, repo: str | None, *,
-    include_on_create: bool = False,
+    include_on_create: bool = False, relay_env: str = "",
 ) -> None:
     """Run repo-declared provision hooks for a CodeSpace over SSH.
 
@@ -2333,6 +2247,9 @@ async def _provision_repo_hooks(
         )
         if not command:
             return
+
+        if relay_env:
+            command = f"bash -l -c {shlex.quote(relay_env + command)}"
 
         # on_create hooks (e.g. install scripts) can run long; give them
         # a generous timeout. on_connect-only hooks stay snappy.
@@ -3981,7 +3898,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     # Provision over SSH: relay helpers + dotfiles bootstrap + repo hooks
     # (including on_create extras).
     from .relay_launch import effective_relay_port
-    relay_port = effective_relay_port(config)
+    relay_env, relay_port = relay_launch.build_relay_launch_env(info.name, effective_relay_port(config))
     source = CodespaceSource(info.name, account=info.account or None)
     manager = ConnectionManager()
 
@@ -3997,10 +3914,11 @@ def _cmd_create(args: argparse.Namespace) -> int:
                 host_port_resolver=lambda: relay_launch.effective_relay_port(config),
             )
             await _provision_relay_helpers(manager, info.name)
-            await _provision_dotfiles(manager, info.name, config)
-            await _provision_harness(manager, info.name, config)
+            await _provision_dotfiles(manager, info.name, config, relay_env=relay_env)
+            await _provision_harness(manager, info.name, config, relay_env=relay_env)
             await _provision_repo_hooks(
                 manager, info.name, config, args.repo, include_on_create=True,
+                relay_env=relay_env,
             )
             return 0
         finally:
@@ -4573,7 +4491,10 @@ def _cmd_provision_command(args: argparse.Namespace | None = None) -> int:
     from .provision import dispatch_provision_command
 
     cfg = load_merged_config(include_cwd=False)
-    print(dispatch_provision_command(cfg, getattr(args, "codespace", None), repository_for_codespace))
+    print(dispatch_provision_command(
+        cfg, getattr(args, "codespace", None), repository_for_codespace,
+        phase=getattr(args, "phase", "all"),
+    ))
     return 0
 
 
@@ -4630,7 +4551,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
     try:
         spec = asyncio.run(CodespaceResolver().resolve_spec(
             args.name,
-            extra_plugin_sources=list(getattr(args, "stage_plugin", []) or []),
+            extra_plugin_sources=list(getattr(args, "stage_plugins", []) or []),
             repo=getattr(args, "repo", None),
             repo_remote=getattr(args, "repo_remote", None),
         ))

@@ -38,6 +38,23 @@ def _args(**kw):
     return argparse.Namespace(**base)
 
 
+def test_preparation_runs_under_the_existing_keeper_before_native_launch(seams, monkeypatch):
+    prepared = []
+
+    def prepare(args, target, **kwargs):
+        assert seams.keeper
+        assert kwargs["remote_env"]
+        assert kwargs["relay_port"] == 9857
+        prepared.append(True)
+        return []
+
+    monkeypatch.setattr("agent_containers.plugin_preparation.prepare_plugins", prepare)
+    assert detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 41235, relay_healthy=lambda port: True,
+    ) == 0
+    assert prepared == [True]
+
+
 def _target(profile: str = "trusted"):
     config = ContainersConfig(forward_gh_token=False, relay_enabled=True, relay_port=9857,
                               copilot_auth_mode="legacy")
@@ -72,6 +89,7 @@ class _FakeLock:
 
 @pytest.fixture
 def seams(monkeypatch):
+    monkeypatch.setattr("agent_containers.plugin_preparation.prepare_plugins", lambda *a, **kw: [])
     # Hermetic: never read the developer's own ~/.copilot/settings.json model.
     monkeypatch.setattr(detach, "with_supervisor", lambda venue, ref=None: dict(venue))
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])

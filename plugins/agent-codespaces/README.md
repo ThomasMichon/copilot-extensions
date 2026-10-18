@@ -57,6 +57,55 @@ for the existing Codespace SSH session path, preserving provisioning, credential
 relay, forwarding, claim ownership and disconnect settlement. It is not an
 independent machine resolver and does not need a `machine-transport` dependency.
 
+### Target-local plugin preparation
+
+Fresh ACP and attached CLI launches prepare selected plugins before starting the
+actual Copilot child. Credential relay readiness precedes authenticated checkout
+provisioning and plugin installation; checkout-creating `on_connect` hooks run
+before Git-root-dependent preparation. Cross-repo targets carry a separate,
+provider-generated clone-if-missing command, used by both fresh and replacement
+Session Hosts rather than evaluating an ACP command prefix.
+For fresh and replacement children, a dynamic environment-selected workspace
+overrides conventional metadata: the validated probe resolves one concrete path
+for preparation and the child command. Live Host reattachment retains its
+persisted workspace instead of redirecting a running child.
+Path resolution before provisioning determines intent without requiring an
+existing directory. After relay readiness, authenticated hooks and any explicit
+clone run before strict directory/Git validation, preparation, and child launch.
+Fresh-start ownership cleanup covers preflight as well as connect failures;
+it releases newly acquired claims/locks, restores a failed replacement's lock
+transfer, and retains ownership when remote launch cleanup is still pending.
+An unconfirmed claim release retains the failed session's existing ownership
+and TargetLock and reports cleanup failure without claiming a remote Host is
+running. Parity retention begins at connect, never at early claim denial or
+workspace preflight.
+The existing `provision-command --phase helpers|hooks` interface separates
+helper deployment from authenticated hooks: Session Hosts deploy helpers first,
+verify the real relay, then run hooks in the login-shell launch environment
+before plugin preparation.
+
+Attached CLI launches retain their foreground-owned relay fallback when the
+Connection Owner is unavailable. Its event loop supervises the forward until the
+interactive child exits, while SSH retains the main thread and terminal signals.
+Rejoining an already-live CLI session does not reinstall plugins.
+Interrupting before preparation is ready cancels the in-flight work and waits
+for its relay/connection cleanup; normal interactive exit releases the retained
+forward without canceling already-completed preparation.
+Attached checkout-creating hooks receive the same relay launch prelude inside
+their login shell, including on a cold foreground fallback without cached auth.
+Full SSH provisioning and fresh `create` provisioning carry that context too;
+fresh creation also supplies it to authenticated control-repository bootstrap.
+
+`ssh`, `copilot`, and `namespace-resolve` accept repeatable
+`--stage-plugin SOURCE` and `--stage-plugin-disabled SOURCE`. The latter preserves
+an explicit disabled selection; paths, spaces, and `=false` in a source remain
+literal. Provider selections take precedence over related-source fallbacks.
+Payload lookup prefers explicit controller roots, then current configuration
+roots before adopted anchors; settings retain their existing merge order.
+The existing `plugin-plan` command accepts repeatable `--plugin-root PATH`
+arguments in highest-priority-first order to carry validated controller roots
+across the provider boundary.
+
 ## Runtime health and activation
 
 Both installers verify `python -I -m agent_codespaces --help` before publishing
@@ -182,12 +231,19 @@ honored here:
 - **In-venue plugins (`codespacePlugins`).** The harness plugin's `plugin.json`
   also declares which plugins to inject **into** the CodeSpace on connect (the
   `<product>-agent`), scoped by `forWorkspaceRepo` (see `codespace_plugins.py`).
-  A source backed by a **remote** marketplace is registered + pre-installed into
-  the CodeSpace's user settings; a source backed by the harness repo's own
-  **local** (`.ai`/`directory`) marketplace can't be installed on an
-  egress-restricted CodeSpace (its repo-relative `path` doesn't exist there), so
-  its host payload is **staged** (tar+base64 copy) and folded into the `--acp`
-  launch as `--plugin-dir` -- the same lane the related-repo plugins use.
+  Remote-marketplace plugins are installed using an isolated `COPILOT_HOME`;
+  locally sourced payloads are reflected from their declaring checkout.
+  Both operations must finish before the shared preparation barrier publishes
+  local marketplace paths and enablement in the execution repository's
+  `.github/copilot/settings.local.json`. CLI loads those settings directly;
+  ACP additionally receives `--plugin-dir` for every effective plugin.
+  Bridge-owned Session Hosts use the same barrier over their existing transport,
+  rather than relying on the legacy SSH launch command to stage the payloads.
+  Missing required payloads block launch. Surviving-child reattachment does not
+  rewrite registration. See [`plugin-resolve`](../../libs/plugin-resolve/README.md#trusted-venue-preparation)
+  for preservation, selected-asset topology, companion diagnostics, and
+  installation-cache details. Dependency declarations never expand the
+  eligible provider/related or target-native set.
 
 Authoring a `<repo>-harness` plugin that uses these seams is the
 `authoring-harness-plugins` skill (`customizing-copilot`) and the pattern

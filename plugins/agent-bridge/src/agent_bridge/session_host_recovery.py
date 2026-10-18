@@ -680,6 +680,11 @@ class _SessionHostRecoveryMixin:
             else None
         )
         if container_target is not None:
+            from .venue_plugins import resolve_controller_cwd
+            controller_cwd = await resolve_controller_cwd(
+                target, caller_session_id=getattr(session, "caller_session_id", None),
+                affinity_id=getattr(session, "caller_id", None),
+            )
             from .relay_state import get_live_relay_port
             from .session_host.container_transport import (
                 build_container_spawner,
@@ -725,11 +730,16 @@ class _SessionHostRecoveryMixin:
                     or None
                 )
                 core = _core()
-                plugin_dirs = await core._resolve_remote_ai_plugin_dirs(
-                    spawner.transport,
-                    f"container:{container_target['name']}",
-                    remote_cwd,
-                )
+                from .venue_plugins import prepare_venue_plugins
+                async def prepare_container_child(argv):
+                    plugin_dirs = await prepare_venue_plugins(
+                        container_target, spawner.transport, remote_cwd,
+                        remote_env=prepared.get("remote_env"), controller_cwd=controller_cwd,
+                    )
+                    return _container_remote_child_argv(
+                        container_target, prepared, plugin_dirs, copilot_args=target.copilot_args,
+                    )
+                spawner.prepare_child = prepare_container_child
                 tracker = ConnectTracker(
                     session.event_log.append,
                     session_id=session.session_id,
@@ -745,7 +755,7 @@ class _SessionHostRecoveryMixin:
                     remote_child_argv=_container_remote_child_argv(
                         container_target,
                         prepared,
-                        plugin_dirs,
+                        [],
                         copilot_args=target.copilot_args,
                     ),
                     remote_cwd=remote_cwd,
@@ -783,6 +793,11 @@ class _SessionHostRecoveryMixin:
             cs_target = parse_codespace_target(target.spawn_command)
         if not cs_target:
             return None
+        from .venue_plugins import resolve_controller_cwd
+        controller_cwd = await resolve_controller_cwd(
+            target, caller_session_id=getattr(session, "caller_session_id", None),
+            affinity_id=getattr(session, "caller_id", None),
+        )
         from .relay_state import get_live_relay_port
         from .session_host.codespace_transport import build_codespace_spawner
         from .session_host.spawner import RemoteSpawnCleanupPendingError
@@ -798,20 +813,27 @@ class _SessionHostRecoveryMixin:
                 cs_target["name"],
                 get_live_relay_port(),
             )
-            acp_command = cs_target["acp_command"]
             spawner = build_codespace_spawner(
                 cs_target["name"],
                 cs_target.get("repo") or "",
                 relay_port=relay_port,
+                provision_prelude=relay_prelude,
                 unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
                 active_reap_seconds=self._session_host_active_reap_seconds,
             )
-            ai_plugin_dirs = await core._resolve_remote_ai_plugin_dirs(
-                spawner.transport,
-                f"codespace:{cs_target['name']}",
-                cs_target.get("workspace_folder") or None,
+            from .session_host.codespace_transport import resolve_execution_workspace
+            remote_cwd = await resolve_execution_workspace(cs_target, spawner.transport)
+            target.codespace = cs_target
+            target.cwd = remote_cwd
+            self._db.update_session_target(session.session_id, target.to_json(), remote_cwd)
+            acp_command = cs_target["acp_command"]
+            from .venue_plugins import prepare_venue_plugins
+            from .session_host.codespace_transport import codespace_child_preparer
+            spawner.prepare_child = codespace_child_preparer(
+                cs_target, spawner.transport, prelude=relay_prelude,
+                controller_cwd=controller_cwd, prepare_plugins=prepare_venue_plugins,
+                append_plugin_dirs=_append_plugin_dirs,
             )
-            acp_command = _append_plugin_dirs(acp_command, ai_plugin_dirs)
             tracker = ConnectTracker(
                 session.event_log.append,
                 session_id=session.session_id,
@@ -830,7 +852,7 @@ class _SessionHostRecoveryMixin:
                 model=session.model_override,
                 effort=session.effort_override,
             )
-        except Exception as exc:
+        except BaseException as exc:
             if isinstance(exc, RemoteSpawnCleanupPendingError):
                 self._set_container_launch_pending(session.session_id, True)
             elif not already_held:
@@ -879,4 +901,3 @@ class _SessionHostRecoveryMixin:
             return False
         self._remote_recovery_skipped.discard(rec.session_id)
         return True
-

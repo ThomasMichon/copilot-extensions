@@ -3,6 +3,7 @@
 import asyncio
 import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -21,6 +22,11 @@ from test_acquisition_runtime import rig as _connected_rig
 
 rig = _connected_rig
 pytestmark = pytest.mark.contract("agent_bridge.provider_creation")
+
+
+def _current_refresh_fixture():
+    path = Path(__file__).resolve().parents[1] / "contract" / "fixtures" / "http" / "current"
+    return json.loads((path / "provider-creation-refresh-generation-40.json").read_text(encoding="utf-8"))
 
 
 async def create(manager, target, **options):
@@ -131,6 +137,10 @@ async def test_unsupported_request_refuses_before_any_effect(provider_rig, chang
     assert refused.value.effect == "not_started"
     assert not rig.manager.list_sessions()
     assert not rig.db.execute_read("SELECT * FROM provider_embodiments")
+    if change == "prompt":
+        assert _current_refresh_fixture()["capability"]["creation_prompt_supported"] is False
+    if change == "unpinned":
+        assert _current_refresh_fixture()["capability"]["required_provider_capability"] == "instance_pinned_exec"
 
 
 @pytest.mark.asyncio
@@ -148,6 +158,7 @@ async def test_name_only_command_cannot_claim_an_observed_instance(provider_rig,
     assert refused.value.code == "creation_venue_unsupported"
     assert not rig.manager.list_sessions()
     assert not rig.db.execute_read("SELECT * FROM provider_embodiments")
+    assert _current_refresh_fixture()["compatibility"]["name_only_provider_refused"] is True
 
 
 @pytest.mark.asyncio
@@ -244,6 +255,7 @@ async def test_cold_resume_refuses_provider_placement_drift_before_spawn(
     assert session.target is retained and session.status == SessionStatus.STOPPED
     assert rig.db.get_session(session.session_id)["target_json"] == saved
     rig.client.new_session.assert_awaited_once()
+    assert _current_refresh_fixture()["compatibility"]["cold_resume_placement_drift_refused_before_spawn"] is True
 
 
 @pytest.mark.asyncio
@@ -260,6 +272,7 @@ async def test_successful_cold_resume_uses_guest_workspace_not_host_cwd(provider
     assert rig.client.load_session.await_args.kwargs["cwd"] == "/workspace"
     assert resumed.target.cwd is None
     rig.client.new_session.assert_awaited_once()
+    assert _current_refresh_fixture()["compatibility"]["guest_workspace_preserved_on_load"] is True
 
 
 @pytest.mark.asyncio
@@ -391,6 +404,45 @@ def test_http_keyed_provider_creation_has_no_fabricated_worktree(provider_rig):
     assert rig.manager._active_acquisitions == 0
 
 
+@pytest.mark.guard
+def test_current_generation40_refresh_fixture_matches_real_http_producer_and_consumer(
+    provider_rig, monkeypatch,
+):
+    from agent_bridge import protocol, provider_creation, session_start
+    from agent_bridge.models import StartSessionRequest, StartSessionResponse
+
+    fixture = _current_refresh_fixture()
+    expected = fixture["response"]
+    rig = provider_rig
+    rig.target = replace(rig.target, venue=json.loads(json.dumps(expected["creation"]["venue"])))
+    rig.client.acp_session_id = expected["creation"]["native_session_id"]
+    rig.client.new_session.return_value = expected["creation"]["native_session_id"]
+    monkeypatch.setattr(provider_creation, "uuid", SimpleNamespace(uuid4=lambda: expected["session_id"]))
+    monkeypatch.setattr(session_start, "_generate_name", lambda: expected["name"])
+    app = FastAPI()
+    app.state.session_manager = rig.manager
+    app.state.resolver = SimpleNamespace(resolve_async=AsyncMock(return_value=rig.target))
+    app.include_router(router)
+    with TestClient(app) as client:
+        response = client.request(fixture["request"]["method"], fixture["request"]["path"],
+                                  json=fixture["request"]["json"])
+    assert response.status_code == 200, response.text
+    observed = response.json()
+    # These pre-existing optional null fields are outside the frozen projection.
+    for field in ("caller_session_id", "parity_fault_result"):
+        assert observed.pop(field) is None
+    assert observed == expected
+    consumed = StartSessionResponse.model_validate(response.json())
+    assert consumed.creation == expected["creation"]
+    assert consumed.protocol_version == expected["protocol_version"]
+    assert consumed.min_protocol_version == expected["min_protocol_version"]
+    capability = fixture["capability"]
+    assert protocol.HTTP_PROTOCOL_VERSION == fixture["captured_from"]["protocol_generation"] == 40
+    assert protocol.PROVIDER_CREATION_PROTOCOL_VERSION == capability["provider_creation"]
+    assert protocol.WORKSPACE_CREATION_PROTOCOL_VERSION == capability["workspace_creation"]
+    assert StartSessionRequest(creation_key="ordinary").provider_instance == capability["ordinary_provider_instance_default"]
+
+
 def test_http_missing_provider_key_refuses_before_caller_affinity(provider_rig):
     rig = provider_rig
     app = FastAPI()
@@ -430,7 +482,7 @@ def test_client_refuses_older_provider_creation_before_post(monkeypatch):
     monkeypatch.setattr(client, "_request", lambda *_a, **_k: pytest.fail("must not post"))
     with pytest.raises(BridgeClientError) as refused:
         client.start_session(agent="container:prepared", creation_key="logical-work", provider_instance=True)
-    assert refused.value.status == 426
+    assert refused.value.status == _current_refresh_fixture()["capability"]["client_floor_refusal_status"]
     with pytest.raises(ValueError, match="requires creation_key"):
         client.start_session(agent="container:prepared", provider_instance=True)
 

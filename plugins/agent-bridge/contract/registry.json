@@ -3957,6 +3957,14 @@
           "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
         },
         {
+          "commit": "b597b83deb5ad08f34698231db9f34e9151b6f1d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "d4f0ae02d049b387fad1dd04eeffcce25e7166c1",
+          "capture_method": "Executed canonical test_provider_creation.py, test_provider_creation_stdio.py and test_contract_registry.py: 96 passed before re-attestation. The real HTTP route, SessionManager/provider-creation producer and response-model consumer exactly matched the retained independent generation-40 response projection, with only fixed opaque identities and terminal transport controlled; the two pre-existing optional top-level null fields were asserted separately. Existing real refusal, cold-placement-drift and guest-workspace tests checked the retained capability/compatibility values. Private request-metadata preservation changes no wire generation; all other frozen fixtures and prior provenance remain unchanged."
+        },
+        {
           "commit": "ee591b72e932696b43e16334de8b95999901c258",
           "plugin_version": "0.4.1-dev3",
           "generation": 40,
@@ -4168,7 +4176,7 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_session_host.py",
-          "sha256": "d3237815587ca1fab3d7aff43590781fadc34fb18c1f14754ea86826e8d68577",
+          "sha256": "d53b777d64463e4e6e71b0ce5e7334f5eadabdc922dfd43d866361d982050c96",
           "semantic": false,
           "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape."
         }

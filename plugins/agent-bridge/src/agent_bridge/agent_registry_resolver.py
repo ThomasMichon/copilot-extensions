@@ -461,13 +461,19 @@ class AgentResolver(_ProviderDiscoveryMixin):
     ) -> SpawnTarget:
         """Resolve via a namespace resolver, injecting related-repo plugins."""
         extra = await self._related_plugins_for(resolver, name)
-        return await self._call_resolver(
+        target = await self._call_resolver(
             resolver,
             name,
             extra_plugins=extra,
             repo=repo,
             repo_remote=repo_remote,
         )
+        metadata = target.codespace or target.container
+        if metadata is not None:
+            metadata["related_plugins"] = [
+                {"source": ref.source, "enable": ref.enable} for ref in extra
+            ]
+        return target
 
     async def _call_resolver(
         self,

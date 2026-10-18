@@ -26,9 +26,12 @@ from agent_codespaces.config import (
 
 
 def test_cwd_repo_root_uses_linked_worktree_root(tmp_path, monkeypatch):
+    from agent_codespaces import config
+
     worktree = tmp_path / "repo.worktrees" / "feature"
     worktree.mkdir(parents=True)
     calls = []
+    startup = object()
 
     class Result:
         returncode = 0
@@ -39,8 +42,29 @@ def test_cwd_repo_root_uses_linked_worktree_root(tmp_path, monkeypatch):
         return Result()
 
     monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr(config, "no_window_kwargs", lambda: {"startupinfo": startup})
     assert cwd_repo_root() == worktree.resolve()
     assert calls[0][0] == ["git", "rev-parse", "--show-toplevel"]
+    assert calls[0][1]["startupinfo"] is startup
+
+
+def test_git_origin_probe_preserves_shared_headless_options(tmp_path, monkeypatch):
+    from subprocess import CompletedProcess
+    from agent_codespaces import config
+
+    startup = object()
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return CompletedProcess(args, 0, "https://example.invalid/owner/repo.git\n", "")
+
+    monkeypatch.setattr(config, "no_window_kwargs", lambda: {"startupinfo": startup})
+    monkeypatch.setattr(config.subprocess, "run", run)
+    assert config._git_origin_remote(tmp_path) == "https://example.invalid/owner/repo.git"
+    assert calls[0][0] == ["git", "config", "--get", "remote.origin.url"]
+    assert calls[0][1]["startupinfo"] is startup
+    assert calls[0][1]["cwd"] == str(tmp_path)
 
 
 def test_repo_copilot_settings_merges_marketplaces_and_enablement(tmp_path):
@@ -994,9 +1018,21 @@ class TestCrossRepoRequestFolder:
             self._CS, requested_repo="example-marketplace", repo_remote=remote,
         )
         assert cmd == (
-            f"[ -d /workspaces/example-marketplace/.git ] || "
-            f"git clone {remote} /workspaces/example-marketplace; "
+            f"[ -e /workspaces/example-marketplace/.git ] || "
+            f"git clone -- {remote} /workspaces/example-marketplace && "
             f"cd /workspaces/example-marketplace && {self._COPILOT}"
+        )
+
+    def test_checkout_clone_quotes_provider_data_and_preserves_git_files(self):
+        import shlex
+        config = CodespacesConfig()
+        remote = "https://example.test/project with space;literal.git"
+        command = config.checkout_provision_command_for(
+            self._CS, requested_repo="project with space", repo_remote=remote,
+        )
+        assert command == (
+            "[ -e '/workspaces/project with space/.git' ] || "
+            f"git clone -- {shlex.quote(remote)} '/workspaces/project with space'"
         )
 
     def test_other_repo_owner_prefix_basenamed(self):

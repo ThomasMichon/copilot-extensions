@@ -43,10 +43,12 @@ from .config import (
 )
 from .resolver import (
     _append_copilot_args,
+    add_related_plugins,
     build_restricted_acp_spawn_command,
     host_gh_token,
     resolve_extra_copilot_args,
     resolve_live_exec_target,
+    target_repo_for_cli,
 )
 from .ssh_transport import (
     build_remote_command,
@@ -140,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .copilot_login import add_copilot_login_subparser as _add_copilot_login_subparser
     _add_copilot_login_subparser(sub)
-    from .copilot_venue import add_copilot_subparser as _add_copilot_subparser
+    from .copilot_venue import add_copilot_subparser as _add_copilot_subparser, add_plugin_selection_arguments
     _add_copilot_subparser(sub)
     from .forward_keeper import add_subparser as _add_forward_keeper_subparser
     _add_forward_keeper_subparser(sub)
@@ -233,8 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     # The `container:` namespace resolver over a process boundary: agent-bridge
     # drives these instead of importing `agent_containers.resolver`. Emit plain
     # JSON (agent_bridge-free); the bridge shim reconstructs SpawnTarget /
-    # NamespaceAgentInfo. Containers do not support cross-repo / plugins, so
-    # namespace-resolve takes only a name (mirrors the resolver's resolve(name)).
+    # NamespaceAgentInfo. Bridge owns selection; trusted metadata carries it.
     sub.add_parser(
         "namespace-list",
         help="Print JSON list of container agents for the `container:` namespace.",
@@ -246,10 +247,10 @@ def main(argv: list[str] | None = None) -> int:
         "(not-found -> exit 3).",
     )
     ns_resolve_p.add_argument("name", help="Container name")
+    add_plugin_selection_arguments(ns_resolve_p)
     ns_target_p = sub.add_parser(
         "namespace-target-repo",
-        help="Print the workspace repo a container hosts (always empty -- "
-        "containers do not drive related-repo plugin injection).",
+        help="Print the workspace repo a container hosts for bridge plugin selection.",
     )
     ns_target_p.add_argument("name", help="Container name")
     ns_ready_p = sub.add_parser(
@@ -383,8 +384,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "namespace-resolve":
             return _cmd_namespace_resolve(args)
         if args.command == "namespace-target-repo":
-            print("")  # containers do not drive related-repo plugin injection
-            return 0
+            return target_repo_for_cli(args.name)
         if args.command == "namespace-ensure-ready":
             return _cmd_namespace_ensure_ready(args)
         if args.command == "namespace-recreate":
@@ -601,7 +601,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
     except KeyError as e:
         print(str(e).strip("'"), file=sys.stderr)
         return _NS_NOT_FOUND_EXIT
-    print(json.dumps(spec))
+    print(json.dumps(add_related_plugins(spec, getattr(args, "stage_plugins", []))))
     return 0
 
 

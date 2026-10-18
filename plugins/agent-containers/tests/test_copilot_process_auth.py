@@ -23,6 +23,10 @@ from agent_containers.ssh_transport import cleanup_remote_env as real_cleanup_re
 
 @pytest.fixture
 def launch_seams(monkeypatch):
+    monkeypatch.setattr("venue_copilot.live_session_for", lambda handle: {})
+    monkeypatch.setattr("agent_containers.plugin_preparation.prepare_plugins", lambda *a, **kw: [])
+    monkeypatch.setattr("agent_containers.plugin_preparation.stage_for_attached_launch",
+                        lambda *a, **kw: "PREPARATION_GATE && ")
     config = ContainersConfig(forward_gh_token=True, relay_enabled=False)
     fleet = FleetConfig(copilot_cli_account="inference-user")
     target = SimpleNamespace(config=config, fleet=fleet, user="vscode",
@@ -126,6 +130,7 @@ def test_each_actual_launch_reads_updated_source_without_manager_token(
                 args, require_live_relay_port=lambda: 1, relay_healthy=lambda p: True,
                 busy_exit=75, creation_flags=lambda: 0,
             ) == 0
+            assert seen.commands[-1][0][-1].startswith("PREPARATION_GATE && ")
         auth_values = [
             values for values in seen.staged if list(values) == ["COPILOT_GITHUB_TOKEN"]
         ]

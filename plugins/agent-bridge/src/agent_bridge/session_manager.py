@@ -378,17 +378,19 @@ def _claim_codespace(
     two separately-versioned plugin venvs stay decoupled; mirrors
     ``gh_account``'s shell-out-to-a-sibling-binstub pattern.
 
-    Returns ``("ok", "")`` on success or a degrade-safe skip,
+    Returns ``("ok", "")`` after an allowed claim attempt,
+    ``("skipped", "")`` when no claim was attempted,
     ``("conflict", detail)`` for a live owner conflict, or
     ``("coordination-rejected", detail)`` for a compatible binding rejection.
+    Uncertain attempted outcomes conservatively remain cleanup-owned.
     """
     if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM") and not holder_ref:
-        return "ok", ""
+        return "skipped", ""
     if not codespace_name or (not owner and not holder_ref):
-        return "ok", ""
+        return "skipped", ""
     binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
-        return "ok", ""
+        return "skipped", ""
     command = [binstub, "claim", codespace_name]
     if owner:
         command.extend(["--owner", owner])

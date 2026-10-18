@@ -260,6 +260,33 @@ unchanged.
   for Azure-token minting on the shared relay; it is no longer compensating for
   a host-network-reachable endpoint.
 
+## Plugin preparation
+
+Trusted container launches share the `plugin-resolve` install/copy/register
+barrier with CodeSpaces. Bridge selects related-repository plugins and retains
+that selection independently of the provider's legacy launch argv. Its headed
+CLI handoff carries explicit `--stage-plugin` and `--plugin-root` inputs;
+`--stage-plugin-disabled SOURCE` prepares the same payload but preserves its
+disabled selection. Both staging flags are repeatable; plain source values
+remain unchanged, including paths containing spaces or `=false`. Retained
+provider metadata carries each selection as a `{source, enable}` row while
+accepting older plain-source rows as enabled.
+Standalone container CLI use does not depend on importing bridge's runtime.
+All required remote installs and local copies complete before the execution
+repository's `.github/copilot/settings.local.json` is merged and the child
+starts. The target repository's own enabled remote plugins join that same
+installation barrier. ACP also receives each effective directory explicitly; CLI discovers
+the registered identities from repository settings, without duplicate external
+directory entries. Explicit worktree mode targets that worktree's repository,
+not the fleet's default checkout. Reattachment to a surviving child skips
+preparation. Restricted fleets remain outside host plugin projection.
+
+See [`plugin-resolve`](../../libs/plugin-resolve/README.md#trusted-venue-preparation)
+for settings ownership, isolated installation cache, retained snapshots and
+selected-asset handling. Manifest companions outside the eligible selection are
+diagnostics for caller-owned execution routing, not permission to propagate
+additional plugins.
+
 ## CLI
 
 ```

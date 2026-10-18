@@ -153,7 +153,7 @@ def test_detach_success_reports_exact_session_and_keeps_forwards(seams, capsys):
     argv = shlex.split("agent-worktrees embody" + remote.split(" && agent-worktrees embody", 1)[1])
     assert argv[:3] == ["agent-worktrees", "embody", "--anchor"]
     assert argv[argv.index("--bridge-scope-id") + 1] == "anchor-example-web@cs-1"
-    assert "--copilot-arg=--plugin-dir=/stage/example-agent" in argv
+    assert "--copilot-arg=--plugin-dir=/stage/example-agent" not in argv
     assert "--copilot-arg=--no-ask-user" in argv
     assert argv[argv.index("--seed") + 1] == "do the task"
     assert argv[argv.index("--seed-ready-timeout") + 1] == "180.0"
@@ -617,6 +617,11 @@ def test_venue_tooling_prefix_is_valid_bash(tmp_path):
     import subprocess
 
     bash = shutil.which("bash")
+    if bash and "system32" in bash.lower():
+        from pathlib import Path
+        git = shutil.which("git")
+        native = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+        bash = str(native) if native and native.is_file() else None
     if not bash or "WindowsApps" in bash:
         pytest.skip("no POSIX bash")
     result = subprocess.run([bash, "-n", "-c", detach._VENUE_TOOLING], capture_output=True, text=True)

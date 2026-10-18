@@ -46,6 +46,7 @@ LIBRARIES = (
     "zdd",
     "venue-copilot",
     "session-liveness-probe",
+    "plugin-resolve",
 )
 
 

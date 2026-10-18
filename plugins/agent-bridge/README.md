@@ -352,6 +352,62 @@ execution/ACP capability limits.
 
 ## Responsibility boundary
 
+Trusted-venue plugin preparation uses the dispatcher's controller worktree,
+not the daemon's launch directory or the remote product checkout when controller
+context is supplied. A declared `caller_owner_ref` resolves through the
+Worktrees owner to its local, nonterminal checkout; any supplied controller
+path must agree, and a `#session` qualifier must match `caller_session_id`.
+Without declared ownership, an absolute existing `caller_worktree` directory
+is accepted without Worktrees adoption. With neither, legacy configured
+provider discovery remains unchanged; opaque affinity IDs are not paths.
+Invalid explicit controller context refuses launch rather than falling back.
+These rules also apply to replacement on recovery. Selection uses only a
+per-subprocess cwd, never daemon `chdir`, adoption changes, or global profiles.
+
+Related-repository selections retain their `enable` boolean through provider
+metadata, replacement preparation and both launch modes. Provider CLI handoffs
+use `--stage-plugin SOURCE` for enabled selections and
+`--stage-plugin-disabled SOURCE` for disabled selections, without changing source
+strings. Legacy retained plain-source rows still mean enabled. If a related
+payload also appears in the provider plan, its current payload details can
+replace stale details without replacing the provider's enablement decision.
+When that related lookup is deferred, the provider's resolved origin or archive
+is retained rather than replaced with an unresolved target-side lookup.
+Native CLI dispatch resolves the caller's repository root from nested working
+directories and searches it before configured anchors for both related selections
+and reflected payloads, even when that checkout has no venue-provider config.
+
+The existing Bridge-owned request provenance records whether controller
+context was explicit or inherited from affinity. An inherited ID remains
+opaque even when it looks absolute: only an actually usable absolute directory
+provides cwd; otherwise configured discovery continues without changing the
+claim identity. Known explicit context never downgrades during recovery or
+provider refresh. For older unmarked records only, a `caller_worktree` equal to
+the session's `caller_id`, without a declared owner, retains the legacy affinity
+interpretation. Ignoring an unavailable absolute-looking legacy directory emits
+a warning without the raw path; nonmatching explicit context still validates.
+
+Before plugin preparation, a cold credential reverse-forward uses the existing
+Session Host startup readiness budget. It must complete a real relay-protocol
+round trip before installation or child launch; the short post-launch relay
+health deadline does not bound initial SSH establishment.
+
+Fresh and replacement launches resolve leading literal or environment-selected
+`cd` overrides before trusting conventional workspace metadata. Preparation,
+the child command, and ACP use the same concrete directory; live reattachment
+continues using its persisted workspace.
+
+Pre-launch cancellation releases only that start's resources. Once a launch
+request is submitted, cancellation requires remote cleanup checked against the
+session, launch nonce, boot identity, and PID start times before ownership can
+be released. Missing or mismatched launch authority is inconclusive, so claims
+and TargetLocks remain held rather than permitting a duplicate child.
+Claim admission records an explicit `skipped` outcome when no claim was
+attempted (no owner, disabled admission, or absent management command). A
+pre-launch failure then releases only the new local lock, without inferring
+claim ownership from a later PATH lookup. Acquired or uncertain attempted
+claims still require confirmed release.
+
 agent-bridge owns **live cross-boundary agent communication**: starting or
 resuming a persistent session, sending a turn, streaming its response, and
 steering or taking over that live agent across repository, worktree, machine,

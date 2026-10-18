@@ -683,6 +683,7 @@ _CLI_MODE_VENUE_BINSTUBS = {
 
 def _cmd_create_cli(
     target: str, prompt: str | None, driver: str | None, *, detach: bool = False,
+    worktree_id: str | None = None,
 ) -> None:
     """``agent-bridge create <target> "<prompt>" --cli``: deliver a live,
     human-attachable CLI-mode Copilot session on the venue ``target`` names,
@@ -732,6 +733,30 @@ def _cmd_create_cli(
         )
         sys.exit(1)
     argv = [resolved, "copilot", name]
+    if worktree_id and prefix in {"codespace", "container"}:
+        argv += ["--worktree-id", worktree_id]
+    if prefix in {"codespace", "container"}:
+        from .local_cache_refresh import _checkout_root
+        from .related_plugins import control_plane_anchors, related_plugins_for_repo
+        from agent_procutil import no_window_flags
+        from plugin_resolve.reflection import selection_cli_args
+
+        roots = control_plane_anchors()
+        try:
+            controller = _checkout_root(Path.cwd()).resolve(strict=True)
+            if controller.is_dir() and (controller / ".git").exists():
+                roots = list(dict.fromkeys([controller, *roots]))
+        except OSError:
+            pass
+        if roots:
+            repository = subprocess.run(
+                [resolved, "namespace-target-repo", name], capture_output=True, text=True,
+                check=True, timeout=90, creationflags=no_window_flags(),
+            ).stdout.strip()
+            for plugin in related_plugins_for_repo(repository, anchors=roots) if repository else []:
+                argv += selection_cli_args({"source": plugin.source, "enable": plugin.enable})
+            for root in roots:
+                argv += ["--plugin-root", str(root)]
     if detach:
         argv.append("--detach")
         if prompt:
@@ -768,6 +793,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
             args.target, _resolve_prompt(args, required=False),
             getattr(args, "driver", None),
             detach=getattr(args, "detach", False),
+            worktree_id=getattr(args, "worktree_id", None),
         )
         return
     core = _core()

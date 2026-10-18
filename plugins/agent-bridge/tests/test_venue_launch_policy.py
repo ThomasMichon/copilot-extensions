@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -245,24 +245,31 @@ async def test_a_refusal_at_the_final_recreate_still_records_the_typed_event(ses
 @pytest.mark.asyncio
 async def test_a_refused_start_fails_the_session_with_a_typed_event(tmp_db, monkeypatch):
     monkeypatch.setattr("agent_bridge.session_host.codespace_transport.build_codespace_spawner",
-                        lambda *a, **k: SimpleNamespace(transport=object()))
-    monkeypatch.setattr("agent_bridge.session_manager._resolve_remote_ai_plugin_dirs", AsyncMock(return_value=[]))
+                        lambda *a, **k: SimpleNamespace(transport=SimpleNamespace(
+                            run=AsyncMock(return_value=(0, "/workspaces/example\n", "")),
+                        )))
+    monkeypatch.setattr("agent_bridge.venue_plugins.prepare_venue_plugins", AsyncMock(return_value=[]))
     monkeypatch.setattr("agent_bridge.session_manager._claim_codespace", lambda *a, **k: ("ok", ""))
+    release = Mock(return_value=True)
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
 
     async def refused_connect(self, target, **kwargs):
         raise vlp.LaunchRefusedError("example-codespace", "the operator paused it")
 
     monkeypatch.setattr(SessionManager, "_connect_via_session_host", refused_connect)
     target = SpawnTarget(
-        type="command", cwd="/workspaces/example", caller_worktree="/wt/a",
+        type="command", cwd="/workspaces/example", caller_worktree=str(tmp_db.db_path.parent),
         codespace={"name": "example-codespace", "repo": "example/repo",
                    "acp_command": "cd /workspaces/example && copilot --acp --stdio",
                    "workspace_folder": "/workspaces/example"},
     )
-    session = await SessionManager(tmp_db).start_session(target, agent_name="codespace:example")
+    manager = SessionManager(tmp_db)
+    session = await manager.start_session(target, agent_name="codespace:example")
     assert session.status == SessionStatus.FAILED
     events = {e.event: e.data for e in session.event_log.get_events()}
     assert events["launch_refused"] == {"codespace": "example-codespace", "reason": "the operator paused it"}
+    release.assert_called_once_with("example-codespace", str(tmp_db.db_path.parent))
+    assert not manager._codespace_lock_sessions
 
 
 def test_the_contained_check_decodes_leniently():

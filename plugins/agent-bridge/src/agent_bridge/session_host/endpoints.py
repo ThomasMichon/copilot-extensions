@@ -37,6 +37,21 @@ class CredentialRelayReadinessError(RuntimeError):
     """A required remote credential-relay listener could not be proven ready."""
 
 
+def transport_serving_probe(transport, relay_port: int, *, fail_open: bool = True):
+    """Use the selected transport for the existing relay-protocol round trip."""
+    async def probe() -> bool:
+        try:
+            rc, out, _err = await transport.run(
+                wrap_login_shell(build_relay_ping_probe_command(relay_port)), timeout=5.0,
+            )
+        except Exception:
+            if fail_open:
+                return True
+            raise
+        return rc == 0 and "OK" in (out or "")
+    return probe
+
+
 async def wait_for_relay_serving(
     probe: Callable[[], Awaitable[bool]],
     *,

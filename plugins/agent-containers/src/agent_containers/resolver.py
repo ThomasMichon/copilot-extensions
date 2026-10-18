@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_procutil import no_window_flags
+from plugin_resolve.reflection import selection_spec
 
 from . import lifecycle
 from ._invoke import payload_command_argv
@@ -82,6 +83,19 @@ class LiveExecTarget:
 
 def _creation_flags() -> int:
     return no_window_flags()
+
+
+def target_repo_for_cli(name: str) -> int:
+    print(asyncio.run(ContainerResolver().target_repo(name)) or "")
+    return 0
+
+
+def add_related_plugins(spec: dict, sources: list[str | dict]) -> dict:
+    if sources:
+        if not spec.get("container"):
+            raise RuntimeError("Restricted containers cannot receive host plugin projection")
+        spec["container"]["related_plugins"] = [selection_spec(value) for value in sources]
+    return spec
 
 
 def host_gh_token() -> str | None:
@@ -606,6 +620,16 @@ class ContainerResolver:
             venue=spec.get("venue"),
         )
 
+    async def target_repo(self, name: str) -> str | None:
+        config = load_config()
+        info = await asyncio.to_thread(get_container, config, name)
+        fleet = config.fleets.get(info.fleet or "") if info else None
+        if getattr(info, "security_profile", None) == RESTRICTED_PROFILE or (
+            fleet is not None and fleet.restricted
+        ):
+            return None
+        return (getattr(info, "repo", None) or getattr(fleet, "repo", None)) or None
+
     async def resolve_spec(self, name: str) -> dict:
         """Resolve a container name to a **plain-dict** spawn spec.
 
@@ -731,6 +755,7 @@ class ContainerResolver:
             )
             spec["container"] = {
                 "name": name,
+                "repo": getattr(info, "repo", None) or fleet.repo,
                 "instance_id": getattr(info, "container_id", None),
                 "workspace_folder": workspace_folder,
                 "security_profile": fleet.security_profile,

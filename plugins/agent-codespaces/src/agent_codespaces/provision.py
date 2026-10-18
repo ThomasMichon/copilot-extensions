@@ -212,6 +212,7 @@ def build_provision_command(
 
 def dispatch_provision_command(
     cfg, codespace: str | None, lookup_repo: Callable[[str], str | None],
+    *, phase: str = "all",
 ) -> str:
     """The provision command agent-bridge's dispatch path runs on a CodeSpace.
 
@@ -223,12 +224,19 @@ def dispatch_provision_command(
     and ``on_connect``, never ``on_create``) follow in their own subshell, so a
     bridge dispatch applies the same hooks ``agent-codespaces ssh`` does
     (#5441). Hook resolution is best-effort: on any failure the relay command
-    is returned on its own.
+    is returned on its own. ``helpers`` omits hooks entirely; ``hooks`` omits
+    helper deployment so the caller can run it with the authenticated launch
+    environment only after establishing the credential relay.
     """
     from .codespace_assets import build_provision_command as build_relay_command
 
-    command = build_relay_command(ado_host=getattr(cfg.credentials, "ado_host", None))
-    if not codespace:
+    if phase not in {"all", "helpers", "hooks"}:
+        raise ValueError("Unknown CodeSpace provisioning phase")
+    command = (
+        build_relay_command(ado_host=getattr(cfg.credentials, "ado_host", None))
+        if phase != "hooks" else ""
+    )
+    if not codespace or phase == "helpers":
         return command
     try:
         repo = None

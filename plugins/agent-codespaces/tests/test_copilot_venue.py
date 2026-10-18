@@ -18,6 +18,12 @@ from agent_codespaces import copilot_venue
 from agent_codespaces.__main__ import _interactive_ssh
 
 
+@pytest.fixture(autouse=True)
+def _stub_plugin_preparation(monkeypatch):
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.prepare_attached", AsyncMock())
+
+
 class TestInteractiveSshReverseForwardsAndRemoteCommand:
     """Regression coverage for a real bug found live (agent-bridge-cli-mode-
     sessions Phase 4 validation): a bare reverse-forward spec with no ``-R``
@@ -235,12 +241,89 @@ def _ns(**kw):
     return argparse.Namespace(**defaults)
 
 
+def test_attached_preparation_supervision_stays_off_main_tty_thread(monkeypatch):
+    import threading
+    from contextlib import suppress
+    events = []
+    main_thread = threading.get_ident()
+
+    async def prepare(*a, on_ready, release):
+        assert threading.get_ident() != main_thread
+        events.append("relay-ready-install")
+        on_ready(True)
+        try:
+            await release()
+        finally:
+            events.append("relay-cleanup")
+
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.prepare_attached", prepare)
+    with suppress(KeyboardInterrupt):
+        with copilot_venue._attached_preparation(_ns(), object()) as ready:
+            assert ready
+            assert threading.get_ident() == main_thread
+            events.append("interactive")
+            assert events == ["relay-ready-install", "interactive"]
+            raise KeyboardInterrupt
+    assert events == ["relay-ready-install", "interactive", "relay-cleanup"]
+
+
+@pytest.mark.parametrize("verb,dest", [
+    ("copilot", "stage_plugins"), ("ssh", "stage_plugins"),
+    ("namespace-resolve", "stage_plugins"),
+])
+def test_disabled_plugin_cli_is_unambiguous(monkeypatch, verb, dest):
+    from agent_codespaces import __main__ as cli
+    observed = []
+    if verb == "copilot":
+        monkeypatch.setattr(copilot_venue, "cmd_copilot",
+                            lambda args, **kw: observed.append(args) or 0)
+    elif verb == "namespace-resolve":
+        monkeypatch.setattr(cli, "_cmd_namespace_resolve", lambda args: observed.append(args) or 0)
+    else:
+        monkeypatch.setattr(cli, "_cmd_ssh", lambda args: observed.append(args) or 0)
+    assert cli.main([
+        verb, "synthetic", "--stage-plugin", "literal=false",
+        "--stage-plugin-disabled", "path with spaces",
+    ]) == 0
+    assert getattr(observed[0], dest) == [
+        "literal=false", {"source": "path with spaces", "enable": False},
+    ]
+
+
 class TestCmdCopilotAnchorDefault:
     """Omitting --worktree-id defaults to anchor mode: a CodeSpace is
     conventionally anchor-only (the devcontainer already clones the repo
     directly), matching headless ACP dispatch's own existing behavior of
     running straight in the workspace_folder -- so this should be the
     zero-ceremony default, not something an operator has to opt into."""
+
+    def test_owner_failure_keeps_bridge_forward_without_duplicate_relay(
+        self, store, monkeypatch,
+    ):
+        events = []
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: False)
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: 9280)
+        monkeypatch.setattr("venue_copilot.run_venue_copilot",
+                            lambda identity, *, connect, **kw: connect("CHILD"))
+        monkeypatch.setattr("agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857)
+        monkeypatch.setattr("agent_codespaces.relay_token.token_for", lambda *a, **kw: "synthetic")
+
+        async def prepare(*a, on_ready, release):
+            events.extend(["fallback-forward-ready", "install-copy-settings"])
+            on_ready(True)
+            await release()
+            events.append("cleanup")
+
+        def interactive(name, forwards, **kwargs):
+            assert forwards == ["9280:127.0.0.1:9280"]
+            assert kwargs["remote_command"] == "CHILD"
+            events.append("child")
+            return 0
+
+        monkeypatch.setattr("agent_codespaces.plugin_preparation.prepare_attached", prepare)
+        assert copilot_venue.cmd_copilot(_ns(), interactive_ssh=interactive) == 0
+        assert events == ["fallback-forward-ready", "install-copy-settings", "child", "cleanup"]
 
     def test_no_worktree_id_resolves_anchor_identity_and_forwards_anchor(
         self, store, monkeypatch,

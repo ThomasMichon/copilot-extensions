@@ -60,7 +60,7 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
-def _resolve_provision_command(codespace: str = "") -> str | None:
+def _resolve_provision_command(codespace: str = "", phase: str = "all") -> str | None:
     """Resolve the CodeSpace provision command.
 
     Process-boundary **only** (#1643): shell out to the ``agent-codespaces``
@@ -79,8 +79,12 @@ def _resolve_provision_command(codespace: str = "") -> str | None:
     if not binstub:
         log.debug("agent-codespaces binstub absent -- skipping provision on dispatch")
         return None
-    attempts = [["provision-command", "--codespace", codespace]] if codespace else []
-    for argv in [*attempts, ["provision-command"]]:
+    attempts = [["provision-command", "--codespace", codespace]] if codespace and phase != "helpers" else []
+    if phase == "hooks":
+        attempts = [[*argv, "--phase", "hooks"] for argv in attempts]
+    else:
+        attempts.append(["provision-command"])
+    for argv in attempts:
         try:
             r = subprocess.run(
                 [binstub, *argv], capture_output=True, text=True, timeout=15,
@@ -91,7 +95,8 @@ def _resolve_provision_command(codespace: str = "") -> str | None:
             continue
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout
-        log.debug("agent-codespaces %s exited %s", argv, r.returncode)
+        log.log(logging.WARNING if phase == "hooks" else logging.DEBUG,
+                "agent-codespaces %s exited %s; provisioning phase was not executed", argv, r.returncode)
     return None
 
 
@@ -366,6 +371,7 @@ class CodeSpaceSpawner:
         active_reap_seconds: float = 0.0,
         require_relay_ready: bool = False,
         relay_ready_timeout: float = 5.0,
+        provision_prelude: str = "",
     ) -> None:
         self._transport = transport
         self.boundary = getattr(transport, "boundary", "codespace")
@@ -377,11 +383,25 @@ class CodeSpaceSpawner:
         self._active_reap_seconds = active_reap_seconds
         self._require_relay_ready = require_relay_ready
         self._relay_ready_timeout = relay_ready_timeout
+        self.prepare_child: Callable[[list[str]], Awaitable[list[str]]] | None = None
+        self.provision_prelude = provision_prelude
 
     @property
     def transport(self) -> RemoteTransport:
         """Remote execution seam used by shared pre-launch policy."""
         return self._transport
+
+    async def _run_provision(self, command: str | None, *, prelude: str | None = None) -> None:
+        if not command:
+            return
+        script = f"bash -lc {shlex.quote(prelude + command)}" if prelude is not None else command
+        try:
+            run = getattr(self._transport, "run_script", self._transport.run)
+            rc, _out, error = await run(script, timeout=30.0)
+            if rc:
+                log.warning("CodeSpace provision exited %s: %s", rc, (error or "").strip())
+        except Exception:
+            log.warning("CodeSpace provision failed (dispatch path)", exc_info=True)
 
     async def spawn(
         self,
@@ -390,6 +410,22 @@ class CodeSpaceSpawner:
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         session_id: str = "",
+    ) -> SpawnedHost:
+        preparation_relays: list[Any] = []
+        try:
+            return await self._spawn(
+                child_argv, cwd=cwd, env=env, session_id=session_id,
+                preparation_relays=preparation_relays,
+            )
+        except BaseException:
+            for relay in preparation_relays:
+                with contextlib.suppress(Exception, asyncio.CancelledError):
+                    await relay.stop()
+            raise
+
+    async def _spawn(
+        self, child_argv: list[str], *, cwd: str | None, env: dict[str, str] | None,
+        session_id: str, preparation_relays: list[Any],
     ) -> SpawnedHost:
         from ssh_manager import LocalForward
 
@@ -426,39 +462,16 @@ class CodeSpaceSpawner:
                 f"(rc={preflight_rc}): {preflight_err or preflight_out}"
             )
 
-        # Re-assert the CodeSpace-side ADO/git auth helpers before launching the
-        # dispatched agent (dotfiles #733 T2). The interactive `agent-codespaces
-        # ssh` connect path deploys these via Stage-4 `_provision_relay_helpers`,
-        # but the Session-Host DISPATCH path bypasses that codepath -- so without
-        # this a dispatched agent inherits whatever helper the box already has.
-        # After a CodeSpace reboot that is the VS Code extension's own helper,
-        # whose shebang points at a since-deleted node (`bad interpreter`),
-        # breaking `git push`/PR to ADO. Overwrite it with our stable-shebang,
-        # relay-first wrapper. Codespace boundary only; idempotent + best-effort
-        # (a failure here must never block the launch -- the launch's own auth
-        # verification surfaces a genuinely broken relay).
+        # Deploy helpers without running checkout-creating hooks before auth.
+        hooks = None
         if self.boundary == "codespace":
-            provision_cmd = await asyncio.to_thread(
-                _resolve_provision_command,
-                getattr(self._transport, "codespace_name", "") or "",
+            name = getattr(self._transport, "codespace_name", "") or ""
+            await self._run_provision(await asyncio.to_thread(
+                _resolve_provision_command, name, "helpers",
+            ))
+            hooks = await asyncio.to_thread(
+                _resolve_provision_command, name, "hooks",
             )
-            if provision_cmd:
-                try:
-                    # Over stdin when supported: with repo hooks the script
-                    # can exceed the Windows command-line limit as argv.
-                    run = getattr(self._transport, "run_script", self._transport.run)
-                    prov_rc, _pout, prov_err = await run(provision_cmd, timeout=30.0)
-                    if prov_rc != 0:
-                        log.warning(
-                            "CodeSpace provision (relay helpers + repo hooks) "
-                            "exited %s: %s",
-                            prov_rc, (prov_err or "").strip(),
-                        )
-                except Exception:
-                    log.warning(
-                        "CodeSpace relay-helper (re)deploy failed (dispatch path)",
-                        exc_info=True,
-                    )
 
         safe_sid = _safe_session_id(session_id)
         ts = int(time.time() * 1000)
@@ -469,6 +482,27 @@ class CodeSpaceSpawner:
         if callable(get_reverse):
             reverse += list(get_reverse() or [])
 
+        config = self._transport.ssh_config()
+        from ..relay_state import get_live_relay_port
+        relays = relay_forwards_from_ssh_config(
+            config, reverse, serving_probe_for_port=self._serving_probe_for_port,
+            host_port_resolver=get_live_relay_port,
+            reconnect_gate=getattr(self._transport, "reconnect_allowed", None),
+        )
+        relay_ports = relay_ports_from_reverse_forwards(reverse)
+        if self.prepare_child is not None or hooks:
+            for relay, relay_port in zip(relays, relay_ports, strict=True):
+                preparation_relays.append(relay)
+                await relay.start()
+                await wait_for_relay_serving(
+                    self._serving_probe_for_port(relay_port, fail_open=False),
+                    timeout=self._ready_timeout,
+                )
+        await self._run_provision(hooks, prelude=self.provision_prelude)
+        if self.prepare_child is not None:
+            # Keep the caller's argv reference current for durable host records.
+            child_argv[:] = await self.prepare_child(list(child_argv))
+
         launch = build_remote_launch(
             remote_bundle, state_remote, log_remote, child_argv,
             nonce=nonce, cwd=cwd, session_id=session_id,
@@ -476,61 +510,43 @@ class CodeSpaceSpawner:
             unexpected_reap_seconds=self._unexpected_reap_seconds,
             active_reap_seconds=self._active_reap_seconds,
         )
-        rc, out, err = await self._transport.run(
-            launch, timeout=self._launch_timeout,
-        )
-        if rc != 0:
-            raise RuntimeError(
-                f"remote Session Host launch failed (rc={rc}): {err or out}"
-            )
-
         try:
+            rc, out, err = await self._transport.run(
+                launch, timeout=self._launch_timeout,
+            )
+            if rc != 0:
+                raise RuntimeError(
+                    f"remote Session Host launch failed (rc={rc}): {err or out}"
+                )
             state = await self._poll_state(
                 state_remote,
                 log_remote,
                 session_id=session_id,
                 nonce=nonce,
             )
-        except Exception as exc:
-            if not await self._abort_remote_launch(state_remote, session_id):
-                raise RemoteSpawnCleanupPendingError(
-                    f"remote Session Host launch failed and cleanup is "
-                    f"inconclusive for {session_id}; retaining target ownership"
-                ) from exc
+        except BaseException as exc:
+            await self._require_remote_cleanup(state_remote, session_id, nonce, exc)
             raise
         remote_port = int(state["port"])
         host_pid = int(state["pid"])
         child_pid = int(state["child_pid"])
         protocol_version = int(state.get("protocol_version", proto.PROTOCOL_VERSION))
 
-        config = self._transport.ssh_config()
         # Transport reverse-forwards (the credential relay) get dedicated supervisors so a
         # detached Host keeps a relay; a CodeSpace one never reconnects to a stopped box.
         forward = LocalForward(config, remote_port)
         try:
             local_port = await forward.establish()
-        except Exception as exc:
-            with contextlib.suppress(Exception):
+        except BaseException as exc:
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await forward.cancel()
-            if not await self._abort_remote_launch(state_remote, session_id):
-                raise RemoteSpawnCleanupPendingError(
-                    f"remote Session Host forwarding failed and cleanup is "
-                    f"inconclusive for {session_id}; retaining target ownership"
-                ) from exc
+            await self._require_remote_cleanup(state_remote, session_id, nonce, exc)
             raise
-        from ..relay_state import get_live_relay_port
-        relays = relay_forwards_from_ssh_config(
-            config,
-            reverse,
-            serving_probe_for_port=self._serving_probe_for_port,
-            host_port_resolver=get_live_relay_port,
-            reconnect_gate=getattr(self._transport, "reconnect_allowed", None),
-        )
-        relay_ports = relay_ports_from_reverse_forwards(reverse)
         started_relays = []
         for relay, relay_port in zip(relays, relay_ports, strict=True):
             try:
-                await relay.start()
+                if relay not in preparation_relays:
+                    await relay.start()
                 if self._require_relay_ready:
                     try:
                         await wait_for_relay_serving(
@@ -545,24 +561,17 @@ class CodeSpaceSpawner:
                             "credential relay readiness probe failed for "
                             f"remote loopback port {relay_port}"
                         ) from exc
-            except Exception as exc:
-                with contextlib.suppress(Exception):
+            except BaseException as exc:
+                with contextlib.suppress(Exception, asyncio.CancelledError):
                     await relay.stop()
-                if self._require_relay_ready:
+                if self._require_relay_ready or isinstance(exc, asyncio.CancelledError):
                     for prior in started_relays:
-                        with contextlib.suppress(Exception):
+                        with contextlib.suppress(Exception, asyncio.CancelledError):
                             await prior.stop()
-                    with contextlib.suppress(Exception):
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
                         await forward.cancel()
-                    if not await self._abort_remote_launch(
-                        state_remote, session_id,
-                    ):
-                        raise RemoteSpawnCleanupPendingError(
-                            "required credential relay failed and remote "
-                            f"Session Host cleanup is inconclusive for {session_id}; "
-                            "retaining target ownership"
-                        ) from exc
-                    if isinstance(exc, CredentialRelayReadinessError):
+                    await self._require_remote_cleanup(state_remote, session_id, nonce, exc)
+                    if isinstance(exc, (CredentialRelayReadinessError, asyncio.CancelledError)):
                         raise
                     raise CredentialRelayReadinessError(
                         "credential relay reverse-forward failed before ACP "
@@ -608,10 +617,22 @@ class CodeSpaceSpawner:
             _refresh=_refresh,
         )
 
+    async def _require_remote_cleanup(self, state_remote, session_id, nonce, failure):
+        try:
+            confirmed = await self._abort_remote_launch(state_remote, session_id, expected_nonce=nonce)
+        except BaseException:
+            confirmed = False
+        if not confirmed:
+            raise RemoteSpawnCleanupPendingError(
+                f"remote Session Host launch failed and cleanup is inconclusive for "
+                f"{session_id}; retaining target ownership"
+            ) from failure
+
     async def _abort_remote_launch(
         self,
         state_remote: str,
         session_id: str,
+        *, expected_nonce: str | None = None,
     ) -> bool:
         """Identity-check and reap a Host after post-launch setup fails."""
         script = f"""
@@ -622,14 +643,15 @@ import time
 
 path = {state_remote!r}
 session_id = {session_id!r}
+expected_nonce = {expected_nonce!r}
 try:
     with open(path, encoding="utf-8") as handle:
         state = json.load(handle)
 except FileNotFoundError:
     print("__ABSENT__")
-    raise SystemExit(0)
+    raise SystemExit(0 if expected_nonce is None else 48)
 
-if state.get("session_id") != session_id:
+if state.get("session_id") != session_id or expected_nonce is not None and state.get("nonce") != expected_nonce:
     raise SystemExit(43)
 host_pid = int(state["host_pid"])
 child_pid = int(state["child_pid"])
@@ -697,12 +719,9 @@ print("__REAPED__")
                 exc_info=True,
             )
             return False
-        confirmed = (
-            rc == 0
-            and (
-                "__REAPED__" in (out or "")
-                or "__ABSENT__" in (out or "")
-            )
+        confirmed = rc == 0 and (
+            "__REAPED__" in (out or "")
+            or expected_nonce is None and "__ABSENT__" in (out or "")
         )
         if not confirmed:
             log.warning(
@@ -956,33 +975,8 @@ print("__REAPED__")
         *,
         fail_open: bool = True,
     ) -> Callable[[], Awaitable[bool]]:
-        """Build a best-effort far-side relay-serving probe for Session-Host use.
-
-        A false result means the SSH process is alive but the CodeSpace-side
-        relay listener at ``relay_port`` did not answer a real relay-protocol
-        round-trip (see :func:`build_relay_ping_probe_command`) -- e.g. it is
-        not accepting connections, or something is accepting but not actually
-        speaking the relay protocol (a stale/misrouted listener) -- so the
-        relay supervisor should re-establish. Probe transport failures return
-        True: the probe is a health hint, not a reason to churn an otherwise
-        live relay during a transient command-channel failure.
-        """
-
-        async def _probe() -> bool:
-            from .endpoints import build_relay_ping_probe_command
-
-            probe = build_relay_ping_probe_command(relay_port)
-            try:
-                rc, out, _err = await self._transport.run(
-                    wrap_login_shell(probe), timeout=5.0,
-                )
-            except Exception:
-                if fail_open:
-                    return True
-                raise
-            return rc == 0 and "OK" in (out or "")
-
-        return _probe
+        from .endpoints import transport_serving_probe
+        return transport_serving_probe(self._transport, relay_port, fail_open=fail_open)
 
     async def _poll_state(
         self,

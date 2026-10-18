@@ -201,7 +201,7 @@ class TestDiagnosticRemoteCmd:
         monkeypatch.setattr(
             cli, "_register_codespace_plugins", lambda *_a: record("register")
         )
-        monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a: record("hooks"))
+        monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a, **_kw: record("hooks"))
         monkeypatch.setattr(cli, "_stage_plugins", lambda *_a: record("stage"))
         monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
 
@@ -227,6 +227,7 @@ class TestDiagnosticRemoteCmd:
         self, tmp_path, monkeypatch
     ):
         calls: list[str] = []
+        hook_environment = []
         manager = _FakeManager(calls)
         _patch_ssh_dependencies(monkeypatch, tmp_path, manager)
 
@@ -234,14 +235,19 @@ class TestDiagnosticRemoteCmd:
             calls.append(name)
 
         async def empty_list(*_a, **_kw):
+            calls.append("register")
             return []
+
+        async def hooks(*_a, **kwargs):
+            hook_environment.append(kwargs["relay_env"])
+            calls.append("hooks")
 
         monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
         monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a, **_kw: record("auth"))
         monkeypatch.setattr(cli, "_provision_dotfiles", lambda *_a, **_kw: record("dotfiles"))
         monkeypatch.setattr(cli, "_provision_harness", lambda *_a, **_kw: record("harness"))
         monkeypatch.setattr(cli, "_register_codespace_plugins", empty_list)
-        monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a: record("hooks"))
+        monkeypatch.setattr(cli, "_provision_repo_hooks", hooks)
         monkeypatch.setattr(cli, "_stage_plugins", empty_list)
         monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
         monkeypatch.setattr(cli, "_pipe_stdio", lambda *_a: record("pipe"))
@@ -256,6 +262,9 @@ class TestDiagnosticRemoteCmd:
 
         assert rc == 0
         assert "warm" in calls
+        assert len(hook_environment) == 1
+        assert "LC_GIT_CREDENTIAL_RELAY" in hook_environment[0]
+        assert calls.index("hooks") < calls.index("register") < calls.index("open_stdio_channel")
         assert calls.index("auth") < calls.index("warm") < calls.index("open_stdio_channel")
 
 
@@ -474,9 +483,9 @@ class TestSshSessionHooks:
         monkeypatch.setattr(cli, "_provision_harness", lambda *_a, **_kw: record("harness"))
         monkeypatch.setattr(
             cli, "_register_codespace_plugins",
-            lambda *_a: record("register", ["/stage/example-agent"]),
+            lambda *_a, **_kw: record("register", ["/stage/example-agent"]),
         )
-        monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a: record("hooks"))
+        monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a, **_kw: record("hooks"))
         monkeypatch.setattr(cli, "_stage_plugins", lambda *_a, **_k: record("stage", []))
         monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
         monkeypatch.setattr(

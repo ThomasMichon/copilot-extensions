@@ -24,9 +24,11 @@ dependencies = [
     "agent-venue-copilot",
     "agent-zdd",
     "agent-session-liveness-probe",
+    "agent-plugin-resolve",
 ]
 
 [tool.uv.sources]
+agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
 # Shared OpenSSH process/config primitives used by the trusted-fleet
 # transport. This is a `uv`-editable canonical reference
 # (vendor-pointer-generalization effort, Phase 1): `path` escapes this

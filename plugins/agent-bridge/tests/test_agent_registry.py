@@ -1416,6 +1416,26 @@ class TestPluginInjectionContract:
         assert pr.seen_extra == refs
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("metadata_key", ["codespace", "container"])
+    async def test_related_metadata_keeps_disabled_references(self, monkeypatch, metadata_key):
+        from unittest.mock import AsyncMock
+
+        r = AgentResolver({}, {})
+        refs = [PluginRef("a@m"), PluginRef("b@m", enable=False)]
+        target = SpawnTarget(
+            type="command", spawn_command=["provider"], **{metadata_key: {"name": "example"}},
+        )
+        monkeypatch.setattr(r, "_related_plugins_for", AsyncMock(return_value=refs))
+        call = AsyncMock(return_value=target)
+        monkeypatch.setattr(r, "_call_resolver", call)
+        resolver = _PluginAwareResolver()
+        resolved = await r._resolve_with_plugins(resolver, "example")
+        assert getattr(resolved, metadata_key)["related_plugins"] == [
+            {"source": "a@m", "enable": True}, {"source": "b@m", "enable": False},
+        ]
+        assert call.await_args.kwargs["extra_plugins"] == refs
+
+    @pytest.mark.asyncio
     async def test_legacy_resolver_without_kwarg_still_works(self):
         # _MockResolver.resolve has no extra_plugins kwarg; with empty sourcing
         # (the default) it must resolve fine.

@@ -150,6 +150,29 @@ async def test_resolve_builds_spawn_target_and_argv():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["codespace", "container"])
+async def test_resolve_preserves_disabled_selection_in_provider_argv(prefix):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return _cp(0, json.dumps({"type": "command", "spawn_command": ["provider"]}))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=run):
+        await CliNamespaceResolver(prefix, f"agent-{prefix}s", _Fallback()).resolve(
+            "example", extra_plugins=[
+                SimpleNamespace(source="sample@synthetic", enable=False),
+                SimpleNamespace(source="/plain source=false", enable=True),
+            ],
+        )
+    args = seen["argv"]
+    i = args.index("--stage-plugin-disabled")
+    assert args[i:i + 4] == [
+        "--stage-plugin-disabled", "sample@synthetic", "--stage-plugin", "/plain source=false",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_resolve_carries_venue_metadata():
     """The provider-owned venue contract survives the process boundary."""
     fb = _Fallback()

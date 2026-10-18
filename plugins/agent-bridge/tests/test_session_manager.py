@@ -677,7 +677,7 @@ async def _start_codespace_session(tmp_db, monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(transport=transport),
     )
     monkeypatch.setattr(
-        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        "agent_bridge.venue_plugins.prepare_venue_plugins",
         AsyncMock(return_value=[]),
     )
     manager = SessionManager(tmp_db)
@@ -762,7 +762,8 @@ async def test_trusted_container_selects_remote_session_host(
         captured["build"] = (target, kwargs)
         return SimpleNamespace(transport=transport)
 
-    async def fake_plugin_dirs(selected_transport, venue_name, repo_dir):
+    async def fake_plugin_dirs(venue_target, selected_transport, repo_dir, **options):
+        venue_name = f"container:{venue_target['name']}"
         captured["plugin_resolve"] = (
             selected_transport,
             venue_name,
@@ -771,6 +772,9 @@ async def test_trusted_container_selects_remote_session_host(
         return ["/workspaces/odsp-web/.ai/odsp-web-agent"]
 
     async def fake_connect(self, target, **kwargs):
+        callback = getattr(kwargs.get("spawner"), "prepare_child", None)
+        if callback is not None:
+            kwargs["remote_child_argv"] = await callback(kwargs["remote_child_argv"])
         captured["connect"] = kwargs
         client = MagicMock()
         client.is_running = True
@@ -799,7 +803,7 @@ async def test_trusted_container_selects_remote_session_host(
         SessionManager, "_connect_via_session_host", fake_connect,
     )
     monkeypatch.setattr(
-        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        "agent_bridge.venue_plugins.prepare_venue_plugins",
         fake_plugin_dirs,
     )
     monkeypatch.setattr(
@@ -894,7 +898,7 @@ async def test_container_cleanup_exception_does_not_fail_successful_start(
         lambda *args, **kwargs: SimpleNamespace(transport=object()),
     )
     monkeypatch.setattr(
-        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        "agent_bridge.venue_plugins.prepare_venue_plugins",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
@@ -950,7 +954,7 @@ async def test_codespace_handshake_failure_releases_claim(
         lambda *args, **kwargs: SimpleNamespace(transport=object()),
     )
     monkeypatch.setattr(
-        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        "agent_bridge.venue_plugins.prepare_venue_plugins",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
@@ -960,7 +964,7 @@ async def test_codespace_handshake_failure_releases_claim(
     )
     target = SpawnTarget(
         type="command",
-        caller_worktree="caller-1",
+        caller_worktree=str(tmp_db.db_path.parent),
         codespace={
             "name": "example-codespace",
             "repo": "example/repo",
@@ -972,11 +976,11 @@ async def test_codespace_handshake_failure_releases_claim(
     session = await SessionManager(tmp_db).start_session(
         target,
         agent_name="codespace:example-codespace",
-        caller_id="caller-1",
+        caller_id=str(tmp_db.db_path.parent),
     )
 
     assert session.status == SessionStatus.FAILED
-    assert released == [("example-codespace", "caller-1")]
+    assert released == [("example-codespace", str(tmp_db.db_path.parent))]
 
 
 @pytest.mark.asyncio
@@ -5094,12 +5098,21 @@ class TestCodespaceExclusiveClaim:
         caller_id=None,
         caller_owner_ref=None,
     ):
+        if caller_owner_ref is not None:
+            machine, project, worktree = caller_owner_ref.partition("#")[0].split("/")
+            monkeypatch.setattr(
+                "agent_bridge.acquisition_authority.worktree_command",
+                AsyncMock(return_value={"worktrees": [{
+                    "id": worktree, "repo": project, "machine": machine,
+                    "path": caller_worktree or str(tmp_db.db_path.parent), "status": "active",
+                }]}),
+            )
         monkeypatch.setattr(
             "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
             lambda *a, **k: SimpleNamespace(transport=object()),
         )
         monkeypatch.setattr(
-            "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+            "agent_bridge.venue_plugins.prepare_venue_plugins",
             AsyncMock(return_value=[]),
         )
         claim_calls: list[tuple[str, str, str | None]] = []
@@ -5138,10 +5151,10 @@ class TestCodespaceExclusiveClaim:
         _, session, claim_calls = await self._start(
             tmp_db, monkeypatch,
             claim_result=("ok", ""),
-            caller_worktree="/wt/dispatcher-a",
+            caller_worktree=str(tmp_db.db_path.parent),
         )
         assert claim_calls == [
-            ("example-codespace", "/wt/dispatcher-a", None)
+            ("example-codespace", str(tmp_db.db_path.parent), None)
         ]
         assert session.status == SessionStatus.IDLE
 
@@ -5162,6 +5175,21 @@ class TestCodespaceExclusiveClaim:
         ]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("managed", [False, True])
+    async def test_absolute_opaque_affinity_is_preserved_for_claim(
+        self, tmp_db, monkeypatch, managed,
+    ) -> None:
+        affinity = str(tmp_db.db_path.parent / "nonexistent-affinity-identity")
+        owner_ref = "machine/project/worktree" if managed else None
+        _, session, calls = await self._start(
+            tmp_db, monkeypatch, claim_result=("ok", ""), caller_worktree=None,
+            caller_id=affinity, caller_owner_ref=owner_ref,
+        )
+        assert session.status == SessionStatus.IDLE
+        assert session.target.caller_worktree == affinity
+        assert calls == [("example-codespace", affinity, owner_ref)]
+
+    @pytest.mark.asyncio
     async def test_claim_forwards_caller_owner_ref(
         self, tmp_db, monkeypatch
     ) -> None:
@@ -5169,13 +5197,13 @@ class TestCodespaceExclusiveClaim:
             tmp_db,
             monkeypatch,
             claim_result=("ok", ""),
-            caller_worktree="/wt/dispatcher-a",
+            caller_worktree=str(tmp_db.db_path.parent),
             caller_owner_ref="machine/project/worktree",
         )
         assert claim_calls == [
             (
                 "example-codespace",
-                "/wt/dispatcher-a",
+                str(tmp_db.db_path.parent),
                 "machine/project/worktree",
             )
         ]
@@ -5191,7 +5219,7 @@ class TestCodespaceExclusiveClaim:
         _, session, _calls = await self._start(
             tmp_db, monkeypatch,
             claim_result=("conflict", "[BUSY] held by /wt/other"),
-            caller_worktree="/wt/dispatcher-a",
+            caller_worktree=str(tmp_db.db_path.parent),
         )
         assert session.status == SessionStatus.FAILED
         types = [e.event for e in session.event_log.get_events()]
@@ -5208,7 +5236,7 @@ class TestCodespaceExclusiveClaim:
                 "coordination-rejected",
                 "[BLOCKED] knowledge_binding_required",
             ),
-            caller_worktree="/wt/dispatcher-a",
+            caller_worktree=str(tmp_db.db_path.parent),
             caller_owner_ref="machine/project/worktree",
         )
         assert session.status == SessionStatus.FAILED
@@ -5229,10 +5257,10 @@ class TestCodespaceExclusiveClaim:
         manager, session, _calls = await self._start(
             tmp_db, monkeypatch,
             claim_result=("ok", ""),
-            caller_worktree="/wt/dispatcher-a",
+            caller_worktree=str(tmp_db.db_path.parent),
         )
         await manager.end_session(session.session_id, force=True)
-        assert released == [("example-codespace", "/wt/dispatcher-a")]
+        assert released == [("example-codespace", str(tmp_db.db_path.parent))]
 
 
 class TestClaimCodespaceHelper:
@@ -5311,7 +5339,7 @@ class TestClaimCodespaceHelper:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(sm.subprocess, "run", _run)
-        assert sm._claim_codespace("cs", "") == ("ok", "")
+        assert sm._claim_codespace("cs", "") == ("skipped", "")
         assert called["ran"] is False
 
     def test_missing_binstub_is_skip(self, monkeypatch) -> None:
@@ -5319,7 +5347,7 @@ class TestClaimCodespaceHelper:
 
         monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
         monkeypatch.setattr(sm.shutil, "which", lambda _: None)
-        assert sm._claim_codespace("cs", "/wt/a") == ("ok", "")
+        assert sm._claim_codespace("cs", "/wt/a") == ("skipped", "")
 
     def test_disabled_env_is_skip(self, monkeypatch) -> None:
         from agent_bridge import session_manager as sm
@@ -5332,7 +5360,7 @@ class TestClaimCodespaceHelper:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(sm.subprocess, "run", _run)
-        assert sm._claim_codespace("cs", "/wt/a") == ("ok", "")
+        assert sm._claim_codespace("cs", "/wt/a") == ("skipped", "")
         assert called["ran"] is False
 
     def test_disabled_env_with_holder_ref_still_preflights(

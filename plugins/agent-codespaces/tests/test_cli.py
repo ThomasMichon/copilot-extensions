@@ -456,6 +456,57 @@ class TestCreateScopeGate:
         assert rc == 0
         create.assert_called_once()
 
+    def test_create_provisioning_shares_launch_environment(self, monkeypatch):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        import agent_codespaces.__main__ as m
+
+        config = SimpleNamespace(credentials=SimpleNamespace(relay_port=19857))
+        manager = SimpleNamespace(
+            ensure_connected=AsyncMock(return_value=SimpleNamespace(config=object())),
+            disconnect=AsyncMock(),
+        )
+        relay = SimpleNamespace(stop=AsyncMock())
+        start_relay = AsyncMock(return_value=relay)
+        prelude = "export SYNTHETIC_RELAY_CONTEXT=launch-only; "
+        environments = {}
+
+        async def record(kind, *args, **kwargs):
+            environments[kind] = kwargs
+
+        monkeypatch.setattr(m, "_require_codespace_scope", lambda *a: None)
+        monkeypatch.setattr(m, "load_merged_config", lambda: config)
+        monkeypatch.setattr(m, "create_codespace", lambda *a, **kw: SimpleNamespace(
+            name="synthetic-created", account="synthetic-owner",
+        ))
+        monkeypatch.setattr(m, "wait_for_available", lambda *a, **kw: True)
+        monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: manager)
+        monkeypatch.setattr(m, "CodespaceSource", lambda *a, **kw: object())
+        monkeypatch.setattr(m.relay_launch, "effective_relay_port", lambda cfg: 19857)
+        launch = []
+        monkeypatch.setattr(m.relay_launch, "build_relay_launch_env",
+                            lambda name, port: launch.append((name, port)) or (prelude, port))
+        monkeypatch.setattr(m, "_start_supervised_relay", start_relay)
+        monkeypatch.setattr(m, "_provision_relay_helpers", AsyncMock())
+        monkeypatch.setattr(m, "_provision_dotfiles",
+                            lambda *a, **kw: record("dotfiles", *a, **kw))
+        monkeypatch.setattr(m, "_provision_harness",
+                            lambda *a, **kw: record("harness", *a, **kw))
+        monkeypatch.setattr(m, "_provision_repo_hooks",
+                            lambda *a, **kw: record("hooks", *a, **kw))
+        assert m._cmd_create(SimpleNamespace(
+            repo="example/project", branch=None, force_create=True, no_wait=False, timeout=30,
+        )) == 0
+        assert launch == [("synthetic-created", 19857)]
+        assert start_relay.await_args.args[2] == 19857
+        assert environments == {
+            "dotfiles": {"relay_env": prelude},
+            "harness": {"relay_env": prelude},
+            "hooks": {"include_on_create": True, "relay_env": prelude},
+        }
+        relay.stop.assert_awaited_once()
+        manager.disconnect.assert_awaited_once()
+
 
 class TestCreateReuseGuard:
     """`create` consults the reuse-before-create / budget planner (Phase 2 /
@@ -736,11 +787,9 @@ class TestNamespaceSeams:
         `gh` auth, network unreachable, etc.) must never be a hard
         requirement to resolve any agent -- CodeSpaces are optional, and a
         host that doesn't use them has no reason to carry that scope.
-        Confirmed live, Lambda-Core, 2026-10-04: an uncaught failure here
-        propagated as a non-zero exit from this CLI, which agent-bridge's
-        own namespace-resolver consumer surfaced as 404s for completely
-        unrelated, purely-static agents -- starving the Intelligence
-        Dampener reviewer-dispatch pool for hours. This must report zero
+        An uncaught failure here propagated as a non-zero exit from this CLI,
+        which the namespace-resolver consumer surfaced as 404s for unrelated
+        static agents. This must report zero
         CodeSpaces (exit 0) instead of crashing."""
         import json as _json
 
@@ -769,6 +818,25 @@ class TestNamespaceSeams:
         assert rc == 0
         assert _json.loads(capsys.readouterr().out)["spawn_command"] == ["ssh", "cs-a"]
         assert seen["args"] == ("cs-a", ["/p/one"], "o/r", "https://x/r.git")
+
+    def test_plugin_plan_forwards_explicit_controller_roots(self, capsys):
+        seen = {}
+
+        def plan(repo, config, *, repo_roots):
+            seen["repo"] = repo
+            seen["roots"] = repo_roots
+            return {"plugins": []}
+
+        with (
+            patch("agent_codespaces.plugin_preparation.plugin_plan", plan),
+            patch("agent_codespaces.__main__.load_merged_config", return_value=object()),
+        ):
+            assert main([
+                "plugin-plan", "synthetic", "--repo", "example/project",
+                "--plugin-root", "controller with spaces", "--plugin-root", "secondary",
+            ]) == 0
+        assert seen == {"repo": "example/project", "roots": ["controller with spaces", "secondary"]}
+        assert '"plugins": []' in capsys.readouterr().out
 
     def test_namespace_resolve_not_found_exit3(self, capsys):
         async def _spec(self, name, **kw):
