@@ -151,6 +151,25 @@ def test_secret_shaped_repository_name_remains_browsable_and_editable(native):
     assert repos.copilot_account_for("sk-ui") == "chosen"
 
 
+def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(native):
+    """A registered name longer than the shared character-length cap (native
+    `add_repo()` imposes none) must only mark that one row unsupported, never
+    abort the whole catalog for the properly named selected project."""
+    registry = repos._repos_yaml_path()
+    raw = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    overlong = "a" * 65
+    raw["repos"][overlong] = {
+        "class": "worktree", repos._current_platform(): str(native / "repository"),
+    }
+    registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    result = request("catalog")
+    assert result.returncode == 0, result.stderr
+    rows = {row["id"]: row for row in json.loads(result.stdout)["entries"]}
+    assert rows["sample"]["effective"] == "inherited" and rows["sample"]["editable"] == "true"
+    assert rows[overlong]["effective"] == "unknown" and rows[overlong]["editable"] == "false"
+    assert rows[overlong]["configuration"]["findings"]
+
+
 @pytest.mark.parametrize("change", ["registry", "global", "machine", "drop-in", "target", "login"])
 def test_stale_previews_and_old_host_refuse_writes(native, change):
     proposed = preview("sample", "sample", "set", "chosen")

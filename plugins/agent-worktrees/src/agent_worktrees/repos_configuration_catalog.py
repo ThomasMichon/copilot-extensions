@@ -154,7 +154,15 @@ def catalog(project: str, *, workspace: str = "") -> dict:
     names = sorted({project, *registry.repos, *inspection.routes})
     rows = []
     for name in names:
-        resource_name(name)
+        name_error = None
+        try:
+            resource_name(name)
+        except ConfigurationError as exc:
+            # A registered name that native `add_repo()` accepts but this
+            # shared validator rejects (e.g. longer than the login length
+            # cap) must not abort the whole catalog -- report it as an
+            # unsupported row like any other composition failure instead.
+            name_error = exc
         entry = registry.repos.get(name)
         local_path = entry.local_path() if entry else None
         registration = (
@@ -163,6 +171,8 @@ def catalog(project: str, *, workspace: str = "") -> dict:
         )
         findings = list(inspection.findings)
         try:
+            if name_error is not None:
+                raise name_error
             if composition_error is not None:
                 raise composition_error
             if inherited is None:
