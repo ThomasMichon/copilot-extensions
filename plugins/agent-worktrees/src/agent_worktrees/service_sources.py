@@ -44,7 +44,16 @@ def resolve(repo: Path, config: cfg.Config, *, deploy: bool = False) -> Path:
 
     Never select a caller's active worktree. Detached checkouts are retained
     because service installers may record their source path for later use.
+
+    ``repo`` is normalized to its actual anchor first: the installed CLI may
+    be invoked from a linked worktree of a pure bare anchor, and
+    :func:`git_ops.resolve_to_anchor` is what recognizes that layout (a bare
+    anchor's common dir points at the anchor directly, not an
+    ``<anchor>/.git`` subdirectory) -- otherwise this served the still-active,
+    unmerged worktree instead of the reviewed anchor for both synchronization
+    and source classification -- #7088.
     """
+    repo = git_ops.resolve_to_anchor(repo)
     if deploy:
         ensure_current(repo, config)
     if not bare_anchor_sync.is_bare(repo):

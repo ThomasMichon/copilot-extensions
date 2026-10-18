@@ -91,6 +91,16 @@ def resolve_to_anchor(repo_path: Path) -> Path:
     returned unchanged.  If it is a worktree (has a ``.git`` file),
     ``git rev-parse --git-common-dir`` is used to find the shared ``.git``
     directory whose parent is the anchor repo root.
+
+    A linked worktree of a **pure bare** anchor (``core.bare=true``, no
+    on-disk ``.git`` directory of its own -- agent-worktrees' own
+    worktree-class layout) has its common dir resolve directly to the
+    anchor itself, not to an ``<anchor>/.git`` subdirectory; only the
+    ordinary-clone layout nests the common dir one level down. Try that
+    nested-``.git`` shape first, then fall back to treating the common dir
+    itself as the anchor when it is bare (#7088 -- otherwise this returned
+    the still-unmerged worktree, serving stale/unreviewed content for
+    deployment and list/status from a bare anchor's linked worktree).
     """
     git_path = repo_path / ".git"
     if git_path.is_dir():
@@ -111,6 +121,14 @@ def resolve_to_anchor(repo_path: Path) -> Path:
                 anchor = common.parent
                 if (anchor / ".git").is_dir():
                     return anchor
+                bare = subprocess.run(
+                    ["git", "-C", str(common), "rev-parse", "--is-bare-repository"],
+                    capture_output=True, text=True, timeout=5,
+                    env=repository_identity_env(),
+                    **no_window_kwargs(),
+                )
+                if bare.returncode == 0 and bare.stdout.strip() == "true":
+                    return common
         except Exception:
             pass
     return repo_path

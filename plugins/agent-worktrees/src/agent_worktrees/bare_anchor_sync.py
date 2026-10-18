@@ -102,7 +102,10 @@ def sync_bare_anchor(
     ``repos sync`` still wants a repo's own client-side hooks to run), is set
     by :func:`agent_worktrees.service_sources.ensure_current` for deployment:
     a configured ``reference-transaction`` hook must not be able to run, and
-    reject, a service-source deployment sync -- #7088.
+    reject, a service-source deployment sync -- #7088. It is threaded through
+    every ref write here AND into :mod:`bare_anchor_files`'s own index/work-tree
+    operations (``update-index --refresh``, ``read-tree``) for a converted-bare
+    anchor, so a configured ``post-index-change`` hook is equally suppressed.
     """
 
     # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE must never redirect the
@@ -158,12 +161,15 @@ def sync_bare_anchor(
         return ("skipped", f"{remote}/{target} not found after fetch")
     if new_sha == old_sha:
         _cleanup_scratch()
-        return ("synced", f"{target}; files={bare_anchor_files.current_status(path, old_sha)}")
+        return (
+            "synced",
+            f"{target}; files={bare_anchor_files.current_status(path, old_sha, no_hooks=no_hooks)}",
+        )
     ancestry = _git("merge-base", "--is-ancestor", old_sha, new_sha)
     if ancestry.returncode != 0:
         _cleanup_scratch()
         return ("skipped", "not fast-forwardable (diverged)")
-    refusal = bare_anchor_files.precheck(path, old_sha, new_sha)
+    refusal = bare_anchor_files.precheck(path, old_sha, new_sha, no_hooks=no_hooks)
     if refusal:
         _cleanup_scratch()
         return (
@@ -174,7 +180,7 @@ def sync_bare_anchor(
     _cleanup_scratch()
     if updated.returncode != 0:
         return ("error", updated.stderr.strip() or "git update-ref failed")
-    files = bare_anchor_files.refresh(path, old_sha, new_sha)
+    files = bare_anchor_files.refresh(path, old_sha, new_sha, no_hooks=no_hooks)
     if files.startswith(bare_anchor_files.REFRESH_FAILED):
         # The ref already moved; the CLI reports the stale files as a warning.
         return (

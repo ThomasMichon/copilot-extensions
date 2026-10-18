@@ -115,6 +115,21 @@ def test_bare_deploy_runs_reviewed_installer_not_active_worktree(repository, bat
     assert source.exists()  # Redirector/source provenance remains usable after return.
 
 
+def test_resolve_normalizes_linked_worktree_to_bare_anchor(repository):
+    """#7088: `resolve()` must normalize a linked worktree of a pure bare
+    anchor to the anchor itself before anything else -- not stubbing
+    `_find_repo_dir()` so this exercises the real CLI entry path a linked
+    worktree hits."""
+    r = repository
+    service_sources.ensure_current(r.anchor, r.config)
+    active = r.anchor.parent / "active-for-resolve"
+    _git(r.anchor, "worktree", "add", str(active), r.reviewed)
+    source = service_sources.resolve(active, r.config, deploy=True)
+    assert source != active
+    assert _git(source, "rev-parse", "HEAD") == r.reviewed
+    assert _git(r.anchor, "rev-parse", "--is-bare-repository") == "true"
+
+
 def test_bare_sync_suppresses_reference_transaction_hook(repository):
     """#7088: a deployment sync of a bare anchor must not let a configured
     ``reference-transaction`` hook run -- it could reject or side-effect the
@@ -230,6 +245,29 @@ def test_bare_converted_clone_keeps_configuration(repository):
     assert source != converted
     assert _git(source, "rev-parse", "HEAD") == r.reviewed
     assert _git(converted, "config", "--get", "core.bare") == "true"
+
+
+def test_bare_converted_clone_suppresses_post_index_change_hook(repository):
+    """#7088: `no_hooks` must also cover the converted-bare file sync in
+    `bare_anchor_files` (`update-index --refresh`, `read-tree -m -u`), not
+    only the direct fetch/ref-update suppression in `sync_bare_anchor`."""
+    r = repository
+    converted = r.anchor.parent / "converted-hook"
+    _git(r.anchor.parent, "clone", "-q", str(r.upstream), str(converted))
+    _git(converted, "config", "core.bare", "true")
+    hooks = r.anchor.parent / "converted-hooks"
+    hooks.mkdir()
+    marker = r.anchor.parent / "converted-hook-ran"
+    hook = hooks / "post-index-change"
+    hook.write_text("#!/bin/sh\n" + f"touch '{marker.as_posix()}'\n", encoding="utf-8")
+    hook.chmod(0o755)
+    _git(converted, "config", "core.hooksPath", str(hooks))
+    (r.upstream / "converted-update.txt").write_text("reviewed update\n", encoding="utf-8")
+    _git(r.upstream, "add", ".")
+    _git(r.upstream, "commit", "-qm", "Reviewed converted update")
+    service_sources.ensure_current(converted, r.config)
+    assert not marker.exists()
+    assert (converted / "converted-update.txt").read_text(encoding="utf-8") == "reviewed update\n"
 
 
 def test_lost_checkout_creation_race_revalidates_published_source(repository, monkeypatch, caplog):
