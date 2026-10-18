@@ -2034,7 +2034,12 @@ EOF within that byte bound, rejecting NUL anywhere (including after the newline)
 before Bash can discard it. Missing or extra newlines and malformed records
 never authorize admission, stale deletion or owner-checked EXIT cleanup. Older
 dangling numeric PID symlinks remain readable; symlinks resolving to filesystem
-nodes are refused, not erased as stale PID evidence.
+nodes are refused, not erased as stale PID evidence. Legacy `readlink` output is
+captured in a private file, never normalized by command substitution before
+validation. It must contain one digit-only target of at most 63 bytes followed
+by exactly the utility's one newline terminator. Embedded or trailing newlines,
+carriage returns, NUL, oversized output, missing terminators and utility errors
+are refused without deleting the original link or authorizing EXIT cleanup.
 
 The fallback requires Bash, `mktemp` and the standard `link` utility and
 same-filesystem hard-link support; missing utilities fail closed before

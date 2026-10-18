@@ -34,8 +34,8 @@ host deployment are separate objectives.
 - **Host (owns PRs):** Integration coordinator.
 - **Delegates:** Correctness worker owns local changes; no child agents.
 - **Handoff:** validated local changes return to the coordinator before commit
-  or publication. The NUL-validation follow-up is locally validated and awaits
-  independent review; integration retains publication authority.
+  or publication. The legacy-target raw-byte follow-up is locally validated
+  and awaits independent review; integration retains publication authority.
 - **Binding replacement:** explicitly replace the worker's broad Phase 3a
   binding with this canonical effort, participant `Correctness worker`, slice
   `Repair and validation`. The parent remains Active and retains all telemetry
@@ -103,6 +103,9 @@ or host changes are authorized; integration retains final review and publication
   then validate raw receipt bytes before any lossy Bash text parsing.
 - [x] Add mirrored NUL, newline/byte-bound, typed-owner compatibility and EXIT
   regressions; repeat the complete targeted suites and real transaction stress.
+- [x] Reproduce legacy trailing-newline target normalization, validate private
+  raw `readlink` output before command substitution, and repeat all four
+  consumers' malformed-target, compatibility, EXIT and byte-bound regressions.
 
 ### Integration and released-source proof
 
@@ -120,7 +123,7 @@ or host changes are authorized; integration retains final review and publication
 - [x] Before-fix actual-script regression fails with overlapping starts and successful children.
 - [x] After-fix suites cover deterministic overlap, fresh/stale contention, malformed owners,
   dead admission mutexes, timeouts, release failures and EXIT ownership.
-- [x] Four current targeted suites: 208 passed; 12 unchanged PowerShell behavior tests skipped
+- [x] Four current targeted suites: 316 passed; 12 unchanged PowerShell behavior tests skipped
   because the isolated Linux image has no PowerShell.
 - [x] Real-script stress: 24 six-child fresh/stale schedules, 144 serialized transactions.
 - [x] Ruff F/E9, four shell syntax checks, install contract (13 plugins), module guard
@@ -134,6 +137,11 @@ or host changes are authorized; integration retains final review and publication
   deletion; NUL-corrupted current-owner receipts also survive EXIT cleanup.
 - [x] Positive regular live/dead owners, legacy dangling PID symlinks, exact
   64-byte receipts and strict newline framing pass in all four matching consumers.
+- [x] Legacy targets with leading/internal/trailing newline or CR, multiple
+  trailing newlines, overlong targets, malformed utility output and utility
+  failure are refused with original target bytes/inodes preserved. Malformed
+  current-owner legacy links survive EXIT cleanup; digit-only legacy links
+  remain compatible within the bound.
 - [ ] Independent coordinator validation and required CI confirm the final reviewed repair head.
 - [ ] Released-source proof confirms every repaired installer, not merely an unrelated green run.
 
@@ -141,11 +149,87 @@ or host changes are authorized; integration retains final review and publication
 
 This records an already-authorized bounded correctness slice, not a new
 architecture or policy campaign. Review and publication remain coordinator-owned.
-The NUL follow-up changes only the four matching receipt readers, their mirrored
-tests, the install contract and this effort. Existing four-plugin patch change
-intent and version metadata remain unchanged.
+The legacy-target follow-up changes only the four matching readers' legacy
+branches, their mirrored tests, the install contract and this effort. The
+published typed-receipt NUL validation is unchanged. Existing four-plugin patch
+change intent and version metadata remain unchanged.
 
 ## Journal
+
+### 2026-10-14 - Legacy target raw-byte residual corrected locally
+
+- The actual Balanced provider review `5514428890` on #6551 at
+  `1c78ce53d1a4122c0b22e858f98e67760d9530f3` resolved the four prior NUL
+  findings but named four additional Medium findings in its body: command
+  substitution trimmed trailing newlines from legacy dangling PID targets.
+  The body's findings remain a blocking observation despite the overview's
+  zero-open-finding counter. This worker made no provider mutation.
+- The permitted bounded API probe returned `linux`; the already-present base
+  image retained the recorded identity. No Docker startup, diagnosis, restart,
+  WSL operation, image update or host remediation was attempted.
+- Before changing source, **16 of 16 actual Bash negatives** reproduced across
+  the four scripts: digit targets with one or two trailing newlines were
+  normalized to a dead PID, stale-deleted and followed by successful admission;
+  malformed current-PID targets were also deleted by EXIT cleanup.
+  An initial pytest-importing reproduction exhausted its 120-second bound and
+  is not counted as evidence; the direct standard-library reproduction then
+  completed within its separate 90-second bound.
+- Only the legacy branches now capture standard `readlink` output in a private
+  regular file. A bounded NUL-delimited byte read requires EOF, exactly one
+  utility newline terminator and an otherwise nonempty digit-only target.
+  Failed utility calls never publish owner evidence. Original links are
+  untouched; the private capture is removed on acceptance and refusal.
+  No GNU-only flag, new dependency, interpreter or lock protocol was added.
+- All four **complete** transaction-lock modules passed: **316 passed,
+  12 unchanged PowerShell skips**. The 108 new cases cover both shared paths
+  with leading/internal/trailing newline and CR, multiple newline and CRLF
+  targets, original target/inode preservation and no admission; current-owner
+  EXIT refusal; 63-digit acceptance and 64/1024-digit refusal; missing/extra
+  utility terminators, NUL output and failure despite a numeric partial output.
+  Existing digit-only legacy live/dead compatibility remains exercised.
+- Successful full selections were agent-mcp plus agent-containers (**158 passed,
+  6 skipped, 212.79 seconds**), agent-vault (**79 passed, 3 skipped, 91.76
+  seconds**) and agent-ssh (**79 passed, 3 skipped, 89.21 seconds**). Each used
+  the unchanged pytest arguments `-q --tb=short -c /dev/null --noconftest
+  --import-mode=importlib -p no:cacheprovider -o
+  'markers=guard: static installer guard'` through `pytest.main`, selecting
+  each named plugin's `tests/test_install_transaction_lock.py`.
+- Direct dependency import from the read-only host bind exhausted a 240-second
+  run; copying that dependency tree through the bind also exhausted 240 seconds.
+  Neither is counted as a pass. The existing 515 dependency files were instead
+  transported as one read-only archive and unpacked solely into each disposable
+  container's tmpfs before importing pytest. No package installation, version
+  change, host runtime write or image provisioning occurred. The temporary
+  transport archive is worker-owned cleanup, not persistent repository state.
+- Every Linux invocation used the existing image with `--pull=never`, `--rm`,
+  no network, read-only source/root, all capabilities dropped, 128 PIDs,
+  512 MiB memory, a 128 MiB temporary filesystem and an explicit timeout.
+  Successful suites retained the 240-second bound; no credential or Docker
+  socket was mounted.
+- Four actual `bash -n` checks passed. The four complete owner readers are
+  byte-identical, with SHA-256
+  `136b9d5b3a4bd063e0a51bd6b661b5afcf033abf07fc09f791768d8d6d5b1acb`.
+  A direct comparison with the published head confirmed that all four regular
+  typed-receipt validation paths remain byte-for-byte unchanged. All prior
+  NUL, exact-path, FIFO, directory/race, flock, timeout and dead-mutex tests pass.
+- Fresh/stale actual-script stress passed again: **24 schedules and 144
+  serialized transactions**, with each transaction root completely empty
+  afterward. Existing Ruff F/E9, the 13-plugin install-contract check, module
+  guard and diff whitespace checks passed without baseline changes.
+- **Documentation impact:** the authoritative install contract now states the
+  legacy raw-output bound and exact terminator/digit checks. This effort records
+  the material residual and current local proof. This is below-altitude
+  enforcement of the established malformed-owner contract, not a new protocol
+  or a vision change. The existing four-plugin patch changefile remains intact.
+- **Validation tiers:** static/unit and actual Linux consumer integration passed,
+  including fresh lock roots. Native BSD/macOS and PowerShell execution remain
+  unproved. Full runtime provisioning, host installation, paid trials and other
+  feature implementation were unauthorized and not attempted.
+- Source is locally modified only, with no worker commit, rebase, push or PR
+  write. Independent review of this material legacy correction, publication,
+  current-head required CI, merge and released-source proof remain parent-owned
+  and open. This bounded effort remains **Active**; previous NUL acceptance and
+  published-head checks do not substitute for those gates.
 
 ### 2026-10-14 - Independent NUL correction verification closed the named findings
 

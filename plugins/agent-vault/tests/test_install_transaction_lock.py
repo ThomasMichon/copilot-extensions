@@ -655,6 +655,116 @@ def test_posix_pid_fallback_record_reader_refuses_unknown_content(tmp_path: Path
 
 
 @pytest.mark.parametrize("leaf", [".install.lock.pid", ".install.lock.pid.reap"])
+@pytest.mark.parametrize("shape", [
+    "trailing-newline", "trailing-newlines", "trailing-cr", "trailing-crlf",
+    "internal-newline", "internal-cr", "leading-newline", "leading-cr",
+])
+def test_posix_pid_fallback_legacy_target_never_admits_or_mutates(
+    tmp_path: Path, leaf: str, shape: str,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    path = install_dir / leaf
+    owner = str(_dead_pid())
+    target = {
+        "trailing-newline": owner + "\n", "trailing-newlines": owner + "\n\n",
+        "trailing-cr": owner + "\r", "trailing-crlf": owner + "\r\n",
+        "internal-newline": owner[:1] + "\n" + owner[1:],
+        "internal-cr": owner[:1] + "\r" + owner[1:],
+        "leading-newline": "\n" + owner, "leading-cr": "\r" + owner,
+    }[shape]
+    path.symlink_to(target)
+    identity = path.lstat()
+    result = _run_sh_block(
+        bash, install_dir,
+        f'if _read_install_lock_owner "{path}"; then echo trusted; else echo untrusted; fi\n'
+        "if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi",
+        env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["untrusted", "refused"]
+    assert os.readlink(path) == target
+    assert (path.lstat().st_dev, path.lstat().st_ino) == (identity.st_dev, identity.st_ino)
+    assert sorted(node.name for node in install_dir.iterdir()) == [leaf]
+
+
+@pytest.mark.parametrize("suffix", [r"\n", r"\n\n", r"\r", r"\r\n"])
+def test_posix_pid_fallback_legacy_target_never_authorizes_exit_cleanup(
+    tmp_path: Path, suffix: str,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    path = install_dir / ".install.lock.pid"
+    result = _run_sh_block(
+        bash, install_dir,
+        "_enter_install_lock 5 || exit 3\n"
+        f'rm -f "{path}"; ln -s "$$"$\'{suffix}\' "{path}"\n'
+        '_exit_install_lock\necho "$$"',
+        env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert os.readlink(path) == result.stdout.strip() + suffix.encode("ascii").decode("unicode_escape")
+    assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
+
+
+@pytest.mark.parametrize(("digits", "trusted"), [(63, True), (64, False), (1024, False)])
+def test_posix_pid_fallback_legacy_target_reader_enforces_byte_bound(
+    tmp_path: Path, digits: int, trusted: bool,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    path = install_dir / ".install.lock.pid"
+    target = "1" * digits
+    path.symlink_to(target)
+    identity = path.lstat()
+    result = _run_sh_block(
+        bash, install_dir, f'if ! _read_install_lock_owner "{path}"; then echo refused; fi',
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (target if trusted else "refused")
+    assert os.readlink(path) == target
+    assert (path.lstat().st_dev, path.lstat().st_ino) == (identity.st_dev, identity.st_ino)
+    assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
+
+
+@pytest.mark.parametrize(("ending", "status"), [
+    ("", 0), (r"\n\n", 0), (r"\0\n", 0), (r"\n", 1),
+])
+def test_posix_pid_fallback_legacy_reader_refuses_malformed_or_failed_utility_output(
+    tmp_path: Path, ending: str, status: int,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    path = install_dir / ".install.lock.pid"
+    target = str(_dead_pid())
+    path.symlink_to(target)
+    identity = path.lstat()
+    result = _run_sh_block(
+        bash, install_dir,
+        f"readlink() {{ printf '%s{ending}' '{target}'; return {status}; }}\n"
+        f'if _read_install_lock_owner "{path}"; then echo trusted; else echo untrusted; fi\n'
+        "if _enter_install_lock 1; then echo entered; _exit_install_lock; else echo refused; fi",
+        env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["untrusted", "refused"]
+    assert os.readlink(path) == target
+    assert (path.lstat().st_dev, path.lstat().st_ino) == (identity.st_dev, identity.st_ino)
+    assert sorted(node.name for node in install_dir.iterdir()) == [path.name]
+
+
+@pytest.mark.parametrize("leaf", [".install.lock.pid", ".install.lock.pid.reap"])
 @pytest.mark.parametrize("position", [
     "prefix-start", "prefix-body", "pid-start", "pid-body", "before-newline", "after-newline",
 ])
