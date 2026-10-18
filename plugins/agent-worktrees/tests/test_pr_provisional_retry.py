@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, git_ops, pr_ops, pr_publication_state, tracking
+from agent_worktrees import finalize, git_ops, pr_ops, pr_publication_state, pr_publish, tracking
 
 pytestmark = pytest.mark.contract("agent_worktrees.pr_publish.publication_state")
 
@@ -255,3 +255,29 @@ def test_failed_retry_allocation_outranks_an_earlier_same_second_settlement(
     # A no-selector retry must target B (the most recently attempted PR),
     # not fall back to the earlier, already-settled A.
     assert record.active_pr().branch == "pr/b"
+
+
+def test_legacy_feature_branch_allocation_outranks_an_earlier_same_second_settlement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The legacy feature-branch publication path (``prepare_existing_publication``,
+    used by the already-on-the-feature-branch re-run path) must share the same
+    monotonic-ordering policy as fresh/retry allocation and settlement (#7114
+    follow-up) -- it was still stamping a plain ``_now_iso()`` at allocation,
+    letting it sort *before* an unrelated sibling settled moments earlier in
+    the same whole-second clock tick.
+    """
+    frozen = "2026-06-01T10:00:51"
+    monkeypatch.setattr(tracking, "_now_iso", lambda: frozen)
+
+    settled_pr = tracking.PRRecord(state="creating", branch="pr/a", opened_at=frozen)
+    record = _bare_record(prs=[settled_pr])
+    pr_publication_state.settle_creation(record, settled_pr)
+    assert record.active_pr().branch == "pr/a"
+
+    legacy_pr = pr_publish.prepare_existing_publication(
+        record, None, "pr/legacy", cfg.PRConfig(), None,
+    )
+    record.prs.append(legacy_pr)
+
+    assert record.active_pr().branch == "pr/legacy"
