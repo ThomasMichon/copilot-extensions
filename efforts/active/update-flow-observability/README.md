@@ -225,6 +225,35 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-17 - Keep standalone build guards independent of runtime imports
+
+- The approved candidate's actual CI failed seven installer-engine guard
+  cases because their standalone file loader still addressed the Worktrees
+  compatibility shim after the capability implementation moved. An
+  installed local runtime could mask that new import dependency; this was
+  a regression caused by the move, not an unrelated failure to bypass.
+- The guard now loads the shared stdlib-only capability source directly.
+  A new real `python -I -S -B` regression first reproduced the missing
+  `update_telemetry` import, then verified a real packaged declaration with
+  neither runtime package imported. Existing declaration, rewrite, tamper
+  and whole-payload assertions are retained.
+- CI's merge tree contained newer canonical/materialized fixture coverage
+  from #7124. The smaller pre-sync local result was not accepted as that
+  matrix. Committed the repair, retained a backup, and used managed sync
+  to pull forward 29 upstream commits. All follow-up patches remained
+  equivalent; upstream fixture expansions were preserved, not copied away
+  or dropped from this PR.
+- The complete synchronized 47-case guard suite passed on Windows in
+  73.39 seconds and on an exact-code native Linux snapshot in 4.21 seconds,
+  including the new bare-interpreter proof. An earlier concurrent Windows
+  attempt hit the unchanged 30-second item bound and recorded an 18-second
+  filesystem scan; it is not a pass. Final validation ran serially, with
+  no item/group/resource limit increase or fixture/assertion removal.
+- Installer-engine, installation-context and payload generation checks
+  remained synchronized after pulling forward. The prior approval applies
+  to the old head; the repaired, synchronized candidate still owes fresh
+  review, hosted CI and an actual merge before this slice is landed.
+
 ### 2026-10-17 - Classify unattributed-source diagnostics as warnings
 
 - Review found the existing unattributed-source admission diagnostic was

@@ -160,6 +160,8 @@ configuration or an alternative signature/trust authority.
 `update_telemetry.capabilities` owns the shared declaration probe; payload
 generation copies that canonical source without depending on a plugin's
 runtime package.
+Standalone build/validation callers load this stdlib-only source directly;
+the Worktrees compatibility re-export is a runtime API with its declared dependencies.
 `tools/sync-installer-engine.py` owns the helper copies and declarations.
 Re-run it when a declaring installer changes. Materialization refreshes the
 declaration after rewriting an engine reference and refuses linked, missing
