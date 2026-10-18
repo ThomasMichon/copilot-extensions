@@ -223,3 +223,35 @@ def test_fresh_publish_outranks_an_earlier_same_second_resumed_retry(
     pr_publication_state.settle_creation(record, fresh_pr)
 
     assert record.active_pr().branch == "pr/c"
+
+
+def test_failed_retry_allocation_outranks_an_earlier_same_second_settlement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provisional attempt allocated after an earlier settle in the same
+    whole-second clock tick must still sort later than that settle (#7114
+    follow-up): successful A -> failed B -> a no-selector retry must resume
+    B, not fall back to the earlier, already-settled A.
+    """
+    frozen = "2026-06-01T10:00:51"
+    monkeypatch.setattr(tracking, "_now_iso", lambda: frozen)
+
+    # A: an attempt settles (publishes) successfully.
+    settled_pr = tracking.PRRecord(state="creating", branch="pr/a", opened_at=frozen)
+    record = _bare_record(prs=[settled_pr])
+    pr_publication_state.settle_creation(record, settled_pr)
+    assert record.active_pr().branch == "pr/a"
+
+    # B: a distinct --new attempt is allocated moments later -- still within
+    # the same whole-second tick -- then fails before ever settling (e.g. a
+    # rebase conflict), leaving it unpublished.
+    failed_pr = tracking.PRRecord(
+        state="creating", branch="pr/b",
+        opened_at=pr_publication_state.monotonic_opened_at(record),
+    )
+    record.prs.append(failed_pr)
+    assert pr_publication_state.unpublished(failed_pr)
+
+    # A no-selector retry must target B (the most recently attempted PR),
+    # not fall back to the earlier, already-settled A.
+    assert record.active_pr().branch == "pr/b"

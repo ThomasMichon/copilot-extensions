@@ -138,23 +138,31 @@ def retry_candidate(
     return active
 
 
-def settle_creation(record: tracking.WorktreeRecord, target: tracking.PRRecord) -> None:
-    """Make a successfully published attempt the default without changing its peers.
+def monotonic_opened_at(record: tracking.WorktreeRecord) -> str:
+    """Return an ``opened_at`` guaranteed later than every PR already on this record.
 
-    A resumed retry's ``opened_at`` can be bumped ahead of ``_now_iso()``'s
-    whole-second resolution to outrank its own earlier attempts (see below).
-    A *fresh* publish that previously kept its pre-push ``_now_iso()`` stamp
-    unconditionally could therefore be out-ranked by an unrelated sibling that
-    resumed moments earlier in the same second -- a later, genuinely newer
-    publication would lose `active_pr()` to an older one. Apply the same
-    monotonic-ordering policy (advance past every sibling's ``opened_at``,
-    never behind real time) to every settle, fresh or resumed, so whichever
-    PR actually publishes last always sorts last.
+    ``_now_iso()`` has whole-second resolution, so two record mutations in the
+    same tick would otherwise tie (or, once one of them is bumped past that
+    resolution, sort *before* a genuinely later sibling). Advance past the
+    current max by one microsecond when real time hasn't caught up to it yet.
+    Shared by every ``opened_at`` assignment -- provisional allocation and
+    settlement alike -- so no lifecycle stage can issue a timestamp that is
+    out of order relative to its own record's siblings.
     """
-    target.state = "open"
     latest = max((pr.opened_at or "" for pr in record.prs), default="")
     now = tracking._now_iso()
-    target.opened_at = (
+    return (
         (datetime.fromisoformat(latest) + timedelta(microseconds=1)).isoformat()
         if latest and latest >= now else now
     )
+
+
+def settle_creation(record: tracking.WorktreeRecord, target: tracking.PRRecord) -> None:
+    """Make a successfully published attempt the default without changing its peers.
+
+    Applies the same monotonic-ordering policy as :func:`monotonic_opened_at`
+    to every settle, fresh or resumed, so whichever PR actually publishes last
+    always sorts last.
+    """
+    target.state = "open"
+    target.opened_at = monotonic_opened_at(record)

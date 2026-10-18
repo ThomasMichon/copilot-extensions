@@ -777,12 +777,12 @@ def create_pr(
                     target_pr.head_observed_api_base = ""
                 target_pr.repo = target_repo
             if not target_pr.opened_at:
-                target_pr.opened_at = tracking._now_iso()
+                target_pr.opened_at = pr_publication_state.monotonic_opened_at(record)
         else:
             target_pr = PRRecord(
                 state="creating", branch=feature_branch,
                 provider=prcfg.provider, repo=default_pr_repo,
-                opened_at=tracking._now_iso(),
+                opened_at=pr_publication_state.monotonic_opened_at(record),
             )
             _want_attribution = (
                 prcfg.source_attribution if attribution is None else attribution
