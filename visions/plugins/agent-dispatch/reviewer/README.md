@@ -67,12 +67,16 @@ genuinely domain-specific.
 
 ### portfolio-consultation
 
-Every materially new PR assessment or revision produces a compact,
-evidence-backed summary and consultation request to the standing
+For reviewer loops participating in an adopted portfolio charter, every
+materially new PR assessment or revision produces a compact, evidence-backed
+summary and consultation request to the standing
 [portfolio Orchestrator](../../../agent-fabric/agentic-factory/README.md#standing-portfolio-oversight):
 the change's intent, relevant vision and policy context, recommendation, and
 uncertainty or dependencies. Consultation is mandatory; universal synchronous
 permission and an immediate personal reply for every PR are not.
+Standalone reviewer loops remain independent of portfolio orchestration;
+adopting consultation composes the layers rather than making a higher layer
+a prerequisite for review.
 
 The reviewer continues independent investigation, checks, and drafting while
 consultation is pending. Clearly routine work may proceed under applicable
