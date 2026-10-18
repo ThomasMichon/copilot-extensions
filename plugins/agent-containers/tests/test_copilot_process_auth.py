@@ -23,10 +23,13 @@ from agent_containers.ssh_transport import cleanup_remote_env as real_cleanup_re
 
 @pytest.fixture
 def launch_seams(monkeypatch):
+    def stage(_args, target, *, prepared_context, **kwargs):
+        prepared_context["workspace"] = target.workspace_folder
+        return "PREPARATION_GATE && "
+
     monkeypatch.setattr("venue_copilot.live_session_for", lambda handle: {})
     monkeypatch.setattr("agent_containers.plugin_preparation.prepare_plugins", lambda *a, **kw: [])
-    monkeypatch.setattr("agent_containers.plugin_preparation.stage_for_attached_launch",
-                        lambda *a, **kw: "PREPARATION_GATE && ")
+    monkeypatch.setattr("agent_containers.plugin_preparation.stage_for_attached_launch", stage)
     config = ContainersConfig(forward_gh_token=True, relay_enabled=False)
     fleet = FleetConfig(copilot_cli_account="inference-user")
     target = SimpleNamespace(config=config, fleet=fleet, user="vscode",
