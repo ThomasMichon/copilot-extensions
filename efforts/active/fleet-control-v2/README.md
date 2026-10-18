@@ -1774,3 +1774,32 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   non-provisioning refinement; live external-venue activation remains outside
   the authorized slice. Current-head hosted checks and fresh review are still
   required. The parent remains Active with its remaining gates unchanged.
+
+### 2026-10-18 - Reconciled admission PR and shared CI dependency
+
+- Resumed the original #7099 source after recovery was authorized. Retained
+  the published head and a local backup, then used the managed sync flow to
+  rebase onto current `dev`. Admission, controller, transport and their
+  regression-test files are unchanged by that reconciliation; unrelated
+  upstream fleet changes are retained.
+- The old Dispatch job and its one targeted retry both exceeded their
+  twelve-minute job boundary after passing suite summaries. Their cancelled
+  jobs and failed required aggregate remain failures, not successful validation.
+  Shared pipeline recovery is coordinated under #7172 with its existing owner;
+  this effort does not take over that source or increase any deadline.
+- The reconciled base includes #7127's coverage-selected Dispatch PR lane and
+  complete push/manual partitions. Unusable coverage evidence still selects
+  the full portfolio in the single PR row, so that fallback's actual bounded
+  execution is explicitly part of the shared dependency, not presumed repaired.
+  #7162's hosted-review routing repair is separate from ordinary CI.
+- Revalidated the unchanged required selectors and 120-second suite limits:
+  planner 422 passed in 26.86 seconds, Gateway 435 passed in 62.43 seconds,
+  and separate Gateway processes four passed in 23.43 seconds. The larger
+  Gateway count includes retained upstream SSH-policy/runtime coverage.
+  These local results do not replace fresh exact-head review or required
+  hosted checks after publication.
+- This is source reconciliation and existing-contract validation, not a new
+  provider adapter, enrollment or deployment. No installer behavior changed,
+  so no new installer clean-room proof is claimed; no live external role
+  activation is authorized. The full parent remains Active with every
+  remaining Plan and Validation Plan obligation unchanged.
