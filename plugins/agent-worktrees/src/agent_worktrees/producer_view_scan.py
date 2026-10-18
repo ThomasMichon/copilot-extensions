@@ -104,17 +104,20 @@ def scan_ownership(
     # In an installation-cell (namespaced) context, cfg.project_dir() resolves
     # each project's ledger through repos.yaml (project_state's strict remote
     # lookup). Stamp it too, so a change to repos.yaml mid-scan is detected by
-    # the same race check as the projects registry and per-project records --
-    # a malformed/duplicate entry is independently surfaced per-project below
-    # via cfg.project_dir()'s own strict read, so a stamp failure here is not
-    # itself fatal.
+    # the same race check as the projects registry and per-project records.
+    # A rejected input here (e.g. a symlink/reparse point) must be recorded
+    # as uncertainty, not silently discarded: cfg.project_dir()'s own strict
+    # read_text() would still follow that same link and could otherwise
+    # report a falsely complete snapshot built on a routing input this scan
+    # itself refused. Only relevant when there is at least one project to
+    # route -- preserves the explicit-empty-registry (not-observed) result.
     from . import project_state, registry_paths
-    if project_state.namespaced():
+    if project_state.namespaced() and projects:
         try:
             repos_path = registry_paths.registry_path("repos.yaml")
             stamps.append((repos_path, _stamp(repos_path), False))
-        except _READ_ERRORS:
-            pass
+        except _READ_ERRORS as exc:
+            issues.append(issue("registry-unavailable", "repos", str(exc)))
     for project in sorted(projects, key=str):
         if not _component(project) or not isinstance(projects[project], dict):
             issues.append(issue("invalid-project", str(project), "invalid project name or registry entry"))

@@ -426,6 +426,49 @@ def test_ownership_scan_survives_a_duplicate_remote_entry(
     assert issues_by_subject.get("bad") == "project-unavailable"
 
 
+def test_ownership_scan_reports_uncertainty_for_a_linked_repos_registry(
+    monkeypatch, tmp_path
+):
+    """Installation-cell regression (copilot-extensions PR #7102): a
+    symlink/reparse-point repos.yaml must not be silently skipped while
+    cfg.project_dir() still follows it through its own strict read -- it
+    must be recorded as uncertainty (an incomplete snapshot with suppressed
+    current owners), not a falsely complete result built on a routing input
+    this scan itself refused."""
+    from agent_worktrees import installer, producer_view_scan
+
+    payload = _payload(tmp_path, "payload")
+    context, _plugin_root = _stamp(
+        tmp_path / "durable",
+        payload,
+        marketplace="ownership-scan-link",
+        repository="Example-Org/Ownership-Scan-Link-Marketplace",
+    )
+    _select(monkeypatch, context, payload)
+    _register_repo("good", "https://github.com/Example-Org/Good-Repo.git")
+    good_state = project_state.ensure_project_state("good")
+    (good_state / "worktrees").mkdir(parents=True, exist_ok=True)
+
+    repos_path = registry_paths.registry_path("repos.yaml")
+    real = repos_path.with_name("repos-real.yaml")
+    repos_path.rename(real)
+    try:
+        repos_path.symlink_to(real)
+    except OSError:
+        pytest.skip("symlink creation unavailable on this platform")
+    installer.projects_yaml_path().parent.mkdir(parents=True, exist_ok=True)
+    installer.projects_yaml_path().write_text(
+        "projects:\n  good: {}\n", encoding="utf-8",
+    )
+
+    snapshot = producer_view_scan.scan_ownership()
+
+    assert not snapshot["complete"]
+    issues_by_subject = {i["subject"]: i["code"] for i in snapshot["issues"]}
+    assert issues_by_subject.get("repos") == "registry-unavailable"
+    assert all(e["current_owner"] is None for e in snapshot["entries"])
+
+
 def test_same_repository_has_same_id_but_isolated_cell_state(
     monkeypatch, tmp_path
 ):
