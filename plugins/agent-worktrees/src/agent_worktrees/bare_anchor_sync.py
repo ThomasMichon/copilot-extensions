@@ -63,7 +63,7 @@ def branch_skip_reason(
 
 
 def sync_bare_anchor(
-    path: str, declared_branch: str | None, *, remote: str = "origin",
+    path: str, declared_branch: str | None, *, remote: str = "origin", no_hooks: bool = False,
 ) -> tuple[str, str]:
     """Fast-forward a bare worktree-class anchor's branch ref directly.
 
@@ -97,12 +97,20 @@ def sync_bare_anchor(
     (:mod:`bare_anchor_files`): a stale index, local edits, or an untracked or
     ignored path in the way refuse BEFORE the ref moves. The detail always
     ends with ``; files=<status>`` once the ref is known to be current.
+
+    ``no_hooks``, opt-in and ``False`` by default (an interactive/manual
+    ``repos sync`` still wants a repo's own client-side hooks to run), is set
+    by :func:`agent_worktrees.service_sources.ensure_current` for deployment:
+    a configured ``reference-transaction`` hook must not be able to run, and
+    reject, a service-source deployment sync -- #7088.
     """
 
     # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE must never redirect the
     # ref move or the fetch to another repository: always act on `path`.
     def _git(*args: str):
-        return git_ops.git(*args, cwd=path, check=False, isolated_repository=True)
+        return git_ops.git(
+            *args, cwd=path, check=False, isolated_repository=True, no_hooks=no_hooks,
+        )
 
     target, skip = _branch_selection(path, declared_branch, bare=True)
     if skip:
@@ -135,7 +143,7 @@ def sync_bare_anchor(
             "fetch", "--quiet", "--no-tags", remote,
             f"+refs/heads/{target}:{scratch_ref}",
             cwd=path, check=False, timeout=180, isolated_repository=True,
-            auth_acquisition=True,
+            auth_acquisition=True, no_hooks=no_hooks,
         )
     finally:
         for refspec in saved_refspecs:

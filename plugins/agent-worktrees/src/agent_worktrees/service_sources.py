@@ -18,7 +18,9 @@ def ensure_current(repo: Path, config: cfg.Config) -> None:
     branch = config.default_repo.default_branch or "master"
     output.info(f"Syncing anchor repo ({remote}/{branch})...")
     if bare_anchor_sync.is_bare(repo):
-        state, detail = bare_anchor_sync.sync_bare_anchor(str(repo), branch, remote=remote)
+        state, detail = bare_anchor_sync.sync_bare_anchor(
+            str(repo), branch, remote=remote, no_hooks=True,
+        )
         files = bare_anchor_files.status_of(detail)
         if state != "synced" or (
             files is not None and files not in bare_anchor_files.QUIET_STATUSES

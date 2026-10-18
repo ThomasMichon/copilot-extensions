@@ -115,6 +115,27 @@ def test_bare_deploy_runs_reviewed_installer_not_active_worktree(repository, bat
     assert source.exists()  # Redirector/source provenance remains usable after return.
 
 
+def test_bare_sync_suppresses_reference_transaction_hook(repository):
+    """#7088: a deployment sync of a bare anchor must not let a configured
+    ``reference-transaction`` hook run -- it could reject or side-effect the
+    fetch/update-ref ref writes :func:`bare_anchor_sync.sync_bare_anchor`
+    performs, same as the existing non-bare ``post-merge`` suppression."""
+    r = repository
+    hooks = r.anchor.parent / "bare-hooks"
+    hooks.mkdir()
+    marker = r.anchor.parent / "bare-hook-ran"
+    hook = hooks / "reference-transaction"
+    hook.write_text("#!/bin/sh\n" + f"touch '{marker.as_posix()}'\n", encoding="utf-8")
+    hook.chmod(0o755)
+    _git(r.anchor, "config", "core.hooksPath", str(hooks))
+    (r.upstream / "new.txt").write_text("reviewed update\n", encoding="utf-8")
+    _git(r.upstream, "add", ".")
+    _git(r.upstream, "commit", "-qm", "Reviewed update")
+    service_sources.ensure_current(r.anchor, r.config)
+    assert not marker.exists()
+    assert _git(r.anchor, "rev-parse", "main") == _git(r.upstream, "rev-parse", "main")
+
+
 def test_bare_list_status_and_cache_reuse(repository, capsys):
     r = repository
     service_sources.ensure_current(r.anchor, r.config)
