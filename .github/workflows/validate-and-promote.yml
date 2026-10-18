@@ -323,8 +323,7 @@ jobs:
         # agent-dispatch -- completing this pilot's full 9-plugin matrix.
         # `baseline.py`
         # chunks a suite larger than its own `--max-files-per-chunk`
-        # (default 25, matching `run-plugin-tests.py`'s own sub-suite
-        # chunking) into sequential pytest processes and merges the
+        # (default 5) into independent pytest processes and merges the
         # results, rather than collecting an entire suite in one process
         # -- needed for agent-mcp's own 54-file suite, whose real
         # process/watchdog-management tests otherwise exceeded a
@@ -366,6 +365,8 @@ jobs:
         # this `if:` list and the `promote` job's matching one below.
         if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees","agent-dispatch"]'), matrix.plugin)
         continue-on-error: true
+        env:
+          BASELINE_WORKERS: ${{ (matrix.plugin == 'agent-worktrees' || matrix.plugin == 'agent-dispatch') && '2' || '1' }}
         run: |
           plugin="${{ matrix.plugin }}"
           python tools/coverage_guided_selection/baseline.py \
@@ -374,6 +375,7 @@ jobs:
             --plugin "${plugin}" \
             --project-dir "plugins/${plugin}" \
             --measured-commit "${{ needs.gate.outputs.sha }}" \
+            --workers "$BASELINE_WORKERS" \
             --out "${plugin}.json"
       - name: Upload coverage baseline - ${{ matrix.plugin }}
         if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees","agent-dispatch"]'), matrix.plugin)
