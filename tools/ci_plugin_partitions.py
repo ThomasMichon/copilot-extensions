@@ -3,13 +3,127 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import json
+import math
 from pathlib import Path
 import re
 
 _PLUGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 _FILES_PER_GROUP = 25
 _SMOKE_PARTITIONS = {"agent-dispatch": 3}
+_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def _hosted(reason: str) -> dict[str, str]:
+    return {"backend": "hosted", "reason": reason}
+
+
+def _identity(value: object) -> bool:
+    return isinstance(value, str) and bool(value) and value == value.strip()
+
+
+def _fresh(observed: object, now: object, max_age: object) -> bool:
+    values: list[float] = []
+    for value in (observed, now, max_age):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            number = float(value)
+        except OverflowError:
+            return False
+        if not math.isfinite(number):
+            return False
+        values.append(number)
+    timestamp, current, maximum = values
+    return maximum > 0 and 0 <= current - timestamp <= maximum
+
+
+def _partition_identity(row: Mapping[str, object]) -> bool:
+    if "partition" not in row and "partitions" not in row:
+        return row.get("plugin") == "agent-worktrees"
+    index, count = row.get("partition"), row.get("partitions")
+    return type(index) is int and type(count) is int and count > 0 and 0 <= index < count
+
+
+def select_backend(row: object, context: object) -> dict[str, str]:
+    """Choose a route kind before execution; never mutate or allocate a row.
+
+    Context supplies mode/job, exact tested head and immutable recipe identity,
+    one existing provider, opt_in=True, current author/sender write trust and
+    same-repository origin, execution_started=False, now, and a readiness
+    snapshot. Readiness must bind that same provider/head/recipe/row and contain provider_ready,
+    coverage_ready, coverage="complete", observed_at and max_age_seconds.
+    "Complete" means the entire existing recipe, not 100% source-line coverage.
+
+    Readiness.windows_ram explicitly declares required=False for a native
+    non-Windows provider, or required=True plus fresh free_bytes/required_bytes,
+    observed_at/max_age_seconds. Unknown observations remain hosted.
+    Timestamps and now use the same caller clock, measured in seconds.
+
+    Thresholds, identities and provider proof come from the protected caller;
+    this pure per-row decision is not allocation authority or a runner label.
+    The caller retains inventory, commands, worker admission and failure
+    propagation. It must never reselect or retry on hosted after execution starts.
+    """
+    if not isinstance(context, Mapping):
+        return _hosted("invalid-row-or-context")
+    if context.get("execution_started") is True:
+        raise ValueError("backend selection is pre-execution only; propagate the execution result")
+    if not isinstance(row, Mapping):
+        return _hosted("invalid-row-or-context")
+    if context.get("execution_started") is not False:
+        return _hosted("execution-state-unknown")
+    if context.get("mode") != "pr":
+        return _hosted("not-ordinary-pr")
+    if (context.get("job"), row.get("plugin")) not in (
+        ("smoke", "agent-dispatch"), ("worktrees-smoke", "agent-worktrees"),
+    ):
+        return _hosted("outside-selected-pr-recipes")
+    if "job" in row and row["job"] != context.get("job"):
+        return _hosted("job-identity-mismatch")
+    if not _identity(row.get("name")):
+        return _hosted("row-identity-missing")
+    if not _partition_identity(row):
+        return _hosted("invalid-existing-partition")
+    if context.get("opt_in") is not True:
+        return _hosted("opt-in-inactive")
+    for key in ("same_repository", "author_write", "sender_write", "trust_current"):
+        if context.get(key) is not True:
+            return _hosted(f"{key}-unconfirmed")
+    head, recipe, provider = (context.get(key) for key in ("head", "recipe", "provider"))
+    if not isinstance(head, str) or not _COMMIT.fullmatch(head):
+        return _hosted("head-not-immutable")
+    if not _identity(recipe) or not _identity(provider):
+        return _hosted("recipe-or-provider-identity-missing")
+    ready = context.get("readiness")
+    if not isinstance(ready, Mapping):
+        return _hosted("readiness-missing")
+    if ready.get("provider_ready") is not True:
+        return _hosted("provider-not-ready")
+    if ready.get("coverage_ready") is not True or ready.get("coverage") != "complete":
+        return _hosted("recipe-coverage-incomplete")
+    qualified_row = ready.get("row")
+    if (
+        not isinstance(qualified_row, Mapping) or not _partition_identity(qualified_row)
+        or qualified_row != row
+        or any(ready.get(key) != context.get(key) for key in ("head", "recipe", "provider"))
+    ):
+        return _hosted("readiness-identity-mismatch")
+    if not _fresh(ready.get("observed_at"), context.get("now"), ready.get("max_age_seconds")):
+        return _hosted("readiness-not-fresh")
+    ram = ready.get("windows_ram")
+    if not isinstance(ram, Mapping) or type(ram.get("required")) is not bool:
+        return _hosted("windows-reserve-requirement-unknown")
+    if ram["required"]:
+        free, required = ram.get("free_bytes"), ram.get("required_bytes")
+        if type(free) is not int or type(required) is not int or free < 0 or required <= 0:
+            return _hosted("windows-reserve-observation-invalid")
+        if not _fresh(ram.get("observed_at"), context.get("now"), ram.get("max_age_seconds")):
+            return _hosted("windows-reserve-not-fresh")
+        if free < required:
+            return _hosted("windows-reserve-insufficient")
+    return {"backend": "private", "reason": "ready-exact-ordinary-pr-recipe"}
 
 
 def smoke_matrix(

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent managed plan, implementation and control-activation PRs
 - **Created:** 2026-10-16
-- **Status:** Active; hosted-safe review setup merged to dev, Main coordination/shared helpers/ARC readiness pending; validators paused
+- **Status:** Active; pure existing-row backend selector/tests implemented; CI integration after #7164 and qualification/activation pending
 - **Vision:** `visions/test-portfolio/README.md`: bounded feedback loops,
   shared-host admission, unique value or consolidation, reductions preserve assurance
 - **Umbrella issue:** #7122
@@ -24,6 +24,20 @@ bounded feedback and unique-value coverage without reducing assurance. It does
 not expand the required portfolio or move privileged release work onto private
 runners. It follows the pattern principles of right-sized surfaces,
 cross-platform parity and explicit failures.
+
+### Implemented slice
+
+The current implementation is the pure
+[`select_backend(row, context)`](../../../tools/ci_plugin_partitions.py)
+extension in the existing row helper, with dedicated cases in the
+[existing test module](../../../tools/test_ci_plugin_partitions.py).
+It returns a backend kind and explicit reason before execution, without
+changing row identity, inventory, partitions, CLI output or test commands.
+It does not allocate workers, wire CI, execute recipes or establish readiness.
+There is no second selector registry.
+
+CI integration remains with the existing owner after #7164. Full routing,
+executor delivery, qualification, activation and real-job acceptance are open.
 
 ## Participants
 
@@ -60,11 +74,10 @@ cross-platform parity and explicit failures.
   changes, repository variables, workflow pins, release resume or direct-main
   edits. Preserve the accepted collaborator boundary and separately qualify
   capacity before enabling routing.
-- **Current priority:** the official ARC Code Review capacity proposal is merged.
-  Implementing-source publication is authorized, but the initial setup remains
-  on literal `ubuntu-latest` even if promoted before capacity is ready. Broad
-  validator implementation is paused; custom ARC selection requires a separate
-  explicit READY receipt. Shared helper edits remain coordination-gated.
+- **Current slice:** the existing helper's pure PR-backend decision and its
+  dedicated tests only. The CI owner retains integration after #7164, including
+  coupled workflow, worker-contract and release-admission changes. No executor,
+  runner allocation, selector activation or CI wiring is implemented here.
 
 ## Context
 
@@ -82,10 +95,10 @@ standalone consumers, runner admission, Fleet partitions and Worktrees
 collection/guards. Their selectors and timeout exclusions are meaningful
 coverage, not disposable matrix overhead.
 
-`tools/check-trusted-ci.py` currently permits exactly that one custom route,
-rejects other custom/dynamic/reusable workflow routes, and requires CI's ungated
-contract guard and existing PR trigger. Its regression suite must evolve with
-the graph, not be disabled to permit a new route.
+The normal-CI trust guard permits the legacy bridge route; the dedicated review
+setup has its own separate contract. Other normal-CI custom/dynamic/reusable
+routes remain denied. The guard and existing PR trigger must not be disabled
+to enable a new route. This pure selector change does not alter those guards.
 
 The existing `PR gate (required check)` depends on all required CI jobs but
 accepts `skipped` indiscriminately. Routing introduces a new distinction:
@@ -183,8 +196,14 @@ change host policy or bypass the release pause.
 - [x] Coordinate the disjoint guard/test edits with #6237's existing owner.
   Preserve its held publication-boundary tests and notify exact additive
   post-CI test hunks before any such edits; use dedicated fixtures here.
-- [ ] Return each exact Main stage/base/hunk and old-source compatibility result
-  for owner coordination before mutation; keep the two control epochs separate.
+- [x] Record the separate Main admission and manifest/setup epochs in the
+  public merge history; no combined policy/data epoch is represented.
+- [x] Main admission-path change: #7153 merged as
+  `bc328d8d425155616bc91a35c616692dc4c81342`.
+- [x] Main manifest/hosted-setup change: #7154 merged as
+  `c1c0fea7ba3beea33b4010be009489696e51e4be`, parent
+  `bc328d8d425155616bc91a35c616692dc4c81342`. That commit contains the
+  four-path manifest and a literal `ubuntu-latest` setup definition.
 - [x] Land the ARC proposal: #7133 merged as
   `58dd5c890415a65a656acbd8bf4b4931bda97a11` through the operator-authorized
   exact-head planning exception, with both original protections restored and
@@ -192,15 +211,29 @@ change host policy or bypass the release pause.
 - [x] Land hosted-safe setup staging through dev: #7135 merged as
   `2db8a9c072fb191de2b6adef053ecfa8bc50c11a`. The five-minute limit is
   step-only; no job timeout or custom runner selection is configured.
+- [x] Land the disjoint dedicated-review guard and fixtures through dev:
+  #7151 merged as `0f0f039ca40bf9db4b3ba4ae832e08e46c85113c` after
+  current-head approval and all required Dev checks passed; qualified
+  default-branch delivery is a separate remaining gate.
 - [ ] Implement and qualify only the approved official ARC slice after its
   gates clear; keep broad validators paused until separately resumed.
 
 ### Phase 2 - Inert public implementation
 
-Paused while Phase 1a is the operator's priority.
+The implemented boundary is pure per-row selection in the existing helper and
+dedicated tests. It changes no inventory, default CLI output, job identity or
+test command. It is not a worker-allocation or readiness receipt.
 
-- [ ] Implement the single-graph routing and bounded executor below, disabled by
-  default. Do not enable a live route while implementation is under review.
+- [x] Define the existing-row selector boundary, with CI integration retained
+  by the existing owner after #7164.
+- [x] Implement and test `select_backend(row, context)` in
+  `tools/ci_plugin_partitions.py`, with dedicated cases in
+  `tools/test_ci_plugin_partitions.py`; preserve all original functions/tests,
+  partition inventory and CLI behavior.
+- [ ] Integrate ordinary PR smoke/heavy routing after #7164 through the existing
+  CI owner, preserving current row/job identities and execution semantics.
+- [ ] Implement the owner-coordinated routing and bounded execution for the
+  selected existing recipes; keep live routing unchanged until its gates clear.
 - [ ] Add behavioral authorization, graph, partition and mutation regressions;
   intentionally replace obsolete exact-shape guard expectations.
 - [ ] Update directly affected pipeline/testing docs and preserve all native,
@@ -262,8 +295,8 @@ Paused while Phase 1a is the operator's priority.
   arbitrary dynamic routes, unpinned actions/calls, credential inheritance,
   mutable checkout and condition/needs/timeout bypasses fail closed. Run the
   trusted guard together with its updated tests and related CI scope tests.
-- [ ] Bounded execution: at most two self-hosted shard jobs per PR run, one
-  runner slot per host, serial recipes per shard and unchanged per-recipe
+- [ ] Bounded execution: at most two selected serial test recipes per PR run,
+  one actual private worker and unchanged per-recipe
   deadlines. Exercise concurrent PRs, admission contention and cleanup after
   failure/cancellation without raising existing test budgets.
 - [ ] Native/hosted regression: retain actual Windows/macOS jobs, external
@@ -296,62 +329,35 @@ Paused while Phase 1a is the operator's priority.
 
 ## Proposal
 
-### One CI graph, a narrow trusted executor
+### Existing-row decision and pending CI integration
 
-**Agent-recommended design.** Keep `ci.yml` as the PR graph and owner of the
-existing aggregate, native platform jobs, guards and hosted fallback. Do not
-create a second independent set of green PR checks or coordinate independent
-authorization decisions across two parallel workflows.
+The pure selector evaluates one existing row and caller-supplied context.
+Only ordinary PR `smoke`/Dispatch and `worktrees-smoke`/Worktrees recipes are
+eligible. Unknown authority, partial/shadow coverage, mismatched or stale
+readiness, or insufficient Windows reserve yields a reasoned hosted decision
+before execution. Source (including source-main), candidate and legacy modes
+remain hosted.
+After execution starts, reselection is refused; the caller must propagate
+the actual result rather than retrying on hosted.
 
-Add a credential-free-checkout hosted routing job. It resolves current PR
-metadata and both current permissions using pinned trusted authorization code,
-checks the active opt-in, and validates workflow-source compatibility before
-choosing hosted or trusted execution. It does not execute PR-supplied helper
-code with its read-only API credential. Missing authority selects hosted with
-an explicit diagnostic; integrity or graph inconsistencies block the gate
-rather than inventing success.
+The protected caller remains responsible for current same-repository
+author/sender trust, immutable integration-head/recipe/provider identities,
+complete recipe evidence and fresh resource observations. A backend decision
+is not an authorization, allocation or qualification receipt. The code defines
+no provider registry, runner-label mapping or default resource thresholds.
 
-Evolve `trusted-ci.yml` into the reviewed reusable Linux executor, addressed by
-a literal full commit pin whose workflow blob must match the approved
-default-branch version. Retire its independent PR-target bridge execution in
-the same cutover. The reusable controller independently validates the real
-event/PR identities and permissions rather than trusting caller-supplied
-booleans, SHAs or runner labels. No `secrets: inherit`; test jobs have
-`permissions: {}`, pinned actions, credential-free immutable checkout and no
-persisted Git credentials. Scope API read permissions to hosted authorization
-and the reusable call's declared ceiling; reusable jobs cannot elevate beyond
-their caller. Authority-bearing jobs never import PR tools.
+Future CI wiring belongs to the existing owner after #7164. It must use the
+same rows and job identities, retain the existing aggregate/cancellation
+contracts, and require successful complete execution of the selected branch.
+It must not count two skipped branches as coverage. Planning and API credentials
+stay hosted; credential-free execution must use the exact tested integration
+tree. These are open integration obligations, not implemented mechanisms.
 
-Proposed graph:
-
-```text
-PR event
-  -> hosted route (current permissions + opt-in + source compatibility)
-  -> existing discover (unprivileged coverage selection; no routing authority)
-  -> hosted Linux recipes [route=hosted]
-     OR pinned trusted-ci reusable executor [route=trusted]
-          -> independently authorize exact PR tuple
-          -> Linux shard 0 / Linux shard 1, max parallel 2
-  -> existing native Windows/macOS and other retained hosted jobs
-  -> existing PR gate (required check), validates the selected branch's coverage
-```
-
-Initial offload replaces plugin `smoke`, including bridge's shared SSH proxy
-contracts, and Worktrees' collection plus guard execution. Keep the
-credential-bearing, non-blocking coverage-selection shadow step hosted and
-separate from secret-free Worktrees execution. Keep repository guards,
-discovery, standalone services, Fleet and runner-contract jobs hosted in this
-first slice; their equivalent replacement is not claimed. Preserve the full
-manual, scheduled and promotion portfolio. Later expansion requires its own
-explicit coverage inventory, not a blanket matrix-label rewrite.
-
-Distribute the same selected smoke recipes and Worktrees collection/guards
-deterministically over no more than two shards. Run recipes serially, preserving
-their existing contained runner and individual deadlines. Derive enclosing
-shard limits from the sum of those bounded recipes plus explicit preparation
-overhead; do not squeeze several suites under one existing suite deadline or
-expand each suite's budget. Measure the queue/wall-time tradeoff. A two-slot
-pilot is a capacity target, not a public inventory or provisioning instruction.
+Preserve Worktrees collection/guards and Dispatch's existing PR selection,
+changed tests, smoke floor, guards and full fallback. Non-PR partitions,
+other plugins, native Windows/macOS and privileged release recipes are not
+offloaded by this slice. No second caller, registry, executor module or CI job
+is added. Existing contained-runner and per-recipe budgets remain unchanged.
 
 ### Label and capability qualification
 
@@ -463,26 +469,18 @@ merely to restate an accepted existing limitation.
 
 ### Expected source changes and control ownership
 
-| Surface | Planned change |
+| Surface | Implemented or pending responsibility |
 |---------|----------------|
-| `.github/workflows/ci.yml` | One routing dependency; mutually exclusive hosted smoke/Worktrees execution and pinned trusted call; branch-aware existing aggregate; unchanged native and promotion coverage |
-| `.github/workflows/trusted-ci.yml` | Reviewed reusable authorization/executor graph; two bounded Linux shards; remove duplicate standalone bridge trigger |
-| `tools/check-trusted-ci.py` | Exact reviewed caller/callee, event, pin, permission, custom-route and aggregate contract; all other routes remain denied |
-| `tools/test_check_trusted_ci.py` | Preserve refusal families; intentionally replace obsolete one-job/one-trigger shape assertions |
-| `tools/trusted_ci_routing.py` and `tools/test_trusted_ci_routing.py` | Proposed bounded policy/recipe inventory and executable authorization/selection fixtures; trusted loading only from approved source |
-| `tools/run_trusted_ci_shard.py` and `tools/test_run_trusted_ci_shard.py` | Proposed serial recipe execution, existing containment/deadlines and exact coverage accounting |
-| `tools/run-plugin-tests.py` and `tools/test_run_plugin_tests.py`, if needed | Preserve dependency ownership; enforce/test managed interpreter selection and cached-venv identity where explicit workflow selection is insufficient |
-| Related `tools/test_*ci_scope.py` tests | Update only selectors affected by moving collection/guard execution or workflow paths |
-| `docs/pipelines.md`, `TESTING.md` | Routing, actual coverage, budgets, refusal, activation and rollback reference |
-| This effort and `efforts/README.md` | Reviewed plan, actual merge journal and resolved completion gates |
+| `tools/ci_plugin_partitions.py` | Implemented pure `select_backend(row, context)`; existing inventory, partitions, CLI output and commands unchanged |
+| `tools/test_ci_plugin_partitions.py` | Implemented dedicated decision cases while retaining all original tests |
+| `.github/workflows/ci.yml` | Pending owner integration after #7164; no changes in this selector slice |
+| Existing executor, route guards and integration tests | Future coordinated routing/execution work; no new registry or executor module proposed by this slice |
+| Existing contained runner and coverage-selection helpers | Unchanged here; their current commands, selection semantics and budgets remain authoritative |
+| This effort and `efforts/README.md` | Current implementation boundary, public repository history and open completion gates |
 
-Implementation must settle the literal reusable commit pin through the authorized
-control flow, not hardcode an unreviewed feature-branch ref. Until the executor is
-released and its source/admission contract proven, CI keeps hosted execution.
-If the current main-only exception cannot admit the required compatible control
-and helper changes, report that exact incompatibility and wait; do not broaden
-its allowlist or resume promotion. Coordinate this narrow activation with #6237
-instead of taking ownership of that campaign.
+This selector introduces no executor reference or call site. Later CI wiring,
+source pins and qualified execution remain coordinated integration work under
+#6237; no Main delivery, helper-pin change or activation is inferred here.
 
 ## Journal
 
@@ -682,3 +680,52 @@ instead of taking ownership of that campaign.
   split across shell lines. The dedicated contract now compares parsed values
   directly and has an independent negative newline fixture. The coupled Dev
   portfolio passed 252 cases under the bounded supervisor.
+
+### 2026-10-17 - Main admission path merged
+
+- #7153 merged at 18:29 America/Los_Angeles as
+  `bc328d8d425155616bc91a35c616692dc4c81342`, parent
+  `a2f59e9dae82738ba2537e9a58196cd5cca0e3c8`, from reviewed head
+  `a422deb07738d35bb32962b245160ff8c20c4fc5`. The one-line named allowlist
+  addition was the only changed file; admission-workflow blob was
+  `0cff158925120b6ee5c72b3d9b7d0b631c161500`.
+- That commit did not change the manifest, helper or setup definition.
+
+### 2026-10-17 - Dedicated review guard merged to dev
+
+- #7151 merged at 18:37 America/Los_Angeles as
+  `0f0f039ca40bf9db4b3ba4ae832e08e46c85113c`, from approved head
+  `13e7e06b9ba2d60a0beb2f678ac561227537c647`. This records the Dev
+  source landing, not qualification or physical readiness.
+
+### 2026-10-17 - Main hosted setup preserved
+
+- #7154 merged at 18:57 America/Los_Angeles as
+  `c1c0fea7ba3beea33b4010be009489696e51e4be`, from reviewed head
+  `a83e5005de7dbf81a0055ff7ec39920fda7cf2f1`, directly on the actual
+  Stage 1 merge. Only the Main manifest and hosted setup definition changed.
+- Commit contents: manifest `afab28d33694384f5167b7d268e0586be2b691c5`,
+  setup workflow `add925d5cc80a3283cb7c612ace1b546c153770b`. All three
+  existing declarations were retained; the fourth names the review setup.
+  The definition in this commit selects literal `ubuntu-latest`, with a
+  step-only five-minute timeout and no whole-review job cap. These entries
+  record repository chronology, not current qualification or readiness.
+
+### 2026-10-18 - Pure existing-row backend selection
+
+- Implemented `select_backend(row, context)` in the existing
+  `tools/ci_plugin_partitions.py` helper and dedicated cases in
+  `tools/test_ci_plugin_partitions.py`. It returns only a route kind and
+  explicit reason; it changes no existing row, inventory, partition, CLI
+  output, job identity or test command, and adds no registry or caller.
+- Selection is pre-execution only. Unknown/untrusted, partial/shadow,
+  mismatched, stale or unready contexts remain hosted; reselection after
+  execution starts is refused. The caller retains proof validation, resource
+  admission and actual execution-result propagation.
+- The targeted helper module passes 119 tests. The coupled guard, partition,
+  coverage-selection and selection-file portfolio passes 298 tests with two
+  existing opt-in integration skips. Original functions/tests and inventory
+  remain unchanged.
+- CI wiring and executor work remain owner integration after #7164.
+  Qualification, activation and real-job acceptance remain open; the pure
+  selector establishes none of them.
