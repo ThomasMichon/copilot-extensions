@@ -178,6 +178,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Phase 1 reductions proven safe under existing protection.
 - [ ] Establish one exact-input validation contract and compact generated
   candidate gate; preserve distinct heavy/platform/installation coverage.
+- [ ] Implement the operator's promotion-lifecycle clarification through the
+  canonical [release effort's Phase 9](../dev-branch-release-pipeline/README.md#phase-9---source-owned-release-identity-and-repeat-blocker-prevention):
+  retain one active promotion through actual merge, recover run-ended/open-PR
+  obligations, and reuse complete exact-input qualification without duplicate
+  flaky full-check gates. Mechanisms remain agent-recommended and review-gated;
+  independent Main control and existing authority boundaries are unchanged.
 - [ ] Remove redundant promotion-PR/main-push validations only after replacement
   gates are required and proven; migrate old contexts/callers before deletion.
 - [ ] Reconcile repair ownership with #6142 and existing remediation effort;

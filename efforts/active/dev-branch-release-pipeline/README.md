@@ -99,6 +99,17 @@ rewrite)._
 
 ## Request
 
+**2026-10-18 promotion lifecycle clarification (verbatim):**
+
+> Close those old ones then to keep them out of the PR queue. We sitll need to fix the dev-to-main promotion flow to include waiting and drving the PR to merge before marking complete, so new runs can't trigger while the previous PR is still active. We also need (as part of this agent's charter) a way to ensure those PRs always go through, and aren't dependent on running redundant checks which may fail due to flakiness.
+
+The campaign driver retains the active promotion through verified Main merge,
+publication/readback and explicit recovery of blockers; opening a PR or ending
+its producing run does not discharge that responsibility. The implementation
+mechanisms below are **agent-recommended**. Reliable progress for a properly
+qualified candidate does not authorize accepting failed qualification, weakening
+integrity/freshness, adding authority, or treating absent evidence as success.
+
 **2026-10-15 delivery and source-identity clarification:**
 
 > I feel like this issue happened a couple times in a row. We need to sweep over blockers of previous release attempts and check for repeat patterns. We really need a release once an hour, if not sooner.
@@ -773,6 +784,36 @@ _(Agent-recommended implementation and validation decomposition of the
 - [ ] Preserve source governance, byte integrity, exact lock authority, required
       qualification and atomic publication. Any change to independently owned
       main control requires its existing explicit review/authorization path.
+- [ ] _(Operator-required.)_ Keep each promotion active until its exact PR is
+      actually merged and the required publication/readback is verified. Do not
+      trigger another Dev-to-Main promotion while the preceding promotion PR
+      remains active, including after a failed or interrupted producing run.
+- [ ] _(Agent-recommended mechanism.)_ Extend the existing whole-run
+      serialization and merge waiter with a durable active-PR admission and
+      recovery contract. Reuse the authoritative existing PR/generation state;
+      distinguish resuming that generation from dispatching a new one. Pending
+      source advances coalesce rather than producing competing candidates.
+- [ ] _(Operator-required.)_ Ensure qualified promotion PRs are driven through
+      their normal merge gate without redundant checks becoming an independent
+      flaky obstacle. Keep a named campaign owner until actual terminal
+      evidence, not merely a submitted merge request or green wrapper.
+- [ ] _(Agent-recommended mechanism.)_ Reuse complete, trusted qualification
+      bound to the exact source, composed payload, controller/helper, toolchain
+      and required portfolio. Retain the compact Main admission/freshness gate;
+      remove only proven duplicate promotion-PR or post-Main full validation.
+      Distinct source, generated, native and installation coverage remains
+      required until an equivalent reviewed replacement is proven.
+- [ ] _(Agent-recommended mechanism.)_ Reconcile Dev-CI/source-validation and
+      full-suite/baseline-collection repetitions as well. Collect required
+      baselines in the same complete passing execution where possible, and
+      reuse existing exact-source run/artifact provenance only when portfolio,
+      platform, configuration and collector compatibility are proven. A source
+      proof never substitutes for unproven materialized-consumer coverage.
+- [ ] _(Agent-recommended mechanism.)_ Prove existing publication/event
+      authority reliably delivers the required Main gate and a nonadministrator
+      exact-head merge. Missing checks, API ambiguity, moved Main, unqualified
+      or closed candidates retain explicit recovery ownership. Do not create a
+      second merge writer or enable the separately scoped Maintainer steward.
 - [ ] Measure actual qualified source advancement, queue time and blocking
       stages against hourly-or-faster delivery while changes are pending;
       ordinary PR event-to-required-gate time must be below ten minutes,
@@ -962,6 +1003,30 @@ participants' phase ownership remain unchanged.
       including queue delays; separately measure validate-and-promote against
       the thirty-minute target. Do not apply the conditional one-hour allowance
       before the local-Dev workflow has actual acceptance evidence.
+- [ ] A second Dev advance, manual request or retry cannot dispatch a competing
+      promotion while an earlier promotion PR is open. A failed/cancelled run
+      cannot lose that obligation; resume or explicit retirement is auditable.
+- [ ] The existing workflow remains incomplete while its promotion PR is
+      pending and reports success only after the exact verified merge and
+      required publication/readback. Closed-without-merge and uncertain writes
+      cannot produce success-shaped completion.
+- [ ] Exact valid qualification is reused without rerunning the same full
+      portfolio at a duplicate event. Missing, failed, skipped, incomplete,
+      forged or mismatched evidence still refuses; changed source, generated
+      bytes, control/helper, toolchain, portfolio or Main base cannot reuse
+      incompatible proof.
+- [ ] Shared full-suite/baseline evidence retains every enrolled case and every
+      required nonempty baseline artifact with exact source/run/profile
+      provenance. Partial PR selections, different platforms, incompatible
+      collectors and interrupted executions cannot authorize reuse.
+- [ ] A properly qualified candidate receives the required Main gate and merges
+      through the existing authorized publisher. Prove a redundant lane is not
+      dispatched and cannot hold that merge; a genuinely required failing lane
+      must still block. Retain ordinary contribution/control admission.
+- [ ] A real canary and the two natural cycles demonstrate one active candidate,
+      terminal merge ownership and fewer duplicate invocations/checks. Report
+      queue/execution timing and any remaining service or flaky-test failures
+      separately, without implying a waiver.
 
 ## Proposal
 
@@ -983,6 +1048,29 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-18 - Candidate repair merged; retain promotion ownership beyond run lifetime
+
+Source repair #7187 merged as
+`ead7b3eaf9bfd3dd733e43384038ae73bba95a33` after actual current-head Copilot
+approval and all three original required checks succeeded. This is a source
+merge, not a qualified product release or permission to resume Main.
+The operator explicitly retires superseded candidates #6950 and #7184; both
+are closed unmerged with their branches and artifacts retained.
+
+The new operator clarification is captured verbatim above. Inspection confirms
+the current Main controller already retains whole-workflow concurrency through
+its exact-candidate merge waiter. Its required Main gate is distinct from the
+full candidate qualification. The remaining lifecycle gap is an active PR left
+behind by a failed/interrupted run; workflow concurrency alone expires with
+that run. Main-push CI also retains full validation after pre-merge qualification.
+The next reviewed slice must address durable admission/recovery and proven
+evidence reuse rather than add a second publisher or waive a failed portfolio.
+
+Main stays paused. Matching candidate worker/validator activation, fresh
+qualification, verified merge/publication, resume, cadence and client acceptance
+remain open. The ordinary Maintainer merge/rebase steward remains separately
+disabled; this promotion charter does not grant its activation authority.
 
 ### 2026-10-18 - Repair candidate inputs and prove bounded native Bridge completion
 
