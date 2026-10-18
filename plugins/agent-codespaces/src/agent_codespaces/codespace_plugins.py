@@ -164,8 +164,13 @@ def iter_installed_manifest_sources(
 
 def iter_local_manifests(
     repo_roots: Iterable[Path],
+    *,
+    enabled_sources: dict[str, Any] | None = None,
 ) -> Iterator[tuple[str, str, Path, dict[str, Any]]]:
-    """Yield enabled manifests from the effective multi-root local settings."""
+    """Yield local manifests using merged enablement, independently of payload priority.
+
+    Without explicit enablement, preserve the legacy last-root-wins settings merge.
+    """
     try:
         from plugin_resolve import read_repo_settings
         from .plugin_staging import local_payload_dir
@@ -178,9 +183,10 @@ def iter_local_manifests(
         return
 
     roots = list(repo_roots)
-    enabled: dict[str, bool] = {}
-    for repo_root in roots:
-        enabled.update(read_repo_settings(repo_root).enabled)
+    enabled = dict(enabled_sources) if enabled_sources is not None else {}
+    if enabled_sources is None:
+        for repo_root in roots:
+            enabled.update(read_repo_settings(repo_root).enabled)
 
     seen: set[Path] = set()
     for source, is_enabled in enabled.items():
@@ -449,7 +455,9 @@ def resolve_codespace_plugins(
         source: (name, pdir, manifest)
         for source, name, pdir, manifest in iter_installed_manifest_sources(home)
     }
-    for source, name, pdir, manifest in iter_local_manifests(repo_roots):
+    for source, name, pdir, manifest in iter_local_manifests(
+        repo_roots, enabled_sources=enabled_sources,
+    ):
         manifests[source] = (name, pdir, manifest)
     for source, (name, _pdir, manifest) in manifests.items():
         enabled_name = plugin_name(source) or name

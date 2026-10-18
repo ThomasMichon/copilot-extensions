@@ -189,6 +189,16 @@ Prepared target-local marketplace declarations are compared with the authored
 lock-entry view before publication. A directory-origin change during installation
 refuses the old payload rather than republishing its projection or silently
 replanning.
+Origin validation also covers every effectively enabled identity, including
+previously disabled entries omitted from this preparation. An owned directory
+projection cannot mask a newly authoritative base/Claude marketplace origin
+merely because its old payload still resolves. Remote cache reuse must match
+the source/definition-addressed installation home, completed source receipt,
+owning-home registration and actual installed manifest. Direct authored local
+directories remain usable; a projected local origin needs preparation evidence.
+These checks only read existing state under the lock: they never install,
+refresh or retry there. Disabled entries and inactive namespaces do not gain
+new origin requirements. Refusal preserves prior publication and operator edits.
 
 Each complete preparation reads ownership and authored settings together under
 the checkout lock. Publication prunes unchanged owned enablement observed in

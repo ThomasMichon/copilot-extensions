@@ -14,6 +14,62 @@ import pytest
 from agent_codespaces.plugin_preparation import prepare_plugins
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("installed", [False, True])
+def test_manifest_enablement_and_worktree_payload_precedence_are_independent(
+    monkeypatch, tmp_path, enabled, installed,
+):
+    import io
+    import tarfile
+    from agent_codespaces.plugin_preparation import plugin_plan
+
+    anchor, controller, home = [tmp_path / name for name in ("anchor", "controller", "home")]
+    for root, decision, text in (
+        (anchor, not enabled, "anchor-v1"), (controller, enabled, "controller-v2"),
+    ):
+        catalog = root / ".ai"
+        for name in ("control-harness", "sample", "stale"):
+            payload = catalog / name
+            payload.mkdir(parents=True)
+            manifest = {"name": name, "version": "1.0.0"}
+            if name == "control-harness":
+                manifest["codespacePlugins"] = [{
+                    "source": f"{'sample' if root == controller else 'stale'}@synthetic",
+                }]
+            (payload / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (payload / "payload.txt").write_text(text, encoding="utf-8")
+        (catalog / "marketplace.json").write_text(json.dumps({
+            "name": "synthetic", "owner": {"name": "Synthetic Publisher"},
+            "plugins": [{"name": name, "source": name, "version": "1.0.0"}
+                        for name in ("control-harness", "sample", "stale")],
+        }), encoding="utf-8")
+        settings = root / ".github" / "copilot"
+        settings.mkdir(parents=True)
+        (settings / "settings.json").write_text(json.dumps({
+            "enabledPlugins": {"control-harness@synthetic": decision},
+            "extraKnownMarketplaces": {
+                "synthetic": {"source": {"source": "directory", "path": "./.ai"}},
+            },
+        }), encoding="utf-8")
+    if installed:
+        old = home / "installed-plugins" / "synthetic" / "control-harness"
+        old.mkdir(parents=True)
+        (old / "plugin.json").write_text(json.dumps({
+            "name": "control-harness", "version": "0.1.0",
+            "codespacePlugins": [{"source": "stale@synthetic"}],
+        }), encoding="utf-8")
+    monkeypatch.setattr("agent_codespaces.codespace_plugins.default_copilot_home", lambda: home)
+    plan = plugin_plan(None, SimpleNamespace(source_paths=[anchor, controller], codespace_plugins=[]))
+    if not enabled:
+        assert plan["plugins"] == []
+        return
+    assert [item["source"] for item in plan["plugins"]] == ["sample@synthetic"]
+    item = plan["plugins"][0]
+    assert item["enable"] is True
+    with tarfile.open(fileobj=io.BytesIO(base64.b64decode(item["archive"]))) as archive:
+        assert archive.extractfile(item["relative"] + "/payload.txt").read() == b"controller-v2"
+
+
 @pytest.mark.asyncio
 async def test_provider_selection_registers_before_consumer(tmp_path):
     control = tmp_path / "control"

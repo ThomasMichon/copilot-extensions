@@ -21,7 +21,8 @@ from .payload import (
 )
 from .reflection import _plan_item, identity
 from .registration import (
-    _operator_settings, _settings_document, atomic_json, checkout_lock, register_prepared, strict_json,
+    _installation_home, _operator_settings, _settings_document,
+    atomic_json, checkout_lock, register_prepared, strict_json,
 )
 from .settings import RepoPluginSettings
 
@@ -290,12 +291,9 @@ def prepare(
                 _unpack(content, destination)
                 payload = destination / item["relative"]
             else:
-                install_id = hashlib.sha256(json.dumps(
-                    [source, item["marketplace"]], sort_keys=True,
-                ).encode()).hexdigest()
-                (root / "installation" / install_id).resolve().relative_to(root.resolve())
+                install_home = _installation_home(staging, source, item["marketplace"])
                 payload, item["catalog"], item["entry"] = _install(
-                    source, item["marketplace"], root / "installation" / install_id, repo,
+                    source, item["marketplace"], install_home, repo,
                     copilot_command,
                 )
             payloads[source] = str(payload)

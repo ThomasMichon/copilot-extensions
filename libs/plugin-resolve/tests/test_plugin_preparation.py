@@ -597,6 +597,81 @@ def test_operator_enable_during_install_is_validated_before_any_publication(
         )
 
 
+@pytest.mark.parametrize("layer", SETTINGS_RELS[:-1])
+@pytest.mark.parametrize("mode", [
+    "changed-remote", "changed-local", "inactive-remote", "cached-remote", "no-origin", "direct-local",
+])
+def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path, monkeypatch, layer, mode):
+    from plugin_resolve import preparation as module
+
+    target = tmp_path / "target"
+    init_checkout(target)
+    plan = local_plan(tmp_path / "host")
+    plan["plugins"][0]["enable"] = False
+    operator_path = target.joinpath(*layer)
+    original_remote = {"source": {"source": "github", "repo": "example/original-catalog"}}
+    if mode in {"changed-remote", "inactive-remote", "cached-remote"}:
+        operator_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_json(operator_path, {
+            "enabledPlugins": {"sample@local": False},
+            "extraKnownMarketplaces": {"local": original_remote},
+        })
+    command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
+    assert prepare({"repo": str(target), **plan}, copilot_command=command) == {}
+    state = target / ".git" / "copilot-venue-plugins"
+    local = target / ".github" / "copilot" / "settings.local.json"
+    catalog = state / "marketplaces" / "local" / "marketplace.json"
+    receipt = state / "ownership.json"
+    before = local.read_bytes(), catalog.read_bytes(), receipt.read_bytes()
+    assert read_repo_settings(target).enabled["sample@local"] is False
+    replacement = tmp_path / "replacement"
+    local_plan(replacement)
+    path = replacement / ".ai" / "sample" / "plugin.json"
+    value = json.loads(path.read_text())
+    value["version"] = "9.8.7"
+    atomic_json(path, value)
+    install = module._install
+    edits = []
+    _expect_installer_settings(monkeypatch, target)
+
+    def interleave(*args, **kwargs):
+        installed = install(*args, **kwargs)
+        chosen = local if mode == "direct-local" else operator_path
+        value = json.loads(chosen.read_text()) if chosen.exists() else {}
+        value.setdefault("enabledPlugins", {})["sample@local"] = mode != "inactive-remote"
+        if mode in {"changed-remote", "inactive-remote"}:
+            value.setdefault("extraKnownMarketplaces", {})["local"] = {
+                "source": {"source": "github", "repo": "example/new-authority"},
+            }
+        elif mode in {"changed-local", "direct-local"}:
+            value.setdefault("extraKnownMarketplaces", {})["local"] = {
+                "source": {"source": "directory", "path": str(replacement / ".ai")},
+            }
+        chosen.parent.mkdir(parents=True, exist_ok=True)
+        atomic_json(chosen, value)
+        edits.append((chosen, chosen.read_bytes()))
+        return installed
+
+    monkeypatch.setattr(module, "_install", interleave)
+    if mode in {"changed-remote", "changed-local"}:
+        with pytest.raises(ValueError, match="native.*origin.*not prepared"):
+            prepare(_remote_request(target), copilot_command=command)
+        assert edits
+        assert edits[0][0].read_bytes() == edits[0][1]
+        assert (local.read_bytes(), catalog.read_bytes(), receipt.read_bytes()) == before
+        assert not (state / "marketplaces" / "synthetic" / "marketplace.json").exists()
+    else:
+        result = prepare(_remote_request(target), copilot_command=command)
+        assert edits
+        assert ("sample@local" in result) is (mode != "inactive-remote")
+        assert set(resolve_repo_plugins(target).resolved) == set(result)
+        if mode == "cached-remote":
+            assert "installation" in Path(result["sample@local"]).parts
+            assert json.loads((Path(result["sample@local"]) / "plugin.json").read_text())["version"] == "2.3.4"
+        if mode == "direct-local":
+            assert Path(result["sample@local"]) == (replacement / ".ai" / "sample").resolve()
+
+
 @pytest.mark.parametrize("origin", [
     {"source": "git", "url": "https://example.invalid/catalog.git"},
     {"source": "github", "repo": "example/catalog"},

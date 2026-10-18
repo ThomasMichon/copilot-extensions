@@ -6,12 +6,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_codespaces.codespace_plugins import (
     CodespacePluginSpec,
     enabled_plugin_names,
     is_harness_plugin,
     is_local_marketplace_source,
     iter_installed_manifests,
+    iter_local_manifests,
     marketplace_of,
     partition_local_specs,
     plugin_names_from_enabled,
@@ -269,6 +272,51 @@ def test_repo_local_manifest_replaces_stale_installed_declarations(tmp_path):
         repo_roots=[repo],
     )
     assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("installed", [False, True])
+def test_merged_enablement_is_not_recomputed_from_payload_root_priority(tmp_path, enabled, installed):
+    anchor, controller, home = [tmp_path / name for name in ("anchor", "controller", "home")]
+    source = "example-web-harness@local-marketplace"
+    for root, value in ((anchor, not enabled), (controller, enabled)):
+        _write_local_harness(root)
+        path = root / ".github" / "copilot" / "settings.json"
+        settings = json.loads(path.read_text())
+        settings["enabledPlugins"][source] = value
+        path.write_text(json.dumps(settings), encoding="utf-8")
+    if installed:
+        _install_plugin(
+            home, "local-marketplace", "example-web-harness",
+            codespace_plugins=[{"source": "stale-agent@local-marketplace"}],
+        )
+    specs = resolve_codespace_plugins(
+        None, copilot_home=home, enabled_sources={source: enabled},
+        enabled_names={"example-web-harness"} if enabled else set(),
+        repo_roots=[controller, anchor],
+    )
+    assert [spec.source for spec in specs] == (
+        ["example-web-agent@local-marketplace"] if enabled else []
+    )
+
+
+@pytest.mark.parametrize("local_enabled", [False, True])
+@pytest.mark.parametrize("decision", [None, "absent", False, True])
+def test_local_manifest_enablement_override_is_authoritative(tmp_path, local_enabled, decision):
+    source = "example-web-harness@local-marketplace"
+    _write_local_harness(tmp_path)
+    path = tmp_path / ".github" / "copilot" / "settings.json"
+    settings = json.loads(path.read_text())
+    settings["enabledPlugins"][source] = local_enabled
+    path.write_text(json.dumps(settings), encoding="utf-8")
+    if decision is None:
+        manifests = list(iter_local_manifests([tmp_path]))
+        expected = local_enabled
+    else:
+        enabled = {} if decision == "absent" else {source: decision}
+        manifests = list(iter_local_manifests([tmp_path], enabled_sources=enabled))
+        expected = decision is True
+    assert [item[0] for item in manifests] == ([source] if expected else [])
 
 
 def test_qualified_false_disables_stale_marketplace_copy(tmp_path):

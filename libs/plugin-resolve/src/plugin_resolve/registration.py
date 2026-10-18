@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import time
@@ -61,6 +62,47 @@ def _operator_settings(repo: Path, receipt: dict) -> RepoPluginSettings:
             else:
                 marketplaces[name] = value
     return RepoPluginSettings(enabled=enabled, marketplaces=marketplaces)
+
+
+def _installation_home(staging: Path, source: str, definition: dict) -> Path:
+    _name, marketplace = split_source(source)
+    digest = hashlib.sha256(json.dumps([source, definition], sort_keys=True).encode()).hexdigest()
+    home = staging / marketplace / "installation" / digest
+    home.resolve().relative_to(staging.resolve())
+    return home
+
+
+def _validate_effective_origin(
+    source: str, candidate: Path, repo: Path, state_dir: Path,
+    operator: RepoPluginSettings, effective: RepoPluginSettings, publications: dict,
+) -> None:
+    name, marketplace = split_source(source)
+    authority = operator.marketplaces.get(marketplace)
+    if authority is None:
+        return
+    kind = authority.get("source", {}).get("source")
+    if kind in REMOTE_MARKETPLACE_SOURCE_KINDS:
+        home = _installation_home(state_dir / "marketplaces", source, authority)
+        expected = home / "installed-plugins" / marketplace / name
+        if (
+            candidate.resolve() == expected.resolve()
+            and strict_json(home / ".installation-complete.json").get("source") == source
+            and _settings_document(home / "settings.json").get("extraKnownMarketplaces", {}).get(marketplace)
+            == authority
+            and plugin_manifest(candidate).get("name") == name
+        ):
+            return
+    elif kind in LOCAL_MARKETPLACE_SOURCE_KINDS:
+        actual = local_marketplace_path(marketplace, effective, repo_dir=repo)
+        declared = local_marketplace_path(marketplace, operator, repo_dir=repo)
+        if (
+            actual is not None and declared is not None and actual.resolve() == declared.resolve()
+            and marketplace_manifest_name(marketplace, effective) == marketplace_manifest_name(marketplace, operator)
+        ):
+            return
+        if publications.get(source, {}).get("native_marketplace") == authority:
+            return
+    raise ValueError(f"Enabled target-native marketplace origin was not prepared: {source}")
 
 
 def atomic_json(path: Path, value: dict) -> None:
@@ -242,6 +284,9 @@ def register_prepared(
             if catalog is not None and catalog.name == marketplace_manifest_name(marketplace, effective):
                 candidate = plugin_dir(catalog, name)
                 if candidate is not None:
+                    _validate_effective_origin(
+                        source, candidate, repo, state_dir, operator, effective, publications,
+                    )
                     resolved[source] = str(candidate)
         missing = [source for source in effective.enabled_sources() if source not in resolved]
         if missing:
