@@ -83,7 +83,9 @@ async def resume_singleton_anchor(
         )
         if strict or sessions or known:
             raise _refuse("singleton_head_unavailable", "No exact singleton conversation can be resumed")
-        owner, entry = await wt._find_cached_worktree_entry(anchor, request.app.state.resolver)
+        owner, entry = await wt._find_cached_worktree_entry(
+            anchor, request.app.state.resolver, cache=wt.cache_for_app(request.app),
+        )
         if owner is None or entry is None or entry.path != repo.path:
             raise _refuse("singleton_owner_unavailable", "Singleton launch owner is unavailable", status=503)
         target = replace(

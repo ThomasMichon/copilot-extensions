@@ -124,6 +124,7 @@ class WorktreeDiscoveryCache:
         self._owner_thread = threading.current_thread()
         self._owner_loop = asyncio.get_running_loop()
         if self._interval > 0:
+            self._cancel_requested = False
             self._task = asyncio.create_task(
                 self._loop(resolver), name="worktree-discovery",
             )

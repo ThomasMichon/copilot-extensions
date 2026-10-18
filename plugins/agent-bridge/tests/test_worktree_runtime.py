@@ -167,6 +167,30 @@ async def test_restore_rejects_incomplete_or_coerced_observations(captured, muta
 
 
 @pytest.mark.asyncio
+async def test_capture_succeeds_after_stop_start_restart_clears_cancel_flag(captured):
+    # Regression: start() must clear _cancel_requested when it creates a
+    # replacement periodic task. Otherwise an ordinary in-process
+    # restart (stop() then start() again) permanently leaves
+    # capture_worktrees() refusing an otherwise perfectly healthy
+    # restarted task.
+    app, _origins, _capture = captured
+    resolver = app.state.resolver
+    governance = LoopGovernance(helper=lambda checkpoint: {"status": "ready"})
+    cache = worktrees.WorktreeDiscoveryCache(interval=5)
+    cache.start(resolver, governance=governance)
+    assert cache._task is not None and cache._cancel_requested is False
+    await cache.stop()
+    assert cache._cancel_requested is True
+    cache.start(resolver, governance=governance)
+    assert cache._task is not None and cache._cancel_requested is False
+    try:
+        payload = capture_worktrees(cache, resolver, governance)
+        assert payload["entries"] == {}
+    finally:
+        await cache.stop()
+
+
+@pytest.mark.asyncio
 async def test_capture_succeeds_with_healthy_periodic_discovery_task(captured):
     # Regression (Python 3.10 compatibility): a healthy, uncancelled
     # periodic-discovery task must not trip capture_worktrees()'s
