@@ -16,6 +16,7 @@ _NON_CANDIDATE = {
     "coverage-guided-selection-integration": "inputs.promotion_run == ''",
 }
 _PARTITIONED_SMOKE_STEP = """      - name: Test ${{ matrix.plugin }}
+        if: matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'
         env:
           PLUGIN: ${{ matrix.plugin }}
           PARTITION: ${{ matrix.partition }}

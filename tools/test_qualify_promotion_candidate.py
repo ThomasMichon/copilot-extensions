@@ -344,6 +344,7 @@ def test_partition_matrix_requires_its_explicit_discovery_and_name_contract(
 
 @pytest.mark.parametrize("mutation", [
     "collect-only", "filtered", "failure-masked", "partition-env", "selection",
+    "skip-candidate", "only-pr",
 ])
 def test_partition_runner_requires_the_complete_executed_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
@@ -360,6 +361,9 @@ def test_partition_runner_requires_the_complete_executed_step(
         old, new = invocation, invocation + suffix
     elif mutation == "partition-env":
         old, new = "PARTITION: ${{ matrix.partition }}", "PARTITION: 0"
+    elif mutation in ("skip-candidate", "only-pr"):
+        old = "if: matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'"
+        new = "if: false" if mutation == "skip-candidate" else "if: github.event_name == 'pull_request'"
     else:
         old, new = 'mapfile -t args <<< "$files"', "args=(--collect-only)"
     assert text.count(old) == 1
