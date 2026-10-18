@@ -984,12 +984,48 @@ proposal.
 
 ## Journal
 
-**Latest outcome:** source #7124 and Main control #7129 are merged. Fresh
+**Latest outcome:** source #7124, Main control #7129 and source repair #7152
+are merged. Matching Main activation for #7152 remains open. Fresh
 qualification `39024583508` failed the unchanged Worktrees aggregate budget
 before candidate publication or product merge. Main remains paused and
 unqualified. Historical preparation entries below retain their original
 in-flight state; the later outcome and disconnected diagnostic are recorded
 in their own 2026-10-17 entries.
+
+### 2026-10-18 - Native fixture repair merged; bounded full-suite recovery continues
+
+Source repair #7152 merged as
+`1cc109db49f95c3c6a4fc732c6b69164e69ea496` after actual current-head Copilot
+approval and all three original required checks succeeded. The hosted Windows
+candidate-contract lane is green on the repaired output-file fixture. The
+source worktree was reconciled through the verified squash merge with its
+backup retained. This is a source repair, not Main activation or qualification.
+
+The next narrow experiment uses exactly two contained workers only for the
+existing Linux full-Worktrees source and candidate steps. Every selected test
+and the 30/300/900-second, process, memory and storage limits remain unchanged.
+The CI option requires an owning promotion run: ordinary manual validation of
+an older released Main remains serial before the new test dependency ships.
+Guards, collection, baselines and other plugins retain their existing options.
+The open Windows performance contribution retains its separate ownership and
+unresolved margin proof.
+
+A disconnected serial reference completed all 17 ordinary groups on the first
+private candidate, but subsequent reviewed runtime-source changes invalidated
+that timing comparison. The final paired runs hold every other tracked input
+byte and mode identical, changing only the execution-profile option. Both
+complete all 17 groups with 11,941 passes and 336 unchanged skips. Serial
+execution takes 560.951 seconds and the two-worker profile 348.064 seconds,
+including container preparation and cleanup, a 37.95 percent local reduction.
+The largest reported pytest group falls from 88.73 to 46.49 seconds. Limits,
+test selection and failure handling are unchanged; the temporary container
+profile is removed before publication.
+
+These are complete local Linux witnesses, not hosted or Windows margin proof,
+and do not qualify a release. Normal source review, all current-head required
+checks, matching Main control activation and full release qualification remain
+open. The Windows performance contribution keeps its independent completion
+gate; no production changes were imported from its branch.
 
 ### 2026-10-17 - Prove Git for Windows output capture before updating the repair
 

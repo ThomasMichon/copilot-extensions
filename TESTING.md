@@ -41,6 +41,22 @@ capacity. Local pytest commands remain wrapped by the bounded test supervisor.
 
 ## The turn-key runner
 
+The source and candidate Linux full-suite declarations use exactly two
+work-stealing pytest workers for Worktrees only. Both workers remain inside the
+same runner-owned containment boundary and unchanged 30-second item,
+300-second group, 900-second plugin, process, memory and temporary-storage
+limits. Guard, collection, baseline and other-plugin steps do not inherit those
+worker options. The local runner remains serial unless explicitly configured;
+activation of preserved Main declarations is separately reviewed. These options
+do not count as complete budget evidence until the exact full run succeeds.
+CI's worker options also require an owning promotion run, so ordinary manual
+validation of an older released Main stays serial and does not require a test
+dependency that has not shipped there yet.
+The initial paired disconnected Linux run executes all 17 groups with the same
+11,941 passes and 336 skips: serial 560.951 seconds versus two workers 348.064
+seconds, including preparation and cleanup. This is local execution evidence,
+not a substitute for the exact hosted release gates or Windows margin proof.
+
 Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:
 

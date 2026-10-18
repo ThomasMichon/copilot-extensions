@@ -42,7 +42,10 @@ class TestExistingFeaturePush:
     failure is actually retryable (a non-fast-forward race), not for every
     failure -- a hook rejection is not fixed by rebase-and-retry."""
 
-    def test_reports_push_error(self, monkeypatch):
+    def test_reports_push_error(
+        self, monkeypatch: pytest.MonkeyPatch, pr_repo: tuple[cfg.Config, str, Path, Path],
+    ) -> None:
+        config, _, worktree, _ = pr_repo
         monkeypatch.setattr(pr_ops, "_rev", lambda *_args, **_kwargs: "deadbeef")
         monkeypatch.setattr(
             pr_ops.git_ops,
@@ -53,9 +56,8 @@ class TestExistingFeaturePush:
         )
 
         result = pr_ops._push_existing_feature(
-            ".", "feature/change", "origin", None, None, None, {},
-            config=cfg.Config(srcroot=".", machine="test", platform="linux",
-                              repos={"test": cfg.RepoConfig(anchor=".", worktree_root=".")}),
+            str(worktree), "feature/change", "origin", None, None, None, {},
+            config=config,
             worktree_id="", title="", body=None, open_pr=None,
             draft=False, attribution=None,
         )
@@ -65,7 +67,10 @@ class TestExistingFeaturePush:
             "BLOCKED: release guard"
         )
 
-    def test_reports_retry_guidance_for_non_fast_forward(self, monkeypatch):
+    def test_reports_retry_guidance_for_non_fast_forward(
+        self, monkeypatch: pytest.MonkeyPatch, pr_repo: tuple[cfg.Config, str, Path, Path],
+    ) -> None:
+        config, _, worktree, _ = pr_repo
         monkeypatch.setattr(pr_ops, "_rev", lambda *_args, **_kwargs: "deadbeef")
         monkeypatch.setattr(
             pr_ops.git_ops,
@@ -76,9 +81,8 @@ class TestExistingFeaturePush:
         )
 
         result = pr_ops._push_existing_feature(
-            ".", "feature/change", "origin", None, None, None, {},
-            config=cfg.Config(srcroot=".", machine="test", platform="linux",
-                              repos={"test": cfg.RepoConfig(anchor=".", worktree_root=".")}),
+            str(worktree), "feature/change", "origin", None, None, None, {},
+            config=config,
             worktree_id="", title="", body=None, open_pr=None,
             draft=False, attribution=None,
         )

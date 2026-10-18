@@ -62,7 +62,7 @@ def plugin_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def wired(monkeypatch, plugin_dir):
+def wired(monkeypatch: pytest.MonkeyPatch, plugin_dir: Path) -> None:
     """Wire cmd_update's collaborators to no-ops, except pivot pruning."""
 
     def _run(argv, *a, **k):
@@ -75,6 +75,7 @@ def wired(monkeypatch, plugin_dir):
     monkeypatch.setattr(m, "_update_modules", lambda *a, **k: None)
     monkeypatch.setattr(m, "_fast_forward_project_anchors", lambda: None)
     monkeypatch.setattr(m, "_find_installed_plugin_dir", lambda: plugin_dir)
+    monkeypatch.setattr(m, "_invocation_update_context", lambda: plugin_dir)
     monkeypatch.setattr(m, "_project_update_context", lambda: plugin_dir)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")

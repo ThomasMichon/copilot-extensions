@@ -234,6 +234,8 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
+        env:
+          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-worktrees' && '-n 2 --dist=worksteal' || '' }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
       - name: Coverage baseline - ${{ matrix.plugin }} (pilot plugins only)
         # Phase 1 pilot (efforts/active/coverage-guided-ci): coverage

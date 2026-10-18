@@ -58,7 +58,7 @@ def plugin_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def wired(monkeypatch, plugin_dir):
+def wired(monkeypatch: pytest.MonkeyPatch, plugin_dir: Path) -> list[list[str]]:
     """Wire cmd_update's collaborators to no-ops and record subprocess calls.
 
     Returns the list of recorded subprocess argv lists so a test can assert
@@ -79,6 +79,7 @@ def wired(monkeypatch, plugin_dir):
     monkeypatch.setattr(m, "_fast_forward_project_anchors", lambda: None)
     monkeypatch.setattr(m, "_prune_stale_pivots_after_update", lambda: None)
     monkeypatch.setattr(m, "_find_installed_plugin_dir", lambda: plugin_dir)
+    monkeypatch.setattr(m, "_invocation_update_context", lambda: plugin_dir)
     monkeypatch.setattr(m, "_project_update_context", lambda: plugin_dir)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     return calls
