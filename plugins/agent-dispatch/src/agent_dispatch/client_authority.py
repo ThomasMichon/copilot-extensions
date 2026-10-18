@@ -8,11 +8,12 @@ from typing import Any, Literal
 
 from .client import DispatchError
 
-Authority = Literal["legacy", "local", "central", "explicit"]
+DefaultAuthority = Literal["legacy", "local", "central"]
+Authority = Literal["legacy", "local", "central", "pinned_url"]
 AUTHORITY_ENV = "AGENT_DISPATCH_TASK_AUTHORITY"
 
 
-def default_authority() -> Authority:
+def default_authority() -> DefaultAuthority:
     value = os.environ.get(AUTHORITY_ENV, "").strip().lower()
     if not value:
         return "legacy"
@@ -27,7 +28,7 @@ def client_authority(args: argparse.Namespace) -> Authority:
             raise DispatchError(400, "--local cannot be combined with --url or --shared")
         return "local"
     if getattr(args, "url", None):
-        return "explicit"
+        return "pinned_url"
     if getattr(args, "shared", False):
         return "central"
     return default_authority()

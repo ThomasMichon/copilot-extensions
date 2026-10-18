@@ -278,6 +278,31 @@ def test_legacy_reference_output_is_unchanged():
 def test_unqualified_claim_callback_never_reports_a_different_writer_absent(monkeypatch, authority, capsys):
     monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", authority)
     monkeypatch.setattr(core, "_client", forbid)
-    invocation = core.build_parser().parse_args(["claim-status", "legacy-task"])
-    assert core._cmd_claim_status(invocation) == 1
-    assert "original authority" in capsys.readouterr().err
+    assert core.main(["claim-status", "legacy-task"]) == 1
+    error = capsys.readouterr().err
+    assert "original authority" in error
+    assert "coordinator error" not in error
+
+
+@pytest.mark.parametrize("kind", ["container", "network"])
+@pytest.mark.parametrize("state", ["absent", "present", "inventory-failed"])
+def test_partial_docker_setup_cleanup_requires_confirmed_absence(monkeypatch, kind, state):
+    from types import SimpleNamespace
+
+    from tests import test_central_authority_docker as proof
+
+    def docker(*argv):
+        if "rm" in argv:
+            return SimpleNamespace(returncode=1, stdout="", stderr="resource was never created")
+        return SimpleNamespace(
+            returncode=1 if state == "inventory-failed" else 0,
+            stdout='"owned-resource"\n' if state == "present" else "",
+            stderr="inventory unavailable" if state == "inventory-failed" else "",
+        )
+
+    monkeypatch.setattr(proof, "_docker", docker)
+    if state == "absent":
+        proof._remove_owned(kind, "owned-resource")
+    else:
+        with pytest.raises(AssertionError, match="inventory failed|cleanup failed"):
+            proof._remove_owned(kind, "owned-resource")

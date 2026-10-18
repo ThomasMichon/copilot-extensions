@@ -38,6 +38,25 @@ def _run(*argv):
     return result.stdout
 
 
+def _remove_owned(kind, name):
+    removed = _docker("rm", "-f", "-v", name) if kind == "container" else _docker("network", "rm", name)
+    command = [kind, "ls", "--filter", f"name={name}"]
+    if kind == "container":
+        command.append("--all")
+    command.extend(["--format", "{{json .Names}}" if kind == "container" else "{{json .Name}}"])
+    inventory = _docker(*command)
+    assert inventory.returncode == 0, (
+        f"{kind} inventory failed: exit={inventory.returncode}; "
+        f"stdout={inventory.stdout!r}; stderr={inventory.stderr!r}"
+    )
+    names = [json.loads(line) for line in inventory.stdout.splitlines()]
+    assert all(isinstance(value, str) for value in names), f"{kind} inventory malformed"
+    assert name not in names, (
+        f"{kind} cleanup failed: exit={removed.returncode}; "
+        f"stdout={removed.stdout!r}; stderr={removed.stderr!r}"
+    )
+
+
 def _native(container, *argv, expected=0, env=None):
     prefix = ["exec"]
     for key, value in (env or {}).items():
@@ -77,7 +96,7 @@ def test_native_central_authority_never_promotes_a_local_queue(tmp_path):
     (evidence / "cr-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     try:
         with ExitStack() as cleanup:
-            cleanup.callback(_run, "network", "rm", network)
+            cleanup.callback(_remove_owned, "network", network)
             _run("network", "create", "--internal", network)
             uid, gid = _run(
                 "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
@@ -96,7 +115,7 @@ def test_native_central_authority_never_promotes_a_local_queue(tmp_path):
                         "AGENT_DISPATCH_FEDERATION_INSTANCE": "acceptance-peer",
                     }.items():
                         extra.extend(["-e", f"{key}={value}"])
-                cleanup.callback(_run, "rm", "-f", "-v", name)
+                cleanup.callback(_remove_owned, "container", name)
                 _run(
                     "run", "-d", "--name", name, "--network", network,
                     "--network-alias", "central" if name == central else "peer",

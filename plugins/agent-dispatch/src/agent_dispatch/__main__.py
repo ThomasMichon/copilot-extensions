@@ -469,7 +469,7 @@ def _ensure_local_coordinator(args: argparse.Namespace) -> None:
     """
     from .client_authority import client_authority
 
-    if client_authority(args) in {"explicit", "central"}:
+    if client_authority(args) in {"pinned_url", "central"}:
         return
     if os.environ.get(_AUTOSTART_ENV_OPT_OUT):
         return

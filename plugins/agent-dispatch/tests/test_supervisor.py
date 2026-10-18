@@ -4654,7 +4654,8 @@ def test_cli_supervise_rejects_idle_nudge_exempt_label_not_watched(monkeypatch, 
     assert "every --idle-nudge-exempt-label must also be watched" in capsys.readouterr().err
 
 
-def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client):
+@pytest.mark.parametrize("authority,route", [(None, ""), ("central", " --shared"), ("local", " --local")])
+def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client, authority, route):
     """--pool --headless constructs a headless FleetSpawner with the configured
     --headless-agent (the headless-fleet embodiment for a remote pool host)."""
     import types
@@ -4664,17 +4665,19 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     from agent_dispatch import remote_dispatch
 
     q.create("work")
+    if authority:
+        monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", authority)
     captured: dict = {}
 
     class FakeFleet:
         def __init__(
             self, pool, *, origin, headless=False, agent="task-worker",
-            charter=None, all_repos=False, verify_timeout=0,
+            charter=None, all_repos=False, verify_timeout=0, route="",
         ):
             self.pool = list(pool)
             captured.update(
                 pool=pool, origin=origin, headless=headless, agent=agent,
-                charter=charter, all_repos=all_repos,
+                charter=charter, all_repos=all_repos, route=route,
             )
 
         def __call__(self, task):
@@ -4704,6 +4707,7 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     assert captured["all_repos"] is False
     assert captured["pool"] == ["anomalous-potato-wsl"]
     assert captured["origin"] == "mantis-counter"
+    assert captured["route"] == route
 
 
 def test_hold_live_leases_heartbeats_live_script_body(q, client):
