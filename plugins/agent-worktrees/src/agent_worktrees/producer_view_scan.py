@@ -112,7 +112,11 @@ def scan_ownership(
             before = _stamp(directory, directory=True)
             stamps.append((directory, before, True))
             paths = sorted(directory.iterdir())
-        except _READ_ERRORS as exc:
+        except (*_READ_ERRORS, AttributeError) as exc:
+            # cfg.project_dir() can reach project_state._normalized_repository_remote(),
+            # which raises AttributeError on a non-strict-read malformed registry
+            # entry (e.g. a null remote). Treat that the same as any other
+            # project-resolution failure: report it and keep scanning the rest.
             issues.append(issue("project-unavailable", project, str(exc)))
             continue
         for path in paths:

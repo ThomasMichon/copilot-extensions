@@ -244,6 +244,29 @@ def test_missing_input_cannot_be_a_clean_empty_snapshot(ledgers: Path, target: s
     assert not snapshot["complete"] and snapshot["issues"]
 
 
+def test_malformed_repository_remote_does_not_abort_the_whole_scan(
+    ledgers: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cfg.project_dir() can reach project_state._normalized_repository_remote(),
+    which raises AttributeError on a namespaced installation-cell's malformed
+    (e.g. null) repository remote. That must become a per-project
+    'project-unavailable' finding, not an uncaught crash that stops the scan
+    before the remaining registered projects are read (copilot-extensions
+    PR #7102)."""
+    reserve(ledgers)
+    real_project_dir = cfg.project_dir
+    def project_dir(name: str | None = None) -> Path:
+        if name == "q":
+            raise AttributeError("'NoneType' object has no attribute 'strip'")
+        return real_project_dir(name)
+    monkeypatch.setattr(cfg, "project_dir", project_dir)
+    snapshot = scan_ownership()
+    assert not snapshot["complete"]
+    issues = {(i["code"], i["subject"]) for i in snapshot["issues"]}
+    assert ("project-unavailable", "q") in issues
+    assert snapshot["entries"], "project 'p' must still be scanned and reported"
+
+
 @pytest.mark.parametrize("target", ["registry", "directory", "record"])
 def test_symlink_inputs_are_explicit_uncertainty(ledgers: Path, target: str) -> None:
     path = (
