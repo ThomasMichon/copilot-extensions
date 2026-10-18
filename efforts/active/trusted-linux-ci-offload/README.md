@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent managed plan, implementation and control-activation PRs
 - **Created:** 2026-10-16
-- **Status:** Active; hosted-safe official review setup staging, shared-helper coordination and ARC readiness pending; validators paused
+- **Status:** Active; hosted-safe review setup merged to dev, Main coordination/shared helpers/ARC readiness pending; validators paused
 - **Vision:** `visions/test-portfolio/README.md`: bounded feedback loops,
   shared-host admission, unique value or consolidation, reductions preserve assurance
 - **Umbrella issue:** #7122
@@ -180,12 +180,18 @@ change host policy or bypass the release pause.
 - [x] Obtain the integration owner's implementing-source publication clearance;
   keep initial setup hosted-safe and require a separate custom-selector READY
   decision.
-- [ ] Coordinate the exact shared-helper edits and dev-first default-branch
-  compatibility transaction with #6237's existing owner before editing them.
+- [x] Coordinate the disjoint guard/test edits with #6237's existing owner.
+  Preserve its held publication-boundary tests and notify exact additive
+  post-CI test hunks before any such edits; use dedicated fixtures here.
+- [ ] Return each exact Main stage/base/hunk and old-source compatibility result
+  for owner coordination before mutation; keep the two control epochs separate.
 - [x] Land the ARC proposal: #7133 merged as
   `58dd5c890415a65a656acbd8bf4b4931bda97a11` through the operator-authorized
   exact-head planning exception, with both original protections restored and
   audited. This is not a claim that full agentic review or required CI passed.
+- [x] Land hosted-safe setup staging through dev: #7135 merged as
+  `2db8a9c072fb191de2b6adef053ecfa8bc50c11a`. The five-minute limit is
+  step-only; no job timeout or custom runner selection is configured.
 - [ ] Implement and qualify only the approved official ARC slice after its
   gates clear; keep broad validators paused until separately resumed.
 
@@ -613,3 +619,51 @@ instead of taking ownership of that campaign.
   continuation uses the existing repo-local issue reference and labels the
   approved design accordingly.
 - No Main control, shared helper, runner selector or credential was changed.
+
+### 2026-10-17 - Hosted-safe implementation merged to dev
+
+- #7135 merged at 16:59 America/Los_Angeles as
+  `2db8a9c072fb191de2b6adef053ecfa8bc50c11a`, from exact head
+  `438058d919fbb73cf784e2677a2abe50d17b3647`, after current-head Copilot
+  approval and both ruleset checks passed. The normal managed merge remained
+  blocked on the missing/pending PR aggregate; the operator-authorized
+  transaction lifted only classic dev admin enforcement, restored it in
+  `finally`, and live-audited both original protection snapshots. The check
+  ruleset stayed active and unchanged throughout.
+- Corrected the step-timeout scope using the official supported Actions step
+  field. Exact YAML contract checks and all 34 existing trusted-route
+  regressions passed under the bounded supervisor with verified cleanup.
+- A description update omitted the source marker; restored it using managed
+  attribution preparation, verified the live body, and confirmed the real
+  source-attribution check passed before merge. No failure was replaced by a
+  forged success status.
+- Re-read the canonical effort after reconciling the already-merged squash,
+  preserving intervening upstream work. The parent #7122 remains open.
+- This is merged dev source, not default-branch activation or ARC readiness.
+  Main is held pending the existing workflow-control owner's coordination;
+  shared helper edits and the final static ARC selector remain gated.
+
+### 2026-10-17 - Disjoint review guard and exact-Main overlay preparation
+
+- Workflow-control owner cleared the dedicated setup guard/test seam and retained
+  the held publication-boundary test file. This slice leaves that file,
+  post-CI policy tests, CI, promoter and the Dev preservation manifest untouched.
+- Added exact hosted/named-ARC setup-contract validation and independent
+  mutation fixtures while retaining every original validator check. Dedicated
+  fixtures execute the real inline Main admission body and unchanged generic
+  preservation helper for old/prepared allowlists and unsafe transaction cases.
+  All 90 focused guard cases and the 251-case coupled Dev policy portfolio
+  passed under the bounded supervisor; fixture cleanup was verified.
+- Prepared separate allowlist-only and later canonical-manifest/hosted-file
+  overlays against `a2f59e9dae82738ba2537e9a58196cd5cca0e3c8`; no Main
+  mutation occurred. The existing helper already supports the fourth path;
+  no generic preservation implementation or helper pin was changed.
+- Exact old-Main guard invocations pass. Its four-file guard/admission test
+  portfolio reports 146 passed and the same two failures on the untouched
+  baseline and on each overlay: stale contents-only permission expectations
+  and an obsolete positive promotion fixture in `tools/test_post_ci_policy.py`.
+  These remain #6237's compatibility/qualification decision, not a green proof
+  or permission to replace its tests with unqualified Dev source.
+- Current sequencing uses qualified Dev-to-Main guard delivery before final
+  ARC selection, rather than expanding workflow-only policy to copy Python
+  helpers. Hosted selection and the explicit physical READY gate remain intact.

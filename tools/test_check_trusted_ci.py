@@ -8,6 +8,9 @@ from typing import Callable
 
 import pytest
 
+from copilot_review_setup_fixtures import BAD_SETUPS, write_setup
+from copilot_review_control_fixtures import CASES, check_control_case, prepare_review_allowlist
+
 MODULE_PATH = Path(__file__).with_name("check-trusted-ci.py")
 SPEC = importlib.util.spec_from_file_location("check_trusted_ci", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
@@ -414,3 +417,57 @@ def test_ci_guard_step_cannot_continue_on_error(tmp_path: Path) -> None:
     assert "ci.yml must invoke the ungated trusted CI guard and tests" in (
         MODULE.validate_workflow(trusted)
     )
+
+
+@pytest.mark.parametrize("runner", ["ubuntu-latest", "copilot-extensions-review"])
+def test_dedicated_review_setup_is_accepted(tmp_path: Path, runner: str) -> None:
+    trusted = _workflow(tmp_path, lambda text: text)
+    write_setup(tmp_path, runner=runner)
+    assert MODULE.validate_workflow(trusted) == []
+
+
+@pytest.mark.parametrize("change", BAD_SETUPS)
+def test_review_setup_contract_rejects_mutations(
+    tmp_path: Path, change: tuple[tuple[str, ...], object],
+) -> None:
+    trusted = _workflow(tmp_path, lambda text: text)
+    write_setup(tmp_path, runner="copilot-extensions-review", change=change)
+    assert "copilot-code-review.yml: setup does not match the reviewed contract" in (
+        MODULE.validate_workflow(trusted)
+    )
+
+
+@pytest.mark.parametrize("filename", ["other.yml", "copilot-code-review.yaml", "Copilot-code-review.yml"])
+def test_review_runner_cannot_move_to_another_workflow(tmp_path: Path, filename: str) -> None:
+    trusted = _workflow(tmp_path, lambda text: text)
+    setup = write_setup(tmp_path, runner="copilot-extensions-review")
+    setup.rename(tmp_path / filename)
+    assert any("unauthorized self-hosted runner route" in error
+               for error in MODULE.validate_workflow(trusted))
+
+
+def test_review_job_identity_is_required(tmp_path: Path) -> None:
+    trusted = _workflow(tmp_path, lambda text: text)
+    setup = write_setup(tmp_path, runner="copilot-extensions-review")
+    setup.write_text(setup.read_text().replace("copilot-setup-steps:", "review:"), encoding="utf-8")
+    assert "copilot-code-review.yml: setup does not match the reviewed contract" in (
+        MODULE.validate_workflow(trusted)
+    )
+
+
+def test_old_repository_without_review_setup_remains_valid(tmp_path: Path) -> None:
+    trusted = _workflow(tmp_path, lambda text: text)
+    assert not (tmp_path / "copilot-code-review.yml").exists()
+    assert MODULE.validate_workflow(trusted) == []
+
+
+@pytest.mark.parametrize("prepared", [False, True], ids=["old-policy", "prepared-overlay"])
+@pytest.mark.parametrize("case", CASES)
+def test_prepared_review_preservation_admission(case: str, prepared: bool) -> None:
+    check_control_case(MODULE.ROOT, case, prepared=prepared)
+
+
+def test_review_control_overlay_is_idempotent_after_activation() -> None:
+    text = (MODULE.ROOT / ".github/workflows/base-branch-reminder.yml").read_text(encoding="utf-8")
+    prepared = prepare_review_allowlist(text)
+    assert prepare_review_allowlist(prepared) == prepared

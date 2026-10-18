@@ -74,8 +74,7 @@ permission to publish implementing code before the integration owner's gate.
 | `tools/test_check_trusted_ci.py` | Positive official setup fixture; wrong filename, job, label, dynamic route, extra self-hosted job and secret/permission regressions |
 | `.github/workflows/base-branch-reminder.yml` | Add only the dedicated review workflow to the trusted control-declaration allowlist, with corresponding admission tests |
 | `.github/promotion-control.json` | Preserve the dedicated review workflow across promotion, after its exact-path admission support is active |
-| `tools/test_promotion_control.py` | Prove exact-path preservation and unchanged existing release-control declarations; the generic preservation implementation needs no new path-specific capability |
-| `tools/test_release_publication_boundary.py`, `tools/test_post_ci_policy.py` | Exercise the actual main-admission code, exact reviewed-source compatibility transaction, and rejection of mixed/unrelated source changes |
+| `tools/copilot_review_setup_fixtures.py`, `tools/copilot_review_control_fixtures.py` | Independent setup mutations and literal control-admission fixtures, wired through the existing required guard tests; no overwrite of another owner's held tests |
 | `docs/pipelines.md`, `TESTING.md` | Describe official review placement, distinct trust envelope, operator prerequisites, guard coverage, activation and rollback |
 
 Do not add ordinary PR/push triggers merely to execute the setup on every
@@ -88,10 +87,10 @@ label prefix nor an arbitrary workflow input may authorize private execution.
 The exact setup exception does not relax `trusted-ci.yml` or allow other
 workflows to select `copilot-extensions-review`.
 
-## Default-branch activation and narrow compatibility transaction
+## Default-branch activation and separate named-control epochs
 
-The baseline default-branch snapshot
-`f1837c45e71ead77fe21f01227931f0d85d6786e` carries:
+The prepared default-branch input
+`a2f59e9dae82738ba2537e9a58196cd5cca0e3c8` carries:
 
 - A workflow-only, owner-authored main bootstrap exception.
 - `check-trusted-ci.py` rejecting every custom runner route except the existing
@@ -100,9 +99,11 @@ The baseline default-branch snapshot
   The trusted main-admission code allows only those same three workflow paths
   in a control transaction.
 
-Consequently, adding the new setup YAML alone would leave main's guard
-incompatible, and adding it to the manifest alone would fail trusted admission.
-A dev merge does not activate either repair while promotion is paused.
+Its generic preservation helper supports one through 64 exact workflow paths.
+Adding a fourth path therefore needs no Python-helper change or helper-pin bump.
+Hosted setup is compatible with the old custom-route guard; the future ARC label
+is not. Adding the review path to the manifest before trusted admission is
+extended would fail, even if the same candidate also changes admission code.
 
 The operator explicitly authorized a minimum compatible control-plane bootstrap
 after its generic source changes land through dev. This is not permission to
@@ -110,54 +111,47 @@ author unrelated source directly on main, promote an unqualified dev snapshot,
 or resume the release pipeline. Coordinate this slice with the existing #6237
 owner; #7122 owns review-capacity integration, not the release campaign.
 
-The planned compatibility-source set is exactly:
-
-- `tools/check-trusted-ci.py`
-- `tools/test_check_trusted_ci.py`
-- `tools/test_release_publication_boundary.py`
-- `tools/test_post_ci_policy.py`
-
-The last two files carry the actual admission-policy regressions. Keep the
-generic `tools/promotion_control.py` implementation unchanged. Additional
-preservation fixtures in `tools/test_promotion_control.py` may land through dev,
-but are not automatically included in the main compatibility transfer. If local
-qualification demonstrates another necessary dependency, explain that concrete
-need and obtain scoped approval before expanding this exact set.
+The disjoint Dev source set is the route guard, its existing test entry point,
+and the two dedicated fixture modules listed above. Keep
+`tools/promotion_control.py` unchanged. Do not overwrite the held
+`tools/test_release_publication_boundary.py`. Additive changes to
+`tools/test_post_ci_policy.py` require exact-hunk coordination first; this slice
+does not edit it. Do not activate policy through a conflicting Dev preservation
+manifest.
 
 Required sequence:
 
 1. Clear the proposal and integration-owner intent/publication gates.
 2. Land and locally validate the narrow dev-owned guard/tests/docs and
    control-admission support through their authorized PR flow.
-3. Pin the actually merged, locally validated dev source commit. Through an
-   owner-authored workflow-only main PR, activate a narrowly reviewed admission
-   recipe in `base-branch-reminder.yml` for only the four compatibility paths
-   above and only their approved immutable source blobs. The existing trusted
-   workflow-only exception admits this enabling policy, not helper source in
-   the same PR. Tests must exercise the prepared main workflow itself.
-4. In a separate main compatibility PR, transfer only those exact reviewed dev
-   blobs. The already-active trusted main admission code checks the complete
-   diff, exact source identity, regular-file modes and content equivalence
-   without importing candidate code. A candidate cannot change its own source
-   pin or admission recipe. Refuse unrelated paths, arbitrary test/helper
-   imports and newer mutable dev content. Retire the bounded source-transfer
-   exception after the compatible guard is installed.
-5. Activate the exact review-workflow preservation allowlist, then add the
-   setup workflow and canonical preservation declaration through the admitted
-   main control transaction. Preserve the existing three workflow declarations.
-   Reconfirm the actual main parent and compatible helper identities before
-   each transaction.
-6. Only after the capacity operator proves ARC Ubuntu x64 readiness, ephemeral
+3. Prepare **Stage 1 only** against the exact coordinated Main base: add the
+   dedicated review workflow to the named allowlist in
+   `base-branch-reminder.yml`. Change no manifest, helper, CI or promoter in
+   that epoch. Run the unchanged old Main guard/tests against the workflow-only
+   overlay and report the exact hunk, base and results before requesting
+   owner-coordinated mutation.
+4. After Stage 1 actually merges, re-pin Main and prepare **Stage 2**:
+   canonical Main-authoritative preservation metadata containing the existing
+   three declarations plus the review path, and the existing hosted review
+   workflow. The updated trusted base gate, not candidate code, admits this
+   transaction. Retain regular blobs, canonical sorted JSON, no removals and
+   denial of arbitrary or undeclared paths. Do not combine the two epochs.
+5. Deliver the compatible custom-route guard and its tests/fixtures through the
+   existing qualified Dev-to-Main route. Workflow-only permission does not ship
+   Python source. If qualified delivery cannot meet the necessary compatibility
+   contract, return the exact failing files/cases for an owner decision rather
+   than copying unqualified helper code or borrowing another release's proof.
+6. Only after qualified guard delivery and the capacity operator's explicit ARC
+   Ubuntu x64 READY receipt for ephemeral
    lifecycle and network isolation, enable the actual route. Record the final
    default-branch setup blob SHA and actual scale-set identity.
 7. Request one ordinary official review through the existing supported route;
    verify a real ARC-assigned job and resulting official review. Do not rerun an
    old Actions execution and assume it selects the new workflow definition.
 
-The explicit source-compatibility authorization covers the narrow, dev-first
-recipe above. It does not make the old workflow-only rule capable of admitting
-Python source without that enabling policy transaction. Exact-head
-edit/merge/restore consent separately addresses blocked PR checks. Any temporary
+The explicit bootstrap authorization does not turn workflow-only admission
+into permission to ship Python source or authorize an unrelated Main epoch.
+Exact-head edit/merge/restore consent separately addresses blocked PR checks. Any temporary
 protection exception closes and is live-audited before further coding, waiting
 or another PR; no forged check results or globally disabled ruleset is used.
 
@@ -166,9 +160,10 @@ or another PR; no forged check results or globally disabled ruleset is used.
 - Exact guard exception and negative route/permission fixtures retain ordinary
   validator refusals and hosted/native coverage.
 - Main control transactions reject mixed source changes, undeclared files,
-  incompatible helpers and stale control inputs. The explicitly bounded source
-  compatibility transaction admits only its pinned, dev-merged four-file set;
-  wrong source, changed bytes, added imports and non-regular modes are refused.
+  incompatible helpers and stale control inputs. Candidate-side allowlist
+  expansion cannot authorize its own fourth-path manifest. Qualified delivery
+  must include the actual guard/test fixture dependencies, not a workflow-only
+  copy of the custom selector.
 - Preservation survives a later promotion; no unrelated main controls or
   candidate-generation behavior change.
 - The operator proves denied LAN/unapproved egress, required-host connectivity,

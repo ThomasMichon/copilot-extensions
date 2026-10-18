@@ -777,6 +777,18 @@ validation. This policy changes no required inventory for the current head.
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate`, the existing one-time retarget reminder, and identifier reporting for owner-authored PRs that pass admission. Gate permissions are contents-read only; any checkout is pinned trusted main, and PR commits are fetched only as Git data. No PR code executes. This replaces main-PR CI admission and post-CI scanning. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 
+The dedicated review setup is independently guarded: only its exact filename,
+official job identity, minimal permissions and setup step may select literal
+`ubuntu-latest` or the named `copilot-extensions-review` ARC scale set. This
+exception does not authorize that label in another workflow or relax the
+validator lane. The committed setup remains hosted; accepting the future label
+in policy is not a capacity-readiness signal or a selector activation. Main
+preservation requires its own owner-coordinated named-allowlist update before
+the later canonical manifest transaction. The generic preservation helper
+already supports a fourth workflow path and needs no change solely for that
+addition. Guard source and tests still require qualified default-branch delivery
+before a custom ARC selector is enabled.
+
 **Reactive, post-CI (triggered by `ci.yml` completing):**
 
 | Workflow | Trigger | Purpose |

@@ -19,9 +19,23 @@ The five-minute timeout belongs only to the setup command step, not the job.
 No job-level timeout overrides the official review's execution budget.
 
 `tools/check-trusted-ci.py` and `tools/test_check_trusted_ci.py` retain the
-existing global custom-route restrictions during hosted staging. A future ARC
-route needs its exact workflow/job/label guard and regression coverage before
-activation, plus operator-owned network and ephemeral-worker qualification.
+existing validator authorization and global custom-route restrictions. The
+dedicated review contract accepts only the exact minimal setup with literal
+`ubuntu-latest` or `copilot-extensions-review`; a different file, job, label,
+permission, trigger, extra step or job-timeout override is rejected. The setup
+and prepared-control fixture modules keep the cases independent of production
+expectation constants, and the existing required guard test entry point runs
+them without adding a CI job.
+
+Prepared-control fixtures exercise the real inline admission body and unchanged
+preservation helper with old and four-workflow allowlists, including rejected
+candidate self-authorization, foreign sources, missing/unsafe blobs, noncanonical
+metadata and unrelated paths. They do not activate a Main policy. Before any
+Main bootstrap, separately run the exact old Main guard/tests with only the
+proposed workflow overlay; passing Dev tests is not that compatibility proof.
+A future ARC activation additionally needs the compatible guard to reach the
+default branch through qualified delivery, plus operator-owned network and
+ephemeral-worker qualification.
 Do not use a readiness expression or a hosted-label alias to select private
 capacity. Local pytest commands remain wrapped by the bounded test supervisor.
 
