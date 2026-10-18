@@ -40,6 +40,17 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from .baseline_chunks import (
+        BaselineCollectionError, Chunk, collect_contained, run_chunk,
+        timeout_error as _timeout_error,
+    )
+except ImportError:  # plain-script entry point
+    from baseline_chunks import (
+        BaselineCollectionError, Chunk, collect_contained, run_chunk,
+        timeout_error as _timeout_error,
+    )
+
 BASELINE_SCHEMA_VERSION = 3
 DEFAULT_MAX_FILES_PER_CHUNK = 5
 # v1: {schema_version, plugin, cov_source, generated_at, tests, coverage}
@@ -288,40 +299,6 @@ _DRIVER_SCRIPT = textwrap.dedent(
 )
 
 
-class BaselineCollectionError(RuntimeError):
-    """Raised when the ephemeral pytest+coverage subprocess fails outright.
-
-    A baseline is only ever earned from a run where **every** collected test
-    passed: a failed/errored run can leave later tests unexecuted and
-    coverage/duration data partial, which would silently under-test any
-    change that relies on it -- the same "never silently under-test"
-    Behavior the vision requires of selection applies just as much to the
-    baseline it selects against.
-    """
-
-    def __init__(self, returncode: int, stdout: str, stderr: str) -> None:
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-        details = "\n".join(
-            f"{label}:\n{stream.rstrip()}"
-            for label, stream in (("stdout", stdout), ("stderr", stderr))
-            if stream
-        )
-        super().__init__(f"coverage baseline collection failed (exit {returncode}):\n{details}")
-
-
-def _timeout_error(exc: subprocess.TimeoutExpired, *, timeout_s: float) -> BaselineCollectionError:
-    def _decode(value) -> str:
-        return value.decode() if isinstance(value, bytes) else (value or "")
-
-    return BaselineCollectionError(
-        -1,
-        _decode(exc.stdout),
-        f"timed out after {timeout_s}s" + ((": " + _decode(exc.stderr)) if exc.stderr else ""),
-    )
-
-
 def _project_has_dev_extra(project_dir: Path) -> bool:
     pyproject = project_dir / "pyproject.toml"
     if not pyproject.is_file():
@@ -463,6 +440,7 @@ def collect_baseline(
     measured_commit: str | None = None,
     project_dir: Path | None = None,
     max_files_per_chunk: int = DEFAULT_MAX_FILES_PER_CHUNK,
+    workers: int = 1,
 ) -> dict:
     """Run `test_path` under coverage and return a portable baseline dict.
 
@@ -503,7 +481,16 @@ def collect_baseline(
     evidence the validation gate itself would accept. A chunked suite fails
     fast on the first non-clean chunk, exactly like a single-chunk suite
     always has.
+
+    `workers=2` opts into two independent drivers inside ONE existing
+    900s/128-process/4096-MiB/2048-MiB containment budget, not two budgets.
+    Each chunk then owns its sandbox as well as its coverage database,
+    report and pytest temp root. The default remains sequential.
     """
+    if type(workers) is not int or workers not in (1, 2):
+        raise ValueError("coverage workers must be 1 or 2")
+    if max_files_per_chunk < 1:
+        raise ValueError("max_files_per_chunk must be positive")
     with tempfile.TemporaryDirectory(
         prefix="cgs-baseline-", ignore_cleanup_errors=True
     ) as tmp:
@@ -537,7 +524,7 @@ def collect_baseline(
             ]
 
         chunks = _plan_chunks(cwd, test_path, max_files_per_chunk)
-        chunk_results = []
+        tasks = []
         for index, chunk_paths in enumerate(chunks):
             chunk_cov_data_file = tmp_path / f".coverage.{index}"
             chunk_json_report_file = tmp_path / f"report.{index}.json"
@@ -560,33 +547,18 @@ def collect_baseline(
                 str(basetemp),
             ]
             command = [*command_prefix, *driver_args]
-            print(
-                f"Collecting coverage baseline chunk {index + 1}/{len(chunks)} "
-                f"({len(chunk_paths)} path(s), {timeout_s:g}s limit)",
-                flush=True,
-            )
+            tasks.append(Chunk(
+                index=index, total=len(chunks),
+                command=command, cwd=str(cwd),
+                sandbox=str(sandbox if workers == 1 else tmp_path / f"s{index}"),
+                coverage_file=str(chunk_cov_data_file),
+                output_file=str(chunk_out_file), timeout_s=timeout_s,
+            ))
 
-            proc = None
-            try:
-                proc = subprocess.run(
-                    command,
-                    cwd=cwd,
-                    env=_subprocess_env(chunk_cov_data_file, sandbox),
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_s,
-                )
-            except subprocess.TimeoutExpired as exc:
-                # A hang is just as non-clean a collection outcome as a
-                # nonzero exit: translate it into the same error contract
-                # instead of letting it escape as an undocumented
-                # `TimeoutExpired`, so every caller only ever needs to catch
-                # `BaselineCollectionError`.
-                raise _timeout_error(exc, timeout_s=timeout_s) from exc
-            if proc.returncode != 0:
-                raise BaselineCollectionError(proc.returncode, proc.stdout, proc.stderr)
-
-            chunk_results.append(json.loads(chunk_out_file.read_text()))
+        chunk_results = (
+            [run_chunk(task) for task in tasks]
+            if workers == 1 else collect_contained(tasks, tmp_path)
+        )
 
         merged = _merge_chunk_results(chunk_results)
 
@@ -660,6 +632,13 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     parser.add_argument("--cwd", default=".")
     parser.add_argument("--out", required=True)
     parser.add_argument(
+        "--workers",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help="independent coverage chunks; 2 shares one fixed containment budget",
+    )
+    parser.add_argument(
         "--measured-commit",
         default=None,
         help="the dev commit SHA this run is measured against (see correlation.py)",
@@ -688,6 +667,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         measured_commit=args.measured_commit,
         project_dir=Path(args.project_dir) if args.project_dir else None,
         max_files_per_chunk=args.max_files_per_chunk,
+        workers=args.workers,
     )
     Path(args.out).write_text(json.dumps(baseline, indent=2, sort_keys=True))
     print(f"wrote baseline for {args.plugin} to {args.out}")

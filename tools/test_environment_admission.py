@@ -508,6 +508,11 @@ def test_standalone_real_uv_preparation_preserves_environment_identity(cache, mo
             '[project.optional-dependencies]\ntest=[]\n',
             encoding="utf-8",
         )
+    (cache / "plugins/agent-index/pyproject.toml").write_text(
+        (cache / "plugins/agent-index/pyproject.toml").read_text(encoding="utf-8")
+        + '[tool.uv.sources]\nagent-procutil={path="../../libs/agent-procutil"}\n',
+        encoding="utf-8",
+    )
     root = cache / ".test-venvs" / "standalone"
     root.mkdir(parents=True)
     python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")

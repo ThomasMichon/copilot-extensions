@@ -993,6 +993,70 @@ is now merged, with the pause and exposed product unchanged. Fresh full
 qualification remains open. Historical preparation entries below retain their
 original in-flight state; subsequent entries record the later outcomes.
 
+### 2026-10-18 - Separate coverage collection exhausts the unchanged job deadline
+
+Source compatibility prevention #7169 merged as
+`c1eb1be5d7fbb2fc0cda8dea9eaaf5c0550ac249`, after actual current-head approval
+and the newest same-head CI suite succeeded. The description edit had started
+another CI suite; an earlier green run was not evidence that the current
+required contexts had settled. The correction remains ordinary reviewed
+source work, not a CI waiver.
+
+Fresh paused qualification `39129398512` executed trusted Main `e86100f353`
+and admitted exact Dev `753c8384974052e1515950663017386ec376d9dc`. It did not
+include the later #7169 merge. Twelve source jobs succeeded. Worktrees and
+Dispatch passed their full suites in 635 and 765 seconds respectively, then
+both reached the existing 30-minute job deadline during separate serial
+coverage collection. GitHub's annotations explicitly identify that timeout;
+it was not external cancellation. Worktrees reached chunk 85/85 and Dispatch
+wrote its 44-chunk JSON at cancellation, but neither earned an uploaded
+baseline. Build, qualification, publication and product merge were skipped.
+The run is terminal; Main remains paused and no qualified replacement exists.
+
+The narrow repair adds an opt-in two-chunk scheduler only for those two
+existing baseline recipes, retaining five-file chunks, complete enrollment,
+the coverage/context driver and deterministic per-line union. Both drivers
+share one existing containment tree and budget, with separate sandbox,
+coverage, report and pytest temp paths. A failed chunk stops new scheduling,
+drains bounded active work and refuses partial evidence. Other recipes remain
+serial and the combined job deadline does not increase.
+
+The driver/report work in open #6783 remains independently owned; the
+outer-collector repair was coordinated before editing the shared file.
+Synthetic real-driver comparisons preserve exact test identities, per-line
+contexts, fixture setup/teardown and portfolio tiers across serial and parallel
+execution; a real failed chunk cannot write an authoritative output.
+Full heavy-suite timing, normal review, required CI, compatible Main control
+activation and fresh complete qualification remain separate gates. No
+unchanged qualification rerun, baseline waiver or strict-selection activation
+is authorized by this repair.
+
+The new scheduler contracts are directly re-exported through the already
+selected coverage-guided-selection test module in both existing CI lanes.
+No new test filename is added to preserved Main control: legacy Main can still
+execute its unchanged source selector before the new helper/test payload ships,
+while generated current-source candidates collect the additional contracts.
+
+A complete disconnected Linux Worktrees baseline now executes all 85 chunks
+within the fixed shared budget and retains the actual JSON for readback:
+12,491 test records, matching the complete serial reference's 12,155 passes
+and 336 skips. Every coverage context belongs to that same test set. Collection
+takes 427.430 seconds; the separate conservative serial full-suite reference
+takes 557.687 seconds. Their sum is 985.117 seconds, not a claim of one
+continuously timed production run. A preceding complete collection took
+408.354 seconds but its local witness export failed; that attempt is not
+substituted for the retained baseline. Dispatch's complete combined recipe
+and actual hosted qualification remain separate validation gates.
+
+Dispatch's complete disconnected combined recipe also succeeds: all nine
+full-suite groups finish with 6,070 passes and 154 skips, followed by all 44
+instrumented chunks. The retained baseline has exactly 6,224 test records and
+all coverage contexts refer to that same set. Full execution takes 374.624
+seconds, collection 286.490 seconds, and the continuously measured combined
+recipe 661.114 seconds, below the unchanged 1,800-second job deadline. These
+local Linux results do not stand in for source review, current-head required
+checks, hosted qualification or verified publication.
+
 ### 2026-10-18 - Source suites pass; pinned materializer compatibility blocks composition
 
 Source #7164 merged as `0b5b636802a6988b59af45c9c5174d281be9592d` after actual

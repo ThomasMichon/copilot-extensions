@@ -53,6 +53,16 @@ and durations merge across batches. A failed or timed-out batch aborts collectio
 without returning partial evidence or retrying a smaller subset. A successful
 upload step with no file does not satisfy the required baseline gate.
 
+Worktrees and Dispatch opt into `--workers 2` for this separate baseline step.
+The two drivers retain independent coverage databases, reports, pytest temp
+roots and host-state sandboxes. They share **one** unchanged 900-second,
+128-process, 4096-MiB memory and 2048-MiB temporary-storage containment budget;
+the full-suite-plus-baseline job still has its 30-minute deadline. Other
+plugins and local callers remain serial by default. Results merge in discovery
+order with per-line context unions, not last-writer wins. A failed chunk stops
+new scheduling, drains bounded active work and refuses the entire baseline;
+no tests, enrolled baselines or upload requirements are removed.
+
 `qualify_promotion_candidate.py` dispatches canonical `ci.yml` in candidate
 mode at the exact generated branch/SHA and owning promotion run-attempt. It
 validates the actual candidate/dev/base relationship and derives required job

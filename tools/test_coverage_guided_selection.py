@@ -21,6 +21,10 @@ resolution rather than running as part of the fast, always-on, pure-stdlib
 synthetic tests above. `.github/workflows/ci.yml` runs the synthetic tests
 in every PR's required `checks` job, and this one test only in a separate,
 workflow_dispatch-only `coverage-guided-selection-integration` job.
+
+The bounded chunk-scheduler contracts live in
+`coverage_baseline_chunk_contract.py` and are re-exported here so preserved
+Main CI keeps its existing source selector, including before that helper ships.
 """
 
 from __future__ import annotations
@@ -44,6 +48,17 @@ from tools.coverage_guided_selection import debt  # noqa: E402
 from tools.coverage_guided_selection import decide as decide_mod  # noqa: E402
 from tools.coverage_guided_selection import diff as diff_mod  # noqa: E402
 from tools.coverage_guided_selection import cli as cli_mod  # noqa: E402
+from tools.coverage_baseline_chunk_contract import (
+    test_chunk_refuses_incomplete_evidence_and_keeps_diagnostics as test_chunk_refuses_incomplete_evidence_and_keeps_diagnostics,
+    test_collector_keeps_all_paths_and_isolates_parallel_state as test_collector_keeps_all_paths_and_isolates_parallel_state,
+    test_failure_drains_owned_work_without_starting_later_chunks as test_failure_drains_owned_work_without_starting_later_chunks,
+    test_invalid_worker_count_refuses_before_launch as test_invalid_worker_count_refuses_before_launch,
+    test_real_parallel_failure_cannot_write_a_baseline as test_real_parallel_failure_cannot_write_a_baseline,
+    test_real_parallel_matches_serial_contexts_tiers_and_fixture_phases as test_real_parallel_matches_serial_contexts_tiers_and_fixture_phases,
+    test_two_workers_overlap_without_reordering_or_queuing_extra_work as test_two_workers_overlap_without_reordering_or_queuing_extra_work,
+    test_workers_share_one_unchanged_containment_budget as test_workers_share_one_unchanged_containment_budget,
+    test_workflow_keeps_deadline_enrollment_and_only_two_heavy_opt_ins as test_workflow_keeps_deadline_enrollment_and_only_two_heavy_opt_ins,
+)
 
 
 def test_baseline_error_preserves_collection_output_despite_coverage_warning():
@@ -1459,9 +1474,11 @@ def test_collect_baseline_with_project_dir_resolves_real_plugin_dependencies() -
 
 
 @pytest.mark.parametrize("max_files_per_chunk", [None, 2])
+@pytest.mark.parametrize("workers", [1, 2])
 def test_collect_baseline_chunks_a_large_suite_and_merges_the_results(
     tmp_path: Path,
     max_files_per_chunk: int | None,
+    workers: int,
 ) -> None:
     # Real, opt-in end-to-end proof of the chunking fix this effort's
     # agent-mcp enrollment surfaced the need for: constructs a synthetic
@@ -1508,6 +1525,7 @@ def test_collect_baseline_chunks_a_large_suite_and_merges_the_results(
         cov_source="src",
         plugin="chunking-regression",
         timeout_s=60.0,
+        workers=workers,
         **options,
     )
 
