@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -342,29 +343,82 @@ def test_posix_powershell_purge_compares_physical_home_identity(tmp_path):
     alias = tmp_path / "alias"
     alias.symlink_to(tmp_path, target_is_directory=True)
     script = r"""
+function Write-PurgeFixturePhase([string]$Phase) {
+    [Console]::Error.WriteLine([DateTime]::UtcNow.ToString('O') + ' purge-fixture: ' + $Phase)
+}
+Write-PurgeFixturePhase 'script-started'
 . $args[0]
+Write-PurgeFixturePhase 'engine-sourced'
+$script:ReadInstallDirectoryIdentity = ${function:Get-InstallDirectoryIdentity}
+function Get-InstallDirectoryIdentity {
+    param([string]$Path)
+    Write-PurgeFixturePhase 'identity-started'
+    try { & $script:ReadInstallDirectoryIdentity -Path $Path }
+    finally { Write-PurgeFixturePhase 'identity-finished' }
+}
 $refused = $false
+Write-PurgeFixturePhase 'aliased-home-check'
 try { Remove-InstallRuntimeContent -InstallRoot $args[1] }
 catch {
     if ($_.Exception.Message -ne 'Refusing to purge a user home') { throw }
     $refused = $true
 }
 if (-not $refused) { throw 'aliased home accepted' }
+Write-PurgeFixturePhase 'aliased-home-refused'
+Write-PurgeFixturePhase 'runtime-purge-started'
 Remove-InstallRuntimeContent -InstallRoot $args[2]
+Write-PurgeFixturePhase 'runtime-purge-finished'
 """
     runner = tmp_path / "purge.ps1"
     runner.write_text(script, encoding="utf-8")
-    result = subprocess.run(
-        [pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner),
-         str(ENGINE / "installer-engine.ps1"), str(alias / "home"), str(alias / root.name)],
-        capture_output=True, text=True, timeout=20,
-        env={**os.environ, "HOME": str(home), "USERPROFILE": str(home)},
-    )
+    try:
+        result = subprocess.run(
+            [pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner),
+             str(ENGINE / "installer-engine.ps1"), str(alias / "home"), str(alias / root.name)],
+            capture_output=True, text=True, timeout=20,
+            env={**os.environ, "HOME": str(home), "USERPROFILE": str(home)},
+        )
+    except subprocess.TimeoutExpired as error:
+        phase_output = error.stderr or b""
+        if isinstance(phase_output, bytes):
+            phase_output = phase_output.decode("utf-8", errors="replace")
+        print(
+            "POSIX purge fixture exceeded its original 20s child deadline; native phases:\n"
+            + phase_output[-16384:],
+            file=sys.stderr, flush=True,
+        )
+        raise
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "purge-fixture: runtime-purge-finished" in result.stderr
     assert (home / "sentinel").read_text(encoding="utf-8") == "home"
     assert sorted(path.name for path in root.iterdir()) == [
         ".install-stage", ".install.lock", ".install.lock.pid", ".install.lock.pid.reap",
     ]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX physical-home fixture")
+def test_posix_purge_timeout_retains_native_phase_output_and_original_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    error = subprocess.TimeoutExpired(
+        ["synthetic-pwsh"], 20, output=b"primary-output",
+        stderr=b"purge-fixture: identity-started\n",
+    )
+
+    def timeout(command: list[str], **kwargs: object) -> None:
+        assert kwargs["timeout"] == 20
+        assert "-NoProfile" in command and "-NonInteractive" in command
+        raise error
+
+    monkeypatch.setattr(shutil, "which", lambda name: "synthetic-pwsh")
+    monkeypatch.setattr(subprocess, "run", timeout)
+    with pytest.raises(subprocess.TimeoutExpired) as failure:
+        test_posix_powershell_purge_compares_physical_home_identity(tmp_path)
+    assert failure.value is error and error.output == b"primary-output"
+    assert error.stderr == b"purge-fixture: identity-started\n"
+    diagnostics = capsys.readouterr().err
+    assert "original 20s child deadline" in diagnostics
+    assert "purge-fixture: identity-started" in diagnostics
 
 
 def _uninstall_ps(tmp_path, name, *, preview=False, hold=False):
