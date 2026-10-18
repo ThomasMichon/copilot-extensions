@@ -16,7 +16,9 @@ PATTERN = re.search(r"grep -Eq \\\n\s*'([^'\n]+)'", DETECTION["run"]).group(1)
 def test_real_native_consumer_is_separate_bounded_and_required():
     assert JOB["timeout-minutes"] == 5
     assert JOB["runs-on"] == "ubuntu-latest"
-    assert JOB["if"] == WORKFLOW["jobs"]["worktree-manager"]["if"]
+    assert JOB["if"] == (
+        "github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'"
+    )
     assert "repositories-configuration" in WORKFLOW["jobs"]["pr-gate"]["needs"]
     assert "repositories-configuration" in WORKFLOW["jobs"]["promotion-gate"]["needs"]
     assert WORKFLOW["jobs"]["worktree-manager"]["timeout-minutes"] == 6
@@ -36,6 +38,24 @@ def test_real_native_consumer_is_separate_bounded_and_required():
     assert "run-standalone-tests.py worktree-manager --prepare" in ui["run"]
     assert "--timeout 120" in ui["run"]
     assert "$BASE_SHA...$HEAD_SHA" in DETECTION["run"]
+
+
+def test_native_consumer_keeps_its_own_admission_when_manager_becomes_path_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(
+        WORKFLOW["jobs"]["worktree-manager"], "if",
+        "always() && !cancelled() && needs.discover.outputs.manager_contracts == 'true'",
+    )
+    test_real_native_consumer_is_separate_bounded_and_required()
+
+
+def test_native_consumer_still_refuses_a_widened_main_pr_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(JOB, "if", "true")
+    with pytest.raises(AssertionError):
+        test_real_native_consumer_is_separate_bounded_and_required()
 
 
 @pytest.mark.parametrize("path,selected", [

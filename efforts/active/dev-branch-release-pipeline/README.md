@@ -1056,6 +1056,14 @@ file. A real-Git negative control reproduces exit 128 with CRLF and success
 with LF against the same object store. Write exact LF bytes and assert the
 absence of CR; all twelve source-contract cases then pass locally. This is a
 fixture serialization repair, not a source-lineage or Windows coverage waiver.
+That head receives current-head Copilot approval and passes the Windows repair,
+but the synthetic merge with #7140 exposes a separate stale Configuration
+contract: the independently selected native Configuration job is still compared
+to Manager's newly path-admitted predicate. Pin the native job's own unchanged
+Main-PR exclusion instead, retaining its five-minute bound, required membership
+and real owner/UI checks. Mutation regressions prove independence from Manager
+selection and continued refusal of widened Main scope; all 29 cases pass.
+No workflow admission policy is changed by this test-only correction.
 
 ### 2026-10-18 - Source and artifact repair passes; candidate qualification blocks publication
 
