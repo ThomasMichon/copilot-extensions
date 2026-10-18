@@ -1,0 +1,16 @@
+name: Copilot Code Review setup
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  copilot-setup-steps:
+    # Keep hosted until the isolated ARC capacity is explicitly qualified.
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Complete minimal review setup
+        timeout-minutes: 5
+        run: echo "Copilot Code Review setup complete."
