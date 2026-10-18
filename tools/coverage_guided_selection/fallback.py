@@ -40,6 +40,7 @@ than its own caller's stated budget is not.
 
 from __future__ import annotations
 
+import heapq
 import math
 from dataclasses import dataclass
 
@@ -89,18 +90,23 @@ def compute_fallback_set(
     a free/near-zero-cost pick -- incomplete timing data must never make a
     test look artificially attractive to the optimizer.
     """
-    all_test_lines: dict[str, set] = {}
+    all_test_lines: dict[str, int] = {}
+    universe_size = 0
     for file, lines in baseline.get("coverage", {}).items():
         for lineno, tests in lines.items():
+            if not tests:
+                continue
+            bit = 1 << universe_size
+            universe_size += 1
             for test in tests:
-                all_test_lines.setdefault(test, set()).add((file, lineno))
+                all_test_lines[test] = all_test_lines.get(test, 0) | bit
 
     # The universe is every line the *full* baseline attributes to any
     # test, regardless of eligibility -- see module docstring on why this
     # must not shrink when `eligible_tests` restricts candidates.
-    universe: set = set()
-    for covered in all_test_lines.values():
-        universe |= covered
+    # Negative/NaN budgets cannot buy coverage; zero can still buy free tests.
+    if not runtime_budget_s >= 0:
+        return FallbackSet((), 0.0, 0.0 if universe_size else 1.0, universe_size)
 
     eligible_test_lines = (
         all_test_lines
@@ -128,45 +134,45 @@ def compute_fallback_set(
         # invented near-zero floor.
         return max(actual_cost[test], _MIN_DURATION_S)
 
-    remaining = set(universe)
-    candidates = set(actual_cost)
+    remaining = (1 << universe_size) - 1
+    # Marginal gains only decrease. A lazy heap can reuse each previous
+    # score as an upper bound, preserving the exact greedy order without
+    # sorting every test's large line set after every pick.
+    candidates = [
+        (-(eligible_test_lines[test].bit_count() / score_cost(test)),
+         actual_cost[test], test, 0)
+        for test in actual_cost
+        if actual_cost[test] <= runtime_budget_s
+    ]
+    heapq.heapify(candidates)
     selected: list[str] = []
     total_cost = 0.0
 
     while remaining and candidates:
-        # Stable, score-descending ranking every round: (score desc, cost
-        # asc, test-id asc) so ties never depend on set/hash iteration
-        # order -- the same baseline always curates the same fallback set.
-        ranked = sorted(
-            (t for t in candidates if eligible_test_lines[t] & remaining),
-            key=lambda t: (
-                -(len(eligible_test_lines[t] & remaining) / score_cost(t)),
-                actual_cost[t],
-                t,
-            ),
-        )
-        if not ranked:
-            break  # no remaining candidate covers anything new
+        _, cost, test, iteration = heapq.heappop(candidates)
+        if not total_cost + cost <= runtime_budget_s:
+            continue  # unaffordable now means unaffordable in every later round
+        gain = (eligible_test_lines[test] & remaining).bit_count()
+        if not gain:
+            continue
+        if iteration != len(selected):
+            heapq.heappush(
+                candidates, (-(gain / score_cost(test)), cost, test, len(selected))
+            )
+            continue
+        selected.append(test)
+        total_cost += cost
+        remaining &= ~eligible_test_lines[test]
 
-        affordable = next(
-            (t for t in ranked if total_cost + actual_cost[t] <= runtime_budget_s),
-            None,
-        )
-        if affordable is None:
-            break  # the budget is a hard cap -- never force an over-budget pick
-
-        selected.append(affordable)
-        total_cost += actual_cost[affordable]
-        remaining -= eligible_test_lines[affordable]
-        candidates.discard(affordable)
-
-    covered_fraction = 1.0 if not universe else 1.0 - (len(remaining) / len(universe))
+    covered_fraction = (
+        1.0 if not universe_size else 1.0 - (remaining.bit_count() / universe_size)
+    )
 
     return FallbackSet(
         selected_tests=tuple(selected),
         total_runtime_s=total_cost,
         covered_fraction=covered_fraction,
-        universe_size=len(universe),
+        universe_size=universe_size,
     )
 
 

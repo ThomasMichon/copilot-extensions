@@ -731,7 +731,9 @@ with owned_python(['-c', 'import time; time.sleep(120)'],
 
 
 def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
+    import shlex
     import yaml
+    from packaging.requirements import Requirement
 
     workflows = SCRIPT.parent.parent / ".github" / "workflows"
     ci = yaml.safe_load((workflows / "ci.yml").read_text(encoding="utf-8"))["jobs"]
@@ -750,7 +752,15 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
             step["run"] for step in ci[name]["steps"]
             if step.get("name") == "Test runner admission and isolation"
         )
-        assert 'python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel' in command
+        install = shlex.split(command.split("&&", 1)[0])
+        assert "tools/seasoned_uv.py" in install and "--system" in install
+        requirements = {
+            requirement.name: requirement
+            for requirement in map(Requirement, install[install.index("--system") + 1:])
+        }
+        assert {"pytest", "pytest-timeout", "pyyaml", "setuptools", "wheel"} <= requirements.keys()
+        assert "83.0.0" in requirements["setuptools"].specifier
+        assert "82.9.0" not in requirements["setuptools"].specifier
     for name in ("agent-index-service-linux", "agent-index-service-windows"):
         assert ci[name]["needs"] == "discover"
         assert "needs.discover.outputs.standalone_service == 'true'" in ci[name]["if"]

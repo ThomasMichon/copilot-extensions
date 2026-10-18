@@ -9,8 +9,9 @@ run-name: ${{ inputs.promotion_run != '' && format('CI promotion {0} at {1}', in
 #   * discover       - resolve which plugin suites to run (changed on PR, all on
 #                      push to main), split into a fast set (smoke) and the one
 #                      heavy plugin (agent-worktrees, ~11 min) handled separately.
-#   * smoke          - full suite per fast plugin, in parallel (wall-time ~= the
-#                      slowest, agent-bridge ~2 min). fail-fast: false.
+#   * smoke          - full suite per fast plugin, in parallel; dispatch PRs use
+#                      coverage-selected tests + curated smoke + guards.
+#                      Push/manual portfolios stay full. fail-fast: false.
 #   * worktrees-smoke- agent-worktrees is too slow for the budget, so on PR/push
 #                      it only gets a cheap import/collection smoke; its full
 #                      suite runs via the manual `full` workflow below.
@@ -720,7 +721,9 @@ jobs:
         # 'coverage-guided-selection-integration' job below): it spawns a
         # real 'uv run --with coverage ...' subprocess against a real
         # plugin's suite, which doesn't belong in this fast, always-on lane.
-        run: python -m pytest -q tools/test_coverage_guided_selection.py
+        run: >-
+          python -m pytest -q tools/test_coverage_guided_selection.py
+          tools/test_coverage_fallback_equivalence.py tools/test_coverage_selected_execution.py
       # Internal-identifier enforcement moved out of this untrusted PR lane.
       # Fork PRs receive no repository secrets on `pull_request`, and repo
       # `vars.*` would be plain-text/public, so this workflow can never hold the
@@ -1020,7 +1023,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(tools/(ci_plugin_partitions\.py|test_ci_plugin_partitions\.py|run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|test_standalone_materialized_preparation\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            '^(tools/(ci_plugin_partitions\.py|test_ci_plugin_partitions\.py|run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|plugin_test_selection\.py|pytest_test_selection\.py|test_plugin_test_selection\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|test_standalone_materialized_preparation\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -1031,13 +1034,14 @@ jobs:
           PYTHONPATH: libs/single-instance-lease/src
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout pyyaml "setuptools>=83.0.0" wheel &&
           python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           libs/single-instance-lease/tests/test_operation.py
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_ci_plugin_partitions.py
+          tools/test_plugin_test_selection.py
           tools/test_run_standalone_tests.py
           tools/test_standalone_materialized_preparation.py
           tools/test_run_tests_in_devcontainer.py
@@ -1396,7 +1400,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(tools/(ci_plugin_partitions\.py|test_ci_plugin_partitions\.py|run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|test_standalone_materialized_preparation\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            '^(tools/(ci_plugin_partitions\.py|test_ci_plugin_partitions\.py|run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|plugin_test_selection\.py|pytest_test_selection\.py|test_plugin_test_selection\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|test_standalone_materialized_preparation\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -1407,13 +1411,14 @@ jobs:
           PYTHONPATH: libs/single-instance-lease/src
           PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml "setuptools>=83.0.0" wheel &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout pyyaml "setuptools>=83.0.0" wheel &&
           python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           libs/single-instance-lease/tests/test_operation.py
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_ci_plugin_partitions.py
+          tools/test_plugin_test_selection.py
           tools/test_run_standalone_tests.py
           tools/test_standalone_materialized_preparation.py
 
@@ -1515,10 +1520,28 @@ jobs:
           fi
           FULL=$(python tools/run-plugin-tests.py $MODE --list)
           SMOKE=$(python tools/run-plugin-tests.py $MODE --exclude "$HEAVY_PLUGIN" --list)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PILOT_PATHS=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              .github/workflows/ci.yml tools/coverage_guided_selection/ \
+              tools/ci_plugin_partitions.py \
+              tools/run-coverage-selected-tests.py tools/run-plugin-tests.py \
+              tools/plugin_test_selection.py tools/pytest_test_selection.py \
+              tools/plugin_test_containment.py tools/pytest_portfolio_guard.py \
+              tools/run_tests_in_devcontainer.py tools/_devcontainer_selection.py \
+              tools/_devcontainer_network_scope.py)
+            if [ -n "$PILOT_PATHS" ]; then
+              FULL=$(python -c 'import json,sys; print(json.dumps(sorted(set(json.loads(sys.argv[1])) | {"agent-dispatch"})))' "$FULL")
+              SMOKE=$(python -c 'import json,sys; print(json.dumps(sorted(set(json.loads(sys.argv[1])) | {"agent-dispatch"})))' "$SMOKE")
+            fi
+          fi
           echo "Full set:  $FULL"
           echo "Fast set:  $SMOKE"
           echo "smoke=$SMOKE" >> "$GITHUB_OUTPUT"
-          SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE")
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE" --single-job-plugin agent-dispatch)
+          else
+            SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE")
+          fi
           echo "smoke_matrix=$SMOKE_MATRIX" >> "$GITHUB_OUTPUT"
           if echo "$FULL" | python -c "import json,sys,os; sys.exit(0 if os.environ['HEAVY_PLUGIN'] in json.load(sys.stdin) else 1)"; then
             echo "heavy=true" >> "$GITHUB_OUTPUT"
@@ -1534,8 +1557,9 @@ jobs:
     # These consumers include setup and independent native/integration lanes.
     # Bridge's real TLS HTTP2/WSS lane exceeded eight minutes including cleanup
     # despite passing steps; retain fresh peer processes and a bounded 12m job.
-    # Dispatch distributes its complete suite's existing process groups across
-    # independent jobs; no item, sub-suite, plugin or job deadline is increased.
+    # Full dispatch runs retain their complete process-group partitions.
+    # Its PR-only coverage selection runs once, not once per full-suite partition.
+    # No item, sub-suite, plugin or job deadline is increased.
     timeout-minutes: ${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}
     strategy:
       fail-fast: false
@@ -1543,6 +1567,8 @@ jobs:
         include: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ matrix.plugin == 'agent-dispatch' && github.event_name == 'pull_request' && '0' || '1' }}
       - name: Fetch Agent Bridge contract provenance
         if: matrix.plugin == 'agent-bridge'
         run: git fetch --no-tags --prune --unshallow
@@ -1551,6 +1577,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test ${{ matrix.plugin }}
+        if: matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'
         env:
           PLUGIN: ${{ matrix.plugin }}
           PARTITION: ${{ matrix.partition }}
@@ -1563,6 +1590,22 @@ jobs:
             mapfile -t args <<< "$files"
           fi
           python tools/run-plugin-tests.py "$PLUGIN" "${args[@]}"
+      - name: Coverage-selected dispatch PR tests plus smoke and guards
+        if: matrix.plugin == 'agent-dispatch' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          python tools/run-coverage-selected-tests.py
+          --repo "$GITHUB_REPOSITORY" --plugin agent-dispatch --base-ref "$BASE_SHA"
+          --smoke-budget 120 --commit-volume-threshold 200 --age-threshold-seconds 604800
+          --out "$RUNNER_TEMP/dispatch-selection.json"
+      - name: Upload dispatch selection evidence
+        if: always() && matrix.plugin == 'agent-dispatch' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-selection
+          path: ${{ runner.temp }}/dispatch-selection.json
       - name: Test shared SSH proxy contracts
         if: matrix.plugin == 'agent-bridge'
         # ssh-manager is now consumed as a `uv`-editable canonical
@@ -1767,9 +1810,10 @@ jobs:
         env:
           CGS_RUN_INTEGRATION_TEST: "1"
         run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
           python -m pytest -q
           tools/test_coverage_guided_selection.py
+          tools/test_coverage_selected_execution.py
 
   promotion-gate:
     name: Promotion snapshot gate

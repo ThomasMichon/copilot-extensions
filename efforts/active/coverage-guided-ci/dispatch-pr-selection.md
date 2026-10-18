@@ -66,15 +66,20 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
 
 ## Plan and validation
 
-- [ ] Review and merge this proposal before activating required execution.
-- [ ] Measure real baseline curation and choose a bounded smoke budget with
+- [x] Review and merge this proposal before activating required execution.
+      Merged in [#7093](https://github.com/ThomasMichon/copilot-extensions/pull/7093).
+- [x] Measure real baseline curation and choose a bounded smoke budget with
       cross-cutting breadth evidence, not only a synthetic timing estimate.
-- [ ] Add strict contained node execution and regression coverage for invalid,
+      The 120-second floor covers 99.36% of 40,105 attributed lines across
+      all 234 baseline source files; real execution evidence is below.
+- [x] Add strict contained node execution and regression coverage for invalid,
       missing, renamed and empty node lists; ordinary full runs stay unchanged.
 - [ ] Wire coverage selection plus the additive smoke floor into the PR lane;
       test fresh, missing, stale, debt-saturated, unattributed and mixed diffs.
-- [ ] Demonstrate a runtime-covered regression is selected and fails, while
+- [x] Demonstrate a runtime-covered regression is selected and fails, while
       the corresponding clean selected invocation passes.
+      The opt-in real-coverage fixture proves clean/broken/repaired execution
+      and that the detecting test exceeds the smoke budget but is retained.
 - [ ] Measure an actual hosted required invocation inside the unchanged
       twelve-minute deadline, including setup and cleanup, before claiming
       the timeout repaired.
@@ -86,3 +91,73 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
 - 2026-10-16: proposed a bounded pilot using the existing mechanism.
   `agent-worktrees` remains shadow-only; nine published plugin pointers
   already include `agent-dispatch`. No required execution policy changed.
+- 2026-10-16: proposal #7093 merged after a clean current-head review and
+  successful complete required CI. Implementation is next; the execution
+  and hosted deadline proofs remain open. A real dispatch baseline curated
+  2,159 tests at a 120-second predicted budget, covering 99.36% of its
+  attributed lines across all 234 source files. The existing greedy
+  implementation itself took several minutes, so execution also needs
+  semantics-preserving curation acceleration, not a larger CI deadline.
+- 2026-10-16: implemented exact-node manifests, additive guards/changed test
+  files, fork-coordinate selection and the PR-only dispatch lane locally.
+  The existing curator now takes 0.74 seconds on the same real baseline and
+  returns the identical count, cost and breadth. One hundred randomized
+  baselines also match the original greedy ordering and accounting.
+  A real network-disconnected devcontainer invocation completed preparation,
+  execution and cleanup in 102.31 seconds: 2,285 passed, 7 skipped,
+  3,591 deselected; pytest itself took 77.52 seconds. This is local evidence,
+  not the still-required hosted twelve-minute proof. Focused runner,
+  curation and container-transport contracts passed (481 passed, 16 skipped);
+  the separate opted-in runtime-covered regression proof passed all 15
+  contracts, including the intentionally failing selected subprocess.
+- 2026-10-17: the first hosted implementation run failed both runner-contract
+  jobs on an exact dependency-command assertion that had not been updated for
+  the new `pytest-timeout` requirement. Updated that assertion rather than
+  weakening the installation contract. Its discovery output also showed no
+  plugin smoke targets for this tools-only PR; selection/runner/workflow
+  changes now explicitly nominate dispatch. Real-Git tests execute the
+  workflow's discovery script for relevant and unrelated inputs and verify
+  the PR-only nomination. The complete required runner portfolio plus
+  selection/discovery contracts passed locally: 642 passed, 22 skipped,
+  22 exhaustive cases deselected, 18.72 seconds. The pilot CLI also refuses
+  an absent suite before planning so no-evidence full fallback cannot
+  become a successful no-suite skip. The hosted deadline proof remains open.
+- 2026-10-17: reconciled the shared test-root map with the merged
+  `runtime-source` target from #7080, preserving its dependency declaration
+  and native CI lanes. Added it to the direct/container root consistency
+  regression. The rebased required runner/selection portfolio passed
+  (649 passed, 22 skipped, 22 exhaustive cases deselected); the unchanged
+  target also passed in a network-disconnected devcontainer (58 passed,
+  39 platform skips). These Linux results do not replace native Windows CI.
+- 2026-10-17: a cancelled hosted run still exposed two real Windows
+  absolute-path rejection failures: native normalization produced drive paths
+  that POSIX-only parsing treated as relative. Reject drive/UNC forms before
+  filesystem resolution while retaining native relative CLI paths. Review
+  also caught an implicated-test union masking an empty curated floor.
+  Validate the floor independently; regressions retain the implicated test
+  but block execution when every candidate costs 121 seconds against the
+  120-second budget, or all timing data is invalid. Fresh native and hosted
+  deadline evidence remains required.
+- 2026-10-17: review found the legacy debt-exceeded early return could drop
+  an implicated test from the new required execution mode. Keep that legacy
+  path for unchanged shadow callers, but make additive-floor execution remap
+  and retain implicated tests even when age/commit-volume debt is exceeded.
+  Regressions cover the 121-second detector against the 120-second smoke
+  budget, and the real coverage-earned runtime proof runs both fresh and
+  eight-day-old baseline variants. Debt remains audited; no known detector
+  is removed to fit the smoke budget.
+- 2026-10-17: the pre-rebase candidate cleared every required CI job and
+  received an actual approval. Its hosted dispatch job completed in 148
+  seconds, including setup and cleanup, with 2,292 passed and 3,591 deselected;
+  the decision artifact records a 129.90-second invocation and exit code 0.
+  A subsequent base advance introduced the complete-suite dispatch
+  partitioner. Preserve its three-job defaults for full push/manual/promotion
+  execution, but request one explicit matrix row for PR-only coverage
+  selection to avoid duplicate smoke execution and artifact collisions.
+  The reconciled candidate must clear fresh review and CI before merging.
+  Composition contracts passed (693 passed, 23 skipped, 22 exhaustive cases
+  deselected), including the unchanged complete/disjoint partition and
+  qualification inventory tests. The literal workflow emits one selected PR
+  row and retains three full dispatch rows for push/manual events. Real
+  selected smoke on the new base passed in a disconnected devcontainer
+  (2,285 passed, 7 platform skips, 3,717 deselected; 98.69 seconds complete).

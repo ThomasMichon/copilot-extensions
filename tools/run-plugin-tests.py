@@ -56,6 +56,11 @@ import tomllib
 from pathlib import Path
 
 from seasoned_uv import run_uv_install
+# Preserve the runner's existing public map as an explicit re-export.
+from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
+from plugin_test_selection import (
+    TestSelection, load_selection, resolve_plugin_root, validate_test_file,
+)
 from plugin_test_containment import (
     ContainmentError,
     Limits,
@@ -69,11 +74,6 @@ PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
-EXTERNAL_TEST_ROOTS = {
-    "worktree-manager": Path("worktree-manager"),
-    "payload-invocation": Path("libs/payload-invocation"),
-    "runtime-source": Path("libs/versioned-runtime"),
-}
 EXTERNAL_TEST_DEPENDENCIES = {
     "payload-invocation": ("pyyaml>=6.0.3",),
     "runtime-source": ("pyyaml>=6.0.3",),
@@ -151,9 +151,7 @@ from _admission_protocol import acquire as _acquire_admission  # noqa: E402
 
 
 def _plugin_dir(name: str) -> Path:
-    if name in EXTERNAL_TEST_ROOTS:
-        return REPO / EXTERNAL_TEST_ROOTS[name]
-    return PLUGINS / name
+    return resolve_plugin_root(REPO, name, plugins_root=PLUGINS)
 
 
 def _has_suite(name: str) -> bool:
@@ -355,17 +353,7 @@ def _test_file_groups(
     if test_files:
         files = []
         for value in test_files:
-            path = Path(value)
-            candidate = _plugin_dir(name) / path
-            if (
-                path.is_absolute() or ".." in path.parts
-                or not candidate.resolve().is_relative_to(tests.resolve())
-                or candidate.resolve() != candidate.absolute()
-                or not candidate.is_file()
-                or not candidate.name.startswith("test_")
-                or candidate.suffix != ".py"
-            ):
-                raise ValueError(f"test file must be an existing, unlinked tests/test_*.py: {value}")
+            candidate = validate_test_file(_plugin_dir(name), Path(value).as_posix())
             if candidate not in files:
                 files.append(candidate)
         files.sort()
@@ -392,14 +380,25 @@ def run_plugin(
     allow_explicit_tiers: bool = False,
     allow_host_state: bool = False,
     test_files: tuple[str, ...] = (),
+    selection_file: Path | None = None,
 ) -> int:
+    selection: TestSelection | None = None
+    if selection_file is not None:
+        if test_files or prepare_only or guards or kexpr or collect_only:
+            raise ValueError("--selection-file cannot be combined with other selection modes")
+        selection = load_selection(selection_file, name, _plugin_dir(name))
+        if not selection.include_guards:
+            test_files = tuple(
+                str(path.relative_to(_plugin_dir(name)))
+                for path in selection.collection_files(_plugin_dir(name))
+            )
     if test_files and prepare_only:
         raise ValueError("--test-file cannot be combined with --prepare-only")
     groups = _test_file_groups(
-        name, max_files_per_subsuite, filtered=bool(guards or kexpr),
+        name, max_files_per_subsuite, filtered=bool(guards or kexpr or selection),
         test_files=test_files,
     )
-    if not _has_suite(name):
+    if not _has_suite(name) and selection is None:
         print(f"[SKIP] {name}: no test suite")
         return 0
     if prepare_only:
@@ -441,6 +440,10 @@ def run_plugin(
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
+        if selection is not None:
+            env.pop("PYTEST_ADDOPTS", None)
+            snapshot = sandbox / "selection.json"
+            snapshot.write_text(json.dumps(selection.as_dict()), encoding="utf-8")
         plugin_started = time.monotonic()
         for index, group in enumerate(groups, start=1):
             remaining = plugin_timeout - (time.monotonic() - plugin_started)
@@ -472,6 +475,12 @@ def run_plugin(
             ]
             if collect_only:
                 cmd.append("--collect-only")
+            if selection is not None:
+                cmd += [
+                    "-p", "pytest_test_selection",
+                    "-o", "addopts=",
+                    f"--exact-selection={snapshot}", f"--selection-plugin={name}",
+                ]
             if guards:
                 cmd += ["-m", "guard"]
             if kexpr:
@@ -511,6 +520,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", default="origin/main", help="diff base for --changed")
     ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
+    ap.add_argument(
+        "--selection-file", type=Path, help="validated exact-node JSON selection; "
+        "union whole test files and guards (requires exactly one named plugin)",
+    )
     ap.add_argument(
         "--test-file", action="append", default=[], metavar="PATH",
         help="collect only this plugin-relative tests/test_*.py file (repeatable; "
@@ -571,6 +584,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    if args.selection_file is not None and (
+        len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
+        or args.test_file or args.guards or args.kexpr or args.collect_only
+        or args.list_only or args.exclude or args.pre_push
+    ):
+        ap.error("--selection-file requires one named plugin and no other selection mode")
     if args.test_file and (
         len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
     ):
@@ -686,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
                     allow_explicit_tiers=args.allow_explicit_tiers,
                     allow_host_state=args.allow_host_state,
                     test_files=tuple(args.test_file),
+                    selection_file=args.selection_file,
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)
