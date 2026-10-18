@@ -93,28 +93,35 @@ abstracted; the requested mechanics and priorities are unchanged):
 
 - [x] Trace the actual headed CLI and headless ACP launch owners, including
   bridge-owned remote Session Hosts and provider process boundaries.
-- [ ] Implement shared payload reflection/registration preparation: local
-  filesystem references for local launches, copied payloads for remote launches,
-  and a resolvable local marketplace declaration plus explicit enablement in
+- [x] Implement shared payload reflection/registration preparation for trusted
+  Codespace/container launches: copied payloads and a resolvable local
+  marketplace declaration plus explicit enablement in
   the target repository's `.github/copilot/settings.local.json`.
-- [ ] Complete installation of every selected remote-marketplace plugin and
+- [x] Deferred to `#5286 / Phase 2 - Static local, remote SSH and privileged relay`:
+  local launch-adapter preparation and local filesystem references remain part
+  of this effort, not completion inferred from the trusted remote providers.
+- [x] Complete installation of every selected remote-marketplace plugin and
   copying of every selected locally sourced in-worktree payload before
   assembling target-local settings, in both CLI and ACP modes. Verify installed
   payload locations instead of treating an expected cache path as installation.
-- [ ] Preserve unrelated configuration and repository-native plugins; reconcile
+- [x] Preserve unrelated configuration and repository-native plugins; reconcile
   only owned entries. Make repeat preparation idempotent.
-- [ ] Pass `--plugin-dir` for every effective prepared plugin to ACP. CLI uses
+- [x] Pass `--plugin-dir` for every effective prepared plugin to ACP. CLI uses
   target `settings.local.json` merged over `settings.json`; explicit plugin
   directories may supplement that supported path. Settings registration is
   mandatory in both modes, not replaced by the ACP flags.
-- [ ] Prepare before starting either child; surface copy/registration failure
+- [x] Prepare before starting either child; surface copy/registration failure
   rather than treating an agent missing requested plugins as ready.
-- [ ] Keep restricted/untrusted containers outside automatic projection.
-- [ ] Land the smallest coherent change with directly related docs, tests, and
+- [x] Keep restricted/untrusted containers outside automatic projection.
+- [x] Land the smallest coherent change with directly related docs, tests, and
   changefiles.
 
-### Phase 2 - Static remote SSH and privileged relay
+### Phase 2 - Static local, remote SSH and privileged relay
 
+- [ ] Apply target-local registration before static local-loopback launches in
+  both CLI and ACP modes, retaining existing own/related selection, native
+  operator precedence and account/platform locality checks. Resolve local
+  filesystem references without assuming a remote provider owns this path.
 - [ ] Apply the same contract to genuine remote static-registry SSH targets:
   target-owned resolution plus control-repository payload staging.
 - [ ] Resolve the privileged launch's real identity/filesystem context and
@@ -134,37 +141,37 @@ abstracted; the requested mechanics and priorities are unchanged):
 
 ## Validation Plan
 
-- [ ] Unit contracts cover first preparation, repeat preparation, settings
+- [x] Unit contracts cover first preparation, repeat preparation, settings
   preservation, identity mapping, required payload absence, malformed settings,
   and restricted-venue refusal.
-- [ ] Concurrent preparations against one checkout retain both intended
+- [x] Concurrent preparations against one checkout retain both intended
   registration sets and unrelated settings; an interrupted write leaves the
   previous valid file usable.
-- [ ] Existing user-level registration and target-local registration of the
+- [x] Existing user-level registration and target-local registration of the
   same identity resolve to the selected target payload without duplicate skill
   loading. Explicit target-local operator overrides remain authoritative unless
   this operation explicitly owns that entry.
-- [ ] Shared preparation covers headed CLI and ACP with the same selected
+- [x] Shared preparation covers headed CLI and ACP with the same selected
   payload identities; ordering tests prove remote installation and local copying
   complete before settings assembly, and settings assembly completes before
   launch. Missing installation or copy failure prevents child startup.
-- [ ] Companion metadata cannot expand the eligible set: a selected sample
+- [x] Companion metadata cannot expand the eligible set: a selected sample
   alone reports its external companion without copying/enabling it; an
   explicitly selected pair is prepared together. Target-native selected remote
   plugins still install, and target-local enable/disable choices remain intact.
-- [ ] An independent CLI consumer discovers the merged base/local settings, and
+- [x] An independent CLI consumer discovers the merged base/local settings, and
   ACP receives one `--plugin-dir` for every effective prepared plugin, including
   both remote-installed and worktree-copied sources.
-- [ ] Synthetic fresh-checkout integration uses the real configuration writer
+- [x] Synthetic fresh-checkout integration uses the real configuration writer
   and plugin resolver, verifies on-disk payloads and local marketplace sources,
   and launches an independent consumer rather than mocking past registration.
 - [ ] Trusted container proof: headed and headless agents enumerate the
   expected skills from the reflected payloads.
-- [ ] Codespace proof: the same narrow discovery check succeeds for both launch
+- [x] Codespace proof: the same narrow discovery check succeeds for both launch
   modes, with effective paths/settings and launch version recorded.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
   evidence or explicit tracked transfers.
-- [ ] Existing own-plugin, related-plugin, Session Host resume, and native
+- [x] Existing own-plugin, related-plugin, Session Host resume, and native
   repository settings behavior remain intact.
 
 ## Proposal
@@ -199,6 +206,40 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-18 - Trusted provider registration merged; static targets next
+
+- #7157 merged into `dev` as
+  `677623a2dcaf1fadb69f9b5dfbabb5e691f8ac09`. Its exact final head had 50
+  successful or legitimately skipped checks and a clean owner-authored Comment review with no remaining
+  findings. This records a merge, not release promotion or installed rollout.
+- Actual Codespace ACP and native CLI discovery exercised 34 effective
+  controller/native registrations and payloads. ACP received every effective
+  directory; native CLI loaded the reflected skill through target settings with
+  no plugin-directory flags. Actual creation, genuine child reuse and controlled
+  stale-ledger replacement all completed their mandatory preparation barrier.
+  A separate actual attached-shell consumer verified the prepared checkout and
+  34 local registrations from a neutral directory; only its terminal consumer
+  was substituted, so it is not claimed as a full native-TTY/model interaction.
+- Shared and provider regressions cover operator authority, late selection/
+  origin edits, consecutive and overlapping preparations, source-worktree
+  precedence, exact claim teardown, cancellation and hook-created checkouts.
+  Real archives exclude mixed-case environment secrets while retaining the
+  existing example/sample/template exceptions and required assets.
+- #7176's Windows CI repair retains separate constant-identity readiness and
+  publication jobs, each bounded to five minutes and required by both aggregate
+  gates. Hosted runs passed in 65 and 169 seconds without dropping selectors or
+  weakening qualification inventory.
+- The merged commit's Dev CI passed. Trusted Main remains under the
+  operator-approved release containment tracked by #6237; its promotion gate
+  deliberately skips publication. Do not treat a successful no-op workflow as a
+  release, unpause that separately owned control work, or install unpromoted
+  source to declare rollout complete.
+- The local launch-adapter portion is explicitly carried into Phase 2 alongside
+  static remote SSH and privileged execution. The next stretch traces those
+  actual launch owners and identity/filesystem boundaries before extending the
+  existing preparation engine. Live trusted-container discovery and the release/
+  authorized-rollout gate remain unresolved; no parent completion is claimed.
 
 ### 2026-10-18 - Complete catalog authority and authenticated hook sequencing
 
