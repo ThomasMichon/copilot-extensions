@@ -115,13 +115,17 @@ rewrite)._
 > https://github.com/ThomasMichon/copilot-extensions/pull/6938
 > I expect that to mean "release succeeded". If we have a failure, don't allow this merge through.
 
-**2026-10-16 CI capacity clarification (verbatim):**
+**2026-10-16 latency, sequencing and CI capacity clarification (verbatim):**
+
+> What's the main blocker here? Is CI getting stuck in a queue? We need CI to be under 10 minutes
 
 > CI for PRs should be under 10 minutes; CI for validate-and-promote should be more like 30, but 1 hour is okay nce we have the parallel "use dev locally" effort through
 
 > Focus on getting current promotion flow unblocked before disrupting it; once it runs against, focus on shortening the time
 
 > We've accumulated over 50 actrive PRs in copilot-extensions; we desperately need main promotion and to make the CI pipeline shorter so we're not jammed in the queue. We don't have enough resources to sustain this test load
+
+> You should dig into tests at a per-test timing level and really identify the bad actors when run in the CI/validation flow. We'll want to file bugs on getting those tightened up
 
 The quoted wording and original spelling are preserved verbatim. Phase 9's
 operative plan below interprets the timing and recovery-first requirements;
@@ -766,7 +770,8 @@ _(Agent-recommended implementation and validation decomposition of the
       ordinary PR event-to-required-gate time must be below ten minutes,
       including queueing. Target thirty minutes for validate-and-promote;
       the one-hour allowance requires actual local-Dev workflow acceptance.
-- [ ] _(Agent-recommended sequencing.)_ Contain superseded PR CI without
+      Unblock the current promotion before changing its performance.
+- [x] _(Agent-recommended sequencing.)_ Contain superseded PR CI without
       interrupting the executing Main qualification. Retain rolling Dev/manual
       validation and every current-head gate. While Main is canonically paused,
       the reviewed Dev-only policy may land without changing that pinned
@@ -775,6 +780,12 @@ _(Agent-recommended implementation and validation decomposition of the
       path after that retirement and before any fresh qualification or resume
       containing source that asserts it. Recheck the pause before the Dev merge;
       governed Main controls are never replaced silently.
+      Source #7124 and matching Main #7129 are merged with the pause preserved;
+      this closes the policy interlock, not qualification or latency acceptance.
+- [ ] Identify individual slow tests and fixture costs in the actual CI and
+      validation flow, distinguish hosted timings from local profiles, and
+      file deduplicated optimization bugs without dropping behavioral coverage
+      or increasing containment limits.
 - [ ] Prove normal release and client compatibility, journal the result and
       retain responsibility for unresolved acceptance. A contract PR, source
       merge, tag, or green wrapper alone does not complete this phase.
@@ -939,6 +950,10 @@ participants' phase ownership remain unchanged.
 - [ ] Two natural qualified release cycles with pending source changes
       demonstrate the cadence, source marker, artifact reuse and landed tag.
       Missed targets and remaining blockers stay explicit and owned.
+- [ ] Measure ordinary PR event-to-required-gate completion below ten minutes,
+      including queue delays; separately measure validate-and-promote against
+      the thirty-minute target. Do not apply the conditional one-hour allowance
+      before the local-Dev workflow has actual acceptance evidence.
 
 ## Proposal
 
@@ -960,6 +975,32 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+**Latest outcome:** source #7124 and Main control #7129 are merged. Fresh
+qualification `39024583508` failed the unchanged Worktrees aggregate budget
+before candidate publication or product merge. Main remains paused and
+unqualified. Historical preparation entries below retain their original
+in-flight state; the later outcome and disconnected diagnostic are recorded
+in their own 2026-10-17 entries.
+
+### 2026-10-17 - Prepare bounded no-op Promote admission
+
+Paused normal runs already decline expensive source validation, but the
+unconditional Promote job still allocated a runner and deployment environment
+merely to decline that source again. The prepared source/Main pair changes
+only that job's admission field: retain `always()` for dependency-failure
+visibility while requiring successful gate execution and its exact
+`is_dev=true` output. The unchanged decision step still refuses every missing,
+failed, cancelled, skipped or unknown validation result.
+
+Semantic YAML comparison confirms all other job data, dependencies, steps,
+permissions, budgets and release evidence checks are identical on each side.
+The exact prepared Main controller passes all 23 controlled boundary/admission
+tests under the bounded supervisor; the source view passes its applicable
+cases with the existing explicit legacy-controller skip. Neither local proof
+activates Main or qualifies a product. The disjoint hosted review-setup
+allowlist stage has the next coordinated Main slot; this V&P activation must
+re-pin its eventual base and clear normal review and required gates afterward.
 
 ### 2026-10-16 (PDT) - Retire failed candidate; repair release-layout qualification
 
@@ -1059,6 +1100,102 @@ Next: merge the reviewed collector repair through Dev, then earn a fresh
 paused replacement with complete source, candidate and artifact evidence.
 Resume, consumer deployment and both natural pending-source cadence cycles
 remain open.
+### 2026-10-17 - Fresh qualification exhausted the unchanged Worktrees aggregate
+
+Fresh paused qualification `39024583508` executed trusted Main
+`a2f59e9dae82738ba2537e9a58196cd5cca0e3c8` and admitted actual Dev
+`b367d11da269b9844dd5a1af305fdfcf3c6ca492`, which contains source repair
+#7124. It failed the full Worktrees job before build, attestation, candidate
+qualification, publication or a product merge. Main remains paused and the
+existing product remains unqualified; neither a successful pause-only automatic
+run nor a workflow-only repair is product qualification.
+
+The exact source runner and failed job establish an aggregate-budget failure,
+not a new ten-second item limit: fifteen completed groups reported 10,838 passes,
+173 existing skips and 857.66 pytest seconds. Interpreter and containment
+overhead left 9.70186 seconds of the unchanged 900-second plugin budget for
+group sixteen of seventeen. No named assertion trace established a functional
+regression or an accepted flake. No budget, selection or release gate was
+relaxed, and no unchanged qualification retry was dispatched.
+
+Existing #5694 retains ownership of the performance implementation. Its
+published candidate still owes repeated complete normal Windows budget and
+group-headroom proof, current review and required checks. Its two-worker
+work-stealing setting belongs to the Windows rotation, not the serial Linux
+release command; those are distinct measurements. The separately observed
+paused-run Promote allocation is retained under #6237 and #3336 for a bounded
+control repair, not permission to change the release while it is qualifying.
+
+The approved twelve-entry deferred-CI restoration cohort is fully accounted
+for, and its monitor is stopped. Two restored runs succeeded; changed or closed
+sources were not replayed. Existing replacements were recorded, including a
+cancelled replacement that is explicitly not passing proof. This completes
+that bounded capacity action, not the release or latency acceptance gates.
+
+### 2026-10-17 - Disconnected benchmark exposed source-checkout-dependent fixtures
+
+The exact failed Dev source was exercised through the canonical disconnected
+container wrapper with unchanged 30/300/900-second limits. Nine groups passed;
+group ten reported 912 passes, 16 existing skips and two failed push-error
+fixtures before the remaining groups could run. Both fixtures passed `"."`
+into the real publication path and received the publication-lock refusal
+instead of reaching their intended mocked push errors. This partial run is
+neither a full performance baseline nor evidence that the hosted timeout was
+fixed.
+
+The same fixtures remain in #5694's published candidate after its test-file
+split. A diagnostic-only overlay supplies the existing real, test-owned Git
+repository and configuration while retaining both original error assertions,
+push doubles and the production publication lock. The canonical disconnected
+wrapper passes both affected cases; no production ownership, Git configuration
+scrubbing, timeout or skip policy changed. The finding and proposed overlay are
+coordinated with #5694's existing owner. A complete candidate comparison and
+all normal qualification remain outstanding.
+
+### 2026-10-17 - Source containment and materialized-fixture repair merged
+
+PR #7124 merged normally at `027887e06949d7cbf676b82b48bc82a6eb9aa244`.
+The exact source head received an actual Approved Copilot review with no open
+issues, and all three original required checks passed. The reviewed fixture
+repair covers canonical and already-materialized source layouts without
+relaxing admission or downloaded-byte integrity. The strict AST test evaluator
+and PR-only cancellation policy landed in the same contribution; no additional
+CI-triggering push was made for explained chronological evidence or cosmetic
+review suggestions.
+
+The matching Main control is already active through #7129, while the canonical
+pause remains set. This closes the reviewed Dev/Main policy-activation
+interlock, not release qualification or the ten-minute CI/cadence targets.
+The next stretch is a fresh trusted-Main qualification that captures a new
+live Dev source, preserves the three governed control paths, and executes
+every source/candidate/native/consumer/integrity/publication/readback gate
+before any product transition reaches Main.
+
+The separate bounded queue-relief operation retired the approved attempts and
+recorded current-head deferrals for paced restoration. It changes no workflow
+admission setting or release gate; no cancelled attempt is treated as passing
+proof. The release effort remains Active, with client acceptance and the two
+natural qualified-cycle observation still outstanding.
+
+### 2026-10-17 - Matching Main CI containment activated while paused
+
+PR #7129 merged normally at `a2f59e9dae82738ba2537e9a58196cd5cca0e3c8`
+after actual current-head Copilot review and the original Main source gate.
+The owner-authored passing Comment had no Medium/High findings; cosmetic
+predicate-anchor suggestions were explained and declined. No administrator
+merge or branch-policy exception was used.
+
+The merge changes only `.github/workflows/ci.yml`, with the four reviewed
+PR-only cancellation fields. The release state is byte-identical to its
+previous Main base: canonical pause and the old source marker remain intact.
+Product files, the immutable helper pin and the three-path control declaration
+are unchanged. This activates the control prerequisite for fresh qualification;
+it is not product qualification, publication, resumption or deployment.
+
+The source companion #7124 has an actual Approved review on its exact head
+and all three original required checks passing; its merge is the next step.
+Phase 9 remains open until fresh qualification and the release/client
+acceptance matrix actually pass.
 
 ### 2026-10-16 - Source-owned helper implementation; activation remains open
 
@@ -1115,6 +1252,15 @@ not credited as live qualification. A measured native cumulative timeout is
 addressed by partitioning into the existing second Windows job, preserving all
 cases and both five-minute bounds rather than extending a deadline.
 
+The helper implementation merged as #7005 at
+`c2caa135dbb5c1d6bbacfee5c48f9b6a0c17d104` after a normal branch refresh,
+fresh exact-head review with no open findings, and all required checks.
+CI run `38952655125` succeeded on the reviewed source head. No branch
+protection, check binding or review requirement was changed to resolve the
+earlier server-side merge refusal. The next slice pins this actual merged Dev
+commit in the prepared workflow-only Main bootstrap and re-executes its
+functional admission/publication proofs before opening that control PR.
+
 These source changes do not activate Main control. #6237 retains one
 coordinated, explicitly authorized workflow/control repair; the pipeline is
 paused after #6949, and the exposed product snapshot is not declared healthy.
@@ -1123,6 +1269,89 @@ while preparing a normal candidate PR replacement. Its trusted control,
 first-transition qualification, actual known-good Main replacement, installed
 consumer acceptance and hourly-or-faster cadence proof remain open. A source
 merge, helper receipt or documentation change is not effort completion.
+
+### 2026-10-16 - Reviewed Main workflow bootstrap landed; replacement remains open
+
+The workflow-only bootstrap #7022 merged as
+`6972054f04607d8999dbc05c1d9e3d930005efb0` with the actual merged #7005
+helper pin. Review identified and resolved the merge waiter's missing
+job-level Actions read permission and the removed postlanding attribution
+refresh. The final explicit functional portfolio passes 20 cases, including
+dispatch inputs, invalid identities and visible provider failures. The
+refresh remains a bounded, nonqualifying idempotent metadata operation;
+qualification and artifact publication/readback remain entirely premerge.
+Fresh exact-head review had no open blocking findings and the required Main
+source gate succeeded. The exact-head merge did not request administrator
+bypass or change any protection.
+
+The separate canonical three-workflow control declaration #7025 merged as
+`3c3a8bef04f5f77eddd9d2987dc5f0bdd5b06a7a` after exact-head approval and
+successful required Main admission. The actual Main diff from the paused
+snapshot contains only those three workflows and the canonical declaration;
+the product source marker and pause are unchanged.
+Control landing is not a known-good product release:
+the existing product snapshot remains unqualified and the pause remains set.
+The next slice is the explicit, fully qualified paused replacement.
+Only after actual known-good Main readback
+may canonical resume, installed consumer acceptance and natural cadence
+validation proceed.
+
+The first two manual qualification dispatches were replaced in GitHub's
+pending slot before executing any job. Newer automatic dispatches were still
+occupying the same serialized lane with full source suites despite the pause.
+The narrow #7036 admission repair merged as
+`f1837c45e71ead77fe21f01227931f0d85d6786e` after exact-head approval and
+required Main admission. A validated, fresh Main pause now declines normal
+source validation in the cheap gate; explicit qualification-only replacement
+retains every downstream gate. The actual functional portfolio passes 21
+cases. Running jobs are not cancelled, pending-slot semantics are unchanged,
+and neither cancelled dispatch counts as qualification or cadence evidence.
+
+### 2026-10-16 - Collector repair merged; current replacement precedes latency changes
+
+Collector repair #7049 merged as
+`b75d4f62ffb8afb7f2a2ded09b19d48d141b76ac` after exact-head approval,
+all three required checks and complete CI run `38977784933` succeeded.
+The review's native-path expectation finding was corrected before approval.
+The collector retains every test and its unchanged 300-second cap; the exact
+failed 25-file/722-item inventory passed in five batches, the longest 184.87
+seconds. This closes the collector source repair, not containing-release
+qualification. Fresh paused qualification `38982486731` is the next owned
+release gate; no resume or client update has been performed.
+
+The operator distinguished the latency budgets and explicitly prioritized
+restoring this flow before changing its performance. The successful PR CI
+took 46m34s event-to-completion. Its guards job spent 17m15s executing serial
+steps, while many short jobs waited much longer for runners; the final
+aggregate itself executed in four seconds after queueing. Queue delay and
+test execution are separate problems, not proof of a hung test. Read-only
+per-test investigations now cover payload foundation, JavaScript unit tests
+and artifact/shared-library contracts. Their findings must retain hosted
+versus local measurement provenance and become deduplicated bugs; no active
+workflow or owned test-corpus lane is modified by this profiling.
+
+The investigation filed #7075 for the two actual hosted CLI parity cases at
+100.038409 and 72.827613 seconds, and #7076 for synthetic binding/lifecycle
+fixtures inheriting real WSL guest identity. The latter prevents treating a
+failed local profile as equivalent to hosted passes; production identity
+refusals remain required. Actual hosted Worktrees per-item hotspots were
+attached to the existing #5694 owner, while #3336 retains the timing
+provenance, missing hosted Python per-test evidence and smaller repeated-YAML
+parsing optimization. Filing these bugs does not change the running promotion
+or complete the latency acceptance gates.
+
+The next paused replacement, `38982486731`, tested source
+`40f3f51dac6b0e69124d51215a2b4371571394c1` and failed only Worktrees
+`test_successful_posix_helper_cannot_leave_a_redirected_descendant` in full
+job `117254600034`. Every other source family passed; candidate construction,
+qualification, artifact publication and Main merge were skipped.
+The original failure observes an unchanged live-process identity after cleanup;
+the reader already excludes zombies. The cause remains unproven after three
+bounded local checks, including the full selected CI neighborhood. The operator
+authorized one same-source failed-job diagnostic retry, attempt 2, preserving
+every release gate. A repeat failure stops further retries; a pass neither
+classifies this as an accepted flake nor closes the retained #6237 cleanup
+defect. No timeout, Main control, pause or installed runtime was changed.
 
 ### 2026-10-13 - Phase 8 superseded by the canonical campaign
 

@@ -87,6 +87,15 @@ Postmerge work may record the actual landing; it is not the first publication,
 consumer test or availability check. A Main promotion PR merging means the
 release is already qualified for marketplace consumption.
 
+The checkout-free merge waiter needs explicit job-level `actions: read` for
+that final qualification-run lookup; its own permission map replaces the
+workflow-level grant. After landing, a separate bounded dispatch refreshes
+existing Dev attribution checks against the landed Main policy, because a
+merge using the Actions token does not produce ordinary push-triggered runs.
+That idempotent metadata refresh is not release qualification or artifact
+publication. Dispatch failures remain visible without retroactively failing
+an already qualified release.
+
 The required Main source gate also authenticates the actual owning promotion
 run. Its immutable executing Main SHA must belong to Main history, and its CI
 and promotion workflow blobs must equal the current PR base's control blobs.
@@ -103,6 +112,20 @@ nor bypasses source, rollback, stale-candidate, artifact or CI checks. It
 cannot directly push Main or create an early release tag. A trusted,
 explicit manual control flow may land the replacement only through the same
 fully qualified candidate PR path. Normal automatic promotion remains paused.
+
+The cheap admission gate reads fresh trusted Main state before normal source
+validation. A valid pause explicitly defers normal work, while missing,
+malformed or wrongly typed state refuses. This avoids occupying the serialized
+lane with expensive source portfolios that cannot publish. It does not change
+GitHub's rolling pending-slot semantics or cancel an existing running job;
+an explicit replacement still needs all qualification and publication proof.
+
+Promote runner admission also requires a successful source gate and its exact
+`is_dev=true` output. A failed or declined gate therefore allocates no Promote
+runner or deployment environment. Admitted sources still reach the existing
+decision step after failed dependencies, and every required validation result
+must be successful before candidate work can proceed. This job-admission policy
+requires matching reviewed Main control activation; a Dev edit alone is not live.
 
 New landed releases are recorded as `promote-dev-<full-dev-sha>`.
 `tag_promotion.py` verifies the landed Main state. A second equivalent Git

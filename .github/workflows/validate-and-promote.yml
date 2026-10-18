@@ -762,12 +762,9 @@ jobs:
   promote:
     name: Promote dev -> main
     needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, python-artifacts]
-    # `always()`: `full`/`worktree-manager`/`guards-full-sweep` are legitimately
-    # `skipped` (not `success`) whenever `gate` found `is_dev == 'false'` --
-    # the default implicit `if` (require every `needs` job to have succeeded)
-    # would skip THIS job too in that case, when what we actually want is to
-    # run the `decide` step below and log why promotion isn't happening.
-    if: always()
+    # Keep failed validation visible to `decide`, but do not allocate a runner
+    # when the gate failed or declined the source (including a paused normal run).
+    if: always() && needs.gate.result == 'success' && needs.gate.outputs.is_dev == 'true'
     runs-on: ubuntu-latest
     environment: main-promotion
     permissions:

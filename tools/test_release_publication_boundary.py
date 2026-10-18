@@ -106,6 +106,66 @@ class TrustedHarnessTests(unittest.TestCase):
             self.assertTrue(callable(control._paths))
 
 
+class PromotionJobAdmissionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.promote = jobs(WORKFLOW.read_text(encoding="utf-8"))["promote"]
+
+    def test_declined_or_failed_gate_does_not_allocate_a_promote_runner(self) -> None:
+        condition = re.search(r"^    if: (.+)$", self.promote, re.M)
+        self.assertIsNotNone(condition)
+        self.assertEqual(
+            condition[1],
+            "always() && needs.gate.result == 'success' && needs.gate.outputs.is_dev == 'true'",
+        )
+        parts = condition[1].split(" && ")
+        self.assertEqual(parts.pop(0), "always()")
+        comparisons = []
+        for part in parts:
+            comparison = re.fullmatch(r"(needs\.gate(?:\.outputs)?\.[a-z_]+) == '([a-z]+)'", part)
+            self.assertIsNotNone(comparison)
+            comparisons.append(comparison.groups())
+        for gate, is_dev in itertools.product(
+            ("success", "failure", "cancelled", "skipped", "", "unknown"),
+            ("true", "false", "", "True", "unknown"),
+        ):
+            with self.subTest(gate=gate, is_dev=is_dev):
+                values = {"needs.gate.result": gate, "needs.gate.outputs.is_dev": is_dev}
+                admitted = all(values[field] == expected for field, expected in comparisons)
+                self.assertEqual(admitted, gate == "success" and is_dev == "true")
+
+    def test_admitted_source_still_requires_every_validation_result(self) -> None:
+        validation = [
+            "full", "worktree-manager", "agent-index-service-linux",
+            "agent-index-service-windows", "guards-full-sweep", "python-artifacts",
+        ]
+        template = script(step(self.promote, "decide"))
+        fields = {"needs.gate.result": "success", "needs.gate.outputs.is_dev": "true"}
+        fields.update({f"needs.{name}.result": "success" for name in validation})
+        scenarios = [(None, None), *itertools.product(
+            validation, ("failure", "cancelled", "skipped", "", "unknown"),
+        )]
+        for name, result in scenarios:
+            with self.subTest(validation=name, result=result):
+                values = dict(fields)
+                if name is not None:
+                    values[f"needs.{name}.result"] = result
+                command = re.sub(
+                    r"\$\{\{\s*([^{}]+?)\s*\}\}",
+                    lambda match: values[match[1].strip()],
+                    template,
+                )
+                with tempfile.TemporaryDirectory(prefix="promotion-admission-") as directory:
+                    output = Path(directory) / "output"
+                    completed = subprocess.run(
+                        ["bash", "-eu", "-c", command],
+                        env={"PATH": os.defpath, "GITHUB_OUTPUT": str(output)},
+                        capture_output=True, text=True, timeout=5, check=True,
+                    )
+                    self.assertEqual(output.read_text(), f"proceed={str(name is None).lower()}\n")
+                    if name is not None:
+                        self.assertIn("refusing to promote", completed.stdout)
+
+
 def controller(text: str, marker: str) -> None:
     if marker not in text:
         message = "Legacy controller: new publication boundary is NOT active; use an explicit prepared workflow."
@@ -231,11 +291,109 @@ class BoundaryTests(unittest.TestCase):
         self.assertNotIn("secrets.", self.jobs["merge-promotion"])
         for dependency in ("qualify-candidate", "publish-python-artifacts"):
             self.assertIn(f"needs.{dependency}.result == 'success'", self.jobs["merge-promotion"])
+        self.assertRegex(self.jobs["merge-promotion"], r"(?m)^      actions: read$")
         ci = jobs((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
         excluded = {"promotion-gate", "pr-gate", "coverage-guided-selection-integration"}
         self.assertEqual(needs(ci["promotion-gate"]), set(ci) - excluded)
         self.assertIn("inputs.promotion_phase == 'candidate'", ci["full"])
         self.assertEqual(len(re.findall(r"^          - [a-z][a-z0-9-]*$", ci["full"], re.M)), 9)
+
+    def test_postlanding_attribution_refresh_is_bounded_and_not_release_qualification(self) -> None:
+        body = self.jobs["refresh-promotion-attribution"]
+        self.assertEqual(needs(body), {"merge-promotion"})
+        for expected in (
+            "if: needs.merge-promotion.outputs.merge_sha != ''",
+            "timeout-minutes: 5", "continue-on-error: true", "actions: write",
+            "MERGE_SHA: ${{ needs.merge-promotion.outputs.merge_sha }}",
+            "PROMOTION_RUN: ${{ github.run_id }}-${{ github.run_attempt }}",
+        ):
+            self.assertIn(expected, body)
+        self.assertNotIn("uses:", body)
+        self.assertNotIn("secrets.", body)
+        code = python_body(script(step(
+            body, "Dispatch the bounded idempotent attribution refresh without release qualification",
+        )))
+        for merged, run in ((MERGED, "123-4"), ("invalid", "123-4"), (MERGED, "invalid")):
+            with self.subTest(merged=merged, run=run):
+                env = {**environment(), "MERGE_SHA": merged, "PROMOTION_RUN": run}
+                with mock.patch.dict(os.environ, env, clear=True), mock.patch("subprocess.run") as dispatch:
+                    if merged == "invalid" or run == "invalid":
+                        with self.assertRaises(RuntimeError):
+                            exec(compile(code, "<literal-attribution-refresh>", "exec"), {})
+                        dispatch.assert_not_called()
+                        continue
+                    exec(compile(code, "<literal-attribution-refresh>", "exec"), {})
+                    dispatch.assert_called_once()
+                    argv, = dispatch.call_args.args
+                    self.assertEqual(argv, [
+                        "gh", "api", "--method", "POST",
+                        "repos/example/project/actions/workflows/workflow-lockdown-guard.yml/dispatches",
+                        "--input", "-",
+                    ])
+                    self.assertEqual(json.loads(dispatch.call_args.kwargs["input"]), {
+                        "ref": "main", "inputs": {"promotion_sha": MERGED, "promotion_run": "123-4"},
+                    })
+                    self.assertIs(dispatch.call_args.kwargs["check"], True)
+                    self.assertEqual(dispatch.call_args.kwargs["timeout"], 60)
+        with (
+            mock.patch.dict(os.environ, {**environment(), "MERGE_SHA": MERGED, "PROMOTION_RUN": "123-4"}, clear=True),
+            mock.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, ["gh"])),
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            exec(compile(code, "<literal-attribution-refresh>", "exec"), {})
+
+    def test_pause_defers_normal_work_but_not_explicit_replacement_without_weakening_evidence(self) -> None:
+        gate = self.jobs["gate"]
+        pause = step(gate, "pause")
+        self.assertIn("git fetch --no-tags origin main", script(pause))
+        self.assertIn("if: steps.pause.outputs.normal_paused != 'true'", step(gate, "check"))
+        self.assertIn(
+            "is_dev: ${{ steps.pause.outputs.normal_paused == 'true' && 'false' || steps.check.outputs.is_dev }}",
+            gate,
+        )
+        code = python_body(script(pause))
+        state = {"schema": "copilot-extensions.release-pipeline-state", "version": 1, "paused": True}
+        for paused, qualification in itertools.product((True, False), ("true", "false")):
+            with self.subTest(paused=paused, qualification=qualification):
+                output = io.StringIO()
+                env = {**environment(), "QUALIFICATION_ONLY": qualification}
+                result = subprocess.CompletedProcess([], 0, json.dumps({**state, "paused": paused}), "")
+                with (
+                    mock.patch.dict(os.environ, env, clear=True),
+                    mock.patch("subprocess.run", return_value=result) as read,
+                    mock.patch("builtins.open", return_value=contextlib.nullcontext(output)),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    exec(compile(code, "<literal-early-pause>", "exec"), {})
+                read.assert_called_once_with(
+                    ["git", "show", "refs/remotes/origin/main:.github/release-pipeline-state.json"],
+                    check=True, capture_output=True, text=True, timeout=30,
+                )
+                expected = str(paused and qualification == "false").lower()
+                self.assertEqual(output.getvalue(), f"normal_paused={expected}\n")
+        invalid = [
+            None, [], {}, {**state, "schema": "other"}, {**state, "version": True},
+            {**state, "version": 2}, {**state, "paused": "true"}, {**state, "paused": None},
+        ]
+        for value in invalid:
+            with self.subTest(invalid=value):
+                result = subprocess.CompletedProcess([], 0, json.dumps(value), "")
+                with (
+                    mock.patch.dict(os.environ, {**environment(), "QUALIFICATION_ONLY": "false"}, clear=True),
+                    mock.patch("subprocess.run", return_value=result),
+                    mock.patch("builtins.open") as output,
+                    self.assertRaises(RuntimeError),
+                ):
+                    exec(compile(code, "<literal-early-pause>", "exec"), {})
+                output.assert_not_called()
+        with (
+            mock.patch.dict(os.environ, {**environment(), "QUALIFICATION_ONLY": "false"}, clear=True),
+            mock.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, ["git"])),
+            mock.patch("builtins.open") as output,
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            exec(compile(code, "<literal-early-pause>", "exec"), {})
+        output.assert_not_called()
 
     def test_pending_checks_then_exact_nonadmin_merge(self) -> None:
         provider = Provider(buckets=["pending", "pass"])
