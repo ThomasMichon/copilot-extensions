@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; identity prerequisite merged; provider/enrollment/integration/lifecycle open
+- **Status:** Active; identity/admission prerequisites merged; provider/enrollment/integration/lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -278,6 +278,10 @@ All detailed slices are **agent-recommended** and remain subject to review.
   The isolated [admission library](../../../fleet-manager/docs/runtime-admission.md)
   adds current trusted-snapshot and finite Permit prerequisites; authenticated
   snapshot provenance and retained-owner resident wiring remain open.
+- [x] Land the isolated current-policy admission prerequisite without replacing
+  static Gateway enrollment or claiming resident/provider adoption (#7099).
+  This includes the separately authorized bounded address fallback and
+  controller acquisition-expiry corrections, not the broader integration item.
 - [ ] Review and implement the selected
   [Windows/Entra application adapter](runtime-authentication.md#selected-windowsentra-application-adapter)
   with the retained auth owner: actual broker/API proof compatibility,
@@ -1803,3 +1807,41 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   so no new installer clean-room proof is claimed; no live external role
   activation is authorized. The full parent remains Active with every
   remaining Plan and Validation Plan obligation unchanged.
+
+### 2026-10-18 - Admission prerequisite merged; current-snapshot agreement next
+
+- #7099 actually merged at `c86cd48af163a8967d9668003980134175e9dbd9`,
+  `2026-10-18T21:07:18Z`. Exact published head `42487abeec` received actual
+  Copilot approval `5564879948` with no open findings; all 23 review threads
+  were resolved. The latest required aggregate and source-attribution checks
+  passed, along with all twelve native Linux/Windows fleet partitions.
+  Both current-head CI runs `39164490460` and `39165439148` completed successfully.
+  This is merged source, not proof of release promotion or live activation.
+- An intermediate description update incorrectly forwarded stdin and cleared
+  the PR body, causing a real source-attribution failure. Restored the complete
+  authored description and current validation from a file through the canonical
+  attribution preparer, verified exact provider readback, and waited for the
+  replacement trusted check to pass. The earlier failed check is retained
+  history, not a gate bypass.
+- The shared #7172 owner independently verified #7127's selected PR lane and
+  three complete push/full partitions within the unchanged twelve-minute
+  boundary, then closed that issue. Its no-baseline full fallback remains an
+  explicitly disclosed edge, not a newly proven bounded fallback here. This
+  effort did not modify the shared pipeline or weaken a deadline.
+- Stopped the PR-specific periodic monitor after actual merge. Managed
+  pull-forward initially tried to replay already-squashed commits and safely
+  aborted. Verified every changed path exactly matched upstream, retained a
+  backup, dropped only those proven-landed commits, and confirmed managed sync
+  at the actual merge. No unlanded work, claims or parent responsibilities
+  were discarded; this worktree is not finalized.
+- The next authorized stretch is the retained-owner agreement under #6443,
+  #5789 and #5862: identify the serving owner of `AuthoritySnapshot`, its
+  authenticated current policy/enrollment and provider-revocation evidence,
+  durable revision/generation fencing, exact read/operation adapter scope and
+  the real lookup/effect/emission transaction boundary. Only after that exact
+  interface and source allocation agree may a resident consumer be wired.
+  Windows broker/API proof compatibility, issuer/enrollment authority and
+  deployment remain independent gates; the static #6809 API is not replaced.
+- The bounded admission prerequisite above is complete. Every broader runtime,
+  provider, lifecycle, migration and live Validation Plan item remains open;
+  the full Fleet Control V2 parent stays Active.
