@@ -1027,6 +1027,14 @@ checks, matching Main control activation and full release qualification remain
 open. The Windows performance contribution keeps its independent completion
 gate; no production changes were imported from its branch.
 
+Review found that a new standalone guard file was not in CI's explicit module
+list. The policy assertions are now called through six directly collected
+cases in the existing admission suite. Both platform change filters include
+the helper, both workflow declarations and the test-dependency manifest, with
+reachability regression coverage. This also avoids a missing-test bootstrap
+on older Main. The exact selected Linux CI cohort passes 241 cases with 12
+existing skips and 22 existing exhaustive-tier deselections.
+
 ### 2026-10-17 - Prove Git for Windows output capture before updating the repair
 
 The next hosted Windows job, `117588931328` in `39097888644`, exposed the

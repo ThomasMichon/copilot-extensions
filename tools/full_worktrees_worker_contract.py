@@ -1,4 +1,4 @@
-"""Keep bounded Worktrees parallelism confined to existing Linux full-suite steps."""
+"""Worktrees worker-policy assertions called by the existing CI admission suite."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,8 +33,7 @@ def _has_worker_option(value: object) -> bool:
     return isinstance(value, str) and bool(re.search(r"-n\s*=?\s*\d|--numprocesses", value))
 
 
-@pytest.mark.parametrize("workflow", WORKFLOWS)
-def test_full_step_uses_exactly_two_workers_without_narrowing_tests(workflow: str) -> None:
+def assert_full_step_uses_exactly_two_workers_without_narrowing_tests(workflow: str) -> None:
     job = _workflow(workflow)["jobs"]["full"]
     steps = [step for step in job["steps"] if step.get("name") == FULL_STEP]
     assert len(steps) == 1
@@ -48,8 +46,7 @@ def test_full_step_uses_exactly_two_workers_without_narrowing_tests(workflow: st
     assert "continue-on-error" not in step
 
 
-@pytest.mark.parametrize("workflow", WORKFLOWS)
-def test_workers_do_not_leak_into_guards_collection_or_baselines(workflow: str) -> None:
+def assert_workers_do_not_leak_into_guards_collection_or_baselines(workflow: str) -> None:
     declaration = _workflow(workflow)
     assert not _has_worker_option(declaration.get("env", {}).get("PYTEST_ADDOPTS"))
     worker_steps = []
@@ -61,14 +58,14 @@ def test_workers_do_not_leak_into_guards_collection_or_baselines(workflow: str) 
     assert worker_steps == [("full", FULL_STEP)]
 
 
-def test_xdist_is_a_worktrees_test_dependency_not_a_runtime_requirement() -> None:
+def assert_xdist_is_a_worktrees_test_dependency_not_a_runtime_requirement() -> None:
     with (ROOT / "plugins" / "agent-worktrees" / "pyproject.toml").open("rb") as source:
         project = tomllib.load(source)["project"]
     assert project["optional-dependencies"]["dev"].count("pytest-xdist>=3.8,<4") == 1
     assert not any("pytest-xdist" in requirement.casefold() for requirement in project["dependencies"])
 
 
-def test_manual_main_validation_does_not_need_unshipped_test_dependencies() -> None:
+def assert_manual_main_validation_does_not_need_unshipped_test_dependencies() -> None:
     declaration = _workflow("ci.yml")
     events = declaration.get("on", declaration.get(True))
     inputs = events["workflow_dispatch"]["inputs"]

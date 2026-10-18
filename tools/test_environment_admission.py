@@ -16,6 +16,7 @@ _previous_path = sys.path.copy()
 sys.path.insert(0, str(TOOLS))
 try:
     import _admission_protocol as admission
+    import full_worktrees_worker_contract as worker_contract
 finally:
     sys.path[:] = _previous_path
 
@@ -646,11 +647,32 @@ def test_ci_runner_portfolio_keeps_smoke_path_gated_and_manual_exhaustive():
         pattern = re.search(r"'(\^\(.*)'", detector["run"]).group(1)
         for path in (
             "tools/run-plugin-tests.py", "tools/test_environment_admission.py",
+            "tools/full_worktrees_worker_contract.py",
             "tools/_admission_protocol.py", "tools/conftest.py",
             "libs/single-instance-lease/src/single_instance_lease/lease.py",
             ".github/workflows/ci.yml",
+            ".github/workflows/validate-and-promote.yml",
+            "plugins/agent-worktrees/pyproject.toml",
             ".devcontainer/test-isolation/devcontainer.json",
             ".devcontainer/test-isolation/Dockerfile",
         ):
             assert re.search(pattern, path)
         assert not re.search(pattern, "plugins/voice-announcer/README.md")
+
+
+@pytest.mark.parametrize("workflow", worker_contract.WORKFLOWS)
+def test_worktrees_full_steps_use_exactly_two_workers_without_narrowing(workflow: str) -> None:
+    worker_contract.assert_full_step_uses_exactly_two_workers_without_narrowing_tests(workflow)
+
+
+@pytest.mark.parametrize("workflow", worker_contract.WORKFLOWS)
+def test_worktrees_workers_do_not_leak_into_other_steps(workflow: str) -> None:
+    worker_contract.assert_workers_do_not_leak_into_guards_collection_or_baselines(workflow)
+
+
+def test_worktrees_xdist_is_test_only() -> None:
+    worker_contract.assert_xdist_is_a_worktrees_test_dependency_not_a_runtime_requirement()
+
+
+def test_worktrees_manual_main_bootstrap_stays_serial() -> None:
+    worker_contract.assert_manual_main_validation_does_not_need_unshipped_test_dependencies()
