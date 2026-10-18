@@ -187,3 +187,39 @@ def test_interleaved_retry_reuses_original_attempt(
         "--git-dir", str(_remote), "rev-parse", f"refs/heads/{first.branch}",
         cwd=str(_wt),
     ).stdout.strip()
+
+
+def _bare_record(**prs_kwargs) -> tracking.WorktreeRecord:
+    return tracking.WorktreeRecord(
+        worktree_id="wt-001", branch="worktree/wt-001", worktree_path="/tmp/wt",
+        repo="test-repo", machine="test-machine", platform="wsl",
+        started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
+        resume_count=0, title=None, status="active", completed_at=None,
+        sessions=None, **prs_kwargs,
+    )
+
+
+def test_fresh_publish_outranks_an_earlier_same_second_resumed_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resumed retry's bumped ``opened_at`` must not permanently outrank a
+    genuinely later fresh publish that lands in the same whole-second clock
+    tick (#7114 follow-up): both settle through the same monotonic-ordering
+    policy, so whichever PR actually publishes last always sorts last.
+    """
+    frozen = "2026-06-01T10:00:51"
+    monkeypatch.setattr(tracking, "_now_iso", lambda: frozen)
+
+    # A: an unpublished attempt resumes and publishes first.
+    resumed_pr = tracking.PRRecord(state="creating", branch="pr/a", opened_at=frozen)
+    record = _bare_record(prs=[resumed_pr])
+    pr_publication_state.settle_creation(record, resumed_pr)
+    assert record.active_pr().branch == "pr/a"
+
+    # C: an unrelated, entirely fresh PR publishes moments later -- still
+    # within the same whole-second tick that _now_iso() can represent.
+    fresh_pr = tracking.PRRecord(state="creating", branch="pr/c", opened_at=frozen)
+    record.prs.append(fresh_pr)
+    pr_publication_state.settle_creation(record, fresh_pr)
+
+    assert record.active_pr().branch == "pr/c"

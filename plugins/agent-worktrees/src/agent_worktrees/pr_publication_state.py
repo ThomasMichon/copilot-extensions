@@ -138,15 +138,23 @@ def retry_candidate(
     return active
 
 
-def settle_creation(
-    record: tracking.WorktreeRecord, target: tracking.PRRecord, *, resumed: bool,
-) -> None:
-    """Make a successfully resumed attempt the default without changing its peers."""
+def settle_creation(record: tracking.WorktreeRecord, target: tracking.PRRecord) -> None:
+    """Make a successfully published attempt the default without changing its peers.
+
+    A resumed retry's ``opened_at`` can be bumped ahead of ``_now_iso()``'s
+    whole-second resolution to outrank its own earlier attempts (see below).
+    A *fresh* publish that previously kept its pre-push ``_now_iso()`` stamp
+    unconditionally could therefore be out-ranked by an unrelated sibling that
+    resumed moments earlier in the same second -- a later, genuinely newer
+    publication would lose `active_pr()` to an older one. Apply the same
+    monotonic-ordering policy (advance past every sibling's ``opened_at``,
+    never behind real time) to every settle, fresh or resumed, so whichever
+    PR actually publishes last always sorts last.
+    """
     target.state = "open"
-    if resumed:
-        latest = max((pr.opened_at or "" for pr in record.prs), default="")
-        now = tracking._now_iso()
-        target.opened_at = (
-            (datetime.fromisoformat(latest) + timedelta(microseconds=1)).isoformat()
-            if latest and latest >= now else now
-        )
+    latest = max((pr.opened_at or "" for pr in record.prs), default="")
+    now = tracking._now_iso()
+    target.opened_at = (
+        (datetime.fromisoformat(latest) + timedelta(microseconds=1)).isoformat()
+        if latest and latest >= now else now
+    )
