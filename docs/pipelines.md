@@ -771,7 +771,7 @@ validation. This policy changes no required inventory for the current head.
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | `pull_request` (all bases except `main`), `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) and `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. The base-branch exclusion prevents the whole redundant main-PR invocation, not just its jobs; main/dev push and manual validation remain unchanged. |
-| `copilot-code-review.yml` | `workflow_dispatch`; official Copilot Code Review setup after default-branch publication | Dedicated `copilot-setup-steps` job selects the literal isolated ephemeral `copilot-extensions-review` role, separate from the CI pool, with no checkout or dependency setup; Copilot supplies its own checkout afterward. It does not change the coding-agent fallback. Source publication is not activation or successful review evidence: the default-branch route requires an explicit activation decision, available isolated capacity and an observed managed-review canary. The unchanged contract also permits a reviewed literal `ubuntu-latest` rollback. |
+| `copilot-code-review.yml` | `workflow_dispatch`; official Copilot Code Review setup after default-branch publication | The `copilot-setup-steps` job preserves hosted review capacity with literal `ubuntu-latest`, with no checkout or dependency setup; Copilot supplies its own checkout afterward. It does not change the coding-agent fallback. The independently guarded `copilot-extensions-review` ARC role remains available only for an explicit reviewed route change, not additive overflow. A default-branch selector change requires an activation decision and an observed managed-review canary. |
 | `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, the separate `source-attribution` metadata check, and the Maintainer-only review fallback. Default-branch push/manual runs refresh source-attribution checks for already-open `dev` PRs; job-scoped permissions/concurrency preserve the review boundary. No PR code executes. |
 | `source-attribution-departures.yml` | `pull_request_target` (`synchronize`, `closed`, `edited`) | Trusted metadata-only refresh of remaining dev PRs on a departed shared head, including retargets away from dev. Publishes no required-context skipped jobs and never executes PR content. |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate`, the existing one-time retarget reminder, and identifier reporting for owner-authored PRs that pass admission. Gate permissions are contents-read only; any checkout is pinned trusted main, and PR commits are fetched only as Git data. No PR code executes. This replaces main-PR CI admission and post-CI scanning. |
@@ -781,7 +781,14 @@ The dedicated review setup is independently guarded: only its exact filename,
 official job identity, minimal permissions and setup step may select literal
 `ubuntu-latest` or the named `copilot-extensions-review` ARC scale set. This
 exception does not authorize that label in another workflow or relax the
-validator lane. The committed setup remains hosted; accepting the future label
+validator lane. GitHub documents one runner selection for a repository's managed
+review lane, not automatic hosted/ARC overflow. Label arrays require every
+label; they are not alternatives or failover. Selecting ARC replaces this
+lane's hosted routing, so it must not be described as additive capacity.
+Keep hosted review primary unless a separate supported routing decision is
+explicitly approved. See [Copilot runner configuration](https://docs.github.com/en/copilot/how-tos/copilot-on-github/set-up-copilot/configure-runners)
+and [cumulative runner labels](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/use-in-a-workflow).
+The committed setup remains hosted; accepting the alternative label
 in policy is not a capacity-readiness signal or a selector activation. Main
 preservation requires its own owner-coordinated named-allowlist update before
 the later canonical manifest transaction. The generic preservation helper
