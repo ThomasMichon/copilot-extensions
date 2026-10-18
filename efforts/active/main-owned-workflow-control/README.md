@@ -1710,3 +1710,10 @@ hosted checks, review and a containing full validation remain required.
   diagnosis of every historical timeout. Current-head hosted Linux and actual
   materialized consumer qualification, review and required checks remain gates;
   additional runner capacity is not a test-result waiver.
+- The real single-plugin release preview at committed source `7540445a2bdb`
+  also passes all 431 native cases with 45 skips in 66.47 seconds. Its routing
+  integration uses the real sibling guidance payload, not a resolver mock.
+  This is a focused materialized consumer result, not full release qualification:
+  whole-tree candidate construction separately exceeded its unchanged
+  120-second internal builder limit before producing a receipt. No partial tree
+  was accepted as a candidate and no builder deadline was increased.
