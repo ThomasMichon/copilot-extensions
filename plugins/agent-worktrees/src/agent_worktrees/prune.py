@@ -537,9 +537,12 @@ def reconcile_pr_states(
     ``merged`` the local state becomes ``"merged"``; otherwise a live state of
     ``"closed"`` becomes ``"closed"``.  A live ``open`` is left as-is.
 
-    With ``only_live`` (the default) only non-terminal records are refreshed --
-    that is the stale case (local ``open`` while the PR merged externally).
-    Pass ``only_live=False`` to re-verify terminal records too.
+    With ``only_live`` (the default), records already explicitly ``merged``
+    or ``closed`` are skipped; everything else -- including an unconfirmed
+    or ``unknown`` PR state that :func:`retirement_safety.retirement_blocker`
+    still treats as pending -- is re-queried so reconciliation can clear
+    that guard once the provider confirms real settlement.  Pass
+    ``only_live=False`` to re-verify explicitly-terminal records too.
 
     Mutates ``rec.prs`` in place and returns ``(number, old_state, new_state)``
     tuples for every record that changed.  The caller persists ``rec`` if it
@@ -549,7 +552,11 @@ def reconcile_pr_states(
     for pr in rec.prs:
         if pr.number is None:
             continue
-        if only_live and tracking._pr_is_terminal(pr):
+        if only_live and pr.state in ("merged", "closed"):
+            # Consistent with retirement_safety.retirement_blocker's pending
+            # definition: an unconfirmed/unknown state still blocks cleanup,
+            # so it must still be re-queried here rather than skipped as
+            # tracking._pr_is_terminal() would (it treats unknown as terminal).
             continue
         repo = pr.repo or rec.repo
         try:

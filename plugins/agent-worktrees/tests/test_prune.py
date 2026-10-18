@@ -164,6 +164,19 @@ class TestReconcile:
         assert prune.reconcile_pr_states(rec, lookup) == []
         assert called == []  # only_live skips terminal records
 
+    def test_unknown_state_is_rechecked_by_default(self):
+        # retirement_safety.retirement_blocker() treats "unknown" as
+        # still pending (it blocks cleanup), so reconciliation must still
+        # query the provider for it -- unlike tracking._pr_is_terminal(),
+        # which treats "unknown" as terminal and would otherwise leave
+        # cleanup stuck open forever even after the PR genuinely settled
+        # remotely (#7121).
+        rec = _rec(prs=[_pr(50, "unknown")])
+        lookup = lambda repo, n: _FakePull(state="closed", merged=True, number=n)
+        changes = prune.reconcile_pr_states(rec, lookup)
+        assert changes == [(50, "unknown", "merged")]
+        assert rec.prs[0].state == "merged"
+
     def test_only_live_false_rechecks_terminal(self):
         rec = _rec(prs=[_pr(30, "open")])  # locally open
         lookup = lambda repo, n: _FakePull(state="closed", merged=False, number=n)
