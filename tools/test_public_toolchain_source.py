@@ -182,7 +182,17 @@ def _assert_windows_source_contracts(jobs):
 
 @pytest.fixture
 def generated_source_controller(generated_materializer_checkout):
-    root = generated_materializer_checkout
+    return _retain_main_ci(
+        generated_materializer_checkout, Path(__file__).resolve().parents[1],
+    )
+
+
+def _retain_main_ci(root: Path, original: Path) -> Path:
+    main = _materializer_git(
+        original, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}",
+    ).decode().strip()
+    # A shared clone shares objects, not the source's remote-tracking refs.
+    _materializer_git(root, "update-ref", "refs/remotes/origin/main", main)
     preserved = _materializer_git(
         root, "show", "refs/remotes/origin/main:.github/workflows/ci.yml",
     )
@@ -193,6 +203,51 @@ def generated_source_controller(generated_materializer_checkout):
         "commit", "-qm", "retain actual Main CI controller",
     )
     return root
+
+
+def test_source_contracts_retain_main_from_actions_checkout_without_local_main(
+    tmp_path, generated_materializer_checkout,
+):
+    original = Path(__file__).resolve().parents[1]
+    main = _materializer_git(
+        original, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}",
+    ).decode().strip()
+    dev = json.loads(
+        (generated_materializer_checkout / ".github/release-pipeline-state.json").read_text()
+    )["last_promotion"]["dev_head"]
+    actions = tmp_path / "actions-checkout"
+    _materializer_git(tmp_path, "init", "-q", "-b", "source-fixture", str(actions))
+    objects = _materializer_git(
+        original, "rev-parse", "--path-format=absolute", "--git-path", "objects",
+    ).decode().strip()
+    (actions / ".git/objects/info/alternates").write_text(
+        Path(objects).as_posix() + "\n", encoding="utf-8",
+    )
+    _materializer_git(actions, "update-ref", "refs/heads/source-fixture", dev)
+    _materializer_git(actions, "update-ref", "refs/remotes/origin/main", main)
+    generated = tmp_path / "generated-without-main"
+    _materializer_git(tmp_path, "clone", "--shared", "--no-checkout", str(actions), str(generated))
+    for checkout, ref in (
+        (actions, "refs/heads/main"), (generated, "refs/heads/main"),
+        (generated, "refs/remotes/origin/main"),
+    ):
+        with pytest.raises(subprocess.CalledProcessError):
+            _materializer_git(checkout, "show-ref", "--verify", ref)
+    shutil.copytree(generated_materializer_checkout / ".github", generated / ".github")
+    _materializer_git(generated, "add", ".github")
+    _retain_main_ci(generated, actions)
+    assert _materializer_git(
+        generated, "rev-parse", "refs/remotes/origin/main",
+    ).decode().strip() == main
+    assert _materializer_git(generated, "rev-parse", "HEAD").decode().strip() != dev
+    assert (generated / ".github/workflows/ci.yml").read_bytes() == _materializer_git(
+        original, "show", f"{main}:.github/workflows/ci.yml",
+    )
+    assert source_workflow(generated, "ci.yml") == yaml.safe_load(_materializer_git(
+        original, "show", f"{dev}:.github/workflows/ci.yml",
+    ))
+    for job in ("checks", "windows-python-artifact-builder"):
+        assert _artifact_scope(job, generated) == _artifact_scope(job)
 
 
 @pytest.mark.parametrize("layout", ["canonical", "generated"])
