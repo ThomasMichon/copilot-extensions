@@ -113,7 +113,7 @@ permissions:
 
 env:
   # REQUIRED: replace with the reviewed, merged Dev helper commit before activation.
-  RELEASE_HELPERS_SHA: "c2caa135dbb5c1d6bbacfee5c48f9b6a0c17d104"
+  RELEASE_HELPERS_SHA: "b576e17ec2280c27866b0be550ff7b0604cfaa58"
 
 jobs:
   gate:
