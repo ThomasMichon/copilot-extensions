@@ -404,7 +404,7 @@ def test_ownership_scan_survives_a_duplicate_remote_entry(
 
     # Corrupt the registry in place with a duplicate `remote:` key under a
     # second project, after "good"'s own state root already exists.
-    repos.repos_yaml_path().write_text(
+    registry_paths.registry_path("repos.yaml").write_text(
         "repos:\n"
         "  good:\n"
         "    remote: https://github.com/Example-Org/Good-Repo.git\n"

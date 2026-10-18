@@ -108,10 +108,10 @@ def scan_ownership(
     # a malformed/duplicate entry is independently surfaced per-project below
     # via cfg.project_dir()'s own strict read, so a stamp failure here is not
     # itself fatal.
-    from . import project_state, repos as repos_module
+    from . import project_state, registry_paths
     if project_state.namespaced():
         try:
-            repos_path = repos_module.repos_yaml_path()
+            repos_path = registry_paths.registry_path("repos.yaml")
             stamps.append((repos_path, _stamp(repos_path), False))
         except _READ_ERRORS:
             pass
