@@ -416,6 +416,12 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         # Scans every adopted project's tracking store, never the CWD's own:
         # it must give the same answer from any directory.
         return True
+    if command == "claims" and args_list[1:2] == ["ownership"]:
+        # Strict read-only global snapshot (cmd_ownership -> scan_ownership):
+        # scans every adopted project's tracking store, never the CWD's own,
+        # and takes no positional selectors -- it must run from a neutral
+        # directory with no active project, same as `claims find pr`.
+        return True
     if command == "get" and any(
         arg == "--session-id" or arg.startswith("--session-id=") for arg in args_list[1:]
     ):
