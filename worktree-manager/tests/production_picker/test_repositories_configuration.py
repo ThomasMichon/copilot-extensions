@@ -246,6 +246,7 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
             assert changed == {
                 str(Path(".agent-worktrees") / "repos.yaml"),
                 str(Path(".agent-worktrees") / "repos.lock"),
+                str(Path(".agent-worktrees") / "pr-rewrite-authority.lock"),
             }
             app.screen.action_close()
             await _wait(pilot, lambda: any(row["id"] == "sample" and row["effective"] == "chosen"

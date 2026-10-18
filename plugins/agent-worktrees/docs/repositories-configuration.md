@@ -78,7 +78,8 @@ composition requires a new preview and consent; there is no automatic retry
 or merge of a stale proposal. Missing/invalid tokens (including old hosts'
 empty token substitution) fail before a write. No lock or state directory is
 created by catalog or preview. Successful writes may create the registry's
-local `repos.lock` sidecar; no repository/knowledge/plugin/preset source is
+local `repos.lock` and shared `pr-rewrite-authority.lock` sidecars; no
+repository/knowledge/plugin/preset source is
 written. Unrecognized local registry metadata is preserved by this API.
 YAML aliases are detached at the selected registration before an edit, so
 unselected registrations and metadata cannot change through shared mappings.

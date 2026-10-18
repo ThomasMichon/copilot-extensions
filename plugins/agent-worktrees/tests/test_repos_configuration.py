@@ -102,6 +102,7 @@ def test_real_cli_set_reset_inheritance_and_allowlisted_local_writes(native):
     assert changed == {
         str(Path(".agent-worktrees") / "repos.yaml"),
         str(Path(".agent-worktrees") / "repos.lock"),
+        str(Path(".agent-worktrees") / "pr-rewrite-authority.lock"),
     }
     raw = yaml.safe_load(repos._repos_yaml_path().read_text(encoding="utf-8"))
     assert raw["unrecognized_owner_metadata"]["sentinel"] == SECRET
@@ -126,6 +127,28 @@ def test_real_cli_set_reset_inheritance_and_allowlisted_local_writes(native):
     assert SECRET not in "".join([
         catalog.stdout, catalog.stderr, proposed.stdout, proposed.stderr, result.stdout, result.stderr,
     ])
+
+
+def test_secret_shaped_repository_name_remains_browsable_and_editable(native):
+    """A registered repository literally named like a secret (e.g. ``sk-ui``)
+    is a resource name, not a credential: the secret-token rejection applies
+    only to login values, never to repository/project identifiers."""
+    registry = repos._repos_yaml_path()
+    raw = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    raw["repos"]["sk-ui"] = {
+        "class": "worktree", repos._current_platform(): str(native / "repository"),
+    }
+    registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    result = request("catalog")
+    assert result.returncode == 0, result.stderr
+    row = next(row for row in json.loads(result.stdout)["entries"] if row["id"] == "sk-ui")
+    assert row["registration"] == "present"
+    proposed = request("preview", "--login", "chosen", name="sk-ui")
+    assert proposed.returncode == 0, proposed.stderr
+    token = json.loads(proposed.stdout)["token"]
+    result = request("apply", "--login", "chosen", "--preview-token", token, name="sk-ui")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert repos.copilot_account_for("sk-ui") == "chosen"
 
 
 @pytest.mark.parametrize("change", ["registry", "global", "machine", "drop-in", "target", "login"])

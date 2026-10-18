@@ -13,6 +13,13 @@ def render_registry(registry: ReposRegistry) -> str:
 
     header = "# ~/.agent-worktrees/repos.yaml"  # marketplace-isolation: allow legacy
     lines = [header, "# Registry of known repositories and source roots.", ""]
+    if not registry.srcroot and not registry.account_map and not registry.repos:
+        # An all-comment document parses to ``None``, not a mapping, so the
+        # reader records an invalid baseline and the *next* write fails with a
+        # spurious conflict even though nothing changed concurrently. Emit an
+        # explicit empty mapping so an empty registry round-trips cleanly.
+        lines.append("{}")
+        return "\n".join(lines) + "\n"
     if registry.srcroot:
         lines.append("srcroot:")
         for plat in ("windows", "wsl", "linux"):

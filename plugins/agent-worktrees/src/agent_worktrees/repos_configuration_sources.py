@@ -25,6 +25,11 @@ class ConfigurationError(ValueError):
 
 
 def identity(value: object, *, allow_empty: bool = False) -> str:
+    """Validate a *login* value supplied as a Copilot account preference.
+
+    Rejects secret-shaped tokens (PATs, ``sk-`` keys): a login is the only
+    value here a caller could mistakenly paste a credential into.
+    """
     if value is None and allow_empty:
         return ""
     if not isinstance(value, str):
@@ -37,6 +42,26 @@ def identity(value: object, *, allow_empty: bool = False) -> str:
         or re.match(r"(?:gh[pousr]_|github_pat_|sk-)", value, re.IGNORECASE)
     ):
         raise ConfigurationError("invalid-identity", "The preference must be a non-secret login.")
+    return value
+
+
+def resource_name(value: object, *, allow_empty: bool = False) -> str:
+    """Validate a repository/project/machine *name* (never a credential).
+
+    Unlike :func:`identity`, legitimate resource names are not screened
+    against secret-token shapes (e.g. a repository literally named
+    ``sk-ui``) -- only the shared character-set and length constraints
+    apply.
+    """
+    if value is None and allow_empty:
+        return ""
+    if not isinstance(value, str):
+        raise ConfigurationError("invalid-identity", "The value must be a valid resource name.")
+    value = value.strip()
+    if not value and allow_empty:
+        return ""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", value):
+        raise ConfigurationError("invalid-identity", "The value must be a valid resource name.")
     return value
 
 
@@ -89,7 +114,7 @@ class PreferenceDefaults:
 
 
 def defaults(project: str) -> PreferenceDefaults:
-    project = identity(project)
+    project = resource_name(project)
     global_path = cfg.global_config_path()
     machine_path = cfg.project_dir(project) / "config.yaml"
     directory = machine_path.parent / "config.d"

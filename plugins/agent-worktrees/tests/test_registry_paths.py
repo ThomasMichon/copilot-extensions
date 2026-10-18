@@ -453,6 +453,28 @@ def test_relative_remote_cannot_own_namespaced_project_state(
         project_state.ensure_project_state("example")
 
 
+def test_removing_the_last_repo_leaves_a_valid_empty_registry(monkeypatch, tmp_path):
+    """An empty registry (no srcroot/account_map/repos) must round-trip as a
+    valid mapping baseline, not an all-comment document the reader treats as
+    invalid -- otherwise the very next write raises RegistryConflictError
+    with no actual concurrent change."""
+    payload = _payload(tmp_path, "payload")
+    context, _ = _stamp(
+        tmp_path / "durable",
+        payload,
+        marketplace="empty-registry-roundtrip",
+        repository="Example-Org/Empty-Registry-Marketplace",
+    )
+    _select(monkeypatch, context, payload)
+    _register_repo("example", "https://github.com/example/repo.git")
+
+    assert repos.remove_repo("example") is True
+    assert repos.read_registry().repos == {}
+
+    _register_repo("second", "https://github.com/example/second.git")
+    assert "second" in repos.read_registry().repos
+
+
 def test_concurrent_identity_publication_is_idempotent(monkeypatch, tmp_path):
     payload = _payload(tmp_path, "payload")
     context, _ = _stamp(

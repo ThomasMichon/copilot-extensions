@@ -10,7 +10,7 @@ import yaml
 
 from . import config as cfg, installer, related, repos, state_root
 from .repos_configuration import FUTURE_ONLY, compose_preference, target
-from .repos_configuration_sources import ConfigurationError, defaults, fingerprint, identity, mapping
+from .repos_configuration_sources import ConfigurationError, defaults, fingerprint, identity, mapping, resource_name
 from .repos_registry_reader import RepositoryResolutionError
 
 
@@ -33,7 +33,7 @@ def _validate_routes(raw: dict) -> None:
     if not isinstance(entries, dict):
         invalid()
     for name, entry in entries.items():
-        identity(name)
+        resource_name(name)
         if entry is None:
             continue
         if not isinstance(entry, dict):
@@ -97,8 +97,8 @@ def inspect_project(project: str, workspace: str) -> Inspection:
         root = state_root.resolve_state_root(config, cwd=checkout)
         result.binding = {
             "status": "present" if root.bound and not root.error else "absent",
-            "identity": identity(config.knowledge_repo, allow_empty=True),
-            "state_repo": identity(root.repo, allow_empty=True),
+            "identity": resource_name(config.knowledge_repo, allow_empty=True),
+            "state_repo": resource_name(root.repo, allow_empty=True),
             "source": root.source,
             "anchor": root.path,
             "writable_workspace": False,
@@ -154,7 +154,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
     names = sorted({project, *registry.repos, *inspection.routes})
     rows = []
     for name in names:
-        identity(name)
+        resource_name(name)
         entry = registry.repos.get(name)
         local_path = entry.local_path() if entry else None
         registration = (

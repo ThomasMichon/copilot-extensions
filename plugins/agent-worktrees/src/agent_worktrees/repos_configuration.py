@@ -18,7 +18,7 @@ import yaml
 
 from . import registry_paths, repos
 from .repos_configuration_sources import (
-    ConfigurationError, PreferenceDefaults, defaults, fingerprint, identity, mapping,
+    ConfigurationError, PreferenceDefaults, defaults, fingerprint, identity, mapping, resource_name,
 )
 from .repos_registry_reader import RepositoryResolutionError
 from .repos_registry_transaction import registry_lock, write_checked
@@ -43,7 +43,7 @@ def target(project: str, name: str) -> dict[str, str]:
 
 
 def preference(project: str, name: str) -> dict:
-    project, name = identity(project), identity(name)
+    project, name = resource_name(project), resource_name(name)
     registry = repos.read_registry(strict=True)
     fingerprint([repos._repos_yaml_path()])
     return compose_preference(project, name, registry, defaults(project))
@@ -172,13 +172,13 @@ def command(argv: list[str]) -> int:
         # Native loaders may warn about source content. Return sanitized findings,
         # never those raw diagnostics through provider rows, stderr or receipts.
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            project = identity(args.context_project)
+            project = resource_name(args.context_project)
             if args.command == "catalog":
                 from .repos_configuration_catalog import catalog
 
                 result = catalog(project, workspace=args.workspace)
             else:
-                name = identity(args.repository)
+                name = resource_name(args.repository)
                 result = (
                     preview(project, name, args.operation, args.login)
                     if args.command == "preview"
