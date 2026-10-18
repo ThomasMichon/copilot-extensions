@@ -278,8 +278,13 @@ starts. The target repository's own enabled remote plugins join that same
 installation barrier. ACP also receives each effective directory explicitly; CLI discovers
 the registered identities from repository settings, without duplicate external
 directory entries. Explicit worktree mode targets that worktree's repository,
-not the fleet's default checkout. Reattachment to a surviving child skips
-preparation. Restricted fleets remain outside host plugin projection.
+not the fleet's default checkout. Attached and detached native CLI attempts run
+the idempotent plugin barrier before the remote reuse/create decision, even if
+the host live-session registration remains fresh. Preparation failure blocks
+creation; a genuine rejoin still reuses the running child without changing its
+active bindings or replaying its seed. Guaranteed surviving Session Host
+reattachment skips preparation. Restricted fleets remain outside host plugin
+projection.
 
 See [`plugin-resolve`](../../libs/plugin-resolve/README.md#trusted-venue-preparation)
 for settings ownership, isolated installation cache, retained snapshots and

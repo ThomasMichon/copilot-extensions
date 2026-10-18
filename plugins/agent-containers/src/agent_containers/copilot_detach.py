@@ -409,9 +409,7 @@ def cmd_detach(
             target=target,
         )
         _progress("prepare", "registration credentials on the container")
-        from venue_copilot import live_session_for
-        if (live_session_for(plan["scope_id"]) or {}).get("status") != "live":
-            adapter.plugin_args = args
+        adapter.plugin_args = args
         rc, payload = launch_detached(
             adapter,
             plan,

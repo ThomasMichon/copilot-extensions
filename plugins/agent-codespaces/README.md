@@ -239,8 +239,13 @@ honored here:
   ACP additionally receives `--plugin-dir` for every effective plugin.
   Bridge-owned Session Hosts use the same barrier over their existing transport,
   rather than relying on the legacy SSH launch command to stage the payloads.
-  Missing required payloads block launch. Surviving-child reattachment does not
-  rewrite registration. See [`plugin-resolve`](../../libs/plugin-resolve/README.md#trusted-venue-preparation)
+  Missing required payloads block launch. Attached and detached native CLI
+  attempts always complete the idempotent plugin barrier before the remote
+  reuse/create decision: a host live-session registration cannot guarantee that
+  its CLI child still exists. A genuine remote rejoin still reuses that child
+  without replacing its active bindings or replaying its seed. Guaranteed
+  surviving Session Host reattachment does not rewrite registration.
+  See [`plugin-resolve`](../../libs/plugin-resolve/README.md#trusted-venue-preparation)
   for preservation, selected-asset topology, companion diagnostics, and
   installation-cache details. Dependency declarations never expand the
   eligible provider/related or target-native set.

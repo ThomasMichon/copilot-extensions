@@ -299,14 +299,9 @@ class RemoteHostRecoveryPendingError(RuntimeError):
 
 
 def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
-    """Resolve ``(codespace_name, owner_worktree)`` for a CodeSpace target.
+    """Use recorded claim identity, falling back to caller_worktree for legacy targets.
 
-    The owner is the *caller's* worktree (the dispatcher), carried on
-    ``target.caller_worktree`` -- the same key agent-codespaces uses. Returns
-    ``None`` when the target is not a resolvable CodeSpace or has no owner to key
-    a claim on (degrade-safe: no owner -> no claim). Deterministic from the
-    persisted target, so it survives a daemon restart (unlike a per-session
-    in-memory attribute).
+    Known skipped admission has no lease. Caller provenance is never rewritten.
     """
     name: str | None = None
     cs = getattr(target, "codespace", None)
@@ -320,6 +315,14 @@ def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
             name = parsed.get("name")
     if not name:
         return None
+    venue = getattr(target, "venue", None)
+    overrides = venue.get(_REQUEST_OVERRIDES_KEY) if isinstance(venue, dict) else None
+    if isinstance(overrides, dict) and "codespace_claim" in overrides:
+        identity = overrides["codespace_claim"]
+        if not isinstance(identity, dict):
+            return None
+        key = identity.get("name"), identity.get("owner")
+        return key if all(isinstance(value, str) and value for value in key) else None
     owner = getattr(target, "caller_worktree", None)
     if not owner:
         return None

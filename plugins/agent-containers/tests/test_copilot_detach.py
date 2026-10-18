@@ -55,6 +55,46 @@ def test_preparation_runs_under_the_existing_keeper_before_native_launch(seams, 
     assert prepared == [True]
 
 
+@pytest.mark.parametrize("child_alive", [False, True])
+@pytest.mark.parametrize("failure", [None, "copy", "install"])
+def test_detached_live_ledger_requires_preparation_before_remote_decision(
+    seams, monkeypatch, capsys, child_alive, failure,
+):
+    events = []
+    monkeypatch.setattr(venue_copilot, "live_session_for", lambda *a, **kw: {
+        "status": "live", "session_id": "sid-42", "venue": {"target": "repo-1"},
+    })
+
+    def prepare(args, target, **kwargs):
+        events.append("prepare")
+        assert args.stage_plugins == [{"source": "sample@synthetic", "enable": False}]
+        if failure:
+            raise RuntimeError(f"plugin {failure} failed")
+
+    original = detach.subprocess.run
+
+    def run(argv, **kwargs):
+        if "agent-worktrees embody" in argv[-1]:
+            events.append("reuse" if child_alive else "create")
+            return types.SimpleNamespace(returncode=0, stderr="", stdout=json.dumps({
+                "ok": True, "created": not child_alive, "resumed": child_alive,
+            }))
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr("agent_containers.plugin_preparation.prepare_plugins", prepare)
+    monkeypatch.setattr(detach.subprocess, "run", run)
+    assert detach.cmd_detach(
+        _args(seed=None, stage_plugins=[{"source": "sample@synthetic", "enable": False}]),
+        require_live_relay_port=lambda: 41235, relay_healthy=lambda port: True,
+    ) == (1 if failure else 0)
+    assert events == (["prepare"] if failure else ["prepare", "reuse" if child_alive else "create"])
+    if not failure:
+        out = json.loads(capsys.readouterr().out)
+        assert out["created"] is not child_alive and out["resumed"] is child_alive
+    if child_alive:
+        assert not any("tmux kill-session" in command for command in seams.run)
+
+
 def _target(profile: str = "trusted"):
     config = ContainersConfig(forward_gh_token=False, relay_enabled=True, relay_port=9857,
                               copilot_auth_mode="legacy")

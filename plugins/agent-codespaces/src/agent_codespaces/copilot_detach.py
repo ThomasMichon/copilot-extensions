@@ -664,7 +664,6 @@ def cmd_detach(
             captured.pop("result", None)
             try:
                 ssh_args = _ssh_namespace(args, "agent-worktrees embody", timeout=launch_timeout)
-                ssh_args.skip_plugin_preparation = rejoining
                 ssh_args.plugin_worktree_id = getattr(args, "worktree_id", None)
                 rc = ssh_session(
                     ssh_args,

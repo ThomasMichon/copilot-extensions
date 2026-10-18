@@ -166,6 +166,37 @@ def _call(
     return rc, seen
 
 
+@pytest.mark.parametrize("child_alive", [False, True])
+@pytest.mark.parametrize("failure", [None, "copy", "install"])
+def test_attached_live_ledger_requires_preparation_before_remote_decision(
+    monkeypatch, child_alive, failure,
+):
+    events = []
+    monkeypatch.setattr("venue_copilot.live_session_for", lambda *a: {"status": "live"})
+
+    def stage(args, target, **kwargs):
+        events.append("stage")
+        assert args.stage_plugins == [{"source": "sample@synthetic", "enable": False}]
+        return "REQUIRED_PLUGIN_PREPARATION && "
+
+    def run(argv, **kwargs):
+        assert argv[-1].startswith("REQUIRED_PLUGIN_PREPARATION && ")
+        events.append("prepare")
+        if not failure:
+            events.append("reuse" if child_alive else "create")
+        return SimpleNamespace(returncode=1 if failure else 0)
+
+    monkeypatch.setattr("agent_containers.plugin_preparation.stage_for_attached_launch", stage)
+    rc, _ = _call(
+        _args(stage_plugins=[{"source": "sample@synthetic", "enable": False}]),
+        target=_target(), monkeypatch=monkeypatch, subprocess_run=run,
+    )
+    assert rc == (1 if failure else 0)
+    assert events == (["stage", "prepare"] if failure else [
+        "stage", "prepare", "reuse" if child_alive else "create",
+    ])
+
+
 @pytest.mark.guard
 @pytest.mark.parametrize("receipt", ["missing", "resumed", "created"])
 def test_attached_failed_connection_uses_receipt_before_cleanup(monkeypatch, receipt):

@@ -223,18 +223,43 @@ async def test_attached_owner_failure_keeps_foreground_relay_until_release(monke
 
 
 @pytest.mark.asyncio
-async def test_attached_rejoin_never_connects_or_prepares(monkeypatch):
-    from unittest.mock import Mock
+@pytest.mark.parametrize("child_alive", [False, True])
+@pytest.mark.parametrize("failure", [None, "copy", "install"])
+async def test_attached_live_ledger_requires_preparation_before_remote_decision(
+    monkeypatch, child_alive, failure,
+):
+    from unittest.mock import AsyncMock
     from agent_codespaces.plugin_preparation import prepare_attached
+    events = []
     monkeypatch.setattr("agent_codespaces.__main__._lookup_codespace_repo", lambda *a: "example/project")
     monkeypatch.setattr("venue_copilot.live_session_for", lambda *a: {"status": "live"})
-    manager = Mock(side_effect=AssertionError("must not connect"))
-    monkeypatch.setattr("ssh_manager.ConnectionManager", manager)
-    await prepare_attached(
-        SimpleNamespace(name="synthetic", worktree_id=None, no_relay=False),
-        SimpleNamespace(resolved_workspace_folder_for=lambda repo: "/workspaces/project"),
-    )
-    manager.assert_not_called()
+    manager = SimpleNamespace(ensure_connected=AsyncMock(), disconnect=AsyncMock())
+    monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: manager)
+    hooks = AsyncMock()
+    monkeypatch.setattr("agent_codespaces.__main__._provision_repo_hooks", hooks)
+
+    async def prepare(*args, **kwargs):
+        events.append("prepare")
+        assert args[5] == [{"source": "sample@synthetic", "enable": False}]
+        if failure:
+            raise RuntimeError(f"plugin {failure} failed")
+
+    async def release():
+        events.append("reuse" if child_alive else "create")
+
+    monkeypatch.setattr("agent_codespaces.plugin_preparation.prepare_plugins", prepare)
+    args = SimpleNamespace(name="synthetic", worktree_id=None, no_relay=True,
+                           stage_plugins=[{"source": "sample@synthetic", "enable": False}])
+    config = SimpleNamespace(resolved_workspace_folder_for=lambda repo: "/workspaces/project")
+    if failure:
+        with pytest.raises(RuntimeError, match="failed"):
+            await prepare_attached(args, config, on_ready=lambda ready: None, release=release)
+        assert events == ["prepare"]
+    else:
+        await prepare_attached(args, config, on_ready=lambda ready: None, release=release)
+        assert events == ["prepare", "reuse" if child_alive else "create"]
+    manager.disconnect.assert_awaited_once()
+    hooks.assert_not_awaited()
 
 
 def test_payload_roots_reverse_config_priority_without_reversing_settings(monkeypatch, tmp_path):

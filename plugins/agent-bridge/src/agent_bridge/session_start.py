@@ -552,6 +552,10 @@ class _SessionStartMixin:
                     self, session_id, cs_target, claim_owner or "", core,
                     holder_ref=getattr(target, "caller_owner_ref", None),
                     replace_session_id=replace_session_id, retain_on_error=parity_fault,
+                    claim_metadata=target.venue[_REQUEST_OVERRIDES_KEY],
+                    persist_claim_metadata=lambda: self._db.update_session_target(
+                        session_id, target.to_json(), target.cwd,
+                    ),
                 ) as enter_connect:
                     from .relay_state import get_live_relay_port
                     relay_prelude, relay_port = core._resolve_relay_launch_env(

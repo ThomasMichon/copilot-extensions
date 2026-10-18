@@ -5097,6 +5097,7 @@ class TestCodespaceExclusiveClaim:
         caller_worktree,
         caller_id=None,
         caller_owner_ref=None,
+        acp_command=None,
     ):
         if caller_owner_ref is not None:
             machine, project, worktree = caller_owner_ref.partition("#")[0].split("/")
@@ -5119,7 +5120,7 @@ class TestCodespaceExclusiveClaim:
 
         def fake_claim(name, owner, *, holder_ref=None):
             claim_calls.append((name, owner, holder_ref))
-            return claim_result
+            return claim_result(name, owner) if callable(claim_result) else claim_result
 
         monkeypatch.setattr(
             "agent_bridge.session_manager._claim_codespace", fake_claim,
@@ -5135,8 +5136,11 @@ class TestCodespaceExclusiveClaim:
             SessionManager, "_connect_via_session_host", fake_connect,
         )
         manager = SessionManager(tmp_db)
+        target = self._cs_target(caller_worktree, caller_owner_ref)
+        if acp_command is not None:
+            target.codespace["acp_command"] = acp_command
         session = await manager.start_session(
-            self._cs_target(caller_worktree, caller_owner_ref),
+            target,
             agent_name="codespace:example",
             caller_id=caller_id,
         )
@@ -5261,6 +5265,155 @@ class TestCodespaceExclusiveClaim:
         )
         await manager.end_session(session.session_id, force=True)
         assert released == [("example-codespace", str(tmp_db.db_path.parent))]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("restart", [False, True])
+    @pytest.mark.parametrize("admission", ["ok", "skipped"])
+    async def test_owner_only_claim_teardown_uses_durable_acquired_identity(
+        self, tmp_db, monkeypatch, restart, admission,
+    ) -> None:
+        from agent_bridge.session_manager import _REQUEST_OVERRIDES_KEY
+
+        released = []
+        monkeypatch.setattr(
+            "agent_bridge.session_manager._release_codespace_claim",
+            lambda name, owner: released.append((name, owner)) or True,
+        )
+        manager, session, calls = await self._start(
+            tmp_db, monkeypatch, claim_result=(admission, ""),
+            caller_worktree=None, caller_id=None, caller_owner_ref="machine/project/worktree",
+        )
+        session.client.shutdown = AsyncMock()
+        managers = [manager]
+        expected = ("example-codespace", str(tmp_db.db_path.parent))
+        try:
+            assert session.status == SessionStatus.IDLE
+            assert calls == [(*expected, "machine/project/worktree")]
+            assert session.target.caller_worktree is None
+            assert session.target.caller_owner_ref == "machine/project/worktree"
+            origin = session.target.venue[_REQUEST_OVERRIDES_KEY]["controller_worktree_origin"]
+            assert origin == "affinity"
+            persisted = SpawnTarget.from_json(tmp_db.get_session(session.session_id)["target_json"])
+            assert persisted.caller_worktree is None
+            assert persisted.caller_owner_ref == "machine/project/worktree"
+            identity = {"name": expected[0], "owner": expected[1]} if admission == "ok" else None
+            assert persisted.venue[_REQUEST_OVERRIDES_KEY]["codespace_claim"] == identity
+            if restart:
+                # Simulate daemon exit releasing its OS lock, not its durable lease.
+                manager._release_codespace_lock(session.session_id)
+                manager = SessionManager(tmp_db)
+                managers.append(manager)
+                session = manager.get_session(session.session_id)
+                assert session.target.caller_worktree is None
+                assert session.target.venue[_REQUEST_OVERRIDES_KEY]["controller_worktree_origin"] == origin
+                manager.set_resolver(SimpleNamespace(
+                    resolve_async=AsyncMock(return_value=self._cs_target()),
+                ))
+                await manager._refresh_provider_target(session)
+                assert session.target.venue[_REQUEST_OVERRIDES_KEY]["codespace_claim"] == identity
+                assert session.target.caller_worktree is None
+            await manager.end_session(session.session_id, force=True)
+            assert released == ([expected] if admission == "ok" else [])
+        finally:
+            for current in managers:
+                for session_id in list(current._codespace_lock_sessions):
+                    current._release_codespace_lock(session_id)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("restart", [False, True])
+    async def test_confirmed_failed_owner_only_rollback_cannot_release_next_sessions_claim(
+        self, tmp_db, monkeypatch, restart,
+    ) -> None:
+        from agent_bridge.session_manager import _REQUEST_OVERRIDES_KEY
+
+        active = {}
+        releases = []
+        generation = "failed-A"
+
+        def acquire(name, owner):
+            active[name] = (generation, owner)
+            return "ok", ""
+
+        def release(name, owner):
+            current = active.get(name)
+            if current and current[1] == owner:
+                releases.append((current[0], name, owner))
+                active.pop(name)
+            return True
+
+        monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+        owner_ref = "machine/project/worktree"
+        manager, failed, _calls = await self._start(
+            tmp_db, monkeypatch, claim_result=acquire, caller_worktree=None,
+            caller_owner_ref=owner_ref,
+            acp_command='cd "${WORKSPACE:=/unsupported}" && copilot --acp',
+        )
+        managers = [manager]
+        next_session = None
+        owner = str(tmp_db.db_path.parent)
+        try:
+            assert failed.status == SessionStatus.FAILED
+            assert not active
+            assert releases == [("failed-A", "example-codespace", owner)]
+            generation = "successful-B"
+            next_session = await manager.start_session(
+                self._cs_target(None, owner_ref), agent_name="codespace:example",
+            )
+            assert next_session.status == SessionStatus.IDLE
+            next_session.client.shutdown = AsyncMock()
+            assert active == {"example-codespace": ("successful-B", owner)}
+            if restart:
+                manager._release_codespace_lock(next_session.session_id)
+                manager = SessionManager(tmp_db)
+                managers.append(manager)
+            persisted = SpawnTarget.from_json(tmp_db.get_session(failed.session_id)["target_json"])
+            await manager.end_session(failed.session_id, force=True)
+            assert active == {"example-codespace": ("successful-B", owner)}, "failed A released B's new claim"
+            assert persisted.venue[_REQUEST_OVERRIDES_KEY]["codespace_claim"] is None
+            assert persisted.caller_worktree is None
+            await manager.end_session(next_session.session_id, force=True)
+            assert not active
+            assert releases[-1] == ("successful-B", "example-codespace", owner)
+        finally:
+            for current in managers:
+                for session_id in list(current._codespace_lock_sessions):
+                    current._release_codespace_lock(session_id)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("restart", [False, True])
+    async def test_unadmitted_start_cannot_release_incumbent_same_owner_claim(
+        self, tmp_db, monkeypatch, restart,
+    ) -> None:
+        released = []
+        monkeypatch.setattr(
+            "agent_bridge.session_manager._release_codespace_claim",
+            lambda name, owner: released.append((name, owner)) or True,
+        )
+        owner = str(tmp_db.db_path.parent)
+        manager, incumbent, calls = await self._start(
+            tmp_db, monkeypatch, claim_result=("ok", ""), caller_worktree=owner,
+        )
+        incumbent.client.shutdown = AsyncMock()
+        managers = [manager]
+        try:
+            refused = await manager.start_session(
+                self._cs_target(owner), agent_name="codespace:example-alias",
+            )
+            assert incumbent.status == SessionStatus.IDLE
+            assert refused.status == SessionStatus.FAILED
+            assert len(calls) == 1
+            if restart:
+                manager._release_codespace_lock(incumbent.session_id)
+                manager = SessionManager(tmp_db)
+                managers.append(manager)
+            await manager.end_session(refused.session_id, force=True)
+            assert released == [], "unadmitted start released the incumbent's claim"
+            await manager.end_session(incumbent.session_id, force=True)
+            assert released == [("example-codespace", owner)]
+        finally:
+            for current in managers:
+                for session_id in list(current._codespace_lock_sessions):
+                    current._release_codespace_lock(session_id)
 
 
 class TestClaimCodespaceHelper:
@@ -5435,6 +5588,40 @@ class TestCodespaceClaimKey:
 
         t = SpawnTarget(type="local", cwd="/tmp", caller_worktree="/wt/a")
         assert sm._codespace_claim_key(t) is None
+
+    def test_recorded_identity_is_exact_and_does_not_reinterpret_affinity(self) -> None:
+        from agent_bridge import session_manager as sm
+
+        target = SpawnTarget(
+            type="command", caller_worktree="/different/controller",
+            codespace={"name": "refreshed-name"},
+            venue={sm._REQUEST_OVERRIDES_KEY: {
+                "controller_worktree_origin": "affinity",
+                "codespace_claim": {"name": "actually-claimed", "owner": "opaque-affinity"},
+            }},
+        )
+        restored = SpawnTarget.from_json(target.to_json())
+        assert sm._codespace_claim_key(restored) == ("actually-claimed", "opaque-affinity")
+        assert restored.caller_worktree == "/different/controller"
+        assert restored.venue[sm._REQUEST_OVERRIDES_KEY]["controller_worktree_origin"] == "affinity"
+
+    def test_non_codespace_metadata_does_not_create_claim_authority(self) -> None:
+        from agent_bridge import session_manager as sm
+
+        target = SpawnTarget(type="local", venue={sm._REQUEST_OVERRIDES_KEY: {
+            "codespace_claim": {"name": "not-this-target", "owner": "/wt/other"},
+        }})
+        assert sm._codespace_claim_key(target) is None
+
+    @pytest.mark.parametrize("identity", [None, {}, {"name": "claimed"}, {"name": "", "owner": "/wt/a"}])
+    def test_known_skipped_or_invalid_identity_does_not_fall_back(self, identity) -> None:
+        from agent_bridge import session_manager as sm
+
+        target = SpawnTarget(
+            type="command", caller_worktree="/wt/a", codespace={"name": "unclaimed"},
+            venue={sm._REQUEST_OVERRIDES_KEY: {"codespace_claim": identity}},
+        )
+        assert sm._codespace_claim_key(SpawnTarget.from_json(target.to_json())) is None
 
 
 class TestClaimContainerHelper:

@@ -805,3 +805,75 @@ def test_actual_acquired_claim_keeps_required_cleanup_when_provider_disappears(
         assert TargetLock("synthetic", directory=locks).read_holder() is not None
     finally:
         session_manager._release_codespace_lock("acquired")
+
+
+@pytest.mark.parametrize("outcome", [
+    "confirmed", "release-false", "release-error", "remote-pending",
+    "transferred", "already-held", "transferred-skipped", "already-held-skipped",
+])
+def test_claim_receipt_clears_only_after_confirmed_new_claim_rollback(
+    session_manager, monkeypatch, tmp_path, outcome,
+):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from ssh_manager import TargetLock
+    from agent_bridge.session_host.codespace_transport import codespace_launch_ownership
+    from agent_bridge.session_host.spawner import RemoteSpawnCleanupPendingError
+
+    locks = tmp_path / "locks"
+    locks.mkdir()
+    monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: locks)
+    transferred = outcome.startswith("transferred")
+    already_held = outcome.startswith("already-held")
+    if transferred:
+        session_manager._acquire_codespace_lock("old", "synthetic")
+    elif already_held:
+        session_manager._acquire_codespace_lock("current", "synthetic")
+    release = Mock(return_value=outcome != "release-false")
+    if outcome == "release-error":
+        release.side_effect = RuntimeError("release failed")
+    core = SimpleNamespace(_claim_codespace=Mock(return_value=(
+        "skipped" if outcome.endswith("-skipped") else "ok", "",
+    )),
+                           _release_codespace_claim=release)
+    persisted = []
+    identity = {"name": "synthetic", "owner": "/task/owner"}
+    metadata = {"codespace_claim": dict(identity)} if transferred or already_held else {}
+
+    def persist():
+        receipt = metadata["codespace_claim"]
+        persisted.append(dict(receipt) if receipt is not None else None)
+        if receipt is None:
+            if len(persisted) == 1:
+                assert not session_manager._codespace_lock_sessions
+                core._claim_codespace.assert_not_called()
+            else:
+                assert session_manager._codespace_lock_sessions == {"current": "synthetic"}
+                assert TargetLock("synthetic", directory=locks).read_holder() is not None
+
+    error = (
+        RemoteSpawnCleanupPendingError("remote authority remains")
+        if outcome == "remote-pending" else RuntimeError("preflight failed")
+    )
+    try:
+        with pytest.raises(RuntimeError):
+            with codespace_launch_ownership(
+                session_manager, "current", {"name": "synthetic"}, "/task/owner", core,
+                replace_session_id="old" if transferred else None,
+                claim_metadata=metadata, persist_claim_metadata=persist,
+            ):
+                raise error
+        initial = [] if transferred or already_held else [None]
+        if outcome == "confirmed":
+            assert persisted == [*initial, identity, None]
+            assert "codespace_claim" in metadata and metadata["codespace_claim"] is None
+            assert not session_manager._codespace_lock_sessions
+        else:
+            assert metadata["codespace_claim"] == identity
+            assert persisted == [*initial, identity]
+            assert session_manager._codespace_lock_sessions
+        if outcome == "remote-pending" or transferred or already_held:
+            release.assert_not_called()
+    finally:
+        for session_id in list(session_manager._codespace_lock_sessions):
+            session_manager._release_codespace_lock(session_id)

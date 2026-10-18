@@ -200,7 +200,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-          "sha256": "f2adc523c768c18244897f2ac423b61cd2291f7562e8c522a9c0203496da8963",
+          "sha256": "56558c3959289bad2d5ce7801d66ce0f81bf5f666e971a5fc3c6305920f65ac2",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1438,7 +1438,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-40.json",
-          "sha256": "e4a3a9e223f3832231cdb77662acb5225dd88b1383ee23454e2e483ae23f7107",
+          "sha256": "e105620c9052edb2e04a3e61ea4690e876a439fc9d85fa477e62ea8499a8f51c",
           "role": "Generation-40 combined receipt/native producer evidence: session_core.py",
           "generation": 40
         },
@@ -4035,6 +4035,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
           "source_git_blob": "a761babc5786ddd6c497ee4037f117013e5f0dc4",
           "capture_method": "Committed-source compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "d73e640e35b90800ebba360113179a9c8cbd4d40",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1f79ce0214043e2b857b2d41b9785d92267b27e8",
+          "capture_method": "Executed test_provider_creation.py and test_provider_creation_stdio.py against the merged native-continuation and request-provenance producer: 44 passed. Real HTTP production and response-model consumption retain the independent generation-40 projection, capability floors and compatibility values; preserving private request metadata adds no wire generation. Historical fixtures and provenance are retained."
         },
         {
           "commit": "440a69dfd3136eedd3e153c31bdf0f5584ba54f2",

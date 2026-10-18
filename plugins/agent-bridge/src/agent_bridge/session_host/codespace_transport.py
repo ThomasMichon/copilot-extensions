@@ -434,7 +434,8 @@ def codespace_child_preparer(target, transport, *, prelude, controller_cwd,
 
 @contextmanager
 def codespace_launch_ownership(manager, session_id, target, owner, core, *,
-                              holder_ref=None, replace_session_id=None, retain_on_error=False):
+                              holder_ref=None, replace_session_id=None, retain_on_error=False,
+                              claim_metadata=None, persist_claim_metadata=None):
     """Rollback only this start's resources, including preflight/cancellation failures."""
     from ..session_manager import CodespaceClaimConflictError, CodespaceCoordinationRejectedError
     from .spawner import RemoteSpawnCleanupPendingError
@@ -448,6 +449,10 @@ def codespace_launch_ownership(manager, session_id, target, owner, core, *,
         nonlocal connect_started
         connect_started = True
 
+    if claim_metadata is not None and not already_held and not replace_session_id:
+        claim_metadata["codespace_claim"] = None
+        if persist_claim_metadata is not None:
+            persist_claim_metadata()
     try:
         if replace_session_id:
             manager._transfer_codespace_lock(replace_session_id, session_id, name)
@@ -463,6 +468,12 @@ def codespace_launch_ownership(manager, session_id, target, owner, core, *,
         if status == "coordination-rejected":
             raise CodespaceCoordinationRejectedError(name, owner, detail)
         claimed = status != "skipped"
+        if claim_metadata is not None:
+            inherited_receipt = (already_held or transferred) and "codespace_claim" in claim_metadata
+            if claimed or not inherited_receipt:
+                claim_metadata["codespace_claim"] = {"name": name, "owner": owner} if claimed else None
+            if persist_claim_metadata is not None:
+                persist_claim_metadata()
         yield enter_connect
     except RemoteSpawnCleanupPendingError:
         raise
@@ -480,6 +491,10 @@ def codespace_launch_ownership(manager, session_id, target, owner, core, *,
                         f"CodeSpace claim cleanup is unconfirmed ({detail}); "
                         "retaining the failed session's claim and TargetLock"
                     ) from failure
+                if claim_metadata is not None:
+                    claim_metadata["codespace_claim"] = None
+                    if persist_claim_metadata is not None:
+                        persist_claim_metadata()
             if transferred:
                 manager._transfer_codespace_lock(session_id, replace_session_id, name)
             elif locked and not already_held:

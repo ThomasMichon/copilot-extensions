@@ -407,6 +407,17 @@ attempted (no owner, disabled admission, or absent management command). A
 pre-launch failure then releases only the new local lock, without inferring
 claim ownership from a later PATH lookup. Acquired or uncertain attempted
 claims still require confirmed release.
+Admission also snapshots the exact Codespace name and claim owner into existing
+session-owned target metadata, independently of controller provenance. Normal
+teardown and daemon-restart cleanup use that durable identity; known skipped
+admission has no claim to release, while legacy unmarked targets retain their
+caller-worktree fallback.
+Fresh attempts record no claim before target-lock admission, so a refused alias
+cannot inherit legacy teardown authority over an incumbent's same-owner claim.
+Confirmed rollback commits an explicit no-claim receipt before releasing the
+new local lock, so ending an older failed session cannot release a later
+same-owner lease. Unconfirmed release and inherited/transferred obligations
+retain their recorded identity.
 
 agent-bridge owns **live cross-boundary agent communication**: starting or
 resuming a persistent session, sending a turn, streaming its response, and

@@ -136,11 +136,7 @@ async def prepare_attached(args, config, *, on_ready=None, release=None) -> None
     repo = _lookup_codespace_repo(args.name)
     workspace = config.resolved_workspace_folder_for(repo)
     identity = args.worktree_id or f"anchor-{workspace.rstrip('/').rsplit('/', 1)[-1]}"
-    if (live_session_for(f"{identity}@{args.name}") or {}).get("status") == "live":
-        if on_ready is not None:
-            on_ready(False)
-            await release()
-        return
+    rejoining = (live_session_for(f"{identity}@{args.name}") or {}).get("status") == "live"
     manager = ConnectionManager()
     relay = None
     try:
@@ -155,8 +151,11 @@ async def prepare_attached(args, config, *, on_ready=None, release=None) -> None
                     host_port_resolver=lambda: relay_launch.effective_relay_port(config),
                 )
             await require_relay_ready(manager, args.name, port)
-            await _provision_relay_helpers(manager, args.name)
-        await _provision_repo_hooks(manager, args.name, config, repo, relay_env=prelude)
+            if not rejoining:
+                await _provision_relay_helpers(manager, args.name)
+        if not rejoining:
+            await _provision_repo_hooks(manager, args.name, config, repo, relay_env=prelude)
+        # A live host registration cannot guarantee the remote child survives.
         await prepare_plugins(
             manager, args.name, repo, config, workspace,
             getattr(args, "stage_plugins", []), worktree_id=args.worktree_id,

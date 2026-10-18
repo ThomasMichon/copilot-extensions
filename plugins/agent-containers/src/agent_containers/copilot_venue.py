@@ -266,13 +266,11 @@ def cmd_copilot(
                 elif remote_env:
                     from .ssh_transport import build_remote_command
                     remote_command = build_remote_command(remote_command, remote_env)
-                from venue_copilot import live_session_for
                 from .plugin_preparation import stage_for_attached_launch
-                if (live_session_for(f"{identity}@{args.name}") or {}).get("status") != "live":
-                    remote_command = stage_for_attached_launch(
-                        args, target, remote_env=remote_env,
-                        relay_port=relay_port,
-                    ) + remote_command
+                remote_command = stage_for_attached_launch(
+                    args, target, remote_env=remote_env,
+                    relay_port=relay_port,
+                ) + remote_command
                 spawn_cmd = build_ssh_command(
                     ssh_config, remote_command,
                     reverse_forwards=reverse_forwards, pty=True,
