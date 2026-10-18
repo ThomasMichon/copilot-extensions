@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, TypedDict
+
+
+class StaticPluginArgs(TypedDict):
+    base: list[str]
+    automatic: list[str]
 
 
 @dataclass
@@ -43,6 +48,8 @@ class SpawnTarget:
     remote_acp: dict[str, Any] | None = None
     remote_acp_capabilities: dict[str, Any] | None = None
     native_resume_id: str | None = None
+    static_plugin_args: StaticPluginArgs | None = None
+    local_plugin_preparation: bool = False
 
     def to_json(self) -> str:
         """Keep runtime-only native admission out of persisted target metadata.

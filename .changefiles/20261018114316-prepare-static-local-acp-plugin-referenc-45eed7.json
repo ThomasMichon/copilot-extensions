@@ -1,0 +1,21 @@
+{
+  "comment": "Prepare static local ACP plugin references before launch; preserve remote-copy defaults and explicit child environments.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

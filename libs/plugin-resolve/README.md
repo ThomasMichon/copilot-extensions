@@ -254,6 +254,26 @@ Direct `prepare` callers can collect these diagnostics through its optional
 alongside the prepared-directory result, and provider adapters log them without
 turning them into additional plugin directories.
 
+## Same-filesystem preparation
+
+`build_plan(..., local_mode="reference")` emits explicit `reference` records
+with a marketplace root, payload, and absolute directory declaration. The
+matching `prepare` request must opt into `"local_mode": "reference"` too.
+These are not copy-mode `local_path` fields with relaxed containment:
+registration revalidates each direct reference against its source catalog
+and publishes only target settings/ownership. It never writes a generated
+catalog into the referenced marketplace or snapshots the payload. Receipts
+identify reference registrations explicitly for repeat owned-projection
+recovery. Native operator origins, disablement, locking, atomic publication
+and effective-selection checks remain the same. Copy mode is still the default
+for all existing remote callers.
+
+`prepare(..., environment=child_env)` passes that environment to Git and the
+isolated native installer after removing Git selectors. Omission retains the
+ambient-environment contract. `check_cancelled` may stop preparation between
+bounded operations and before publication; callers using a worker thread must
+await its quiescence rather than abandon it.
+
 ## Sources
 
 - Copilot CLI: docs.github.com/.../customize-copilot/plugins-marketplace

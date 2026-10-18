@@ -360,6 +360,46 @@ execution/ACP capability limits.
 
 ## Responsibility boundary
 
+Ordinary static local ACP targets prepare plugins after real Worktrees
+allocation (or an explicit existing cwd), before either the raw child or local
+Session Host starts. Related selection and payload declarations prefer the
+verified controller worktree over configured anchors. Target-native settings
+retain authority. Already-local payloads are direct filesystem references:
+preparation never snapshots them or writes catalogs into source marketplaces.
+Selected remote sources use the shared verified, checkout-isolated installer
+before the atomic repository-local registration barrier.
+
+ACP gets every effective prepared directory. Structured resolver provenance
+replaces only automatic plugin arguments; configured and request arguments
+remain verbatim, and prepared argv is not persisted onto the target. Gitless
+legacy directories have no registration surface and retain their old launch.
+The final child environment also selects the native installer and accompanies
+Git/installer subprocesses, without modifying daemon globals. An explicit
+`copilot_path` wins over environment discovery for a direct local launch's
+installer, matching that launch's executable precedence. Cancellation waits
+for bounded in-flight preparation to quiesce before propagating.
+
+For managed Worktrees launches, the merged target and resolved plan environment
+selects the **packaging CLI** through `COPILOT_PATH` or `PATH`, as in the shared
+remote preparation engine. It is independent of an opaque runtime/setup wrapper:
+Bridge never invokes that wrapper's argv as the plugin installer and does not
+assert installer/runtime binary identity. Installation verifies the selected
+payloads and registration before returning the unchanged runtime command.
+An unavailable or invalid packaging CLI fails when installation requires it;
+direct-reference-only preparation does not invoke it. This contract adds no
+Worktrees launch-plan metadata or configuration.
+
+This registration integration excludes native CLI acquisition, SSH, command
+wrappers, privileged configurations (including POSIX `requires_admin`),
+sub-daemon relays and receiver-local Session Host runners. Existing launch
+behavior remains unchanged there. Host-backed loopback preparation additionally
+checks the configured effective SSH login against the current login, retaining
+the actual SSH target's environment-user-before-agent-user precedence. An unset
+login may resolve through SSH alias configuration; neither it nor a different
+explicit account proves ordinary local preparation. Login comparison remains
+exact, without introducing account-name normalization. Platform/machine routing
+is unchanged.
+
 Trusted-venue plugin preparation uses the dispatcher's controller worktree,
 not the daemon's launch directory or the remote product checkout when controller
 context is supplied. A declared `caller_owner_ref` resolves through the

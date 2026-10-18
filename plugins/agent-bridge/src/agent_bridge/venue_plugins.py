@@ -5,12 +5,89 @@ from __future__ import annotations
 import json
 import logging
 import shlex
+import asyncio
+import threading
 from pathlib import Path
 
 from plugin_resolve.reflection import build_plan, build_prepare_script, parse_prepared, selection_spec
 
 
-def with_controller_origin(target, origin):
+async def prepare_local_plugins(target, workspace: str, environment: dict[str, str]) -> list[str] | None:
+    """Prepare only the allocated static local ACP checkout, without copying."""
+    from plugin_resolve.conventions import SETTINGS_RELS
+    from plugin_resolve.preparation import prepare
+    from plugin_resolve.registration import _settings_document
+    from .related_plugins import control_plane_anchors, is_harness_plugin, related_plugins_for_repo
+    from .transport import _find_copilot, _wrap_batch_for_windows
+
+    if not isinstance(workspace, str) or not workspace.strip():
+        raise ValueError("Local plugin preparation requires the allocated execution checkout")
+    checkout = Path(workspace).resolve(strict=True)
+    if not checkout.is_dir():
+        raise ValueError("Local execution checkout is not a directory")
+    if not any((parent / ".git").exists() for parent in (checkout, *checkout.parents)):
+        return None  # Legacy Gitless launches have no repository registration surface.
+    from .session_manager import _REQUEST_OVERRIDES_KEY
+
+    provenance = (target.venue or {}).get(_REQUEST_OVERRIDES_KEY, {})
+    controller = await resolve_controller_cwd(
+        target, caller_session_id=provenance.get("controller_session_id"),
+    )
+    roots = list(dict.fromkeys([
+        *([Path(controller)] if controller else []), *control_plane_anchors(),
+    ]))
+    cancelled = threading.Event()
+
+    def check_cancelled():
+        if cancelled.is_set():
+            raise InterruptedError("Local plugin preparation cancelled")
+
+    def prepare_checkout():
+        check_cancelled()
+        for root in roots:
+            for relative in SETTINGS_RELS:
+                _settings_document(root.joinpath(*relative))
+        specs = [
+            {"source": ref.source, "enable": ref.enable}
+            for ref in related_plugins_for_repo(target.project, anchors=roots)
+            if not is_harness_plugin(ref.source)
+        ]
+        plan = build_plan(specs, roots, allow_external=True, local_mode="reference")
+        direct_launch = not target.project or (target.explicit_cwd and not target.native_resume_id)
+        # Managed plans may run opaque setup wrappers. Their selected environment
+        # supplies the packaging CLI, not proof of the wrapper's eventual backend.
+        executable = (
+            target.copilot_path if direct_launch and target.copilot_path
+            else _find_copilot(environment)
+        )
+        command = tuple(_wrap_batch_for_windows([executable], environment))
+        prepared = prepare(
+            {"repo": str(checkout), **plan, "local_mode": "reference"},
+            copilot_command=command, environment=environment, check_cancelled=check_cancelled,
+        )
+        return [arg for directory in prepared.values() for arg in ("--plugin-dir", directory)]
+
+    worker = asyncio.create_task(asyncio.to_thread(prepare_checkout))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        cancelled.set()
+        # Cancellation cannot leave a mutating thread behind a failed launch.
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                continue
+            except InterruptedError:
+                break
+        try:
+            worker.result()
+        except InterruptedError:
+            pass
+        raise
+
+
+def with_controller_origin(target, origin, *, caller_session_id=None):
     from dataclasses import replace
     from .session_manager import _REQUEST_OVERRIDES_KEY
 
@@ -18,6 +95,7 @@ def with_controller_origin(target, origin):
     return replace(target, venue={
         **venue, _REQUEST_OVERRIDES_KEY: {
             **venue.get(_REQUEST_OVERRIDES_KEY, {}), "controller_worktree_origin": origin,
+            **({"controller_session_id": caller_session_id} if caller_session_id is not None else {}),
         },
     })
 

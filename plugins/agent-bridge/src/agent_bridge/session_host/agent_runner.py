@@ -73,7 +73,9 @@ async def run_agent_session_host(
             "targets -- a remote/command target here means a mis-route"
         )
 
-    args, work_dir, env = await resolve_local_launch(target, session_id=agent_name)
+    args, work_dir, env = await resolve_local_launch(
+        target, session_id=agent_name, prepare_plugins=False,
+    )
     run_cwd = cwd or work_dir or target.cwd
     log.info(
         "Far-side runner: hosting agent %r (cwd=%s, port=%s, secured=%s)",

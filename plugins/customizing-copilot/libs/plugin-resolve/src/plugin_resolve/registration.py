@@ -161,6 +161,7 @@ def register_prepared(
     repo: Path, payloads: dict[str, str], enabled: dict[str, bool], roots: dict[str, str],
     *, state_dir: Path, publications: dict[str, dict],
     diagnostics: list[dict], initial_owned_plugins: dict[str, bool],
+    check_cancelled=lambda: None,
 ) -> dict:
     """Merge only unclaimed or unchanged owned keys; return effective directories.
 
@@ -170,6 +171,7 @@ def register_prepared(
     directory = repo / ".github" / "copilot"
     directory.resolve().relative_to(repo.resolve())
     with checkout_lock(state_dir):
+        check_cancelled()
         directory.mkdir(parents=True, exist_ok=True)
         for relative in (".github/copilot/settings.json", ".claude/settings.json",
                          ".claude/settings.local.json"):
@@ -206,8 +208,13 @@ def register_prepared(
             if operator_marketplaces.get(marketplace) != prior_marketplaces.get(marketplace):
                 origin_active[marketplace] = False
         catalogs: dict[str, dict] = {}
+        reference_marketplaces = {
+            k: v for k, v in receipt.get("referenceMarketplaces", {}).items()
+            if owned_marketplaces.get(k) == v
+        }
         reconciled_marketplaces: set[str] = set()
         for source, raw in payloads.items():
+            check_cancelled()
             name, marketplace = split_source(source)
             payload = Path(raw).resolve(strict=True)
             manifest = plugin_manifest(payload)
@@ -215,16 +222,32 @@ def register_prepared(
                 raise ValueError(f"Prepared payload identity mismatch: {source}")
             root = Path(roots[marketplace]).resolve()
             payload.relative_to(root)
-            root.mkdir(exist_ok=True)
-            catalog = catalogs.setdefault(marketplace, strict_json(root / "marketplace.json"))
-            entries = {item["name"]: item for item in catalog.get("plugins", [])}
             details = publications[source]
-            metadata, entry = catalog_metadata(
-                source, manifest, details.get("catalog", {}), details.get("entry", {}),
-            )
-            entries[name] = {**entry, "source": "./" + Path(os.path.relpath(payload, root)).as_posix()}
-            catalog.update(metadata, plugins=list(entries.values()))
-            definition = {"source": {"source": "directory", "path": str(root)}}
+            reference = details.get("reference")
+            if reference is not None:
+                definition = reference["definition"]
+                settings = RepoPluginSettings(marketplaces={marketplace: definition})
+                declared = local_marketplace_path(marketplace, settings, repo_dir=repo)
+                catalog = load_marketplace(root)
+                if (
+                    declared is None or declared.resolve() != root or catalog is None
+                    or catalog.name != marketplace_manifest_name(marketplace, settings)
+                    or plugin_dir(catalog, name) != payload
+                ):
+                    raise ValueError(f"Prepared filesystem reference no longer resolves: {source}")
+                reference_marketplaces[marketplace] = definition
+            else:
+                root.relative_to((state_dir / "marketplaces").resolve())
+                root.mkdir(exist_ok=True)
+                catalog = catalogs.setdefault(marketplace, strict_json(root / "marketplace.json"))
+                entries = {item["name"]: item for item in catalog.get("plugins", [])}
+                metadata, entry = catalog_metadata(
+                    source, manifest, details.get("catalog", {}), details.get("entry", {}),
+                )
+                entries[name] = {**entry, "source": "./" + Path(os.path.relpath(payload, root)).as_posix()}
+                catalog.update(metadata, plugins=list(entries.values()))
+                definition = {"source": {"source": "directory", "path": str(root)}}
+                reference_marketplaces.pop(marketplace, None)
             current = operator_marketplaces.get(marketplace)
             authority = operator.marketplaces.get(marketplace)
             prepared_origin = details["native_marketplace"]
@@ -301,11 +324,14 @@ def register_prepared(
                         else "outside-selection",
                     })
         for marketplace, catalog in catalogs.items():
+            check_cancelled()
             atomic_json(Path(roots[marketplace]) / "marketplace.json", catalog)
+        check_cancelled()
         atomic_json(receipt_path, {
             "enabledPlugins": owned_plugins, "extraKnownMarketplaces": owned_marketplaces,
             "marketplaceOrigins": origins,
             "marketplaceOriginActive": origin_active,
+            "referenceMarketplaces": reference_marketplaces,
         })
         atomic_json(path, data)
         return resolved

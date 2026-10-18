@@ -56,6 +56,164 @@ def local_plan(root, name="sample", marketplace="local"):
     return build_plan([{"source": f"{name}@{marketplace}"}], [root])
 
 
+def test_reference_mode_is_direct_repeatable_and_never_writes_source_catalog(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    catalog = host / ".ai" / "marketplace.json"
+    before = catalog.read_bytes()
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    item = plan["plugins"][0]
+    assert "archive" not in item and "local_path" not in item
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    expected = {"sample@local": str((host / ".ai" / "sample").resolve())}
+    assert prepare(request) == expected
+    assert prepare(request) == expected
+    assert catalog.read_bytes() == before
+    assert not list((target / ".git").rglob("snapshots"))
+    assert not list((target / ".git").rglob("marketplace.json"))
+    assert resolve_repo_plugins(target).resolved == {
+        source: Path(path) for source, path in expected.items()
+    }
+    # Independent consumer reads the actual disk overlay, not the prepare result.
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import json,sys; from plugin_resolve.resolve import resolve_repo_plugins; "
+         "r=resolve_repo_plugins(sys.argv[1]); assert not r.unresolved; "
+         "print(json.dumps({k:str(v) for k,v in r.resolved.items()}))", str(target)],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
+        capture_output=True, text=True, check=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert json.loads(result.stdout) == expected
+    path = target / ".github" / "copilot" / "settings.local.json"
+    value = json.loads(path.read_text())
+    value["enabledPlugins"]["sample@local"] = False
+    atomic_json(path, value)
+    assert prepare(request) == {}
+
+
+def test_reference_mode_native_authority_and_recovery(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target)
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    expected = {"sample@local": str((target / ".ai" / "sample").resolve())}
+    assert prepare(request) == expected
+    assert prepare({"repo": str(target), "plugins": [], "local_mode": "reference"}) == expected
+
+
+def test_reference_requires_opt_in_and_validates_again_before_publication(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    with pytest.raises(ValueError, match="explicit reference mode"):
+        prepare({"repo": str(target), **plan})
+    (host / ".ai" / "marketplace.json").unlink()
+    with pytest.raises(ValueError, match="reference no longer resolves"):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_explicit_environment_reaches_git_and_installer_without_mutating_host(tmp_path, monkeypatch):
+    from plugin_resolve import preparation as module
+
+    target = tmp_path / "target"
+    init_checkout(target)
+    calls = []
+    run = module.subprocess.run
+
+    def capture(*args, **kwargs):
+        calls.append(kwargs["env"])
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(module.subprocess, "run", capture)
+    environment = {**os.environ, "VENUE_EXPLICIT_ENV": "child-only", "GIT_DIR": "invalid"}
+    prepare({"repo": str(target), "plugins": []}, environment=environment)
+    assert calls and all(env["VENUE_EXPLICIT_ENV"] == "child-only" for env in calls)
+    assert all("GIT_DIR" not in env for env in calls)
+    assert "VENUE_EXPLICIT_ENV" not in os.environ
+
+    calls.clear()
+    environment["VENUE_CALL_LOG"] = str(tmp_path / "installer-calls.jsonl")
+    environment["VENUE_EXPECTED_SETTINGS_SHA256"] = hashlib.sha256(
+        (target / ".github" / "copilot" / "settings.local.json").read_bytes(),
+    ).hexdigest()
+    origin = {"source": {"source": "github", "repo": "example/synthetic"}}
+    command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
+    result = prepare({
+        "repo": str(target), "plugins": [{"source": "sample@remote", "enable": True, "marketplace": origin}],
+    }, environment=environment, copilot_command=command)
+    assert "sample@remote" in result
+    assert all(env["VENUE_EXPLICIT_ENV"] == "child-only" for env in calls)
+    assert [json.loads(line)["argv"][:2] for line in
+            Path(environment["VENUE_CALL_LOG"]).read_text().splitlines()] == [
+        ["plugin", "marketplace"], ["plugin", "install"],
+    ]
+
+
+def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from plugin_resolve import preparation as module
+
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    catalog = host / ".ai" / "marketplace.json"
+    value = json.loads(catalog.read_text())
+    extra = host / ".ai" / "extra"
+    extra.mkdir()
+    atomic_json(extra / "plugin.json", {"name": "extra", "version": "1.0.0"})
+    value["plugins"].append({"name": "extra", "source": "extra"})
+    atomic_json(catalog, value)
+    barrier = threading.Barrier(2, timeout=10)
+    register = module.register_prepared
+
+    def overlap(*args, **kwargs):
+        barrier.wait()
+        return register(*args, **kwargs)
+
+    monkeypatch.setattr(module, "register_prepared", overlap)
+    requests = [
+        {"repo": str(target), **build_plan([{"source": source}], [host], local_mode="reference"),
+         "local_mode": "reference"}
+        for source in ("sample@local", "extra@local")
+    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(prepare, requests))
+    assert all(results)
+    assert set(resolve_repo_plugins(target).resolved) == {"sample@local", "extra@local"}
+
+
+def test_reference_atomic_failure_keeps_previous_overlay(tmp_path, monkeypatch):
+    from plugin_resolve import registration
+
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    path = target / ".github" / "copilot" / "settings.local.json"
+    path.parent.mkdir(parents=True)
+    atomic_json(path, {"unrelated": "preserved"})
+    before = path.read_bytes()
+    original = registration.os.replace
+
+    def fail(source, destination):
+        if Path(destination) == path:
+            raise OSError("synthetic interrupted publication")
+        return original(source, destination)
+
+    monkeypatch.setattr(registration.os, "replace", fail)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    with pytest.raises(OSError, match="interrupted publication"):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert path.read_bytes() == before
+    assert not list(path.parent.glob("*.pending"))
+
+
 @pytest.mark.parametrize("value, expected", [
     ("sample@local", {"source": "sample@local", "enable": True}),
     ("/p/one with spaces=false", {"source": "/p/one with spaces=false", "enable": True}),

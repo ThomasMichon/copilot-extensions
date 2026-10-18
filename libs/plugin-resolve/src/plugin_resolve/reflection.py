@@ -122,7 +122,7 @@ def subset(root: Path, payload: Path) -> bytes:
 
 def _plan_item(
     spec, owner, declarations: dict, *, allow_external: bool = False,
-    existing_root: Path | None = None, required: bool = True,
+    existing_root: Path | None = None, required: bool = True, local_mode: str = "copy",
 ) -> dict | None:
     """Plan against supplied authority, without re-reading a generated overlay."""
     item = selection_spec(spec)
@@ -147,7 +147,15 @@ def _plan_item(
         declared = plugin_manifest(payload)
         item["catalog"], item["entry"] = publication_metadata(local, source)
         item["requirements"] = dependencies(declared, marketplace)
-        if existing_root is not None and payload.is_relative_to(existing_root):
+        if local_mode == "reference":
+            item["reference"] = {
+                "marketplace_root": str(local), "payload": str(payload),
+                "definition": {
+                    **owner[1].marketplaces[marketplace],
+                    "source": {**owner[1].marketplaces[marketplace]["source"], "path": str(local)},
+                },
+            }
+        elif existing_root is not None and payload.is_relative_to(existing_root):
             item["local_path"] = str(payload)
         else:
             content = subset(base, payload)
@@ -171,8 +179,11 @@ def _plan_item(
 def build_plan(
     specs: list[dict], repo_roots: list[Path], *, marketplaces: dict | None = None,
     allow_external: bool = False, existing_root: Path | None = None,
+    local_mode: str = "copy",
 ) -> dict:
     """Resolve local sources first-wins; remote sources remain install requests."""
+    if local_mode not in {"copy", "reference"}:
+        raise ValueError("Unknown local payload preparation mode")
     declarations = dict(marketplaces or {})
     owners = {}
     for root in repo_roots:
@@ -193,6 +204,7 @@ def build_plan(
         plugins.append(_plan_item(
             normalized, owners.get(marketplace), declarations,
             allow_external=allow_external, existing_root=existing_root,
+            local_mode=local_mode,
         ))
     return {"plugins": plugins, "marketplaces": declarations}
 

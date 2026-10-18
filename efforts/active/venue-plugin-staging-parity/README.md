@@ -118,10 +118,13 @@ abstracted; the requested mechanics and priorities are unchanged):
 
 ### Phase 2 - Static local, remote SSH and privileged relay
 
-- [ ] Apply target-local registration before static local-loopback launches in
-  both CLI and ACP modes, retaining existing own/related selection, native
+- [ ] Apply target-local registration before static local-loopback ACP
+  launches, retaining existing own/related selection, native
   operator precedence and account/platform locality checks. Resolve local
   filesystem references without assuming a remote provider owns this path.
+- [ ] Apply the same registration barrier through the existing native local
+  CLI acquisition owner; settings-only consumer discovery is not proof that
+  this adapter prepares its target.
 - [ ] Apply the same contract to genuine remote static-registry SSH targets:
   target-owned resolution plus control-repository payload staging.
 - [ ] Resolve the privileged launch's real identity/filesystem context and
@@ -206,6 +209,36 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-18 - Static local ACP candidate and consumer proof
+
+- The next bounded slice implements ordinary static local ACP preparation
+  after actual workspace allocation and environment resolution, before either
+  raw-local or local Session Host child startup. Structured argument provenance
+  replaces only automatic plugin directories; explicit flags remain intact.
+- Shared preparation has opt-in same-filesystem references. Target-local
+  settings point directly at the original selected marketplace; preparation
+  neither snapshots those payloads nor writes source catalogs. Remote-copy
+  defaults, native operator authority, atomic settings publication and verified
+  remote installation remain unchanged.
+- Direct launches honor their explicit Copilot executable. Managed opaque
+  wrappers use a separate packaging CLI selected from the resolved environment,
+  matching the existing shared preparation contract; this is not a claim that
+  the installer executable equals a backend selected later by a setup script.
+  No Worktrees launch-plan API or configuration surface is added.
+- Contained coverage includes fresh/repeated preparation, real related-repo
+  selection, allocation ordering, source-worktree precedence, operator
+  overrides, explicit arguments, installer environment, missing installation,
+  malformed settings, cancellation quiescence and deferred-lane exclusions.
+  Independent actual Copilot CLI and ACP consumers loaded and invoked a
+  synthetic skill from the original filesystem reference. The CLI consumer
+  used only target settings, with no plugin-directory flags; ACP used the
+  launch adapter's effective directory.
+- These are source-candidate and fresh-checkout consumer checks, not installed
+  rollout or native CLI acquisition acceptance. Native local CLI, SSH,
+  privileged execution, live trusted-container proof and release remain open.
+  This candidate still requires review, required CI and merge; no implementation
+  checkbox is closed by this journal entry.
 
 ### 2026-10-18 - Trusted provider registration merged; static targets next
 

@@ -462,6 +462,9 @@ class AgentResolver(_ProviderDiscoveryMixin):
             )
             return dataclasses.replace(
                 target, project=repo, copilot_args=copilot_args,
+                static_plugin_args={
+                    "base": base_args, "automatic": copilot_args[len(base_args):],
+                },
             )
         if target.type == "ssh":
             import dataclasses
@@ -687,15 +690,17 @@ class AgentResolver(_ProviderDiscoveryMixin):
             )
 
         if not config.host:
+            automatic = (
+                self._own_plugin_args(config.project, config.cwd)
+                + self._related_plugin_args(config.project)
+            )
             return SpawnTarget(
                 type="local",
                 cwd=config.cwd,
                 copilot_path=config.copilot_path,
-                copilot_args=(
-                    config.copilot_args
-                    + self._own_plugin_args(config.project, config.cwd)
-                    + self._related_plugin_args(config.project)
-                ),
+                copilot_args=[*config.copilot_args, *automatic],
+                static_plugin_args={"base": list(config.copilot_args), "automatic": automatic},
+                local_plugin_preparation=not config.requires_admin,
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,
@@ -735,14 +740,24 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 machine.key,
                 ssh_env.name,
             )
+            import getpass
+
+            automatic = (
+                self._own_plugin_args(config.project, config.cwd)
+                + self._related_plugin_args(config.project)
+            )
+            # Match the actual SSH target's environment-first precedence below.
+            # An unset login can still come from SSH alias configuration, so it
+            # does not prove the same execution account.
+            user = ssh_env.user or config.ssh_user
             return SpawnTarget(
                 type="local",
                 cwd=config.cwd,
                 copilot_path=config.copilot_path,
-                copilot_args=(
-                    config.copilot_args
-                    + self._own_plugin_args(config.project, config.cwd)
-                    + self._related_plugin_args(config.project)
+                copilot_args=[*config.copilot_args, *automatic],
+                static_plugin_args={"base": list(config.copilot_args), "automatic": automatic},
+                local_plugin_preparation=(
+                    not config.requires_admin and user is not None and user == getpass.getuser()
                 ),
                 env=config.env,
                 project=config.project,

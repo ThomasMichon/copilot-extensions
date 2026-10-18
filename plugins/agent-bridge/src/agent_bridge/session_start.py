@@ -335,9 +335,11 @@ class _SessionStartMixin:
                 and target.container.get("name")
                 else None
             )
-            if cs_target is not None or container_target is not None:
+            if cs_target is not None or container_target is not None or target.local_plugin_preparation:
                 from .venue_plugins import with_controller_origin
-                target = with_controller_origin(target, controller_origin)
+                target = with_controller_origin(
+                    target, controller_origin, caller_session_id=session.caller_session_id,
+                )
                 session.target = target
                 self._db.update_session_target(session_id, target.to_json(), target.cwd)
             if parity_fault:
