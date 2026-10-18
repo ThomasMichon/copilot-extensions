@@ -75,13 +75,19 @@ def _cleanup_docker(containers, networks):
                     timeout=30, creationflags=no_window_flags(),
                 )
                 if inspected.returncode:
-                    failures.append(f"{kind} inventory unavailable: {name}: {inspected.stderr}")
+                    failures.append(
+                        f"{kind} inventory unavailable: {name}: exit={inspected.returncode}; "
+                        f"stdout={inspected.stdout!r}; stderr={inspected.stderr!r}"
+                    )
                 else:
                     present = [json.loads(line) for line in inspected.stdout.splitlines()]
                     if any(not isinstance(value, str) for value in present):
                         failures.append(f"{kind} inventory malformed: {name}")
                     elif name in present:
-                        failures.append(f"{kind} still exists: {name}: {removed.stderr}")
+                        failures.append(
+                            f"{kind} still exists: {name}: exit={removed.returncode}; "
+                            f"stdout={removed.stdout!r}; stderr={removed.stderr!r}"
+                        )
             except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
                 failures.append(f"{kind} cleanup failed: {name}: {exc}")
     assert not failures, "\n".join(failures)

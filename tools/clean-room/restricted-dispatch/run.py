@@ -82,7 +82,6 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
         return _finish_report(root, report)
     for outcome in manifest["cases"]:
         case = root / outcome
-        case.mkdir()
         # The contained fixture creates its evidence directory exclusively.
         evidence = case / "evidence"
         env = dict(os.environ)
@@ -98,6 +97,7 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
         phase = "runner"
         runner_failed = False
         try:
+            case.mkdir()
             with (case / "runner.log").open("wb") as log:
                 process = subprocess.run(
                     [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"),
