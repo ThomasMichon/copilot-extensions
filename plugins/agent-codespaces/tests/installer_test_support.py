@@ -72,9 +72,21 @@ function Unregister-ScheduledTask { Deny-TestInstallerEffect 'unregister schedul
 function New-ScheduledTaskAction { Deny-TestInstallerEffect 'create scheduled task' }
 function Start-Process {
     param($FilePath, $ArgumentList, $WorkingDirectory, [switch]$PassThru, [switch]$NoNewWindow)
+    $entry = $null
+    if ($ArgumentList -is [string] -and
+        $ArgumentList -match '^"-NoProfile" "-ExecutionPolicy" "Bypass" "-File" "([^"]+install\.ps1)"(?: "[^"]*")*$') {
+        $entry = $Matches[1]
+    } elseif ($ArgumentList -is [array]) {
+        $index = [array]::IndexOf($ArgumentList, '-File')
+        if ($index -ge 0 -and $index + 1 -lt $ArgumentList.Count) {
+            $entry = $ArgumentList[$index + 1]
+        }
+    }
+    $stageRoot = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-codespaces/.install-stage')) +
+        [IO.Path]::DirectorySeparatorChar
     if ($FilePath -ne (Get-Process -Id $PID).Path -or
-        -not ($ArgumentList -contains '-File') -or
-        -not ($ArgumentList -match 'install\.ps1$')) {
+        -not $entry -or -not [IO.File]::Exists($entry) -or
+        -not [IO.Path]::GetFullPath($entry).StartsWith($stageRoot, [StringComparison]::OrdinalIgnoreCase)) {
         Deny-TestInstallerEffect 'start host process'
     }
     Microsoft.PowerShell.Management\Start-Process @PSBoundParameters

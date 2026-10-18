@@ -14,6 +14,13 @@ from agent_codespaces import copilot_venue, launch_policy as lp
 _REAL_BRIDGE_ENFORCEMENT = lp.bridge_enforcement  # the conftest stubs it per test
 
 
+@pytest.fixture(autouse=True)
+def _align_isolated_profile(monkeypatch, tmp_path):
+    """Keep this module's registration fixture inside its effective profile."""
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 def _policy(code: str, *, timeout: float = 20.0) -> None:
     """Register a Python one-liner as the policy (it reads the request on stdin)."""
     lp.register([sys.executable, "-c", code], timeout=timeout)
@@ -397,6 +404,11 @@ def test_on_windows_a_registration_outside_the_profile_fails_closed(monkeypatch,
     assert "only this user controls" in lp.refusal("cs")
     with pytest.raises(PermissionError):
         lp.register([sys.executable])
+    lp.POLICY_FILE.write_text(
+        json.dumps({"argv": [sys.executable], "timeout": 20.0}),
+        encoding="utf-8",
+    )
+    assert "only this user controls" in lp.refusal("cs")
 
 
 def test_clear_recovers_from_an_empty_directory_at_the_registration_path(capsys):

@@ -65,6 +65,11 @@ module execution checks the actual CLI entrypoint and its imports; a successful
 package import alone can accept a partial namespace package. Checkout files,
 `PYTHONPATH`, and user-site packages cannot mask missing runtime files.
 
+On Windows, a host with `uv` but no Python on `PATH` can bootstrap construction:
+the installer first asks `uv` for Python 3.11, then uses its normal managed-Python
+run path if necessary. It requires a successful concrete interpreter result
+before construction; failure does not authorize reuse of an incomplete slot.
+
 If an existing numbered slot has completion evidence but fails that launch
 check, ordinary installation refuses before rebuilding its venv or packages,
 including under `--force`/`-Force`. Its completion evidence and selectors are

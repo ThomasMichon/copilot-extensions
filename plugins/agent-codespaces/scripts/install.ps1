@@ -455,6 +455,24 @@ function Get-BootstrapPython {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
+    $uv = Get-Command uv -ErrorAction SilentlyContinue
+    if ($uv) {
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $exe = (& $uv.Source python find 3.11 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path -LiteralPath $exe -PathType Leaf)) {
+                return $exe
+            }
+            $exe = (& $uv.Source run --no-project --python 3.11 python -I -c 'import sys; print(sys.executable)' 2>$null |
+                Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path -LiteralPath $exe -PathType Leaf)) {
+                return $exe
+            }
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+    }
     return $null
 }
 

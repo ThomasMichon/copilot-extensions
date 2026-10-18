@@ -4,11 +4,14 @@ box and force only that refusal when all of them are verified clean."""
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import shlex
 import shutil
 import subprocess
 from types import SimpleNamespace
 
 import pytest
+from agent_procutil import no_window_flags
 
 from agent_codespaces import lifecycle, unsaved_guard
 from agent_codespaces.unsaved_guard import CheckoutAudit, CheckoutState, UnsavedWorkError
@@ -109,7 +112,10 @@ def test_error_lists_each_dirty_checkout():
 # --- the real audit script against real git checkouts ----------------------
 
 def _git(*args, cwd):
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+    subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True,
+        timeout=20, creationflags=no_window_flags(),
+    )
 
 
 def _repo(path, remotes):
@@ -127,8 +133,16 @@ def _repo(path, remotes):
 
 
 def _run_audit(root, extra=()):
-    cmd = unsaved_guard.audit_command(workspace_root=str(root), extra_dirs=extra)
-    out = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True)
+    cmd = unsaved_guard.audit_command(workspace_root=root.as_posix(), extra_dirs=extra)
+    argv = shlex.split(cmd)
+    bash = shutil.which(argv[0])
+    assert bash is not None
+    argv[0] = bash
+    out = subprocess.run(
+        argv, capture_output=True, text=True,
+        timeout=30, creationflags=no_window_flags(),
+    )
+    assert out.returncode == 0, (out.stdout, out.stderr)
     return unsaved_guard.parse_audit(out.stdout)
 
 
@@ -149,7 +163,7 @@ def test_audit_script_covers_nested_repos_and_linked_worktrees(tmp_path):
     audit = _run_audit(root)
     assert audit.known and audit.all_clean
     paths = {c.path for c in audit.checkouts}
-    assert {str(main_repo), str(nested)} <= {p for p in paths}
+    assert {main_repo, nested} <= {Path(p) for p in paths}
     assert any(p.endswith("elsewhere/wt") for p in paths)
 
     (linked / "scratch.txt").write_text("unsaved\n")
@@ -162,7 +176,7 @@ def test_audit_script_covers_nested_repos_and_linked_worktrees(tmp_path):
     assert set(dirty) == {"wt", "nested"}
     assert dirty["wt"].dirty and "?? scratch.txt" in dirty["wt"].sample
     assert dirty["nested"].ahead == 1 and dirty["nested"].unpushed_branches == 1
-    assert not any(c.path == str(main_repo) for c in audit.dirty_checkouts)
+    assert not any(Path(c.path) == main_repo for c in audit.dirty_checkouts)
 
 
 @pytest.mark.skipif(not (shutil.which("git") and shutil.which("bash")),
@@ -171,7 +185,9 @@ def test_audit_script_fails_closed_on_git_errors_and_odd_paths(tmp_path):
     remote = tmp_path / "remotes"
     root = tmp_path / "work space"
     root.mkdir()
-    odd = root / "back\\slash"
+    odd_name = "back slash" if os.name == "nt" else "back\\slash"
+    linked_name = "wt odd" if os.name == "nt" else "wt\\odd"
+    odd = root / odd_name
     odd.mkdir()
     _repo(odd, remote)
     broken = root / "broken"
@@ -182,15 +198,15 @@ def test_audit_script_fails_closed_on_git_errors_and_odd_paths(tmp_path):
         if obj.is_file():
             obj.chmod(0o600)
             obj.write_bytes(b"garbage")
-    linked = tmp_path / "outside" / "wt\\odd"
+    linked = tmp_path / "outside" / linked_name
     _git("worktree", "add", "-q", "-b", "side", str(linked), cwd=odd)
     (linked / "unsaved.txt").write_text("x\n")
     audit = _run_audit(root)
     assert audit.known
     by_name = {c.path.rsplit("/", 1)[-1]: c for c in audit.checkouts}
-    assert by_name["back\\slash"].clean  # backslash path emitted verbatim
-    # a linked worktree with a backslash in its path is found (-z, unquoted)
-    assert by_name["wt\\odd"].dirty
+    assert by_name[odd_name].clean
+    # Backslashes are literal POSIX filenames; Windows covers spaces instead.
+    assert by_name[linked_name].dirty
     assert not by_name["broken"].clean
     assert not audit.all_clean
 
@@ -242,10 +258,10 @@ def test_audit_script_finds_deep_and_dot_dir_repos(tmp_path):
     _git("init", "-q", str(skipped), cwd=skipped.parent)
     (deep / "new.txt").write_text("x\n")
     audit = _run_audit(root)
-    paths = {c.path for c in audit.checkouts}
-    assert {str(deep), str(dotted)} <= paths
-    assert str(skipped) not in paths
-    assert [c.path for c in audit.dirty_checkouts] == [str(deep)]
+    paths = {Path(c.path) for c in audit.checkouts}
+    assert {deep, dotted} <= paths
+    assert skipped not in paths
+    assert [Path(c.path) for c in audit.dirty_checkouts] == [deep]
 
 
 # --- delete_codespace integration -------------------------------------------

@@ -151,7 +151,6 @@ if expected_sources and args[:2] == ["pip", "install"]:
     private_root = config.parent
     assert config.is_file() and not config.is_symlink()
     assert private_root.name == "inputs"
-    assert private_root.parent.parent.samefile(Path(os.environ["TEMP"]))
     if os.name != "nt":
         assert private_root.stat().st_uid == os.getuid()
         assert private_root.stat().st_mode & 0o077 == 0
@@ -167,6 +166,13 @@ if expected_sources and args[:2] == ["pip", "install"]:
         for member in original.rglob("*.py"):
             assert (source / member.relative_to(original)).read_bytes() == member.read_bytes()
         args[index] = str(original)
+    if os.name == "nt" and "--editable" in args:
+        expected_parents = {Path(value).resolve().parent for value in expected_sources.values()}
+        assert any(private_root.parent.parent.samefile(parent) for parent in expected_parents)
+    else:
+        assert private_root.parent.parent.samefile(Path(os.environ["TEMP"]))
+    assert not any(private_root.resolve().is_relative_to(Path(value).resolve())
+                   for value in expected_sources.values())
 log = Path(os.environ["TEST_UV_LOG"])
 history = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 with log.open("a") as stream:
@@ -1318,6 +1324,10 @@ def test_installer_engine_adoption_environment_excludes_host_tools(tmp_path):
         ("Register-ScheduledTask", "register scheduled task"),
         ("Start-ScheduledTask", "start scheduled task"),
         ("Start-Process -FilePath 'host.exe' -ArgumentList 'owner'", "start host process"),
+        ("Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-File', $PSCommandPath",
+         "start host process"),
+        ("""Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList ('"-NoProfile" "-ExecutionPolicy" "Bypass" "-File" "' + $PSCommandPath + '"')""",
+         "start host process"),
     ],
 )
 def test_installer_engine_adoption_guards_reject_host_effects(tmp_path, command, effect):
