@@ -301,6 +301,72 @@ def test_routine_recovery_preserves_private_head_checkout_retry(pr_repo, monkeyp
     assert git("show", "HEAD:later-feedback.txt", cwd=wt) == "retain unpublished feedback"
 
 
+def test_reconcile_settles_older_selected_pr_despite_newer_active_pr(pr_repo, monkeypatch) -> None:
+    """A newer PR becoming ``active_pr()`` must not cause routine
+    reconciliation to skip settling an older, still-live PR whose own
+    private head is the one actually checked out."""
+    config, wid, wt, remote, branch, _published = _prepare(pr_repo, scheme="snapshot")
+    current = record(wid)
+    current.pr.number = 42
+    current.pr.repo = "example/project"
+    current.pr.url = "https://gitea.example.com/example/project/pulls/42"
+    current.pr.head_identity = pr_publish.push_identity("origin", cwd=str(wt))
+    current.pr.rewrite_owner = ""
+    current.pr.rewrite_identity = ""
+    tracking.save_record(current)
+    monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
+    monkeypatch.setattr(git_ops, "slug_from_url", lambda *a: "example/project")
+    monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
+    monkeypatch.setattr(pr_rewrite, "observe_pr", lambda config, pr: PullResult(
+        number=42, head_sha=pr_publish._tip("origin", branch, str(wt)),
+        head_ref=branch, head_url=str(remote),
+    ))
+    saved = record(wid).pr.head_sha
+    (wt / "accepted-feedback.txt").write_text("accepted source feedback\n")
+    git("add", "accepted-feedback.txt", cwd=wt)
+    git("commit", "-m", "accepted source feedback", cwd=wt)
+    push = git_ops.push
+
+    def lose_ack(*args, **kwargs):
+        assert push(*args, **kwargs)
+        return git_ops.PushResult(ok=False, stderr="transport acknowledgement lost")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(git_ops, "push", lose_ack)
+        assert not finalize.push_changes(wid, config)
+    assert record(wid).pr.head_sha == saved
+
+    # Check out the older (numbered) PR's own tracked private head, then
+    # introduce a strictly newer live PR so it -- not the numbered one --
+    # becomes active_pr(). Routine reconciliation must still settle the
+    # checked-out (older) PR rather than silently no-op.
+    git("checkout", branch, cwd=wt)
+    current = record(wid)
+    newer = replace(
+        current.pr, pr_id="newer-live-pr", branch="pr/newer-topic", number=None,
+        url="", rewrite_owner="", rewrite_identity="",
+        opened_at="2999-01-01T00:00:00Z",
+    )
+    current.prs.append(newer)
+    tracking.save_record(current)
+    git("branch", newer.branch, cwd=wt)
+    assert record(wid).active_pr().pr_id == newer.pr_id
+
+    (wt / "later-feedback.txt").write_text("retain unpublished feedback\n")
+    git("add", "later-feedback.txt", cwd=wt)
+    git("commit", "-m", "later feedback", cwd=wt)
+    source = git("rev-parse", "HEAD", cwd=wt)
+    assert finalize.push_changes(wid, config)
+    # ``record(wid).pr`` is a back-compat accessor for active_pr() -- the
+    # newer, untouched PR -- so look up the numbered one settlement actually
+    # touched directly.
+    numbered = next(p for p in record(wid).prs if p.number == 42)
+    assert numbered.head_sha == source
+    assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == source
+    assert git("show", "HEAD:accepted-feedback.txt", cwd=wt) == "accepted source feedback"
+    assert git("show", "HEAD:later-feedback.txt", cwd=wt) == "retain unpublished feedback"
+
+
 def test_push_changes_refuses_branch_switch_after_reconciliation(
     owned_publication, monkeypatch,
 ) -> None:

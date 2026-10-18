@@ -48,12 +48,17 @@ def _validate(worktree_id: str, config: Config, record: tracking.WorktreeRecord 
     if pr.provider and pr.provider != repo.pr.provider:
         raise ValueError("Tracked PR provider differs from configuration; refusing credential resolution.")
     branch = f"worktree/{worktree_id}"
+    # A legacy record may store the worktree branch as the bare worktree id
+    # instead of 'worktree/<id>' -- pr_rebase.verify() already normalizes
+    # this form; recognize the same equivalence here, without relaxing any
+    # other authority check.
+    owning_branch = branch if record.branch == worktree_id else record.branch
     current_branch = git_ops._get_current_branch_safe(cwd)
     # A tracked private-head checkout (HEAD on the PR's own feature branch,
     # not the worktree branch) is a supported source for routine settlement
     # only -- it never grants --rewrite-pr's history-replacement authority.
     on_owning_head = current_branch == branch or (allow_feature_head and current_branch == pr.branch)
-    if (record.worktree_id != worktree_id or record.repo.lower() != config.repo_name.lower() or record.branch != branch
+    if (record.worktree_id != worktree_id or record.repo.lower() != config.repo_name.lower() or owning_branch != branch
             or Path(record.worktree_path).resolve() != Path(cwd).resolve()
             or not on_owning_head):
         raise ValueError("--rewrite-pr requires the owning worktree on its recorded worktree branch.")

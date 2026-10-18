@@ -34,12 +34,14 @@ def reconcile(config: Config, record: tracking.WorktreeRecord | None, *, cwd: st
     from .finalize import FinalizeLock
 
     repo = config.default_repo
-    pr = record.active_pr() if record is not None else None
-    if pr is None or not pr.number or tracking._pr_is_terminal(pr) or not repo.pr.enabled:
-        return ""
-    if pr_recovery.selected_pr(
+    # Reconcile whichever PR the checkout actually selects -- the active PR
+    # on 'worktree/<id>', or an older live PR on its own tracked private
+    # head -- never only the former: a newer PR becoming active must not
+    # silently skip settling an older PR's accepted-but-unacknowledged head.
+    pr = pr_recovery.selected_pr(
         record.worktree_id, git_ops._get_current_branch_safe(cwd), record,
-    ) is not pr:
+    ) if record is not None else None
+    if pr is None or not pr.number or tracking._pr_is_terminal(pr) or not repo.pr.enabled:
         return ""
     budget = publication_deadline.lifecycle_budget(repo.pr)
     lock = FinalizeLock(
@@ -167,12 +169,17 @@ def _verified_fallback(
     remote: str, observed: str, source: str, *, cwd: str,
 ) -> bool:
     """Defer only source-owned acknowledgement loss to the existing push guards."""
-    if not git_ops.is_commit_ancestor(pr.head_sha, observed, cwd=cwd):
-        return False
-    if git_ops.is_commit_ancestor(observed, source, cwd=cwd):
+    if (
+        git_ops.is_commit_ancestor(pr.head_sha, observed, cwd=cwd)
+        and git_ops.is_commit_ancestor(observed, source, cwd=cwd)
+    ):
         return True
     from . import pr_rebase
 
+    # A publication rebase rewrites history, so the saved head is not
+    # necessarily a literal ancestor of the newly accepted (rebased) head --
+    # that must not block the verified replay proof below, only the simple
+    # ancestor-chain case above.
     # The supported source is whichever checkout routine settlement already
     # admitted -- the worktree branch or the PR's own tracked private head
     # (see pr_rewrite._validate's allow_feature_head) -- never a hardcoded

@@ -120,8 +120,14 @@ def revalidate(
 ) -> None:
     """Refuse changed input after retention; transport still CASes the exact ref."""
     pr_publication_state.require_current(record, pr)
+    # A legacy record may store the worktree branch as the bare worktree id
+    # instead of 'worktree/<id>' -- pr_rebase.verify() already normalizes
+    # this form; recognize the same equivalence here.
+    owning_branch = (
+        f"worktree/{record.worktree_id}" if record.branch == record.worktree_id else record.branch
+    )
     current_branch = git_ops._get_current_branch_safe(cwd)
-    on_owning_head = current_branch == record.branch or (allow_feature_head and current_branch == pr.branch)
+    on_owning_head = current_branch == owning_branch or (allow_feature_head and current_branch == pr.branch)
     if not git_ops.is_clean(cwd=cwd) or not on_owning_head:
         raise ValueError("Recovery source branch or working tree changed before publication.")
     source = git_ops.git(
