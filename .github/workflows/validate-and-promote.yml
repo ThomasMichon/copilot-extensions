@@ -113,7 +113,7 @@ permissions:
 
 env:
   # REQUIRED: replace with the reviewed, merged Dev helper commit before activation.
-  RELEASE_HELPERS_SHA: "b576e17ec2280c27866b0be550ff7b0604cfaa58"
+  RELEASE_HELPERS_SHA: "a912c1d2346598f4c8badfceef0c45692c3f9ac6"
 
 jobs:
   gate:
@@ -350,12 +350,10 @@ jobs:
         # loop's current synchronous work has actually finished.
         # Independent
         # of, and in addition to, the trusted `run-plugin-tests.py` run
-        # above -- this step's own failure never fails this job (see
-        # `continue-on-error` below): a baseline is optional evidence
-        # relative to `run-plugin-tests.py`'s own real test outcome, but
-        # the `promote` job's own "Verify enrolled coverage baselines were
-        # actually collected" step makes an ENROLLED plugin's baseline a
-        # hard requirement regardless -- keep this `if:` condition's
+        # above. Every enrolled baseline is required: a collector or upload
+        # failure must fail this source job, not leave a success-shaped
+        # result for missing evidence. The `promote` job also verifies the
+        # complete artifact set independently. Keep this `if:` condition's
         # plugin list in exact sync with that step's own list. Expand both
         # lists together as later pilots prove out. `--cov-source` is
         # derived from `matrix.plugin` (every plugin's own `src/` package
@@ -364,7 +362,6 @@ jobs:
         # hardcoded per plugin, so enrolling the next one only ever touches
         # this `if:` list and the `promote` job's matching one below.
         if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees","agent-dispatch"]'), matrix.plugin)
-        continue-on-error: true
         env:
           BASELINE_WORKERS: ${{ (matrix.plugin == 'agent-worktrees' || matrix.plugin == 'agent-dispatch') && '2' || '1' }}
         run: |
@@ -379,7 +376,6 @@ jobs:
             --out "${plugin}.json"
       - name: Upload coverage baseline - ${{ matrix.plugin }}
         if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees","agent-dispatch"]'), matrix.plugin)
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           # The ARTIFACT's own name carries the `coverage-baseline-` prefix
@@ -392,7 +388,7 @@ jobs:
           # exactly, or verification below silently fails every run.
           name: coverage-baseline-${{ matrix.plugin }}
           path: ${{ matrix.plugin }}.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
 
   worktree-manager:
@@ -1027,15 +1023,10 @@ jobs:
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF"
       - name: Download coverage baselines (pilot plugins only; best-effort)
         if: steps.decide.outputs.proceed == 'true'
-        # Not every promotion run has a baseline artifact yet (only the
-        # pilot plugin(s) in `full`'s own Coverage-baseline step produce
-        # one, and that step is itself best-effort / continue-on-error) --
-        # `actions/download-artifact` has no built-in "zero matches is
-        # fine" mode for `pattern`, so this step tolerates that itself
-        # rather than failing the whole promotion over optional evidence.
-        # The NEXT step enforces the real guarantee: any plugin actually
-        # enrolled in collection must have produced one, or promotion fails
-        # loudly -- this step alone never silently drops that requirement.
+        # Only enrolled plugins produce baselines. Tolerate a failed pattern
+        # download here so the NEXT step reports the exact missing plugin set.
+        # Collection/upload already fail their source jobs; this separate gate
+        # also refuses missing evidence after download.
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -1044,16 +1035,10 @@ jobs:
           merge-multiple: true
       - name: Verify enrolled coverage baselines were actually collected
         if: steps.decide.outputs.proceed == 'true'
-        # `continue-on-error: true` on both the `full` job's own collection
-        # step and this job's download step above means every failure
-        # point along the way is individually soft -- collection failing,
-        # the artifact never existing, or the download failing would all
-        # otherwise let promotion succeed with no baseline recorded at
-        # all, defeating the "correlation loop never silently breaks"
-        # Behavior for a plugin that IS supposed to have one. This step is
-        # the one hard gate: an ENROLLED plugin's baseline is REQUIRED,
-        # never optional -- only a plugin not yet in this list is allowed
-        # to have none.
+        # Independently require the complete enrolled set after download,
+        # including when the best-effort download step itself failed.
+        # An enrolled baseline is never optional; only plugins outside this
+        # list may have none.
         #
         # Keep this list in exact sync with `full` job's own
         # `if: matrix.plugin == '...'` collection-step condition above --
