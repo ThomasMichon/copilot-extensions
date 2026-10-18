@@ -187,6 +187,13 @@ def _repos_yaml_path() -> Path:
     return registry_paths.registry_path("repos.yaml")
 
 
+def repos_yaml_path() -> Path:
+    """Public accessor for the repos registry path (e.g. for stamp/race
+    checks in a strict read-only scan that never opens this module's own
+    cached/best-effort read path)."""
+    return _repos_yaml_path()
+
+
 # ---------------------------------------------------------------------------
 # Read / write
 # ---------------------------------------------------------------------------

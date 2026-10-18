@@ -51,9 +51,14 @@ def _is_link_or_reparse(path: Path) -> bool:
 def _normalized_repository_remote(project: str) -> str:
     from . import repos
 
-    entry = repos.read_registry().repos.get(project)
+    # Strict: a duplicate/malformed repos.yaml entry must raise (caught by the
+    # ownership scan's _READ_ERRORS) rather than silently routing to the
+    # wrong ledger via repos_registry_reader's last-key-wins default read.
+    entry = repos.read_registry(strict=True).repos.get(project)
     if entry is None:
         raise ValueError(f"repository {project!r} is not registered")
+    if not isinstance(entry.remote, str):
+        raise ValueError(f"repository {project!r} has no usable remote")
     raw_remote = entry.remote.strip()
     try:
         parsed = urlsplit(raw_remote)

@@ -101,6 +101,20 @@ def scan_ownership(
             [], [issue("registry-unavailable", "projects", str(exc))],
             owner=owner, kind=kind, namespace=namespace, identity=identity,
         )
+    # In an installation-cell (namespaced) context, cfg.project_dir() resolves
+    # each project's ledger through repos.yaml (project_state's strict remote
+    # lookup). Stamp it too, so a change to repos.yaml mid-scan is detected by
+    # the same race check as the projects registry and per-project records --
+    # a malformed/duplicate entry is independently surfaced per-project below
+    # via cfg.project_dir()'s own strict read, so a stamp failure here is not
+    # itself fatal.
+    from . import project_state, repos as repos_module
+    if project_state.namespaced():
+        try:
+            repos_path = repos_module.repos_yaml_path()
+            stamps.append((repos_path, _stamp(repos_path), False))
+        except _READ_ERRORS:
+            pass
     for project in sorted(projects, key=str):
         if not _component(project) or not isinstance(projects[project], dict):
             issues.append(issue("invalid-project", str(project), "invalid project name or registry entry"))
