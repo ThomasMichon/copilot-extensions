@@ -1,0 +1,9 @@
+{
+  "comment": "On Windows, append PATH entries from the current registry that the service's inherited PATH lacks when spawning sessions, so tools installed after the service started are found",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

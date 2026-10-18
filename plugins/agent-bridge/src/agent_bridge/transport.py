@@ -37,6 +37,7 @@ from .session_lifecycle_cli import (
     _agent_worktrees_launch_prefix,
 )
 from .spawn_target import PluginRef as PluginRef, SpawnTarget as SpawnTarget
+from .windows_path import append_registry_path
 
 log = logging.getLogger("agent-bridge")
 
@@ -577,6 +578,8 @@ async def resolve_local_launch(
     # Strip bridge's venv vars so child processes use their own Python
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
+    # Pick up tools installed since the service started (no-op off Windows).
+    append_registry_path(env)
     env.update(target.env)
 
     if target.project and (not target.explicit_cwd or target.native_resume_id):
@@ -1233,6 +1236,8 @@ async def spawn_raw(
     # Strip bridge's venv vars so child processes use their own Python
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
+    # Pick up tools installed since the service started (no-op off Windows).
+    append_registry_path(env)
     env.update(target.env)
 
     spawn_command = _reresolve_stale_interpreter(list(target.spawn_command))
