@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-16
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -140,6 +140,15 @@ substrate reachability. Other drivers retain that ownership through their own
 contracts; controller routing and connection-health observations derive from it,
 never becoming a second owning mesh registry.
 The [machine-fleet](../machine-fleet/README.md) child vision refines this boundary.
+
+### agent-pull-requests - PR operations and durable observation
+
+Provides the first-class PR-focused client and independently operable watcher
+and subscription registrar. Native use and fleet-managed container placement
+share the PR-domain contract; worktree publication and dispatch task authority
+remain with their existing owners. The
+[agent-pull-requests](../plugins/agent-pull-requests/README.md) child vision
+refines this boundary within the fleet's single-operator ownership model.
 
 ### agent-dispatch — the delegation layer
 Adds **task management and role assignment**: a **shared, transactional store**

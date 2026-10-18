@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** leaf (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -21,6 +21,12 @@ Gateway. A roaming operator client is not required to keep remote work alive.
 The same fabric can grow into a scalable fleet of Linux hosts running explicit,
 containerized roles from the existing service ecosystem, without making one
 container manager or a private infrastructure provider its required substrate.
+
+A fleet belongs to exactly one operator. Its machines, services, state and
+credentials form that operator's control boundary, not a multi-tenant hosting
+environment. Collaboration between operators means explicit interaction between
+independently owned fleets, never placing another operator's state or credentials
+inside this fleet.
 
 ## Concepts & Components
 
@@ -116,6 +122,8 @@ providers own their execution/session substrate. Fleet adapters route supported
 operations to these owners rather than building competing stores or supervisors.
 Index/search and other harness-side services can be registered independently of
 interactive agent sessions.
+The PR service owns its observation, subscriptions and delivery state; fleet
+placement and routing do not create a second PR watcher or registrar.
 
 ### Shared fleet state backing store
 
@@ -177,6 +185,14 @@ Authenticated, operator-enrolled external execution hosts can supplement a small
 fleet without becoming controller hosts implicitly.
 
 ## Features
+
+### single-operator-fleet
+
+The entire fleet serves one operator, including its controller, service roles,
+storage and credential providers. Multiple machines, clients or provider accounts
+do not create additional operator tenants. Future multiplayer connects separate
+fleets through explicitly authorized interactions while each retains its own
+state and credential custody.
 
 ### unified-coordination-product
 
@@ -414,6 +430,9 @@ replacement.
 
 ## Non-Goals / Boundaries
 
+- No multi-operator tenancy inside a fleet and no hosting another operator's
+  state or credentials. Cross-fleet collaboration does not enroll that
+  operator into the local fleet or merge the fleets' private stores.
 - No required provider, cloud substrate, tunnel product, identity vendor, or
   adopter-specific inventory in the portable controller.
 - No mandatory Gateway dependency for standalone services or existing direct/
@@ -432,7 +451,8 @@ replacement.
 
 - Parent: [agent-fabric](../agent-fabric/README.md)
 - Related: [host-resource-providers](../host-resource-providers/README.md),
-  [venue-parity](../venue-parity/README.md), [session-hosting](../session-hosting/README.md)
+  [venue-parity](../venue-parity/README.md), [session-hosting](../session-hosting/README.md),
+  [PR service](../plugins/agent-pull-requests/README.md)
 - Lifecycle: [plugin-services](../plugin-services/README.md), [installer](../installer/README.md),
   [runtime assembly & artifact admission](../plugin-services/runtime-assembly/README.md)
 - Cutover: [graceful daemon cutover](../../docs/patterns/graceful-daemon-cutover.md)

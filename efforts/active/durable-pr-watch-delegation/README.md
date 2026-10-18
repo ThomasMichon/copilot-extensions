@@ -5,28 +5,43 @@
 - **Branch(es):** Separate proposal, notification-contract, and integration PRs against `dev`
 - **Created:** 2026-10-09
 - **Status:** Active
-- **Vision:** `visions/plugins/agent-dispatch/README.md` / `hibernate-the-wait`; `visions/plugins/agent-worktrees/pull-requests/README.md` / `durable-shared-pr-transition-subscriptions`
+- **Vision:** `visions/plugins/agent-dispatch/README.md` / `hibernate-the-wait`; `visions/plugins/agent-worktrees/pull-requests/README.md` / `durable-shared-pr-transition-subscriptions`; `visions/plugins/agent-pull-requests/README.md`; `visions/machine-fleet/README.md` / `single-operator-fleet`
 - **Umbrella issue:** #6007
-- **Sub-issues:** #6286 (PR-owner installation-cell adoption)
+- **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment)
 
 ## Guiding Intent
 
 Resume the deferred PR-watch delegation work without trading away wake
 reliability. Eligible suspended dispatch tasks should share the existing PR
 watch owner's observation stream rather than retain one operating-system
-wait process per task. Ordinary process waiters remain a working fallback.
+wait process per task. Build out `agent-pull-requests` as the first-class PR
+plugin and independently operable service, including a centralized watcher and
+subscription registrar deployable in containers through fleet-manager on
+explicitly assigned fleet machines. A fleet belongs to exactly one operator;
+it never hosts another operator's state or credentials. Ordinary process
+waiters and supported native PR operation remain working alternatives.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Delegation driver | Proposal, implementation, validation, PR stewardship, deployment | This effort's source worktree and linked issue |
+| PR-service plan steward | First-class plugin/service and fleet-consumer scope amendment, review and integration | Separate managed planning worktree; #7188 |
 
 ## Coordination
 
 - **Topology:** Serial, independently reviewable PRs against `dev`.
 - **Host (owns PRs):** Delegation driver.
 - **Delegates:** Any bounded implementation delegate receives an exclusive slice; the driver owns integration and completion.
+- **Fleet expansion:** The PR-service plan steward owns the
+  `Fleet-hosted PR service expansion` slice. #5789, #6030/#5861,
+  #6236/#6240/#6241 and #7051 retain routing, deployment, integrated lifecycle
+  and PR-conformance ownership. This effort consumes their contracts rather
+  than taking over those campaigns.
+- **Review sequencing:** Land the fleet vision/plan amendment before its runtime
+  implementation. Keep this proposal separate from the existing installer and
+  Windows receipt-read investigation; neither scope expansion nor a passing
+  rerun waives that prerequisite.
 - **Handoff:** Continue from this README, its next unchecked item, and the current PR state. Do not replay the preserved branch wholesale.
 
 ## Context
@@ -48,10 +63,17 @@ uses generation-fenced arm/finish operations. Delegation must compose with
 those contracts rather than invent a second task lifecycle or a sentinel
 machine identity.
 
-This work closes the two named vision items. It follows the patterns'
+The [fleet service plan](fleet-pr-service.md) extends this campaign beyond
+dispatch's optional wait optimization. The centralized registrar owns PR
+subscriptions, not a second dispatch task registry or fleet enrollment store.
+Services supply independently usable artifacts and consume fleet-owned role
+placement, routing, authentication and lifecycle.
+
+This work closes the named PR, dispatch and fleet vision items. It follows the patterns'
 independent-installation, optional-composition, attributable-command,
-cross-platform, and graceful-cutover invariants. It adds no new resident
-service.
+cross-platform, and graceful-cutover invariants. It extends and packages the
+existing PR-watch service; it does not introduce a parallel watch owner,
+fleet controller or credential issuer.
 
 ## Request
 
@@ -85,6 +107,29 @@ This selects the offered option to add and review canonical graceful cutover,
 then continue adoption. It does not waive the installation-cell lifecycle
 contract or authorize a stop/start exemption.
 
+Lease-only ownership boundary selection, verbatim:
+
+> refuse-unprovable-owner
+
+An owner without verifiable same-cell ownership must remain untouched. This
+replaces first-upgrade success for that legacy owner with explicit refusal;
+it does not waive governed upgrades or state preservation.
+
+Fleet-service scope expansion, verbatim:
+
+> Got it, nice. So this effort should also roll in building out `agent-pull-requests`, the first-class PR-focused plugin and associated service daemon. We'll need to expand the scope a little bit: we want services to become compatible with the fleet-manager, deployable into containers on the assigned fleet machines. A centralized PR-watcher and registrar makes a ton of since, as we can have one centralized watcher that's mostly IO-based.
+
+The operator selected `single-operator` when asked about service tenancy, then
+clarified the standing fleet boundary verbatim:
+
+> The intent of the fleet is that it all belongs to one single operator. If we ever introduce multiplayer, it will be by having one operator's fleet talk to another operator's fleet, never holding another operator's state or credentials in the same fleet.
+
+This is an invariant of the entire fleet, not merely an initial service
+default. Future collaboration means federation between separately owned fleets,
+not shared tenancy. Federation implementation and concrete live deployment are
+not authorized by this plan amendment. The implementation sequencing and
+validation details below and in the linked plan are **agent-recommended**.
+
 ## Plan
 
 ### Governed watch-owner cutover prerequisite
@@ -94,9 +139,10 @@ _Agent-recommended design and validation, explicitly selected for review._
 - [x] Review and merge the [watch-owner lifecycle plan](watch-owner-cutover.md) before implementing the service transaction (confirmed by #6291).
 - [x] Land the canonical pre-adoption drain, full-transaction borrowed authority and custody-preserving rollback prerequisite before the owner adapter (confirmed by #6396).
 - [x] Land inactive watch-state construction, final read-ready reload and bounded complete quiescence as internal groundwork, without enabling a production service or installation-cell adapter (confirmed by #6714).
+- [x] Land non-signaling native process-exit references captured before graceful control, without granting installation or retirement authority (confirmed by #6720).
 - [ ] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery.
 - [ ] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery.
-- [ ] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and first upgrade from a lease-only owner on Windows and Linux before landing the cutover prerequisite.
+- [ ] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and refusal of lease-only owners without verifiable same-cell ownership on Windows and Linux before landing the cutover prerequisite.
 - [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation.
 
 ### Installation-cell prerequisite
@@ -125,6 +171,29 @@ _Agent-recommended implementation requirements._
 - [x] Validate notification specifications and timeout inputs explicitly. Report delivery failures and pending retry state without logging credentials.
 - [x] Land and verify the notification-contract PR before enabling dispatch delegation.
 
+### Fleet-hosted PR service expansion
+
+_Operator-required scope; agent-recommended implementation and validation._
+
+- [ ] Review and land the first-class PR plugin/service vision, single-operator
+  fleet invariant and [fleet service plan](fleet-pr-service.md) before building
+  its new runtime paths.
+- [ ] Build out the existing PR plugin as the PR-domain client/service surface;
+  preserve supported worktree publication policy and provider behavior through
+  shared contracts rather than another forge implementation.
+- [ ] Supply an independently installable PR service and container role for
+  fleet-manager's declared placement and lifecycle, without requiring a Copilot
+  session, host-side plugin supervisor or parallel fleet controller.
+- [ ] Implement centralized, authorization-scoped observation and durable
+  registration with transport-appropriate replay/ACK delivery; do not execute a
+  remote subscriber's local callback argv in the service container.
+- [ ] Integrate scoped, renewable forge credentials and typed client/dispatch
+  access through the fleet-owned Gateway contracts, without hosting any other
+  operator's state or credentials.
+- [ ] Prove standalone/container lifecycle, restart and upgrade continuity,
+  account/fleet isolation, observation sharing, disconnection recovery and the
+  real client/Gateway/service path before treating fleet deployment as complete.
+
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
 - [ ] Recognize only supported PR-watch invocations and discover the optional watch owner through its attributable installation boundary, never ambient `PATH`.
@@ -140,6 +209,9 @@ _Agent-recommended implementation requirements._
 
 - [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface.
 - [ ] Exercise the deployed contract in isolated state without interrupting shared coordinators, watch subscriptions, or peer sessions.
+- [ ] Complete the fleet service acceptance in the linked plan on explicitly
+  approved capacity, including persistent registration/delivery and the actual
+  Gateway path. Local delegation alone does not complete the expanded effort.
 - [ ] Synchronize consumer guidance when changed payload provenance requires it, through the consumer's own PR flow.
 - [ ] Record outcomes, resolve every validation item or transfer it to a named tracked objective, archive this effort, release its binding, and finalize owned worktrees.
 
@@ -158,6 +230,10 @@ All items below are **agent-recommended** acceptance checks.
 - [ ] Source gates: touched-plugin tests, fatal Python lint, module-size, headless-launch, install-contract, and required CI pass; add a changefile for each runtime plugin changed.
 - [ ] Live deployment: exercise an existing, authorized PR target with isolated subscriber/coordinator state when available; otherwise record the exact unavailable lane and a named follow-up before closure.
 - [ ] Documentation: review the final diff's impact on plugin behavior, failure/retry semantics, fallback, configuration, CLI help, and source-of-truth docs.
+- [ ] Fleet service: resolve every acceptance item in
+  [the fleet plan](fleet-pr-service.md#validation-plan-agent-recommended),
+  including the single-operator ownership boundary, without substituting mocks
+  or a healthy container for the requested deployed path.
 
 ## Proposal
 
@@ -175,6 +251,20 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-18 - First-class PR service and single-operator fleet scope
+
+- The operator expands this same effort to build out the PR-focused plugin and
+  service, with a centralized IO-oriented watcher and registrar deployable into
+  containers on assigned fleet machines. #7188 owns the service-consumer slice;
+  existing routing, fleet, lifecycle and PR-conformance owners retain their work.
+- The operator clarifies that one operator owns the entire fleet, permanently
+  excluding other operators' state and credentials from that fleet. Future
+  multiplayer would connect separate fleets, not add tenants to this one.
+- This amendment proposes implementation and validation before runtime changes.
+  The existing installation-cell prerequisite, unresolved Windows stable-read
+  observation, saved dispatch integration, release and authorized deployment
+  gates remain open. A plan merge will not complete the parent effort.
 
 ### 2026-10-14 - Watch-state core merged; exact exit proof continues
 

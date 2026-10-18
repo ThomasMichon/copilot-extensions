@@ -9,7 +9,7 @@
 - **Scope:** leaf (child of the
   [agent-worktrees](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-10-18
 - **Reality docs:** the agent-worktrees plugin `docs/`;
   `skills/worktree/references/pr-workflow.md` (the "Addressing a foreign
   repo" section is the authoritative, maintained description of
@@ -48,6 +48,14 @@ clean-room scenario-eval, a dry run — can be proven against it with the same
 confidence as the real thing.
 
 ## Concepts & Components
+
+### First-class PR ownership with worktree compatibility
+
+The [dedicated PR plugin and service](../../agent-pull-requests/README.md)
+provide the PR-domain surface. Worktree-aware operations retain source-control
+publication, obligations and repository policy while composing that shared
+capability. Existing provider behavior and command compatibility converge
+through one domain contract rather than a second forge implementation.
 
 ### The PR capability, as one provider-neutral surface
 
@@ -211,10 +219,10 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
 - **Not a replacement for a repository's own review policy or rubric.**
   Provider-neutral operations execute policy; they do not define what a
   repository requires to approve or land a change.
-- **Not a packaging decision.** Whether this capability remains part of
-  agent-worktrees or is later split into its own dedicated plugin is a
-  future wiring/packaging question outside this vision's scope; this vision
-  describes the capability's shape independent of which module hosts it.
+- **Not a replacement worktree lifecycle.** Dedicated PR plugin/service
+  ownership does not move source-control publication, worktree obligations or
+  repository review policy into the daemon. This vision states the shared
+  capability contract; the dedicated plugin vision owns its client/service shape.
 - **Not a specification.** This vision fixes the capability's shape and
   guarantees, not the provider protocol's exact method signatures, the mock
   provider's storage format, or a CLI flag's exact name.
@@ -222,6 +230,7 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
 ## See Also
 
 - Parent vision: [agent-worktrees](../README.md)
+- PR-domain owner: [agent-pull-requests](../../agent-pull-requests/README.md)
 - Composing sibling:
   [agent-dispatch/reviewer](../../agent-dispatch/reviewer/README.md) — the
   cooperative reviewer loop this capability is meant to compose rather than
