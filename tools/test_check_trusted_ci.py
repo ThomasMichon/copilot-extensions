@@ -425,11 +425,11 @@ def test_dedicated_review_setup_is_accepted(tmp_path: Path, runner: str) -> None
     assert MODULE.validate_workflow(trusted) == []
 
 
-def test_repository_selects_dedicated_review_capacity() -> None:
+def test_repository_preserves_hosted_review_capacity() -> None:
     path = MODULE_PATH.parents[1] / ".github/workflows/copilot-code-review.yml"
     workflow, errors = MODULE._load(path)
     assert workflow is not None and errors == []
-    assert workflow["jobs"]["copilot-setup-steps"]["runs-on"] == "copilot-extensions-review"
+    assert workflow["jobs"]["copilot-setup-steps"]["runs-on"] == "ubuntu-latest"
     assert MODULE._validate_review_setup(workflow) == []
 
 

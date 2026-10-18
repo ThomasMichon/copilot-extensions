@@ -7,8 +7,8 @@ permissions: {}
 
 jobs:
   copilot-setup-steps:
-    # Dedicated isolated ephemeral capacity; do not share the CI runner pool.
-    runs-on: copilot-extensions-review
+    # Preserve hosted review capacity; ARC selection is not additive overflow.
+    runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Complete minimal review setup
