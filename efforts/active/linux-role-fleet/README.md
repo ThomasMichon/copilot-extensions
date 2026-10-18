@@ -169,8 +169,11 @@ Implementation sequencing below is **agent-recommended**:
   serial durable-admission, construction and owned-activation/removal gates;
   it does not deliver a managed installer or authorize a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
-  agent-recommended #6464 setup prerequisite proposal; it does not implement
-  execution or require downstream plugins to create core installation cells.
+  agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
+  source implementation is merged in #6944; fresh-environment/native acceptance
+  and actual consuming setup remain open under #6464. Downstream plugins are
+  not required to create core installation cells, and active-core apply remains
+  unsupported.
 - [ ] Define controller-owned live configuration validation, atomic activation,
   last-valid-state recovery and explicit restart-required outcomes.
 - [ ] Implement explicit inspect/plan/apply behavior for the chosen adapter:
@@ -564,3 +567,35 @@ These bounded Windows selections are not a new full Windows-suite claim.
   integration against reviewed dependencies. Standalone controller/connector
   lifecycle, authorization, useful service roles, persistence and safe cutover
   remain unresolved. This campaign and routing foundation stay Active.
+
+### 2026-10-17 - Ordinary repair merged; fleet completion gates retained
+- #6944 merged into `dev` at `2026-10-17T14:41:24Z`, commit
+  `b576e17ec2280c27866b0be550ff7b0604cfaa58`. The reviewed source head was
+  `c246cd7a613925ed4f6859a9049d9a51eaaad7b0`; its actual Balanced review
+  `5558255196` reported no open issues and CI `39040731281` succeeded.
+- The final corrections independently bind declared action content, preserve
+  declared interpreter semantics while attesting executable content, and
+  confirm transient Windows/POSIX cleanup before releasing repair ownership.
+  The runtime-owner census includes non-repairable and unresolved enabled
+  peers, rejects linked/reparse runtime roots and ancestors, and refuses
+  ambiguous ownership before probes or installers execute.
+- Current source evidence includes 119 native Linux repair cases with four
+  Windows-only skips, 160 Bridge authority cases and 167 packaging/scenario
+  cases. The native Windows ownership/census/junction/fresh-apply selection
+  passed 14 cases; this selection is not a new full Windows-suite claim.
+  These are source-contract results, not a fresh Docker provisioning,
+  native macOS, active-core apply or actual consuming-setup pass.
+- No new fresh-box acceptance receipt was produced after the previously
+  recorded package-feed TLS failure. #6464 retains that follow-up and the
+  remaining native/consuming setup gates; no TLS/feed exception or passing
+  first-provision result is inferred from the merge.
+- The independently owned Gateway SSH runtime leaf #7083 merged into `dev`
+  at `2026-10-17T11:53:40Z`; policy leaf #7087 remains open. This records
+  source availability only: neither shared lifecycle wiring nor live
+  automatic recovery has been delivered by those leaves.
+- Current stewardship is limited to completing owned upstream PRs. The
+  campaign and routing foundation remain Active; broader implementation and
+  activation stay paused. Managed client admission, controller/connector
+  lifecycle, authorization, useful roles, persistence and safe cutover remain
+  unresolved. No plugin/runtime update, enrollment, capacity acquisition or
+  service migration is authorized or performed by this journal update.
