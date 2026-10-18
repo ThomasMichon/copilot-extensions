@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from agent_logger.usage_calibration import validate_calibration
 from agent_logger.usage_feature_contract import admit_sessions
 
@@ -23,9 +25,15 @@ def _estimate_metric(calls: list[dict], quantity: str, metric: dict | None) -> d
     feature_total = sum(call[f"{quantity}_chars"] for call in missing)
     predicted = feature_total * metric["coefficient"]
     ratios = metric["empirical_actual_over_predicted"]
+    # Token quantities are integer counts: round the point estimate to the
+    # nearest whole token, and floor/ceil the empirical bounds outward so they
+    # still enclose that rounded point estimate.
+    estimated_tokens = round(predicted)
+    lower = min(math.floor(predicted * min(1, ratios["min"])), estimated_tokens)
+    upper = max(math.ceil(predicted * max(1, ratios["max"])), estimated_tokens)
     result.update(
-        estimated_tokens=predicted,
-        empirical_range={"lower": predicted * min(1, ratios["min"]), "upper": predicted * max(1, ratios["max"])},
+        estimated_tokens=estimated_tokens,
+        empirical_range={"lower": lower, "upper": upper},
         status="estimated", reason=None,
         confidence="empirical-only",
         held_out_relative_error=metric["held_out_relative_error"],

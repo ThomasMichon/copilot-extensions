@@ -113,17 +113,20 @@ def _copy_and_digest(
     source: BinaryIO,
     destination: BinaryIO | None,
     maximum_bytes: int,
+    *,
+    digest: bool = True,
 ) -> ArchiveMemberDigest:
-    digest = hashlib.sha256()
+    hasher = hashlib.sha256() if digest else None
     size = 0
     while chunk := source.read(min(1024 * 1024, maximum_bytes - size + 1)):
         size += len(chunk)
         if size > maximum_bytes:
             raise ValueError("session archive member exceeds its byte budget")
-        digest.update(chunk)
+        if hasher is not None:
+            hasher.update(chunk)
         if destination is not None:
             destination.write(chunk)
-    return ArchiveMemberDigest(size, digest.hexdigest())
+    return ArchiveMemberDigest(size, hasher.hexdigest() if hasher is not None else "")
 
 
 class Codec(ABC):
@@ -372,9 +375,13 @@ class TarGzCodec(Codec):
                     if source is None:
                         raise ValueError(f"missing session archive member: {info.name!r}")
                     destination = io.BytesIO() if name == target else None
+                    # Bounded single-member reads only need the selected member's
+                    # bytes/digest; draining the rest without hashing avoids
+                    # SHA-256 cost proportional to total archive content.
                     with source:
                         result[name] = _copy_and_digest(
                             source, destination, info.size,
+                            digest=target is None or name == target,
                         )
                     if destination is not None:
                         selected = destination.getvalue()

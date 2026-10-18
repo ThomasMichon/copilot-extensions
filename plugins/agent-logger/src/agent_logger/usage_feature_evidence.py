@@ -23,7 +23,7 @@ def enrich_features(
         try:
             artifact = json.loads(saved)
         except (ValueError, UnicodeError) as exc:
-            raise UsageEvidenceError("invalid calibration evidence artifact") from exc
+            raise UsageEvidenceError("invalid usage evidence artifact") from exc
         if (
             not isinstance(artifact, dict) or artifact.get("schema") != SCHEMA
             or artifact.get("version") != 1
@@ -31,7 +31,7 @@ def enrich_features(
             or not isinstance(artifact.get("records"), list)
             or len(artifact["records"]) > MAX_RECORDS
         ):
-            raise UsageEvidenceError("incompatible calibration evidence artifact")
+            raise UsageEvidenceError("incompatible usage evidence artifact")
         records.extend(artifact["records"])
     if usage_store is not None:
         rows = read_sqlite_usage(usage_store, {ref.id, features["session_id"]})
@@ -57,7 +57,7 @@ def pair_measured_features(features: dict, records: list[dict]) -> dict:
             normalized = _identifier(identity)
             if identity is not None and (not normalized or normalized.lower() != features["session_id"]):
                 raise UsageEvidenceError("measured feature session identity mismatch")
-        if values.get("parent_tool_call_id"):
+        if values.get("parent_tool_call_id") or values.get("agent_id"):
             continue
         api = _identifier(values.get("api_call_id"))
         candidates = index.get(api, []) if api else []

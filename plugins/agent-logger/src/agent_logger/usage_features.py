@@ -105,6 +105,9 @@ class _Turn:
         return call
 
     def finish(self) -> list[CallFeatures]:
+        # Synthetic unlinked calls are kept out of `self.calls` (keyed by real
+        # `api_call_id`) so a real ID can never collide with internal bookkeeping.
+        extra: list[CallFeatures] = []
         if self.unlinked:
             if len(self.calls) == 1:
                 call = next(iter(self.calls.values()))
@@ -116,14 +119,15 @@ class _Turn:
                     call.emissions += 1
             else:
                 for count, model in self.unlinked:
-                    key = f"unlinked:{len(self.calls)}"
-                    self.calls[key] = CallFeatures(
+                    extra.append(CallFeatures(
                         self.index, None, model or self.model, self.input_chars,
                         output_chars=count, emissions=1,
-                    )
+                    ))
         for call in self.calls.values():
             call.model = call.model or self.model
-        return list(self.calls.values())
+        for call in extra:
+            call.model = call.model or self.model
+        return list(self.calls.values()) + extra
 
 
 def read_transcript_features(ref: SessionRef) -> dict:
@@ -171,9 +175,13 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
         data = event.get("data", {})
         if not isinstance(data, dict):
             raise UsageEvidenceError("invalid transcript feature data")
+        nested_usage = data.get("usage")
+        nested_agent = (
+            _identifier(nested_usage.get("agentId")) if isinstance(nested_usage, dict) else None
+        )
         if (
             _identifier(event.get("agentId")) or _identifier(data.get("agentId"))
-            or data.get("parentToolCallId")
+            or data.get("parentToolCallId") or nested_agent
         ):
             child_events += 1
             continue

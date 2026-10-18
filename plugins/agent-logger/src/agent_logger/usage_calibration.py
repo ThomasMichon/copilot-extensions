@@ -150,6 +150,10 @@ def validate_calibration(document: object) -> dict:
         or type(document.get("feature_version")) is not int or document["feature_version"] != FEATURE_VERSION
         or document.get("feature_method") != FEATURE_METHOD
         or document.get("validation_unit") != "session-model matched-call aggregate"
+        or not isinstance(document.get("source_cohort"), str)
+        or not document["source_cohort"].strip() or len(document["source_cohort"]) > 200
+        or not isinstance(document.get("range_interpretation"), str)
+        or not document["range_interpretation"].strip()
         or not isinstance(document.get("models"), dict) or len(document["models"]) > 1000
     ):
         raise UsageEvidenceError("incompatible transcript calibration")

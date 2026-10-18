@@ -104,8 +104,10 @@ def _read_events(stream: BinaryIO) -> list[dict]:
             raise UsageEvidenceError("transcript has an unstable partial tail")
         try:
             event = json.loads(line.decode("utf-8"), parse_constant=_invalid_constant)
-        except (ValueError, UnicodeError, RecursionError) as exc:
-            raise UsageEvidenceError("transcript contains invalid UTF-8 JSON") from exc
+        except UnicodeError as exc:
+            raise UsageEvidenceError("transcript contains invalid UTF-8") from exc
+        except (ValueError, RecursionError) as exc:
+            raise UsageEvidenceError("transcript contains invalid JSON") from exc
         if not isinstance(event, dict):
             raise UsageEvidenceError("transcript event is not an object")
         events.append(event)

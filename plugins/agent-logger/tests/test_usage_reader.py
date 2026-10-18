@@ -516,3 +516,39 @@ def test_usage_reader_review_regression_corrupt_header_after_selected_member(
     ref.path.write_bytes(gzip.compress(expanded[:boundary] + header + padding))
     with pytest.raises(UsageEvidenceError, match="header"):
         reader.read_session_events(ref)
+
+
+@pytest.mark.parametrize("kind", ["live", "tar", "zip"])
+def test_usage_reader_review_regression_utf8_vs_json_messages_differ(tmp_path, kind):
+    """Encoding errors and JSON syntax errors get distinguishable messages."""
+    utf8_root = tmp_path / "utf8"
+    utf8_root.mkdir()
+    json_root = tmp_path / "json"
+    json_root.mkdir()
+    with pytest.raises(UsageEvidenceError, match=r"^transcript contains invalid UTF-8$"):
+        reader.read_session_events(_ref(utf8_root, kind, b'{"value":"\xff"}\n'))
+    with pytest.raises(UsageEvidenceError, match=r"^transcript contains invalid JSON$"):
+        reader.read_session_events(_ref(json_root, kind, b"{bad}\n"))
+
+
+def test_usage_reader_review_regression_tar_bounded_read_skips_hashing(tmp_path, monkeypatch):
+    """A bounded single-member TAR read must not SHA-256 every other member."""
+    ref = _ref(tmp_path, "tar", PAYLOAD)
+    _tar(ref.path, [("events.jsonl", PAYLOAD), ("other-1", b"x" * 4096), ("other-2", b"y" * 4096)])
+    digested: list[bytes] = []
+    original_sha256 = codecs.hashlib.sha256
+
+    class _TrackingHash:
+        def __init__(self) -> None:
+            self._inner = original_sha256()
+
+        def update(self, data: bytes) -> None:
+            digested.append(data)
+            self._inner.update(data)
+
+        def hexdigest(self) -> str:
+            return self._inner.hexdigest()
+
+    monkeypatch.setattr(codecs.hashlib, "sha256", _TrackingHash)
+    assert reader.read_session_member(ref, "events.jsonl", max_bytes=len(PAYLOAD)) == PAYLOAD
+    assert sum(len(chunk) for chunk in digested) == len(PAYLOAD)

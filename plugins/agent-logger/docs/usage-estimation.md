@@ -34,9 +34,11 @@ Root calls are identified by chronological root `assistant.turn_start`
 segments and API-call IDs, not by a possibly repeated turn ID or the nearest
 previous assistant message. Measured usage may precede its emitted response.
 Native event IDs suppress identical replay; conflicting replay is an error.
-Envelope `agentId`, legacy `data.agentId` and parent-tool ownership are filtered
-before changing any root prompt, model, context or turn state. Child events do
-not become root-call quantities.
+Envelope `agentId`, legacy `data.agentId`, a nested `data.usage.agentId`
+accounting marker and parent-tool ownership are filtered before changing any
+root prompt, model, context or turn state. Child events do not become
+root-call quantities, and preserved/SQLite evidence records carrying their own
+`agent_id` are likewise excluded before pairing with root-call features.
 
 Output counts Unicode characters in recorded response content, one explicitly
 exposed plaintext reasoning representation, and emitted tool arguments.
@@ -122,6 +124,13 @@ guarantees**; correlated repeated calls do not shrink uncertainty by
 Large held-out error is disclosed even when a point estimate can be produced.
 No calibration can prove historical accuracy where no measured ground truth
 survives.
+
+Token quantities are integers. `estimated_tokens` rounds the raw
+`feature_total * coefficient` point prediction to the nearest whole token;
+`empirical_range` floors its lower bound and ceils its upper bound outward
+(never inward past the rounded point estimate), so the reported range always
+encloses `estimated_tokens`.
+
 
 ## Resource and compatibility boundary
 

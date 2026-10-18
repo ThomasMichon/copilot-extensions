@@ -316,3 +316,59 @@ def test_usage_features_review_regression_preserved_diagnostics_plus_store(
     assert result["calls"][0]["input_tokens"] == 30
     assert result["evidence_join"]["paired_calls_by_source"] == {"session-store": 1}
     assert result["evidence_join"]["unmatched_records"] == 1
+
+
+@pytest.mark.guard
+def test_usage_features_review_regression_unlinked_key_cannot_collide_with_real_id() -> None:
+    """A real `apiCallId` shaped like the old synthetic key must survive intact."""
+    result = features_from_events([
+        event("assistant.turn_start"),
+        event("session.usage_record", usage={"apiCallId": "a", "inputTokens": 2, "model": "m"}),
+        # The old synthetic key was f"unlinked:{len(self.calls)}"; with exactly two
+        # named calls present, that string is literally "unlinked:2".
+        event("session.usage_record", usage={
+            "apiCallId": "unlinked:2", "inputTokens": 7, "model": "m",
+        }),
+        event("assistant.message", apiCallId="a", content="a-out"),
+        event("assistant.message", apiCallId="unlinked:2", content="real-id-out"),
+        # One ambiguous (no apiCallId) emission triggers the old key-collision code path.
+        event("assistant.message", content="ambiguous"),
+    ], "s")
+    by_id = {call["api_call_id"]: call for call in result["calls"] if call["api_call_id"]}
+    assert by_id["unlinked:2"]["input_tokens"] == 7
+    assert by_id["unlinked:2"]["output_chars"] == len("real-id-out")
+    assert by_id["unlinked:2"]["emissions"] == 1
+    unlinked_entries = [call for call in result["calls"] if call["api_call_id"] is None]
+    assert len(unlinked_entries) == 1
+    assert unlinked_entries[0]["output_chars"] == len("ambiguous")
+
+
+@pytest.mark.guard
+def test_usage_features_review_regression_nested_usage_agent_id_excluded() -> None:
+    """``data.usage.agentId`` (not just event/data-level ``agentId``) marks child ownership."""
+    rows = fixture()
+    expected = features_from_events(rows, "original")
+    child_usage_record = event("session.usage_record", usage={
+        "apiCallId": "child-only-marker", "model": "child-model", "inputTokens": 999,
+        "agentId": "child-agent",
+    })
+    actual = features_from_events([*rows[:2], child_usage_record, *rows[2:]], "original")
+    assert actual["calls"] == expected["calls"]
+    excluded = actual["coverage"]["child_events_excluded"]
+    baseline = expected["coverage"]["child_events_excluded"]
+    assert excluded == baseline + 1
+    assert "child-only-marker" not in json.dumps(actual)
+
+
+@pytest.mark.guard
+def test_usage_features_review_regression_agent_owned_evidence_is_skipped_before_pairing() -> None:
+    """Child-owned (``agent_id``) preserved/SQLite records must not pair into root accounting."""
+    result = features_from_events(fixture(), "original")
+    child_record = {"source": "session-store", "values": {
+        "api_call_id": "c2", "model": "model-a", "input_tokens": 999, "agent_id": "child-agent",
+    }}
+    pair_measured_features(result, [child_record])
+    assert result["calls"][1]["input_tokens"] is None
+    assert result["evidence_join"]["paired_calls_by_source"] == {}
+    assert result["evidence_join"]["unmatched_records"] == 0
+    assert result["evidence_join"]["ambiguous_records"] == 0

@@ -191,3 +191,62 @@ def test_usage_estimation_cli_json_calibration_estimation_and_explicit_error(tmp
     captured = capsys.readouterr()
     assert not captured.out
     assert json.loads(captured.err)["schema"] == "agent-logger.usage-error"
+
+
+@pytest.mark.guard
+def test_usage_estimation_review_regression_estimate_range_is_int_and_encloses_point() -> None:
+    """``estimated_tokens``/``empirical_range`` are integers, and the range encloses the point."""
+    data = cohort()
+    policy = CalibrationPolicy()
+    for item in data:
+        if is_validation(item["session_id"], policy):
+            item["calls"][0]["input_tokens"] //= 10
+    calibration = calibrate(data, cohort="synthetic")
+    row = estimate(
+        [document("old", measured=False)], calibration,
+    )["sessions"][0]["models"][0]["input"]
+    assert type(row["estimated_tokens"]) is int
+    assert type(row["empirical_range"]["lower"]) is int
+    assert type(row["empirical_range"]["upper"]) is int
+    bounds = row["empirical_range"]
+    assert bounds["lower"] <= row["estimated_tokens"] <= bounds["upper"]
+
+
+@pytest.mark.guard
+def test_usage_estimation_review_regression_calibration_requires_cohort_metadata() -> None:
+    """A calibration missing ``source_cohort``/``range_interpretation`` is rejected up front,
+    not left to raise an uncaught ``KeyError`` deep inside ``estimate()``."""
+    calibration = calibrate(cohort(), cohort="synthetic")
+    for field in ("source_cohort", "range_interpretation"):
+        tampered = copy.deepcopy(calibration)
+        del tampered[field]
+        tampered["calibration_id"] = _digest({
+            key: value for key, value in tampered.items() if key != "calibration_id"
+        })
+        with pytest.raises(UsageEvidenceError, match="incompatible"):
+            estimate([document("old", measured=False)], tampered)
+
+
+@pytest.mark.guard
+def test_usage_estimation_review_regression_cli_reports_missing_calibration_metadata_as_json_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    """The CLI must surface a missing calibration field as its documented JSON error
+    (exit status 2), never an unhandled traceback."""
+    calibration = calibrate(cohort(), cohort="synthetic")
+    del calibration["source_cohort"]
+    calibration["calibration_id"] = _digest({
+        key: value for key, value in calibration.items() if key != "calibration_id"
+    })
+    calibration_path = tmp_path / "calibration.json"
+    calibration_path.write_text(json.dumps(calibration))
+    features = tmp_path / "features.json"
+    features.write_text(json.dumps(document("historical", measured=False)))
+    args = [
+        "usage", "estimate", "--features", str(features), "--calibration", str(calibration_path),
+    ]
+    assert main(args) == 2
+    captured = capsys.readouterr()
+    assert not captured.out
+    error = json.loads(captured.err)
+    assert error["schema"] == "agent-logger.usage-error"
