@@ -1065,3 +1065,69 @@ def test_posix_pid_fallback_fails_closed_on_an_unattributable_lock_path(tmp_path
     )
     assert result.stdout.strip() == "refused", result.stderr
     assert lock.read_text() == "not a symlink"
+
+
+def test_posix_pid_fallback_create_survives_concurrent_staging_dir_removal(tmp_path: Path) -> None:
+    """A concurrent `uninstall --purge` can reclaim `_create_install_lock_owner`'s
+    private staging directory the instant after its `link(1)` call already
+    published the receipt -- that publication is a second, independent
+    directory entry on the same inode, so it survives the staging directory's
+    removal. Reporting the call as failed anyway (because best-effort cleanup
+    of now-vanished scratch failed) would make every caller skip releasing the
+    mutex it just admitted, stranding it until manual repair."""
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    link = install_dir / ".install.lock.pid.reap"
+    result = _run_sh_block(
+        bash, install_dir,
+        # Simulate the purge: the instant link(1) itself succeeds, its
+        # private staging directory is reclaimed out from under the caller.
+        'link() { command link "$@" && rm -rf "$(dirname -- "$1")"; }\n'
+        f'if _create_install_lock_owner "{link}"; then echo created; else echo failed; fi',
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "created"
+    assert os.path.lexists(link)
+
+
+def test_posix_pid_fallback_attempts_once_despite_clock_second_boundary(tmp_path: Path) -> None:
+    """The deadline computation and the acquire loop's own `date +%s` call are
+    two separate invocations; a short timeout (the suites' own 1s default) can
+    straddle a wall-clock second boundary between them. A pre-check-only loop
+    condition would then skip even an uncontended acquisition. Stub `date` to
+    force exactly that boundary and confirm the first attempt still happens
+    before the deadline is ever enforced."""
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    # The deadline calculation and the loop's `date +%s` run in separate
+    # command-substitution subshells, so the call count must be tracked in a
+    # file -- a plain shell variable resets to 0 in each new subshell and
+    # never actually reaches the second scripted value.
+    stub = (
+        'rm -f "$INSTALL_DIR/.fixture-date-calls"\n'
+        "date() {\n"
+        "    local __n=0\n"
+        '    [[ ! -f "$INSTALL_DIR/.fixture-date-calls" ]] || __n=$(cat "$INSTALL_DIR/.fixture-date-calls")\n'
+        "    __n=$((__n + 1))\n"
+        '    printf \'%s\' "$__n" > "$INSTALL_DIR/.fixture-date-calls"\n'
+        '    if [[ "$1" == "+%s" && "$__n" -le 2 ]]; then\n'
+        '        if [[ "$__n" -eq 1 ]]; then echo 1000; else echo 1001; fi\n'
+        "        return 0\n"
+        "    fi\n"
+        '    command date "$@"\n'
+        "}\n"
+    )
+    result = _run_sh_block(
+        bash, install_dir,
+        stub + "if _enter_install_lock 1; then echo acquired; else echo refused; fi",
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "acquired"

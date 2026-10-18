@@ -758,8 +758,16 @@ _create_install_lock_owner() {
        link "$__private/owner" "$__path" 2>/dev/null; then
         __result=0
     fi
-    rm -f "$__private/owner" || __result=1
-    rmdir "$__private" || __result=1
+    # The published link is a second, independent directory entry on the same
+    # inode: once link(1) above succeeds, admission already happened and must
+    # be reported regardless of what happens to this private staging
+    # directory next. A concurrent purge is free to reclaim unreferenced
+    # staging scratch at any time (it never follows the published link), so a
+    # best-effort cleanup failure here must never flip a successful
+    # publication back into a reported failure -- that would abandon the
+    # mutex this call just admitted, with nothing left to ever release it.
+    rm -f "$__private/owner" 2>/dev/null
+    rmdir "$__private" 2>/dev/null
     return "$__result"
 }
 
@@ -768,8 +776,22 @@ _read_install_lock_owner() {
     if [[ -L "$__path" ]]; then
         # Legacy PID symlinks represent IDs, not references to existing filesystem nodes.
         [[ ! -e "$__path" ]] || return 1
-        readlink "$__path"
-        return
+        __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
+        # Preserve target bytes before command substitution can trim newlines.
+        if readlink "$__path" > "$__private/owner" &&
+           [[ -L "$__path" && ! -e "$__path" ]] &&
+           ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
+           [[ "$__record" == *$'\n' ]]; then
+            __owner="${__record%$'\n'}"
+            case "$__owner" in
+                *[!0-9]*|"") ;;
+                *) __result=0 ;;
+            esac
+        fi
+        rm -f "$__private/owner" || __result=1
+        rmdir "$__private" || __result=1
+        [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
+        return "$__result"
     fi
     [[ -f "$__path" ]] || return 1
     __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
@@ -831,7 +853,13 @@ _enter_install_lock() {
     fi
     local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __acquired
     __deadline=$(( $(date +%s) + __timeout ))
-    while [[ "$(date +%s)" -lt "$__deadline" ]]; do
+    # Always attempt admission once before enforcing the deadline: computing
+    # the deadline and this loop's own `date +%s` are two separate calls, so a
+    # short timeout (e.g. 1s) can straddle a second boundary between them and
+    # make a pre-check-only loop condition skip even an uncontended
+    # acquisition. Checking the deadline only after the first attempt (below)
+    # removes that race.
+    while :; do
         __live=0
         if _create_install_lock_owner "$__link.reap"; then
             # Admission and stale cleanup share this mutex; no acquirer may
@@ -863,6 +891,7 @@ _enter_install_lock() {
             [[ "$__acquired" != 1 ]] || return 0
         fi
         # A dead admission-mutex owner requires explicit repair, never another reaper.
+        [[ "$(date +%s)" -lt "$__deadline" ]] || break
         if [[ "$__live" == 1 ]]; then sleep 1; else sleep 0.1; fi
     done
     return 1
