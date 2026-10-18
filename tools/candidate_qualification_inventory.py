@@ -30,6 +30,12 @@ _PARTITIONED_SMOKE_STEP = """      - name: Test ${{ matrix.plugin }}
           fi
           python tools/run-plugin-tests.py "$PLUGIN" "${args[@]}"
 """
+_PARTITIONED_SMOKE_WORKERS_STEP = _PARTITIONED_SMOKE_STEP.replace(
+    "        env:\n",
+    "        env:\n"
+    "          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-bridge' && "
+    "inputs.promotion_run != '' && '-n 2 --dist=worksteal' || '' }}\n",
+)
 
 
 def _smoke_rows(root: Path, plugins: set[str]) -> tuple[list[str], str]:
@@ -139,7 +145,7 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
                     or re.findall(
                         r"(?ms)^      - name: Test \$\{\{ matrix\.plugin \}\}\n.*?(?=^      - |\Z)",
                         block,
-                    ) != [_PARTITIONED_SMOKE_STEP]
+                    ) not in ([_PARTITIONED_SMOKE_STEP], [_PARTITIONED_SMOKE_WORKERS_STEP])
                 ):
                     raise CandidateValidationError("canonical smoke job no longer uses discovered partitions")
                 values, partition_source = _smoke_rows(root, plugins - {heavy[1]})

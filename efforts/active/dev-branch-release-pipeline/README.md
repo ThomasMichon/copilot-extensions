@@ -1020,9 +1020,20 @@ candidates, with unchanged item, group, aggregate and resource bounds.
 
 Install contracts, module caps and the newly declared development dependency's
 seven-day seasoning check pass. Current-head hosted review/checks, minimal
-reviewed Main worker-policy activation, a new changed-input qualification,
+reviewed Main worker-policy and matching validator-pin activation, a new changed-input qualification,
 publication/resume, natural-cycle cadence and client acceptance remain open.
 The failed candidate #7184 stays unmerged and Main stays paused.
+
+The first repair PR check also catches its coupled qualification inventory
+contract: the candidate-only worker environment must be recognized explicitly,
+not mistaken for an unknown partition recipe. Admit only the exact reviewed
+two-worker expression or the historical no-worker step, preserve the full row
+set and bind the changed recipe digest. Reject expanded worker scope/count,
+filters and extra environment fields. Matching trusted helper activation is
+therefore part of the next minimal Main-control PR; old pinned inventory code
+cannot validate the new step by implication.
+The exact ordinary runner lane plus the complete qualification module passes
+594 cases with twelve platform skips after this correction.
 
 ### 2026-10-18 - Source and artifact repair passes; candidate qualification blocks publication
 

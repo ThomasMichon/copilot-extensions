@@ -1798,7 +1798,8 @@ hosted checks, review and a containing full validation remain required.
   341.274 seconds, including real PowerShell coverage. Candidate-only two-worker
   admission retains the existing shared containment and eight-minute Main bound.
 - Main still needs a separately reviewed minimal CI worker-environment change
-  after this source repair lands. No Dev controller is copied wholesale, no
+  and matching source-pinned qualification inventory after this repair lands.
+  No Dev controller is copied wholesale, no
   existing twelve-minute Dev limit is activated on Main, and the preservation
   manifest, pause and helper pin are unchanged by this source slice.
 - Required review/checks, generated/native qualification, release and resume

@@ -342,6 +342,41 @@ def test_partition_matrix_requires_its_explicit_discovery_and_name_contract(
         inventory.required_jobs(ROOT)
 
 
+def test_candidate_only_bridge_workers_retain_exact_rows_and_bind_changed_recipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    text = workflow.read_text("utf-8")
+    assert text.count(inventory._PARTITIONED_SMOKE_WORKERS_STEP) == 1
+    with_workers = inventory.required_jobs(ROOT)
+    workflow.write_text(
+        text.replace(inventory._PARTITIONED_SMOKE_WORKERS_STEP, inventory._PARTITIONED_SMOKE_STEP),
+        encoding="utf-8",
+    )
+    historical = inventory.required_jobs(ROOT)
+    assert historical[:2] == with_workers[:2]
+    assert historical[2] != with_workers[2]
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("'-n 2 --dist=worksteal'", "'-n 3 --dist=worksteal'"),
+    ("matrix.plugin == 'agent-bridge'", "matrix.plugin != 'agent-bridge'"),
+    ("inputs.promotion_run != '' && ", ""),
+    ("'-n 2 --dist=worksteal'", "'-n 2 --dist=worksteal -k selected_case'"),
+    ("          PLUGIN:", "          EXTRA: unreviewed\n          PLUGIN:"),
+])
+def test_candidate_bridge_worker_recipe_cannot_expand_or_narrow_qualification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old: str, new: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    text = workflow.read_text("utf-8")
+    step = inventory._PARTITIONED_SMOKE_WORKERS_STEP
+    assert text.count(step) == 1 and step.count(old) == 1
+    workflow.write_text(text.replace(step, step.replace(old, new)), encoding="utf-8")
+    with pytest.raises(CandidateValidationError, match="discovered partitions"):
+        inventory.required_jobs(ROOT)
+
+
 @pytest.mark.parametrize("mutation", [
     "collect-only", "filtered", "failure-masked", "partition-env", "selection",
     "skip-candidate", "only-pr",
