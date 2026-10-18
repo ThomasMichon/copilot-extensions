@@ -129,6 +129,41 @@ onboarded merely because its source is published.
 
 ### Configuration and transport authority
 
+- An explicitly selected two-repository control plane carries its harness and
+  knowledge roles together. This closes the repository-topology vision's
+  capability-based relationships and honest authority/availability intent; it
+  does not require every control plane to split its repositories.
+- The additive declaration proposed under #7195 is:
+
+  ```yaml
+  control_plane:
+    project: example-harness
+    harness: example-harness
+    knowledge: example-knowledge
+  ```
+
+  `project` is the legacy scalar launch projection for older daemons, not a
+  second independently editable target. It must agree with `harness`. The
+  knowledge role never becomes a standalone Bridge launch target.
+- One typed reader owns pair validation. A native read-only resolver supplies
+  the declared roles to normal setup/binding consumers. Reuse the existing
+  binding owner to project the machine-local knowledge pointer and personal
+  plugin composition; do not add a competing configuration writer. Explicit
+  pair setup must also work when the repositories are registered but no
+  machine-local harness configuration exists yet.
+- Preserve a matching existing binding and refuse a conflicting one before
+  effects. Keep canonical repository/account identity, knowledge-class
+  worktree capability, paired-workspace ownership and ordinary publication
+  gates. A binding repair must not convert a knowledge companion into an
+  executable project.
+- Legacy scalar/project-only declarations keep their supported self-hosted
+  behavior without inventing a knowledge companion. New pair consumers reject
+  malformed, incomplete or conflicting declarations explicitly; an older
+  daemon ignoring new metadata is not evidence of successful pair binding.
+- Keep #6300's caller/parent target-routing ownership and #6721's native
+  Configuration preference-writer scope separate. Agree any exact shared-file
+  overlap before implementation. Concrete adopter configuration and fleet
+  rollout remain with the adopter's existing owners and authorization.
 - Resolve the exact machine and execution environment before selecting a
   controller. A friendly alias, shared hostname or SSH reachability does not
   grant another execution space's ownership.
@@ -208,6 +243,11 @@ onboarded merely because its source is published.
 
 ### Phase 2 - Driver and directional policy
 
+- [x] Publish the accepted pure per-target policy leaf and focused installed
+  consumer contracts; source merge does not close configuration or setup.
+- [ ] Review and implement the explicit harness/knowledge declaration,
+  matching legacy launch projection and normal new-machine binding consumer
+  under #7195, preserving the separate #6300 routing reservation.
 - [ ] Implement the agreed per-machine/environment Gateway/controller binding
   and ingress/egress/hop policy in the owning configuration contract.
 - [ ] Implement the fleet-owned external agent-ssh provider adapter using the
@@ -234,6 +274,15 @@ onboarded merely because its source is published.
 
 ## Validation Plan
 
+- [ ] Pair/schema: explicit roles, matching legacy projection, malformed and
+  conflicting declarations, unchanged legacy scalar/project-only behavior,
+  and no knowledge-only executable target.
+- [ ] Fresh native setup with registered repositories but no local harness
+  config; actual binding/pair creation, matching-binding no-op and
+  conflicting-binding refusal through the existing owner.
+- [ ] Old/new consumer compatibility: an older daemon reads the same scalar
+  harness target, while new consumers retain the knowledge companion and
+  separately report unsupported binding/projection capabilities.
 - [ ] Unit/schema: controller/provider selection, mutually exclusive canonical
   aliases, directional allow/deny rules, constrained guest hops and unsupported
   role refusal.
@@ -288,3 +337,18 @@ takeover or implementation completion is asserted.
 - Included the required generated `fleet-manager` patch changefile: its
   coupled standalone content participates in the repository release guard.
   No shared manifest or version number is edited manually.
+
+### 2026-10-18 - Policy merged and paired control-plane amendment
+
+- Policy #7087 actually merged at
+  `e1ddb33e9e17ccfadc06e98df7b3913d52a40471` after fresh current-head review,
+  CI and thread checks. Its source PR claim is released. No setup, runtime
+  adoption or completed integration is implied.
+- The operator clarified that projection to a new machine must retain both
+  harness and knowledge repository roles, including when local binding
+  configuration is absent, and explicitly required older-daemon compatibility.
+  This is a generalized summary; adopter identities and rollout authority
+  remain outside this public effort.
+- Reserved #7195 for the additive declaration and binding-projection contract.
+  This amendment must clear the normal review gate before implementation;
+  existing routing, configuration, lifecycle and operation owners remain.
