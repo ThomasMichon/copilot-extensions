@@ -218,6 +218,32 @@ def test_guard_rejects_non_normalized_paths() -> None:
         launch_storage.directory_guard("/tmp/../dev/shm")
 
 
+def test_guard_rejects_double_leading_slash_without_looping() -> None:
+    """POSIX normpath() preserves an *exact* double leading slash, under
+    which dirname("//") == "//" forever; reject it before the ancestor walk
+    instead of growing `ancestors` without bound.
+    """
+    with pytest.raises(RuntimeError, match="normalized absolute"):
+        launch_storage.directory_guard("//home/user/.agent-containers/launch")
+
+
+def test_session_host_rejects_double_leading_slash_cleanup_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_containers import __main__ as cli
+
+    monkeypatch.setattr(
+        cli, "_trusted_session_host_context",
+        lambda *args: (None, None, "user", "/workspace"),
+    )
+    monkeypatch.setattr(cli, "cleanup_remote_env", lambda *args: pytest.fail("no deletion"))
+    with pytest.raises(RuntimeError, match="normalized absolute"):
+        cli._cmd_session_host_cleanup(SimpleNamespace(
+            name="fixture", expected_instance=None,
+            remote_env="//home/user/.agent-containers/launch/" + "a" * 32 + ".env",
+        ))
+
+
 def test_session_host_original_ram_handle_removes_both_roots(
     ram_root: Path, local_transport: list, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

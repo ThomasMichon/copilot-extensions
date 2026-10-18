@@ -32,7 +32,15 @@ def directory_guard(
     missing_ok: bool = False,
 ) -> str:
     """Validate before reading stdin; pin subsequent relative writes by cwd."""
-    if not directory.startswith("/") or posixpath.normpath(directory) != directory:
+    if (
+        not directory.startswith("/")
+        or posixpath.normpath(directory) != directory
+        or directory.startswith("//")
+    ):
+        # POSIX normpath() deliberately preserves an *exact* double leading
+        # slash (3+ collapse to one, already caught above): dirname("//")
+        # == "//" forever, so the ancestor walk below would never reach "/"
+        # and would grow `ancestors` without bound.
         raise RuntimeError("launch storage requires a normalized absolute directory")
     parent = posixpath.dirname(directory)
     base = posixpath.dirname(parent) if create else directory
