@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -28,19 +30,83 @@ repo = _repo_fixture
 no_ambient_git_identity = _identity_fixture
 
 
-@pytest.mark.parametrize("helper", ["workflow", "obsolete"])
-def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helper):
-    root = Path(__file__).resolve().parent.parent
+def _materializer_git(root, *args):
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+    return subprocess.run(
+        ["git", "--no-replace-objects", *args], cwd=root, env=env,
+        capture_output=True, check=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    ).stdout
+
+
+def _materializer_controller(root):
     workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
     if not source_owned(workflow["jobs"]):
-        control = subprocess.run(
-            ["git", "--no-replace-objects", "show",
-             "refs/remotes/origin/main:.github/workflows/validate-and-promote.yml"],
-            cwd=root, env=env, capture_output=True, text=True, check=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        workflow = yaml.safe_load(control.stdout)
+        workflow = yaml.safe_load(_materializer_git(
+            root, "show", "refs/remotes/origin/main:.github/workflows/validate-and-promote.yml",
+        ))
+    return workflow
+
+
+def _materializer_source(root, destination):
+    workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
+    if not source_owned(workflow["jobs"]):
+        return root
+    state = json.loads((root / ".github/release-pipeline-state.json").read_text())
+    dev = state["last_promotion"]["dev_head"]
+    assert isinstance(dev, str) and re.fullmatch(r"[0-9a-f]{40}", dev), "invalid recorded Dev source"
+    assert _materializer_git(root, "rev-parse", "--verify", f"{dev}^{{commit}}").decode().strip() == dev
+    payload = _materializer_git(
+        root, "archive", "--format=tar", dev, "libs", "plugins/agent-machines/pyproject.toml",
+    )
+    destination.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+        archive.extractall(destination, filter="data")
+    return destination
+
+
+@pytest.fixture
+def generated_materializer_checkout(tmp_path):
+    root = Path(__file__).resolve().parent.parent
+    source_workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
+    dev = (
+        json.loads((root / ".github/release-pipeline-state.json").read_text())["last_promotion"]["dev_head"]
+        if source_owned(source_workflow["jobs"])
+        else _materializer_git(root, "rev-parse", "HEAD").decode().strip()
+    )
+    generated = tmp_path / "generated-checkout"
+    _materializer_git(tmp_path, "clone", "--shared", "--no-checkout", str(root), str(generated))
+    control = generated / ".github"
+    control.mkdir()
+    (control / "workflows").mkdir()
+    (control / "workflows/validate-and-promote.yml").write_text(
+        yaml.safe_dump(_materializer_controller(root)), encoding="utf-8",
+    )
+    (control / "release-pipeline-state.json").write_text(
+        json.dumps({"last_promotion": {"dev_head": dev}}), encoding="utf-8",
+    )
+    plugin = generated / "plugins/agent-machines"
+    plugin.mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text(
+        '[tool.uv.sources]\nagent-installation-context = { path = "libs/installation-context" }\n',
+        encoding="utf-8",
+    )
+    context = generated / "libs/installation-context"
+    context.mkdir(parents=True)
+    (context / "installation_context.py").write_bytes(b"GENERATED_BYTES_MUST_NOT_BE_SOURCE\n")
+    _materializer_git(generated, "add", "-A")
+    _materializer_git(
+        generated, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "generated materialized fixture",
+    )
+    assert _materializer_git(generated, "rev-parse", "HEAD").decode().strip() != dev
+    return generated
+
+
+def _assert_pinned_materializer(root, tmp_path, helper):
+    workflow = _materializer_controller(root)
+    source = _materializer_source(root, tmp_path / "validated-dev")
     pin = workflow["env"]["RELEASE_HELPERS_SHA"]
     assert re.fullmatch(r"[0-9a-f]{40}", pin), "release helpers require an immutable Git commit"
     if helper == "obsolete":
@@ -52,15 +118,10 @@ def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helpe
         "nested_uv_editable_ref", "uv_editable_ref", "installer_engine_ref",
         "launch_wrapper_assets_ref", "standalone_consumers",
     ):
-        result = subprocess.run(
-            ["git", "--no-replace-objects", "show", f"{pin}:tools/{name}.py"],
-            cwd=root, env=env, capture_output=True, check=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        (tools / f"{name}.py").write_bytes(result.stdout)
+        (tools / f"{name}.py").write_bytes(_materializer_git(root, "show", f"{pin}:tools/{name}.py"))
     destination = tmp_path / "candidate" / "plugins" / "agent-machines"
     destination.mkdir(parents=True)
-    shutil.copyfile(root / "plugins/agent-machines/pyproject.toml", destination / "pyproject.toml")
+    shutil.copyfile(source / "plugins/agent-machines/pyproject.toml", destination / "pyproject.toml")
     script = """
 import json
 import sys
@@ -77,8 +138,8 @@ report = materialize_main.materialize_uv_editable_ref_into(
 print(json.dumps(report))
 """
     result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", script, str(tools), str(root), str(destination)],
-        cwd=tmp_path, env=env, capture_output=True, text=True, check=True, timeout=15,
+        [sys.executable, "-I", "-B", "-c", script, str(tools), str(source), str(destination)],
+        cwd=tmp_path, capture_output=True, text=True, check=True, timeout=15,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     report = json.loads(result.stdout)
@@ -90,12 +151,36 @@ print(json.dumps(report))
     assert report and not refusals, f"pinned release helpers cannot materialize current source: {report}"
     context = destination / "libs/installation-context"
     assert (context / "installation_context.py").read_bytes() == (
-        root / "libs/installation-context/installation_context.py"
+        source / "libs/installation-context/installation_context.py"
     ).read_bytes()
     assert 'path = "libs/installation-context"' in (destination / "pyproject.toml").read_text()
     nested = (destination / "libs/installer-readiness/pyproject.toml").read_text()
     assert 'path = "../installation-context"' in nested
     assert "editable" not in nested
+
+
+@pytest.mark.parametrize("helper", ["workflow", "obsolete"])
+def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helper):
+    _assert_pinned_materializer(Path(__file__).resolve().parent.parent, tmp_path, helper)
+
+
+@pytest.mark.parametrize("helper", ["workflow", "obsolete"])
+def test_native_generated_checkout_replays_unmaterialized_dev(
+    tmp_path, generated_materializer_checkout, helper,
+):
+    _assert_pinned_materializer(generated_materializer_checkout, tmp_path, helper)
+
+
+@pytest.mark.parametrize("dev", [None, "", "../outside", "f" * 40])
+def test_native_generated_checkout_requires_available_recorded_dev(
+    tmp_path, generated_materializer_checkout, dev,
+):
+    state = generated_materializer_checkout / ".github/release-pipeline-state.json"
+    state.write_text(json.dumps({"last_promotion": {"dev_head": dev}}))
+    expected = subprocess.CalledProcessError if dev == "f" * 40 else AssertionError
+    with pytest.raises(expected):
+        _materializer_source(generated_materializer_checkout, tmp_path / "refused-source")
+    assert not (tmp_path / "refused-source").exists()
 
 
 class HostedRelease:

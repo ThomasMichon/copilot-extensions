@@ -1038,6 +1038,14 @@ artifact-readiness suite now pass against that actual Main pin, including the
 old-helper refusal. Fresh complete qualification, normal resume, natural
 release cycles and client compatibility remain open.
 
+Review identified that an initial fixture fed already-materialized candidate
+manifests back into the materializer. The corrected fixture keeps the
+candidate's controller pin but replays unmaterialized inputs from its recorded
+exact Dev commit, refusing absent or invalid lineage. A real generated Git
+checkout, deliberately different generated library bytes and both current/old
+helper cases cover that boundary. All 52 artifact-readiness cases pass locally;
+current-head hosted native execution and review remain separate gates.
+
 ### 2026-10-18 - Native fixture repair merged; bounded full-suite recovery continues
 
 Source repair #7152 merged as
