@@ -7,6 +7,7 @@ import argparse
 import ast
 import os
 import shlex
+import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -386,30 +387,21 @@ def test_cli_missing_suite_cannot_turn_full_fallback_into_a_successful_skip(tmp_
     assert error.value.code == 2
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the discovery job executes Bash on Linux")
-@pytest.mark.parametrize("changed,event,expected", [
-    ("tools/coverage_guided_selection/fallback.py", "pull_request", True),
-    ("tools/run-coverage-selected-tests.py", "pull_request", True),
-    ("tools/run-plugin-tests.py", "pull_request", True),
-    ("tools/plugin_test_selection.py", "pull_request", True),
-    ("tools/plugin_test_containment.py", "pull_request", True),
-    ("tools/pytest_portfolio_guard.py", "pull_request", True),
-    ("tools/_devcontainer_selection.py", "pull_request", True),
-    ("tools/_devcontainer_network_scope.py", "pull_request", True),
-    (".github/workflows/ci.yml", "pull_request", True),
-    ("docs/unrelated.md", "pull_request", False),
-    ("tools/unrelated.py", "pull_request", False),
-    ("tools/plugin_test_selection.py", "push", False),
-])
-def test_discovery_runs_dispatch_for_its_selection_inputs(history, changed, event, expected):
+def _run_discovery(
+    history: tuple[Path, str, dict], changed: str, event: str, listed: tuple[str, ...] = (),
+) -> dict[str, str]:
     import yaml
 
     root, _, _ = history
     tools = root / "tools"
     tools.mkdir()
     stub = tools / "run-plugin-tests.py"
-    stub.write_text("print('[]')\n", encoding="utf-8")
-    _git(root, "add", "tools/run-plugin-tests.py")
+    stub.write_text(f"print({json.dumps(list(listed))!r})\n", encoding="utf-8")
+    shutil.copyfile(
+        Path(__file__).resolve().parent / "ci_plugin_partitions.py",
+        tools / "ci_plugin_partitions.py",
+    )
+    _git(root, "add", "tools/run-plugin-tests.py", "tools/ci_plugin_partitions.py")
     _git(root, "commit", "-qm", "discovery list stub")
     base = _git(root, "rev-parse", "HEAD")
     target = root / changed
@@ -434,9 +426,49 @@ def test_discovery_runs_dispatch_for_its_selection_inputs(history, changed, even
         ["bash", "-e", "-c", script], cwd=root, env=env,
         capture_output=True, text=True, check=True, timeout=30,
     )
-    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the discovery job executes Bash on Linux")
+@pytest.mark.parametrize("changed,event,expected", [
+    ("tools/coverage_guided_selection/fallback.py", "pull_request", True),
+    ("tools/run-coverage-selected-tests.py", "pull_request", True),
+    ("tools/run-plugin-tests.py", "pull_request", True),
+    ("tools/ci_plugin_partitions.py", "pull_request", True),
+    ("tools/plugin_test_selection.py", "pull_request", True),
+    ("tools/plugin_test_containment.py", "pull_request", True),
+    ("tools/pytest_portfolio_guard.py", "pull_request", True),
+    ("tools/_devcontainer_selection.py", "pull_request", True),
+    ("tools/_devcontainer_network_scope.py", "pull_request", True),
+    (".github/workflows/ci.yml", "pull_request", True),
+    ("docs/unrelated.md", "pull_request", False),
+    ("tools/unrelated.py", "pull_request", False),
+    ("tools/plugin_test_selection.py", "push", False),
+])
+def test_discovery_runs_dispatch_for_its_selection_inputs(history, changed, event, expected):
+    values = _run_discovery(history, changed, event)
     assert json.loads(values["smoke"]) == (["agent-dispatch"] if expected else [])
     assert values["heavy"] == "false"
+    assert json.loads(values["smoke_matrix"]) == (
+        [{"plugin": "agent-dispatch", "partition": 0, "partitions": 1, "name": "agent-dispatch"}]
+        if expected else []
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the discovery job executes Bash on Linux")
+@pytest.mark.parametrize("event", ["pull_request", "push", "workflow_dispatch"])
+def test_discovery_keeps_full_partition_defaults_outside_the_pr_pilot(history, event):
+    from tools.ci_plugin_partitions import smoke_matrix
+
+    listed = ("agent-dispatch", "agent-bridge")
+    values = _run_discovery(history, "docs/unrelated.md", event, listed)
+    rows = json.loads(values["smoke_matrix"])
+    override = frozenset({"agent-dispatch"}) if event == "pull_request" else frozenset()
+    assert rows == smoke_matrix(list(listed), single_job_plugins=override)
+    assert len({row["name"] for row in rows}) == len(rows)
+    assert sum(row["plugin"] == "agent-dispatch" for row in rows) == (
+        1 if event == "pull_request" else 3
+    )
 
 
 @pytest.mark.skipif(

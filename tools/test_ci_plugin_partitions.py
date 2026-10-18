@@ -2,6 +2,7 @@
 
 from collections import Counter
 import importlib.util
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -24,6 +25,38 @@ def test_matrix_changes_only_dispatch_parallelism():
     assert all(row["partitions"] == 3 for row in rows[:3])
     assert all(row["partitions"] == 1 and row["name"] == row["plugin"] for row in rows[3:])
     assert smoke_matrix([]) == []
+
+
+def test_single_job_override_preserves_all_plugins_and_default_partition_policy():
+    plugins = ["agent-dispatch", "agent-bridge", "copilot-extensions-harness"]
+    rows = smoke_matrix(plugins, single_job_plugins=frozenset({"agent-dispatch"}))
+    assert [row["plugin"] for row in rows] == plugins
+    assert all(row["partition"] == 0 and row["partitions"] == 1 for row in rows)
+    assert all(row["name"] == row["plugin"] for row in rows)
+    assert len(smoke_matrix(plugins)) == 5
+    assert smoke_matrix([], single_job_plugins=frozenset({"agent-dispatch"})) == []
+
+
+@pytest.mark.parametrize("override", [None, "agent-dispatch", frozenset({False}), frozenset({"../outside"})])
+def test_invalid_single_job_override_refuses_instead_of_omitting_work(override):
+    with pytest.raises(ValueError):
+        smoke_matrix(["agent-dispatch"], single_job_plugins=override)
+
+
+def test_real_matrix_cli_single_job_mode_is_explicit():
+    script = REPO / "tools" / "ci_plugin_partitions.py"
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    base = [sys.executable, str(script), "matrix", '["agent-dispatch","agent-bridge"]']
+    default = subprocess.run(
+        base, capture_output=True, text=True, timeout=10, creationflags=flags,
+    )
+    selected = subprocess.run(
+        [*base, "--single-job-plugin", "agent-dispatch"],
+        capture_output=True, text=True, timeout=10, creationflags=flags,
+    )
+    assert default.returncode == selected.returncode == 0
+    assert len(json.loads(default.stdout)) == 4
+    assert len(json.loads(selected.stdout)) == 2
 
 
 def test_candidate_qualification_requires_exactly_the_actual_smoke_matrix_names():

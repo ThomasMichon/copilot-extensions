@@ -1523,6 +1523,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             PILOT_PATHS=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
               .github/workflows/ci.yml tools/coverage_guided_selection/ \
+              tools/ci_plugin_partitions.py \
               tools/run-coverage-selected-tests.py tools/run-plugin-tests.py \
               tools/plugin_test_selection.py tools/pytest_test_selection.py \
               tools/plugin_test_containment.py tools/pytest_portfolio_guard.py \
@@ -1536,7 +1537,11 @@ jobs:
           echo "Full set:  $FULL"
           echo "Fast set:  $SMOKE"
           echo "smoke=$SMOKE" >> "$GITHUB_OUTPUT"
-          SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE")
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE" --single-job-plugin agent-dispatch)
+          else
+            SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE")
+          fi
           echo "smoke_matrix=$SMOKE_MATRIX" >> "$GITHUB_OUTPUT"
           if echo "$FULL" | python -c "import json,sys,os; sys.exit(0 if os.environ['HEAVY_PLUGIN'] in json.load(sys.stdin) else 1)"; then
             echo "heavy=true" >> "$GITHUB_OUTPUT"
@@ -1552,8 +1557,9 @@ jobs:
     # These consumers include setup and independent native/integration lanes.
     # Bridge's real TLS HTTP2/WSS lane exceeded eight minutes including cleanup
     # despite passing steps; retain fresh peer processes and a bounded 12m job.
-    # Dispatch distributes its complete suite's existing process groups across
-    # independent jobs; no item, sub-suite, plugin or job deadline is increased.
+    # Full dispatch runs retain their complete process-group partitions.
+    # Its PR-only coverage selection runs once, not once per full-suite partition.
+    # No item, sub-suite, plugin or job deadline is increased.
     timeout-minutes: ${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}
     strategy:
       fail-fast: false

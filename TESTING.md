@@ -631,11 +631,12 @@ processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
 
-The required CI smoke matrix distributes agent-dispatch's complete file
-inventory across three independent jobs. `tools/ci_plugin_partitions.py` assigns
+Full dispatch execution in the CI smoke matrix (push, manual and promotion)
+distributes its complete file inventory across three independent jobs.
+`tools/ci_plugin_partitions.py` assigns
 whole ordinary 25-file groups round-robin and supplies explicit `--test-file`
 arguments to the unchanged contained runner. Every file belongs to exactly one
-partition, and every partition remains required by the PR/promotion aggregate;
+partition, and every full-suite partition remains required by the applicable aggregate;
 a failed or cancelled partition fails the gate. Local unfiltered runs remain
 sequential. Item, sub-suite, plugin and 12-minute job deadlines are unchanged.
 This addresses #6052's recurrence where all 5,933 tests passed but aggregate
@@ -653,6 +654,10 @@ literal `_SMOKE_PARTITIONS` mapping without executing candidate Python. Its
 receipt binds the normalized workflow and helper bytes. Missing, unsuccessful,
 duplicate or unsupported rows still refuse qualification; both native promotion
 contract lanes also select changes to this scheduling helper.
+The PR-only coverage-selected dispatch lane below instead requests one matrix
+row through `--single-job-plugin agent-dispatch`. Selection and its evidence
+artifact run once, not once per complete-suite partition. The explicit matrix
+override leaves every other plugin and the default full partition policy intact.
 
 Agent-index's fleet-ingress tests select the same-checkout `fleet-manager[auth]`
 distribution explicitly during development preparation. Its runtime metadata

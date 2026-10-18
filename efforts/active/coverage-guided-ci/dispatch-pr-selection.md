@@ -146,3 +146,18 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
   budget, and the real coverage-earned runtime proof runs both fresh and
   eight-day-old baseline variants. Debt remains audited; no known detector
   is removed to fit the smoke budget.
+- 2026-10-17: the pre-rebase candidate cleared every required CI job and
+  received an actual approval. Its hosted dispatch job completed in 148
+  seconds, including setup and cleanup, with 2,292 passed and 3,591 deselected;
+  the decision artifact records a 129.90-second invocation and exit code 0.
+  A subsequent base advance introduced the complete-suite dispatch
+  partitioner. Preserve its three-job defaults for full push/manual/promotion
+  execution, but request one explicit matrix row for PR-only coverage
+  selection to avoid duplicate smoke execution and artifact collisions.
+  The reconciled candidate must clear fresh review and CI before merging.
+  Composition contracts passed (693 passed, 23 skipped, 22 exhaustive cases
+  deselected), including the unchanged complete/disjoint partition and
+  qualification inventory tests. The literal workflow emits one selected PR
+  row and retains three full dispatch rows for push/manual events. Real
+  selected smoke on the new base passed in a disconnected devcontainer
+  (2,285 passed, 7 platform skips, 3,717 deselected; 98.69 seconds complete).

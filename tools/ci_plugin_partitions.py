@@ -12,16 +12,22 @@ _FILES_PER_GROUP = 25
 _SMOKE_PARTITIONS = {"agent-dispatch": 3}
 
 
-def smoke_matrix(plugins: object) -> list[dict]:
+def smoke_matrix(
+    plugins: object, *, single_job_plugins: frozenset[str] = frozenset(),
+) -> list[dict]:
     if not isinstance(plugins, list) or any(
         not isinstance(name, str) or not _PLUGIN.fullmatch(name) for name in plugins
     ):
         raise ValueError("expected a list of portable plugin names")
     if len(set(plugins)) != len(plugins):
         raise ValueError("duplicate plugin names")
+    if not isinstance(single_job_plugins, frozenset) or any(
+        not isinstance(name, str) or not _PLUGIN.fullmatch(name) for name in single_job_plugins
+    ):
+        raise ValueError("expected a frozenset of portable single-job plugin names")
     rows = []
     for plugin in plugins:
-        count = _SMOKE_PARTITIONS.get(plugin, 1)
+        count = 1 if plugin in single_job_plugins else _SMOKE_PARTITIONS.get(plugin, 1)
         for index in range(count):
             rows.append({
                 "plugin": plugin, "partition": index, "partitions": count,
@@ -51,6 +57,10 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     matrix = commands.add_parser("matrix")
     matrix.add_argument("plugins_json")
+    matrix.add_argument(
+        "--single-job-plugin", action="append", default=[],
+        help="emit one row for this plugin (repeatable; default partitions stay unchanged)",
+    )
     files = commands.add_parser("files")
     files.add_argument("--plugin", required=True)
     files.add_argument("--partition", type=int, required=True)
@@ -58,7 +68,9 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.command == "matrix":
-            print(json.dumps(smoke_matrix(json.loads(args.plugins_json)), separators=(",", ":")))
+            print(json.dumps(smoke_matrix(
+                json.loads(args.plugins_json), single_job_plugins=frozenset(args.single_job_plugin),
+            ), separators=(",", ":")))
         else:
             for path in partition_files(
                 Path(__file__).resolve().parents[1], args.plugin, args.partition, args.partitions,
