@@ -206,7 +206,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
-          "sha256": "f38e9374840d2b9560a1eed954e0a4906e968ed15849239f041e04c1cf6feeea",
+          "sha256": "a07369bc24b429039e36cc8af0fb58d696918aeb7248ec4fc75d2125779fd408",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1456,7 +1456,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-40.json",
-          "sha256": "0d77e011cbba36340934cd301d16e4849128728335dd9c56634c09aa6a94e737",
+          "sha256": "294894e81bccf880e03700d5b5dcc588e853ed187a4dc0f48c7cadf5a0bf46f2",
           "role": "Generation-40 combined receipt/native producer evidence: worktrees.py",
           "generation": 40
         },
@@ -4083,6 +4083,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
           "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
           "capture_method": "Re-attest unchanged HTTP-40 wire vectors after resolving the singleton-anchor fresh-init resume path through the app-bound worktree cache instead of the process-global one; the owner-boundary route and payload shape are unaffected."
+        },
+        {
+          "commit": "6981d0c57dccfcae97a8f2c3a96c09e170c4cc7b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
+          "capture_method": "Re-attest unchanged HTTP-40 wire vectors after clearing the retained completed task and cancel-requested flag on a periodic-to-on-demand restart; the capture/restore/wire contract is unaffected."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",
