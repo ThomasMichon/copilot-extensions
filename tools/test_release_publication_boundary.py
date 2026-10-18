@@ -106,7 +106,27 @@ class TrustedHarnessTests(unittest.TestCase):
             self.assertTrue(callable(control._paths))
 
 
-class PromotionJobAdmissionTests(unittest.TestCase):
+class _ShellFixture(unittest.TestCase):
+    def shell(
+        self, body: str, env: dict[str, str], *, timeout: float = 10,
+    ) -> subprocess.CompletedProcess[str]:
+        bash = shutil.which("bash")
+        git = shutil.which("git")
+        child_env = {"PATH": os.defpath, "GITHUB_OUTPUT": "/dev/stdout", **env}
+        if os.name == "nt":
+            native = Path(git).resolve().parent.parent / "bin/bash.exe" if git else None
+            bash = str(native) if native is not None and native.is_file() else None
+            child_env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\Windows")
+        if bash is None:
+            self.skipTest("Native Bash (Git for Windows on Windows) is required for literal shell fixtures")
+        return subprocess.run(
+            [bash, "--noprofile", "--norc", "-e"], input=body, text=True,
+            capture_output=True, timeout=timeout, env=child_env,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+
+
+class PromotionJobAdmissionTests(_ShellFixture):
     def setUp(self) -> None:
         self.promote = jobs(WORKFLOW.read_text(encoding="utf-8"))["promote"]
 
@@ -125,13 +145,14 @@ class PromotionJobAdmissionTests(unittest.TestCase):
             self.assertIsNotNone(comparison)
             comparisons.append(comparison.groups())
         for gate, is_dev in itertools.product(
-            ("success", "failure", "cancelled", "skipped", "", "unknown"),
-            ("true", "false", "", "True", "unknown"),
+            ("success", "SUCCESS", "failure", "cancelled", "skipped", "", "unknown"),
+            ("true", "True", "TRUE", "false", "", "unknown"),
         ):
             with self.subTest(gate=gate, is_dev=is_dev):
                 values = {"needs.gate.result": gate, "needs.gate.outputs.is_dev": is_dev}
-                admitted = all(values[field] == expected for field, expected in comparisons)
-                self.assertEqual(admitted, gate == "success" and is_dev == "true")
+                # Actions string comparisons are case-insensitive.
+                admitted = all(values[field].casefold() == expected for field, expected in comparisons)
+                self.assertEqual(admitted, gate.casefold() == "success" and is_dev.casefold() == "true")
 
     def test_admitted_source_still_requires_every_validation_result(self) -> None:
         validation = [
@@ -141,29 +162,33 @@ class PromotionJobAdmissionTests(unittest.TestCase):
         template = script(step(self.promote, "decide"))
         fields = {"needs.gate.result": "success", "needs.gate.outputs.is_dev": "true"}
         fields.update({f"needs.{name}.result": "success" for name in validation})
-        scenarios = [(None, None), *itertools.product(
-            validation, ("failure", "cancelled", "skipped", "", "unknown"),
-        )]
-        for name, result in scenarios:
-            with self.subTest(validation=name, result=result):
-                values = dict(fields)
-                if name is not None:
-                    values[f"needs.{name}.result"] = result
+        scenarios = [
+            ({}, True),
+            *(
+                ({f"needs.{name}.result": result}, False)
+                for name, result in itertools.product(
+                    validation, ("failure", "cancelled", "skipped", "", "unknown"),
+                )
+            ),
+            ({"needs.gate.result": "SUCCESS"}, False),
+            ({"needs.gate.outputs.is_dev": "True"}, False),
+        ]
+        for overrides, proceed in scenarios:
+            with self.subTest(overrides=overrides):
+                values = {**fields, **overrides}
                 command = re.sub(
                     r"\$\{\{\s*([^{}]+?)\s*\}\}",
                     lambda match: values[match[1].strip()],
                     template,
                 )
-                with tempfile.TemporaryDirectory(prefix="promotion-admission-") as directory:
-                    output = Path(directory) / "output"
-                    completed = subprocess.run(
-                        ["bash", "-eu", "-c", command],
-                        env={"PATH": os.defpath, "GITHUB_OUTPUT": str(output)},
-                        capture_output=True, text=True, timeout=5, check=True,
-                    )
-                    self.assertEqual(output.read_text(), f"proceed={str(name is None).lower()}\n")
-                    if name is not None:
-                        self.assertIn("refusing to promote", completed.stdout)
+                completed = self.shell("set -u\n" + command, {}, timeout=5)
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+                decisions = [line for line in completed.stdout.splitlines() if line.startswith("proceed=")]
+                self.assertEqual(decisions, [f"proceed={str(proceed).lower()}"])
+                if not proceed and not overrides.keys() & {
+                    "needs.gate.result", "needs.gate.outputs.is_dev",
+                }:
+                    self.assertIn("refusing to promote", completed.stdout)
 
 
 def controller(text: str, marker: str) -> None:
@@ -254,7 +279,7 @@ class Provider:
         return contextlib.nullcontext(self.output)
 
 
-class BoundaryTests(unittest.TestCase):
+class BoundaryTests(_ShellFixture):
     @classmethod
     def setUpClass(cls) -> None:
         cls.text = WORKFLOW.read_text(encoding="utf-8")
@@ -466,22 +491,6 @@ class BoundaryTests(unittest.TestCase):
         self.unmerged(provider)
         self.assertFalse(provider.calls)
 
-    def shell(self, body: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        bash = shutil.which("bash")
-        git = shutil.which("git")
-        child_env = {"PATH": os.defpath, "GITHUB_OUTPUT": "/dev/stdout", **env}
-        if os.name == "nt":
-            native = Path(git).resolve().parent.parent / "bin/bash.exe" if git else None
-            bash = str(native) if native is not None and native.is_file() else None
-            child_env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\Windows")
-        if bash is None:
-            self.skipTest("Native Bash (Git for Windows on Windows) is required for literal shell fixtures")
-        return subprocess.run(
-            [bash, "--noprofile", "--norc", "-e"], input=body, text=True,
-            capture_output=True, timeout=10, env=child_env,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-
     def test_zero_helper_pin_is_refused_before_any_checkout_or_publication(self) -> None:
         gate = self.jobs["gate"]
         identifier = "Require an immutable reviewed release-helper pin"
@@ -502,11 +511,12 @@ class BoundaryTests(unittest.TestCase):
             mock.patch.object(subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True),
             mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run,
         ):
-            self.shell("exit 0", {})
+            self.shell("exit 0", {}, timeout=5)
         argv = run.call_args.args[0]
         self.assertEqual(Path(argv[0]), Path("/native/git/bin/bash.exe"))
         self.assertEqual(run.call_args.kwargs["creationflags"], 0x08000000)
         self.assertEqual(run.call_args.kwargs["env"]["SYSTEMROOT"], "synthetic-windows")
+        self.assertEqual(run.call_args.kwargs["timeout"], 5)
 
     def test_only_manual_trusted_main_can_admit_paused_qualification(self) -> None:
         body = script(step(self.jobs["gate"], "mode"))

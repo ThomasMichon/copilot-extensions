@@ -120,7 +120,7 @@ lane with expensive source portfolios that cannot publish. It does not change
 GitHub's rolling pending-slot semantics or cancel an existing running job;
 an explicit replacement still needs all qualification and publication proof.
 
-Promote runner admission also requires a successful source gate and its exact
+Promote runner admission also requires a successful source gate and its
 `is_dev=true` output. A failed or declined gate therefore allocates no Promote
 runner or deployment environment. Admitted sources still reach the existing
 decision step after failed dependencies, and every required validation result

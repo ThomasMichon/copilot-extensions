@@ -131,6 +131,14 @@ The quoted wording and original spelling are preserved verbatim. Phase 9's
 operative plan below interprets the timing and recovery-first requirements;
 the quotations are not edited into implementation instructions.
 
+**2026-10-17 recovery focus (verbatim):**
+
+> Okay, your goal is to get the dev-to-main pipeline moving, focusing on addressing blocking and flaky issues in the pipeline and validation
+
+The operator also explicitly allowed minimal, normally reviewed pipeline and
+validation repair PRs. This restores narrow repair execution, not CI waivers,
+administrator merges, deadline increases or emergency promotion.
+
 Phase 9 is the agent-recommended decomposition of this clarification. It does
 not grant a new main-path exception, relax byte integrity or silently change
 the separately owned main-control preservation policy. The original pipeline
@@ -982,6 +990,33 @@ before candidate publication or product merge. Main remains paused and
 unqualified. Historical preparation entries below retain their original
 in-flight state; the later outcome and disconnected diagnostic are recorded
 in their own 2026-10-17 entries.
+
+### 2026-10-17 - Repair the native admission fixture before another qualification
+
+The hosted Windows candidate-contract run `39084596299` reported 31 failed
+shell subcases, with 136 passes, 11 existing skips and 105 passing subtests.
+The new fixture launched bare Bash with a replacement environment and a native
+temporary output path, instead of using the module's existing native,
+consoleless shell boundary. The repair shares that boundary between both test
+families, retains the new fixture's five-second child deadline and strict shell
+mode, and captures the decision through standard output. Nonzero exits retain
+both stdout and stderr in the assertion.
+
+Review also identified that Actions string equality is case-insensitive. The
+literal admission model now covers mixed-case strings accordingly; the actual
+decision script is independently exercised to refuse noncanonical gate values.
+That distinction preserves both the allocation model and the publication
+refusal rather than pretending an uppercase value cannot allocate a runner.
+
+Main now includes the reviewed hosted setup controls through #7153 and #7154.
+The prepared no-op admission view was re-pinned to exact Main
+`c1c0fea7ba3beea33b4010be009489696e51e4be`, with its actual adjacent CI and
+base-admission declarations. All 23 controlled boundary cases pass in the
+bounded Linux fixture run; actual hosted Windows success remains required.
+Only the prepared Promote admission field differs semantically. No helper,
+qualification gate, timeout, package policy or artifact-integrity check changed.
+The current Worktrees aggregate-budget blocker and normal release qualification
+remain open; pause-only successful workflows do not close them.
 
 ### 2026-10-17 - Prepare bounded no-op Promote admission
 
