@@ -89,7 +89,7 @@ def capture_worktrees(
                 *cache._live_probe_inflight.values(),
             ))
             or (cache._task is not None and (
-                cache._task.done() or cache._task.cancelling()
+                cache._task.done() or cache._cancel_requested
                 or cache._task.get_loop() is not cache._owner_loop
             ))
             or (cache._interval > 0 and cache._task is None)

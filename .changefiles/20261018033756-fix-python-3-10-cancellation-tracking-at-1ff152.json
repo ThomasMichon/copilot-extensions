@@ -1,0 +1,9 @@
+{
+  "comment": "Fix Python 3.10 cancellation-tracking AttributeError in worktree discovery capture and resolve native resume through the app-bound worktree cache, not the process-global one",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

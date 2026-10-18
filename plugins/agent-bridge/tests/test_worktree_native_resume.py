@@ -19,6 +19,7 @@ from agent_bridge.acquisition_store import AcquisitionStore
 from agent_bridge.db import Database
 from agent_bridge.models import ServiceConfig, SessionStatus
 from agent_bridge.routes import worktrees as wt
+from agent_bridge.routes import worktree_probe
 from agent_bridge.session_manager import SessionManager
 from agent_bridge.session_manager import Session
 from agent_bridge.transport import SpawnTarget
@@ -128,6 +129,29 @@ async def test_invalid_record_ids_refuse_before_owner_commands(boundary, worktre
         await native_resume.resume_native_worktree(worktree_id, boundary.request, "acp")
     assert refused.value.status_code == 400
     assert not boundary.calls
+
+
+@pytest.mark.asyncio
+async def test_resume_resolves_through_the_apps_own_cache_not_the_global_one(boundary, monkeypatch):
+    # Regression: a restored serving app lists worktrees from its retained
+    # (app-bound) cache, so resume must resolve through that exact cache --
+    # never fall back to the process-global singleton, which can be empty
+    # or unrelated and would otherwise force an unnecessary live probe.
+    monkeypatch.setattr(wt, "_find_cached_worktree_entry", worktree_probe.find_worktree_entry)
+    app_cache = wt.WorktreeDiscoveryCache()
+    app_cache._cache = {"example": [boundary.entry]}
+    boundary.request.app.state.worktree_discovery_cache = app_cache
+
+    global_cache = wt.get_cache()
+    monkeypatch.setattr(global_cache, "get_all", Mock(
+        side_effect=AssertionError("resume escaped to the process-global cache"),
+    ))
+    monkeypatch.setattr(global_cache, "probe_live", AsyncMock(
+        side_effect=AssertionError("resume escaped to the process-global cache"),
+    ))
+
+    result = await native_resume.resume_native_worktree("wt-example", boundary.request, "acp")
+    assert result.acp_session_id == result.durable_session_id == "native-original"
 
 
 @pytest.fixture

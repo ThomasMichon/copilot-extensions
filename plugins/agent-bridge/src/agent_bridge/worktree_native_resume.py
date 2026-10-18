@@ -94,7 +94,9 @@ async def _resume(
     from .routes import worktrees as wt
     from .routes.sessions import _session_info
 
-    owner, entry = await wt._find_cached_worktree_entry(worktree_id, resolver)
+    owner, entry = await wt._find_cached_worktree_entry(
+        worktree_id, resolver, cache=wt.cache_for_app(request.app),
+    )
     if owner is None or entry is None or not entry.path:
         raise _refuse("worktree_unknown", "No owning workspace was found", status=404)
     config = resolver.agents.get(owner)

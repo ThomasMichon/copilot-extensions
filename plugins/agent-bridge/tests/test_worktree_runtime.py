@@ -89,6 +89,7 @@ async def test_completed_cache_roundtrip_preserves_entries_and_refuses_discovery
 @pytest.mark.parametrize("mutation", [
     "resolver", "governance", "thread", "loop", "crawl", "backfill",
     "archive", "live", "fresh-start", "periodic-missing", "entries-limit",
+    "cancel-requested",
 ])
 async def test_capture_refuses_unowned_or_inflight_cache(captured, monkeypatch, mutation):
     app, _origins, _capture = captured
@@ -119,6 +120,15 @@ async def test_capture_refuses_unowned_or_inflight_cache(captured, monkeypatch, 
         monkeypatch.setitem(worktrees._fresh_start_locks, "venue-1", lock)
     elif mutation == "periodic-missing":
         cache._interval = 5
+    elif mutation == "cancel-requested":
+        # Python 3.10 has no Task.cancelling(); capture_worktrees() must
+        # still refuse a task whose cancellation was requested but that
+        # hasn't finished yet, using our own _cancel_requested flag.
+        cache._interval = 5
+        cache._task = asyncio.create_task(asyncio.Event().wait())
+        cache._owner_loop = asyncio.get_running_loop()
+        cache._cancel_requested = True
+        pending = cache._task
     else:
         cache._cache["actual"] *= 4097
     try:
@@ -154,6 +164,27 @@ async def test_restore_rejects_incomplete_or_coerced_observations(captured, muta
     with pytest.raises(PrivateIPCError) as caught:
         restore_worktrees(payload, resolver)
     assert "private-value" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_capture_succeeds_with_healthy_periodic_discovery_task(captured):
+    # Regression (Python 3.10 compatibility): a healthy, uncancelled
+    # periodic-discovery task must not trip capture_worktrees()'s
+    # cancellation-in-progress check, which can no longer rely on the
+    # 3.11-only Task.cancelling().
+    app, _origins, _capture = captured
+    cache, resolver, governance = cache_graph(app)
+    cache._interval = 5
+    cache._task = asyncio.create_task(asyncio.Event().wait())
+    cache._owner_loop = asyncio.get_running_loop()
+    assert cache._cancel_requested is False
+    try:
+        payload = capture_worktrees(cache, resolver, governance)
+        assert payload["entries"]["actual"][0]["id"] == "venue-1"
+    finally:
+        cache._task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cache._task
 
 
 @pytest.mark.asyncio

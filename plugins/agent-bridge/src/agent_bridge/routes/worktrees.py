@@ -71,6 +71,10 @@ class WorktreeDiscoveryCache:
         self._governance: LoopGovernance | None = None
         self._owner_thread: threading.Thread | None = None
         self._owner_loop: asyncio.AbstractEventLoop | None = None
+        # Python 3.10 has no Task.cancelling(); track cancellation
+        # requests ourselves so worktree_runtime.capture_worktrees() can
+        # detect an in-progress cancel without that 3.11-only API.
+        self._cancel_requested = False
         # worktree-finality-and-obligations (Phase 5): the classify-backfill
         # tasks crawl_if_empty() spawns must obey the same daemon lifecycle as
         # the periodic loop -- retained here so stop() can cancel/await them
@@ -133,6 +137,7 @@ class WorktreeDiscoveryCache:
     async def stop(self) -> None:
         await self._refresh.close()
         if self._task and not self._task.done():
+            self._cancel_requested = True
             self._task.cancel()
             try:
                 await self._task
