@@ -409,6 +409,26 @@ def test_usage_features_review_regression_text_and_content_block_shapes_counted(
 
 
 @pytest.mark.guard
+def test_usage_features_review_regression_linked_tool_result_text_block_counted() -> None:
+    """A linked tool result whose ``content`` is a text-block array contributes
+    its visible text to the next turn's input count, not zero."""
+    result = features_from_events([
+        event("assistant.turn_start"),
+        event(
+            "assistant.message", apiCallId="a", content="out",
+            toolRequests=[{"toolCallId": "t1"}],
+        ),
+        event("tool.execution_complete", toolCallId="t1", result={
+            "content": [{"text": "to"}, {"text": "ol-out"}],
+        }),
+        event("assistant.turn_start"),
+        event("assistant.message", apiCallId="b", content="next"),
+    ], "s")
+    assert result["calls"][1]["input_chars"] == len("out") + len("tool-out")
+    assert result["calls"][1]["output_chars"] == len("next")
+
+
+@pytest.mark.guard
 def test_usage_features_review_regression_model_change_accepts_model_id() -> None:
     """``session.model_change`` using ``data.modelId`` (not just ``newModel``/``model``)
     must still attribute the model to subsequent calls."""

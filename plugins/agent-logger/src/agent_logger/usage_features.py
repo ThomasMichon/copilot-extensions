@@ -291,9 +291,10 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
             tool_id = _identifier(data.get("toolCallId"))
             if tool_id and tool_id in root_tools:
                 result = data.get("result")
-                context += _text(result) if isinstance(result, str) else (
-                    _text(result.get("content")) if isinstance(result, dict) else 0
-                )
+                if isinstance(result, str):
+                    context += len(result)
+                elif isinstance(result, dict):
+                    context += _message_text(result)
             else:
                 unlinked_tools += 1
         if len(calls) + (len(turn.calls) + len(turn.unlinked) if turn else 0) > MAX_RECORDS:
