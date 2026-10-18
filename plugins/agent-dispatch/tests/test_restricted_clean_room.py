@@ -1,0 +1,246 @@
+"""The host-driven report must not accept skipped or incomplete Docker proof."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import stat
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+
+@pytest.fixture
+def lane():
+    script = Path(__file__).resolve().parents[3] / "tools/clean-room/restricted-dispatch/run.py"
+    spec = importlib.util.spec_from_file_location("restricted_clean_room", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _proof(root, outcome):
+    root.mkdir()
+    proof = {
+        "outcome": outcome, "status": "completed" if outcome == "complete" else "abandoned",
+        "native": "native-1", "owner_native": "native-1", "bridge_native": "native-1",
+        "prompts": 1, "rotated": True, "terminal_credential_status": 403,
+        "refused": [{"status": 403} for _ in range(5)],
+    }
+    (root / "proof.json").write_text(json.dumps(proof), encoding="utf-8")
+    (root / "stages.jsonl").write_text(
+        '{"stage":"acceptance","event":"complete"}\n'
+        '{"stage":"cleanup","event":"complete"}\n', encoding="utf-8",
+    )
+    return proof
+
+
+def test_clean_room_retains_two_independent_cases_and_original_limits(lane, tmp_path, monkeypatch):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        outcome = argv[argv.index("-k") + 1]
+        evidence = Path(kwargs["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"])
+        assert not evidence.exists()
+        _proof(evidence, outcome)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(lane.subprocess, "run", run)
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "pass" and report["jams"] == []
+    assert [row["case"] for row in report["stages"]] == ["complete", "abandon"]
+    for argv, kwargs in calls:
+        assert argv[argv.index("--test-timeout") + 1] == "300"
+        assert argv[argv.index("--timeout") + 1] == "360"
+        assert argv[argv.index("--plugin-timeout") + 1] == "360"
+        assert kwargs["timeout"] == 360
+        assert "--allow-host-state" not in argv
+    assert calls[0][1]["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"] != (
+        calls[1][1]["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"]
+    )
+    assert json.loads((tmp_path / "cr-report.json").read_text())["result"] == "pass"
+
+
+@pytest.mark.parametrize("failure", [
+    "nonzero", "skip", "malformed", "revocation", "cleanup", "refusals", "native", "rotation",
+    "timeout", "io", "runner-value",
+])
+def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch, failure):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if failure == "timeout":
+            raise lane.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if failure == "io":
+            raise PermissionError("runner unavailable")
+        if failure == "runner-value":
+            raise ValueError("invalid runner argument")
+        root = Path(kwargs["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"])
+        if failure != "skip":
+            proof = _proof(root, "complete")
+            if failure == "revocation":
+                proof["terminal_credential_status"] = 200
+            elif failure == "refusals":
+                proof["refused"] = []
+            elif failure == "native":
+                proof["bridge_native"] = "replacement-native"
+            elif failure == "rotation":
+                proof["rotated"] = False
+            (root / "proof.json").write_text(
+                "{" if failure == "malformed" else json.dumps(proof), encoding="utf-8",
+            )
+            if failure == "cleanup":
+                (root / "stages.jsonl").write_text(
+                    '{"stage":"acceptance","event":"complete"}\n'
+                    '{"stage":"cleanup","event":"start"}\n', encoding="utf-8",
+                )
+        return SimpleNamespace(returncode=1 if failure == "nonzero" else 0)
+
+    monkeypatch.setattr(lane.subprocess, "run", run)
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "fail"
+    assert len(calls) == 1 and len(report["stages"]) == 1
+    assert report["jams"][0]["evidence"] == "complete/runner.log"
+    expected = {
+        "nonzero": "runner-exit", "timeout": "contained-timeout", "io": "runner-io",
+        "runner-value": "runner-io",
+    }.get(failure, "proof-invalid")
+    assert report["jams"][0]["category"] == expected
+    assert report["jams"][0]["error_type"] == report["stages"][0]["error_type"]
+    assert report["jams"][0]["error"] == report["stages"][0]["error"]
+
+
+@pytest.mark.parametrize("failure", ["json", "identity", "empty-cases", "budgets"])
+def test_manifest_failure_never_launches_or_passes_without_original_cases(lane, tmp_path, monkeypatch, failure):
+    manifest = json.loads(lane.MANIFEST.read_text(encoding="utf-8"))
+    if failure == "identity":
+        manifest["name"] = "another-lane"
+    elif failure == "empty-cases":
+        manifest["cases"] = []
+    elif failure == "budgets":
+        manifest["deadlines_seconds"]["contained_case"] = 720
+    path = tmp_path / "manifest.json"
+    path.write_text("{" if failure == "json" else json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(lane, "MANIFEST", path)
+    monkeypatch.setattr(lane.subprocess, "run", lambda *a, **kw: pytest.fail("invalid manifest launched"))
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "fail" and report["stages"] == []
+    assert report["jams"][0]["category"] == "manifest-invalid"
+    assert json.loads((tmp_path / "cr-report.json").read_text())["result"] == "fail"
+
+
+def test_pytest_retains_acceptance_failure_and_reports_cleanup_error_separately(tmp_path):
+    script = Path(__file__).with_name("test_restricted_supervisor_docker.py")
+    source = tmp_path / "test_unwind.py"
+    source.write_text(
+        "import importlib.util\nimport pytest\n"
+        f"spec = importlib.util.spec_from_file_location('docker_fixture', {str(script)!r})\n"
+        "module = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\n"
+        "def fail_cleanup(*args):\n    raise AssertionError('secondary-cleanup-failure')\n"
+        "module._cleanup_docker = fail_cleanup\n"
+        "@pytest.fixture\n"
+        "def resources(request):\n"
+        "    module._register_docker_cleanup(request, (), (), lambda *args: None)\n"
+        "def test_primary(resources):\n    raise ValueError('primary-acceptance-failure')\n",
+        encoding="utf-8",
+    )
+    junit = tmp_path / "pytest-results.xml"
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "--junitxml", str(junit), str(source)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "primary-acceptance-failure" in result.stdout
+    assert "secondary-cleanup-failure" in result.stdout
+    suites = ET.parse(junit).getroot().iter("testsuite")
+    counts = [(int(suite.attrib["failures"]), int(suite.attrib["errors"])) for suite in suites]
+    assert sum(failures for failures, _errors in counts) == 1
+    assert sum(errors for _failures, errors in counts) == 1
+
+
+def test_case_directory_failure_is_reported_without_launch(lane, tmp_path, monkeypatch):
+    (tmp_path / "complete").write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(lane.subprocess, "run", lambda *a, **kw: pytest.fail("invalid directory launched"))
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "fail"
+    assert report["jams"][0]["category"] == "runner-io"
+    assert len(report["stages"]) == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not prove a Windows ACL")
+def test_result_directory_is_created_owner_only_on_posix(lane, tmp_path, monkeypatch):
+    def run(root, **_kwargs):
+        assert stat.S_IMODE(root.stat().st_mode) == 0o700
+        assert root.stat().st_uid == os.getuid()
+        return {"result": "pass"}
+
+    monkeypatch.setattr(lane, "run", run)
+    monkeypatch.setattr(sys, "argv", [
+        "run.py", "--central-image", "candidate",
+        "--bridge-python", sys.executable, "--provider-python", sys.executable,
+        "--results-root", str(tmp_path),
+    ])
+    assert lane.main() == 0
+
+
+@pytest.mark.parametrize("failure", [
+    None, "substring-only", "remaining", "inventory", "malformed", "nonstring", "timeout",
+])
+def test_docker_cleanup_confirms_absence_and_attempts_every_resource(monkeypatch, failure):
+    script = Path(__file__).with_name("test_restricted_supervisor_docker.py")
+    spec = importlib.util.spec_from_file_location("restricted_docker_case", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        inventory = "ls" in argv
+        name = (
+            argv[argv.index("--filter") + 1].removeprefix("name=^/?").removesuffix("$")
+            if inventory else argv[-1]
+        )
+        if not inventory:
+            if name == "worker" and failure == "timeout":
+                raise module.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+            return SimpleNamespace(returncode=1, stdout="", stderr="arbitrary localized removal diagnostic")
+        if name == "worker":
+            if failure == "timeout":
+                raise module.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+            if failure == "inventory":
+                return SimpleNamespace(returncode=1, stderr="daemon unavailable", stdout="")
+            if failure == "remaining":
+                return SimpleNamespace(returncode=0, stderr="", stdout='"worker"\n')
+            if failure == "malformed":
+                return SimpleNamespace(returncode=0, stderr="", stdout="{")
+            if failure == "nonstring":
+                return SimpleNamespace(returncode=0, stderr="", stdout="null")
+            if failure == "substring-only":
+                return SimpleNamespace(returncode=0, stderr="", stdout='"worker-suffix"\n')
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    if failure not in (None, "substring-only"):
+        with pytest.raises(AssertionError, match="cleanup|inventory|still exists"):
+            module._cleanup_docker(("worker", "central"), ("internal", "management"))
+    else:
+        module._cleanup_docker(("worker", "central"), ("internal", "management"))
+    assert {argv[-1] for argv in calls if "ls" not in argv} == {
+        "worker", "central", "internal", "management",
+    }
