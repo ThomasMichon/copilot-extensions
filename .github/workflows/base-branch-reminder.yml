@@ -270,7 +270,7 @@ jobs:
               ".github/workflows/ci.yml",
               ".github/workflows/validate-and-promote.yml",
           }
-          allowed = required | {".github/workflows/base-branch-reminder.yml"}
+          allowed = required | {".github/workflows/base-branch-reminder.yml", ".github/workflows/copilot-code-review.yml"}
           if not required <= declared or not declared <= allowed:
               raise RuntimeError("control manifest must name only the qualified release workflows")
           manifest = json.loads(raw)
