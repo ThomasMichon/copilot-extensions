@@ -134,7 +134,9 @@ upgrade contracts where those runtimes are used.
 ## Implementation sequence (agent-recommended)
 
 1. Land this vision/effort amendment; agree service-role, transport, delivery and
-   credential interfaces with their retained owners. Reconcile the saved dispatch
+   credential interfaces with their retained owners using the
+   [consumer contract proposal](pr-service-contract.md). Its logical operations
+   are not implemented routes or an owner-agreement receipt. Reconcile the saved dispatch
    integration against the broadened contract without enabling it prematurely.
 2. Finish the existing governed owner prerequisite and original reader diagnosis.
    Extend the PR-facing client/service seam and provider conformance without
@@ -151,7 +153,8 @@ upgrade contracts where those runtimes are used.
 ## Validation plan (agent-recommended)
 
 - [ ] Contract: agree the supported role lifecycle, Gateway route, credential
-  provider and event delivery interfaces with their current owners; unsupported
+  provider and event delivery interfaces with their current owners; resolve the
+  [owner-agreement checklist](pr-service-contract.md#owner-agreement-checklist). Unsupported
   dependencies fail explicitly instead of inventing a parallel implementation.
 - [ ] Unit: one operator owns the fleet; wrong fleet/service/account/namespace
   refuses, PR read/watch grants cannot mutate PRs or administer the fleet, and

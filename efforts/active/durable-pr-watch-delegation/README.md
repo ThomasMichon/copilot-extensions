@@ -175,9 +175,12 @@ _Agent-recommended implementation requirements._
 
 _Operator-required scope; agent-recommended implementation and validation._
 
-- [ ] Review and land the first-class PR plugin/service vision, single-operator
+- [x] Review and land the first-class PR plugin/service vision, single-operator
   fleet invariant and [fleet service plan](fleet-pr-service.md) before building
-  its new runtime paths.
+  its new runtime paths (confirmed by #7189).
+- [ ] Agree the [PR-service consumer contract](pr-service-contract.md) with the
+  retained Gateway, credential, dispatch and placement owners before wiring
+  unsupported routes or treating an isolated admission API as service authority.
 - [ ] Build out the existing PR plugin as the PR-domain client/service surface;
   preserve supported worktree publication policy and provider behavior through
   shared contracts rather than another forge implementation.
@@ -251,6 +254,46 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-18 - Concrete PR-service contract intake
+
+- Reconciled the fleet-service worktree with newly merged #7099. Its isolated
+  admission library validates existing observation/operation shapes; it is not
+  a PR registration route, durable delivery transport or serving policy owner.
+- Grounded the consumer proposal in the actual PR registry and callback
+  implementation: pending registration/event identities already exist, but
+  replace-by-subscriber-ID is not idempotent registration retry, local callback
+  argv is not a remote transport, and callback return success is not a remote
+  coordinator ACK protocol. The proposed shared consumer flow retains PR-owned
+  durable state and dispatch's existing generation fences.
+- Live owner-routing coordination has not established Gateway authority. An
+  attempted coordination channel returned `carrier_unavailable` (HTTP 503,
+  handshake `IncompleteReadError`); preserved that evidence without restart,
+  replacement or repair. The contract proposal and owner-agreement checklist
+  permit specific review while keeping those owners and the original reader
+  blocker intact; no runtime or live deployment changes are claimed.
+
+### 2026-10-18 - Fleet PR-service amendment reviewed and merged
+
+- #7189 merged into `dev` at `34c49cf34ec34bcddfa607eb0acc95526a6ce0ec`
+  after exact-head Copilot approval `5564926445`, no review threads and successful
+  required CI `39165380566`. The standing single-operator fleet boundary and
+  first-class PR-service implementation/validation plan have cleared review.
+- Reconciled the planning worktree onto the merged intent and retained the
+  Active parent and distinct fleet-service slice. Next resolve the retained
+  fleet owners' supported role, routing, credential and remote delivery
+  contracts. No runtime, service deployment or live authority changed.
+- Read the current `fleet-manager/docs/gateway-runtime.md` at the merged
+  source: its executable backend contract is index-specific, its enrolled roles
+  do not include a PR-service consumer, and its credential broker is explicitly
+  in-memory with restart uncertainty rather than a durable event queue.
+  #7188 therefore depends on the retained #6236/#5789 owners agreeing PR service
+  routing/enrollment and transport-appropriate durable delivery. Do not disguise
+  PRs as index corpora or use the credential broker as the subscription registrar.
+- The existing Windows receipt-read diagnosis remains open; its frozen repro
+  candidate and operator-run capture procedure are preserved. The scope
+  amendment neither clears that blocker nor completes installation-cell
+  adoption, saved dispatch integration, release or authorized deployment.
 
 ### 2026-10-18 - First-class PR service and single-operator fleet scope
 
