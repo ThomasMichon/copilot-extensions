@@ -28,6 +28,76 @@ repo = _repo_fixture
 no_ambient_git_identity = _identity_fixture
 
 
+@pytest.mark.parametrize("helper", ["workflow", "obsolete"])
+def test_native_pinned_materializer_expands_current_flat_sources(tmp_path, helper):
+    root = Path(__file__).resolve().parent.parent
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
+    if not source_owned(workflow["jobs"]):
+        control = subprocess.run(
+            ["git", "--no-replace-objects", "show",
+             "refs/remotes/origin/main:.github/workflows/validate-and-promote.yml"],
+            cwd=root, env=env, capture_output=True, text=True, check=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        workflow = yaml.safe_load(control.stdout)
+    pin = workflow["env"]["RELEASE_HELPERS_SHA"]
+    assert re.fullmatch(r"[0-9a-f]{40}", pin), "release helpers require an immutable Git commit"
+    if helper == "obsolete":
+        pin = "c2caa135dbb5c1d6bbacfee5c48f9b6a0c17d104"
+    tools = tmp_path / "reviewed-helpers" / "tools"
+    tools.mkdir(parents=True)
+    for name in (
+        "materialize_main", "materialize_installer_engine", "materialize_launch_wrapper_assets",
+        "nested_uv_editable_ref", "uv_editable_ref", "installer_engine_ref",
+        "launch_wrapper_assets_ref", "standalone_consumers",
+    ):
+        result = subprocess.run(
+            ["git", "--no-replace-objects", "show", f"{pin}:tools/{name}.py"],
+            cwd=root, env=env, capture_output=True, check=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        (tools / f"{name}.py").write_bytes(result.stdout)
+    destination = tmp_path / "candidate" / "plugins" / "agent-machines"
+    destination.mkdir(parents=True)
+    shutil.copyfile(root / "plugins/agent-machines/pyproject.toml", destination / "pyproject.toml")
+    script = """
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import materialize_main
+root, destination = map(Path, sys.argv[2:])
+report = materialize_main.materialize_uv_editable_ref_into(
+    source_consumer_dir=root / "plugins/agent-machines",
+    dest_consumer_dir=destination,
+    canonical_root=root,
+    dest_root=destination.parent.parent,
+)
+print(json.dumps(report))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(tools), str(root), str(destination)],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    report = json.loads(result.stdout)
+    refusals = [line for line in report if line.startswith("SKIP")]
+    if helper == "obsolete":
+        assert any("agent-installation-context" in line and "editable = true" in line
+                   for line in refusals), report
+        return
+    assert report and not refusals, f"pinned release helpers cannot materialize current source: {report}"
+    context = destination / "libs/installation-context"
+    assert (context / "installation_context.py").read_bytes() == (
+        root / "libs/installation-context/installation_context.py"
+    ).read_bytes()
+    assert 'path = "libs/installation-context"' in (destination / "pyproject.toml").read_text()
+    nested = (destination / "libs/installer-readiness/pyproject.toml").read_text()
+    assert 'path = "../installation-context"' in nested
+    assert "editable" not in nested
+
+
 class HostedRelease:
     def __init__(self, directory: Path):
         self.directory = directory

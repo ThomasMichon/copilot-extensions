@@ -984,13 +984,59 @@ proposal.
 
 ## Journal
 
-**Latest outcome:** source #7124, Main control #7129 and source repair #7152
-are merged. Matching Main activation for #7152 remains open. Fresh
-qualification `39024583508` failed the unchanged Worktrees aggregate budget
-before candidate publication or product merge. Main remains paused and
-unqualified. Historical preparation entries below retain their original
-in-flight state; the later outcome and disconnected diagnostic are recorded
-in their own 2026-10-17 entries.
+**Latest outcome:** source repairs #7152 and #7164 and matching Main activation
+#7166 are merged. Fresh qualification `39123233231` passed all fourteen source
+validation jobs, then failed composed-candidate materialization because its
+trusted helper pin predates reviewed retained-flat support from #6944. No
+candidate publication or product merge occurred. Main helper activation #7167
+is now merged, with the pause and exposed product unchanged. Fresh full
+qualification remains open. Historical preparation entries below retain their
+original in-flight state; subsequent entries record the later outcomes.
+
+### 2026-10-18 - Source suites pass; pinned materializer compatibility blocks composition
+
+Source #7164 merged as `0b5b636802a6988b59af45c9c5174d281be9592d` after actual
+current-head Copilot approval and all original required checks succeeded.
+Main control #7166 then merged as
+`c75fbdc597200e22210b634037accfbe0e46d260`, activating only the two reviewed
+workflow declarations. Normal Main merge required no administrator override.
+The pause, exposed product source, control manifest and helper pin were
+byte-identical before and after that workflow activation.
+
+Fresh paused qualification `39123233231` admitted exact Dev
+`938fc9aa1abe1883374748e6b274aa7cfcf01f3f` from trusted Main `c75fbdc597`.
+All fourteen source-validation jobs passed. The full Worktrees step completed
+in 570 seconds within its unchanged 900-second aggregate; its separate
+coverage collection and upload also succeeded. This is actual hosted source
+proof, not a qualified product release or a complete latency acceptance.
+
+The next composed-artifact build refused two explicit noneditable
+installation-context references, direct from Agent Machines and nested through
+installer-readiness. Reviewed #6944 deliberately retained those flat-module
+references and added compatible canonical materialization. The active immutable
+helper predates that support. Changing the manifests to editable sources would
+break the installed-layout contract; weakening materialization refusal would
+ship unresolved references.
+
+The bounded compatibility regression executes the actual pinned helper import
+closure against the current source manifests and libraries, rather than testing
+the newer source materializer in its place. It reproduces both old-pin refusals
+and verifies the replacement's copied bytes and direct/nested rewrites. Both
+existing artifact-contract lanes already select this module and the affected
+source paths. A full non-pushing composition using the reviewed replacement
+helper also succeeds against the exact failed source and Main base.
+
+The failed run is terminal and is not retried unchanged. No candidate,
+qualification receipt, artifact publication or product merge occurred.
+Workflow-only Main activation #7167 merged as
+`e86100f35398eeb7fa2a168f039952ff1a2673d1`, after actual current-head Copilot
+approval with no findings and the enforced Main source gate passed. Normal
+merge used no administrator override. Only the immutable helper scalar changed
+to reviewed `b576e17ec2280c27866b0be550ff7b0604cfaa58`; the pause, product state,
+control manifest and every release gate remain unchanged. All 46 cases in the
+artifact-readiness suite now pass against that actual Main pin, including the
+old-helper refusal. Fresh complete qualification, normal resume, natural
+release cycles and client compatibility remain open.
 
 ### 2026-10-18 - Native fixture repair merged; bounded full-suite recovery continues
 
