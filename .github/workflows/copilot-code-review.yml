@@ -7,8 +7,8 @@ permissions: {}
 
 jobs:
   copilot-setup-steps:
-    # Keep hosted until the isolated ARC capacity is explicitly qualified.
-    runs-on: ubuntu-latest
+    # Dedicated isolated ephemeral capacity; do not share the CI runner pool.
+    runs-on: copilot-extensions-review
     permissions: {}
     steps:
       - name: Complete minimal review setup
