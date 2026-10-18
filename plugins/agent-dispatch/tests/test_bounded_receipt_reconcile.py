@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -933,6 +934,27 @@ def test_discovery_and_receipt_wait_share_one_cycle_budget():
     finally:
         gate.set()
         daemon.shutdown()
+
+
+@pytest.mark.parametrize("failure", ["creation", "communication"])
+@pytest.mark.parametrize("error_type", [OSError, subprocess.SubprocessError])
+def test_captured_command_errors_hide_provider_details(tmp_path, monkeypatch, failure, error_type):
+    from agent_dispatch import companion_capture
+
+    error = error_type("private-path-and-command-details")
+
+    def fail(*args, **kwargs):
+        raise error
+
+    process = SimpleNamespace(communicate=fail)
+    monkeypatch.setattr(
+        companion_capture.subprocess, "Popen",
+        fail if failure == "creation" else lambda *args, **kwargs: process,
+    )
+    with pytest.raises(CompanionIndeterminate) as raised:
+        companion._run_captured(("fixture",), cwd=str(tmp_path), environment={}, timeout=4)
+    assert str(raised.value) == "companion command unavailable"
+    assert raised.value.__cause__ is error
 
 
 def test_captured_timeout_includes_process_creation(tmp_path, monkeypatch):

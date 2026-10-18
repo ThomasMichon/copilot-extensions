@@ -302,7 +302,10 @@ class BoundedReconciliation:
             log.warning("declaration discovery remains pending; retaining confirmed declarations")
             return self._last_declared
         except Exception as exc:
-            log.exception("failed to read declared profile set; retaining confirmed declarations")
+            log.warning(
+                "failed to read declared profile set: error_type=%s; retaining confirmed declarations",
+                type(exc).__name__,
+            )
             if self._last_declared is None:
                 raise CompanionIndeterminate(
                     "declaration discovery unavailable; no confirmed declaration snapshot"

@@ -148,6 +148,10 @@ Status-file read errors expose fixed I/O, JSON and object-shape classifications,
 not filesystem paths or raw exception text.
 Receipt metadata failures likewise expose only a fixed unavailable category,
 not the underlying filesystem exception or receipt path.
+Captured command failures expose a fixed unavailable message. Declaration
+discovery failures log only their error type, without exception text or
+tracebacks; confirmed declarations remain retained and cold discovery stays
+indeterminate.
 A controller without a callable progress observation reports
 `receipt-progress-unsupported`; only a completed observation may report `[]`.
 Data/state failures in the final summary follow the same classified best-effort

@@ -83,6 +83,30 @@ def test_slow_native_status_identity_is_off_master_and_coalesced(tmp_path, monke
         daemon.shutdown()
 
 
+@pytest.mark.parametrize("confirmed", [False, True])
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError])
+def test_declaration_failure_logs_only_sanitized_category(caplog, confirmed, error_type):
+    def unavailable():
+        raise error_type("private-path-and-provider-details")
+
+    daemon = SupervisorDaemon(FakeClient([]), "host", declared_source=unavailable)
+    previous = [_reg("confirmed", machine="host")] if confirmed else None
+    daemon._last_declared = previous
+    try:
+        if confirmed:
+            assert daemon._declared() is previous
+        else:
+            with pytest.raises(CompanionIndeterminate, match="no confirmed declaration snapshot"):
+                daemon._declared()
+        records = [record for record in caplog.records if "declared profile set" in record.message]
+        assert len(records) == 1
+        assert records[0].exc_info is None
+        assert f"error_type={error_type.__name__}" in records[0].message
+        assert "private-path-and-provider-details" not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
 def test_confirmed_registry_snapshot_retains_nested_spec_isolation(monkeypatch):
     registration = _reg("unit", machine="host")
     registration["spec"]["nested"] = {"labels": ["original"]}

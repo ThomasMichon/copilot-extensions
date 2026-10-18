@@ -46,4 +46,4 @@ def _run_captured(
             command, process.returncode, stdout=stdout, stderr=stderr,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        raise lifecycle.CompanionIndeterminate(str(exc)) from exc
+        raise lifecycle.CompanionIndeterminate("companion command unavailable") from exc
