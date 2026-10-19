@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -326,3 +327,113 @@ def test_close_releases_reply_fd_before_coroutine_claim(active_adapter):
         assert os.read(reader, 1) == b""
     finally:
         os.close(reader)
+
+
+@pytest.mark.parametrize("preparing", [False, True])
+@pytest.mark.parametrize("ended", [False, True])
+def test_same_boot_replacement_reconciles_persisted_notification(
+    active_adapter, notification_module, preparing, ended,
+):
+    first, first_bus, journal = active_adapter
+    first_bus.prepare(True)
+    notification_id = journal.snapshot()[0]["notification_id"]
+    if ended:
+        journal.record_exit(
+            positive(), reason="unknown", detail="native-end-cause-unconfirmed",
+            end_consumed=True,
+        )
+    first.close()
+    bus = FakeLogindBus()
+    bus.preparing = preparing
+    replacement = notification_module.LogindShutdownAdapter(
+        journal, HostEpoch("linux", "environment-one", "boot-one"),
+        bus_factory=lambda: bus,
+    )
+    try:
+        replacement.start()
+        pump_until(replacement, lambda: replacement.status["status"] == (
+            "shutdown-pending" if preparing else "watching"
+        ))
+        if preparing:
+            assert journal.snapshot()[0]["notification_id"] == notification_id
+            bus.prepare(False)
+            pump_until(replacement, lambda: replacement.status["status"] == "watching")
+        row = journal.snapshot()[0]
+        assert row["notification_id"] == ""
+        assert row["disposition"] == ("unknown" if ended else "live")
+        assert row["end_consumed"] is ended
+    finally:
+        replacement.close()
+        bus.close()
+
+
+def test_replacement_cancels_all_current_epoch_ids_but_not_foreign_or_closed(
+    tmp_path, notification_module,
+):
+    journal = RecoveryJournal(tmp_path)
+    first = positive()
+    second = replace(first, worktree_id="example-two")
+    closed = replace(first, worktree_id="example-closed")
+    foreign = replace(first, worktree_id="example-foreign", boot_id="old-boot")
+    journal.observe(first)
+    journal.observe(closed)
+    journal.shutdown_pending(
+        "linux", "environment-one", "boot-one", notification_id="older-one",
+    )
+    journal.record_exit(closed, reason="intentional", detail="operator-stop")
+    journal.observe(second)
+    journal.shutdown_pending(
+        "linux", "environment-one", "boot-one", notification_id="older-two",
+    )
+    journal.observe(foreign)
+    journal.shutdown_pending(
+        "linux", "environment-one", "old-boot", notification_id="foreign-one",
+    )
+    bus = FakeLogindBus()
+    adapter = notification_module.LogindShutdownAdapter(
+        journal, HostEpoch("linux", "environment-one", "boot-one"),
+        bus_factory=lambda: bus,
+    )
+    try:
+        adapter.start()
+        pump_until(adapter, lambda: adapter.status["status"] == "watching")
+        rows = {row["last_positive"]["worktree_id"]: row for row in journal.snapshot()}
+        for key in ("example-one", "example-two"):
+            assert rows[key]["notification_id"] == ""
+            assert rows[key]["disposition"] == "live"
+        assert rows["example-closed"]["disposition"] == "intentional"
+        assert rows["example-foreign"]["notification_id"] == "foreign-one"
+        assert rows["example-foreign"]["disposition"] == "shutdown-pending"
+    finally:
+        adapter.close()
+        bus.close()
+
+
+def test_replacement_cannot_report_watching_before_cancellation_is_durable(
+    active_adapter, notification_module, monkeypatch,
+):
+    from worktree_manager.restart_evidence import RecoveryEvidenceError
+
+    first, first_bus, journal = active_adapter
+    first_bus.prepare(True)
+    first.close()
+    bus = FakeLogindBus()
+    adapter = notification_module.LogindShutdownAdapter(
+        journal, HostEpoch("linux", "environment-one", "boot-one"),
+        bus_factory=lambda: bus,
+    )
+
+    def denied(*args, **kwargs):
+        assert adapter.status["status"] != "watching"
+        raise RecoveryEvidenceError("cancel write denied")
+
+    monkeypatch.setattr(journal, "shutdown_cancelled", denied)
+    try:
+        adapter.start()
+        pump_until(adapter, lambda: adapter.status["status"] == "blocked")
+        assert "cancel write denied" in adapter.status["blocker"]
+        assert journal.snapshot()[0]["disposition"] == "shutdown-pending"
+        assert os.read(bus.readers[-1], 1) == b""
+    finally:
+        adapter.close()
+        bus.close()

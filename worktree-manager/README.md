@@ -485,6 +485,12 @@ last-positive generations transactionally, then releases the inhibitor;
 cancellation durably reconciles the matching notification before reacquiring.
 If native End preceded cancellation, its shutdown-interruption claim becomes
 unknown with a sticky cancelled-shutdown marker, not a revived execution.
+After a same-boot pause or replacement, the adapter recovers persisted
+notification identities for this exact environment/boot. An initially cancelled
+native state reconciles those identities durably before reporting `watching`;
+an ongoing shutdown retains them for its later cancellation. Batch cancellation
+is one transaction and cannot affect foreign epochs or explicitly closed
+generations.
 Checkpoint lock contention fails immediately rather than spending the delay
 budget waiting for SQLite, and a progress deadline can roll back an expired
 checkpoint. This is not a hard bound on operating-system filesystem stalls.

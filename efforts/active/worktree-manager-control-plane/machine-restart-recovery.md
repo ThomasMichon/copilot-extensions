@@ -484,3 +484,11 @@ The umbrella effort remains Active independently of this slice's completion.
   native-cause regressions failed first. Matching cancellation now makes that
   ended generation unknown, clears its notification and preserves the sticky
   cancelled-shutdown marker; an explicit operator closure stays closed.
+- Provider review then identified lost notification identity after same-boot
+  adapter replacement. Five new regressions failed for initially cancelled and
+  still-preparing native states, ended/live generations, and multiple retained
+  IDs. Startup now recovers only this environment/boot's IDs, reconciles initial
+  cancellation before reporting `watching`, and retains ongoing IDs for later
+  atomic batch cancellation. Foreign epochs, replacement executions and
+  explicit operator closures retain their fences. A denied cancellation write
+  leaves the adapter blocked rather than reporting readiness.

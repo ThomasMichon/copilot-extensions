@@ -63,6 +63,7 @@ class LogindShutdownAdapter:
         self._handler_added = False
         self._subscribed = False
         self._notification_id: str | None = None
+        self._notification_ids: set[str] = set()
         self._signal_sequence = 0
         self._delay_seconds = 0.0
         self.status: dict = {"status": "inactive", "qualified": False}
@@ -153,6 +154,14 @@ class LogindShutdownAdapter:
 
     async def _setup(self) -> None:
         try:
+            self._notification_ids = {
+                row["notification_id"] for row in self.journal.snapshot()
+                if row["notification_id"]
+                and row["disposition"] in {"shutdown-pending", "shutdown-interrupted"}
+                and all(row["last_positive"][field] == getattr(self.epoch, field) for field in (
+                    "platform", "environment_id", "boot_id",
+                ))
+            }
             self._bus = self._bus_factory()
             await asyncio.wait_for(self._bus.connect(), timeout=3.0)
             self._bus.add_message_handler(self._message)
@@ -193,11 +202,14 @@ class LogindShutdownAdapter:
             if self.status["status"] == "blocked":
                 return
             # A signal may have reached the handler while these calls were pending.
-            if self.status["status"] == "connecting":
-                self._state("watching")
             if self._signal_sequence == sequence:
                 self._prepare(preparing)
-        except (OSError, ValueError, DBusError, NotificationError, asyncio.TimeoutError) as exc:
+            if self.status["status"] == "connecting":
+                self._state("watching")
+        except (
+            OSError, ValueError, DBusError, RecoveryEvidenceError,
+            NotificationError, asyncio.TimeoutError,
+        ) as exc:
             self._block(exc)
 
     def _prepare(self, preparing: bool) -> None:
@@ -211,6 +223,7 @@ class LogindShutdownAdapter:
                 if self._fd is None:
                     raise NotificationError("Shutdown arrived without an active delay inhibitor.")
                 self._notification_id = str(uuid4())
+                self._notification_ids.add(self._notification_id)
                 try:
                     self.journal.shutdown_pending(
                         self.epoch.platform, self.epoch.environment_id, self.epoch.boot_id,
@@ -220,14 +233,18 @@ class LogindShutdownAdapter:
                     self._state("shutdown-pending")
                 finally:
                     self._release()
-            elif self._notification_id is not None:
+            elif self._notification_ids:
                 self.journal.shutdown_cancelled(
                     self.epoch.platform, self.epoch.environment_id, self.epoch.boot_id,
-                    notification_id=self._notification_id,
+                    notification_id=frozenset(self._notification_ids),
                 )
                 self._notification_id = None
-                self._state("rearming")
-                self._schedule(self._rearm())
+                self._notification_ids.clear()
+                if self._fd is None:
+                    self._state("rearming")
+                    self._schedule(self._rearm())
+                else:
+                    self._state("watching")
         except (OSError, ValueError, RecoveryEvidenceError, NotificationError) as exc:
             self._block(exc)
 

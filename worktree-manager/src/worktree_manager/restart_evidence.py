@@ -335,12 +335,22 @@ class RecoveryJournal:
             return {"applied": True}
 
     def _shutdown_event(
-        self, platform: str, environment_id: str, boot_id: str, notification_id: str, *,
+        self, platform: str, environment_id: str, boot_id: str,
+        notification_ids: frozenset[str], *,
         cancelled: bool, deadline: float | None = None,
     ) -> None:
+        # One persisted ID per subject, plus this adapter's current native event.
+        if (
+            not isinstance(notification_ids, frozenset) or not notification_ids
+            or len(notification_ids) > _MAX_SUBJECTS + 1
+            or not cancelled and len(notification_ids) != 1
+        ):
+            raise ValueError("Invalid recovery notification identity budget")
+        for identifier in notification_ids:
+            _text(identifier, "notification", 256)
         for name, value in (
             ("platform", platform), ("environment", environment_id),
-            ("boot", boot_id), ("notification", notification_id),
+            ("boot", boot_id),
         ):
             _text(value, name, 256)
         with self._transaction(deadline=deadline) as conn:
@@ -358,7 +368,7 @@ class RecoveryJournal:
                 if cancelled:
                     if (
                         row["disposition"] not in {"shutdown-pending", "shutdown-interrupted"}
-                        or row["notification_id"] != notification_id
+                        or row["notification_id"] not in notification_ids
                     ):
                         continue
                     interrupted = row["disposition"] == "shutdown-interrupted"
@@ -373,7 +383,10 @@ class RecoveryJournal:
                 else:
                     if row["disposition"] != "live":
                         continue
-                    row.update(disposition="shutdown-pending", notification_id=notification_id)
+                    row.update(
+                        disposition="shutdown-pending",
+                        notification_id=next(iter(notification_ids)),
+                    )
                 self._append(conn, evidence, row)
 
     def shutdown_pending(
@@ -382,14 +395,19 @@ class RecoveryJournal:
     ) -> None:
         """Freeze eligible positive generations before shutdown teardown."""
         self._shutdown_event(
-            platform, environment_id, boot_id, notification_id, cancelled=False, deadline=deadline,
+            platform, environment_id, boot_id, frozenset({notification_id}),
+            cancelled=False, deadline=deadline,
         )
 
     def shutdown_cancelled(
-        self, platform: str, environment_id: str, boot_id: str, *, notification_id: str,
+        self, platform: str, environment_id: str, boot_id: str, *,
+        notification_id: str | frozenset[str],
     ) -> None:
-        """Cancel only the matching notification, never revive an explicit exit."""
-        self._shutdown_event(platform, environment_id, boot_id, notification_id, cancelled=True)
+        """Cancel matching notification identities atomically, never explicit exits."""
+        identifiers = (
+            frozenset({notification_id}) if isinstance(notification_id, str) else notification_id
+        )
+        self._shutdown_event(platform, environment_id, boot_id, identifiers, cancelled=True)
 
     def snapshot(self, *, recover_existing: bool = False) -> list[dict]:
         """Read evidence without creating absent storage or launch intent.
