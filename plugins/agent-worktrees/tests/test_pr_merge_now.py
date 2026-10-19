@@ -111,7 +111,9 @@ class _FakeProvider:
             merged=bool(self.calls) and not self._merge_pending,
         )
 
-    def get_snapshot(self, repo, number, *, api_base="", token=None):
+    def get_snapshot(
+        self, repo, number, *, api_base="", token=None, strict_safety=False,
+    ):
         head = self._live_head if len(self._live_head) == 40 else HEAD
         return pc.PRSnapshot(
             pr_state="open", head_sha=head, mergeable=True,
@@ -851,6 +853,44 @@ def test_unreadable_mutation_evidence_blocks_every_write(monkeypatch, prefer_aut
         _args(), _prcfg(prefer_auto_merge=prefer_auto), _self_merge_flow(), apply=True,
     ) == 1
     assert fake.auto_calls == fake.calls == fake.review_gate_calls == []
+
+
+@pytest.mark.parametrize("mutation", ["null-label", "missing-fields"])
+def test_direct_mode_rejects_malformed_raw_safety_metadata(monkeypatch, mutation):
+    import json
+    import subprocess
+
+    from agent_worktrees.providers import github
+
+    provider = github.GitHubProvider()
+    _patch_provider(monkeypatch, provider)
+    calls = []
+
+    def run_cli(argv, **kwargs):
+        calls.append(argv)
+        if argv[:2] == ["gh", "api"] and any(
+            arg.endswith("/pulls/7") for arg in argv
+        ):
+            payload = {
+                "state": "open", "merged": False, "mergeable": True,
+                "head": {"sha": HEAD}, "base": {"ref": "dev"},
+                "user": {"login": "author"}, "title": "Ready",
+                "draft": False, "labels": [],
+            }
+            if mutation == "null-label":
+                payload["labels"] = [None]
+            else:
+                payload.pop("title")
+                payload.pop("draft")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+        raise AssertionError(f"unexpected mutation after unsafe snapshot: {argv}")
+
+    monkeypatch.setattr(github, "run_cli", run_cli)
+    assert m._pr_merge_now(
+        _args(), _prcfg(prefer_auto_merge=False),
+        _self_merge_flow(), apply=True,
+    ) == 1
+    assert not any(argv[:3] == ["gh", "pr", "merge"] for argv in calls)
 
 
 def test_new_unsafe_evidence_after_snapshot_blocks_every_write(monkeypatch):

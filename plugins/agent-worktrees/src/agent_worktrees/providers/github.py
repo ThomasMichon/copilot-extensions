@@ -283,7 +283,8 @@ class GitHubProvider:
         return f"gh pr ready failed for {repo}#{number}: {detail}"
 
     def get_snapshot(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        strict_safety: bool = False,
     ) -> PRSnapshot:
         """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
         Mirrors the gitea provider over GitHub's REST API (near-identical
@@ -316,6 +317,22 @@ class GitHubProvider:
             raise ProviderError(f"gh returned non-JSON PR payload: {exc}") from exc
         if not isinstance(pr, dict):
             raise ProviderError(f"unexpected gh PR payload for {repo}#{number}")
+        if strict_safety:
+            labels_raw = pr.get("labels")
+            if (
+                not isinstance(pr.get("draft"), bool)
+                or not isinstance(pr.get("title"), str)
+                or not isinstance(labels_raw, list)
+                or any(
+                    not isinstance(label, dict)
+                    or not isinstance(label.get("name"), str)
+                    or not label["name"].strip()
+                    for label in labels_raw
+                )
+            ):
+                raise ProviderError(
+                    f"GitHub mutation safety metadata is incomplete for {repo}#{number}"
+                )
 
         # GitHub computes ``mergeable`` asynchronously and reports it null on a
         # freshly-opened PR; only a real bool is a known state (else None). It

@@ -382,6 +382,7 @@ def _pr_merge_now(
         try:
             snap = provider.get_snapshot(
                 args.repo, args.pr, api_base=base, token=tok,
+                strict_safety=True,
             )
         except (ProviderError, OSError, ValueError, TypeError, AttributeError) as exc:
             return refuse_mutation(
