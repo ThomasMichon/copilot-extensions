@@ -196,6 +196,7 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
 Historical entries are preserved in dated journals. The Plan and Validation Plan
 above remain the completion gate; journal milestones do not close the effort.
 
+- [2026-10-19 - reviewed documentation corrections](journal/2026/10.19-reviewed-documentation-corrections.md)
 - [2026-10-16 - configuration acceptance](journal/2026/10.16-configuration-acceptance.md)
 - [2026-10-15 - diagnostics and release qualification](journal/2026/10.15-diagnostics-and-release-qualification.md)
 - [2026-10-14 - transport and deployment gates](journal/2026/10.14-transport-and-deployment-gates.md)
