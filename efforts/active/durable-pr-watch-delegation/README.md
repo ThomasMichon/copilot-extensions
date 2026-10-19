@@ -256,6 +256,32 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-19 - Add the required live Windows launch regression
+
+- The bootstrap repair is published as #7240 at `d1ae5e7e`.
+  Required CI `39243373833` succeeds, including the previously missing
+  customization consumer, and native acceptance `39243565444` passes all
+  fifteen selected jobs. These functional gates do not satisfy the separate
+  live window/focus requirement for the new native child-launch path.
+- Actual review `5570850298` identifies that missing proof as a Medium
+  finding. Add the opt-in live Windows flow required by the existing launch
+  pattern; do not treat mocked flags or output assertions as a substitute.
+- For both Windows PowerShell and PowerShell 7, the flow launches the actual
+  wrapper from a real windowless `pythonw.exe` parent, runs a real local
+  console descendant across two complete invocations, and reuses the canonical
+  Win32 observer. Additional sampling records every new visible window and
+  every foreground transition, including baseline windows, without recording
+  titles or user content. The observer must stay alive and sample both cycles.
+- A separate forced timeout captures all four native participants, verifies
+  each is in the caller's non-breakaway Job, terminates that Job with
+  zero-active-process confirmation, and requires each captured native handle
+  to signal exit. No daemon-survival or remote-routing behavior is introduced.
+- This flow runs only in the already opt-in disposable Windows hosted-account
+  normal-upgrade scenario. Local checks compile both fixture programs and
+  explicitly skip the two live cases on the shared host; current-head native
+  execution remains required before resolving the finding or merging.
+  The parent remains Active with no install or rollout authorized.
+
 ### 2026-10-19 - Fix the post-merge native bootstrap composition regression
 
 - Post-merge Dev CI `39232925741` blocks release of #7160. Its only failing

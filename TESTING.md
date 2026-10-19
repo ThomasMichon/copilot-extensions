@@ -468,6 +468,17 @@ profile-folder API (Windows). It never redirects HOME or USERPROFILE in this
 lane. The hosted job discards the whole account afterward, while each test
 gracefully stops only its own original, natively captured owners.
 
+The Windows normal-upgrade scenario also runs the opt-in bootstrap admission
+visibility/cleanup probe for Windows PowerShell and PowerShell 7. It launches
+the actual wrapper from a real `pythonw.exe` parent, exercises an unflagged
+local console descendant across two invocations, and uses the shared live
+Win32 window observer plus stricter foreground tracking. A separate forced
+timeout proves all four native participants belong to the caller's Job and
+exit when that Job is terminated, with zero active processes confirmed.
+The probe is restricted to the disposable hosted-account lane, not the
+operator's desktop or fast required CI. It creates no daemon or remote route
+and does not test or authorize deployment.
+
 These are manual acceptance jobs, not additions to required fast CI. Each
 composite case runs separately under a 1,200-second group and 1,800-second
 aggregate bound; actual service cutover and native-exit deadlines remain
