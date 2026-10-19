@@ -906,14 +906,19 @@ accumulated on `dev` so far. Treat a red `dev` build as the first
 priority: land a forward fix immediately, or revert the breaking merge,
 rather than leaving it red at leisure.
 
-### Expect roughly 10-20 minutes, and know what to watch
+### Delivery targets and what to watch
 
-Budget on the order of **10-20 minutes** from a green `dev` merge to a real
-`main` release: `CI` on `dev` (a few minutes) → `Validation Gate` →
-`Promote` opens a generated `release/promote-<run id>` candidate PR
-against `main` → that candidate PR's own fast `main source gate` check →
-exact-head squash merge in a separate, checkout-free job using the non-admin
-`GITHUB_TOKEN`/Actions identity. The owner `APERTURE_RELEASE_TOKEN` creates
+Target **thirty minutes** for validate-and-promote, not an assumed ten-to-twenty
+minute guarantee. Ordinary PR event-to-required-gate completion targets under
+ten minutes including queueing; a one-hour promotion allowance requires separate
+acceptance of the local-Dev workflow. Actual timing and release acceptance
+remain campaign gates.
+
+The [source-owned controller contract](pipelines/source-owned-release-identity.md)
+owns qualification-before-PR ordering, single active promotion admission and
+job-only recovery without duplicate full qualification. Both controller profiles
+retain exact-head squash merge in a separate, checkout-free job using the
+non-admin `GITHUB_TOKEN`/Actions identity. The owner `APERTURE_RELEASE_TOKEN` creates
 the candidate PR and publishes artifacts, but never authorizes this routine
 merge. To confirm a change actually shipped rather than
 assuming the `dev` merge itself was the release:
@@ -923,7 +928,13 @@ waiting for required checks and its exact generated PR to merge. It does not
 arm a head-independent auto-merge request. The waiter verifies the PR identity
 before the atomic expected-head merge, requires strict server-enforced
 base freshness on the existing main source gate, and reports a bounded timeout,
-closed-unmerged state or provider error as a failure. The release tag uses that
+closed-unmerged state or provider error as a failure.
+
+#### Legacy timestamp tags and post-merge verification
+
+The following timestamp-tag/postmerge-dispatch details apply to the legacy Dev
+controller and historical receipts, not the source-owned Main generation's
+premerge publication boundary. The release tag uses that
 PR's actual merge commit, even if `main` advances again before tagging.
 `tools/tag_promotion.py` provides the intended naming for that tag:
 `<stem>-<merge sha8>`, where the stem (`promote-<UTC timestamp>`) is the

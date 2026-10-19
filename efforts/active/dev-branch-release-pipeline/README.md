@@ -1049,6 +1049,50 @@ proposal.
 
 ## Journal
 
+### 2026-10-18 - Reviewed lifecycle charter implemented locally; Main activation pending
+
+Plan amendment #7199 merged as
+`fd9294796fa9164bbea105a39a16ca5dae18e632` after current-head Copilot approval
+and all three original required checks passed. The local source slice adds a
+complete read-only active-PR inventory, deferred-advance scheduling and stable
+qualification-origin output. The existing trusted dispatcher handles successful
+CI/promoter completions and owner-authored Main closures without executing PR
+code or creating another workflow/job.
+
+Prepared Main control data is derived from the actual preserved controller, not
+the legacy Dev template. It prepares a branch without opening a PR, qualifies
+the complete generated consumer, publishes and reads back immutable source
+assets, then opens the ready PR inside the already credentialed publisher.
+The separate merger remains checkout-free, secret-free and nonadministrative.
+Publication/merge-job recovery retains the original qualification owner; an
+uncertain merge response is reconciled by bounded readback without another
+blind write. Normal already-current sources avoid duplicate source validation;
+explicit qualification-only operation remains available.
+
+Deferred CI while a PR is active is recovered after actual merge or explicit
+retirement/resume. Successful no-ops cannot recursively dispatch; unchanged
+retired sources are not retried automatically, and stale completion events do
+not take progress back from a newer generation. Source/generated/native
+coverage and all nine baseline requirements are unchanged. Full-suite/baseline
+coalescing remains a separately measured follow-through item, not an excuse to
+drop a required execution profile.
+
+The exact prepared controller passes the existing 24 publication/freshness
+boundary cases and 11 lifecycle cases, including literal PR-opening negative
+controls, stable-origin retry, uncertain-write readback and real admission-CLI
+trigger transport. Broader source policy checks exposed coupled event-condition
+test assumptions; their restricted evaluator is retained with explicit new
+closed-event contexts. No local independent-review verdict is claimed when its
+prepared-data inputs are inaccessible. Normal source and actual Main PR review
+remain mandatory before activation.
+
+Main itself is still unchanged and paused. The prepared helper pin is not an
+activation receipt; it must select the actual reviewed merged source that
+contains these helpers. Candidate-only Main CI enrollment preserves bootstrap
+operation before those test files ship, and Bridge keeps the same two-worker
+policy and unchanged eight-minute bound. Fresh qualification, actual Main merge,
+publication/resume, two natural cycles and client acceptance remain open.
+
 ### 2026-10-18 - Candidate repair merged; retain promotion ownership beyond run lifetime
 
 Source repair #7187 merged as

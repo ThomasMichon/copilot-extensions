@@ -26,7 +26,10 @@ def test_dependency_version_updates_use_the_contribution_branch():
 def test_one_trusted_followup_keeps_jobs_and_credentials_independent():
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     triggers = workflow.get("on", workflow.get(True))
-    assert triggers == {"workflow_run": {"workflows": ["CI"], "types": ["completed"]}}
+    assert triggers == {
+        "workflow_run": {"workflows": ["CI", "Validate and promote dev to main"], "types": ["completed"]},
+        "pull_request_target": {"branches": ["main"], "types": ["closed"]},
+    }
     assert not (WORKFLOW.parent / "identifier-leak-guard.yml").exists()
     assert "concurrency" not in workflow
     assert workflow["permissions"] == {"contents": "read"}
@@ -35,7 +38,9 @@ def test_one_trusted_followup_keeps_jobs_and_credentials_independent():
     assert "needs" not in dispatch and "needs" not in scan
     assert "github.event.workflow_run.conclusion == 'success'" in dispatch["if"]
     assert "github.event.workflow_run.event != 'pull_request'" in dispatch["if"]
-    assert dispatch["permissions"] == {"contents": "write"}
+    assert dispatch["permissions"] == {
+        "contents": "write", "pull-requests": "read", "actions": "read",
+    }
     assert scan["permissions"] == {
         "contents": "read", "pull-requests": "read", "issues": "write", "checks": "write",
     }
@@ -385,12 +390,47 @@ def test_only_committed_same_repo_dev_ci_can_refresh_baseline(
     ("workflow_dispatch", "success", True),
 ])
 def test_only_committed_or_manual_success_can_enter_the_filter(event, conclusion, expected):
+    assert _filter_can_run(event=event, conclusion=conclusion) is expected
+
+
+def _filter_can_run(**changes: str) -> bool:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     condition = workflow["jobs"]["filter-and-dispatch"]["if"]
-    executable = condition.replace(
-        "github.event.workflow_run.conclusion", "conclusion",
-    ).replace("github.event.workflow_run.event", "event").replace("&&", "and")
-    assert _boolean_expression(executable, {"event": event, "conclusion": conclusion}) is expected
+    replacements = {
+        "github.event.workflow_run.conclusion": "conclusion",
+        "github.event.workflow_run.event": "event",
+        "github.event.pull_request.head.repo.full_name": "head_repo",
+        "github.event.pull_request.user.login": "author",
+        "github.event.pull_request.base.ref": "base",
+        "github.repository_owner": "owner",
+        "github.event_name": "trigger",
+        "github.event.action": "action",
+        "github.repository": "repo",
+    }
+    for source, target in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        condition = condition.replace(source, target)
+    executable = "(" + condition.replace("&&", "and").replace("||", "or") + ")"
+    context: dict[str, str | bool] = {
+        "trigger": "workflow_run", "event": "", "conclusion": "", "action": "",
+        "author": "", "owner": "owner", "base": "", "head_repo": "", "repo": "owner/project",
+        **changes,
+    }
+    return _boolean_expression(executable, context)
+
+
+@pytest.mark.parametrize("changes,expected", [
+    ({}, True), ({"author": "outside"}, False), ({"head_repo": "outside/fork"}, False),
+    ({"base": "dev"}, False), ({"action": "edited"}, False), ({"trigger": "push"}, False),
+])
+def test_only_closed_same_repository_owner_main_prs_can_wake_deferred_source(
+    changes: dict[str, str], expected: bool,
+) -> None:
+    assert _filter_can_run(
+        **{
+            "trigger": "pull_request_target", "action": "closed", "base": "main",
+            "author": "owner", "head_repo": "owner/project", **changes,
+        },
+    ) is expected
 
 
 @pytest.fixture

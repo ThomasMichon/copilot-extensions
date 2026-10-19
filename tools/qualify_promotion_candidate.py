@@ -234,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
                 output.write(
                     f"qualification_run={receipt['run_id']}\n"
                     f"qualification_attempt={receipt['run_attempt']}\nqualification_digest={digest}\n"
+                    f"qualification_promotion_run={receipt['promotion_run']}\n"
                 )
                 for field in ("candidate_sha", "dev_sha", "main_before", "control_sha", "tree"):
                     output.write(f"{field}={receipt[field]}\n")

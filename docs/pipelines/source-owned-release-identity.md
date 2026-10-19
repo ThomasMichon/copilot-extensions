@@ -102,6 +102,62 @@ Postmerge work may record the actual landing; it is not the first publication,
 consumer test or availability check. A Main promotion PR merging means the
 release is already qualified for marketplace consumption.
 
+## Promotion PR ownership and recovery
+
+The qualified-before-PR controller opens its generated PR only **after** complete
+candidate CI, immutable source publication and raw-byte readback succeed.
+Candidate preparation alone emits a branch/SHA, not a PR number or a completed
+release. The already credentialed publisher opens the ready PR; the separate
+checkout-free merger retains only its existing non-administrator Actions
+authority. No second publisher or merge writer is introduced.
+
+`promotion_lifecycle.py` reads the complete open-Main-PR inventory before a new
+generation starts. A failed, cancelled or interrupted producing run does not
+release its open promotion PR. The source-owned trigger declines another
+dispatch, and the trusted Main admission gate independently refuses new source
+validation. Incomplete or ambiguous inventory, an unexpected same-repository
+publisher, or malformed promotion identity fails closed. Foreign PRs cannot
+claim the same-repository release namespace.
+
+Deferred CI events are not discarded: successful promoter completion and
+owner-authored Main PR closure wake the same trusted dispatcher. It re-reads
+Main pause/source state and current successful Dev CI before scheduling pending
+advances. A merged resume/control transaction can drain already-green changes
+without another push. Successful no-ops with no merged PR cannot form a
+dispatch loop; an unmerged retired candidate does not automatically retry its
+unchanged source. Stale completion events do not take responsibility back from
+a newer generation, including one whose real failure still needs recovery.
+Normal admission also declines duplicate validation of a source already
+recorded on Main; an explicit qualification-only request remains distinct.
+
+The publisher rechecks ownership after qualification. It can reuse exactly one
+existing PR only for the same generated branch and SHA, allowing recovery after
+an ambiguous PR-creation response without opening another PR. Closed, replaced,
+cross-repository or differently authored PRs are not silently revived.
+
+Recover a publication or merge failure by resuming the **existing failed job**,
+not rerunning full qualification or dispatching another generation. The
+qualifier's `qualification_promotion_run` output retains its original owning
+run-attempt; publication and merge retries use that recorded key even when the
+current job attempt advances. Foreign or future qualification ownership, moved
+Main/head, changed CI attempts and failed required checks still refuse.
+Explicit retirement is required when the old candidate cannot be recovered.
+An uncertain merge-command response is reconciled through bounded readback,
+never another blind merge write. Confirmed policy refusal preserves the
+original error and the active PR's recovery obligation.
+
+The existing whole-workflow concurrency slot remains held until exact Main
+merge is read back. Only the required Main checks gate that write; already
+completed full candidate qualification is not dispatched again after opening
+the PR. An Actions-token landing suppresses automatic Main-push CI; only the
+bounded attribution refresh described below is dispatched afterward. Ordinary
+Main control/rollback validation is not removed by this release contract.
+
+The helper and controller contracts do not activate themselves. Main's reviewed
+workflow/pin change must be proven against its exact prepared control data before
+the next qualification; the legacy Dev workflow is not the authority for that
+independently owned Main controller.
+
 The checkout-free merge waiter needs explicit job-level `actions: read` for
 that final qualification-run lookup; its own permission map replaces the
 workflow-level grant. After landing, a separate bounded dispatch refreshes

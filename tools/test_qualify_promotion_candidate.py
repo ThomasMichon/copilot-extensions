@@ -116,6 +116,7 @@ def test_real_cli_writes_exact_digest_bytes_and_all_bound_workflow_outputs(
     assert {key: fields[key] for key in IDENTITY} == IDENTITY
     assert fields["control_sha"] == MAIN
     assert fields["qualification_run"] == "456" and fields["qualification_attempt"] == "1"
+    assert fields["qualification_promotion_run"] == RUN
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "cancelled", "skipped", "timed_out", None])

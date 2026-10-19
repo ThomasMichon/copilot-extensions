@@ -164,6 +164,7 @@ def _assert_windows_source_contracts(jobs):
         "test_qualify_promotion_candidate.py", "test_promotion_source_identity.py",
         "test_reuse_promotion_artifacts.py", "test_publish_candidate_artifacts.py",
         "test_promotion_source_alias.py", "test_release_publication_boundary.py",
+        "test_promotion_lifecycle.py", "test_promotion_lifecycle_workflow.py", "test_promotion_dispatch.py",
         "test_rollback_release.py",
     ):
         assert composed["run"].count("tools/" + name) == 0
@@ -351,6 +352,8 @@ def test_source_contracts_still_reject_budget_and_dependency_regressions(generat
         "public_toolchain_source", "seasoned_public_feed", "governed_feed_trust",
         "promotion_python_artifacts", "publish_python_artifacts", "promotion_artifact_readiness",
         "test_promotion_python_artifacts", "test_public_toolchain_source",
+        "promotion_lifecycle", "test_promotion_lifecycle", "test_promotion_lifecycle_workflow",
+        "promotion_dispatch", "test_promotion_dispatch",
         "ci_plugin_partitions", "test_ci_plugin_partitions",
     )),
 ])
