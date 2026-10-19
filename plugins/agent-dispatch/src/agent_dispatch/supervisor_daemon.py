@@ -15,12 +15,9 @@ schedule-lease over a ``supervisor:<machine>:<env>`` scope): the first daemon
 wins the scope and a second **stands down** rather than spawning a rival loop --
 the *one supervisor per machine-and-environment* the vision requires.
 
-This increment lands the daemon mechanics and the **supervised-lane** unit
-(reconstruct the ``agent-dispatch supervise`` foreground loop from a stored
-spec). Folding the schedule / emitter / evaluator kinds into units the daemon
-runs is the next increment; an unsupported kind is logged and skipped, never
-fatal. The class is transport-light and fully injectable (launcher, clock,
-sleep) so its reconcile logic is unit-tested without real subprocesses.
+Lane and producer children retain the daemon's selected task authority.
+Unsupported kinds are logged and skipped. Injected launchers, clocks and
+clients let reconciliation tests run without real subprocesses.
 
 Registration fingerprinting, desired-set diffing, command-line building, and
 the launcher/handle protocols used to live here too; they moved to
