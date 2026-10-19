@@ -4,9 +4,42 @@ from __future__ import annotations
 
 import json
 import shlex
+import asyncio
+import uuid
 
 
-def recover_pending_delivery(name, plan, pending, owner, *, remote, release_cli_mode, busy_exit):
+def recover_pending_delivery(
+    name, plan, pending, owner, *, remote, release_cli_mode, busy_exit,
+    await_forward, bridge_path_ok,
+):
+    recovery_tenant = plan["tenant"] + ":delivery-recovery:" + uuid.uuid4().hex
+    needs_forward = pending.get("status") != "admitted"
+    try:
+        if needs_forward:
+            port, mux = pending.get("daemon_port"), pending.get("mux_session")
+            if type(port) is not int or not 0 < port <= 65535 or not isinstance(mux, str) or not mux:
+                raise RuntimeError("Pending delivery lacks its original native forward metadata")
+            # A bounded recovery connection does not renew the original session lease.
+            owner.hold(name, recovery_tenant, daemon_port=port, mux_session=mux,
+                       confirmed=True, max_lease=600)
+            if not asyncio.run(await_forward(name, timeout=90)) or not bridge_path_ok(name, port):
+                raise RuntimeError("The retained native session's bridge forward is unavailable")
+        return _reconcile_pending_delivery(
+            name, plan, pending, owner, remote=remote,
+            release_cli_mode=release_cli_mode, busy_exit=busy_exit,
+        )
+    except (RuntimeError, OSError) as exc:
+        print(json.dumps({
+            "ok": False, **plan, "pending": True, "session_id": pending["session_id"],
+            "error": str(exc),
+        }, indent=2))
+        return busy_exit
+    finally:
+        if needs_forward:
+            owner.release(name, recovery_tenant)
+
+
+def _reconcile_pending_delivery(name, plan, pending, owner, *, remote, release_cli_mode, busy_exit):
     from venue_copilot.refs import reconcile_owned_delivery, settle_deferred_seed
 
     result = reconcile_owned_delivery(pending)

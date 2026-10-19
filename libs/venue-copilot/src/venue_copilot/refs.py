@@ -250,6 +250,18 @@ def deliver_note(
     return getattr(result, "returncode", 1) == 0
 
 
+def owned_delivery_journal(
+    session_id: str, note: str, context: dict, *, operation: str, plan: dict,
+    reservation_id: str | None, creation_receipt: dict | None, daemon_port: int,
+) -> dict:
+    return {
+        **owned_result(False, session_id=session_id, operation=operation, note=note, context=context).recovery(),
+        "envelope": {"prompt": note, "plugin_context": context},
+        "creation_receipt": creation_receipt, "reservation_id": reservation_id,
+        "scope_id": plan["scope_id"], "mux_session": plan["mux_session"], "daemon_port": daemon_port,
+    }
+
+
 def reconcile_owned_delivery(pending: dict, *, run=subprocess.run) -> OwnedDelivery:
     envelope = pending["envelope"]
     expected = owned_result(
@@ -258,6 +270,14 @@ def reconcile_owned_delivery(pending: dict, *, run=subprocess.run) -> OwnedDeliv
     )
     if expected.input_digest != pending["input_digest"] or expected.idempotency_key != pending["idempotency_key"]:
         raise ValueError("Pending delivery inputs changed; refusing to replay")
+    if pending.get("status") == "admitted":
+        message_id = pending.get("message_id")
+        if type(message_id) is not int or message_id <= 0:
+            raise ValueError("Confirmed pending delivery has no valid message ID")
+        return OwnedDelivery(
+            "admitted", expected.operation, expected.session_id, expected.idempotency_key,
+            expected.input_digest, message_id,
+        )
     return deliver_note(
         pending["session_id"], envelope["prompt"], run=run, operation=pending["operation"],
         prepared_context=envelope["plugin_context"], admission_unknown=True,

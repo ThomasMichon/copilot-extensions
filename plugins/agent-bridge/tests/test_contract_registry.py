@@ -128,6 +128,24 @@ def test_startup_readiness_fixture_does_not_report_failure_as_ready(status) -> N
         })
 
 
+def test_startup_readiness_wire_ignores_future_fields_without_relaxing_ownership() -> None:
+    from agent_bridge.plugin_readiness import PluginReadinessRequest, PluginReadinessResult
+
+    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-41.json")
+    expected = fixture["request"]["plugin_readiness"]
+    future = {
+        **expected, "future_observation": "optional",
+        "plugins": [{**plugin, "future_metadata": 1} for plugin in expected["plugins"]],
+    }
+    assert PluginReadinessRequest.model_validate(future).model_dump() == expected
+    response = fixture["readiness_response"]
+    assert PluginReadinessResult.model_validate({
+        **response, "future_observation": "optional",
+    }).model_dump() == response
+    with pytest.raises(ValueError):
+        PluginReadinessRequest.model_validate({**future, "owner": "operator"})
+
+
 @pytest.mark.parametrize("mode", ["acp", "cli"])
 def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, mode):
     from agent_bridge.client import BridgeClient

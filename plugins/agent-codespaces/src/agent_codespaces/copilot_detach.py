@@ -571,10 +571,12 @@ def cmd_detach(
     _progress("hold", f"Owner session tenant {plan['tenant']} (bridge port {daemon_port})")
     held = owner.get_hold(args.name)
     prior_session = dict((held.sessions.get(plan["tenant"]) if held else None) or {}) or None
-    if prior_session and prior_session.get("pending_delivery"):
+    pending = owner.get_pending_delivery(args.name, plan["tenant"])
+    if pending:
         return copilot_detach_startup.recover_pending_delivery(
-            args.name, plan, prior_session["pending_delivery"], owner,
+            args.name, plan, pending, owner,
             remote=_remote, release_cli_mode=release_cli_mode, busy_exit=_BUSY_EXIT,
+            await_forward=await_owner_bridge_forward, bridge_path_ok=_bridge_path_ok,
         )
     prior_forwards = dict(getattr(held, "reverse_forwards", None) or {})
     prior_local = dict(getattr(held, "local_forwards", None) or {})
@@ -769,16 +771,12 @@ def cmd_detach(
 
         alias_floor = {"min_daemon_protocol": max(41, LIVE_SESSION_ALIAS_PROTOCOL)}
         if seed_needs_bridge:
-            from venue_copilot.refs import deliver_note, owned_result
-            pending = owned_result(
-                False, session_id=session_id, operation=operation,
-                note=seed, context=captured["plugin_context"],
-            ).recovery()
-            ledger = {
-                **pending, "envelope": {"prompt": seed, "plugin_context": captured["plugin_context"]},
-                "creation_receipt": creation_receipt, "reservation_id": reservation.get("reservation_id"),
-                "scope_id": plan["scope_id"],
-            }
+            from venue_copilot.refs import deliver_note, owned_result, owned_delivery_journal
+            ledger = owned_delivery_journal(
+                session_id, seed, captured["plugin_context"], operation=operation, plan=plan,
+                reservation_id=reservation.get("reservation_id"),
+                creation_receipt=creation_receipt, daemon_port=daemon_port,
+            )
             owner.record_pending_delivery(args.name, plan["tenant"], ledger)
             pending_delivery = True
 

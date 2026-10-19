@@ -266,6 +266,30 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-19 - Current-head full-review recovery corrections
+
+- The first full review of the combined startup candidate found three further
+  recovery defects: confirmed admission could be lost on settlement retry,
+  unknown container delivery could replay before restoring a dead forward,
+  and CodeSpace tenant expiry could erase its pending journal. These findings
+  block merge; the earlier named local-review corrections were not a substitute
+  for the full-PR review.
+- The follow-up retains confirmed admission and retries only receipt settlement,
+  persists CodeSpace workflow journals independently of connection leases, and
+  restores/probes the retained native forward before unknown delivery replay.
+  A bounded, per-attempt CodeSpace recovery connection does not renew the
+  original session lease or launch another mux.
+- Focused contained suites pass 189 CodeSpace, 62 container and 115 shared venue
+  contracts, including expired-tenant migration, failed keeper replacement,
+  failed probes and settlement after native-session exit. Current-head review
+  and required CI remain pending; no installed rollout is claimed.
+- Actual CI also exposed strict unknown-field rejection in the three new wire
+  models and a container test that patched the internal release alias but still
+  invoked the host CLI through the public alias. The follow-up preserves typed
+  ownership validation while tolerating additive peer fields, and makes the
+  test's release boundary hermetic. The CI-equivalent wire/readiness selection
+  passes all 80 tests; the corrected container selection passes all 62.
+
 ### 2026-10-19 - Admission ambiguity correction and contract evidence
 
 - Admission now distinguishes admitted, refused and unknown outcomes. An

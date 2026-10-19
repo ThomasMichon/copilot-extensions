@@ -259,6 +259,121 @@ def test_admitted_seed_lost_response_keeps_mux_keeper_inputs_and_pending_recover
     queue.close()
 
 
+@pytest.mark.parametrize("failure", [None, "spawn", "probe"])
+def test_unadmitted_pending_seed_restores_dead_keeper_before_native_readiness(
+    seams, monkeypatch, capsys, failure,
+):
+    import time
+
+    attempts, events, messages = [], [], {}
+    connected = [False]
+    def send(argv, **kwargs):
+        attempts.append((list(argv), kwargs["input"]))
+        if not connected[0]:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        events.append("send")
+        key = argv[argv.index("--idempotency-key") + 1]
+        messages.setdefault(key, kwargs["input"])
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps({
+            "accepted": True, "session_id": "sid-42", "message_id": 1,
+            "receipt": {"session_id": "sid-42", "stage": "admitted"},
+        }))
+    monkeypatch.setattr("venue_copilot.refs.deliver_note",
+                        lambda sid, note, **kwargs: _real_deliver_note(
+                            sid, note, run=send, **{k: v for k, v in kwargs.items() if k != "run"}))
+    args = _args()
+    assert detach.cmd_detach(args, require_live_relay_port=lambda: 41235,
+                             relay_healthy=lambda port: True) == 75
+    capsys.readouterr()
+    assert not messages
+    pending = seams.pending["anchor-repo@repo-1"]
+    assert pending["daemon_port"] == 41234 and pending["mux_session"] == "wt-anchor-repo"
+    monkeypatch.setattr(forward_keeper, "read_state", lambda name: {
+        "pending_deliveries": seams.pending,
+    })
+    current_failure = [failure]
+    def restore(name, **kwargs):
+        events.append("restore")
+        assert kwargs["venue_port"] == pending["daemon_port"]
+        assert kwargs["mux"] == pending["mux_session"]
+        if current_failure[0] == "spawn":
+            raise OSError("replacement keeper failed")
+        connected[0] = current_failure[0] != "probe"
+        return {"hold_added": False, "hold_updated_at": 100}
+    monkeypatch.setattr(forward_keeper, "ensure_running", restore)
+    original_run = detach.subprocess.run
+    def run(argv, **kwargs):
+        if "curl -fsS" in argv[-1]:
+            events.append("probe")
+            return types.SimpleNamespace(returncode=0 if connected[0] else 1, stdout="", stderr="")
+        return original_run(argv, **kwargs)
+    monkeypatch.setattr(detach.subprocess, "run", run)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    launches = sum("agent-worktrees embody" in command for command in seams.run)
+    if failure:
+        before = len(attempts)
+        assert detach.cmd_detach(args, require_live_relay_port=lambda: 41235,
+                                 relay_healthy=lambda port: True) == 75
+        assert json.loads(capsys.readouterr().out)["pending"] is True
+        assert len(attempts) == before and not messages
+        assert seams.pending and seams.stop_keeper == []
+        current_failure[0] = None
+        events.clear()
+    assert detach.cmd_detach(args, require_live_relay_port=lambda: 41235,
+                             relay_healthy=lambda port: True) == 0
+    assert json.loads(capsys.readouterr().out)["message_id"] == 1
+    assert events == ["restore", "probe", "send"]
+    assert len(messages) == 1 and seams.pending == {}
+    assert seams.release == [("anchor-repo@repo-1", "r1")]
+    assert sum("agent-worktrees embody" in command for command in seams.run) == launches
+    assert all(attempt == attempts[0] for attempt in attempts)
+
+
+def test_confirmed_seed_recovery_only_settles_without_restoring_a_dead_native_forward(
+    seams, monkeypatch, capsys,
+):
+    from venue_copilot.refs import owned_result
+
+    def admit(sid, note, **kwargs):
+        return dataclasses.replace(owned_result(
+            False, session_id=sid, operation=kwargs["operation"],
+            note=note, context=kwargs["prepared_context"],
+        ), status="admitted", message_id=17)
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", admit)
+    receipt = {"seed": {"text": "creation task", "handoff_id": "bridge-r1"}}
+    original_run = detach.subprocess.run
+    fail_settlement = [True]
+    def run(argv, **kwargs):
+        if "agent-worktrees embody" in argv[-1]:
+            return types.SimpleNamespace(returncode=0, stdout=json.dumps({
+                "ok": True, "created": True, "bridge_seed_deferred": True,
+                "bridge_seed_operation": "r1", "deferred_creation_seed": receipt,
+                "session": "wt-anchor-repo",
+            }), stderr="")
+        if "bridge-seed-settle" in argv[-1] and fail_settlement[0]:
+            return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"settlement unavailable")
+        return original_run(argv, **kwargs)
+    monkeypatch.setattr(detach.subprocess, "run", run)
+    args = _args()
+    assert detach.cmd_detach(args, require_live_relay_port=lambda: 41235,
+                             relay_healthy=lambda port: True) == 75
+    capsys.readouterr()
+    assert seams.pending["anchor-repo@repo-1"]["status"] == "admitted"
+    monkeypatch.setattr(forward_keeper, "read_state", lambda name: {
+        "pending_deliveries": seams.pending,
+    })
+    monkeypatch.setattr(forward_keeper, "ensure_running",
+                        lambda *a, **kw: pytest.fail("the native session has exited"))
+    monkeypatch.setattr("venue_copilot.refs.deliver_note",
+                        lambda *a, **kw: pytest.fail("confirmed admission must not be resent"))
+    fail_settlement[0] = False
+    assert detach.cmd_detach(args, require_live_relay_port=lambda: 41235,
+                             relay_healthy=lambda port: True) == 0
+    assert json.loads(capsys.readouterr().out)["message_id"] == 17
+    assert seams.pending == {}
+    assert seams.release == [("anchor-repo@repo-1", "r1")]
+
+
 @pytest.mark.parametrize("child_alive", [False, True])
 @pytest.mark.parametrize("failure", [None, "copy", "install"])
 def test_detached_live_ledger_requires_preparation_before_remote_decision(
@@ -384,6 +499,7 @@ def seams(monkeypatch):
         "release_cli_mode",
         lambda scope, reservation_id=None: calls.release.append((scope, reservation_id)) or 1,
     )
+    monkeypatch.setattr(venue_copilot, "release_cli_mode", venue_detached.release_cli_mode)
     monkeypatch.setattr(
         venue_copilot,
         "live_session_for",

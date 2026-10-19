@@ -37,6 +37,8 @@ The version-gated `acquisition_cli.acquire` requires HTTP protocol 41 for CLI
 acquisition. Raw HTTP callers must enforce the same floor; older daemons ignore
 unknown acquisition fields. ACP acquisition retains its prepared directories and
 native handshake and does not require a joined CLI extension.
+Readiness wire models likewise ignore additive unknown peer fields while
+retaining required ownership, identity, uniqueness and result-state validation.
 The default `acquisition-readiness` producer probe also requires protocol 41.
 Existing ACP holders lacking the new optional metadata retain their established
 prepared-directory/handshake path; no new transcript or CLI-extension requirement

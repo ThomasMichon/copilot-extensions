@@ -362,16 +362,12 @@ def launch_detached(
         if seed_needs_bridge:
             from .refs import deliver_note
             if owned:
-                from .refs import owned_result
-                pending = owned_result(
-                    False, session_id=session_id, operation=operation,
-                    note=seed, context=plan["plugin_context"],
-                ).recovery()
-                ledger = {
-                    **pending, "envelope": {"prompt": seed, "plugin_context": plan["plugin_context"]},
-                    "creation_receipt": creation_receipt, "reservation_id": reservation.get("reservation_id"),
-                    "scope_id": plan["scope_id"],
-                }
+                from .refs import owned_result, owned_delivery_journal
+                ledger = owned_delivery_journal(
+                    session_id, seed, plan["plugin_context"], operation=operation, plan=plan,
+                    reservation_id=reservation.get("reservation_id"),
+                    creation_receipt=creation_receipt, daemon_port=daemon_port,
+                )
                 adapter.record_pending_delivery(plan, ledger)
                 pending_delivery = True
 

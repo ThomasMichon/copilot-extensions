@@ -254,7 +254,10 @@ class _ContainerAdapter:
     def record_pending_delivery(self, plan, pending):
         from . import forward_keeper
         if pending is not None:
-            pending = {**pending, "remote_env": self.remote_env}
+            pending = {
+                **pending, "remote_env": self.remote_env,
+                "relay_port": self.relay_port, "host_relay_port": self.host_relay_port,
+            }
         forward_keeper.record_pending_delivery(self.name, self.hold_id, pending)
         self.pending_delivery = pending is not None
 
@@ -409,10 +412,33 @@ def cmd_detach(
         pending = (held.get("pending_deliveries") or {}).get(plan["scope_id"])
         if pending:
             from venue_copilot.refs import reconcile_owned_delivery, settle_deferred_seed
+            ssh_config = prepare_ssh_config(args.name, target.user)
+            if pending.get("status") != "admitted":
+                from venue_copilot.detached import _bridge_path_ok
+                port = pending.get("daemon_port", held.get("venue_port"))
+                mux = pending.get("mux_session") or (held.get("holds", {}).get(
+                    plan["scope_id"], {}).get("mux"))
+                try:
+                    if type(port) is not int or not 0 < port <= 65535 or not isinstance(mux, str) or not mux:
+                        raise RuntimeError("Pending delivery lacks its original native forward metadata")
+                    adapter = _ContainerAdapter(
+                        name=args.name, ssh_config=ssh_config, hold_id=plan["scope_id"],
+                        remote_env=pending.get("remote_env"),
+                        relay_port=pending.get("relay_port", held.get("relay_port")),
+                        host_relay_port=pending.get("host_relay_port", held.get("host_relay_port")),
+                    )
+                    adapter.ensure_keeper(venue_port=port, mux=mux)
+                    if not _bridge_path_ok(adapter, port):
+                        raise RuntimeError("The retained native session's bridge forward is unavailable")
+                except (RuntimeError, OSError) as exc:
+                    return _emit(busy_exit, {
+                        "ok": False, **public_plan(plan), "pending": True,
+                        "session_id": pending["session_id"], "error": str(exc),
+                    })
             result = reconcile_owned_delivery(pending)
             def settle(command, stdin):
                 return _remote_input(
-                    prepare_ssh_config(args.name, target.user), command, stdin, timeout=60,
+                    ssh_config, command, stdin, timeout=60,
                 )
             if result.status == "admitted" and settle_deferred_seed(
                 settle, plan["identity"], pending["envelope"]["plugin_context"]["cwd"],

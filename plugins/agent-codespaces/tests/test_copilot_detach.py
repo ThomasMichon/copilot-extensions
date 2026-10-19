@@ -77,6 +77,7 @@ def seams(monkeypatch):
         else:
             calls.pending[tenant] = value
     monkeypatch.setattr(owner, "record_pending_delivery", pending)
+    monkeypatch.setattr(owner, "get_pending_delivery", lambda name, tenant: calls.pending.get(tenant))
 
     async def _fwd(name, timeout=0):
         return True
@@ -170,11 +171,53 @@ def test_pending_delivery_roundtrips_in_existing_owner_hold_and_survives_heartbe
     owner.record_pending_delivery("synthetic", "cli:scope", pending)
     owner.heartbeat("synthetic", "cli:scope")
     owner.hold("synthetic", "cli:scope", mux_session="wt-scope", confirmed=True)
-    assert owner.get_hold("synthetic").sessions["cli:scope"]["pending_delivery"] == pending
+    assert owner.get_pending_delivery("synthetic", "cli:scope") == pending
     with pytest.raises(RuntimeError, match="must be reconciled"):
         owner.hold("synthetic", "cli:scope", mux_session="wt-new", fresh=True)
     owner.record_pending_delivery("synthetic", "cli:scope", None)
-    assert "pending_delivery" not in owner.get_hold("synthetic").sessions["cli:scope"]
+    assert owner.get_pending_delivery("synthetic", "cli:scope") is None
+
+
+@pytest.mark.parametrize("expiry", ["absolute-lease", "stale-heartbeat"])
+@pytest.mark.parametrize("embedded", [False, True])
+def test_pending_journal_outlives_tenant_expiry_without_renewing_connection(
+    monkeypatch, tmp_path, expiry, embedded,
+):
+    import contextlib
+    from ssh_manager.forward_keeper import KeeperStore
+
+    monkeypatch.setattr(owner, "OWNER_FILE", tmp_path / "owner.json")
+    monkeypatch.setattr(owner, "ensure_runtime_dir", lambda: None)
+    monkeypatch.setattr(owner, "_owner_lock", contextlib.nullcontext)
+    now = [100000.0]
+    monkeypatch.setattr(owner.time, "time", lambda: now[0])
+    hold = owner.hold(
+        "synthetic", "cli:scope", mux_session="wt-scope", daemon_port=41234,
+        confirmed=True, max_lease=10 if expiry == "absolute-lease" else 10000,
+    )
+    expires_at = hold.sessions["cli:scope"]["expires_at"]
+    pending = {
+        "version": 1, "status": "unknown", "operation": "operation", "session_id": "native",
+        "creation_receipt": {"seed": {"text": "original creation task"}},
+        "mux_session": "wt-scope", "daemon_port": 41234,
+    }
+    if embedded:
+        raw = json.loads(owner.OWNER_FILE.read_text())
+        raw["synthetic"]["sessions"]["cli:scope"]["pending_delivery"] = pending
+        owner.OWNER_FILE.write_text(json.dumps(raw), encoding="utf-8")
+    else:
+        owner.record_pending_delivery("synthetic", "cli:scope", pending)
+    now[0] += 11 if expiry == "absolute-lease" else owner.DEFAULT_TTL + 1
+    assert owner.get_hold("synthetic") is None
+    assert owner.get_pending_delivery("synthetic", "cli:scope") == pending
+    assert json.loads(owner.OWNER_FILE.read_text()) == {}
+    assert expires_at == 100000 + (10 if expiry == "absolute-lease" else 10000)
+    owner.hold("synthetic", "other")
+    owner.release("synthetic", "other")
+    assert owner.get_pending_delivery("synthetic", "cli:scope") == pending
+    owner.record_pending_delivery("synthetic", "cli:scope", None)
+    assert owner.get_pending_delivery("synthetic", "cli:scope") is None
+    assert not KeeperStore(tmp_path / "pending-deliveries").state_path("synthetic").exists()
 
 
 _CREATED = json.dumps({
@@ -1122,9 +1165,8 @@ def test_admitted_seed_with_lost_responses_retains_owner_and_rejoins_same_operat
     assert seams.release_res == [] and seams.releases == []
     pending = seams.pending["cli:wt-7@cs-1"]
     assert pending["creation_receipt"] == receipt and pending["operation"] == "r1"
-    monkeypatch.setattr(owner, "get_hold", lambda *args: types.SimpleNamespace(
-        sessions={"cli:wt-7@cs-1": {"pending_delivery": pending, "mux_session": "wt-wt-7"}},
-    ))
+    # Connection expiry does not remove the separately retained delivery.
+    monkeypatch.setattr(owner, "get_hold", lambda *args: None)
     # A failed reconciliation preserves the ledger and never relaunches.
     assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams)) == 75
     capsys.readouterr()
@@ -1132,9 +1174,72 @@ def test_admitted_seed_with_lost_responses_retains_owner_and_rejoins_same_operat
     assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams)) == 0
     assert json.loads(capsys.readouterr().out)["message_id"] == 1
     assert len(seams.ssh) == 1 and seams.pending == {}
+    recovery_holds = [(a, kw) for a, kw in seams.holds if ":delivery-recovery:" in a[1]]
+    assert len(recovery_holds) == 2
+    assert len({a[1] for a, _ in recovery_holds}) == 2
+    assert all(kw["daemon_port"] == 41234 and kw["mux_session"] == pending["mux_session"]
+               and kw["max_lease"] == 600 for _, kw in recovery_holds)
+    assert all(":delivery-recovery:" in a[1] for a, _ in seams.releases)
     assert queue.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
     assert all(value == attempts[0] for value in attempts)
     queue.close()
+
+
+def test_pending_recovery_probe_failure_retains_journal_without_task_or_mux_launch(
+    seams, monkeypatch, capsys,
+):
+    from venue_copilot.refs import owned_result
+
+    context = {"version": 1, "cwd": "/workspace", "plugins": []}
+    pending = {
+        **owned_result(False, session_id="sid-42", operation="operation",
+                       note="original task", context=context).recovery(),
+        "envelope": {"prompt": "original task", "plugin_context": context},
+        "mux_session": "original-mux", "daemon_port": 41234,
+    }
+    seams.pending["cli:wt-7@cs-1"] = pending
+    monkeypatch.setattr(detach, "_bridge_path_ok", lambda name, port: False)
+    monkeypatch.setattr("venue_copilot.refs.deliver_note",
+                        lambda *a, **kw: pytest.fail("unverified forward cannot authorize replay"))
+    assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams)) == 75
+    assert json.loads(capsys.readouterr().out)["pending"] is True
+    assert seams.pending["cli:wt-7@cs-1"] == pending
+    assert seams.ssh == [] and seams.release_res == []
+    assert len(seams.holds) == len(seams.releases) == 1
+    assert seams.holds[0][0][1] == seams.releases[0][0][1]
+    assert seams.holds[0][0][1].startswith("cli:wt-7@cs-1:delivery-recovery:")
+
+
+def test_confirmed_seed_retries_only_settlement_after_native_session_exit(seams, monkeypatch, capsys):
+    from venue_copilot.refs import owned_result
+
+    def admit(sid, note, **kwargs):
+        return dataclasses.replace(owned_result(
+            False, session_id=sid, operation=kwargs["operation"],
+            note=note, context=kwargs["prepared_context"],
+        ), status="admitted", message_id=17)
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", admit)
+    receipt = {"seed": {"text": "creation task", "handoff_id": "bridge-r1"}}
+    original_remote = detach._remote
+    fail_settlement = [True]
+    def remote(name, command, **kwargs):
+        if "bridge-seed-settle" in command and fail_settlement[0]:
+            return 1, "", "settlement unavailable"
+        return original_remote(name, command, **kwargs)
+    monkeypatch.setattr(detach, "_remote", remote)
+    output = json.dumps({**json.loads(_CREATED), "deferred_creation_seed": receipt})
+    args = _args(worktree_id="wt-7")
+    assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=output)) == 75
+    capsys.readouterr()
+    assert seams.pending["cli:wt-7@cs-1"]["status"] == "admitted"
+    fail_settlement[0] = False
+    monkeypatch.setattr("venue_copilot.refs.deliver_note",
+                        lambda *a, **kw: pytest.fail("the native session has exited; do not resend"))
+    holds = len(seams.holds)
+    assert detach.cmd_detach(args, ssh_session=_ssh(seams)) == 0
+    assert json.loads(capsys.readouterr().out)["message_id"] == 17
+    assert seams.pending == {} and len(seams.ssh) == 1
+    assert len(seams.holds) == holds
 
 
 def test_ref_files_for_a_running_session_are_sent_as_a_message(seams, tmp_path, monkeypatch, capsys):

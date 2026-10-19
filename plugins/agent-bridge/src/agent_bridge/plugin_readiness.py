@@ -14,7 +14,7 @@ READINESS_CONTROL = "control:plugin-readiness"
 
 
 class ExpectedPlugin(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
     projected_source: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.-]*$")
     logical_source: str | None = None
     version: str | None = None
@@ -24,7 +24,7 @@ class ExpectedPlugin(BaseModel):
 class PluginReadinessRequest(BaseModel):
     """A Bridge-owned compiled requirement, not global plugin policy."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
     owner: Literal["bridge"]
     expected_session_id: str | None = None
     cwd: str | None = None
@@ -40,7 +40,7 @@ class PluginReadinessRequest(BaseModel):
 
 
 class PluginReadinessResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     status: Literal["ready", "failed", "unsupported"]
     reason: str = Field(max_length=256)
     session_id: str

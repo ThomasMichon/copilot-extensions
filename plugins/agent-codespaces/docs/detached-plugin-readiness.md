@@ -80,14 +80,24 @@ the original message. After any ambiguous attempt, a subsequent refusal cannot
 erase that uncertainty. Only an authoritative admitted receipt resolves it.
 
 Unresolved delivery returns a pending/busy result, never `seeded` or a
-success-shaped “no task”. The mux, connection/relay/keeper, supervisor venue and
-CLI reservation remain owned. A private `pending_delivery` record lives in the
-existing CodeSpace connection tenant or an independent container workflow journal
-alongside the forward-keeper store. It holds
+success-shaped “no task”. It does not authorize mux cleanup or release of the
+delivery's supervisor/CLI ownership. Private pending records live independently
+of expiring CodeSpace connection tenants and disposable container keepers. They hold
 the exact envelope, native SID, operation, input digest and creation receipt.
-It contains no authentication snapshot. Rejoining first reconciles that record
-without starting another mux or changing its input. Successful reconciliation
-settles the original creation receipt and returns the existing message ID.
+They contain no authentication snapshot. Rejoining recovers that record without
+starting another mux or changing its input. Unknown admission first restores and
+authenticates the reverse forward at the retained native port/mux, then replays
+the original operation. Failed forward restoration leaves the journal pending
+without sending a task. Confirmed admission is never resent or downgraded after
+native-session exit: only its original creation receipt needs settlement.
+Successful recovery returns the existing message ID.
+
+CodeSpace workflow journals survive stale heartbeats, the absolute session-lease
+cap, and release of another tenant. Migrating the unreleased embedded format
+persists the journal before tenant pruning. Journal retention does not renew a
+connection lease. An explicit unknown-admission retry uses a separate,
+per-attempt recovery tenant bounded to ten minutes and releases it on exit;
+it does not restart the native session or extend the original session lease.
 
 Only a structured, confirmed pre-admission refusal permits destructive cleanup.
 Raw reference-note calls without prepared metadata keep their legacy Boolean

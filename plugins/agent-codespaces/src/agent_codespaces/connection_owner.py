@@ -190,16 +190,7 @@ def _read_holds() -> dict[str, OwnerHold]:
             hold = OwnerHold(**fields_in)
         except TypeError:
             continue
-        # Sanitize the tenants map: must be {str: float}. Drop any entry whose
-        # heartbeat isn't numeric so live_tenants() can't crash on ``now - hb``.
-        tenants: dict[str, float] = {}
-        if isinstance(hold.tenants, dict):
-            for tenant, hb in hold.tenants.items():
-                try:
-                    tenants[str(tenant)] = float(hb)
-                except (TypeError, ValueError):
-                    continue
-        hold.tenants = tenants
+        hold.tenants = owner_session_records.normalize_tenants(hold.tenants)
         hold.daemon_port = _sanitize_port(hold.daemon_port)
         sanitize_hold_forwards(hold)
         hold.sessions = owner_session_records.normalize_sessions(hold.sessions)
@@ -243,6 +234,7 @@ def _prune_hold(hold: OwnerHold, ttl: float) -> None:
 
 def _prune(holds: dict[str, OwnerHold], ttl: float) -> dict[str, OwnerHold]:
     """Prune stale tenants, then drop holds with no reason to persist."""
+    owner_session_records.migrate_pending_deliveries(holds, OWNER_FILE)
     live: dict[str, OwnerHold] = {}
     for codespace, hold in holds.items():
         _prune_hold(hold, ttl)
@@ -341,7 +333,7 @@ def hold(
         if mux_session:
             current = existing.sessions.get(tenant) or {}
             prior = restore if restore is not None else ({} if fresh else current)
-            if current.get("pending_delivery") and fresh:
+            if fresh and owner_session_records._read_pending(codespace, OWNER_FILE).get(tenant):
                 raise RuntimeError("A pending owned delivery must be reconciled before starting another launch")
             existing.sessions[tenant] = {
                 "mux_session": mux_session,
@@ -361,10 +353,19 @@ def hold(
 
 
 def record_pending_delivery(codespace: str, tenant: str, pending: dict | None) -> None:
-    """Journal the owned send on its existing connection tenant."""
+    """Journal the owned send independently of its expiring connection tenant."""
     owner_session_records.record_pending_delivery(
-        codespace, tenant, pending, lock=_owner_lock, read_holds=_read_holds, write_holds=_write_holds,
+        codespace, tenant, pending, owner_file=OWNER_FILE,
+        lock=_owner_lock, read_holds=_read_holds, write_holds=_write_holds,
     )
+
+
+def get_pending_delivery(codespace: str, tenant: str) -> dict | None:
+    return owner_session_records.get_pending_delivery(
+        codespace, tenant, owner_file=OWNER_FILE,
+        lock=_owner_lock, read_holds=_read_holds, write_holds=_write_holds,
+    )
+
 
 def heartbeat(
     codespace: str, tenant: str, ttl: float = DEFAULT_TTL,
