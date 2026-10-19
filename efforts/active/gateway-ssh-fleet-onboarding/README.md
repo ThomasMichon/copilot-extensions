@@ -383,6 +383,14 @@ takeover or implementation completion is asserted.
   pass: declared-pair and explicit missing-registration flows, each with ordinary
   and conventional bare anchors. Both ordinary cases participate in the same
   existing hosted guard; no topology is required by explicit registration.
+- Subsequent review found that a changed companion registration between pair
+  preflight and the writer could still leave a pointer after reporting failure.
+  The preserving flow now rejects its fresh non-ready inspection before any
+  binding write. Removed/repointed registration cases cover fresh and existing
+  configuration, including bytes and timestamp preservation. All 150 binding
+  tests and 35 selected native inventory/first-touch cases pass. The additive
+  inventory platform is included in all exact strict/legacy output snapshots;
+  a red hosted snapshot assertion was fixed, not bypassed.
 - Amendment #7198 actually merged as
   `1e313d5ee1f3cd688c95d53de56d7548878ee878` before implementation.
   The shared typed reader retains the legacy scalar launch target and both

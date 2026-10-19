@@ -227,6 +227,9 @@ require version 1, both supported registration classes and
 registration. An unsupported probe is a normal owning setup/update gate.
 Use the reader's native execution platform for registered paths, including
 home-relative paths; do not substitute an environment-variable platform guess.
+The preserving writer rechecks canonical companion registration before writing
+the pointer; a removed or repointed registration leaves existing configuration
+bytes and timestamps unchanged, or leaves a fresh configuration absent.
 Registered roots must be actual Git roots; bare anchors remain supported.
 It refuses a conflicting effective knowledge binding (including an inherited
 global default) before effects and checks

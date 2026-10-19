@@ -72,6 +72,8 @@ def pair(tmp_path, monkeypatch):
             }
         elif args == ["repos", "list", "--json"]:
             value = registry
+        elif args == ["repos", "find", "knowledge", "--json"]:
+            return subprocess.CompletedProcess(args, 1, "", "not found")
         elif args == ["-p", "harness", "config-root", "--json"]:
             value = {
                 "repo": "harness",
@@ -137,6 +139,39 @@ def test_fresh_pair_uses_normal_writer_without_prior_local_config(pair):
     assert not any(args[:2] == ["repos", "add"] for args, _kwargs in calls)
     assert list(harness.iterdir()) == []
     assert list(knowledge.iterdir()) == [topology]
+
+
+@pytest.mark.parametrize("change", ["removed", "repointed"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_changed_registration_after_preflight_never_writes_binding(pair, change, existing):
+    home, harness, knowledge, topology, _roles, registry, _calls = pair
+    config = home / ".harness" / "config.yaml"
+    if existing:
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            "# preserved settings\nrepo_name: harness\nknowledge_repo: knowledge\n",
+            encoding="utf-8",
+        )
+    selected = _resolve(pair)
+    before = (config.read_bytes(), config.stat().st_mtime_ns) if existing else None
+    topology_before = topology.read_bytes()
+    if change == "removed":
+        registry["repos"].pop()
+    else:
+        registry["repos"][-1]["paths"] = {
+            bk._current_platform_key(): str(knowledge.with_name("repointed")),
+        }
+    with pytest.raises(RuntimeError, match="companion registration changed"):
+        bk.bind(
+            selected["harness"], selected["knowledge"], selected["knowledge_path"],
+            home=home, harness_path=str(harness), agent_worktrees_path="native-owner",
+            assemble_plugins=False, preserve_binding=True,
+        )
+    if existing:
+        assert (config.read_bytes(), config.stat().st_mtime_ns) == before
+    else:
+        assert not home.exists()
+    assert topology.read_bytes() == topology_before
 
 
 def test_matching_binding_preserves_existing_config_bytes_and_timestamp(pair):

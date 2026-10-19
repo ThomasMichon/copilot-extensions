@@ -160,10 +160,14 @@ def test_strict_inventory_refuses_corrupt_or_dropped_entries(registry_path, capf
 @pytest.mark.guard
 def test_strict_inventory_missing_is_complete_but_legacy_json_is_not_an_attestation(registry_path, capfd):
     assert repos_cli.cmd_repos_dispatch(["list", "--strict", "--json"]) == 0
-    assert json.loads(capfd.readouterr().out) == {"version": 1, "repos": [], "inventory_authority": "complete"}
+    assert json.loads(capfd.readouterr().out) == {
+        "version": 1, "platform": "linux", "repos": [], "inventory_authority": "complete",
+    }
     assert not registry_path.exists()
     assert repos_cli.cmd_repos_dispatch(["list", "--json"]) == 0
-    assert json.loads(capfd.readouterr().out) == {"version": 1, "repos": []}
+    assert json.loads(capfd.readouterr().out) == {
+        "version": 1, "platform": "linux", "repos": [],
+    }
 
 
 @pytest.mark.guard
@@ -207,7 +211,10 @@ def test_native_strict_inventory_distinguishes_missing_and_unavailable_ancestors
     payload = json.loads(result.stdout)
     if ancestor == "absent":
         assert result.returncode == 0, result.stderr
-        assert payload == {"version": 1, "repos": [], "inventory_authority": "complete"}
+        assert payload == {
+            "version": 1, "platform": repos._current_platform(),
+            "repos": [], "inventory_authority": "complete",
+        }
         assert not storage.exists()
     else:
         assert result.returncode == 2, result.stderr

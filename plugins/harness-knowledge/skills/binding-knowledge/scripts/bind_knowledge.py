@@ -727,6 +727,11 @@ def bind(
             platform_key=platform_key,
         )
     )
+    if preserve_binding and registration["status"] != "ready":
+        raise RuntimeError(
+            "canonical companion registration changed before binding: "
+            + str(registration["reason"])
+        )
     base = config_root if config_root is not None else Path(home) / f".{harness}"
     cfg = base / "config.yaml"
     _binding_yaml.write_binding(cfg, harness, knowledge, preserve=preserve_binding)
