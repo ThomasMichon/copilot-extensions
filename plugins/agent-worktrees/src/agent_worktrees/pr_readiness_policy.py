@@ -51,7 +51,7 @@ def operation_readiness(
         reason = "mergeability is unknown; re-read before direct merge"
     elif direct_candidate and state.reason in (
         "no auto-merge label configured (binding absent)",
-        "auto-merge already present",
+        f"{automerge_label} already present",
     ):
         reason = "not yet approved"
     return {

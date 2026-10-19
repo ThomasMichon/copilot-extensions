@@ -737,6 +737,17 @@ class TestMergeReadiness:
             assert commented["clear_to_merge"] is False
             assert commented["needs_consent"] is False
 
+    def test_direct_custom_consent_label_does_not_mask_missing_approval(self):
+        readiness = pc.merge_readiness(
+            _approved(reviews=(), labels=("auto-complete",)),
+            operation="direct",
+            automerge_label="auto-complete",
+        )
+        assert readiness["ready_for_direct_merge"] is False
+        assert readiness["eligible"] is False
+        assert readiness["needs_consent"] is False
+        assert readiness["reason"] == "not yet approved"
+
     def test_consent_operation_retains_classifier_eligibility(self):
         readiness = pc.merge_readiness(
             _approved(), automerge_label="auto-merge",
