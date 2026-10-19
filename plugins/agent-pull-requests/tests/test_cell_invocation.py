@@ -443,6 +443,148 @@ def test_implicit_legacy_installer_refuses_governed_policy_before_all_writes(tmp
     assert not (tmp_path / ".copilot-extensions" / "marketplaces").exists()
 
 
+@pytest.fixture
+def legacy_staging(tmp_path, native_profile):
+    if os.name != "nt" and native_profile is None:
+        pytest.skip("Native POSIX admission requires a disposable OS account")
+    profile = native_profile or tmp_path / "profile"
+    profile.mkdir(exist_ok=True)
+    marketplace = profile / ".copilot" / "installed-plugins" / "staging-fixture"
+    payload = marketplace / "agent-pull-requests"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("install.ps1", "install.sh", "payload-mode.ps1", "payload-mode.sh",
+                 "versioned_runtime_native.ps1"):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
+    (payload / "plugin.json").write_text(
+        json.dumps({"name": "agent-pull-requests", "version": "1.0.0"}), encoding="utf-8",
+    )
+    (payload / "content.txt").write_text("original bytes\n", encoding="utf-8")
+    descriptor = {"source": "github", "repo": "example/staging-fixture"}
+    settings = profile / ".copilot" / "settings.json"
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {"staging-fixture": {"source": descriptor}},
+    }), encoding="utf-8")
+    identity = api.source_identity(api.normalize_source(descriptor), "staging-fixture")
+    _policy(profile, False)
+    policy = profile / ".copilot-extensions" / "installation-mode.json"
+    policy.write_text(json.dumps({
+        "schema": api.POLICY_SCHEMA, "version": 1,
+        "installationMode": {
+            "enabled": True,
+            "marketplaces": {identity["marketplaceId"]: {"enabled": False}},
+        },
+    }), encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key not in {
+            "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+            "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
+            "COPILOT_PLUGIN_INSTALL_SMOKE_GRANDCHILD",
+        }
+    }
+    environment.update(
+        HOME=str(profile), USERPROFILE=str(profile),
+        COPILOT_PLUGIN_INSTALL_SMOKE="1", COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP="0",
+    )
+    try:
+        yield profile, payload, policy, settings, environment
+    finally:
+        # Each exact subtree belongs to this fixture, including on a disposable
+        # native-account runner; never remove the account or shared .copilot root.
+        shutil.rmtree(marketplace)
+        settings.unlink()
+        if (profile / ".agent-pull-requests").exists():
+            shutil.rmtree(profile / ".agent-pull-requests")
+        shutil.rmtree(profile / ".copilot-extensions")
+
+
+@pytest.mark.parametrize("action", ["install", "update", "stamp", "provision", "uninstall"])
+@pytest.mark.parametrize("policy_form", ["marketplace-opt-out", "disabled-with-other-override"])
+def test_legacy_staging_installer_revalidates_marketplace_opt_out(
+    legacy_staging, action, policy_form,
+):
+    profile, payload, policy, _, environment = legacy_staging
+    if policy_form == "disabled-with-other-override":
+        policy.write_text(json.dumps({
+            "schema": api.POLICY_SCHEMA, "version": 1,
+            "installationMode": {
+                "enabled": False,
+                "marketplaces": {"another-source--0123456789abcdef": {"enabled": True}},
+            },
+        }), encoding="utf-8")
+    result = native(payload / "scripts" / "install", [action], environment=environment)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    smoke = json.loads((profile / ".agent-pull-requests" / "smoke.json").read_text("utf-8-sig"))
+    assert smoke["staged"] is True
+    assert Path(smoke["staged_from"]) == payload
+    assert Path(smoke["ran_from"]).parent.parent.parent == (
+        profile / ".agent-pull-requests" / ".install-stage"
+    )
+    assert not (profile / ".local").exists()
+    assert not (profile / ".copilot-extensions" / "marketplaces").exists()
+
+
+@pytest.mark.parametrize("damage", [
+    "none", "stage-content", "origin-content", "extra-stage-entry", "missing-origin",
+    "missing-flag", "relative-origin", "noninstalled-origin", "governance", "settings",
+    "ordinary-payload-hint", "linked-entry",
+])
+def test_legacy_staging_reentry_never_trusts_flags_or_stale_admission(
+    legacy_staging, tmp_path, damage,
+):
+    profile, payload, policy, settings, environment = legacy_staging
+    staged = profile / ".agent-pull-requests" / ".install-stage" / "fixture-0" / payload.name
+    shutil.copytree(payload, staged)
+    environment.update(COPILOT_PLUGIN_INSTALL_STAGED="1", COPILOT_PLUGIN_STAGED_FROM=str(payload))
+    if damage == "stage-content":
+        (staged / "content.txt").write_text("changed stage", encoding="utf-8")
+    elif damage == "origin-content":
+        (payload / "content.txt").write_text("changed origin", encoding="utf-8")
+    elif damage == "extra-stage-entry":
+        (staged / "extra").write_text("not in origin", encoding="utf-8")
+    elif damage == "missing-origin":
+        environment["COPILOT_PLUGIN_STAGED_FROM"] = str(payload.parent / "missing")
+    elif damage == "missing-flag":
+        environment.pop("COPILOT_PLUGIN_INSTALL_STAGED")
+    elif damage == "relative-origin":
+        environment["COPILOT_PLUGIN_STAGED_FROM"] = "relative/origin"
+    elif damage == "noninstalled-origin":
+        environment["COPILOT_PLUGIN_STAGED_FROM"] = str(staged)
+    elif damage == "governance":
+        _policy(profile, True)
+    elif damage == "settings":
+        settings.write_text("{}", encoding="utf-8")
+    elif damage == "ordinary-payload-hint":
+        # An ordinary unattributed payload may not borrow a legacy source's
+        # identity just by exporting the shared staging hints.
+        staged = tmp_path / "ordinary" / payload.name
+        shutil.copytree(payload, staged)
+    elif damage == "linked-entry":
+        try:
+            for root in (payload, staged):
+                (root / "linked.txt").symlink_to(root / "content.txt")
+        except OSError as error:
+            pytest.skip(f"Native symlink creation unavailable: {error}")
+
+    def owned_files():
+        return {
+            path.relative_to(profile): path.read_bytes()
+            for root in (payload.parent, policy.parent, profile / ".agent-pull-requests")
+            for path in root.rglob("*") if path.is_file()
+        } | {settings.relative_to(profile): settings.read_bytes()}
+
+    before = owned_files()
+    result = native(staged / "scripts" / "install", ["stamp"], environment=environment)
+    assert (result.returncode == 0) == (damage == "none"), (result.stdout, result.stderr)
+    if damage != "none":
+        assert not (profile / ".agent-pull-requests" / "smoke.json").exists()
+        assert owned_files() == before
+    assert not (profile / ".local").exists()
+    assert not (profile / ".copilot-extensions" / "marketplaces").exists()
+
+
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")

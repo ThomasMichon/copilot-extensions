@@ -67,7 +67,7 @@ jobs:
       matrix:
         scenario:
           - name: normal-upgrade
-            selector: test_normal_payload_init_refreshes_receipt
+            selector: test_normal_payload_init_refreshes_receipt or legacy_staging
           - name: two-shipped-cells
             selector: test_two_normal_shipped_cells
           - name: peer-roundtrip

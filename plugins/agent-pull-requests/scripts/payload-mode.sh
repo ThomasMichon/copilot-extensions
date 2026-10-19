@@ -4,6 +4,36 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 payload="$(cd "$here/.." && pwd)"
 legacy="${HOME:?}/.agent-pull-requests"
+stage_root="$legacy/.install-stage"
+stage="$(dirname "$payload")"
+if [[ "$(dirname "$stage")" == "$stage_root" ]]; then
+    # Staging hints locate evidence, never waive native governance admission.
+    [[ "${COPILOT_PLUGIN_INSTALL_STAGED:-}" == 1 &&
+        "${COPILOT_PLUGIN_STAGED_FROM:-}" == /* &&
+        "$(basename "$payload")" == agent-pull-requests ]] || {
+        printf '%s\n' 'Staged installer provenance is incomplete' >&2; exit 126;
+    }
+    origin="$(cd -P -- "$COPILOT_PLUGIN_STAGED_FROM" && pwd)"
+    marketplace="$(dirname "$origin")"
+    [[ "$(dirname "$marketplace")" == "$HOME/.copilot/installed-plugins" &&
+        "$(basename "$origin")" == agent-pull-requests ]] || {
+        printf '%s\n' 'Staged installer origin is not a canonical installed payload' >&2; exit 126;
+    }
+    for root in "$payload" "$COPILOT_PLUGIN_STAGED_FROM"; do
+        cursor="$root"
+        while [[ "$cursor" != / ]]; do
+            [[ ! -L "$cursor" ]] || {
+                printf '%s\n' 'Staged installer provenance may not traverse links' >&2; exit 126;
+            }
+            cursor="$(dirname "$cursor")"
+        done
+    done
+    links="$(find "$payload" "$origin" -type l -print)"
+    [[ -z "$links" ]] && diff -qr "$payload" "$origin" >/dev/null || {
+        printf '%s\n' 'Staged installer payload differs from its origin or contains links' >&2; exit 126;
+    }
+    payload="$origin"
+fi
 forward=(status --payload-root "$payload" --plugin-id agent-pull-requests --legacy-root "$legacy")
 if [[ ! -e "$legacy" && ! -L "$legacy" ]]; then
     forward+=(--legacy-probe-json '{"declared":true,"result":"absent","checkedAt":null}')

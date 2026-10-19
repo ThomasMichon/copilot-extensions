@@ -2,6 +2,50 @@
 $ErrorActionPreference = 'Stop'
 $payload = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $legacy = Join-Path $env:USERPROFILE '.agent-pull-requests'
+$stageRoot = Join-Path $legacy '.install-stage'
+$stage = Split-Path -Parent $payload
+if ((Split-Path -Parent $stage) -eq $stageRoot) {
+    # Staging hints locate evidence, never waive native governance admission.
+    if ($env:COPILOT_PLUGIN_INSTALL_STAGED -cne '1' -or
+        -not [IO.Path]::IsPathRooted([string]$env:COPILOT_PLUGIN_STAGED_FROM) -or
+        (Split-Path -Leaf $payload) -cne 'agent-pull-requests') {
+        throw 'Staged installer provenance is incomplete'
+    }
+    $origin = (Resolve-Path -LiteralPath $env:COPILOT_PLUGIN_STAGED_FROM).Path
+    $marketplace = Split-Path -Parent $origin
+    $installed = Join-Path $env:USERPROFILE '.copilot\installed-plugins'
+    if ((Split-Path -Parent $marketplace) -ne $installed -or
+        (Split-Path -Leaf $origin) -cne 'agent-pull-requests') {
+        throw 'Staged installer origin is not a canonical installed payload'
+    }
+    foreach ($root in @($payload, $origin)) {
+        $cursor = $root
+        while ($cursor) {
+            if ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Staged installer provenance may not traverse links'
+            }
+            $cursor = Split-Path -Parent $cursor
+        }
+    }
+    $entries = @(Get-ChildItem -LiteralPath $payload -Recurse -Force)
+    $originalEntries = @(Get-ChildItem -LiteralPath $origin -Recurse -Force)
+    if ($entries.Count -ne $originalEntries.Count) { throw 'Staged installer payload differs from its origin' }
+    foreach ($entry in $entries) {
+        $relative = $entry.FullName.Substring($payload.Length + 1)
+        $original = Get-Item -LiteralPath (Join-Path $origin $relative) -Force
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            ($original.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $entry.PSIsContainer -ne $original.PSIsContainer) {
+            throw 'Staged installer payload contains a link or mismatched entry'
+        }
+        if (-not $entry.PSIsContainer -and
+            (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash -cne
+            (Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash) {
+            throw 'Staged installer payload differs from its origin'
+        }
+    }
+    $payload = $origin
+}
 $hostExe = (Get-Process -Id $PID).Path
 $forward = @(
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',

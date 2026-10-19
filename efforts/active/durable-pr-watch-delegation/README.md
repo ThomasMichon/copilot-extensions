@@ -256,6 +256,37 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-19 - Revalidate marketplace admission after legacy self-staging
+
+- The actual completed review of #7160 identifies one additional Medium
+  finding in its body despite the overview's no-open-issues banner: the
+  staged child loses the original marketplace locator, so a valid nonempty
+  per-marketplace legacy policy can refuse the normal installer.
+- Both native mode helpers now recognize only the installer's canonical
+  per-profile staging layout. They require an existing canonical installed
+  origin and equal, link-free payload trees before asking the unchanged
+  native installation-context validator to resolve that original source
+  against current governance. Environment staging flags alone never waive
+  admission, and origin replacement or disappearance refuses safely.
+  The shared thirteen-plugin self-staging blocks remain unchanged.
+- Initial contained coverage passes 33 selected cases in 136.02 seconds,
+  including actual PowerShell staging for all five mutating installer
+  actions and refused modified payloads, missing/forged origins, changed
+  governance, lost marketplace declarations and ordinary payload hints.
+  Final complete invocation coverage passes 68 cases with one explicit-tier
+  cold-build skip in 203.40 seconds, including both scoped policy forms and
+  native link refusal. An initially malformed unrelated-marketplace fixture
+  is corrected to the canonical source-derived ID shape; validation is not
+  relaxed. The partition/native-scope contracts pass all 187 cases in 17.57
+  seconds with short runner-owned Windows paths; exact fixture cleanup
+  removes its read-only Git objects afterward. Fatal lint, module-size and
+  all thirteen install-contract gates pass.
+  The existing native-account normal-upgrade scenario also selects these
+  contracts on Linux and Windows without adding jobs or widening deadlines.
+- This is a supported legacy-compatibility fix, not renewed reader/receipt
+  investigation or a deployment. Current-head review, required CI and native
+  acceptance remain owed; #7160 is not merged and the parent remains Active.
+
 ### 2026-10-19 - Preserve native acceptance while reconciling current-base CI
 
 - Published bounded recovery at `e9e9f37ad` on the existing #7160, replied to

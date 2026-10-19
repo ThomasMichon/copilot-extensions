@@ -46,6 +46,11 @@ never fall back to that legacy root.
 For an unattributed legacy payload, a valid disabled policy may omit the
 `marketplaces` map or leave it empty. Invalid member types still refuse; a
 nonempty scoped map requires resolvable source identity.
+Legacy self-staging revalidates the original installed marketplace against the
+current policy. The child accepts an origin hint only inside its own canonical
+staging layout, with an existing installed payload and identical, link-free
+payload contents; staging flags alone never bypass admission. A replaced or
+unavailable origin fails closed rather than guessing its marketplace.
 
 ## Verbs
 
