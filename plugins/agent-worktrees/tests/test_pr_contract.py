@@ -723,6 +723,7 @@ class TestMergeReadiness:
                 automerge_label="auto-merge",
             )
             assert approved["ready_for_direct_merge"] is True
+            assert approved["eligible"] is True
             assert approved["needs_consent"] is False
             assert approved["consent_action"] == "not-applicable"
 
@@ -732,8 +733,18 @@ class TestMergeReadiness:
                 review_blocking=False, approval_required=False,
             )
             assert commented["review_assessment_required"] is True
+            assert commented["eligible"] is False
             assert commented["clear_to_merge"] is False
             assert commented["needs_consent"] is False
+
+    def test_consent_operation_retains_classifier_eligibility(self):
+        readiness = pc.merge_readiness(
+            _approved(), automerge_label="auto-merge",
+            operation="consent",
+        )
+        assert readiness["eligible"] is True
+        assert readiness["needs_consent"] is True
+        assert readiness["clear_to_merge"] is True
 
     def test_review_blocking_false_reports_comment_verdict(self):
         snap = _approved(reviews=(_rev(1, "COMMENT"),))

@@ -39,7 +39,7 @@ def operation_readiness(
         reason = "not yet approved"
     return {
         "consent_action": "not-applicable" if direct_candidate else state.consent_action,
-        "eligible": direct_ready or state.eligible,
+        "eligible": direct_ready if direct_candidate else state.eligible,
         "needs_consent": False if direct_candidate else state.consent_action == "apply",
         "clear_to_merge": (
             direct_ready if direct_candidate
