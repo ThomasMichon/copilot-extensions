@@ -3,8 +3,48 @@
 The Manager's user-owned configuration lives at
 `~/.worktree-manager/config.toml`. It contains control-plane preferences and
 provider settings that must not be committed to a project. The existing
-`[source]` update-source table and the AHP provider table coexist in this file;
+`[source]` update-source, AHP provider and restart-recovery tables coexist in this file;
 `worktree-manager source set/reset` preserves all non-source tables.
+
+## Restart recovery requests
+
+Both new behaviors default off. Existing bounded, report-only evidence sampling
+is independent of these preferences.
+
+```toml
+[restart_recovery]
+shutdown_notifications = false
+automatic_restore = false
+```
+
+These are strictly boolean local requests, not capability attestations or
+authorization. Unknown keys and invalid values visibly block recovery rather
+than silently enabling a default. Source updates preserve this table. No
+command here writes enrollment, installs a host startup service, changes a
+system policy, or resumes a conversation.
+
+`shutdown_notifications = true` requests the native Linux logind transport in
+the existing active mux daemon. It acquires a delay inhibitor before subscribing
+to shutdown signals; denied access is a blocker, never a reason to elevate.
+The connection and FD exist only while the daemon holds its active lease and
+admits loop mutations. Passive generations do not connect. WSL teardown, Windows,
+macOS and containers are not qualified by Linux logind support.
+
+The transport reports `qualified: false`: private D-Bus/FD-transfer tests do not
+prove that the resident loop always services notifications within the native
+delay budget while other work blocks it. This timing gate must close before
+automatic recovery can rely on that notification. `automatic_restore = true`
+currently reports a blocker because current-owner admission and acknowledged
+exact-conversation restart Resume are not qualified; it never launches.
+
+`worktree-manager mux-daemon recovery-evidence` is read-only and includes the
+requested capability states. It does not connect to the system bus to establish
+runtime readiness: a requested Linux notifier is `unconfirmed`, unsupported
+platforms are `blocked`, and disabled requests are `disabled`. Requested but
+unconfirmed/blocked capabilities, invalid configuration and unavailable
+evidence produce a JSON blocker and nonzero exit. The resident daemon's
+authenticated health response additionally exposes `restart_recovery` with its
+actual notification transport state, admission and qualification.
 
 ## Picker logical machine roster
 

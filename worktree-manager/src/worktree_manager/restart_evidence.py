@@ -6,6 +6,7 @@ import dataclasses
 import json
 import math
 import sqlite3
+import time
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -190,17 +191,21 @@ class RecoveryJournal:
         return True
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, deadline: float | None = None):
         try:
             reject_links(self.path)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._protect()
-            with closing(sqlite3.connect(self.path, timeout=5)) as conn, conn:
+            with closing(sqlite3.connect(self.path, timeout=0 if deadline is not None else 5)) as conn, conn:
+                if deadline is not None:
+                    conn.set_progress_handler(lambda: int(time.monotonic() >= deadline), 100)
                 protect(self.path)
                 conn.execute("PRAGMA synchronous=FULL")
                 conn.execute("BEGIN IMMEDIATE")
                 self._schema(conn, create=True)
                 yield conn
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise RecoveryEvidenceError("Restart checkpoint deadline expired.")
         except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
             raise RecoveryEvidenceError(
                 f"Could not persist restart recovery evidence ({type(exc).__name__}): {exc}"
@@ -331,14 +336,14 @@ class RecoveryJournal:
 
     def _shutdown_event(
         self, platform: str, environment_id: str, boot_id: str, notification_id: str, *,
-        cancelled: bool,
+        cancelled: bool, deadline: float | None = None,
     ) -> None:
         for name, value in (
             ("platform", platform), ("environment", environment_id),
             ("boot", boot_id), ("notification", notification_id),
         ):
             _text(value, name, 256)
-        with self._transaction() as conn:
+        with self._transaction(deadline=deadline) as conn:
             rows = conn.execute(
                 "SELECT payload FROM journal WHERE id IN "
                 "(SELECT max(id) FROM journal GROUP BY project, worktree_id)"
@@ -365,9 +370,12 @@ class RecoveryJournal:
 
     def shutdown_pending(
         self, platform: str, environment_id: str, boot_id: str, *, notification_id: str,
+        deadline: float | None = None,
     ) -> None:
         """Freeze eligible positive generations before shutdown teardown."""
-        self._shutdown_event(platform, environment_id, boot_id, notification_id, cancelled=False)
+        self._shutdown_event(
+            platform, environment_id, boot_id, notification_id, cancelled=False, deadline=deadline,
+        )
 
     def shutdown_cancelled(
         self, platform: str, environment_id: str, boot_id: str, *, notification_id: str,

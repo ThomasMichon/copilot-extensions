@@ -100,8 +100,12 @@ means of fulfilling the operator's request. They require normal source review.
   not transcripts, secrets, environment dumps or untrusted executable commands.
   The evidence foundation landed in [#7230](https://github.com/ThomasMichon/copilot-extensions/pull/7230);
   lifecycle producers and restoration remain separate open items.
-- [ ] Record reasoned intentional-exit evidence durably; delayed observations
+- [x] Record reasoned intentional-exit evidence durably; delayed observations
   from an older incarnation must not retire a replacement.
+  Source-bound native lifecycle producers and owner corroboration landed in
+  [#7241](https://github.com/ThomasMichon/copilot-extensions/pull/7241).
+  Linux/WSL source qualification does not qualify platform shutdown adapters or
+  authorize recovery; native restart/seed integration remains open below.
 - [ ] Handle native restart/shutdown notification by checkpointing the eligible
   generation before teardown. Reconcile cancelled shutdowns. Do not rely on
   this notification being delivered during a crash or sudden power loss.
@@ -416,3 +420,61 @@ The umbrella effort remains Active independently of this slice's completion.
   fixes. The expanded isolated lane passed 763 Worktrees tests with 12 platform
   skips and 249 Manager tests with three native skips. This is still source and
   fixture validation, not released or deployed recovery.
+
+### 2026-10-19 - Lifecycle slice landed; notification and admission next
+
+- [#7241](https://github.com/ThomasMichon/copilot-extensions/pull/7241)
+  squash-merged to `dev` as `834dfd278d` after the exact source head received
+  a clean Copilot review with no open findings and all required checks passed.
+  The final isolated contracts passed 763 Worktrees tests and 249 Manager tests,
+  with platform-specific skips. The source-bound intentional-exit Plan item is
+  resolved; the remaining Plan and Validation Plan items are still open.
+- The later CI execution was affected by a cancelled timeout after its test
+  output already reported success. Its original logs and the official Actions
+  incident reference were preserved. After the incident was resolved, one
+  explicitly authorized provider-native retry of that exact cancelled job on
+  the unchanged source head succeeded, followed by the required aggregate.
+  No workflow, timeout, repository rule or release setting was changed.
+- Next stretch: explicit local recovery configuration and capability reporting,
+  followed by a native shutdown-notification adapter owned by the existing
+  active mux-daemon lifecycle. Preserve Linux versus WSL/native Windows
+  boundaries, cancelled-shutdown handling, bounded drain ownership and
+  unsupported-platform refusals. Validate against disposable notification
+  fixtures, never a production reboot, live enrollment or daemon restart.
+- Exact original-conversation recovery admission, task/hold reconciliation,
+  durable attempts and acknowledged status-first seed delivery remain separate
+  unresolved implementation and native-qualification obligations. This merge is
+  not release, rollout or completion of the recovery objective.
+
+### 2026-10-19 - Default-off configuration and native notification transport
+
+- Added strict local `restart_recovery` preferences for shutdown notifications
+  and automatic restoration, both default off. Read-only evidence inspection
+  exposes requested capabilities without opening a system-bus connection or
+  creating absent state. Unsupported platforms and requested-but-unqualified
+  automatic restoration visibly block; configuration is never admission.
+- Added the native Linux logind transport to the existing active mux-daemon
+  loop and mutation admission. It negotiates a real delay inhibitor before
+  subscription, validates the unique owner and message shape, reads initial
+  preparation state, checkpoints before releasing the FD, and persists matching
+  cancellation before reacquiring. Denial, owner/bus loss, malformed evidence
+  and storage failures do not elevate or busy-retry. Drain and lease release
+  close owned native resources; passive generations never connect.
+- A shutdown checkpoint refuses SQLite lock contention immediately and applies
+  a progress deadline with rollback. The transport retains received-FD ownership
+  even when a coroutine is cancelled before consuming the method reply, because
+  the upstream library does not close such dropped reply descriptors.
+- Configuration/capability regressions first failed in 18 cases, then passed.
+  The integrated bounded, disconnected lane passed 318 tests with three native
+  skips, including the actual private D-Bus/SCM_RIGHTS fixture. That fixture
+  ran in a disposable derivative of the pinned isolation image with Debian's
+  D-Bus daemon present; the standard image lacks the binary and explicitly skips
+  that proof. No host system bus, shutdown, live enrollment or rollout was used.
+- This is transport qualification, not a qualified automatic-recovery platform.
+  Existing blocking work on the resident loop can exceed logind's notification
+  delay. The adapter explicitly reports `qualified: false`; notification timing
+  remains an open obligation under this focused objective before it can
+  authorize automatic recovery. Windows/WSL shutdown adapters, startup enrollment,
+  owner/task/hold admission, durable attempts and acknowledged exact-UUID
+  status-first Resume remain open. No Plan or Validation Plan item is closed
+  solely by this increment.

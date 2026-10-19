@@ -146,6 +146,24 @@ They do not reboot a machine, kill a
 production session, qualify Windows native source capture, or prove acknowledged
 restart-seed delivery. Those remain separate native integration obligations.
 
+Default-off recovery configuration and native notification transport use:
+
+```text
+python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_manager_config or test_restart_capabilities or test_restart_notification_runtime or test_restart_notifications'
+```
+
+The disposable transport tests exercise actual pipe-FD ownership, inhibitor-before-
+subscription ordering, checkpoint/cancellation/rearm, owner and bus loss, spoofed
+signals, immediate SQLite lock refusal and FD cleanup before coroutine pickup.
+`test_restart_notifications_dbus.py` additionally uses a private `dbus-daemon`
+and negotiated SCM_RIGHTS; it never connects to the host system bus. That native
+fixture skips explicitly if the binary is unavailable (including the standard
+isolated image), so such a run is not actual D-Bus qualification. A disposable
+derivative of the same pinned, hardened image with Debian's `dbus-daemon`
+installed can run this fixture without changing the wrapper's filesystem,
+credential or network isolation. Neither fixture proves resident-loop latency,
+real host shutdown coverage, automatic enrollment or acknowledged Resume.
+
 Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:
 

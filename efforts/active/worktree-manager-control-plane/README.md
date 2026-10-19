@@ -1230,6 +1230,18 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - The restart-recovery implementer landed source-bound native
+  lifecycle observations and intentional-exit corroboration in
+  [#7241](https://github.com/ThomasMichon/copilot-extensions/pull/7241)
+  (`834dfd278d`), following the private evidence foundation in #7230. Current
+  review had no open findings and required CI passed. The focused
+  [recovery plan](machine-restart-recovery.md) resolves only its intentional-exit
+  producer item; notification adapters, explicit enrollment, recovery admission
+  and acknowledged status-first Resume remain open. The next stretch is
+  configuration/capability gating and native notification capture under the
+  existing mux-daemon lifecycle. No host configuration or live rollout changed;
+  this umbrella stays Active.
+
 - **2026-10-18** - Claimed the machine-restart recovery slice on #4564 and
   captured the operator's request in a focused sub-plan. Existing attachment
   observation from #5573 is retained; missing-mux tombstones are not treated as

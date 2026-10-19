@@ -18,13 +18,13 @@ def cmd_mux_daemon(rest: list[str]) -> int:
         return 2
     action = args.pop(0)
     if action == "recovery-evidence":
-        from .restart_observer import RestartObserver
+        from .restart_capabilities import inspect_recovery
         from .self_install import default_root
 
         if args:
             print("error: recovery-evidence accepts no arguments")
             return 2
-        result = RestartObserver(default_root()).startup()
+        result = inspect_recovery(default_root())
         print(json.dumps(result))
         return 1 if result.get("blocker") else 0
     if action == "status":

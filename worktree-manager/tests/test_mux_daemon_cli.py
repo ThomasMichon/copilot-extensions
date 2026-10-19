@@ -47,7 +47,12 @@ def test_mux_daemon_recovery_evidence_is_read_only(tmp_path, monkeypatch, capsys
     ))
     assert main(["mux-daemon", "recovery-evidence"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report == {"candidates": [], "automatic_eligible": False}
+    assert report["candidates"] == []
+    assert report["automatic_eligible"] is False
+    assert report["capabilities"] == {
+        "shutdown_notifications": {"requested": False, "status": "disabled"},
+        "automatic_restore": {"requested": False, "status": "disabled"},
+    }
     assert not (tmp_path / "restart-recovery").exists()
     assert main(["mux-daemon", "recovery-evidence", "--apply"]) == 2
 

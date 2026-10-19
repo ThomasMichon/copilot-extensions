@@ -415,7 +415,7 @@ launcher/child identity. Repair that Python installation before retrying.
 Existing launcher/child pairs are not rewritten or stopped by this change;
 their identity must be classified before automated retirement.
 
-## Restart evidence (inspection only)
+## Restart evidence and notification transport
 
 The existing active mux daemon maintains a private, bounded recovery-evidence
 journal under its runtime root at `restart-recovery/evidence.sqlite3`. This is
@@ -475,7 +475,26 @@ metadata: a racing notification takes precedence over an apparent user exit, and
 an End after cancelled shutdown remains conservatively uncertain for that
 execution generation, including across intermediate inferred or unknown exits.
 This does not infer a shutdown cause from an exit code or
-wall-clock timestamp, and it does not install a native notification adapter.
+wall-clock timestamp.
+
+Native Linux has an explicitly requested, default-off logind notification
+transport in this same daemon. It negotiates a real delay-inhibitor FD before
+subscribing, authenticates the unique logind owner and reads the initial
+`PreparingForShutdown` state. A shutdown signal checkpoints matching
+last-positive generations transactionally, then releases the inhibitor;
+cancellation durably reconciles the matching notification before reacquiring.
+Checkpoint lock contention fails immediately rather than spending the delay
+budget waiting for SQLite, and a progress deadline can roll back an expired
+checkpoint. This is not a hard bound on operating-system filesystem stalls.
+Owner loss, bus disconnect, malformed messages, denied permissions and failed
+writes stay visible; no elevation or busy reconnect loop is attempted.
+Drain/pause and shutdown close native resources on the owning daemon loop
+before its active lease ends. The transport is **not timing-qualified**:
+other blocking daemon work can delay notification handling beyond logind's
+budget. Its health descriptor therefore retains `qualified: false`; automatic
+recovery cannot treat the transport alone as proof of shutdown coverage.
+See [configuration](docs/configuration.md#restart-recovery-requests) for the
+strict, default-off preferences and capability reporting.
 
 ```bash
 worktree-manager mux-daemon recovery-evidence
@@ -483,17 +502,18 @@ worktree-manager mux-daemon recovery-evidence
 
 This read-only JSON report creates no missing journal and accepts no apply flag.
 It distinguishes same-boot observations, foreign environments, explicit closure
-evidence and unconfirmed previous-boot candidates. `automatic_eligible` is always
+evidence and unconfirmed previous-boot candidates, and reports requested recovery
+capabilities without opening a native bus connection. `automatic_eligible` is always
 `false`: this evidence foundation does **not** launch or enroll recovery,
 configure boot startup, deliver a restart seed, or grant operational permission.
-The journal's reasoned exit/shutdown APIs are not themselves native shutdown
-notification adapters. Missing hooks, generic tombstones and exit codes alone
+The journal's reasoned exit/shutdown APIs do not independently prove native
+notification coverage. Missing hooks, generic tombstones and exit codes alone
 never assert intentional closure or recovery permission.
 
 Native Linux and WSL have evidence-epoch readers; WSL includes its init-process
 incarnation because a distro can restart without restarting the shared kernel.
 Native Windows, macOS and container epochs are explicitly unqualified, not
-silently treated as Linux. Native shutdown notification, automatic admission,
+silently treated as Linux. Qualified native shutdown notification, automatic admission,
 exact-conversation Resume and acknowledged restart-seed delivery remain tracked
 under [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564).
 An evidence report is not completed restoration or installed-release proof.

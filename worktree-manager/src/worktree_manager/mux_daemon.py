@@ -37,6 +37,7 @@ from .mux_mapping_registry import (
 )
 from .self_install import current_version, default_root
 from .restart_observer import RestartObserver
+from .restart_notification_runtime import RestartNotificationRuntime
 
 __all__ = [
     "get_mapping",
@@ -633,6 +634,7 @@ class MuxDaemonRuntime:
         self.handler_tracker = _ActiveHandlerTracker()
         self.root = root if root is not None else default_root()
         self.recovery_observer = RestartObserver(self.root)
+        self.restart_notifications = RestartNotificationRuntime(self.root, self.recovery_observer)
         self.passive = passive
         self.listen_port = listen_port or 0
         self.admissions_open = not passive
@@ -748,6 +750,7 @@ class MuxDaemonRuntime:
             "version": __version__,
             "attached_clients": attached_clients,
             "busy": active_handlers > 0,
+            "restart_recovery": self.restart_notifications.status,
         }
 
     def promote(self) -> dict:
@@ -814,6 +817,7 @@ class MuxDaemonRuntime:
         return self.registry.has_any_live()
 
     def shutdown(self) -> None:
+        self.restart_notifications.close()
         if self.server is not None:
             self.handler_tracker.wait_for_drain(self.SHUTDOWN_DRAIN_TIMEOUT_S)
             self.server.close()
@@ -857,7 +861,7 @@ def run_daemon_foreground(
             listen_port=listen_port,
         )
         if lease is not None:
-            runtime.recovery_observer.startup(recover_existing=True)
+            runtime.restart_notifications.activate()
         runtime.start()
         if runtime.server is None or runtime.port is None:
             return 1
@@ -886,16 +890,19 @@ def run_daemon_foreground(
                             lease = promoted
                             runtime.passive = False
                             runtime._self_retire_generation = generation
-                            runtime.recovery_observer.startup(recover_existing=True)
+                            runtime.restart_notifications.activate()
                 if lease is not None:
                     write_lock_data(lock, runtime.lock_extra())
                 runtime.sync_self_retire()
                 if runtime.republish_enabled:
                     with runtime.loop_mutation():
                         if runtime.republish_enabled:
+                            runtime.restart_notifications.pump(admitted=lease is not None and runtime.accepting_requests())
                             runtime.attachment_observer.observe(runtime.registry)
                             if lease is not None and runtime.accepting_requests():
                                 runtime.recovery_observer.observe(runtime.registry)
+                else:
+                    runtime.restart_notifications.pause()
                 status_monitor_lock = _status_monitor_lock_path()
                 status_monitor_data = (
                     mux_daemon_live.read_lock_data(status_monitor_lock)
