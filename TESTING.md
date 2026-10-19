@@ -1580,7 +1580,11 @@ a scheduled or manually dispatched workflow.
 - Release-tool compatibility tests retain complete legacy-controller branches
   and execute the prepared source-owned graph when present. Before activation,
   the full tool portfolio must also pass with the actual controlled workflow
-  overlays, not only the default Dev YAML. Native source-owned tests use the
+  overlays, not only the default Dev YAML. Include workflow-contract test modules
+  invoked by native CI cells, such as Fleet Manager's admission/partition guard,
+  as well as the release-tool portfolio. Source-policy assertions read the
+  recorded Dev recipe; separate actual-controller assertions retain preserved
+  admission, required coverage and deadlines. Native source-owned tests use the
   existing second Windows job without increasing either five-minute budget;
   unfiltered file partition assertions guard against lost cases.
 - Keep one canonical implementation broad; sample external adapters at genuine

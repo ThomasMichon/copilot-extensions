@@ -10,10 +10,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-
 def workflow(root: Path) -> dict[str, Any]:
+    import yaml
+
     return yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text("utf-8"))
 
 
@@ -22,9 +21,20 @@ def source_owned(jobs: dict[str, Any]) -> bool:
 
 
 def source_workflow(root: Path, name: str) -> dict[str, Any]:
+    import yaml
+
+    return yaml.safe_load(source_workflow_text(root, name))
+
+
+def source_owned_controller(root: Path) -> bool:
+    controller = (root / ".github/workflows/validate-and-promote.yml").read_text("utf-8")
+    return re.search(r"^  qualify-candidate:\s*$", controller, re.M) is not None
+
+
+def source_workflow_text(root: Path, name: str) -> str:
     """Keep source contracts separate from a generated checkout's preserved controller."""
-    if not source_owned(workflow(root)["jobs"]):
-        return yaml.safe_load((root / ".github/workflows" / name).read_text("utf-8"))
+    if not source_owned_controller(root):
+        return (root / ".github/workflows" / name).read_text("utf-8")
     state = json.loads((root / ".github/release-pipeline-state.json").read_text("utf-8"))
     dev = state["last_promotion"]["dev_head"]
     assert isinstance(dev, str) and re.fullmatch(r"[0-9a-f]{40}", dev), "invalid recorded Dev source"
@@ -39,7 +49,7 @@ def source_workflow(root: Path, name: str) -> dict[str, Any]:
         ).stdout
 
     assert git("rev-parse", "--verify", f"{dev}^{{commit}}").strip() == dev
-    return yaml.safe_load(git("show", f"{dev}:.github/workflows/{name}"))
+    return git("show", f"{dev}:.github/workflows/{name}")
 
 
 def heredoc(script: str) -> str:

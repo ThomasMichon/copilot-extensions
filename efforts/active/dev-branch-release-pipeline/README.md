@@ -1049,6 +1049,58 @@ proposal.
 
 ## Journal
 
+### 2026-10-19 - Generated Fleet guard exposes one more source/control profile seam
+
+The changed-controller qualification `39206595414` admitted Dev
+`dd12fff539b9bb8bf2b2ae8dd255c6035fd3e32d`. All fourteen source jobs, nine
+nonempty baselines, artifact build and attestation passed. Candidate
+`a9fb46b6717c9785fc366cbe2503f80d41dacf2f` then entered exact-candidate CI
+`39212912232` before any product PR or publication.
+
+The twelve Fleet native matrix cells fail the same source-policy assertion:
+Dev's newer preallocation contract forbids the legacy detector still deliberately
+preserved in Main. Linux and Windows logs reproduce the identical one-failed,
+sixteen-passed guard result before the Fleet product tests. Preserve both
+policies rather than replacing independently owned Main control.
+
+The original source assertions and dependency-selection cases now read the
+validated recorded Dev recipe. Separate actual-controller assertions retain
+both native routes, all six partitions, required gates and original deadlines;
+deadline, partition and required-gate mutations still fail. A subprocess
+regression blocks PyYAML imports while exercising both contracts, retaining the
+preserved Fleet cell's pytest-only bootstrap without a workflow/dependency edit.
+
+The complete seventy-two-module portfolio named by actual Main CI, plus existing
+release contracts, passes 3,743 cases, 294 subtests and 34 platform/opt-in skips
+in 349.93 seconds against the Git-backed preserved-control fixture. Canonical
+source/helper consumers separately pass 275 cases. Four existing unregistered
+marker warnings remain visible. These are compatibility results, not a live
+release; failed candidate evidence still blocks publication, merge and resume.
+The candidate's full Bridge cell has passed, but its complete qualification has
+not. Retain this generation until terminal and then qualify changed source.
+
+### 2026-10-18 - Rehearsed Main controller activated; full qualification next
+
+#7221 merged as `e81a305c6056454971773c24d31e3a03e43184d0` after exact-head
+Copilot approval and all three original CI gates passed. Its post-publication
+test blobs match the complete controlled-Main rehearsal. The activation's
+repinned merge-wait suite independently passes all twenty-three cases.
+
+Main workflow-only #7216 then merged normally, without an administrator
+override, as `a325f5063e7cc0a2b3276be81be3e4959f8f4651`. Both Main source gates
+passed; its exact-head Copilot review reported no open issues and requested
+final human review. The repository owner explicitly authorized that clean
+comment verdict for this exact activation. This is not a general review waiver.
+The two preserved workflows now pin the reviewed source repair; the release
+pause, preservation manifest, original job coverage and Main's eight-minute
+Bridge limit remain unchanged.
+
+The immediate objective is a fresh complete qualification against this changed
+trusted controller, immutable publication/readback, verified promotion merge and
+tag, then canonical resume. The owner authorized continued corrective PRs,
+promotions, local deployment and validation to restore operation. No generated
+release, client rollout, natural-cycle or timing acceptance is claimed here.
+
 ### 2026-10-18 - Preview custody contract merged; Main activation is next
 
 #7215 merged as `87bfbec660f6901ad95f3b418e6746812141676e` after actual
