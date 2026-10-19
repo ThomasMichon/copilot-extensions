@@ -125,6 +125,7 @@ python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 't
 
 The fixtures cover original-source transport, real held-file ownership, source
 PID/birth mismatch, delayed historical End versus a replacement self-claim,
+source-bound Start through PID-only catalog refresh and matching End cleanup,
 history-pruning ambiguity, pre-dispatch old-daemon refusal with a real legacy
 peer whose mutation handler stays uncalled, installed-bin helper loading,
 the 256-entry retained-history boundary, tombstone-visible closure and

@@ -349,3 +349,12 @@ The umbrella effort remains Active independently of this slice's completion.
   fence. All five new regression cases failed first. The targeted isolated
   Manager lane then passed 239 tests with three native skips; the unchanged
   Worktrees slice retains the preceding 478-test receipt.
+- The next review found PID-only catalog reconciliation replacing a qualified
+  activation with a source-less interval. The shared activation helper now
+  refuses source-less lifecycle changes once source-bound history exists, while
+  the catalog can still fill PID metadata. Both matching and changed catalog
+  timestamps reproduced the failure. The regression follows canonical Start,
+  actual catalog refresh, matching End, claim release and fsmonitor cleanup,
+  then proves another catalog pass cannot reopen the ended interval. The
+  expanded isolated Worktrees lane passed 505 tests with 12 platform skips;
+  Manager sources remain unchanged from their 239-test receipt.

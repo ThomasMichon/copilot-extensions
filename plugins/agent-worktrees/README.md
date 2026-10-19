@@ -402,6 +402,9 @@ physical CLI with the same native UUID are deliberately unconfirmed; the ambigui
 survives history pruning. Duplicate old Start delivery cannot reactivate an ended
 claim. Both lifecycle writes require the version-3 owner verb, including legacy
 requests, so an older resident cannot silently discard the new fields.
+PID-only catalog reconciliation can fill process metadata but cannot replace or
+reopen a source-bound activation. Its matching End still closes the current
+interval and releases that interval's claim and filesystem monitor.
 
 Warm source-aware hooks require `session-start-source-v1` or
 `session-end-source-v1` in the selected resident's rendezvous **before** sending

@@ -54,6 +54,8 @@ def _start_session_activation(
 ) -> bool:
     tracking = _tracking()
     _ensure_activation_history(entry)
+    if source_identity is None and any(item.source_identity is not None for item in entry.activations):
+        return False
     latest = max(entry.activations, key=lambda item: item.ordinal, default=None)
     if latest is not None and latest.ended_at is None:
         same_source = latest.source_identity == source_identity
