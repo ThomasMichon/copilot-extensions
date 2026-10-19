@@ -229,8 +229,24 @@ empty listings qualify absence, and existing dotted worktree names use their
 canonical mux encoding. One actual child reads persisted owner YAML and a separate
 Manager/engine process fixture verifies the no-update/no-reconcile environment
 and unchanged real attempt storage. Process observations and native epochs are
-synthetic; these fixtures do not launch Copilot, qualify current task policy,
+synthetic; these fixtures do not launch Copilot, qualify action-time task policy,
 reserve a recovery launch or prove restart-seed acknowledgement.
+
+Current task-policy snapshots additionally use:
+
+```text
+python tools/run_tests_in_devcontainer.py agent-dispatch agent-worktrees -k 'test_native_restart_policy or test_native_restart_check or test_claim_providers or claim_status'
+```
+
+This lane covers the opt-in owner API's reduced SQLite snapshot, explicit
+writer/native owner/generation/hold/steer/waiter checks, old-coordinator and
+missing-field refusal, and unchanged default callback output. An actual CLI
+child makes only the task-policy HTTP GET; another child reads persisted
+worktree YAML and invokes its registered callback process with the exact writer,
+opt-in flag and no-self-provision environment. These are disposable protocol
+fixtures, not live task acquisition, automatic launch permission or native
+restart qualification. Mixed/legacy/released/producer claims remain blocked;
+generation snapshots are not reservations.
 
 The frozen-identity lane covers no-write default/passive/inspection paths, legacy
 binding refusal, original-snapshot retention, cancelled-shutdown fences, private

@@ -66,7 +66,7 @@ def validate_expected(expected: object) -> dict:
     return expected
 
 
-def _refusal(record: tracking.WorktreeRecord, expected: dict) -> str | None:
+def _refusal(record: tracking.WorktreeRecord, expected: dict, task_policies: list[dict]) -> str | None:
     if record.status != "active" or record.completed_at:
         return "terminal-worktree"
     if record.repo != expected["project"]:
@@ -97,13 +97,14 @@ def _refusal(record: tracking.WorktreeRecord, expected: dict) -> str | None:
         or tracking.derive_execution_leg(record) is not None
     ):
         return "non-native-execution"
-    # Provenance and claim-status do not express the current owner's launch policy.
-    if record.dispatch_attempt is not None or record.dispatch_attempt_opaque or record.dispatch_attempt_raw_present:
-        return "task-policy-unqualified"
-    if record.owner_ref or record.resources:
-        return "claim-policy-unqualified"
     if record.bound_agent or record.profile_assignment_revision or record.profile_assignments:
         return "profile-policy-unqualified"
+    from . import native_restart_task_check
+
+    reason, policies = native_restart_task_check.check(record, expected)
+    if reason:
+        return reason
+    task_policies.extend(policies)
     worktree = Path(record.worktree_path)
     if not worktree.is_dir():
         return "missing-worktree-path"
@@ -140,8 +141,8 @@ def check(
 ) -> dict:
     """Check exact current owner facts without writing, reserving or launching.
 
-    This snapshot is not a capability. Task/claim/profile policy, launch fencing
-    and acknowledged seed pickup must be composed before any future restoration.
+    This snapshot is not a capability. Remaining claim/profile policy, launch
+    fencing and acknowledged seed pickup must precede any future restoration.
     Ended shutdown activations remain refused rather than guessing permission.
     """
     expected = validate_expected(expected)
@@ -153,9 +154,10 @@ def check(
     if record is None or record.worktree_id != expected["worktree_id"]:
         return {**result, "reason": "missing-or-mismatched-worktree"}
     before = dataclasses.asdict(record)
+    task_policies: list[dict] = []
     reason = (
         "foreign-environment" if native_source_context.epoch() != expected["target_epoch"]
-        else _refusal(record, expected)
+        else _refusal(record, expected, task_policies)
     )
     current = loader()
     if current is None or dataclasses.asdict(current) != before:
@@ -163,4 +165,5 @@ def check(
     return {
         **result, "worktree_qualified": reason is None,
         "reason": reason or "current-worktree-matches",
+        **({"task_policies": task_policies} if task_policies else {}),
     }

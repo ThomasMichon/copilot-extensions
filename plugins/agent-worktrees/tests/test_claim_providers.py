@@ -443,6 +443,66 @@ def test_resolve_claim_status_invokes_the_callback_and_parses_json(tmp_path, mon
     assert result == {"available": True, "exists": True, "state": "running"}
 
 
+def test_restart_policy_opt_in_uses_registered_arguments_and_never_retries(tmp_path, monkeypatch):
+    seen = []
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-local-task", plugin="agent-dispatch@copilot-extensions",
+        plugin_root=str(tmp_path), status_command=("agent-dispatch", "--local"),
+        no_self_provision_env="AGENT_DISPATCH_NO_SELFPROVISION",
+    )
+    monkeypatch.setattr(cp, "discover_claim_providers", lambda _: ({"dispatch-local-task": provider}, ()))
+
+    def callback(*args, **kwargs):
+        seen.append(kwargs)
+        return None  # An older callback cannot satisfy the opt-in protocol.
+
+    monkeypatch.setattr(cp, "_run_callback", callback)
+    result = cp.resolve_claim_status(
+        "dispatch-local-task:task-1", native_restart_policy=True, timeout=2,
+    )
+    assert result["available"] is False
+    assert len(seen) == 1
+    assert seen[0]["callback_args"] == ("claim-status", "task-1", "--native-restart-policy")
+    assert seen[0]["legacy_command"] == (
+        "agent-dispatch", "--local", "claim-status", "task-1", "--native-restart-policy",
+    )
+    assert seen[0]["timeout"] == 2
+
+
+def test_restart_policy_refuses_unguarded_old_payload_before_any_process(tmp_path, monkeypatch):
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-local-task", plugin="agent-dispatch@copilot-extensions",
+        plugin_root=str(tmp_path), status_command=("agent-dispatch", "--local"),
+    )
+    monkeypatch.setattr(cp, "discover_claim_providers", lambda _: ({"dispatch-local-task": provider}, ()))
+    monkeypatch.setattr(cp, "_run_callback", lambda *a, **kw: pytest.fail("unprotected bootstrap"))
+    assert cp.resolve_claim_status(
+        "dispatch-local-task:task-1", native_restart_policy=True,
+    )["available"] is False
+
+
+def test_restart_policy_peer_launch_preserves_explicit_writer_and_flag(tmp_path, monkeypatch):
+    seen = []
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-central-task", plugin="agent-dispatch@copilot-extensions",
+        plugin_root=str(tmp_path), status_command=("agent-dispatch", "--shared"),
+        no_self_provision_env="AGENT_DISPATCH_NO_SELFPROVISION",
+    )
+    monkeypatch.setattr(cp, "discover_claim_providers", lambda _: ({"dispatch-central-task": provider}, ()))
+    monkeypatch.setattr(cp.peer_launch_adapter, "explicit_context", lambda: True)
+
+    def run(peer, *args, **kwargs):
+        seen.append((peer, args))
+        return subprocess.CompletedProcess([], 0, '{"exists": false}', "")
+
+    monkeypatch.setattr(cp.peer_launch_adapter, "run", run)
+    result = cp.resolve_claim_status("dispatch-central-task:task-1", native_restart_policy=True)
+    assert result == {"available": True, "exists": False}
+    assert seen == [(
+        "agent-dispatch", ("--shared", "claim-status", "task-1", "--native-restart-policy"),
+    )]
+
+
 def test_resolve_claim_status_envelope_available_wins_over_callback_supplied_key(tmp_path, monkeypatch):
     """Regression: a provider that happens to emit its own "available" key
     must never be able to shadow the envelope's own True/False verdict."""

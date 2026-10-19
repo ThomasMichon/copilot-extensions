@@ -177,21 +177,48 @@ def test_cli_check_requires_explicit_bounded_payload_and_no_ambient_identity(sub
         ])
 
 
-def test_actual_child_reads_persisted_owner_not_parent_session(subject, tmp_path):
+@pytest.mark.parametrize("with_task", [False, True])
+def test_actual_child_reads_persisted_owner_not_parent_session(subject, tmp_path, with_task):
     owner, record, expected = subject
+    if with_task:
+        record.resources.append(tracking.ResourceClaim(kind="task", ref="dispatch-local-task:task-1"))
     record_path = tmp_path / f"{record.worktree_id}.yaml"
     tracking.save_record(record, record_path)
+    before = record_path.read_bytes()
     code = """
-import json, sys
+import json, os, sys
 from pathlib import Path
 from agent_worktrees import native_restart_check as owner, session_metadata_cli as cli
-from agent_worktrees import __main__ as core
+from agent_worktrees import __main__ as core, claim_providers as cp
 expected = json.loads(sys.argv[1])
 cli.cfg.tracking_dir = lambda: Path(sys.argv[2]).parent
 owner.native_source_context.epoch = lambda: expected["target_epoch"]
 owner.sessions.session_has_conversation_data = lambda _: True
 owner.sessions._list_mux_sessions = lambda: {}
 owner.session_liveness = lambda _: "dead"
+record = owner.tracking.load_record(Path(sys.argv[2]))
+policy = {
+    "schema": "native-restart-task-policy", "version": 1, "task_id": "task-1",
+    "repo": record.repo, "state": "started", "owner": record.machine + "/" + record.worktree_id,
+    "owner_session_id": expected["native_session_id"], "generation": 7,
+    "awaiting_steer": False, "resume_requested": False, "hold_reason": None,
+    "hold_actor": None, "hold_at": None, "run_waiter": False, "task_qualified": True,
+    "launch_authorized": False, "automatic_eligible": False, "reason": "current-task-matches",
+}
+callback = (
+    "import json,os,sys; "
+    "assert sys.argv[1:] == ['--local','claim-status','task-1','--native-restart-policy']; "
+    "assert os.environ['AGENT_DISPATCH_NO_SELFPROVISION'] == '1'; "
+    "print(" + repr(json.dumps({"exists": True, "native_restart_policy": policy})) + ")"
+)
+provider = cp.ClaimProviderManifest(
+    namespace="dispatch-local-task", plugin="agent-dispatch@copilot-extensions",
+    plugin_root=str(Path(sys.argv[2]).parent),
+    status_command=(sys.executable, "-c", callback, "--local"),
+    no_self_provision_env="AGENT_DISPATCH_NO_SELFPROVISION",
+)
+cp.discover_claim_providers = lambda _: ({"dispatch-local-task": provider}, ())
+cp.peer_launch_adapter.explicit_context = lambda: False
 args = core.build_parser().parse_args(["session-role", "--restart-check", sys.argv[1], "--json"])
 raise SystemExit(cli.cmd_session_role(args))
 """
@@ -204,6 +231,8 @@ raise SystemExit(cli.cmd_session_role(args))
     assert result["expected"] == expected
     assert result["worktree_qualified"] is True
     assert result["launch_authorized"] is False
+    assert bool(result.get("task_policies")) is with_task
+    assert record_path.read_bytes() == before
 
 
 @pytest.mark.parametrize("raw", [
@@ -226,6 +255,147 @@ def test_released_claim_metadata_is_not_current_policy_proof(subject):
     claim = tracking.ResourceClaim(kind="task", ref="dispatch-task:old-task", state="released")
     record.resources.append(claim)
     assert owner.check(expected, loader=lambda: record)["reason"] == "claim-policy-unqualified"
+
+
+@pytest.fixture
+def task_policy(subject, monkeypatch):
+    from agent_worktrees import claim_providers
+
+    owner, record, expected = subject
+    record.resources.append(tracking.ResourceClaim(kind="task", ref="dispatch-local-task:task-1"))
+    policy = {
+        "schema": "native-restart-task-policy", "version": 1,
+        "task_id": "task-1", "repo": record.repo, "state": "started",
+        "owner": f"{record.machine}/{record.worktree_id}", "owner_session_id": NATIVE,
+        "generation": 7, "awaiting_steer": False, "resume_requested": False,
+        "hold_reason": None, "hold_actor": None, "hold_at": None, "run_waiter": False,
+        "task_qualified": True, "launch_authorized": False, "automatic_eligible": False,
+        "reason": "current-task-matches",
+    }
+    calls = []
+
+    def resolve(ref, **kwargs):
+        calls.append((ref, kwargs))
+        return {"available": True, "exists": True, "native_restart_policy": policy}
+
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", resolve)
+    return owner, record, expected, policy, calls
+
+
+def test_current_task_binds_original_native_owner_without_granting_launch(task_policy):
+    owner, record, expected, policy, calls = task_policy
+    result = owner.check(expected, loader=lambda: record)
+    assert result["worktree_qualified"] is True
+    assert result["task_policies"] == [{"ref": record.resources[0].ref, "policy": policy}]
+    assert result["launch_authorized"] is False
+    assert calls == [(record.resources[0].ref, {"native_restart_policy": True, "timeout": 2})]
+
+
+@pytest.mark.parametrize("change", [
+    {"schema": "other"}, {"version": True}, {"version": 2},
+    {"owner": "other/worktree"}, {"repo": "other"},
+    {"owner_session_id": "00000000-0000-4000-8000-000000000002"},
+    {"task_id": "different"}, {"state": "suspended"}, {"state": "completed"},
+    {"state": "queued"}, {"state": "claimed"}, {"state": "submitted"},
+    {"generation": 0}, {"generation": True}, {"generation": 2**64},
+    {"awaiting_steer": True}, {"resume_requested": True}, {"hold_reason": "hold"},
+    {"hold_actor": "operator"}, {"hold_at": 1}, {"run_waiter": True},
+    {"task_qualified": 1}, {"launch_authorized": True}, {"automatic_eligible": True},
+])
+def test_task_owner_or_policy_changes_refuse_even_if_provider_says_qualified(task_policy, change):
+    owner, record, expected, policy, calls = task_policy
+    policy.update(change)
+    result = owner.check(expected, loader=lambda: record)
+    assert result["worktree_qualified"] is False
+    assert result["launch_authorized"] is False
+    assert result["reason"] == "task-policy-unqualified"
+
+
+@pytest.mark.parametrize("field", [
+    "generation", "hold_reason", "hold_actor", "hold_at", "awaiting_steer", "run_waiter",
+    "launch_authorized", "automatic_eligible",
+])
+def test_incomplete_task_policy_never_qualifies(task_policy, field):
+    owner, record, expected, policy, calls = task_policy
+    del policy[field]
+    assert owner.check(expected, loader=lambda: record)["reason"] == "task-policy-unqualified"
+
+
+@pytest.mark.parametrize("ref", [
+    "task-1", "dispatch-task:task-1", "dispatch-central-task:--unsafe",
+    "dispatch-local-task: task-1", "codespace:task-1",
+])
+def test_never_guess_default_authority_from_legacy_task_ref(task_policy, ref):
+    owner, record, expected, policy, calls = task_policy
+    record.resources[0].ref = ref
+    assert owner.check(expected, loader=lambda: record)["reason"] == "task-policy-unqualified"
+    assert calls == []
+
+
+def test_dispatch_provenance_requires_corresponding_current_task_ref(task_policy):
+    owner, record, expected, policy, calls = task_policy
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="different-task", reservation_key="key", attempt=1,
+        driver="native", supervisor="supervisor", creator_machine=record.machine,
+    )
+    assert owner.check(expected, loader=lambda: record)["reason"] == "task-policy-unqualified"
+    assert calls == []
+
+
+def test_parsed_dispatch_provenance_is_not_a_substitute_for_current_task(task_policy):
+    owner, record, expected, policy, calls = task_policy
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id=policy["task_id"], reservation_key="key", attempt=1,
+        driver="native", supervisor="supervisor", creator_machine=record.machine,
+    )
+    record.dispatch_attempt_raw_present = True
+    assert owner.check(expected, loader=lambda: record)["worktree_qualified"] is True
+    policy["generation"] += 1
+    policy["owner_session_id"] = "00000000-0000-4000-8000-000000000002"
+    assert owner.check(expected, loader=lambda: record)["worktree_qualified"] is False
+
+
+@pytest.mark.parametrize("change", [
+    {"state": "released"}, {"state": "at-rest"}, {"producer_present": True},
+    {"kind": "pr"}, {"state": "unknown"},
+])
+def test_nonactive_or_other_claims_remain_unqualified(task_policy, change):
+    owner, record, expected, policy, calls = task_policy
+    record.resources[0] = replace(record.resources[0], **change)
+    assert owner.check(expected, loader=lambda: record)["reason"] == "claim-policy-unqualified"
+    assert calls == []
+
+
+def test_mixed_claims_do_not_create_an_unbounded_probe_loop(task_policy):
+    owner, record, expected, policy, calls = task_policy
+    record.resources.append(tracking.ResourceClaim(kind="task", ref="dispatch-central-task:other"))
+    assert owner.check(expected, loader=lambda: record)["reason"] == "claim-policy-unqualified"
+    assert calls == []
+
+
+@pytest.mark.parametrize("envelope", [
+    {"available": False}, {"available": True, "exists": False},
+    {"available": True, "exists": True}, {"available": 1, "exists": True},
+])
+def test_unavailable_absent_or_legacy_provider_cannot_prove_task_policy(task_policy, monkeypatch, envelope):
+    from agent_worktrees import claim_providers
+
+    owner, record, expected, policy, calls = task_policy
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", lambda *a, **kw: envelope)
+    assert owner.check(expected, loader=lambda: record)["worktree_qualified"] is False
+
+
+def test_task_policy_change_during_callback_invalidates_worktree_snapshot(task_policy, monkeypatch):
+    from agent_worktrees import claim_providers
+
+    owner, record, expected, policy, calls = task_policy
+
+    def resolve(*args, **kwargs):
+        record.paused = True
+        return {"available": True, "exists": True, "native_restart_policy": policy}
+
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", resolve)
+    assert owner.check(expected, loader=lambda: record)["reason"] == "owner-changed"
 
 
 @pytest.mark.parametrize("failure", [

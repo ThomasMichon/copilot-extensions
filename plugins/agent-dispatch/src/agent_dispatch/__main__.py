@@ -236,7 +236,7 @@ def _emit(value: Any) -> int:
     return 0
 
 
-def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
+def _resolve_client_target(args: argparse.Namespace, *, read_only: bool = False) -> tuple[str, str | None]:
     """Resolve the ordinary fleet client's coordinator and bearer.
 
     Explicit local/central authority never changes with reachability.
@@ -246,6 +246,8 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
     from .client_authority import client_authority, default_authority
 
     authority = client_authority(args)
+    if read_only and authority == "legacy":
+        raise DispatchError(409, "read-only policy requires an explicit task authority")
     url = getattr(args, "url", None)
     token = getattr(args, "token", None)
     if url:
@@ -261,7 +263,9 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
                 file=sys.stderr,
             )
             raise SystemExit(2)
-        bearer = token or shared_token()
+        bearer = token or (
+            os.environ.get("AGENT_DISPATCH_SHARED_TOKEN") if read_only else shared_token()
+        )
         if default_authority() == "central" and not bearer:
             raise DispatchError(403, "central task authority requires a shared coordinator bearer")
         return surl, bearer
@@ -299,18 +303,21 @@ def _should_ssh_failover(args: argparse.Namespace) -> str | None:
     return machine
 
 
-def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
+def _client(
+    args: argparse.Namespace, *, ensure: bool = True,
+    allow_ssh_failover: bool = True, read_only: bool = False,
+) -> DispatchClient:
     from .task_worker_cli import task_worker
 
     worker = task_worker(args)
     if worker is not None:
         return worker.client()
-    if ensure:
+    if ensure and not read_only:
         _ensure_local_coordinator(args)
     # SSH-transport failover: local coordinator down + a peer configured -> open
     # an SSH port-forward to the peer's loopback coordinator (per-machine key =
     # identity, tokenless) and run this command against it, keeping local context.
-    peer = _should_ssh_failover(args)
+    peer = _should_ssh_failover(args) if allow_ssh_failover and not read_only else None
     if peer is not None:
         from . import ssh_tunnel
 
@@ -329,14 +336,18 @@ def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
             control_token=(getattr(args, "control_token", None) or client_control_token()),
             tunnel=tunnel,
         )
-    url, token = _resolve_client_target(args)
+    url, token = (
+        _resolve_client_target(args, read_only=True) if read_only else _resolve_client_target(args)
+    )
     from .client_authority import client_authority
 
     authority = client_authority(args)
     use_shared_control = bool(getattr(args, "shared", False)) or authority == "central" or (
         authority == "legacy" and shared_url() is not None and url == shared_url()
     )
-    if use_shared_control:
+    if read_only:
+        control = None
+    elif use_shared_control:
         control = getattr(args, "control_token", None) or shared_control_token()
     else:
         control = getattr(args, "control_token", None) or client_control_token()

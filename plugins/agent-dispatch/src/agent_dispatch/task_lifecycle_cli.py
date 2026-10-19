@@ -95,9 +95,30 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
     from .client_authority import require_explicit_claim_authority
 
     require_explicit_claim_authority(args)
+    restart_policy = bool(getattr(args, "native_restart_policy", False))
+    if restart_policy and not any(
+        getattr(args, flag, None) for flag in ("local", "shared", "url")
+    ):
+        raise DispatchError(409, "native restart policy requires an explicit task authority")
+    options = {"ensure": False}
+    if restart_policy:
+        options.update(allow_ssh_failover=False, read_only=True)
     try:
-        with _core()._client(args, ensure=False) as c:
-            task = c.get(args.task_id)
+        with _core()._client(args, **options) as c:
+            task = (
+                c.get(args.task_id, native_restart_policy=True) if restart_policy else c.get(args.task_id)
+            )
+            if restart_policy:
+                policy = task.get("native_restart_policy") if isinstance(task, dict) else None
+                if (
+                    not isinstance(policy, dict) or policy.get("schema") != "native-restart-task-policy"
+                    or type(policy.get("version")) is not int or policy["version"] != 1
+                    or policy.get("task_id") != args.task_id
+                    or type(policy.get("task_qualified")) is not bool
+                    or policy.get("launch_authorized") is not False
+                    or policy.get("automatic_eligible") is not False
+                ):
+                    raise DispatchError(502, "coordinator does not confirm native restart policy")
     except DispatchError as exc:
         if exc.status_code == 404:
             return _core()._emit({"exists": False, "detail": "no such task"})
@@ -107,6 +128,11 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"agent-dispatch: coordinator unreachable: {exc}", file=sys.stderr)
         return 1
+    if restart_policy:
+        return _core()._emit({
+            "exists": True,
+            "native_restart_policy": policy,
+        })
     # A suspended task waiting on a `run --detach` waiter has no `owner` (it
     # holds no live session) -- that previously left `detail` blank, giving a
     # claims-ledger reader no insight into *why* the worktree still carries

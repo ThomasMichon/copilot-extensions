@@ -1230,6 +1230,28 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - Prepared the next
+  [focused recovery](machine-restart-recovery.md) increment: explicit read-only
+  current task-owner snapshots through the existing claim-provider process
+  boundary, without default-writer guesses, autostart, SSH failover or launch
+  authority. Disconnected protocol fixtures passed 205 dispatch, 195 owner and
+  16 Manager contracts. This source increment is not yet reviewed or merged;
+  the combined current-policy/action-time gate and full restoration objective
+  remain open. No task generation reservation, native qualification,
+  enrollment or rollout is claimed. This umbrella remains Active.
+
+- **2026-10-19** - Provisional exact current-worktree checks landed in
+  [#7271](https://github.com/ThomasMichon/copilot-extensions/pull/7271)
+  (`936926d76a`) after a genuine exact-head Copilot approval, resolved
+  mux-uncertainty finding and required CI. The disconnected owner lane passed
+  179 tests; unchanged Manager sources retain 196 tests/three native skips.
+  The [focused recovery plan](machine-restart-recovery.md) keeps its combined
+  current task/claim/hold admission and full restoration gates open: a matching
+  worktree snapshot is not launch authority. Next is current policy admission
+  through its actual owner, then fenced native Resume, durable launch/outcomes,
+  status-first acknowledgement, startup enrollment and notification timing.
+  This umbrella remains Active; no release or rollout is claimed.
+
 - **2026-10-19** - Historical owner binding and private frozen restart-candidate
   identity landed in [#7263](https://github.com/ThomasMichon/copilot-extensions/pull/7263)
   (`fe5b070278`) after exact-head Copilot approval and required CI. The final

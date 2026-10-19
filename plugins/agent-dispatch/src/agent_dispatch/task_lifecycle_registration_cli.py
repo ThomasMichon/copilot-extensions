@@ -75,6 +75,10 @@ def register_task_lifecycle_commands(sub) -> None:
         "provider registry entry -- not a human-facing command",
     )
     p.add_argument("task_id")
+    p.add_argument(
+        "--native-restart-policy", action="store_true",
+        help="read current task policy without autostart or transport failover; never launch authority",
+    )
     p.set_defaults(func=_core()._cmd_claim_status)
 
     p = sub.add_parser(

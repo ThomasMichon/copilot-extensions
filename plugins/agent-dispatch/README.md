@@ -532,6 +532,33 @@ alive-but-quiet worker rather than yanking its goal. See the **`agent-dispatch`*
 skill § *Goal-loop tasks* and the vision leaf (*resumable-goal*,
 *resume-the-goal-not-restart-it*) for the full contract.
 
+### Read-only native restart policy
+
+The claim-provider callback has an explicit opt-in for restart inspection:
+`agent-dispatch --local claim-status <task-id> --native-restart-policy`
+(or `--shared` for the original central writer). An unqualified/default task
+reference cannot select that writer from reachability or historical dispatch
+provenance. Ordinary `claim-status` output is unchanged.
+
+The opt-in requests `GET /tasks/<id>?native_restart_policy=true`. The owner reads
+only reduced task fields and active/preparing waiter presence in one SQLite read
+snapshot, then returns `native_restart_policy` with schema
+`native-restart-task-policy`, version 1. It binds task id, repo, owner,
+original native conversation UUID, positive current generation, status and
+hold/steer/resume/waiter fields. Only a started task with a canonical native
+owner, no hold, no pending steer/resume and no waiter can match. Missing,
+malformed or oversized fields refuse; task prompts and results are not returned.
+An older coordinator that ignores the opt-in query cannot satisfy the contract.
+
+This callback never starts a coordinator, probes/opens SSH failover, changes
+tasks or fetches credentials through configured token commands. It uses only
+existing credentials for the selected writer, without a control credential.
+An unavailable provider remains unavailable, not confirmed task absence.
+`task_qualified` is a provisional policy snapshot: it retains the current
+generation for a future action-time fence, not proof of historical-generation
+continuity or a reservation. `launch_authorized` and `automatic_eligible` are
+always false. It cannot restore a conversation or supersede a hold.
+
 ### Routing: `requires` / `excludes` (hard) vs `affinity` (soft)
 
 - **`requires`** -- a set of capability or identity tokens (e.g. `logger`,

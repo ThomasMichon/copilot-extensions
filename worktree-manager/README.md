@@ -571,11 +571,15 @@ agent-worktrees through its attributed process boundary, with a four-second
 timeout and `WORKTREE_NO_UPDATE=1` / `WORKTREE_NO_RECONCILE=1`. It checks the
 response version and exact typed request binding; old owners, errors and
 timeouts remain visible blockers, never a legacy/fresh-launch fallback.
-The optional `owner_check` reports current worktree facts only. Changed,
-paused, ended, pending, externally claimed, dispatch-associated or
-profile-assigned worktrees remain unqualified. A matching worktree is still
-**not admitted**: current task policy, fenced launch and acknowledged restart
-Resume remain unresolved, so this inspection returns a blocker/nonzero status
+The optional `owner_check` reports provisional current owner facts. A single
+active task claim with an explicit local/central writer can additionally carry
+`task_policies`, checked through that writer's registered read-only provider.
+The current task must match the original native owner and be started, unheld,
+unsteered and without a pending resume or waiter. Changed, paused, ended,
+pending, externally claimed, opaque/legacy/mixed-task or profile-assigned
+worktrees remain unqualified. A matching worktree is still **not admitted**:
+action-time task/claim policy, fenced launch and acknowledged restart Resume
+remain unresolved, so this inspection returns a blocker/nonzero status
 even on a match. Neither command writes an attempt outcome, reserves a launch,
 starts a conversation, changes enrollment or contacts the host notification
 service. Ordinary inspection makes no owner call, and the resident daemon has

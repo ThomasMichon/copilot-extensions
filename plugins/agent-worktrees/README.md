@@ -456,6 +456,20 @@ bounded activation lifecycle in the same owner read, even when it is no longer
 the hosted head. This mode never substitutes the ambient session ID. Hosting and
 lifecycle observations do not authorize automatic restart recovery.
 
+`session-role --restart-check <expected-json> --json` compares one exact frozen
+identity with current worktree/head/activation and cold-session evidence.
+For a single active task claim, it requests opt-in current policy from the
+registered claim provider, using only `dispatch-local-task:` or
+`dispatch-central-task:` references. The returned task must match the exact
+machine/worktree, project lane and original native UUID, with a positive current
+generation and no terminal/suspended/held/steered/waiting state. Matching task
+snapshots appear in optional `task_policies`; they are not launch capabilities.
+Legacy/default task refs, opaque or unmatched dispatch provenance, other/mixed/
+released/producer claims, inbound ownership and bound/profile-assigned worktrees
+remain unqualified. Missing/old providers refuse without default-writer guesses,
+self-provisioning or legacy retries. The check never changes task/head state,
+reserves a launch or grants automatic restoration.
+
 The bundled live-pulse extension writes `substatus.json` beside Copilot session
 state so the picker can show live intent/rest state. It is passive; durable
 worktree disposition still comes only from `agent-worktrees status`.

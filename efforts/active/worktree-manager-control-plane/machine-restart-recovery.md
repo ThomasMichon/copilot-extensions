@@ -141,6 +141,14 @@ means of fulfilling the operator's request. They require normal source review.
   current head/succession, task policy and holds through their actual owners.
   Terminal, superseded, intentionally closed or uncertain candidates must not
   launch automatically.
+  [#7271](https://github.com/ThomasMichon/copilot-extensions/pull/7271)
+  delivered a provisional exact current-worktree check and explicit single
+  frozen-attempt inspection. Current task/claim/profile policy and action-time
+  launch admission remain unresolved; a matching snapshot cannot authorize them.
+  The next source increment adds opt-in current task-owner snapshots for one
+  explicit local/central task ref, binding native owner/generation and current
+  holds/steering. This is not action-time admission or a generation reservation;
+  mixed/producer/inbound claims and profile policy remain unqualified.
 - [ ] Reuse a proven surviving session first. Otherwise request supported
   native cold Resume of the exact original conversation in its proper mux.
   Never substitute a new conversation, raw process spawn or a global repair
@@ -661,3 +669,55 @@ The umbrella effort remains Active independently of this slice's completion.
   matching. The disconnected owner lane passed 179 tests; Manager sources are
   unchanged from their 196-test/three-skip receipt. The review fix still awaits
   a new exact-head verdict and required CI.
+
+### 2026-10-19 - Provisional worktree check landed; current task policy next
+
+- [#7271](https://github.com/ThomasMichon/copilot-extensions/pull/7271)
+  squash-merged to `dev` as `936926d76a` after genuine Copilot approval on
+  exact head `177fbef149`, a resolved mux-uncertainty finding and required green
+  CI. The final disconnected owner lane passed 179 tests; unchanged Manager
+  sources retain the 196-test/three-platform-skip receipt.
+- The Plan's combined current worktree/task/claim/hold admission item stays
+  open. Only the provisional exact worktree checks are delivered; they remain
+  read-only and return no launch authority. The full restoration/validation
+  gate and umbrella effort are still open.
+- Next stretch: compose current task ownership/generation and holds through
+  the actual policy owner, preserving optional standalone behavior and
+  rejecting terminal, released, reassigned, suspended/held or uncertain work.
+  Reuse owner process boundaries rather than interpreting immutable task
+  provenance or a generic claim-status response as launch permission.
+- After current policy admission, finish action-time exact-head native Resume,
+  durable launch/outcome/crash reconciliation, explicit status-first seed
+  acknowledgement, startup enrollment and notification timing/qualification.
+  This merge is not release promotion, installation or live enrollment.
+
+### 2026-10-19 - Read-only current task-owner policy increment
+
+- Added an opt-in task-owner API mode that reads reduced task policy and
+  active/preparing waiter presence under one SQLite read snapshot. The existing
+  claim-status callback requests its versioned response only with explicit
+  writer selection; an old coordinator that ignores the query remains
+  unavailable rather than supplying assumed-safe missing fields.
+- The callback suppresses coordinator autostart, SSH probes/tunnels,
+  control-credential fetching and configured shared-token commands. Ordinary
+  status output and transport defaults are unchanged. There is no task
+  mutation, reservation, token minting or launch.
+- Composed the response through the existing verified claim-provider boundary.
+  One active producer-free explicit local/central task claim can match only the
+  exact project lane, machine/worktree and original native UUID, with a positive
+  current generation and no hold, steer, requested resume or waiter. Legacy refs,
+  mismatched/opaque provenance, other/mixed/released/producer claims and inbound
+  ownership remain unqualified; current generation is not historical continuity.
+- Snapshot and owner integration tests first failed. The disconnected lane
+  passed 205 dispatch, 195 worktree-owner and 16 Manager contracts, including
+  actual child HTTP/callback processes and unchanged persisted owner state.
+  High-signal Python lint, module-size and documentation guards passed.
+  These receipts are protocol fixtures, not native recovery qualification.
+  This increment is not yet reviewed or merged.
+- The expanded dispatch compatibility lane passed 361 tests, including
+  coordinator routes, existing client authority and task-worker commands.
+  The worktree-owner and Manager receipts above are unchanged.
+- The combined Plan item stays open: action-time task/claim/profile admission,
+  exact-head fenced native Resume, durable launch/outcome reconciliation,
+  status-first seed acknowledgement, startup enrollment and notification timing
+  remain owed. Automatic recovery remains blocked; no rollout is implied.

@@ -767,10 +767,16 @@ def resolve_claim_status(
     *,
     plugins_root: str | os.PathLike[str] | None = None,
     timeout: float = _CALLBACK_TIMEOUT_SECONDS,
+    native_restart_policy: bool = False,
 ) -> dict:
     """Best-effort claim status via the registered claim provider for ``ref``'s
     namespace. Never raises -- degrades to ``{"available": False, "reason":
-    "..."}"`` on any absence, malformed manifest, or callback failure."""
+    "..."}"`` on any absence, malformed manifest, or callback failure.
+
+    ``native_restart_policy`` requires a guarded payload and appends the opt-in
+    literal to both invocation routes. Unsupported callbacks never retry with
+    ordinary status; callers must validate the owner's versioned policy.
+    """
     split = split_namespaced_ref(ref)
     if split is None:
         return {"available": False, "reason": "ref has no namespace prefix, or contains unsafe characters"}
@@ -787,11 +793,16 @@ def resolve_claim_status(
             "available": False,
             "reason": f"{provider.plugin} is a claim provider for '{namespace}:' but declares no status_command",
         }
+    if native_restart_policy and provider.no_self_provision_env is None:
+        return {"available": False, "reason": "restart policy requires a no-self-provision callback"}
     callback_args = ("claim-status", identifier)
+    if native_restart_policy:
+        callback_args += ("--native-restart-policy",)
     legacy_command = build_provider_argv_for_manifest(
         provider,
         ("claim-status", True),
         (identifier, False),
+        *((("--native-restart-policy", True),) if native_restart_policy else ()),
         kind="status",
     )
     if legacy_command is None:

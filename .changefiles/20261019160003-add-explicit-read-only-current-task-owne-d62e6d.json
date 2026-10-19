@@ -1,0 +1,17 @@
+{
+  "comment": "Add explicit read-only current task-owner policy to provisional restart inspection without launch authority",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

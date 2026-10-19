@@ -377,7 +377,14 @@ def register_task_routes(
         return {k: [_bulk_task_dict(t) for t in v] for k, v in result.items()}
 
     @app.get("/tasks/{task_id}")
-    def get_task(task_id: str) -> dict:
+    def get_task(task_id: str, native_restart_policy: bool = False) -> dict:
+        if native_restart_policy:
+            from .native_restart_policy import read_snapshot
+
+            policy = read_snapshot(queue, task_id)
+            if policy is None:
+                raise HTTPException(status_code=404, detail="no such task")
+            return {"exists": True, "native_restart_policy": policy}
         return _task_with_spawn_dict(queue, _require(queue.get(task_id)))
 
     @app.get("/tasks/{task_id}/result")

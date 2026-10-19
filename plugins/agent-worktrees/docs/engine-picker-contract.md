@@ -413,13 +413,25 @@ history, pending handoffs/seeds, indirect/missing paths, ended or ambiguous
 activations and uncertain/live processes refuse with a reason.
 Mux listing errors/timeouts remain `mux-state-unknown`, not confirmed absence;
 an empty successful listing is distinct from a failed probe.
-Task provenance,
-claim metadata and bound/profile-assigned worktrees remain conservatively
-unqualified; their current owners' policy is not inferred from that metadata
-or its absence. Even a matching worktree always returns
-`launch_authorized: false` and `automatic_eligible: false`. Current task policy,
-action-time launch fencing and acknowledged restart-seed pickup remain separate
-requirements. Ended shutdown activations are not reopened by this check.
+Task provenance is not current task policy. A single active, producer-free task
+claim with an exact `dispatch-local-task:` or `dispatch-central-task:` ref can
+request `claim-status <id> --native-restart-policy` through its existing verified
+claim provider, with a two-second callback budget and a required
+no-self-provision guard. The registered writer prefix is preserved in both
+legacy payload and same-cell peer invocation; a failed/old callback never
+retries without the opt-in. There is no default-writer inference.
+The versioned task snapshot must bind the exact task id, machine/worktree,
+project lane and original native UUID to a started, positive-generation task
+with no hold, steer, requested resume or active/preparing waiter.
+Optional `task_policies` retains the matching ref and reduced owner snapshot.
+Current generation is evidence for a future fence, not a generation reservation
+or proof of continuity with an earlier task incarnation.
+Opaque/unmatched dispatch provenance, legacy task refs, inbound ownership,
+mixed/other/historical/producer claims and bound/profile-assigned worktrees
+remain unqualified. Even a matching worktree always returns
+`launch_authorized: false` and `automatic_eligible: false`.
+Action-time task/claim admission, launch fencing and acknowledged restart-seed
+pickup remain separate requirements. Ended shutdown activations are not reopened.
 Malformed input or unreadable evidence is a JSON error. Native Linux/WSL
 identity must match the requested target epoch; Windows, macOS and containers
 remain unsupported rather than falling back to a different launch mode.
