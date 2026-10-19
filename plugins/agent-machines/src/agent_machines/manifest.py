@@ -374,6 +374,11 @@ def load_package(
         if not isinstance(mod, dict) or not mod.get("name"):
             raise ManifestError(f"{path}: each module must be a mapping with a 'name'")
         _validate_authority(mod, schema, path, f"module {mod.get('name')!r}")
+        if "maintenance_safe" in mod and type(mod["maintenance_safe"]) is not bool:
+            raise ManifestError(
+                f"{path}: module {mod.get('name')!r} maintenance_safe "
+                "must be a boolean when declared"
+            )
         invocation = mod.get("invocation")
         if invocation is None:
             continue

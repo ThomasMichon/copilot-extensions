@@ -745,6 +745,24 @@ case-insensitively. Defining two overlay keys that normalize to the same
 case-insensitive identity is invalid, as are empty or surrounding-whitespace
 keys.
 
+Each `modules:` declaration may optionally set `maintenance_safe: true` to
+include that individually trusted command in blanket `restore --maintenance-safe`
+runs. The default is off: omitted or `false` modules are reported as skipped.
+An explicitly declared value must be a boolean; strings, numbers, null, lists
+and mappings are rejected during manifest loading. This additive field works
+with supported requirement-package schema versions; no schema-version change
+is needed because older runtimes continue to skip all modules during blanket
+maintenance-safe restore.
+
+This is consent to run selected trusted repo-local code unattended, not a
+sandbox or a guarantee that arbitrary commands are safe. Review the module's
+effects before opting it in. The flag changes no existing declarations,
+machine/platform gates, source admission, dry-run requirements or failure
+reporting. Plain restore runs applicable modules as before. Explicit
+`--only <module>` remains operator-directed and can select a module without
+the flag; unselected modules do not execute. During dry-run, opted-in modules
+still require platform `dry_run_args` or invocation `dry_run_arguments`.
+
 Within an `ensure-present` `enabledPlugins` map, `true` remains an additive
 floor and preserves an existing operator `false`. A declared `false` is a
 per-plugin tombstone: it authoritatively disables that one identity while

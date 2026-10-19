@@ -9,6 +9,9 @@ the JSON payload carries a ``resources`` list.
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+
+import pytest
 
 from agent_machines import reconcile as reconcile_module
 from agent_machines import resources as R
@@ -124,21 +127,15 @@ def test_maintenance_safe_restore_still_applies_manage_entries(tmp_path, monkeyp
     assert result.resource_results[0].status == "skipped"
 
 
-def test_maintenance_safe_restore_skips_modules_entirely(tmp_path, monkeypatch):
-    """Regression: found while dogfooding the first real fleet-wide sweep --
-    `restore --apply --all-projects --maintenance-safe` ran every declared
-    module unconditionally (modules have no per-module safety opt-in), so a
-    module reporting legitimate unresolved drift (e.g. an unmanaged uv.toml)
-    made the whole unattended sweep report `error` even though every
-    maintenance-safe resource/surface step succeeded correctly. Modules must
-    stay out of a blanket maintenance-safe restore."""
+def test_maintenance_safe_restore_skips_modules_without_optin(tmp_path, monkeypatch):
+    """Unreviewed repo-local commands remain outside blanket maintenance."""
     from agent_machines import modules as _modules
 
     executed: list[str] = []
 
     def _fail_if_run(pkg, module, plat, dry_run):
         executed.append(str(module.get("name")))
-        raise AssertionError("a module must never execute under a blanket maintenance-safe restore")
+        raise AssertionError("a module without opt-in must never execute in maintenance")
 
     monkeypatch.setattr(_modules, "run_module", _fail_if_run)
     data = base_package(
@@ -171,6 +168,117 @@ def test_maintenance_safe_restore_skips_modules_entirely(tmp_path, monkeypatch):
         maintenance_safe=True, only=["uv-feed"],
     )
     assert only_result.module_results[0].ran is True
+
+
+@pytest.mark.parametrize("maintenance_safe", [False, True])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_restore_module_maintenance_selection(tmp_path, maintenance_safe, dry_run):
+    declarations = []
+    for name, flag in [("omitted", None), ("disabled", False), ("enabled", True)]:
+        module = {
+            "name": name,
+            "linux": {
+                "command": [sys.executable, "-c", "print('executed')"],
+                "dry_run_args": ["--preview"],
+            },
+        }
+        if flag is not None:
+            module["maintenance_safe"] = flag
+        declarations.append(module)
+    declarations.append({
+        "name": "no-preview", "maintenance_safe": True,
+        "linux": {"command": [sys.executable, "-c", "print('executed')"]},
+    })
+    data = base_package(manage={}, modules=declarations)
+    pkg = load_package(write_package(tmp_path / "example", "modules.yaml", data))
+    result = restore(
+        [pkg], "box-1", plat="linux", home=tmp_path,
+        dry_run=dry_run, maintenance_safe=maintenance_safe,
+    )
+    by_name = {item.name: item for item in result.module_results}
+    assert len(by_name) == 4
+    assert by_name["enabled"].ran
+    assert by_name["omitted"].ran is (not maintenance_safe)
+    assert by_name["disabled"].ran is (not maintenance_safe)
+    assert by_name["no-preview"].ran is (not dry_run)
+    if dry_run:
+        assert "dry_run_args" in by_name["no-preview"].skipped_reason
+        assert "--preview" in by_name["enabled"].command
+    assert result.ok
+    assert all(item.dry_run is dry_run for item in result.module_results)
+    assert all(item.stdout_tail.strip() == "executed" for item in by_name.values() if item.ran)
+
+
+@pytest.mark.parametrize("maintenance_safe", [False, True])
+def test_only_module_selection_precedes_execution(tmp_path, monkeypatch, maintenance_safe):
+    from agent_machines import modules
+
+    pkg = load_package(write_package(
+        tmp_path / "example", "modules.yaml",
+        base_package(manage={}, modules=[
+            {"name": name, "maintenance_safe": flag,
+             "linux": {"command": ["unused"]}}
+            for name, flag in [("selected", False), ("unsafe", False), ("safe", True)]
+        ]),
+    ))
+    executed = []
+
+    def run(pkg, module, plat, dry_run):
+        executed.append(module["name"])
+        return modules.ModuleResult(
+            module["name"], pkg.source_repo, ran=True, dry_run=dry_run, returncode=0,
+        )
+
+    monkeypatch.setattr(modules, "run_module", run)
+    result = restore(
+        [pkg], "box-1", plat="linux", home=tmp_path, dry_run=False,
+        maintenance_safe=maintenance_safe, only=["selected"],
+    )
+    assert executed == ["selected"]
+    assert [item.name for item in result.module_results] == ["selected"]
+
+
+def test_maintenance_safe_module_failure_propagates_and_continues(tmp_path):
+    pkg = load_package(write_package(
+        tmp_path / "example", "modules.yaml",
+        base_package(manage={}, modules=[
+            {"name": name, "maintenance_safe": True,
+             "linux": {"command": [sys.executable, "-c", f"raise SystemExit({code})"]}}
+            for name, code in [("a-fails", 3), ("b-continues", 0)]
+        ]),
+    ))
+    result = restore(
+        [pkg], "box-1", plat="linux", home=tmp_path,
+        dry_run=False, maintenance_safe=True,
+    )
+    assert not result.ok
+    assert [item.returncode for item in result.module_results] == [3, 0]
+    assert all(item.ran for item in result.module_results)
+
+
+def test_maintenance_safe_optin_does_not_bypass_conflicts(tmp_path, monkeypatch):
+    from agent_machines import modules
+    from agent_machines.reconcile import RestoreValidationError
+
+    packages = [
+        load_package(write_package(
+            tmp_path / name, "modules.yaml",
+            base_package(name=f"example/{name}", manage={
+                "copilot.settings": {"disposition": "enforce", "values": {"model": name}},
+            }, modules=[{
+                "name": "probe", "maintenance_safe": True,
+                "linux": {"command": ["unused"]},
+            }]),
+        ))
+        for name in ["first", "second"]
+    ]
+    monkeypatch.setattr(
+        modules, "run_module",
+        lambda *args: pytest.fail("conflicted restore must not execute opted-in modules"),
+    )
+    with pytest.raises(RestoreValidationError, match="enforce-conflict"):
+        restore(packages, "box-1", plat="linux", home=tmp_path,
+                dry_run=False, maintenance_safe=True)
 
 
 def test_runtime_spot_check_repairs_only_after_failed_readiness(tmp_path, monkeypatch):
@@ -243,4 +351,3 @@ def test_runtime_command_runner_resolves_pathext_shim(monkeypatch):
     monkeypatch.setattr(reconcile_module.subprocess, "run", fake_run)
     reconcile_module._runtime_command_runner(["agent-machines", "installer-readiness"], timeout=60)
     assert captured["argv"][0] == "C:\\Users\\owner_user\\.local\\bin\\agent-machines.cmd"
-

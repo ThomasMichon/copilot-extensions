@@ -12,7 +12,7 @@ that pattern to this repository.
 |--------|--------|--------------|
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
 | [Remote ACP Provider Contributions](active/remote-acp-provider-contributions/README.md) | Draft; URL/name/plugin targets and approved scoped-auth proposal before implementation | #7218; existing transport and dispatch-catalog owners retained |
-| [Maintenance-Safe Module Opt-In](active/maintenance-safe-module-optin/README.md) | Draft; explicit default-off module consent, proposal review before implementation | #7213 |
+| [Maintenance-Safe Module Opt-In](active/maintenance-safe-module-optin/README.md) | Active; complete bounded portfolio passed, implementation review/merge next; residual reliability #7247 | #7213 |
 | [ADO PR Stewardship](active/ado-pr-stewardship/README.md) | Draft; centralized provider/configuration/observation proposal before implementation | #7203; preserves #7051/#6007/#6818 owners |
 | [Conventional Fleet Connectivity](active/conventional-fleet-connectivity/README.md) | Active; plan reviewed, conventional source discovery first; direct refresh and Bridge derivation pending | #7206 under #63; preserves identity, profile and listing owners |
 | [Dispatch Extension Catalog](active/dispatch-extension-catalog/README.md) | Active; execution authorized, amended-plan review precedes templates, mapped sources and client semantic parity | #7091; preserves #6379/#4959/#6283 owners |
