@@ -46,6 +46,10 @@ remain separately authorized; platform-specific app packaging is deferred.
 - **Shared integration gate:** name the minimal opt-in CLI/serving/auth adapter
   and exclusive files under #6443/#5789 before changing existing consumers.
   Keep static index/credential behavior unchanged outside explicit selection.
+  The operator subsequently assigned the narrow service-role/CLI seam to this
+  campaign; the [service-profile contract](service-profile.md) goes through
+  review before implementation and does not transfer the retained primitives
+  or provider integrations.
 - **Retained owners:** #6743/#7099 own identity/admission primitives; #6804
   provider/enrollment; #6240/#6424 lifecycle; #5862 observation; #6030 deployment.
   Reuse their APIs rather than adding replacement authorities.
@@ -91,6 +95,17 @@ wire choices and validation elaborations below are **agent-recommended**.
 This request authorizes reviewed source implementation, not live infrastructure
 or credential changes.
 
+When asked whether this campaign should own the narrow service-role admission
+adapter and one opt-in CLI/serving seam, with reviewed contract, reused
+cryptographic verification and unchanged static/index/credential/provider
+behavior, the operator selected verbatim:
+
+```text
+integration_scope=authorize-narrow-integration
+```
+
+This settles that source-scope decision, not production trust or deployment.
+
 ## Plan
 
 ### Phase 0 - Review the contract and preserve ownership
@@ -114,6 +129,8 @@ or credential changes.
   presenting this prerequisite as a complete service Gateway.
 
 ### Phase 2 - Authenticated outbound role service channels
+- [ ] Review the [service-profile integration contract](service-profile.md)
+  before implementing the operator-assigned narrow adapter/CLI seam.
 - [ ] Wire the reviewed opt-in serving profile through the same Gateway role,
   reusing compatible identity/admission and current-policy owners.
 - [ ] Add a service connector that initiates an authenticated outbound channel,
@@ -216,3 +233,18 @@ provider credentials and production placement with their existing owners.
 - This is not serving integration: the store does not authenticate its source,
   persist a restart fence, replace verifier/admission state, rotate live trust,
   or route service traffic. Those Plan and Validation gates remain open.
+
+### 2026-10-19 - First prerequisite merged and serving scope assigned
+- PR #7265 merged as `ba438f6cc24435dd44f4748f0577ff0b15b0ffeb`
+  after exact-head Copilot approval and successful current CI.
+- Fixed the actual release guard requirement with a fleet-manager patch
+  changefile. A native Windows fixture failure was a 1 MiB auto-generated
+  pytest identifier; its explicit short ID preserves the full oversized input.
+- The standard bounded fleet-manager portfolio passed 1,454 tests with two
+  platform skips and fourteen explicitly excluded full-portfolio cases.
+- Re-read this effort. The operator authorized the narrow service-role/CLI
+  integration scope after the retained-owner coordination request, preserving
+  provider custody, shared verification primitives and unselected serving.
+- The next slice reviews the service-profile contract, then implements actual
+  current-role admission and coherent context publication. Service channels,
+  streaming, container and live-adoption gates remain open.
