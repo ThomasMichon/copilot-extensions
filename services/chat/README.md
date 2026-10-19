@@ -102,6 +102,13 @@ Scans accept at most 16 distinct channels. Waits/scans share a finite waiter
 admission pool, support at most 300 seconds and a 5-second batch window, and
 release the store transaction while waiting.
 
+Held waits and scans are fenced by instance-local membership generations,
+not wall-clock timestamps. A committed leave invalidates the generation even
+if rejoin records the same `joined_at`; failed leave transactions and idempotent
+active joins do not. Held requests cannot survive store restart, so this fence
+adds no persistent schema or migration and does not support multiple owning
+store instances for one directory.
+
 Constructor defaults limit events, text bytes, channels, actors and memberships.
 Text-byte quota is not a SQLite file-size or total disk-usage guarantee.
 Inactive memberships still consume capacity. Capacity refusal does not prune

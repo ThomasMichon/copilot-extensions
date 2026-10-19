@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+import agent_chat_service.store as store_module
 from agent_chat_service import ChatError, ChatStore, __version__, json_bytes, strict_json
 
 
@@ -263,6 +264,64 @@ def test_held_scan_observes_membership_or_store_end(store, monkeypatch, end):
         thread.join(1)
         assert not thread.is_alive()
         assert result == ["busy" if end == "close" else "notjoined"]
+    finally:
+        store.close()
+        thread.join(3)
+
+
+@pytest.mark.parametrize("op", ["wait", "scan"])
+@pytest.mark.parametrize("transition", [
+    "leave-rejoin", "active-rejoin", "other-leave-rejoin", "failed-leave",
+])
+def test_held_membership_generation_is_independent_of_clock(store, monkeypatch, op, transition):
+    monkeypatch.setattr(store_module, "_utc", lambda: "2000-01-01T00:00:00Z")
+    joined_at = join(store)["membership"]["joined_at"]
+    join(store, channel="other")
+    started = threading.Event()
+    errors, pages = [], []
+    original_wait = store._changed.wait
+
+    def held_wait(timeout):
+        started.set()
+        return original_wait(timeout)
+
+    def wait():
+        try:
+            fields = {"channel": "room"} if op == "wait" else {
+                "epoch": None, "after": [{"channel": "room", "event_id": 0}],
+            }
+            pages.append(rpc(store, op, codename="agent-a", timeout=2, batch_ms=0, **fields))
+        except ChatError as error:
+            errors.append(error.code)
+
+    monkeypatch.setattr(store._changed, "wait", held_wait)
+    thread = threading.Thread(target=wait)
+    thread.start()
+    try:
+        assert started.wait(1)
+        with store._changed:
+            if transition == "leave-rejoin":
+                rpc(store, "leave", channel="room", codename="agent-a")
+            elif transition == "other-leave-rejoin":
+                rpc(store, "leave", channel="other", codename="agent-a")
+                join(store, channel="other")
+            elif transition == "failed-leave":
+                store._db.execute(
+                    "CREATE TEMP TRIGGER fail_leave BEFORE UPDATE OF active ON memberships "
+                    "BEGIN SELECT RAISE(ABORT, 'synthetic leave failure'); END"
+                )
+                try:
+                    with pytest.raises(sqlite3.IntegrityError, match="synthetic leave failure"):
+                        rpc(store, "leave", channel="room", codename="agent-a")
+                finally:
+                    store._db.execute("DROP TRIGGER fail_leave")
+            assert join(store)["membership"]["joined_at"] == joined_at
+            post(store, text="new membership event")
+        thread.join(1)
+        assert not thread.is_alive()
+        assert errors == (["notjoined"] if transition == "leave-rejoin" else [])
+        assert bool(pages) is (transition != "leave-rejoin")
+        assert read(store)["cursor"] == 0
     finally:
         store.close()
         thread.join(3)

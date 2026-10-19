@@ -259,6 +259,9 @@ graduation still requires the declared native and lifecycle guarantees.
 - The existing trusted-runner guard rejected a dynamic OS matrix. Separate
   fixed hosted-platform jobs preserve the same public check names and bounded
   coverage without a runner-policy exception or matrix-specific validator.
+- Repeated-clock testing exposed a membership fence bug in both held operations.
+  Instance-local generations now invalidate only after a committed leave,
+  preserving idempotent joins and rollback without a storage migration.
 - The trusted tooling activation dependency is recorded with the existing
   #6237 release owner. That owner's Main/pause, publisher and qualification
   scope are unchanged; delivery and acceptance are not asserted here.

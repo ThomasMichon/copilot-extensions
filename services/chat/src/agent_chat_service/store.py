@@ -244,6 +244,7 @@ class ChatStore:
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
         self._waiters = threading.BoundedSemaphore(max_waiters)
+        self._membership_generations = {}
         self._closed = False
         directory = Path(data_dir)
         directory.mkdir(parents=True, exist_ok=True)
@@ -363,6 +364,8 @@ class ChatStore:
         with self._locked():
             with self._transaction():
                 result = getattr(self, "_" + op)(request)
+            if op == "leave":
+                self._membership_generations.pop((request["channel"], request["codename"]), None)
             if op in {"post", "leave", "cursor"}:
                 self._changed.notify_all()
             return result
@@ -386,6 +389,10 @@ class ChatStore:
             "SELECT metadata FROM actors WHERE codename=?", (codename,)
         ).fetchone()
         return json.loads(row[0]) if row else None
+
+    def _membership_generation(self, channel, codename):
+        self._member(channel, codename)
+        return self._membership_generations.setdefault((channel, codename), object())
 
     def _join(self, request):
         channel, actor = request["channel"], request["actor"]
@@ -602,15 +609,15 @@ class ChatStore:
             batch_end = None
             with self._locked():
                 joined = {
-                    p["channel"]: self._member(p["channel"], request["codename"])["joined_at"]
+                    p["channel"]: self._membership_generation(p["channel"], request["codename"])
                     for p in request["after"]
                 }
                 while True:
                     if self._closed:
                         raise ChatError("busy", "Store is closed.")
                     with self._transaction():
-                        for channel, joined_at in joined.items():
-                            if self._member(channel, request["codename"])["joined_at"] != joined_at:
+                        for channel, generation in joined.items():
+                            if self._membership_generation(channel, request["codename"]) is not generation:
                                 raise ChatError("notjoined", "Membership ended during scan.")
                         result = self._scan_page(request)
                     now = time.monotonic()
@@ -630,15 +637,15 @@ class ChatStore:
             deadline = time.monotonic() + request.get("timeout", 30)
             batch_end = None
             with self._locked():
-                joined_at = self._member(
+                generation = self._membership_generation(
                     request["channel"], request["codename"]
-                )["joined_at"]
+                )
                 while True:
                     if self._closed:
                         raise ChatError("busy", "Store is closed.")
-                    if self._member(
+                    if self._membership_generation(
                         request["channel"], request["codename"]
-                    )["joined_at"] != joined_at:
+                    ) is not generation:
                         raise ChatError("notjoined", "Membership ended during wait.")
                     result = self._unread(request["channel"], request["codename"])
                     now = time.monotonic()
