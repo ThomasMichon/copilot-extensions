@@ -175,8 +175,8 @@ distinct entry point or perform an explicit ownership transfer; it may not
 replace the wrapper last-writer-wins.
 
 The target repository is not the command owner merely because it contains plugin
-source. Without an explicit invocation payload, resolve the deployed source
-manifest before falling back to target-checkout source discovery.
+source. Without an explicit invocation payload, resolve the runtime installation's
+`deploy-manifest.json` before falling back to target-checkout source discovery.
 
 Same-cell sibling composition uses explicit provider and consumer identities.
 Cross-cell composition is a separate opt-in contract and always names the target
