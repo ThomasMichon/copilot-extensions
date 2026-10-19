@@ -1078,8 +1078,8 @@ jobs:
       - name: Test agent-dispatch-service with installed plugin and host containment
         run: python tools/run-standalone-tests.py services/dispatch --prepare --admission-wait 60 --timeout 180
 
-  agent-chat-service:
-    name: agent-chat-service (${{ matrix.os }})
+  agent-chat-service-linux:
+    name: agent-chat-service (ubuntu-latest)
     needs: discover
     if: >-
       always() && !cancelled() &&
@@ -1087,11 +1087,27 @@ jobs:
        (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
         needs.discover.outputs.admission_validated == 'true' &&
         needs.discover.outputs.chat_contracts == 'true'))
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test portable conversation core and installed artifact
+        run: python tools/run-standalone-tests.py services/chat --prepare --admission-wait 60 --timeout 120
+
+  agent-chat-service-windows:
+    name: agent-chat-service (windows-latest)
+    needs: discover
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.chat_contracts == 'true'))
+    runs-on: windows-latest
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
@@ -1944,7 +1960,8 @@ jobs:
       - worktree-manager
       - repositories-configuration
       - agent-dispatch-service
-      - agent-chat-service
+      - agent-chat-service-linux
+      - agent-chat-service-windows
       - agent-index-service-linux
       - agent-index-service-windows
       - test-runner-linux
@@ -2017,7 +2034,8 @@ jobs:
       - worktree-manager
       - repositories-configuration
       - agent-dispatch-service
-      - agent-chat-service
+      - agent-chat-service-linux
+      - agent-chat-service-windows
       - agent-index-service-linux
       - agent-index-service-windows
       - test-runner-linux
@@ -2051,7 +2069,7 @@ jobs:
               "fleet_contracts": ("fleet-native-linux", "fleet-native-windows"),
               "manager_contracts": ("worktree-manager",),
               "dispatch_contracts": ("agent-dispatch-service",),
-              "chat_contracts": ("agent-chat-service",),
+              "chat_contracts": ("agent-chat-service-linux", "agent-chat-service-windows"),
           }
           if (discovery.get("result") != "success"
                   or outputs.get("admission_validated") != "true"

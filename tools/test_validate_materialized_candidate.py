@@ -285,9 +285,11 @@ def test_chat_registration_has_both_platform_rows_and_the_actual_ci_recipe(chat_
         [sys.executable, str(root / "tools/run-standalone-tests.py"), "services/chat",
          "--prepare", "--admission-wait", "60", "--timeout", "120"], root,
     )]
-    job = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text("utf-8"))["jobs"]["agent-chat-service"]
-    invocation = next(step["run"] for step in job["steps"] if step.get("run"))
-    assert invocation.split()[2:] == commands[0][0][2:]
+    jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text("utf-8"))["jobs"]
+    for platform in ("linux", "windows"):
+        job = jobs[f"agent-chat-service-{platform}"]
+        invocation = next(step["run"] for step in job["steps"] if step.get("run"))
+        assert invocation.split()[2:] == commands[0][0][2:]
 
 
 def test_registered_chat_recipe_executes_and_preserves_candidate_identity(chat_subject):

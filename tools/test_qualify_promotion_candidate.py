@@ -291,23 +291,19 @@ def test_chat_platform_rows_are_required_not_optional_candidate_coverage(
         _qualify()
 
 
-@pytest.mark.parametrize("matrix", [
-    "        os: [ubuntu-latest]\n",
-    "        os: [ubuntu-latest, ubuntu-latest]\n",
-    "        os: [ubuntu-latest, macos-latest]\n",
-    "        os: [ubuntu-latest, windows-latest, macos-latest]\n",
-    "        os: ${{ fromJson(needs.discover.outputs.platforms) }}\n",
-    "        os: [ubuntu-latest, windows-latest]\n        extra: [one, two]\n",
-])
-def test_chat_platform_matrix_refuses_narrowed_or_unaccounted_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, matrix: str,
+@pytest.mark.parametrize("platform", ["ubuntu-latest", "windows-latest"])
+def test_chat_platform_jobs_cannot_gain_an_unaccounted_matrix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
 ) -> None:
     workflow = _candidate_workflow(tmp_path, monkeypatch)
-    before, job = workflow.read_text("utf-8").split("  agent-chat-service:\n", 1)
-    old = "        os: [ubuntu-latest, windows-latest]\n"
-    assert old in job
-    workflow.write_text(before + "  agent-chat-service:\n" + job.replace(old, matrix, 1), encoding="utf-8")
-    with pytest.raises(CandidateValidationError, match="chat platform matrix"):
+    text = workflow.read_text("utf-8")
+    old = f"    name: agent-chat-service ({platform})"
+    assert text.count(old) == 1
+    workflow.write_text(
+        text.replace(old, "    name: agent-chat-service (${{ matrix.os }})"),
+        encoding="utf-8",
+    )
+    with pytest.raises(CandidateValidationError, match="unsupported canonical CI matrix"):
         inventory.required_jobs(ROOT)
 
 

@@ -156,7 +156,8 @@ def workflow() -> dict:
 @pytest.mark.parametrize("job,key", [
     ("fleet-native-linux", "fleet_contracts"), ("fleet-native-windows", "fleet_contracts"),
     ("worktree-manager", "manager_contracts"), ("agent-dispatch-service", "dispatch_contracts"),
-    ("agent-chat-service", "chat_contracts"),
+    ("agent-chat-service-linux", "chat_contracts"),
+    ("agent-chat-service-windows", "chat_contracts"),
 ])
 def test_actual_job_admission_and_full_manual_override(job: str, key: str) -> None:
     cfg = workflow()["jobs"][job]
@@ -215,7 +216,7 @@ def valid_needs(*, selected: bool) -> dict:
     if selected:
         for name in (
             "fleet-native-linux", "fleet-native-windows", "worktree-manager",
-            "agent-dispatch-service", "agent-chat-service",
+            "agent-dispatch-service", "agent-chat-service-linux", "agent-chat-service-windows",
         ):
             needs[name] = {"result": "success"}
     return needs
@@ -241,10 +242,12 @@ def test_actual_discovery_exports_pinned_selection_and_required_noop() -> None:
 
 @pytest.mark.parametrize("broken", [
     "missing", "skipped", "failure", "invalid", "invalid-chat", "no-outputs",
-    "selected-skipped", "selected-chat-skipped",
+    "selected-skipped", "selected-chat-linux-skipped", "selected-chat-windows-skipped",
 ])
 def test_actual_aggregate_refuses_unknown_or_incomplete_admission(broken: str) -> None:
-    needs = valid_needs(selected=broken in {"selected-skipped", "selected-chat-skipped"})
+    needs = valid_needs(selected=broken in {
+        "selected-skipped", "selected-chat-linux-skipped", "selected-chat-windows-skipped",
+    })
     if broken == "missing":
         del needs["discover"]
     elif broken in {"skipped", "failure"}:
@@ -258,6 +261,7 @@ def test_actual_aggregate_refuses_unknown_or_incomplete_admission(broken: str) -
     elif broken == "selected-skipped":
         needs["fleet-native-windows"]["result"] = "skipped"
     else:
-        needs["agent-chat-service"]["result"] = "skipped"
+        platform = "linux" if broken == "selected-chat-linux-skipped" else "windows"
+        needs[f"agent-chat-service-{platform}"]["result"] = "skipped"
     result = gate_result(needs)
     assert result.returncode == 1, result.stdout + result.stderr

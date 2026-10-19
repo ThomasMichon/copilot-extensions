@@ -249,13 +249,16 @@ graduation still requires the declared native and lifecycle guarantees.
 ### 2026-10-19 - Core publication review
 
 - Implementation review exposed coupled qualification-inventory omissions.
-  Its source fixes recognize both mandatory Chat CI platform rows and add
+  Its source fixes require both explicit, statically routed Chat CI jobs and add
   executable materialized-consumer recipes while preserving the older
   standalone roster. Unknown or narrowed coverage still refuses.
 - Review also identified committed-post recovery after leave. Persisted
   request reconciliation now precedes active-membership admission; changed
   content conflicts and new posts still require membership. The regression
   exercises leave and restart without silently rejoining.
+- The existing trusted-runner guard rejected a dynamic OS matrix. Separate
+  fixed hosted-platform jobs preserve the same public check names and bounded
+  coverage without a runner-policy exception or matrix-specific validator.
 - The trusted tooling activation dependency is recorded with the existing
   #6237 release owner. That owner's Main/pause, publisher and qualification
   scope are unchanged; delivery and acceptance are not asserted here.

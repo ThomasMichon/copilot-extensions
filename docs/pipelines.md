@@ -23,8 +23,9 @@ therefore conservatively admit Manager; Dispatch plugin changes admit its
 standalone service too. This first slice does not assume those distribution
 boundaries isolate their source dependencies.
 
-Chat source changes select the bounded conversation-core contracts on Linux
-and Windows. This does not qualify hosted transport or managed service lifecycle.
+Chat source changes select separate, statically routed Linux and Windows jobs
+for the bounded conversation-core contracts. No dynamic runner route or policy
+exception is used. This does not qualify hosted transport or managed service lifecycle.
 Materialized-consumer qualification includes both Chat platforms when the
 validated standalone roster registers `services/chat`; the supported older
 roster remains usable without it. Each row runs the same bounded standalone

@@ -161,13 +161,6 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
                     raise CandidateValidationError("canonical full-suite matrix is incomplete")
             elif identifier in ("fleet-native-linux", "fleet-native-windows") and axis == "partition":
                 values = list(fleet_partitions(root))
-            elif identifier == "agent-chat-service" and axis == "os":
-                entries = re.search(
-                    r"(?m)^      matrix:\n        os: \[([a-z, -]+)\]\n(?=    \S)", block,
-                )
-                values = entries[1].split(", ") if entries else []
-                if len(values) != 2 or set(values) != {"ubuntu-latest", "windows-latest"}:
-                    raise CandidateValidationError("canonical chat platform matrix is incomplete or unsupported")
             else:
                 raise CandidateValidationError(f"unsupported canonical CI matrix: {identifier}")
             rows = [name[:expression.start()] + value + name[expression.end():] for value in values]
