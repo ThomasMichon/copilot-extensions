@@ -232,6 +232,24 @@ Conditional cutover's native contention checks retain their one-second limit,
 measured from actual holder acquisition. Earlier healthy publication/fixture I/O
 is not part of that contention interval; the native lock and whole-item deadline
 remain real and unchanged.
+Real stalled-probe regressions establish descendant readiness and birth-bound
+Job/group custody before the forced 0.8-second capture; that fixture input is
+not a bootstrap allowance or the production 30-second authentication timeout.
+Communication and retirement stay real. On Windows, known pending termination
+may receive one same-pinned-handle exit confirmation, capped at 1,000ms inside
+the existing five-second actor window with one second reserved for heartbeat
+and diagnostics. Failed/unknown observations remain fatal; identity, custody,
+absent stop, signaled exit and stable heartbeat must hold before watchdog
+expiry and fixture Job close. No production timeout or containment is changed.
+The finite Windows probe actors do not import the unrelated process runtime
+before publishing readiness. A poisoned-runtime-module regression proves this
+dependency boundary while retaining the ten-second readiness and five-second
+active windows.
+
+Windows census transport writes compact JSON directly to explicit UTF-8 stdout,
+without host formatting. Its native synthetic-data regression round-trips a
+command line longer than 400,000 characters with Unicode and control characters;
+real durable-launch and cutover tests still exercise the actual CIM inventory.
 
 Budget Guidance's installer fixture supports both development and materialized
 payloads through the real materializer. It preserves an embedded dependency

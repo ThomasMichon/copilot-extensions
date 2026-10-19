@@ -72,6 +72,17 @@ def test_windows_cutover_identity(tmp_path, contained, record_property):
                 assert time.monotonic() < deadline, (root / "caller.log").read_text(errors="replace")
                 time.sleep(.1)
             ready = json.loads((root / "ready.json").read_text())
+            first, second = ready["cutovers"]
+            assert second == ready["active"]
+            assert second["generation"] > first["generation"]
+            assert (first["pid"], first["process_start_time"]) != (
+                second["pid"], second["process_start_time"],
+            )
+            assert ready["stale_reap"]["refused"] is True
+            assert not ready["stale_reap"]["reaped"]
+            assert ready["stale_reap"]["reason"] == (
+                "cutover identity changed; stale passive-reap evidence refused"
+            )
             pair = ready["pair"]
             assert len(pair) == 2, "must exercise a real venv launcher/server pair"
             assert str(ready["active"]["pid"]) in pair

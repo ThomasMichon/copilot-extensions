@@ -143,3 +143,97 @@ def _parse_marker(
     if validated is None:
         return None
     return {**validated, "comment_author": author}
+
+
+def _ownership_key(reservation: dict[str, Any]) -> tuple[Any, ...]:
+    return tuple(reservation.get(field) for field in (
+        "loop", "issue", "occurrence", "label", "task_id",
+    ))
+
+
+def _claim_order(reservation: dict[str, Any]) -> tuple[Any, ...]:
+    """Order snapshots that have passed the providers' marker-schema boundary."""
+    return (
+        reservation.get("at", 0), reservation.get("task_id", ""),
+        reservation.get("label", ""), json.dumps(reservation, sort_keys=True),
+    )
+
+
+def latest_reservations(issue: Any) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    claims: dict[tuple[Any, ...], dict[str, Any]] = {}
+    releases: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for reservation in issue.reservations:
+        loop = reservation.get("loop")
+        if not isinstance(loop, str):
+            continue
+        current = latest.get(loop)
+        state = reservation.get("state")
+        if state == "released":
+            # Another release may occupy the accumulator before its claim appears.
+            releases[_ownership_key(reservation)] = reservation
+        elif state == "claimed":
+            key = _ownership_key(reservation)
+            previous = claims.get(key)
+            if previous is None or _claim_order(reservation) > _claim_order(previous):
+                claims[key] = reservation
+        if current is None:
+            # Providers edit trusted comments in place; the overwritten
+            # predecessor need not appear in a fresh ownership snapshot.
+            if state in {"reserved", "claimed", "released"}:
+                latest[loop] = reservation
+            continue
+        if reservation.get("occurrence", -1) < current.get("occurrence", -1):
+            continue
+        if (
+            reservation.get("occurrence", -1) > current.get("occurrence", -1)
+            and state in {"claimed", "released"}
+        ):
+            latest[loop] = reservation
+            continue
+        if state == "reserved":
+            if (
+                current.get("state") == "released"
+                or reservation.get("occurrence", -1) > current.get("occurrence", -1)
+            ):
+                latest[loop] = reservation
+            continue
+        if (
+            reservation.get("occurrence") != current.get("occurrence")
+            or reservation.get("issue") != current.get("issue")
+        ):
+            continue
+        if (
+            state == "claimed" and current.get("state") == "released"
+            and (
+                current.get("task_id") != reservation.get("task_id")
+                or current.get("label") != reservation.get("label")
+            )
+        ):
+            # Comment creation order survives edits and label reconfiguration.
+            latest[loop] = reservation
+            continue
+        if reservation.get("label") != current.get("label"):
+            continue
+        if state == "claimed" and current.get("state") == "reserved":
+            latest[loop] = reservation
+        elif state == "released":
+            if current.get("state") == "reserved" and reservation.get("task_id") is None:
+                latest[loop] = reservation
+            elif (
+                current.get("state") == "claimed"
+                and reservation.get("task_id") == current.get("task_id")
+            ):
+                latest[loop] = reservation
+    for loop, current in latest.items():
+        current_key = _ownership_key(current)
+        active = {
+            key: claim for key, claim in claims.items()
+            if key[:3] == current_key[:3] and key not in releases
+        }
+        if active:
+            # A matching release closes only its owner, never another live claim.
+            latest[loop] = max(active.values(), key=_claim_order)
+        elif current.get("state") == "claimed":
+            latest[loop] = releases.get(current_key, current)
+    return latest

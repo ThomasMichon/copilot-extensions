@@ -92,20 +92,33 @@ def caller(root: Path):
 
     reap.reap_superseded_coordinators = isolated_reap
     started = time.monotonic()
+    cutovers = []
     for _ in range(2):
         args = main.build_parser().parse_args([
             "deploy", "--json", "--health-timeout", "60", "--drain-timeout", "10",
         ])
         assert main._cmd_cutover(args) == 0
-    active = routing.read_table(root / "routing")["active"]
+        published = routing.read_table(root / "routing", strict=True)["active"]
+        assert verified_pair(published["pid"], published["process_start_time"])
+        cutovers.append(published)
+    active = cutovers[-1]
+    assert active["generation"] > cutovers[0]["generation"]
+    assert (active["pid"], active["process_start_time"]) != (
+        cutovers[0]["pid"], cutovers[0]["process_start_time"],
+    )
     pair = verified_pair(active["pid"], active["process_start_time"])
     launcher_pid = next(pid for pid in pair if pid != active["pid"])
+    # This deliberately old record is not current transition authority.
     sweep = reap.reap_abandoned_passive_backstop(root / "routing", record={
         "new_pid": launcher_pid, "started_at": "2000-01-01T00:00:00Z", "state": "flipped",
     }, grace_seconds=0)
-    assert not sweep["reaped"] and "promoted" in sweep["reason"], sweep
+    assert not sweep["reaped"] and sweep.get("refused") is True, sweep
+    assert sweep["reason"] == "cutover identity changed; stale passive-reap evidence refused", sweep
+    assert routing.read_table(root / "routing", strict=True)["active"] == active
+    assert verified_pair(active["pid"], active["process_start_time"]) == pair
     publish(root / "ready.json", {
         "active": active, "pair": pair,
+        "cutovers": cutovers, "stale_reap": sweep,
         "elapsed": time.monotonic() - started,
         "owned": owned,
     })
