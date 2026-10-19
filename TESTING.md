@@ -133,11 +133,15 @@ source-aware legacy End cleanup without fabricated proof and a source-changing
 already-linked handoff surviving a stale save,
 warm End over real resident IPC with two same-UUID records and an explicit
 binding outside cwd,
-history-pruning ambiguity, pre-dispatch old-daemon refusal with a real legacy
+history-pruning ambiguity including complete source removal, bounded sticky
+pruning fences across stale saves and saturation, pre-dispatch old-daemon refusal with a real legacy
 peer whose mutation handler stays uncalled, installed-bin helper loading,
 the 256-entry retained-history boundary, tombstone-visible closure and
-shutdown/cancellation ordering across inferred exits. Closed unmapped history
-does not dilute live polling, but a new live mapping re-admits its subject.
+shutdown/cancellation ordering across inferred exits. Closed or definitively
+consumed unknown-End unmapped history does not dilute live polling, but a new
+live mapping re-admits its subject. Journal compatibility, marker validation,
+same-generation persistence and execution-generation reset are covered separately
+from inferred-End corroboration.
 They do not reboot a machine, kill a
 production session, qualify Windows native source capture, or prove acknowledged
 restart-seed delivery. Those remain separate native integration obligations.

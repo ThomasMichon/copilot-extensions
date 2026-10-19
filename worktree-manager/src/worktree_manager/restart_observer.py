@@ -186,7 +186,10 @@ class RestartObserver:
         ):
             reason = "intentional"
             detail = "native-session-end"
-        return self.journal.record_exit(evidence, reason=reason, detail=detail)
+        return self.journal.record_exit(
+            evidence, reason=reason, detail=detail,
+            end_consumed=matches[0].get("end_source") in {"hook", "hook:exit"},
+        )
 
     def observe(self, registry: MuxMappingRegistry, *, now: float | None = None) -> None:
         """Persist only independently owner-confirmed, identity-fenced evidence."""
@@ -210,7 +213,8 @@ class RestartObserver:
                 for row in self.journal.snapshot()
             }
             keys = sorted(entries.keys() | {
-                key for key, row in rows.items() if row["disposition"] != "intentional"
+                key for key, row in rows.items()
+                if row["disposition"] != "intentional" and not row["end_consumed"]
             })
             if not keys:
                 self.last_result = {"applied": False, "reason": "no-live-mapping"}

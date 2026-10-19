@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import subprocess
 import sys
@@ -368,6 +368,90 @@ def test_closed_subject_is_polled_when_a_live_mapping_returns(
     row = observer.journal.snapshot()[0]
     assert row["disposition"] == "live"
     assert row["last_positive"]["native_incarnation"] == "native:replacement"
+
+
+@pytest.mark.parametrize("reason", ["complete", "error", "abort", "timeout"])
+def test_consumed_unknown_hook_end_history_does_not_dilute_live_polling(
+    tmp_path, observer_module, mapping, reason,
+):
+    calls = []
+    observer = build_observer(
+        observer_module, tmp_path,
+        owner_probe=lambda *args: calls.append(args) or source_bound_owner(),
+    )
+    observer.observe(mapping, now=10.0)
+    evidence = observer_module.PositiveEvidence(**observer.journal.snapshot()[0]["last_positive"])
+    for index in range(32):
+        ended = replace(
+            evidence, worktree_id=f"ended-{index:03d}",
+            worktree_path=f"/path/to/ended-{index:03d}",
+        )
+        observer.journal.observe(ended)
+        row = {"last_positive": asdict(ended)}
+        assert observer._lifecycle_exit(source_bound_owner(
+            confirmed=False, ended_at="end", end_reason=reason,
+        ), row)["applied"]
+    for now in (30.0, 50.0, 70.0):
+        observer.observe(mapping, now=now)
+    assert [args[1] for args in calls] == ["worktree-one"] * 4
+    rows = observer.journal.snapshot()
+    assert len(rows) == 33
+    assert sum(row["disposition"] == "unknown" for row in rows) == 32
+    assert sum(row["end_consumed"] for row in rows) == 32
+
+
+def test_consumed_unknown_subject_returns_to_rotation_with_live_mapping(
+    tmp_path, observer_module, mapping,
+):
+    result = source_bound_owner()
+    calls = []
+    observer = build_observer(
+        observer_module, tmp_path, owner_probe=lambda *args: calls.append(args) or result,
+    )
+    observer.observe(mapping, now=10.0)
+    observer._lifecycle_exit(
+        source_bound_owner(confirmed=False, ended_at="end", end_reason="error"),
+        observer.journal.snapshot()[0],
+    )
+    entry = mapping.get("example", "worktree-one")
+    mapping.remove("example", "worktree-one")
+    observer.observe(mapping, now=30.0)
+    assert len(calls) == 1
+    entry["mapping_revision"] = mapping.get("example", "worktree-one")["mapping_revision"] + 1
+    assert mapping.register(entry)["applied"]
+    result = source_bound_owner()
+    result["native_incarnation"] = "native:replacement"
+    result["source_identity"] = "native:replacement"
+    result["activation_ordinal"] = 2
+    result["owner_revision"] = 2
+    result["lifecycle"]["activations"] = []
+    result["lifecycle"]["owner_revision"] = 2
+    observer.observe(mapping, now=50.0)
+    assert len(calls) == 2
+    row = observer.journal.snapshot()[0]
+    assert row["disposition"] == "live"
+    assert row["end_consumed"] is False
+
+
+def test_inferred_end_still_gets_later_hook_corroboration(
+    tmp_path, observer_module, mapping,
+):
+    result = source_bound_owner()
+    calls = []
+    observer = build_observer(
+        observer_module, tmp_path, owner_probe=lambda *args: calls.append(args) or result,
+    )
+    observer.observe(mapping, now=10.0)
+    mapping.remove("example", "worktree-one")
+    result = source_bound_owner(confirmed=False, ended_at="inferred")
+    result["lifecycle"]["activations"][0]["end_source"] = "inferred:next-start"
+    observer.observe(mapping, now=30.0)
+    assert observer.journal.snapshot()[0]["disposition"] == "unknown"
+    assert observer.journal.snapshot()[0]["end_consumed"] is False
+    result = source_bound_owner(confirmed=False, ended_at="end", end_reason="user_exit")
+    observer.observe(mapping, now=50.0)
+    assert len(calls) == 3
+    assert observer.journal.snapshot()[0]["disposition"] == "intentional"
 
 
 def test_owner_live_mux_incarnation_must_match_registry(tmp_path, observer_module, mapping):

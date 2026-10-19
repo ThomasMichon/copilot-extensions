@@ -260,6 +260,117 @@ def test_source_changing_linked_handoff_advances_revision_and_survives_stale_sav
     assert tracking.load_record(record_path).lifecycle_revision == retained.lifecycle_revision
 
 
+def test_pruned_physical_source_cannot_regain_unambiguous_end_authority(record_path, monkeypatch):
+    from agent_worktrees import obligations, tracking_session_deregistration_write
+
+    monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 2)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "hook:resume",
+    }
+    for source, timestamp in (
+        ("native:A", "2026-10-19T10:00:00"), ("native:A", "2026-10-19T11:00:00"),
+        ("native:B", "2026-10-19T12:00:00"), ("native:B", "2026-10-19T13:00:00"),
+    ):
+        assert tracking_session_registration_write.apply_session_register({
+            **args, "source_identity": source, "started_at": timestamp,
+        })["ok"]
+    record = tracking.load_record(record_path)
+    assert len(record.sessions[0].activations) == 2
+    assert all(item.source_identity == "native:B" for item in record.sessions[0].activations)
+    replay = tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:A", "started_at": "2026-10-19T14:00:00",
+        "source": "bind",
+    })
+    assert replay.get("ok") or replay.get("error") == "lifecycle"
+    stops = []
+    monkeypatch.setattr(tracking_session_deregistration_write, "stop_fsmonitor_daemon", stops.append)
+    old_end = tracking_session_deregistration_write.apply_session_deregister({
+        **args, "source_identity": "native:A", "ended_at": "old-A-exit",
+        "end_reason": "user_exit",
+    })
+    assert old_end["lifecycle"] == "unconfirmed"
+    current = tracking.load_record(record_path)
+    assert current.sessions[0].ended_at is None
+    assert current.sessions[0].activations[-1].ended_at is None
+    assert all(claim.state == obligations.ACTIVE for claim in current.resources)
+    assert stops == []
+
+
+@pytest.mark.parametrize("equal_revision", [False, True])
+def test_pruning_fence_roundtrips_and_survives_stale_save(
+    record_path, monkeypatch, equal_revision,
+):
+    monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 1)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "bind", "source_identity": "native:A",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    stale = tracking.load_record(record_path)
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:B",
+    })["ok"]
+    current = tracking.load_record(record_path)
+    assert current.sessions[0].pruned_sources == ["native:A"]
+    if equal_revision:
+        stale.lifecycle_revision = current.lifecycle_revision
+    tracking.save_record(stale, record_path)
+    saved = tracking.load_record(record_path)
+    assert "native:A" in saved.sessions[0].pruned_sources
+    if equal_revision:
+        assert "native:B" in saved.sessions[0].pruned_sources
+    from agent_worktrees.tracking_session_activations import source_end_authoritative
+    assert not source_end_authoritative(saved.sessions[0], "native:A")
+
+
+def test_pruning_source_budget_saturates_stickily_and_refuses_before_claim(
+    record_path, monkeypatch,
+):
+    from agent_worktrees import tracking_session_activations as history
+    from agent_worktrees import tracking_session_deregistration_write
+
+    monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 1)
+    monkeypatch.setattr(history, "MAX_PRUNED_SOURCES", 2)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "bind",
+    }
+    for source in ("A", "B", "C", "D"):
+        assert tracking_session_registration_write.apply_session_register({
+            **args, "source_identity": source,
+        })["ok"]
+    current = tracking.load_record(record_path)
+    assert len(current.sessions[0].pruned_sources) == 2
+    assert current.sessions[0].source_history_saturated is True
+    stale = tracking.load_record(record_path)
+    stale.sessions[0].source_history_saturated = False
+    stale.sessions[0].pruned_sources = []
+    tracking.save_record(stale, record_path)
+    assert tracking.load_record(record_path).sessions[0].source_history_saturated is True
+    before = record_path.read_bytes()
+    for source in ("A", "D", "E", None):
+        assert tracking_session_registration_write.apply_session_register({
+            **args, "source_identity": source,
+        })["error"] == "lifecycle"
+        assert record_path.read_bytes() == before
+        assert tracking_session_deregistration_write.apply_session_deregister({
+            **args, "source_identity": source, "end_reason": "user_exit",
+        })["lifecycle"] == "unconfirmed"
+        assert record_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("metadata", [
+    {"pruned_sources": "source"}, {"pruned_sources": ["source", "source"]},
+    {"pruned_sources": [None]}, {"pruned_sources": [True]},
+    {"source_history_saturated": 1}, {"source_history_saturated": "true"},
+])
+def test_invalid_pruning_fence_is_rejected(metadata):
+    from agent_worktrees.tracking_session_activations import parse_pruning_fence
+    with pytest.raises(ValueError):
+        parse_pruning_fence(metadata)
+
+
 @pytest.mark.parametrize("source_identity", [None, "native:replacement"])
 def test_v2_daemon_cannot_downgrade_registration(
     record_path, monkeypatch, monkeypatch_config, source_identity,

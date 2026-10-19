@@ -53,6 +53,64 @@ def test_positive_survives_independent_reader_and_reasonless_loss(tmp_path, reco
     assert row["automatic_eligible"] is False
 
 
+def test_consumed_end_is_monotonic_until_execution_generation_changes(tmp_path, recovery):
+    journal = recovery.RecoveryJournal(tmp_path)
+    evidence = positive(recovery)
+    journal.observe(evidence)
+    journal.record_exit(evidence, reason="unknown", end_consumed=True)
+    journal.record_exit(evidence, reason="unknown")
+    assert journal.snapshot()[0]["end_consumed"] is True
+    journal.observe(dataclasses.replace(evidence, observation_sequence=2, observed_at=110.0))
+    assert journal.snapshot()[0]["end_consumed"] is True
+    assert journal.snapshot()[0]["disposition"] == "unknown"
+    replacement = dataclasses.replace(
+        evidence, native_incarnation="native:replacement", owner_revision=2,
+        observation_sequence=3, observed_at=120.0,
+    )
+    assert journal.observe(replacement)["applied"]
+    assert journal.snapshot()[0]["end_consumed"] is False
+    assert journal.record_exit(
+        evidence, reason="unknown", end_consumed=True,
+    ) == {"applied": False, "reason": "superseded"}
+    assert journal.snapshot()[0]["end_consumed"] is False
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_consumed_end_preserves_shutdown_uncertainty(tmp_path, recovery, cancelled):
+    journal = recovery.RecoveryJournal(tmp_path)
+    evidence = positive(recovery)
+    journal.observe(evidence)
+    journal.shutdown_pending(
+        "linux", "example-environment", "boot-one", notification_id="one",
+    )
+    if cancelled:
+        journal.shutdown_cancelled(
+            "linux", "example-environment", "boot-one", notification_id="one",
+        )
+    journal.record_exit(evidence, reason="unknown", end_consumed=True)
+    row = journal.snapshot()[0]
+    assert row["end_consumed"] is True
+    assert row["disposition"] == ("unknown" if cancelled else "shutdown-interrupted")
+    assert row["notification_id"] == ("" if cancelled else "one")
+    if cancelled:
+        assert row["detail"] == "shutdown-cancelled"
+
+
+def test_legacy_end_consumption_defaults_false_and_rejects_unknown_metadata(recovery):
+    row = {
+        "last_positive": dataclasses.asdict(positive(recovery)),
+        "disposition": "unknown", "detail": "", "notification_id": "",
+    }
+    assert recovery._decode(json.dumps(row))["end_consumed"] is False
+    assert recovery._decode(json.dumps({**row, "end_consumed": True}))["end_consumed"] is True
+    for changes in (
+        {"end_consumed": 1}, {"end_consumed": None}, {"end_consumed": "true"},
+        {"other": False}, {"end_consumed": False, "other": False},
+    ):
+        with pytest.raises(ValueError):
+            recovery._decode(json.dumps({**row, **changes}))
+
+
 def test_explicit_close_is_durable_and_periodic_refresh_cannot_reopen(tmp_path, recovery):
     journal = recovery.RecoveryJournal(tmp_path)
     evidence = positive(recovery)

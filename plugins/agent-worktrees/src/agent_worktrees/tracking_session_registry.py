@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .tracking_session_activations import source_end_authoritative
+
 if TYPE_CHECKING:
     from . import tracking
 
@@ -54,7 +56,10 @@ def _start_session_activation(
 ) -> bool:
     tracking = _tracking()
     _ensure_activation_history(entry)
-    if source_identity is None and any(item.source_identity is not None for item in entry.activations):
+    if source_identity is None and (
+        entry.pruned_sources or entry.source_history_saturated
+        or any(item.source_identity is not None for item in entry.activations)
+    ):
         return False
     latest = max(entry.activations, key=lambda item: item.ordinal, default=None)
     if latest is not None and latest.ended_at is None:
@@ -108,6 +113,8 @@ def _end_session_activation(
     _ensure_activation_history(entry)
     latest = max(entry.activations, key=lambda item: item.ordinal, default=None)
     if source_identity is not None:
+        if not source_end_authoritative(entry, source_identity):
+            return False
         matches = [item for item in entry.activations if item.source_identity == source_identity]
         if len(matches) != 1 or matches[0].source_ambiguous:
             return False
@@ -121,7 +128,10 @@ def _end_session_activation(
         if target is latest:
             entry.ended_at = event_at
         return True
-    if any(item.source_identity is not None for item in entry.activations):
+    if (
+        entry.pruned_sources or entry.source_history_saturated
+        or any(item.source_identity is not None for item in entry.activations)
+    ):
         return False
     if latest is None:
         entry.ended_at = event_at

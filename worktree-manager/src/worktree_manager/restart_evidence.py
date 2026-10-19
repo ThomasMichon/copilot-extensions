@@ -125,17 +125,20 @@ _MAX_SUBJECTS = 4096
 
 def _decode(payload: str) -> dict:
     row = json.loads(payload)
+    legacy_keys = {"last_positive", "disposition", "detail", "notification_id"}
     if (
         not isinstance(row, dict)
-        or set(row) != {"last_positive", "disposition", "detail", "notification_id"}
+        or set(row) not in (legacy_keys, legacy_keys | {"end_consumed"})
         or row["disposition"] not in _DISPOSITIONS
         or not isinstance(row["detail"], str)
         or not isinstance(row["notification_id"], str)
+        or type(row.get("end_consumed", False)) is not bool
     ):
         raise ValueError("Invalid recovery journal event")
     PositiveEvidence(**row["last_positive"])
     if row["disposition"] == "intentional" and row["detail"] not in _INTENTIONAL_DETAILS:
         raise ValueError("Invalid intentional recovery exit evidence")
+    row.setdefault("end_consumed", False)
     return row
 
 
@@ -257,10 +260,17 @@ class RecoveryJournal:
             row = {
                 "last_positive": dataclasses.asdict(evidence),
                 "disposition": "live", "detail": "", "notification_id": "",
+                "end_consumed": bool(
+                    current and evidence.identity() == previous.identity()
+                    and current["end_consumed"]
+                ),
             }
             if (
                 current and evidence.identity() == previous.identity()
-                and current["disposition"] in {"shutdown-pending", "shutdown-interrupted"}
+                and (
+                    current["end_consumed"]
+                    or current["disposition"] in {"shutdown-pending", "shutdown-interrupted"}
+                )
             ):
                 row["disposition"] = current["disposition"]
                 row["notification_id"] = current["notification_id"]
@@ -275,10 +285,13 @@ class RecoveryJournal:
 
     def record_exit(
         self, evidence: PositiveEvidence, *, reason: str, detail: str = "",
+        end_consumed: bool = False,
     ) -> dict:
         """Fence reasoned exit evidence to the exact last-positive generation."""
         if reason not in {"intentional", "unknown", "shutdown-interrupted"}:
             raise ValueError("Unsupported recovery exit reason")
+        if type(end_consumed) is not bool:
+            raise ValueError("Invalid recovery End consumption")
         if reason == "intentional" and detail not in _INTENTIONAL_DETAILS:
             raise ValueError("Intentional closure requires explicit operator or native exit evidence")
         if detail:
@@ -304,6 +317,7 @@ class RecoveryJournal:
             if reason == "shutdown-interrupted" and not current["notification_id"]:
                 return {"applied": False, "reason": "unconfirmed-shutdown"}
             row = dict(current)
+            row["end_consumed"] = current["end_consumed"] or end_consumed
             row["disposition"] = (
                 "shutdown-interrupted"
                 if reason == "unknown" and current["disposition"] in {

@@ -48,7 +48,7 @@ from pathlib import Path
 
 from . import tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
-from .tracking_session_activations import activation_token
+from .tracking_session_activations import activation_token, source_end_authoritative
 from .tracking_session_registry import (
     _end_session_activation,
     _record_has_open_session,
@@ -105,9 +105,11 @@ def apply_session_deregister(args: dict) -> dict:
                 if (
                     source_identity is not None and (
                         len(matches) != 1 or matches[0].source_ambiguous
+                        or not source_end_authoritative(entry, source_identity)
                     )
-                    or source_identity is None and any(
-                        item.source_identity is not None for item in entry.activations
+                    or source_identity is None and (
+                        entry.pruned_sources or entry.source_history_saturated
+                        or any(item.source_identity is not None for item in entry.activations)
                     )
                 ):
                     return _unconfirmed(session_id, "source-ambiguous")

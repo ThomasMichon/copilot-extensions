@@ -399,7 +399,12 @@ history. A delayed historical End cannot end a replacement interval, release its
 self-session claim, stop its fsmonitor, or capture its title. Missing or ambiguous
 source cannot retire a qualified interval. Repeated logical activations in one
 physical CLI with the same native UUID are deliberately unconfirmed; the ambiguity
-survives history pruning. Duplicate old Start delivery cannot reactivate an ended
+survives history pruning. Each session separately retains at most 256 discarded
+physical-source identities. A discarded superseded source cannot register again,
+and discarded sources never regain End or lifecycle-qualification authority.
+Exceeding that safety budget sets a persistent saturation fence: further
+registration and source-bound closure are refused rather than forgetting history.
+Stale saves cannot remove these fences. Duplicate old Start delivery cannot reactivate an ended
 claim. A hook cannot reactivate its ended physical source without a usable event
 timestamp; uncertain replay is refused before claim acquisition. Duplicate End
 observations do not capture a workspace title. Both lifecycle writes require the version-3 owner verb, including legacy

@@ -99,9 +99,12 @@ def test_exact_historical_lifecycle_survives_no_current_hosting(owner, native_re
     assert record.session_entry(NATIVE_ID).ended_at is None
 
 
-@pytest.mark.parametrize("ambiguity,confirmed", [(False, True), (True, False)])
+@pytest.mark.parametrize("ambiguity,pruned,saturated,confirmed", [
+    (False, False, False, True), (True, False, False, False),
+    (False, True, False, False), (False, False, True, False),
+])
 def test_positive_lifecycle_requires_unique_canonical_physical_source(
-    owner, native_record, monkeypatch, ambiguity, confirmed,
+    owner, native_record, monkeypatch, ambiguity, pruned, saturated, confirmed,
 ):
     from agent_worktrees import native_source_context
 
@@ -111,7 +114,9 @@ def test_positive_lifecycle_requires_unique_canonical_physical_source(
     }
     token = native_source_context.identity(NATIVE_ID, 101, "100", epoch)
     record = replace(native_record, sessions=[
-        tracking.SessionEntry(NATIVE_ID, "start", activations=[
+        tracking.SessionEntry(
+            NATIVE_ID, "start", pruned_sources=[token] if pruned else [],
+            source_history_saturated=saturated, activations=[
             tracking.SessionActivation(
                 3, "start", "start", source_identity=token, source_ambiguous=ambiguity,
             ),
@@ -131,6 +136,7 @@ def test_positive_lifecycle_requires_unique_canonical_physical_source(
     assert result["lifecycle_qualified"] is confirmed
     assert result["activation_ordinal"] == (3 if confirmed else 0)
     assert result["source_identity"] == (token if confirmed else None)
+    assert result["lifecycle"]["activations"][0]["source_ambiguous"] is not confirmed
 
 
 def test_ended_native_interval_is_not_checkpointed_again(owner, native_record, monkeypatch):

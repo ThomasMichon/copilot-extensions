@@ -169,6 +169,15 @@ def _apply_session_register_locked(args: dict) -> dict:
         if existing is not None:
             latest = max(existing.activations, key=lambda item: item.ordinal, default=None)
             if (
+                source_identity in existing.pruned_sources
+                and (latest is None or latest.source_identity != source_identity)
+                or existing.source_history_saturated
+                or source_identity is None and existing.pruned_sources
+            ):
+                message = "Registration source history is pruned or saturated; refusing activation"
+                logging.getLogger(__name__).warning("%s for %s", message, session_id)
+                return {"error": "lifecycle", "message": message}
+            if (
                 source_identity is not None and started_at is not None
                 and source.startswith("hook")
                 and any(

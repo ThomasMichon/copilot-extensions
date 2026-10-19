@@ -10,6 +10,7 @@ from uuid import UUID
 from . import config as cfg, native_source_context, sessions, tracking
 from .session_liveness import NATIVE_BINDING_PROOF, session_liveness, session_process_owns_hold
 from .worktree_status_daemon import _is_safe_identity_token
+from .tracking_session_activations import source_end_authoritative
 
 
 def observe(
@@ -45,7 +46,10 @@ def observe(
                 "ordinal": item.ordinal, "source_identity": item.source_identity,
                 "ended_at": item.ended_at, "end_reason": item.end_reason,
                 "end_source": item.end_source,
-                "source_ambiguous": item.source_ambiguous,
+                "source_ambiguous": item.source_ambiguous or (
+                    item.source_identity is not None
+                    and not source_end_authoritative(entry, item.source_identity)
+                ),
             }
             for item in entry.activations
         ] if entry is not None and len(entry.activations) <= tracking._MAX_SESSION_ACTIVATIONS else [],
@@ -129,7 +133,10 @@ def _hosting(record: tracking.WorktreeRecord, result: dict) -> dict:
                 )
             except (OSError, ValueError, IndexError):
                 token = None
-            if latest.source_ambiguous or token != latest.source_identity or sum(
+            if (
+                not source_end_authoritative(entry, latest.source_identity)
+                or latest.source_ambiguous or token != latest.source_identity
+            ) or sum(
                 item.source_identity == token for item in entry.activations
             ) != 1:
                 return {**result, "reason": "native-activation-source-unconfirmed"}

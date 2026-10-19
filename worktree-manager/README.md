@@ -460,8 +460,12 @@ source in addition to the native/mux generation. Legacy evidence defaults to
 unqualified; periodic reads never invent or assign a registration source.
 Lifecycle reads accept the owner's full retained budget of 256 intervals;
 activation ordinals remain monotonic and may exceed that retained count.
-Intentionally closed journal subjects without a live mapping stay retained but
-do not consume polling turns; a live mapping returns them to the rotation.
+Intentionally closed journal subjects and definitively consumed source-bound
+hook Ends without a live mapping stay retained but do not consume polling turns;
+a live mapping returns them to the rotation. End consumption is separate from
+exit disposition: non-user exit causes remain unknown, and inferred Ends remain
+probeable for later hook corroboration. The consumption marker survives
+same-generation refresh and resets only for a confirmed new execution generation.
 
 Only a uniquely source-bound native `user_exit` can assert intentional closure.
 Other reasons, repeated same-physical/same-UUID activations, missing source proof

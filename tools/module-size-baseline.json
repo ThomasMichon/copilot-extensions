@@ -74,7 +74,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/sessions.py": 2594,
   "plugins/agent-worktrees/src/agent_worktrees/state_root.py": 1051,
   "plugins/agent-worktrees/src/agent_worktrees/terminal_fragment.py": 1016,
-  "plugins/agent-worktrees/src/agent_worktrees/tracking.py": 4108,
+  "plugins/agent-worktrees/src/agent_worktrees/tracking.py": 4030,
   "plugins/budget-guidance/scripts/versioned_runtime.py": 2356,
   "plugins/customizing-copilot/skills/reviewing-customizations/scripts/instruction_projections.py": 2445,
   "plugins/harness-knowledge/skills/binding-knowledge/scripts/bind_knowledge.py": 1043,

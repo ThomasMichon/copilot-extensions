@@ -26,6 +26,7 @@ from . import disposition_history, record_cache
 from .effort_focus import ActiveEffort, active_effort_from_mapping
 from .record_io import load_record_uncached as _load_record_uncached
 from .tracking_session_activations import SessionActivation as SessionActivation
+from . import tracking_session_activations as session_activations
 
 #: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
 #: status bar (120-col default) and the Worktree Picker's table rows; longer prose
@@ -231,6 +232,8 @@ class SessionEntry:
     pane_id: str | None = None
     activations: list[SessionActivation] = field(default_factory=list)
     relation_revision: int = 0
+    pruned_sources: list[str] = field(default_factory=list)
+    source_history_saturated: bool = False
 
 
 @dataclass
@@ -1606,59 +1609,8 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
                     succ = entry.get("successor")
                     pred = entry.get("predecessor")
                     pane = entry.get("pane_id")
-                    activations: list[SessionActivation] = []
-                    raw_activations = entry.get("activations")
-                    if isinstance(raw_activations, list):
-                        for raw_activation in raw_activations:
-                            if not isinstance(raw_activation, dict):
-                                continue
-                            act_started = raw_activation.get("started_at", "")
-                            if act_started in (None, "", "null"):
-                                continue
-                            if hasattr(act_started, "isoformat"):
-                                act_started = act_started.isoformat()
-                            act_ended = raw_activation.get("ended_at")
-                            if hasattr(act_ended, "isoformat"):
-                                act_ended = act_ended.isoformat()
-                            elif act_ended in (None, "", "null"):
-                                act_ended = None
-                            start_recorded = raw_activation.get(
-                                "start_recorded_at", act_started
-                            )
-                            if start_recorded in (None, "", "null"):
-                                start_recorded = act_started
-                            if hasattr(start_recorded, "isoformat"):
-                                start_recorded = start_recorded.isoformat()
-                            end_recorded = raw_activation.get("end_recorded_at")
-                            if hasattr(end_recorded, "isoformat"):
-                                end_recorded = end_recorded.isoformat()
-                            elif end_recorded in (None, "", "null"):
-                                end_recorded = None
-                            try:
-                                ordinal = int(raw_activation.get("ordinal", 0))
-                            except (TypeError, ValueError):
-                                ordinal = 0
-                            if ordinal <= 0:
-                                ordinal = len(activations) + 1
-                            activations.append(SessionActivation(
-                                ordinal=ordinal,
-                                started_at=str(act_started),
-                                start_recorded_at=str(start_recorded or act_started),
-                                start_source=str(
-                                    raw_activation.get("start_source") or "hook"
-                                ),
-                                ended_at=str(act_ended) if act_ended else None,
-                                end_recorded_at=(
-                                    str(end_recorded) if end_recorded else None
-                                ),
-                                end_source=(
-                                    str(raw_activation["end_source"])
-                                    if raw_activation.get("end_source") else None
-                                ),
-                                source_identity=raw_activation.get("source_identity"),
-                                end_reason=raw_activation.get("end_reason"),
-                                source_ambiguous=raw_activation.get("source_ambiguous", False),
-                            ))
+                    activations = session_activations.parse_activations(entry.get("activations"))
+                    pruned_sources, saturated = session_activations.parse_pruning_fence(entry)
                     sessions_list.append(SessionEntry(
                         session_id=str(entry["session_id"]),
                         started_at=str(sa),
@@ -1669,6 +1621,8 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
                         predecessor=str(pred) if pred else None,
                         pane_id=str(pane) if pane else None,
                         activations=activations,
+                        pruned_sources=pruned_sources,
+                        source_history_saturated=saturated,
                         relation_revision=_bounded_nonnegative_int(
                             entry.get("relation_revision", 0),
                             field="session relation_revision",
@@ -2515,9 +2469,12 @@ def _save_record_unlocked(
     from .resource_producer import preserve_claims
     preserve_claims(record, current, path)
 
+    current_sessions = {s.session_id: s for s in current.sessions or ()} if current else {}
     for session in record.sessions or ():
+        if session.session_id in current_sessions:
+            session_activations.merge_pruning_fence(session, current_sessions[session.session_id])
         if len(session.activations) > _MAX_SESSION_ACTIVATIONS:
-            session.activations = session.activations[-_MAX_SESSION_ACTIVATIONS:]
+            session_activations.prune_activations(session, _MAX_SESSION_ACTIVATIONS)
     if len(record.head_transitions) > _MAX_HEAD_TRANSITIONS:
         record.head_transitions = record.head_transitions[-_MAX_HEAD_TRANSITIONS:]
     if len(record.handoffs) > _MAX_HANDOFFS:
@@ -2948,42 +2905,7 @@ def _save_record_unlocked(
                     {"relation_revision": s.relation_revision}
                     if s.relation_revision else {}
                 ),
-                **(
-                    {"activations": [
-                        {
-                            "ordinal": activation.ordinal,
-                            "started_at": activation.started_at,
-                            "start_recorded_at": activation.start_recorded_at,
-                            "start_source": activation.start_source,
-                            **(
-                                {"source_identity": activation.source_identity}
-                                if activation.source_identity else {}
-                            ),
-                            **(
-                                {"source_ambiguous": True}
-                                if activation.source_ambiguous else {}
-                            ),
-                            **(
-                                {"ended_at": activation.ended_at}
-                                if activation.ended_at else {}
-                            ),
-                            **(
-                                {"end_recorded_at": activation.end_recorded_at}
-                                if activation.end_recorded_at else {}
-                            ),
-                            **(
-                                {"end_source": activation.end_source}
-                                if activation.end_source else {}
-                            ),
-                            **(
-                                {"end_reason": activation.end_reason}
-                                if activation.end_reason else {}
-                            ),
-                        }
-                        for activation in s.activations
-                    ]}
-                    if s.activations else {}
-                ),
+                **session_activations.activation_fields(s),
             }
             for s in record.sessions
         ]

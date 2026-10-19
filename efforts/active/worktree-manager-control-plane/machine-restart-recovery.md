@@ -399,3 +399,20 @@ The umbrella effort remains Active independently of this slice's completion.
   intended claim open. The repaired path closes only the bound activation and
   leaves the unrelated record byte-for-byte unchanged. The isolated Worktrees
   lane passed 518 tests with 12 platform skips; Manager remains at 239.
+- Review exposed lost source authority after every interval for a still-live
+  physical source had been pruned. Each session now retains a separate bounded
+  discarded-source fence; superseded source re-registration is refused before
+  claim mutation, and discarded sources cannot regain End or owner-proof
+  authority. The fence survives stale and equal-revision saves. Overflow becomes
+  a sticky explicit refusal, not forgotten history. Legacy activation parsing
+  and serialization moved to the existing lifecycle leaf, reducing the tracking
+  module ceiling from 4108 to 4030 lines without widening a budget.
+- The same review found unknown-cause definitive hook Ends still diluting owner
+  polling. A strict backward-compatible journal marker records consumption
+  separately from cause. Consumed unmapped subjects remain retained but leave
+  the rotation; live mappings re-admit them. Inferred Ends remain probeable, and
+  shutdown/cancellation uncertainty is preserved. Marker persistence is fenced
+  to the execution generation. The two original regressions failed before these
+  fixes. The expanded isolated lane passed 763 Worktrees tests with 12 platform
+  skips and 249 Manager tests with three native skips. This is still source and
+  fixture validation, not released or deployed recovery.
