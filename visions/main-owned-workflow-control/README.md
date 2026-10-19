@@ -3,7 +3,7 @@
 - **Subject:** efficient workflow orchestration with recoverable release control
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-19
 - **Reality docs:** `docs/pipelines.md`, `docs/patterns/dev-main-promotion-pipeline.md`
 
 ## Purpose & Intent
@@ -56,7 +56,10 @@ not reported as an eliminated workflow invocation.
 Equivalent trusted validation is reused only with complete, current evidence
 for its actual input and coverage contract. Source and generated-output checks,
 native platforms, installation acceptance and stress coverage retain their
-independent assurance where their contracts differ.
+independent assurance in periodic containerized validation where their
+contracts differ. Promotion and required PR test orchestration admit only
+bounded units with coverage; integration cannot remain a transitive release
+dependency through a qualification or preflight wrapper.
 
 ### supported-capacity-and-review-headroom
 
@@ -142,8 +145,9 @@ unexplained administrative emergency.
 - No duplicate competing release writers or mutable second implementation.
 - No weakening contributor acceptance, fork isolation or required validation.
 - No automatic rollout or temporary policy relaxation inferred from plan approval.
-- No shorter workflow list obtained by hiding failures or dropping distinct
-  platform, generated-output, installation or stress assurance.
+- No hidden failure or discarded ownership when integration leaves the gate.
+  Platform, generated-output, installation and stress tests remain periodic,
+  not promotion prerequisites.
 - No unsupported failover claim, untrusted workload admission or capacity grant
   inferred from an available runner.
 - No competing test portfolio or release controller; this vision governs their

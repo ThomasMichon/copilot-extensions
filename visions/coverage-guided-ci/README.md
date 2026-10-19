@@ -5,7 +5,7 @@
   actually needs to run
 - **Scope:** leaf (concrete cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-09-28
+- **Last revised:** 2026-10-19
 - **Reality docs:** none yet (see Provenance)
 
 ## Purpose & Intent
@@ -31,16 +31,21 @@ budgeted portfolio `test-portfolio` already governs, and the periodic full/
 heavy validation a trunk pipeline (e.g. `ci-failure-remediation`'s subject)
 already runs independent of any per-change targeting.
 
+Required PR selection and promotion operate only on the eligible unit portfolio.
+Promotion collects that unit coverage once. A broader fallback stays inside
+the unit budget; missing selection evidence does not schedule real-Git,
+multi-process or end-to-end integration as a release prerequisite. Those
+families run periodically in containers.
+
 ## Concepts & Components
 
 ### coverage baseline
 
 A durable, versioned artifact recording which tests cover which source
-lines/branches, established authoritatively wherever a repo's own trunk gate
-already runs its full, trusted portfolio (a dev→main promotion's post-merge
-full-suite validation, a scheduled full run, or an equivalent trunk-gate
-event). The baseline is the one place selection evidence is *earned*, never
-per-PR guesswork.
+lines/branches, earned from the admitted unit execution for required PR and
+promotion selection. Periodic integration can retain separate coverage evidence,
+but cannot expand a release gate or be relabeled as unit proof. Baseline identity
+distinguishes those profiles; evidence is earned, never per-PR guesswork.
 
 ### diff-scoped selection
 

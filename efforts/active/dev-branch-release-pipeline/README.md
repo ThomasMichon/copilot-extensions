@@ -6,7 +6,8 @@
   (promoted to `main` by the CI pipeline); Phase 7 work branches off `dev`
   per the current contributor flow.
 - **Created:** 2026-09-22
-- **Status:** Active (Phases 7 and 9; Phase 8 superseded by
+- **Status:** Active (Phases 7 and 9; unit-only promotion burndown governs Phase 9;
+  Phase 8 superseded by
   main-owned-workflow-control Phase 5 — see Journal)
 - **Vision:** [`release-pipeline`](../../../visions/release-pipeline/README.md)
   (source-owned release identity and continuous delivery). Also the named
@@ -25,6 +26,14 @@
   Validation Gate + Promote into one workflow, rolling-queue concurrency)
 
 ## Guiding Intent
+
+**Current governing test policy:** [Promotion burndown](promotion-burndown.md).
+Promotion admits unit tests with coverage only; PR test selection is
+impact-conditional. End-to-end, multi-process, actual-Git and other integration
+tests run periodically in containers, not as release prerequisites. Stable
+operation requires the whole release under thirty minutes including queueing.
+Earlier full/native qualification requirements below are superseded as test
+gates, not permission to weaken production integrity or publication authority.
 
 copilot-extensions is a Copilot CLI plugin marketplace with exactly one
 consumable branch (`main`): machines auto-update by polling its
@@ -98,6 +107,18 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-19 unit-only burndown policy — summary:**
+
+The operator requested a session issue manifest and effort-journal burndown,
+aggressive removal of blocking or excessive test tasks until promotion runs
+under thirty minutes, and a later value-for-cost validation tournament.
+Promotion tests are unit-only with coverage; PR testing conditionally selects
+that unit portfolio. Actual-Git, multi-process and end-to-end integration
+belongs in periodic containers, not promotion. The full request is preserved
+verbatim with its ordered manifest and closure criteria in
+[Promotion burndown](promotion-burndown.md#operator-request--verbatim).
+This policy replaces the earlier full/native test-gating decomposition.
 
 **2026-10-18 promotion lifecycle clarification (verbatim):**
 
@@ -755,15 +776,20 @@ Historical proposal and supersession evidence:
 
 ### Phase 9 - Source-owned release identity and repeat-blocker prevention
 
+**Operative burndown:** [unit-only promotion](promotion-burndown.md). Its
+operator-selected exclusions and under-thirty-minute gate supersede the older
+full-corpus preservation strategy. Production source identity, locks, signing,
+freshness, publication and exact merge remain required.
+
 _(Agent-recommended implementation and validation decomposition of the
 2026-10-15 operator clarification; not a replacement release writer.)_
 
 - [x] Land the reviewed source-identity and cadence contract before changing
       the mechanism.
-- [ ] Exercise actual producer, materializer and verifier agreement in bounded
-      ordinary PR checks before development merge, reusing existing CI lanes.
-      Cover relevant attribute, closure and materializer inputs even when no
-      artifact-tool file changed; do not add an unconditional exhaustive matrix.
+- [ ] Exercise producer/verifier decision rules with bounded in-process units
+      and coverage. Select those units conditionally during PR CI. Move actual
+      Git/materialization/checkout/native integration to periodic containers,
+      without keeping an indirect release dependency.
 - [ ] Reconcile the recurrence audit with existing repair owners. Distinguish
       source merges from actual trusted-control activation and qualified
       releases; #6237, #4876 and #6865 retain their implementation boundaries.
@@ -797,29 +823,28 @@ _(Agent-recommended implementation and validation decomposition of the
       their normal merge gate without redundant checks becoming an independent
       flaky obstacle. Keep a named campaign owner until actual terminal
       evidence, not merely a submitted merge request or green wrapper.
-- [ ] _(Agent-recommended mechanism.)_ Reuse complete, trusted qualification
-      bound to the exact source, composed payload, controller/helper, toolchain
-      and required portfolio. Retain the compact Main admission/freshness gate;
-      remove only proven duplicate promotion-PR or post-Main full validation.
-      Distinct source, generated, native and installation coverage remains
-      required until an equivalent reviewed replacement is proven.
-- [ ] _(Agent-recommended mechanism.)_ Reconcile Dev-CI/source-validation and
-      full-suite/baseline-collection repetitions as well. Collect required
-      baselines in the same complete passing execution where possible, and
-      reuse existing exact-source run/artifact provenance only when portfolio,
-      platform, configuration and collector compatibility are proven. A source
-      proof never substitutes for unproven materialized-consumer coverage.
+- [ ] _(Operator-required.)_ Remove full/native/generated/installation
+      integration test tasks and excessive-cost tests from promotion. Preserve
+      their source, periodic container execution and failure ownership; do not
+      wait for full-corpus equivalence before moving them out of the gate.
+- [ ] _(Agent-recommended mechanism.)_ Establish a positive unit manifest,
+      reject hidden integration and missing file/chunk/node evidence, and
+      collect unit coverage once under a distinct profile. Update compact
+      qualification and required aggregates coherently, without accepting
+      skipped integration jobs as unit proof.
+- [ ] _(Operator-required.)_ After stable operation, use a validation tournament
+      to replace lesser-value units with more valuable units inside the budget,
+      rather than accumulating tests. Integration contenders remain periodic.
 - [ ] _(Agent-recommended mechanism.)_ Prove existing publication/event
       authority reliably delivers the required Main gate and a nonadministrator
       exact-head merge. Missing checks, API ambiguity, moved Main, unqualified
       or closed candidates retain explicit recovery ownership. Do not create a
       second merge writer or enable the separately scoped Maintainer steward.
 - [ ] Measure actual qualified source advancement, queue time and blocking
-      stages against hourly-or-faster delivery while changes are pending;
+      stages against under-thirty-minute delivery while changes are pending;
       ordinary PR event-to-required-gate time must be below ten minutes,
-      including queueing. Target thirty minutes for validate-and-promote;
-      the one-hour allowance requires actual local-Dev workflow acceptance.
-      Unblock the current promotion before changing its performance.
+      including queueing. Measure the entire promotion through publication,
+      Main merge and tag; a one-hour run does not satisfy the stable-state gate.
 - [x] _(Agent-recommended sequencing.)_ Contain superseded PR CI without
       interrupting the executing Main qualification. Retain rolling Dev/manual
       validation and every current-head gate. While Main is canonically paused,
@@ -831,10 +856,10 @@ _(Agent-recommended implementation and validation decomposition of the
       governed Main controls are never replaced silently.
       Source #7124 and matching Main #7129 are merged with the pause preserved;
       this closes the policy interlock, not qualification or latency acceptance.
-- [ ] Identify individual slow tests and fixture costs in the actual CI and
-      validation flow, distinguish hosted timings from local profiles, and
-      file deduplicated optimization bugs without dropping behavioral coverage
-      or increasing containment limits.
+- [ ] Inventory and aggressively remove slow or blocking tests from the gate;
+      distinguish routing from deletion and preserve periodic ownership.
+      Track value, runtime and flakiness for the later tournament rather than
+      extending recovery to repair every excluded integration fixture.
 - [ ] Prove normal release and client compatibility, journal the result and
       retain responsibility for unresolved acceptance. A contract PR, source
       merge, tag, or green wrapper alone does not complete this phase.
@@ -973,14 +998,19 @@ participants' phase ownership remain unchanged.
 
 ### Phase 9 validation
 
+The [unit-only burndown validation](promotion-burndown.md#validation-and-closure)
+governs test routing. Production integrity assertions below are exercised by
+units and enforced by production operations; actual-Git, native and end-to-end
+test witnesses run periodically and cannot hold promotion.
+
 - [ ] An ordinary PR that breaks producer/verifier agreement fails before merge.
-      Prove the selector covers root/nested attributes, declared source closures,
-      materializers and hash/canonicalization helpers on the relevant platforms.
-      Reuse bounded contract portfolios rather than duplicating full validation.
-- [ ] The actual entry points agree across declared LF/CRLF and attribute-policy
-      representations, canonical/materialized layouts and irrelevant staging
-      noise. Changed shipped source/dependency content still fails; no downloaded
-      wheel or archive is normalized to bypass its raw digest.
+      Prove the impact selector covers the relevant unit decision rules.
+      Root/nested attribute, materializer and real platform/checkout integration
+      tests remain in the periodic portfolio, not the required PR path.
+- [ ] In-process fixtures cover declared LF/CRLF and canonical source
+      representations. Changed shipped bytes still fail production integrity;
+      downloaded wheels/archives are never normalized to bypass raw digests.
+      Physical checkout and materialized-layout integration runs periodically.
 - [ ] Same verified dev source, admitted payload and lock with a different
       candidate/squash commit or bookkeeping-only main change reuses the
       immutable artifact set without a new Main-SHA identity refusal.
@@ -994,15 +1024,16 @@ participants' phase ownership remain unchanged.
 - [ ] Legacy indexes, tags, deploy provenance and serving generations remain
       usable under validated compatibility; missing dev lineage is not invented.
       Optional client artifacts do not become a source-installation gate.
-- [ ] Exact generated consumers and validator bootstrap qualify the transition
-      that activates them, not merely a later dev source state.
+- [ ] The transition has complete exact-input unit/coverage evidence and
+      correct production artifacts. Generated-consumer, native and bootstrap
+      integration witnesses have periodic enrollment and are not release gates.
 - [ ] Two natural qualified release cycles with pending source changes
       demonstrate the cadence, source marker, artifact reuse and landed tag.
       Missed targets and remaining blockers stay explicit and owned.
 - [ ] Measure ordinary PR event-to-required-gate completion below ten minutes,
-      including queue delays; separately measure validate-and-promote against
-      the thirty-minute target. Do not apply the conditional one-hour allowance
-      before the local-Dev workflow has actual acceptance evidence.
+      including queue delays; measure the whole normal promotion through
+      publication/Main merge/tag in less than thirty minutes. The previous
+      conditional one-hour allowance does not satisfy this gate.
 - [ ] A second Dev advance, manual request or retry cannot dispatch a competing
       promotion while an earlier promotion PR is open. A failed/cancelled run
       cannot lose that obligation; resume or explicit retirement is auditable.
@@ -1010,23 +1041,21 @@ participants' phase ownership remain unchanged.
       pending and reports success only after the exact verified merge and
       required publication/readback. Closed-without-merge and uncertain writes
       cannot produce success-shaped completion.
-- [ ] Exact valid qualification is reused without rerunning the same full
-      portfolio at a duplicate event. Missing, failed, skipped, incomplete,
-      forged or mismatched evidence still refuses; changed source, generated
-      bytes, control/helper, toolchain, portfolio or Main base cannot reuse
-      incompatible proof.
-- [ ] Shared full-suite/baseline evidence retains every enrolled case and every
-      required nonempty baseline artifact with exact source/run/profile
-      provenance. Partial PR selections, different platforms, incompatible
-      collectors and interrupted executions cannot authorize reuse.
+- [ ] Exact valid unit qualification is reused without duplicate executions.
+      Missing, failed, incomplete, forged or mismatched unit evidence refuses;
+      changed source/control/toolchain/profile cannot reuse incompatible proof.
+- [ ] Unit coverage records every admitted file/chunk/node and terminal
+      outcome with exact source/run/profile provenance. Full integration
+      baselines cannot be relabeled as unit evidence, and the old all-nine
+      full-suite requirement is not retained as a release dependency.
 - [ ] A properly qualified candidate receives the required Main gate and merges
       through the existing authorized publisher. Prove a redundant lane is not
       dispatched and cannot hold that merge; a genuinely required failing lane
       must still block. Retain ordinary contribution/control admission.
 - [ ] A real canary and the two natural cycles demonstrate one active candidate,
       terminal merge ownership and fewer duplicate invocations/checks. Report
-      queue/execution timing and any remaining service or flaky-test failures
-      separately, without implying a waiver.
+      queue/execution timing and periodic integration failures separately.
+      Periodic failures remain attributable but cannot silently regrow the gate.
 
 ## Proposal
 
@@ -1048,6 +1077,34 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-19 - Unit-only promotion burndown replaces full-corpus gating
+
+Captured the operator's new request verbatim in
+[the promotion burndown](promotion-burndown.md), with fourteen stable issue IDs,
+owners, ordering and measurable closure criteria. A structured session artifact
+retains the detailed evidence/dependencies and external-state snapshot; private
+session locators are not published here.
+
+The immediate burndown is subtraction: promotion runs only unit tests from
+which coverage is collected, with impact-conditional unit PR CI. Real-Git,
+multi-process, native, service, installer and end-to-end integration moves to
+periodic containers. Long or blocking integration tasks are no longer release
+prerequisites. The whole release must run under thirty minutes; the prior
+one-hour ceiling and all-nine/full/native equivalence strategy are not stable
+completion criteria.
+
+Stopped further old-policy corpus and native canaries. Existing implementation
+work is retained for explicit unit, periodic or superseded disposition; the
+full-corpus proposal is held as a draft and its control prototype is not to be
+activated. Data-admission correctness fixes may be reused only where the unit
+gate needs them. Production authority, source/lock/byte integrity, signing,
+freshness, publication and exact merge/tag remain enforced.
+
+Next is review of this amended policy, then the manifest's ordered
+inventory, removal of transitive integration gates, minimal unit/coverage path,
+periodic routing and actual timed release/resume. Only after stable operation
+does the validation tournament replace lower-value tests within the same budget.
 
 ### 2026-10-19 - Generated Fleet guard exposes one more source/control profile seam
 
