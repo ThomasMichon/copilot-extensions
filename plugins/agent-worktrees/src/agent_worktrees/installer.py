@@ -380,9 +380,12 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py", "anchor_shell_parser.py",
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
-                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_client.py",
+                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_lifecycle_runtime.py",
+                 "native_source_context.py", "hook_client.py",
                  "post-tool-hook.ps1", "terminal_probe.py"):
         src = scripts / name
+        if name == "native_source_context.py":
+            src = plugin_dir / "src" / "agent_worktrees" / name
         if src.exists():
             shutil.copy2(src, bd / name)
             if platform.system() != "Windows" and name.endswith(".sh"):

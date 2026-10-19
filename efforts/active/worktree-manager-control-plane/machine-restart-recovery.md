@@ -326,3 +326,17 @@ The umbrella effort remains Active independently of this slice's completion.
   Compatibility aliases and the source-string transport guard follow those
   owners. The tracking baseline only shrank; no ceiling was widened. The final
   targeted run above also covers the original title-capture contracts.
+- Provider review found three concrete compatibility gaps. Source-aware warm
+  Start and End now require the selected rendezvous to advertise their capability
+  before a packet is sent, retaining the response check as well. Real legacy
+  TCP peers prove that refusal leaves their mutation handler uncalled. All three
+  installer paths deploy lifecycle transport and the canonical stdlib
+  source-capture helper beside the client; disposable installed-bin fixtures
+  cover source loading without the payload's package tree.
+- The Manager now accepts the owner's full 256-interval retained lifecycle,
+  without confusing that count with its monotonic activation ordinal. The
+  boundary regression accepts 256, rejects 257, and observes a latest-source
+  End at ordinal 1000. These regressions failed before the fixes. The subsequent
+  bounded isolated lane passed 478 Worktrees tests with 12 platform skips and
+  234 Manager tests with three native skips. This remains pre-merge fixture
+  evidence, not permission to enroll or claim live restoration.

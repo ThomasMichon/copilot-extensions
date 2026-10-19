@@ -172,6 +172,47 @@ def test_other_native_end_reasons_are_not_intentional(
     assert observer.journal.snapshot()[0]["disposition"] == "unknown"
 
 
+@pytest.mark.parametrize("count", [256, 257])
+def test_retained_lifecycle_budget_accepts_latest_high_ordinal_exit(
+    tmp_path, observer_module, mapping, count,
+):
+    result = source_bound_owner()
+    ordinal = 1000
+    result["activation_ordinal"] = ordinal
+    result["owner_revision"] = ordinal
+    result["lifecycle"]["owner_revision"] = ordinal
+    result["lifecycle"]["activations"] = [{
+        "ordinal": index, "source_identity": f"native:old-{index}",
+        "source_ambiguous": False, "ended_at": "old-exit",
+        "end_reason": "user_exit", "end_source": "hook",
+    } for index in range(ordinal - count + 1, ordinal)]
+    latest = {
+        "ordinal": ordinal, "source_identity": "native:original",
+        "source_ambiguous": False, "ended_at": None,
+        "end_reason": None, "end_source": None,
+    }
+    result["lifecycle"]["activations"].append(latest)
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: result)
+    observer.observe(mapping, now=10.0)
+    before = observer.journal.snapshot()[0]
+    observer.observe(mapping, now=50.0)
+    if count == 256:
+        assert observer.journal.snapshot()[0]["last_positive"]["observation_sequence"] == 2
+    else:
+        assert observer.journal.snapshot()[0] == before
+        assert observer.last_result["reason"] == "evidence-unavailable"
+    latest.update(ended_at="exit", end_reason="user_exit", end_source="hook")
+    result["confirmed"] = False
+    observer.observe(mapping, now=100.0)
+    row = observer.journal.snapshot()[0]
+    if count == 256:
+        assert row["disposition"] == "intentional"
+        assert row["last_positive"]["activation_ordinal"] == ordinal
+    else:
+        assert row == before
+        assert "activation budget" in observer.last_result["error"]
+
+
 @pytest.mark.parametrize("change", [
     {"ordinal": 2}, {"source_identity": "native:other"}, {"source_ambiguous": True},
     {"source_ambiguous": None},

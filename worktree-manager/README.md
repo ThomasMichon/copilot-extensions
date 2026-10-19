@@ -458,6 +458,8 @@ canonical activation lifecycle, so a tombstone cannot hide its subsequent End.
 New qualified observations bind the activation ordinal and opaque original
 source in addition to the native/mux generation. Legacy evidence defaults to
 unqualified; periodic reads never invent or assign a registration source.
+Lifecycle reads accept the owner's full retained budget of 256 intervals;
+activation ordinals remain monotonic and may exceed that retained count.
 
 Only a uniquely source-bound native `user_exit` can assert intentional closure.
 Other reasons, repeated same-physical/same-UUID activations, missing source proof

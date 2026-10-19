@@ -102,6 +102,14 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         return None
     if endpoint.get("hook_transport") != "tcp":
         return None
+    lifecycle = _load_sibling("hook_lifecycle_runtime.py") if kind in {"sessionStart", "sessionEnd"} else None
+    if lifecycle is None and kind in {"sessionStart", "sessionEnd"}:
+        return None
+    source_aware = _source_aware_lifecycle(payload)
+    if lifecycle and not lifecycle.admitted(
+        kind, source_aware, endpoint.get("hook_capabilities"), preflight=True,
+    ):
+        return lifecycle.unavailable(kind)
     address = str(endpoint.get("hook_endpoint") or "")
     host, sep, port_text = address.rpartition(":")
     token = endpoint.get("hook_token")
@@ -160,21 +168,10 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         or value.get("fallback") is True
     ):
         return None
-    capabilities = value.get("capabilities")
-    if kind == "sessionStart" and (
-        not isinstance(capabilities, list)
-        or "session-lifecycle-v1" not in capabilities
-        or _source_aware_lifecycle(payload) and "session-start-source-v1" not in capabilities
+    if lifecycle and not lifecycle.admitted(
+        kind, source_aware, value.get("capabilities"), preflight=False,
     ):
-        if _source_aware_lifecycle(payload) and os.name == "nt":
-            return {"_stderr": "[agent-worktrees] Resident source-aware sessionStart is unavailable.\n"}
-        return None
-    if kind == "sessionEnd" and (
-        not isinstance(capabilities, list) or "session-end-source-v1" not in capabilities
-    ):
-        if os.name == "nt":
-            return {"_stderr": "[agent-worktrees] Resident native sessionEnd is unqualified here.\n"}
-        return None
+        return lifecycle.unavailable(kind) if source_aware or kind == "sessionEnd" else None
     result = value.get("result")
     return result if isinstance(result, dict) else {}
 
@@ -215,10 +212,9 @@ def _enrich_session_payload(payload: dict) -> dict:
 
 
 def _capture_native_source() -> dict:
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "src" / "agent_worktrees" / "native_source_context.py"
-    )
+    path = Path(__file__).resolve().with_name("native_source_context.py")
+    if not path.is_file():
+        path = Path(__file__).resolve().parents[1] / "src" / "agent_worktrees" / path.name
     try:
         spec = importlib.util.spec_from_file_location("_agent_worktrees_native_source", path)
         if spec is None or spec.loader is None:

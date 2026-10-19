@@ -404,13 +404,20 @@ claim. Both lifecycle writes require the version-3 owner verb, including legacy
 requests, so an older resident cannot silently discard the new fields.
 
 Warm source-aware hooks require `session-start-source-v1` or
-`session-end-source-v1` acknowledgement as appropriate. An older Linux resident
+`session-end-source-v1` in the selected resident's rendezvous **before** sending
+any mutating packet, as well as acknowledgement in its response. An older Linux
+resident
 uses the current source-aware CLI fallback; its explicit flag is rejected by
 older runtimes, and source-aware Start never downgrades to old startup scripts.
 Original Start bindings come only from the transported hook environment, not the
 resident's inherited environment. No End path runs the terminal attachment
 probe. Windows native End remains visibly unqualified; a missing new warm-hook
 capability does not introduce a new console helper or fallback spawn.
+
+The shell, PowerShell and Python installers deploy both lifecycle transport and
+the canonical stdlib source-capture helper beside the installed hook client.
+That client uses its sibling helper outside the payload layout, without
+requiring the runtime package on its import path.
 
 `session-role --hosting-evidence --worktree-id <exact-id> --json` is read-only.
 An optional explicit `--session-id <native-uuid>` asks for that conversation's

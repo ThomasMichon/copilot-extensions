@@ -146,7 +146,7 @@ class RestartObserver:
         ):
             raise ValueError("Native lifecycle owner returned incompatible evidence")
         activations = lifecycle.get("activations")
-        if not isinstance(activations, list) or len(activations) > 128:
+        if not isinstance(activations, list) or len(activations) > 256:
             raise ValueError("Invalid native lifecycle activation budget")
         ordinals = [
             item.get("ordinal") for item in activations if isinstance(item, dict)

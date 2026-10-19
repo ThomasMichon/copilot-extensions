@@ -125,8 +125,10 @@ python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 't
 
 The fixtures cover original-source transport, real held-file ownership, source
 PID/birth mismatch, delayed historical End versus a replacement self-claim,
-history-pruning ambiguity, old-daemon capability refusal, tombstone-visible
-closure and shutdown/cancellation ordering. They do not reboot a machine, kill a
+history-pruning ambiguity, pre-dispatch old-daemon refusal with a real legacy
+peer whose mutation handler stays uncalled, installed-bin helper loading,
+the 256-entry retained-history boundary, tombstone-visible closure and
+shutdown/cancellation ordering. They do not reboot a machine, kill a
 production session, qualify Windows native source capture, or prove acknowledged
 restart-seed delivery. Those remain separate native integration obligations.
 

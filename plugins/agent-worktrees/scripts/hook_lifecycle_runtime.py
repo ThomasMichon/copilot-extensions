@@ -9,6 +9,31 @@ import sys
 from pathlib import Path
 
 
+def admitted(kind: str, source_aware: bool, capabilities: object, *, preflight: bool) -> bool:
+    """Require source support before sending a mutating lifecycle packet."""
+    required = (
+        {"session-start-source-v1"} if kind == "sessionStart" and source_aware
+        else {"session-end-source-v1"} if kind == "sessionEnd"
+        else set()
+    )
+    if kind == "sessionStart" and not preflight:
+        required.add("session-lifecycle-v1")
+    return not required or (
+        isinstance(capabilities, list) and all(item in capabilities for item in required)
+    )
+
+
+def unavailable(kind: str) -> dict | None:
+    """Keep Windows warm-hook refusal diagnostic without spawning a fallback."""
+    if os.name != "nt":
+        return None
+    message = (
+        "Resident source-aware sessionStart is unavailable."
+        if kind == "sessionStart" else "Resident native sessionEnd is unqualified here."
+    )
+    return {"_stderr": f"[agent-worktrees] {message}\n"}
+
+
 def run_start(
     python: Path, payload: dict, *, source_aware: bool, timeout: float,
     decision_timeout: float,
