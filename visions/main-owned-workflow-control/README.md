@@ -38,6 +38,9 @@ control is an enabling mechanism, not a prerequisite for every safe reduction.
   execution evidence determine whether prior work can satisfy a requirement.
 - **Execution placement:** hosted and explicitly admitted self-hosted capacity
   run only workloads whose trust, tooling, isolation and resource contracts fit.
+- **Consented contribution stewardship:** the submitter delegates bounded
+  branch maintenance and completion to trusted repository automation without
+  surrendering review vetoes or source-worktree responsibility.
 
 ## Features
 
@@ -81,6 +84,14 @@ Release evidence identifies both contribution and control inputs and validates
 the resulting composition, not just source before transformation. Concurrent
 control repairs cannot be overwritten by a stale promotion.
 
+### consented-maintainer-completion
+
+An authorized Maintainer can explicitly consent to repository-owned completion
+after satisfying review and validation. The steward maintains a mergeable
+branch when supported, requires fresh evidence after changes, and returns
+actual conflicts to the original submitter rather than resolving them blindly.
+Its work remains discoverable until actual merge and source reconciliation.
+
 ## Behaviors
 
 ### one-coordinated-portfolio
@@ -115,6 +126,15 @@ code or arbitrary candidate-supplied imports.
 Replacement enforcement is proven before existing protections are retired.
 Recovery remains bounded, attributable and compatible with preserved control
 ownership; rollback does not undo an independent control repair.
+
+### missing-approval-exception-is-not-a-review-veto-override
+
+A repository may authorize an actor to complete without an additional required
+reviewer's approval. That exception never overrides an outstanding blocking
+review, required validation, explicit hold or revision mismatch. Agents and
+automation receive a consistent account of both their authority and the
+remaining gates instead of treating routine authorized completion as an
+unexplained administrative emergency.
 
 ## Non-Goals / Boundaries
 

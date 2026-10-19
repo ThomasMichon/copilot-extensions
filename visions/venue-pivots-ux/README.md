@@ -282,6 +282,19 @@ It should tolerate partial kind availability without fabricating missing
 claims. Contribution and claim-production authority remain separate from
 presentation ranking.
 
+### Descendant claims remain visible without changing ownership
+
+A parent worktree's prominent artifacts include eligible descendant claims,
+flattened before the shared ranking rather than hidden behind an intermediate
+worktree or task. Repeated paths to one resource do not duplicate it. The
+actual claimant remains discoverable; showing a child's PR on its ancestor's
+row does not transfer ownership or change finalization obligations.
+
+A bounded row makes omitted results and unresolved descendants apparent and
+offers a path to their detail. An unavailable remote or missing relationship is
+not evidence of an empty subtree. Presentation consumes owner-published
+relationships and summaries without a network traversal on each render.
+
 ### Claim-kind extensibility — a `.d/` drop-in registry, mirroring pivots
 
 Claim kinds and their prominence should extend through the **same cross-plugin

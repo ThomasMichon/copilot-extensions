@@ -38,6 +38,7 @@ completion separately; neither alone completes the overall objective.
 | Test portfolio owner | Preserve selected coverage, platform/stress boundaries and coverage equivalence | #1303 and component test owners |
 | Capacity operator | Qualify the selected image/venue and enforce admitted shared-host limits | #7122 capacity handoff; provider-specific state stays downstream |
 | Remediation owner | Own failure signatures, bounded repair and named escalation | #6142 and the existing remediation effort |
+| PR completion steward | Own Phase 5a readiness, author guidance, consent automation and completion visibility; coordinate shared provider and release seams | #6237 Phase 5a; #3638, #4234 and the linked completion contract |
 | Repository owner | Critical-path acceptance and bounded administrative decisions | Owner-authored PRs and issue steering |
 | Automated reviewer | Review each plan and implementation PR | Repository Copilot review flow |
 
@@ -57,6 +58,12 @@ completion separately; neither alone completes the overall objective.
   driver point ownership of the audit and consolidation plan. This is the same
   canonical #6237 effort, not a second control or runner campaign. Existing
   #3336/#7122/#1303 and remediation implementation/admission scopes remain.
+- **October 18 PR completion assignment:** the operator assigned a PR completion
+  steward to drive the existing Phase 5a through reviewed implementation and
+  acceptance. Its [completion contract](maintainer-pr-completion.md) incorporates
+  readiness, guidance and claims-visibility findings. This does not transfer the
+  campaign driver's portfolio lead, release writer, review-rescue or runner
+  authority. Shared-file changes require coordination with those owners.
 - **Accepted Wave A seam:** the existing Main-control participant accepted
   read-only metadata workflow/helper/event closure and separately reviewed
   negatives/docs, reporting no active writer on the named workflows/helpers.
@@ -115,6 +122,15 @@ implementation reference generalized):**
 Only the implementation reference is generalized; the requested merge gates,
 label consent, automatic rebase and submitter conflict ownership are preserved.
 The implementation and activation decomposition below is agent-recommended.
+
+**2026-10-18 - PR completion ownership and inhibitor repair:**
+
+The operator requested immediate clarity for authorized Maintainer submitters,
+hierarchical claims visibility, and ownership of the existing completion
+automation slice through implementation. The exact public-safe direction,
+analysis, sequencing and acceptance gates are recorded in
+[Maintainer PR completion](maintainer-pr-completion.md). The existing Phase 5a
+remains the canonical plan; this is not another effort or release controller.
 
 **2026-10-18 - Bounded review fallback (verbatim):**
 
@@ -282,6 +298,24 @@ _(Agent-recommended implementation of the October 18 operator request;
 implementation follows review of this amendment. Authority setup and live
 enablement require their own explicit acceptance.)_
 
+Execution owner: **PR completion steward**. The
+[completion contract](maintainer-pr-completion.md) defines ordered slices,
+regressions, retained-owner seams and the completion gate.
+
+- [ ] Land the amended vision and completion plan through ordinary review
+  before implementation; retain all existing portfolio and activation gates.
+- [ ] Repair present-day self-merge readiness and guidance first (#3638,
+  #4234): distinguish actor authorization, review evidence, reviewer vetoes,
+  required CI and consent. Status, watch and mutation must not contradict one
+  another or ask for another approval solely because a permitted review-rule
+  exception exists.
+- [ ] Preserve every outstanding reviewer change request in the mutation path;
+  a repository-authorized exception to missing required approval cannot waive
+  a veto, required CI, holds, draft state or head identity.
+- [ ] Close completion-visibility gaps: reuse #7134's descendant-PR projection,
+  expose truncated/unresolved claims, and distinguish source merge, qualified
+  release and actual installed behavior. Do not recreate an already-merged fix
+  or silently copy descendant ownership into an ancestor's ledger.
 - [ ] Reuse the existing invited-collaborator plus root CODEOWNERS Maintainer
   boundary. Propose an initial Dev-only, same-repository, nondraft scope:
   exclude Main, generated release candidates and the promotion publisher.
@@ -367,6 +401,14 @@ enablement require their own explicit acceptance.)_
   scoped credentials only; no PR-code execution, Main/publisher bypass or
   review-runner route change. Actual canary proves new-head CI/review delivery,
   conflict return and managed local reconciliation before enablement.
+- [ ] PR completion readiness: the same evidence produces consistent
+  status/watch/merge decisions for approved and clean-comment review shapes,
+  absent CODEOWNER approval, unknown authority, stale evidence and persistent
+  change requests. Existing contributor human-review requirements remain.
+- [ ] Completion visibility: parent/child/grandchild claims are flattened
+  before shared ranking and canonical deduplication; bounded or unresolved
+  results are visibly incomplete, and the original owner remains discoverable.
+  Record release and installed-producer evidence separately from source tests.
 - [ ] Bounded review rescue: resolve every obligation in the
   [rescue validation matrix](bounded-review-rescue.md#validation-obligations),
   including fault classification, independent control availability or explicit

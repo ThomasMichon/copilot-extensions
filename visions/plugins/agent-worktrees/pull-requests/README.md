@@ -149,6 +149,15 @@ repository-specific polling program. Unknown evidence cannot establish that
 only human completion gates remain, and configuration cannot waive a native
 gate or grant authority to perform a human action.
 
+### operation-aware-completion-readiness
+
+Author status, observation and completion share one evidence-based account of
+the selected operation's remaining gates. Actor authority, reviewer evidence
+and vetoes, required validation, revision freshness and optional merge consent
+remain distinct. A consent-only prerequisite must not appear as a blocker for
+a direct-submit operation, nor may an authorized exception to an absent
+required approval be mistaken for permission to ignore a blocking review.
+
 ### operator-authorized-pr-recovery
 
 An operator can deliberately recover an existing PR when historical worktree
@@ -188,6 +197,15 @@ When a named target repo is not registered, or its registered provider
 cannot be reached, the operation reports that plainly rather than silently
 falling back to the caller's own repo/provider or guessing at the target's
 identity.
+
+### authorized-completion-is-clear-and-bounded
+
+An authorized submitter can drive a reviewed, validated change through the
+repository's supported completion path without an unnecessary new permission
+ceremony. Status guidance accurately describes existing reviews and the next
+authorized action. Unknown authority or evidence remains explicitly unknown,
+and every mutation preserves current reviewer vetoes, required validation and
+the source revision it was authorized to complete.
 
 ### recovery-does-not-require-perfect-bookkeeping
 
@@ -320,15 +338,15 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
   exists, migrated via a one-time freeze-at-first-touch rather than an
   unbounded live-config fallback — this is a clarification of the
   guarantee's boundary, not a new capability.
-- **2026-09-14** — Authored from an odsp-web-harness clean-room session's
+- **2026-09-14** — Authored from a downstream harness clean-room session's
   real finding: a `code-review` scenario-eval run correctly reported a
   `noop`/BLOCKED verdict for "no PR available" rather than fabricate a
   review, which surfaced three related gaps the operator named directly: no
   mock PR provider to exercise such a flow without a real PR; the reviewer
   side of PR interaction (diffs, comments, threads, verdicts) has no
   first-class primitive the way the author side does; and PR operations
-  require a local checkout of the target repo, which breaks for a repo like
-  odsp-web that is worked on without one. Filed the mock-provider piece
+  require a local checkout of the target repo, which breaks for a repository
+  that is worked on without one. Filed the mock-provider piece
   upstream as
   [#2691](https://github.com/ThomasMichon/copilot-extensions/issues/2691)
   before this vision existed; this vision generalizes that single issue into
