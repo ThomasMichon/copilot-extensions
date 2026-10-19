@@ -3189,8 +3189,48 @@ python tools/run-plugin-tests.py agent-dispatch \
   --max-processes 32 --max-memory-mb 2048 --max-temp-mb 512
 ```
 
-Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
-than repeatedly importing file groups that contain no selected tests.
+Filtered (`-k`) and guard-only selections normally run as one contained
+sub-suite rather than repeatedly importing unrelated file groups.
+
+On Windows, the normal runner automatically partitions
+`agent-codespaces/tests/test_installer_engine_adoption.py` within its existing
+file-group plan: healthy admission and retry/fatal admission/orchestration run
+separately for each editable mode, with the non-boolean admission-spy negative
+controls in the editable failure group; standalone
+snapshot/development-generation lifecycle; and an exhaustive complement for
+everything else, including newly collected tests. The selectors are disjoint;
+other files retain their original groups and are not recollected for each
+partition. This also applies to `--test-file` and intersects every partition
+with a caller's `-k`; `--guards` remains an additional marker restriction.
+Non-Windows and unrelated suites retain their existing grouping.
+Exact-node selection manifests retain their existing collection plan and
+fail-closed missing-node admission rather than adding a keyword restriction.
+
+This is automated partitioning, not a manual-selector or timeout exception.
+Each group retains the default 300-second ceiling, remaining plugin time
+still caps every group within the default 900-second aggregate, and the
+30-second runner request, existing pytest markers and 45-second native fixture
+subprocess deadlines are unchanged. An unexpectedly empty unfiltered partition
+fails. Filtered empty partitions may be traversed, but cannot turn an entirely
+empty explicit-file selection into success; only the existing non-explicit
+guard-only empty-suite convention remains a skip.
+
+Within these automatic Codespaces partitions, pytest assertion exit `1` is sticky:
+later partitions still execute, but later passes cannot turn the plugin result
+green (#6917). Ordinary unpartitioned groups retain their fail-fast behavior.
+Interrupt/internal/usage failures, unfiltered empty collection, containment
+exceptions, resource failures and aggregate timeouts still abort immediately
+with their original status. The runner's multi-plugin policy is unchanged.
+
+`tools/test_run_plugin_tests.py` checks normal `run_plugin` command planning,
+real pytest collection inventory and exact-once coverage, explicit/filter
+selection behavior, failure propagation, and unchanged resource/aggregate
+limits. Run the owned native contract through the same automated plan without
+manual selectors:
+
+```powershell
+python tools\run-plugin-tests.py agent-codespaces --test-file tests\test_installer_engine_adoption.py
+```
 Use repeatable `--test-file <path-relative-to-tests>` with one plugin to avoid
 collecting unrelated modules before applying `-k`. Unknown, escaping and
 non-file selections fail before environment preparation. The Windows
