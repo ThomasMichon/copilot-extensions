@@ -81,11 +81,20 @@ checks could interfere with a remaining Dev PR sharing that same head.
 
 ## Direct helper, data and publication closure
 
-Both metadata consumers check out `github.workflow_sha`, with credentials not
-persisted, and install the same locked parsers without lifecycle scripts.
-They never execute the PR head. The installer admits registry release age and
-integrity before installation and publishes dependencies only if manifests,
-lock and configuration remain unchanged.
+Native PR enforcement and departure refresh check out `github.workflow_sha`,
+with credentials not persisted, and install the same locked parsers without
+lifecycle scripts. Main push and input-free manual backfill also use that
+control snapshot. Promotion-dispatched backfill is the deliberate exception:
+after trusted control verifies release/control ancestry, it checks out
+`inputs.promotion_sha || github.workflow_sha`. With the verifier's promotion
+inputs present, helpers and parser lock come from the merged release snapshot,
+which can differ from the newer workflow/control snapshot.
+
+None of these paths executes the PR head. The installer admits registry release
+age and integrity before installation and publishes dependencies only if
+manifests, lock and configuration remain unchanged. Preserve the distinction
+between trusted control identity and selected helper/lock identity, rather than
+assuming every metadata invocation uses the control tree's helper bytes.
 
 The parser lock closes over CommonMark `0.31.2`, parse5 `7.2.1`, entities
 `3.0.1` and `4.5.0` in their respective dependency locations, mdurl `1.0.1`
@@ -135,7 +144,10 @@ may suppress normal push consumers. It requires the exact successful job
 It correlates promotion run-attempt, creation-time window, release SHA/tag and
 trusted Main control ancestry, rejects ambiguous matching runs, reads all
 bounded job pages, and rejects a missing/skipped required refresh job. The
-controller obtains this verifier from its trusted workflow revision.
+controller obtains this verifier from its trusted workflow revision. The
+verifier supplies `promotion_sha`, so the refresh executes the release's
+helpers/lock even when its workflow definition runs from a newer Main control
+revision; the inline ancestry guard is evaluated before that checkout.
 
 Consequently Main push/manual backfill, workflow identity, promotion inputs,
 run title and required job name cannot be deleted or renamed as incidental
