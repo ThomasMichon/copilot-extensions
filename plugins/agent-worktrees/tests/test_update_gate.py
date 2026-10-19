@@ -1,11 +1,15 @@
 """Update policy must retain explicit execution-space configuration."""
 
 from pathlib import Path
+import os
+import subprocess
+import sys
 
 import pytest
 import yaml
 
 from agent_worktrees import config as cfg, reconcile, repos, update_gate
+from agent_procutil import no_window_kwargs
 
 
 def _configure(tmp_path, monkeypatch, platform, *, configured=True):
@@ -126,3 +130,41 @@ def test_universal_runtime_does_not_require_machine_config(monkeypatch):
 
     monkeypatch.setattr(cfg, "load_config", unavailable)
     assert not update_gate._machine_gate_blocks("agent-example", "universal", Path("/unused"))
+
+
+def test_config_keyword_only_identity_preserves_positional_arguments():
+    repositories = {"project": cfg.RepoConfig(anchor="/example", worktree_root="/trees")}
+    config = cfg.Config("/source", "local-space", "windows", "project", repositories,
+                        configured_machine="local-space")
+    assert config.repo_name == "project"
+    assert config.repos is repositories
+    assert config.configured_machine == "local-space"
+
+
+def test_native_update_gate_reads_explicit_machine_from_isolated_home(tmp_path):
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    (anchor / "machines.yaml").write_text(yaml.safe_dump({
+        "machines": {"local-space": {"execution_platform": cfg.detect_platform()}},
+    }), encoding="utf-8")
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "config.yaml").write_text("machine: local-space\n", encoding="utf-8")
+    project = tmp_path / ".project"
+    project.mkdir()
+    (project / "config.yaml").write_text(yaml.safe_dump({
+        "repo_name": "project",
+        "repos": {"project": {"anchor": str(anchor), "worktree_root": str(tmp_path / "trees")}},
+    }), encoding="utf-8")
+    environment = dict(os.environ, AGENT_HOME=str(tmp_path))
+    result = subprocess.run(
+        [sys.executable, "-B", "-c",
+         "from agent_worktrees import config, update_gate; "
+         "config.set_active_project('project'); "
+         "assert config.load_config().configured_machine == 'local-space'; "
+         "assert not update_gate._machine_gate_blocks('agent-example', 'machine-gated', None); "
+         "print('native-update-gate-ok')"],
+        env=environment, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "native-update-gate-ok"
