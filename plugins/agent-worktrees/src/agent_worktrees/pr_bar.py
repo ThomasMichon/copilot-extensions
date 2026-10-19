@@ -38,6 +38,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
+from .pr_review_policy import latest_effective_reviews, outstanding_change_requests
+
 #: The login GitHub gives Copilot's pull-request reviewer.
 COPILOT_REVIEWER = "copilot-pull-request-reviewer"
 #: Each clause's evidence is a short tail, never a dump.
@@ -211,12 +213,12 @@ def _is_human(review: dict, snap: Snapshot, reviewer: str) -> bool:
 def _humans(snap: Snapshot, reviewer: str) -> Clause:
     if "reviews" in snap.errors:
         return Clause("human_reviews_answered", "unknown", error=snap.errors["reviews"])
-    verdicts: dict[str, dict] = {}
-    for r in sorted(snap.reviews, key=_order):
-        if _is_human(r, snap, reviewer) and r.get("state") in (
-                "APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
-            verdicts[r["author"]] = r
-    asking = sorted(a for a, r in verdicts.items() if r.get("state") == "CHANGES_REQUESTED")
+    human_reviews = [r for r in snap.reviews if _is_human(r, snap, reviewer)]
+    verdicts = latest_effective_reviews(human_reviews, snap.author)
+    asking = sorted(
+        (r.reviewer for r in verdicts.values() if r.state == "CHANGES_REQUESTED"),
+        key=str.casefold,
+    )
     if asking:
         return Clause("human_reviews_answered", "failed", f"changes requested by {', '.join(asking)}")
     humans = {r.get("author") for r in snap.reviews if _is_human(r, snap, reviewer)}
@@ -244,12 +246,7 @@ def _open(thread: dict) -> bool:
 def _outstanding_change_requests(snap: Snapshot) -> list[str]:
     """Reviewers whose latest verdict (approve, request changes, dismissed) requests
     changes: a later review by someone else doesn't answer it."""
-    latest: dict[str, str] = {}
-    for r in sorted(snap.reviews, key=_order):
-        if r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED") and r.get("author"):
-            latest[r["author"]] = r["state"]
-    me = (snap.author or "").lower()
-    return sorted(a for a, s in latest.items() if s == "CHANGES_REQUESTED" and a.lower() != me)
+    return list(outstanding_change_requests(snap.reviews, snap.author))
 
 
 def _policy(snap: Snapshot, policy: dict | None) -> Clause:

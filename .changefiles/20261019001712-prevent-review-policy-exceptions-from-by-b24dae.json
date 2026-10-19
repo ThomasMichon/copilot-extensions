@@ -1,0 +1,9 @@
+{
+  "comment": "Prevent review-policy exceptions from bypassing active vetoes or unreadable merge evidence",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

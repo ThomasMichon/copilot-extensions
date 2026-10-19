@@ -515,6 +515,7 @@ class GitHubProvider:
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
         delete_source_branch: bool = True, expected_head_sha: str = "",
+        hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
     ) -> str:
         """Directly merge PR ``number`` via ``gh pr merge``.
 
@@ -551,7 +552,20 @@ class GitHubProvider:
         return merge_pull(
             repo, number, squash=squash, admin=admin,
             delete_source_branch=delete_source_branch, expected_head_sha=expected_head_sha,
+            hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
             host=host, invoke=lambda argv: run_cli(argv, env=self._env(token, host=host)),
+        )
+
+    def pull_review_exception(
+        self, repo: str, number: int, *, expected_head_sha: str,
+        hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
+        api_base: str = "", token: str | None = None,
+    ) -> tuple[bool, str]:
+        from .github_review_gate import pull_review_exception
+        return pull_review_exception(
+            self, repo, number, expected_head_sha=expected_head_sha,
+            hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
+            api_base=api_base, token=token, invoke=run_cli,
         )
 
     def close_pull(
@@ -682,82 +696,10 @@ class GitHubProvider:
     def pull_review_gate(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
     ) -> tuple[bool, bool | None]:
-        """Live GitHub-rulesets review gate for a PR: ``(review_required, bypassable)``.
-
-        Native ``enable_auto_merge`` arms successfully even when a required
-        review is what's actually blocking the merge -- GitHub queues it
-        indefinitely rather than refusing (#3296 follow-up).
-
-        Reads ``gh pr view --json mergeStateStatus,reviewDecision,baseRefName``,
-        then -- only when ``reviewDecision`` is ``REVIEW_REQUIRED`` -- the
-        branch **rulesets** API for whether the acting identity can bypass
-        it (``current_user_can_bypass``). Classic branch protection has no
-        per-actor bypass signal, so ``bypassable`` is ``None`` (unknown, not
-        "no") when rulesets don't apply -- callers must treat ``None`` as
-        "do not attempt a bypass", never as an affirmative yes.
-
-        Returns ``(False, None)`` when no review is required (or the read
-        itself fails) -- the ordinary auto-merge path is correct there.
-        """
-        host = self.authority_endpoint(api_base)
-        proc = run_cli(
-            ["gh", "pr", "view", str(number), "--repo", repo,
-             "--json", "reviewDecision,baseRefName"],
-            env=self._env(token, host=host),
+        from .github_review_gate import pull_review_gate
+        return pull_review_gate(
+            self, repo, number, api_base=api_base, token=token, invoke=run_cli,
         )
-        if proc.returncode != 0:
-            return False, None
-        try:
-            data = json.loads(proc.stdout)
-        except json.JSONDecodeError:
-            return False, None
-        if data.get("reviewDecision") != "REVIEW_REQUIRED":
-            return False, None
-
-        base_ref = (data.get("baseRefName") or "").strip()
-        if not base_ref:
-            return True, None
-        rproc = run_cli(
-            ["gh", "api", "--hostname", host,
-             f"repos/{repo}/rules/branches/{quote(base_ref, safe='')}"],
-            env=self._env(token),
-        )
-        if rproc.returncode != 0:
-            return True, None
-        try:
-            rules = json.loads(rproc.stdout)
-        except json.JSONDecodeError:
-            return True, None
-        if not isinstance(rules, list):
-            return True, None
-        ruleset_ids = {
-            r.get("ruleset_id") for r in rules
-            if isinstance(r, dict)
-            and r.get("type") == "pull_request"
-            and r.get("ruleset_id")
-        }
-        if not ruleset_ids:
-            return True, None
-
-        for ruleset_id in ruleset_ids:
-            sproc = run_cli(
-                ["gh", "api", "--hostname", host,
-                 f"repos/{repo}/rulesets/{ruleset_id}"],
-                env=self._env(token),
-            )
-            if sproc.returncode != 0:
-                continue
-            try:
-                ruleset = json.loads(sproc.stdout)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(ruleset, dict):
-                continue
-            if ruleset.get("current_user_can_bypass") in (
-                "always", "pull_requests_only",
-            ):
-                return True, True
-        return True, False
 
     def get_repo_policy(
         self, repo: str, *, default_branch: str = "", api_base: str = "",

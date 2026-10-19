@@ -106,11 +106,11 @@ def _pr_merge_now(
     policy bypass. Other providers honor ``prefer_auto_merge`` (#225, default
     on): first try ``enable_auto_merge``, then fall back to ``merge_pull`` where
     auto-merge is unavailable or disabled. A provider-supplied
-    ``pull_review_gate`` (currently GitHub) can additionally skip straight to
-    ``merge_pull(admin=True)`` when a *live, actor-bypassable* required review
-    is the only thing that would otherwise leave auto-merge armed forever
-    (#3296 follow-up); a required review the actor cannot bypass remains
-    provider-enforced either way.
+    ``pull_review_exception`` (currently GitHub) can additionally skip straight
+    to ``merge_pull(admin=True)`` only when complete live evidence identifies
+    an actor-bypassable missing CODEOWNER approval as the remaining review
+    rule; active vetoes, unknown evidence, holds, drafts and head movement
+    refuse that exception.
     Any other profile is refused-with-reminder, steering the agent to the
     sanctioned wait/consent path.
     Returns a shell exit code (0 success, 1 merge failure, 2 refusal/usage).
@@ -339,6 +339,54 @@ def _pr_merge_now(
             print(rem.text(), file=sys.stderr)
         return 0
 
+    hold_labels = tuple(getattr(prcfg, "hold_labels", ()) or ())
+    wip_title_prefixes = tuple(getattr(prcfg, "wip_title_prefixes", ()) or ())
+
+    def refuse_mutation(reason: str) -> int:
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo, "pr": args.pr, "action": "merge",
+                "applied": False, "merged": False, "completion_verified": False,
+                "error": reason, "flow_profile": flow.profile,
+            }))
+        else:
+            output.err(f"pr-merge --now: {reason}. Nothing merged.")
+        return 1
+
+    # GitHub auto-merge can complete immediately. Read complete provider
+    # evidence immediately before any write, and refuse unknown evidence.
+    if getattr(provider, "name", "") == "github":
+        try:
+            snap = provider.get_snapshot(
+                args.repo, args.pr, api_base=base, token=tok,
+            )
+        except (ProviderError, OSError, ValueError, TypeError, AttributeError) as exc:
+            return refuse_mutation(
+                "GitHub mutation safety evidence is unreadable "
+                f"({type(exc).__name__})"
+            )
+        if not isinstance(snap.head_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", snap.head_sha):
+            return refuse_mutation("GitHub merge head is unavailable or invalid")
+        if expected_head_sha and snap.head_sha != expected_head_sha:
+            return refuse_mutation("PR head changed before mutation")
+        expected_head_sha = expected_head_sha or snap.head_sha
+        safety = pc.classify_state(
+            snap,
+            hold_labels=hold_labels,
+            wip_title_prefixes=wip_title_prefixes,
+            approval_required=False,
+            review_blocking=flow.review_blocking,
+        )
+        if (
+            not expected_head_sha or snap.pr_state != "open" or snap.merged
+            or safety.wip or safety.held or safety.conflict
+            or safety.verdict == "CHANGES_REQUESTED"
+        ):
+            return refuse_mutation(
+                "mutation safety gate refused the write "
+                f"({safety.reason or safety.merge_state})"
+            )
+
     # Other providers prefer native CI-gated auto-merge (so the merge waits on
     # required checks) and fall back to an immediate self-merge only where the
     # provider offers no auto-merge or it can't be armed (#225).
@@ -352,17 +400,17 @@ def _pr_merge_now(
     # follow-up: discovered landing a real-world case with a live ruleset
     # requiring 1 approving review but granting the acting Maintainer
     # pull-request-scoped bypass rights). Only a provider that
-    # exposes ``pull_review_gate`` (currently GitHub) is checked; other
+    # exposes ``pull_review_exception`` (currently GitHub) is checked; other
     # providers' auto-merge already means what it says.
     bypass_review_gate = False
-    if prefer_auto and hasattr(provider, "pull_review_gate"):
-        try:
-            review_required, bypassable = provider.pull_review_gate(
-                args.repo, args.pr, api_base=base, token=tok,
-            )
-        except ProviderError:
-            review_required, bypassable = False, None
-        bypass_review_gate = bool(review_required and bypassable)
+    if prefer_auto and hasattr(provider, "pull_review_exception"):
+        bypass_review_gate, _ = provider.pull_review_exception(
+            args.repo, args.pr,
+            expected_head_sha=expected_head_sha,
+            hold_labels=hold_labels,
+            wip_title_prefixes=wip_title_prefixes,
+            api_base=base, token=tok,
+        )
 
     auto_armed = False
     if prefer_auto and not bypass_review_gate:
@@ -428,11 +476,13 @@ def _pr_merge_now(
                 args.repo,
                 args.pr,
                 squash=True,
-                admin=bypass_review_gate or not flow.review_blocking,
+                admin=bypass_review_gate,
                 delete_source_branch=getattr(prcfg, "delete_source_branch", True),
                 api_base=base,
                 token=tok,
                 expected_head_sha=expected_head_sha,
+                hold_labels=hold_labels,
+                wip_title_prefixes=wip_title_prefixes,
             )
         except ProviderError as exc:
             err = str(exc)

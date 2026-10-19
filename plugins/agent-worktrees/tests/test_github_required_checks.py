@@ -7,7 +7,11 @@ import subprocess
 
 import pytest
 
-from agent_worktrees.providers.github_required_checks import RequiredChecksError, verified_merge_head
+from agent_worktrees.providers.github_required_checks import (
+    RequiredChecksError,
+    review_exception_evidence,
+    verified_merge_head,
+)
 
 HEAD = "a" * 40
 
@@ -28,6 +32,10 @@ class GitHubFixture:
         self.rules = [{
             "type": "required_status_checks",
             "parameters": {"required_status_checks": [{"context": "policy"}]},
+        }, {
+            "type": "pull_request",
+            "ruleset_id": 42,
+            "parameters": {"require_code_owner_review": True},
         }]
         self.later_pages = []
         self.runs = [{
@@ -45,6 +53,12 @@ class GitHubFixture:
         self.pr_reads = 0
         self.normal_merge_fails = False
         self.admin_merge_fails = False
+        self.reviews = [{
+            "id": 1, "state": "COMMENTED", "user": {"login": "copilot"},
+            "submitted_at": "2026-10-18T00:00:00Z", "commit_id": HEAD,
+        }]
+        self.review_decision = "REVIEW_REQUIRED"
+        self.bypass = "pull_requests_only"
 
     def invoke(self, argv, **kwargs):
         self.calls.append(argv)
@@ -53,7 +67,9 @@ class GitHubFixture:
             if failed:
                 return subprocess.CompletedProcess(argv, 1, "", "protected merge refused")
             return subprocess.CompletedProcess(argv, 0, "", "")
-        if argv[:3] == ["gh", "pr", "checks"]:
+        if argv[:3] == ["gh", "pr", "view"]:
+            kind, data = "decision", {"reviewDecision": self.review_decision}
+        elif argv[:3] == ["gh", "pr", "checks"]:
             assert "--required" in argv
             assert "--hostname" not in argv
             kind, data = "checks", self.checks
@@ -61,7 +77,14 @@ class GitHubFixture:
             self.pr_reads += 1
             head = self.after_head if self.pr_reads > 1 and self.after_head else self.head
             base = self.after_base if self.pr_reads > 1 and self.after_base else self.base
-            kind, data = "pr", {"state": "open", "head": {"sha": head}, "base": {"ref": base}}
+            kind, data = "pr", {
+                "state": "open", "draft": False, "title": "Ready",
+                "labels": [], "user": {"login": "author"},
+                "head": {"sha": head}, "base": {"ref": base},
+            }
+        elif argv[2].endswith("/pulls/7/reviews"):
+            assert "--paginate" in argv and "--slurp" in argv
+            kind, data = "reviews", [self.reviews]
         elif argv[2] == "graphql":
             assert f"ref=refs/heads/{self.base}" in argv
             kind, data = "policy", {
@@ -79,6 +102,8 @@ class GitHubFixture:
             kind, data = "runs", self.run_pages if self.run_pages is not None else [{
                 "total_count": len(self.runs), "check_runs": self.runs,
             }]
+        elif argv[2].endswith("/rulesets/42"):
+            kind, data = "ruleset", {"current_user_can_bypass": self.bypass}
         else:
             raise AssertionError(f"Unexpected command: {argv}")
         if kind == self.fail:
@@ -308,6 +333,50 @@ def test_actual_admin_merge_is_guarded_and_pins_the_verified_head(monkeypatch, p
     else:
         assert "PR gate" in result
         assert len(merges) == 1 and "--admin" not in merges[0]
+
+
+def test_review_exception_requires_complete_clean_codeowner_evidence():
+    fixture = GitHubFixture()
+    assert review_exception_evidence(
+        "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        expected_head_sha=HEAD,
+    ) == HEAD
+
+
+@pytest.mark.parametrize("mutation,match", [
+    (lambda f: setattr(f, "review_decision", "APPROVED"), "missing required approval"),
+    (lambda f: setattr(f, "bypass", "never"), "not authorized"),
+    (lambda f: f.rules.__setitem__(1, {"type": "pull_request", "ruleset_id": 42,
+                                      "parameters": {"require_code_owner_review": False}}),
+     "not positively identified"),
+    (lambda f: f.reviews.insert(0, {
+        "id": 0, "state": "CHANGES_REQUESTED", "user": {"login": "human"},
+        "submitted_at": "2026-10-17T00:00:00Z", "commit_id": "b" * 40,
+    }), "active change request"),
+])
+def test_review_exception_fails_closed(mutation, match):
+    fixture = GitHubFixture()
+    mutation(fixture)
+    with pytest.raises(RequiredChecksError, match=match):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+            expected_head_sha=HEAD,
+        )
+
+
+def test_later_other_approval_does_not_hide_human_negative():
+    fixture = GitHubFixture()
+    fixture.reviews = [
+        {"id": 1, "state": "CHANGES_REQUESTED", "user": {"login": "human"},
+         "submitted_at": "2026-10-17T00:00:00Z", "commit_id": "b" * 40},
+        {"id": 2, "state": "APPROVED", "user": {"login": "copilot"},
+         "submitted_at": "2026-10-18T00:00:00Z", "commit_id": HEAD},
+    ]
+    with pytest.raises(RequiredChecksError, match="active change request"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+            expected_head_sha=HEAD,
+        )
 
 
 @pytest.mark.parametrize("admin", [False, True])

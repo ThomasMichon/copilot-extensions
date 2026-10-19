@@ -29,6 +29,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from .pr_checks import checks_payload
+from .pr_review_policy import effective_review
 from .pr_snapshot import PRSnapshot as PRSnapshot, Review as Review
 from .pr_snapshot import REVIEW_STATE_EVENT as _REVIEW_STATE_EVENT
 from .pr_status_feedback import STATUS_FEEDBACK
@@ -482,32 +483,19 @@ def _latest_verdict(
     ``review_blocking`` selects :data:`VERDICT_STATES` (default) or
     :data:`NONBLOCKING_VERDICT_STATES` -- see :func:`effective_verdict`.
     """
-    states = VERDICT_STATES if review_blocking else NONBLOCKING_VERDICT_STATES
-    latest_id = -1
-    latest: Review | None = None
-    for r in reviews:
-        state = r.state.upper()
-        if state == "REQUEST_CHANGES":
-            state = "CHANGES_REQUESTED"
-        elif state == "COMMENT":
-            state = "COMMENTED"
-        if state not in states:
-            continue
-        if r.dismissed:
-            continue
-        if author and r.user and r.user == author:
-            continue  # a PR author's own review is never a gate
-        if r.id > latest_id:
-            latest_id = r.id
-            latest = Review(
-                id=r.id,
-                state=state,
-                user=r.user,
-                submitted_at=r.submitted_at,
-                commit_id=r.commit_id,
-                dismissed=r.dismissed,
-            )
-    return latest
+    latest = effective_review(
+        reviews, author, include_comments=not review_blocking,
+    )
+    if latest is None:
+        return None
+    return Review(
+        id=latest.id,
+        state=latest.state,
+        user=latest.reviewer,
+        submitted_at=latest.submitted_at,
+        commit_id=latest.commit_id,
+        dismissed=latest.dismissed,
+    )
 
 
 def _parse_timestamp(value: str) -> datetime | None:
@@ -765,8 +753,6 @@ def _consent_decision(
     approval_stale_authorized: bool = False,
 ) -> tuple[str, str]:
     """Decide what ``pr-merge`` should do with this PR (pure; see classify_state)."""
-    if consent_present:
-        return "already", f"{automerge_label} already present"
     if merge_state == "merged":
         return "skip", "already merged"
     if merge_state == "closed":
@@ -781,6 +767,8 @@ def _consent_decision(
         return "skip", "not mergeable (conflict -> needs rebase)"
     if verdict == "CHANGES_REQUESTED":
         return "skip", "changes requested"
+    if consent_present:
+        return "already", f"{automerge_label} already present"
     if verdict != "APPROVED":
         if approval_required:
             return "skip", "not yet approved"

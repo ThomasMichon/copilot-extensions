@@ -14,6 +14,8 @@ import subprocess
 from collections.abc import Callable
 from urllib.parse import quote
 
+from ..pr_review_policy import ReviewEvidence, outstanding_change_requests
+
 _POLICY_QUERY = """
 query($owner:String!,$name:String!,$ref:String!) {
   repository(owner:$owner,name:$name) {
@@ -75,6 +77,7 @@ def merge_pull(
     repo: str, number: int, *, squash: bool, admin: bool,
     delete_source_branch: bool, expected_head_sha: str, host: str,
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
 ) -> str:
     try:
         expected_head_sha = _protected_merge_head(
@@ -99,6 +102,11 @@ def merge_pull(
         "Normal GitHub merge refused for %s#%s; verifying configured admin fallback", repo, number,
     )
     try:
+        review_exception_evidence(
+            repo, number, host=host, expected_head_sha=expected_head_sha,
+            hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
+            invoke=invoke,
+        )
         verified_merge_head(
             repo, number, host=host, expected_head_sha=expected_head_sha, invoke=invoke,
         )
@@ -108,6 +116,148 @@ def merge_pull(
     if result.returncode:
         return f"{error}; gh admin merge failed: {result.stderr.strip() or result.stdout.strip()}"
     return ""
+
+
+def review_exception_evidence(
+    repo: str, number: int, *,
+    invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    host: str, expected_head_sha: str = "",
+    hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
+) -> str:
+    """Prove the narrow missing-CODEOWNER-approval admin exception.
+
+    The final merge still uses GitHub's expected-head CAS. GitHub exposes no
+    atomic review-version CAS, so this re-read minimizes but cannot eliminate a
+    provider lifecycle race after the evidence read.
+    """
+    _target_parts(repo, number)
+
+    def read_json(args: list[str]) -> object:
+        argv = ["gh", *args]
+        if args[0] == "api":
+            argv += ["--hostname", host]
+        result = invoke(argv)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise RequiredChecksError(
+                f"review-exception verification failed (exit {result.returncode}): {detail}"
+            )
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise RequiredChecksError("review-exception verification returned invalid JSON") from exc
+
+    def obj(value: object, label: str) -> dict:
+        if not isinstance(value, dict):
+            raise RequiredChecksError(f"{label} is unavailable or invalid")
+        return value
+
+    decision = obj(read_json([
+        "pr", "view", str(number), "--repo", repo, "--json", "reviewDecision",
+    ]), "review decision").get("reviewDecision")
+    if decision != "REVIEW_REQUIRED":
+        raise RequiredChecksError(
+            "GitHub does not report missing required approval as the current review block"
+        )
+
+    def identity() -> tuple[str, str]:
+        pr = obj(read_json(["api", f"/repos/{repo}/pulls/{number}"]), "PR metadata")
+        head = obj(pr.get("head"), "PR head").get("sha")
+        base = obj(pr.get("base"), "PR base").get("ref")
+        title = pr.get("title")
+        labels = pr.get("labels")
+        if (
+            pr.get("state") != "open" or pr.get("draft") is not False
+            or not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head)
+            or not isinstance(base, str) or not base or not isinstance(title, str)
+            or not isinstance(labels, list)
+        ):
+            raise RequiredChecksError("open, non-draft PR identity is unavailable or invalid")
+        if expected_head_sha and head != expected_head_sha:
+            raise RequiredChecksError("PR head differs from the expected commit")
+        names = {
+            label.get("name", "").casefold() for label in labels
+            if isinstance(label, dict) and isinstance(label.get("name"), str)
+        }
+        if len(names) != len(labels):
+            raise RequiredChecksError("PR labels are unavailable or invalid")
+        held = names & {label.casefold() for label in hold_labels}
+        if held:
+            raise RequiredChecksError("hold label present: " + ", ".join(sorted(held)))
+        lowered = title.strip().casefold()
+        if any(lowered.startswith(prefix.strip().casefold())
+               for prefix in wip_title_prefixes if prefix.strip()):
+            raise RequiredChecksError("WIP title prefix is present")
+        return head, base
+
+    head, base = identity()
+    pages = read_json([
+        "api", f"/repos/{repo}/pulls/{number}/reviews", "--paginate", "--slurp",
+    ])
+    if not isinstance(pages, list) or not pages:
+        raise RequiredChecksError("complete review history is unavailable")
+    reviews: list[ReviewEvidence] = []
+    for page in pages:
+        if not isinstance(page, list):
+            raise RequiredChecksError("review history page is unavailable or invalid")
+        for raw in page:
+            review = obj(raw, "review")
+            rid = review.get("id")
+            user = review.get("user")
+            state = review.get("state")
+            if (
+                type(rid) is not int or not isinstance(user, dict)
+                or not isinstance(user.get("login"), str) or not isinstance(state, str)
+            ):
+                raise RequiredChecksError("review history is incomplete or invalid")
+            reviews.append(ReviewEvidence(
+                id=rid, state=state, reviewer=user["login"],
+                submitted_at=str(review.get("submitted_at") or ""),
+                commit_id=str(review.get("commit_id") or ""),
+                dismissed=state.upper() == "DISMISSED",
+            ))
+    author = obj(read_json(["api", f"/repos/{repo}/pulls/{number}"]), "PR metadata")
+    author_login = obj(author.get("user"), "PR author").get("login")
+    if not isinstance(author_login, str):
+        raise RequiredChecksError("PR author identity is unavailable")
+    asking = outstanding_change_requests(reviews, author_login)
+    if asking:
+        raise RequiredChecksError("active change request by " + ", ".join(asking))
+
+    pages = read_json([
+        "api", f"/repos/{repo}/rules/branches/{quote(base, safe='')}",
+        "--paginate", "--slurp",
+    ])
+    if not isinstance(pages, list) or not pages:
+        raise RequiredChecksError("effective branch rules are unavailable")
+    codeowner_rulesets: set[int] = set()
+    for page in pages:
+        if not isinstance(page, list):
+            raise RequiredChecksError("effective branch rules page is invalid")
+        for raw in page:
+            rule = obj(raw, "branch rule")
+            if rule.get("type") != "pull_request":
+                continue
+            params = obj(rule.get("parameters"), "pull-request rule")
+            if params.get("require_code_owner_review") is not True:
+                continue
+            ruleset_id = rule.get("ruleset_id")
+            if type(ruleset_id) is not int or ruleset_id <= 0:
+                raise RequiredChecksError("CODEOWNER review rule has no ruleset identity")
+            codeowner_rulesets.add(ruleset_id)
+    if not codeowner_rulesets:
+        raise RequiredChecksError("a missing CODEOWNER approval rule was not positively identified")
+    for ruleset_id in codeowner_rulesets:
+        ruleset = obj(read_json([
+            "api", f"/repos/{repo}/rulesets/{ruleset_id}",
+        ]), "ruleset")
+        if ruleset.get("current_user_can_bypass") not in ("always", "pull_requests_only"):
+            raise RequiredChecksError(
+                f"acting identity is not authorized to bypass CODEOWNER ruleset {ruleset_id}"
+            )
+    if identity() != (head, base):
+        raise RequiredChecksError("PR head/base or mutation gates changed during review verification")
+    return head
 
 
 def verified_merge_head(

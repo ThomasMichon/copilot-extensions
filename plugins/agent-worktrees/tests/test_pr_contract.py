@@ -1250,6 +1250,18 @@ class TestApprovalRequired:
         assert st.consent_action == "skip"
         assert "changes requested" in st.reason
 
+    def test_existing_consent_label_does_not_override_a_change_request(self):
+        snap = pc.PRSnapshot(
+            pr_state="open", mergeable=True, labels=("auto-complete",),
+            reviews=(_rev(1, "CHANGES_REQUESTED"),),
+        )
+        st = pc.classify_state(
+            snap, automerge_label="auto-complete", approval_required=False,
+        )
+        assert st.consent_present is True
+        assert st.consent_action == "skip"
+        assert st.reason == "changes requested"
+
     def test_approved_eligible_regardless(self):
         snap = pc.PRSnapshot(pr_state="open", mergeable=True,
                              reviews=(_rev(1, "APPROVED"),))
