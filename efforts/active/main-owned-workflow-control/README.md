@@ -327,18 +327,24 @@ regressions, retained-owner seams and the completion gate.
 - [x] Land the amended vision and completion plan through ordinary review
   before implementation; retain all existing portfolio and activation gates.
   #7219 merged after current-head approval and required CI.
-- [ ] Repair present-day self-merge readiness and guidance first (#3638,
+- [x] Repair present-day self-merge readiness and guidance first (#3638,
   #4234): distinguish actor authorization, review evidence, reviewer vetoes,
   required CI and consent. Status, watch and mutation must not contradict one
   another or ask for another approval solely because a permitted review-rule
   exception exists.
-- [ ] Preserve every outstanding reviewer change request in the mutation path;
+  Source repairs merged in #7225 and #7232. Qualified release and actual
+  installed behavior retain the separate adoption gates below.
+- [x] Preserve every outstanding reviewer change request in the mutation path;
   a repository-authorized exception to missing required approval cannot waive
   a veto, required CI, holds, draft state or head identity.
+  #7232 merged with independently reviewed negative/effect-boundary contracts;
+  this records the source implementation, not an installed-runtime claim.
 - [ ] Close completion-visibility gaps: reuse #7134's descendant-PR projection,
   expose truncated/unresolved claims, and distinguish source merge, qualified
   release and actual installed behavior. Do not recreate an already-merged fix
   or silently copy descendant ownership into an ancestor's ledger.
+  Manager completeness/detail implementation merged in #7228; qualified
+  release and installed-view acceptance remain open.
 - [ ] Reuse the existing invited-collaborator plus root CODEOWNERS Maintainer
   boundary. Propose an initial Dev-only, same-repository, nondraft scope:
   exclude Main, generated release candidates and the promotion publisher.

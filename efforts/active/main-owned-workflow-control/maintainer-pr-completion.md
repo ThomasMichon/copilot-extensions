@@ -140,6 +140,9 @@ weaken per-hop finalization.
    Evaluate authoritative live state for each bounded action; no head-code
    execution, waiting runner, replacement PR service or competing observer.
    Reuse existing check/review evidence contracts where suitable.
+   The repository-owned [staged implementation](../../../tools/maintainer_pr_completion.md)
+   keeps both workflow execution and configuration disabled; its contracts run
+   in the existing repository-harness suite, not a new CI lane.
 5. **Authority acceptance and canary.** Present the exact proposed automation
    identity, permissions, review-only exception, configuration diff and
    rollback to the repository owner. Do not reuse the licensed review-request

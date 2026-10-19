@@ -9,8 +9,23 @@ import time
 from ctypes import wintypes as w
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[1])
-from agent_worktrees import front_door_cli, git_ops, pr_ops, pr_rebase  # noqa: E402
+steward_probes = sys.argv[1] == "--steward-probes"
+if steward_probes:
+    import importlib.util
+
+    root = Path(sys.argv[2])
+    spec = importlib.util.spec_from_file_location(
+        "mention_guard", root / "plugins" / "copilot-extensions-harness"
+        / "scripts" / "copilot-mention-guard.py",
+    )
+    assert spec and spec.loader
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    sys.path.insert(0, str(root / "tools"))
+    from maintainer_pr_completion import invoke
+else:
+    sys.path.insert(0, sys.argv[1])
+    from agent_worktrees import front_door_cli, git_ops, pr_ops, pr_rebase
 
 
 class ProcessEntry(ctypes.Structure):
@@ -118,17 +133,22 @@ try:
 
     assert not hasattr(subprocess.Popen.__init__, "_aw_headless")
     for _ in range(2):
-        assert pr_rebase._series(sys.argv[3], sys.argv[4], sys.argv[2])
-        assert pr_ops._patch_id(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
-        assert pr_ops._commit_patch_ids(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
-        assert git_ops.resolve_to_anchor(Path(sys.argv[2])).exists()
-        assert front_door_cli._git_toplevel(Path(sys.argv[2])).exists()
+        if steward_probes:
+            assert guard.current_repo_candidates(sys.argv[3]) == ["example/project"]
+            child = str(Path(sys.executable).with_name("python.exe"))
+            assert invoke([child, "-c", "import time; time.sleep(0.15)"]).returncode == 0
+        else:
+            assert pr_rebase._series(sys.argv[3], sys.argv[4], sys.argv[2])
+            assert pr_ops._patch_id(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
+            assert pr_ops._commit_patch_ids(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
+            assert git_ops.resolve_to_anchor(Path(sys.argv[2])).exists()
+            assert front_door_cli._git_toplevel(Path(sys.argv[2])).exists()
         cycles += 1
         time.sleep(0.1)
 finally:
     stop.set()
     thread.join(5)
-    Path(sys.argv[5]).write_text(json.dumps({
+    Path(sys.argv[4] if steward_probes else sys.argv[5]).write_text(json.dumps({
         "cycles": cycles, "observed_descendants": len(seen) - 1,
         "visible_windows": len(visible), "foreground_owned": len(foreground),
         "new_visible_windows": len(new_visible), "foreground_transitions": len(focus_changes),

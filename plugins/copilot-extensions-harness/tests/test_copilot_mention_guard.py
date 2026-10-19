@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _load_guard():
@@ -152,7 +156,7 @@ def test_api_input_file_with_mention_is_denied(tmp_path: Path) -> None:
     guard = _load_guard()
     payload = tmp_path / "body.json"
     payload.write_text('{"body": "@copilot review"}', encoding="utf-8")
-    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {shlex.quote(str(payload))}"
     assert guard.command_publishes_copilot_mention(cmd) == "mention"
 
 
@@ -160,7 +164,7 @@ def test_api_input_file_without_mention_is_allowed(tmp_path: Path) -> None:
     guard = _load_guard()
     payload = tmp_path / "body.json"
     payload.write_text('{"body": "Looks good, thanks!"}', encoding="utf-8")
-    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {shlex.quote(str(payload))}"
     assert guard.command_publishes_copilot_mention(cmd) is None
 
 
@@ -168,7 +172,7 @@ def test_api_input_equals_form_with_mention_is_denied(tmp_path: Path) -> None:
     guard = _load_guard()
     payload = tmp_path / "body.json"
     payload.write_text('{"body": "@copilot review"}', encoding="utf-8")
-    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input={payload}"
+    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input={shlex.quote(str(payload))}"
     assert guard.command_publishes_copilot_mention(cmd) == "mention"
 
 
@@ -182,7 +186,7 @@ def test_api_input_unparseable_json_is_denied_fail_closed(tmp_path: Path) -> Non
     guard = _load_guard()
     payload = tmp_path / "body.json"
     payload.write_text("not valid json", encoding="utf-8")
-    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {shlex.quote(str(payload))}"
     assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
 
 
@@ -294,7 +298,7 @@ def test_api_long_field_form_file_ref_is_scanned(tmp_path: Path) -> None:
     guard = _load_guard()
     body_file = tmp_path / "body.md"
     body_file.write_text("@copilot review", encoding="utf-8")
-    cmd = f"gh api repos/o/r/issues/1/comments --field body=@{body_file}"
+    cmd = f"gh api repos/o/r/issues/1/comments --field body=@{shlex.quote(str(body_file))}"
     assert guard.command_publishes_copilot_mention(cmd) == "mention"
 
 
@@ -360,10 +364,10 @@ def test_target_repo_allows_a_dot_in_the_repo_name(tmp_path: Path) -> None:
 
 def test_current_repo_reads_the_git_remote(tmp_path: Path) -> None:
     guard = _load_guard()
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
     subprocess.run(
         ["git", "remote", "add", "origin", "git@github.com:someorg/some-repo.git"],
-        cwd=tmp_path, check=True,
+        cwd=tmp_path, check=True, creationflags=NO_WINDOW,
     )
     assert guard.current_repo_candidates(str(tmp_path)) == ["someorg/some-repo"]
     assert guard.current_repo_matches("someorg/some-repo", str(tmp_path)) is True
@@ -382,10 +386,10 @@ def test_current_repo_matches_a_non_origin_remote(tmp_path: Path) -> None:
     commonly also carries an 'upstream' remote -- checking only 'origin'
     silently no-ops the guard for either shape."""
     guard = _load_guard()
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
     subprocess.run(
         ["git", "remote", "add", "upstream", "git@github.com:someorg/some-repo.git"],
-        cwd=tmp_path, check=True,
+        cwd=tmp_path, check=True, creationflags=NO_WINDOW,
     )
     assert guard.current_repo_matches("someorg/some-repo", str(tmp_path)) is True
 
@@ -394,10 +398,10 @@ def test_hook_is_a_noop_outside_the_target_repo(tmp_path: Path) -> None:
     """The end-to-end entry point: a session working in an unrelated repo
     (even with this plugin enabled purely for its instruction projections)
     must never be denied, no matter what the command says."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
     subprocess.run(
         ["git", "remote", "add", "origin", "git@github.com:someorg/unrelated-repo.git"],
-        cwd=tmp_path, check=True,
+        cwd=tmp_path, check=True, creationflags=NO_WINDOW,
     )
     payload = json.dumps({
         "toolName": "bash",
@@ -405,9 +409,9 @@ def test_hook_is_a_noop_outside_the_target_repo(tmp_path: Path) -> None:
         "toolArgs": {"command": 'gh pr comment 1 -R owner/repo --body "@copilot review"'},
     })
     result = subprocess.run(
-        ["python3", str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
+        [sys.executable, str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
         input=payload, capture_output=True, text=True,
-        env={"COPILOT_PLUGIN_ROOT": str(PLUGIN)},
+        env={**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN)}, creationflags=NO_WINDOW,
         cwd=str(tmp_path),
     )
     assert result.returncode == 0
@@ -423,9 +427,9 @@ def test_hook_denies_inside_the_target_repo() -> None:
     })
     repo_root = PLUGIN.resolve().parents[1]
     result = subprocess.run(
-        ["python3", str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
+        [sys.executable, str(PLUGIN / "scripts" / "copilot-mention-guard.py")],
         input=payload, capture_output=True, text=True,
-        env={"COPILOT_PLUGIN_ROOT": str(PLUGIN)},
+        env={**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN)}, creationflags=NO_WINDOW,
         cwd=str(repo_root),
     )
     assert result.returncode == 0

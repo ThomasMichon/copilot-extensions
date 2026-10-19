@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "mode": "disabled",
+  "repository": "ThomasMichon/copilot-extensions",
+  "base_ref": "dev",
+  "consent_label": "auto-merge",
+  "hold_labels": ["hold", "do-not-merge"],
+  "wip_title_prefixes": ["WIP", "Draft"],
+  "app_slug": null,
+  "app_id": null
+}
