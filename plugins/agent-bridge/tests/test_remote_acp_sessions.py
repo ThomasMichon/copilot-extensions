@@ -236,12 +236,14 @@ async def test_concurrent_explicit_load_reuses_requested_native_id_before_confir
 
 
 @pytest.mark.asyncio
-async def test_stopped_caller_reuse_shares_explicit_resume_lifecycle_lock(remote_manager):
+@pytest.mark.parametrize("operation", ["resume", "stop"])
+async def test_caller_reuse_shares_explicit_lifecycle_lock(remote_manager, operation):
     import threading
 
     manager, calls = remote_manager
     session = await connect_remote_session(manager, "example", caller_id="caller")
-    await manager.stop_session(session.session_id)
+    if operation == "resume":
+        await manager.stop_session(session.session_id)
     lock = session._lifecycle_lock
     competing = asyncio.Event()
     entries = 0
@@ -267,8 +269,19 @@ async def test_stopped_caller_reuse_shares_explicit_resume_lifecycle_lock(remote
             assert release.wait(5)
         return resolve(*args, **kwargs)
 
-    manager._remote_acp_catalog.resolve = paused
-    explicit = asyncio.create_task(manager.resume_session(session.session_id, drain=False))
+    if operation == "resume":
+        manager._remote_acp_catalog.resolve = paused
+        explicit = asyncio.create_task(manager.resume_session(session.session_id, drain=False))
+    else:
+        shutdown = session.client.shutdown
+
+        async def paused_shutdown():
+            entered.set()
+            assert await asyncio.to_thread(release.wait, 5)
+            await shutdown()
+
+        session.client.shutdown = paused_shutdown
+        explicit = asyncio.create_task(manager.stop_session(session.session_id))
     ordinary = None
     try:
         assert await asyncio.to_thread(entered.wait, 2)
@@ -279,7 +292,8 @@ async def test_stopped_caller_reuse_shares_explicit_resume_lifecycle_lock(remote
         assert not ordinary.done() and calls == ["connect", "new"]
         release.set()
         resumed, reused = await asyncio.wait_for(asyncio.gather(explicit, ordinary), 3)
-        assert resumed is session and reused.session_id == session.session_id
+        assert resumed is (session if operation == "resume" else None)
+        assert reused.session_id == session.session_id
         assert session.status == SessionStatus.IDLE
         assert calls == ["connect", "new", "connect", ("load", "server-owned-session")]
     finally:

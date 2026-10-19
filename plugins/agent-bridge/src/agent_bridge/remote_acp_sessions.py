@@ -106,9 +106,7 @@ async def _attach_remote_session(
                 continue
             if RemoteAcpTarget.model_validate(candidate.target.remote_acp).model_dump(mode="json") != snapshot:
                 raise ValueError("Remote endpoint/profile/identity changed; explicit new attachment required")
-            if candidate.status == SessionStatus.RUNNING:
-                raise RemoteSessionBusy(candidate.session_id)
-            if candidate.status != SessionStatus.STOPPED:
+            if candidate.status == SessionStatus.STARTING:
                 return candidate
             async with candidate._lifecycle_lock:
                 return await _attach_remote_session(
