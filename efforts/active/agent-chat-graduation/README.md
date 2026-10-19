@@ -248,7 +248,7 @@ graduation still requires the declared native and lifecycle guarantees.
 
 ### 2026-10-19 - Core publication review
 
-- Implementation PR #7242 exposed coupled qualification-inventory omissions.
+- Implementation review exposed coupled qualification-inventory omissions.
   Its source fixes recognize both mandatory Chat CI platform rows and add
   executable materialized-consumer recipes while preserving the older
   standalone roster. Unknown or narrowed coverage still refuses.
