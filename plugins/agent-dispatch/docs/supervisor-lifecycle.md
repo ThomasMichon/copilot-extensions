@@ -39,6 +39,8 @@ declaration remains present; lack of a confirmed launch is not withdrawal.
 Withdrawal invalidates a provider's cached authority even if its running future
 cannot be cancelled. That future remains tracked until it finishes; reintroducing
 the same declaration must resolve it afresh rather than consume a withdrawn result.
+A changed authority also invalidates its uncancellable observation immediately;
+returning from authority A to B and then A cannot revive the first A's result.
 Declaration conversion runs inside the discovery future. Coordinator mirroring
 uses one tracked publication batch on a separate single-worker pool: a slow
 register/remove cannot hold the master, and the batch checks its deadline
@@ -93,10 +95,22 @@ the next cycle. Operation-write attempts invalidate it before I/O, including
 committed writes whose response is lost; withdrawal invalidates unused results.
 Malformed operation state types remain indeterminate rather than escaping the
 per-identity corruption fence.
+Generation receipt/selection values must likewise be objects or null, even
+when their recorded digest matches. A digest does not validate their shape.
+Canonical Windows JSON and metadata-hash readers use read/write/delete sharing,
+and their atomic writer uses native replacement of an existing target. A held
+inventory reader cannot deny selection publication and retire a ready process;
+the reader still rejects metadata that changes during its strict observation.
+An executor submission failure cancels admission before marking an exact
+unstarted operation superseded. A late queued callback then cannot execute.
+If execution already started, its separate future stays tracked and its durable
+outcome is retained, not relabelled as unstarted.
 Matching durable root selection pins must also be absent, including matching
 pins from another process-identity domain. Pin readback is non-mutating metadata
 inspection under the root lock and its deadline; a surviving pin keeps the
 operation unknown rather than authorizing cleanup or a duplicate launch.
+An interrupted launch with a managed process receipt and root pin but no local
+selection file withdraws that validated pin after confirmed retirement too.
 Restart identity readback and initial owner-token sampling use the receipt
 executor, never synchronous per-receipt process probes on the master. Owner
 sampling waits only for the remaining shared deadline; unfinished identity work

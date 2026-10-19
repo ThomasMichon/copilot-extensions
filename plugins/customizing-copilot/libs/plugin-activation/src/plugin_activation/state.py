@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 import logging
 import os
 import subprocess
@@ -11,7 +12,9 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from time import sleep
-from typing import Any
+from typing import Any, TextIO
+
+from .fileio import open_binary_shared, replace_shared as _replace_state
 
 RESTORE_RETRY_DELAY_S = 1.0
 
@@ -82,6 +85,10 @@ def _split_jsonc_header(raw: str) -> tuple[str, str]:
     return "".join(lines[:body_start]), "".join(lines[body_start:])
 
 
+def _open_state_text(path: Path) -> TextIO:
+    return io.TextIOWrapper(open_binary_shared(path), encoding="utf-8")
+
+
 def read_json_object(
     path: Path,
     *,
@@ -91,7 +98,8 @@ def read_json_object(
     if not path.exists():
         return "", {}
     try:
-        raw = path.read_text(encoding="utf-8")
+        with _open_state_text(path) as stream:
+            raw = stream.read()
         header, body = _split_jsonc_header(raw) if jsonc_header else ("", raw)
         value = json.loads(body, object_pairs_hook=_reject_duplicates)
     except (OSError, UnicodeError, json.JSONDecodeError, PluginStateError) as exc:
@@ -141,7 +149,7 @@ def write_json_object_atomic(
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temp_name, path)
+        _replace_state(temp_name, path)
     except BaseException:
         try:
             os.unlink(temp_name)

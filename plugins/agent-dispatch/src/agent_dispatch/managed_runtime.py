@@ -729,7 +729,9 @@ def _hash_regular_file(path: Path, *, description: str, deadline: float | None =
     if not stat.S_ISREG(before.st_mode):
         raise ManagedRuntimeError(f"{description} must be a regular file")
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    from plugin_activation.fileio import open_binary_shared
+
+    with open_binary_shared(path) as stream:
         opened = os.fstat(stream.fileno())
         if (
             opened.st_dev != before.st_dev

@@ -24,6 +24,15 @@ from plugin_activation import state
 IDENTITY = "optional-plugin@example-marketplace"
 
 
+def test_atomic_state_replace_preserves_an_open_reader_snapshot(tmp_path):
+    path = tmp_path / "state.json"
+    write_json_object_atomic(path, {"generation": "old"})
+    with state._open_state_text(path) as stream:
+        write_json_object_atomic(path, {"generation": "new"})
+        assert json.loads(stream.read()) == {"generation": "old"}
+    assert read_json_object(path) == ("", {"generation": "new"})
+
+
 def _write_state(tmp_path, user_value=..., inventory_enabled=None):
     home = tmp_path / ".copilot"
     home.mkdir()
@@ -207,7 +216,7 @@ def test_transient_restoration_reuses_original_snapshot_without_reinstall(
             raise subprocess.TimeoutExpired(argv, 1)
         return subprocess.CompletedProcess(argv, 0)
 
-    replace = state.os.replace
+    replace = state._replace_state
 
     def locked_once(source, destination):
         if destination == home / blocked_file:
@@ -219,7 +228,7 @@ def test_transient_restoration_reuses_original_snapshot_without_reinstall(
         return replace(source, destination)
 
     monkeypatch.setattr(subprocess, "run", install)
-    monkeypatch.setattr(state.os, "replace", locked_once)
+    monkeypatch.setattr(state, "_replace_state", locked_once)
     if command_timeout:
         with pytest.raises(subprocess.TimeoutExpired):
             run_install_preserving_activation(["copilot"], IDENTITY, home=home)
@@ -256,7 +265,7 @@ def test_restoration_contention_is_bounded_and_permission_is_terminal(
         error.winerror = code
         raise error
 
-    monkeypatch.setattr(state.os, "replace", locked)
+    monkeypatch.setattr(state, "_replace_state", locked)
     with pytest.raises(OSError, match="localized error"):
         restore(snapshot, home)
     assert len(writes) == attempts
@@ -320,7 +329,7 @@ def test_native_install_restores_after_a_transient_lock_without_replay(
         "(home/'config.json').write_text(json.dumps({'installedPlugins':["
         "{'name':sys.argv[3],'version':'2.0.0','enabled':True}]}))"
     )
-    replace, writes = state.os.replace, []
+    replace, writes = state._replace_state, []
     monkeypatch.setattr(state, "sleep", lambda seconds: None)
 
     def locked_once(source, destination):
@@ -332,7 +341,7 @@ def test_native_install_restores_after_a_transient_lock_without_replay(
                 raise error
         return replace(source, destination)
 
-    monkeypatch.setattr(state.os, "replace", locked_once)
+    monkeypatch.setattr(state, "_replace_state", locked_once)
     result = run_install_preserving_activation(
         [sys.executable, "-c", program, str(home), str(attempts), IDENTITY],
         IDENTITY, home=home, capture_output=True, text=True, timeout=10,

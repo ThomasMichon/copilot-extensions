@@ -1132,6 +1132,12 @@ keyword-only overlay selection while retaining synthetic receiving-side
 configuration; they never discover installed project or plugin registries.
 Both explicit overlay values also run in the required PR guard lane.
 
+The default headless-pool CLI case retains its original unparameterized node ID;
+explicit central/local authority cases have separate parametrized IDs. This
+keeps a current candidate compatible with an existing coverage selection while
+retaining all three real command contracts. Missing requested nodes still fail
+collection; they are not silently removed from the selection.
+
 Execution-space registry tests retain the supplied receiving configuration
 through the real YAML overlay reader and reject malformed registries. A fresh
 Python subprocess also exercises the machine getter's missing-registry path

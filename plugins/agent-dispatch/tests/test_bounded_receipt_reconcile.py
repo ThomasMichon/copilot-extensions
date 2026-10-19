@@ -105,6 +105,94 @@ def test_unmanaged_orphan_ignores_unrelated_malformed_transition_group(tmp_path,
     assert pin_checks and group.read_text(encoding="utf-8") == "{"
 
 
+def test_rejected_receipt_submission_after_shutdown_is_proven_unstarted(tmp_path, monkeypatch):
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    receipt = _receipt(controller)
+    persisted, release = threading.Event(), threading.Event()
+    retired = []
+    write = controller._write_operation
+
+    def held_write(rid, record):
+        write(rid, record)
+        if record["state"] == "pending" and not persisted.is_set():
+            persisted.set()
+            assert release.wait(3)
+
+    monkeypatch.setattr(controller, "_write_operation", held_write)
+    monkeypatch.setattr(controller, "_retire_receipt", lambda value, **kwargs: retired.append(value))
+    operations = ThreadPoolExecutor(max_workers=1)
+    with ThreadPoolExecutor(max_workers=1) as inventory:
+        future = inventory.submit(
+            controller.reconcile_receipts_bounded, set(), executor=operations, deadline=time.monotonic() + 2,
+        )
+        try:
+            assert persisted.wait(1)
+            operations.shutdown(wait=False, cancel_futures=True)
+            release.set()
+            assert future.result(1) == {"withdrawn"}
+            assert controller._operation_record("withdrawn")["state"] == "superseded"
+            assert controller._read_receipt("withdrawn") == receipt
+            assert retired == []
+        finally:
+            release.set()
+            operations.shutdown(wait=True)
+    with ThreadPoolExecutor(max_workers=1) as replacement:
+        controller.reconcile_receipts_bounded(set(), executor=replacement, deadline=time.monotonic() + 2)
+        controller._receipt_operations["withdrawn"].result(2)
+    assert retired == [receipt]
+    assert controller._operation_record("withdrawn")["state"] == "complete"
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_submission_error_cannot_supersede_started_work_or_admit_a_late_worker(tmp_path, monkeypatch, started):
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    receipt = _receipt(controller)
+    calls, queued = [], []
+    monkeypatch.setattr(controller, "_retire_receipt", lambda value, **kwargs: calls.append(value))
+
+    class BrokenSubmit:
+        def submit(self, function):
+            queued.append(function)
+            if started:
+                function()
+            raise RuntimeError("injected executor start failure")
+
+    controller.reconcile_receipts_bounded(
+        set(), executor=BrokenSubmit(), deadline=time.monotonic() + 2,
+    )
+    assert controller._operation_record("withdrawn")["state"] == ("complete" if started else "superseded")
+    if not started:
+        queued[0]()
+        assert calls == []
+        assert controller._read_receipt("withdrawn") == receipt
+    else:
+        assert calls == [receipt]
+
+
+def test_receipt_only_managed_generation_withdraws_its_validated_root_pin(tmp_path, monkeypatch):
+    h = RetentionHarness(tmp_path)
+    snapshot = h.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    h.retention.select(snapshot, h.state)
+    controller = DefaultCompanionController(h.state, retention=h.retention, token_source=lambda pid: "owner")
+    receipt = {
+        **_receipt(controller, rid), "fingerprint": snapshot.fingerprint,
+        "managed_snapshot": snapshot.to_dict(),
+    }
+    controller._receipt_path(rid).write_text(json.dumps(receipt), encoding="utf-8")
+    assert not controller._selection_path(rid).exists()
+    retired = []
+    monkeypatch.setattr(controller, "_retire_receipt", lambda value, **kwargs: retired.append(value))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+        controller._receipt_operations[rid].result(2)
+    assert retired == [receipt]
+    assert controller._operation_record(rid)["state"] == "complete"
+    assert h.record_paths("selections") == []
+    assert controller._read_receipt(rid) is None
+    assert snapshot.runtimes[0].cell.exists()
+
+
 def test_receipt_integrity_pending_does_not_block_unrelated_units(tmp_path, monkeypatch):
     entered, release = threading.Event(), threading.Event()
     harness = RetentionHarness(tmp_path)

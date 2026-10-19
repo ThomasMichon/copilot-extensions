@@ -226,6 +226,47 @@ def test_pending_managed_selection_cannot_cross_an_authority_boundary(monkeypatc
         daemon.shutdown()
 
 
+@pytest.mark.parametrize("observation", ["provider", "selection"])
+def test_authority_reversal_cannot_reuse_an_uncancellable_observation(monkeypatch, observation):
+    controller = FakeCompanionController()
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def read(*args, **kwargs):
+        calls.append(observation)
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(3)
+            return "stale"
+        return "fresh"
+
+    monkeypatch.setattr(
+        controller, "resolve" if observation == "provider" else "selected_managed", read, raising=False,
+    )
+    daemon = SupervisorDaemon(FakeClient([]), "host", companion_controller=controller)
+    invoke = (
+        (lambda authority: daemon._resolve_companion("unit", _companion_reg("unit"), authority))
+        if observation == "provider" else (lambda authority: daemon._selected_managed("unit", authority))
+    )
+    cache = daemon._resolution_futures if observation == "provider" else daemon._selection_futures
+    try:
+        for authority in ("A", "B", "A"):
+            daemon._reconcile_deadline = time.monotonic() + 0.01
+            with pytest.raises(CompanionIndeterminate, match="remains pending"):
+                invoke(authority)
+            assert entered.wait(1)
+        future = cache["unit"][1]
+        assert future in daemon._probe_inflight and not future.done()
+        release.set()
+        assert future.result(1) == "stale"
+        daemon._reconcile_deadline = time.monotonic() + 1
+        assert invoke("A") == "fresh"
+        assert calls == [observation, observation]
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
 def test_unreadable_process_receipt_is_sanitized_through_provider_logging(tmp_path, caplog):
     controller = DefaultCompanionController(tmp_path / "private-receipts")
     controller.receipt_dir.mkdir()

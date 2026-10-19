@@ -942,6 +942,62 @@ def test_cold_recovery_uses_the_bounded_accepted_selection_without_a_second_read
     assert reads == [h.rid]
 
 
+@pytest.mark.parametrize("stage", ["parse", "hash"])
+def test_inventory_reader_cannot_retire_a_ready_selection_publication(harness, monkeypatch, stage):
+    import threading
+    from contextlib import contextmanager
+    from concurrent.futures import ThreadPoolExecutor
+    from plugin_activation import fileio, state
+
+    h = harness
+    assert h.daemon.reconcile_once().started == [h.rid]
+    original = h.unit.companion_resolution.managed_snapshot
+    selection = h.controller._selection_path(h.rid)
+    entered, release = threading.Event(), threading.Event()
+    reader_thread = []
+    open_state = state._open_state_text if stage == "parse" else fileio.open_binary_shared
+
+    @contextmanager
+    def held_state(path):
+        with open_state(path) as stream:
+            if path == selection and threading.get_ident() in reader_thread:
+                entered.set()
+                assert release.wait(3)
+            yield stream
+
+    def inventory_read():
+        reader_thread.append(threading.get_ident())
+        return h.controller._receipt_metadata(selection)
+
+    monkeypatch.setattr(
+        state if stage == "parse" else fileio,
+        "_open_state_text" if stage == "parse" else "open_binary_shared", held_state,
+    )
+    wait_ready = h.controller._wait_ready
+    readers = []
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        def ready_then_read(resolution, process):
+            wait_ready(resolution, process)
+            readers.append(pool.submit(inventory_read))
+            assert entered.wait(1)
+
+        monkeypatch.setattr(h.controller, "_wait_ready", ready_then_read)
+        try:
+            h.change()
+            summary = h.daemon.reconcile_once()
+            assert summary.restarted == [h.rid]
+            assert summary.skipped == []
+            assert h.unit.proc.poll() is None
+        finally:
+            release.set()
+            assert readers
+            with pytest.raises(CompanionIndeterminate, match="metadata unavailable"):
+                readers[0].result(1)
+    current = h.unit.companion_resolution.managed_snapshot
+    assert current.fingerprint != original.fingerprint
+    assert h.controller.selected_managed(h.rid).fingerprint == current.fingerprint
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job ownership must be reacquired")
 def test_windows_recovery_preserves_receipt_until_retirement_is_confirmed(harness, monkeypatch):
     h = harness

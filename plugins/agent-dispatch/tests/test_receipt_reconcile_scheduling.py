@@ -100,7 +100,10 @@ def test_bounded_retirement_retains_unsupported_receipt(tmp_path, monkeypatch, v
         controller._assert_receipt_available("withdrawn")
 
 
-@pytest.mark.parametrize("corruption", ["receipt-json", "operation-json", "operation-digest", "unreadable"])
+@pytest.mark.parametrize("corruption", [
+    "receipt-json", "operation-json", "operation-digest", "unreadable",
+    "operation-receipt-list", "operation-selection-list",
+])
 def test_corrupt_metadata_fences_only_its_identity(tmp_path, monkeypatch, caplog, corruption):
     from agent_dispatch import companion_reconcile
     from agent_dispatch.managed_runtime import ManagedRuntimeError
@@ -111,7 +114,16 @@ def test_corrupt_metadata_fences_only_its_identity(tmp_path, monkeypatch, caplog
     path = controller._receipt_path("a")
     if corruption.startswith("operation"):
         path = controller._operation_path("a")
-    if corruption == "operation-digest":
+    if corruption.endswith("-list"):
+        from agent_dispatch.managed_runtime import _canonical_digest
+        from tests.test_bounded_receipt_reconcile import _unknown_operation
+
+        _unknown_operation(controller, "a")
+        record = controller._operation_record("a")
+        record["generation"][corruption.split("-")[1]] = []
+        record["generation_digest"] = _canonical_digest(record["generation"])
+        path.write_text(json.dumps(record), encoding="utf-8")
+    elif corruption == "operation-digest":
         path.write_text(json.dumps({
             "registration_id": "a", "schema_version": 1, "state": "unknown",
             "generation": {"receipt": None, "selection": None}, "generation_digest": "invalid",
@@ -130,6 +142,9 @@ def test_corrupt_metadata_fences_only_its_identity(tmp_path, monkeypatch, caplog
     monkeypatch.setattr(
         controller, "_retire_receipt", lambda receipt, **kwargs: retired.append(receipt["registration_id"]),
     )
+    if corruption.endswith("-list"):
+        with pytest.raises(CompanionIndeterminate, match="identity is invalid"):
+            controller._operation_record("a")
     with ThreadPoolExecutor(max_workers=2) as pool:
         for _ in range(3):
             controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)

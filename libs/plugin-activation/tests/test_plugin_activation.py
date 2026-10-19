@@ -14,6 +14,7 @@ from plugin_activation import (
     normalize_remote,
     resolve_active_plugins,
     resolver,
+    state,
 )
 
 
@@ -102,7 +103,9 @@ def _register_project(
         if repos_path.exists()
         else {"repos": {}}
     )
-    platform_key = "windows" if os.name == "nt" else "linux"
+    from plugin_activation._project_roots import _platform_key
+
+    platform_key = _platform_key()
     repos["repos"][name] = {
         platform_key: str(repo),
         "remote": remote,
@@ -453,14 +456,14 @@ def test_malformed_local_override_is_indeterminate(tmp_path):
 def test_unreadable_global_settings_is_indeterminate(tmp_path, monkeypatch):
     settings = tmp_path / ".copilot" / "settings.json"
     _write_json(settings, {"enabledPlugins": {"demo@local": True}})
-    original = Path.read_text
+    original = state._open_state_text
 
     def denied(path: Path, *args, **kwargs):
         if path == settings:
             raise PermissionError("denied")
         return original(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", denied)
+    monkeypatch.setattr(state, "_open_state_text", denied)
     report = resolve_active_plugins(home=tmp_path)
     assert report.authority is ScanAuthority.INDETERMINATE
     assert report.reconcile({"demo@local": _prior()})
@@ -783,14 +786,14 @@ def test_unreadable_installed_payload_is_advisory_when_all_scopes_are_local(
     _settings(repo, "local", "demo")
     installed = _installed(tmp_path, "local", "demo")
     manifest = installed / "plugin.json"
-    original = Path.read_text
+    original = state._open_state_text
 
     def denied(path: Path, *args, **kwargs):
         if path == manifest:
             raise PermissionError("denied")
         return original(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", denied)
+    monkeypatch.setattr(state, "_open_state_text", denied)
     report = resolve_active_plugins(home=tmp_path)
 
     assert report.active["demo@local"].root == local
@@ -812,14 +815,14 @@ def test_unreadable_installed_payload_is_indeterminate_when_fallback_is_needed(
     )
     installed = _installed(tmp_path, "catalog", "demo")
     manifest = installed / "plugin.json"
-    original = Path.read_text
+    original = state._open_state_text
 
     def denied(path: Path, *args, **kwargs):
         if path == manifest:
             raise PermissionError("denied")
         return original(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", denied)
+    monkeypatch.setattr(state, "_open_state_text", denied)
     report = resolve_active_plugins(home=tmp_path)
 
     assert "demo@catalog" not in report.active
@@ -843,14 +846,14 @@ def test_installed_payload_does_not_mask_unreadable_local_evidence(
     )
     _installed(tmp_path, "local", "demo")
     manifest = copilot / ".ai" / ".claude-plugin" / "marketplace.json"
-    original = Path.read_text
+    original = state._open_state_text
 
     def denied(path: Path, *args, **kwargs):
         if path == manifest:
             raise PermissionError("denied")
         return original(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", denied)
+    monkeypatch.setattr(state, "_open_state_text", denied)
     report = resolve_active_plugins(home=tmp_path)
     prior = _prior()
     assert report.authority is ScanAuthority.COMPLETE

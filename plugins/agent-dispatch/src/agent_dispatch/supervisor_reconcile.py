@@ -366,6 +366,7 @@ class BoundedReconciliation:
         if entry is not None and entry[0] != authority:
             entry[1].cancel()
             if not entry[1].done():
+                cache[rid] = (None, entry[1])
                 raise CompanionIndeterminate(f"prior {subject} remains pending")
             cache.pop(rid)
             entry = None

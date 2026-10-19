@@ -4659,8 +4659,16 @@ def test_cli_supervise_rejects_idle_nudge_exempt_label_not_watched(monkeypatch, 
     assert "every --idle-nudge-exempt-label must also be watched" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("authority,route", [(None, ""), ("central", " --shared"), ("local", " --local")])
-def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client, authority, route):
+def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client):
+    _assert_cli_supervise_pool_headless_fleet(monkeypatch, q, client, None, "")
+
+
+@pytest.mark.parametrize("authority,route", [("central", " --shared"), ("local", " --local")])
+def test_cli_supervise_pool_headless_forwards_explicit_authority(monkeypatch, q, client, authority, route):
+    _assert_cli_supervise_pool_headless_fleet(monkeypatch, q, client, authority, route)
+
+
+def _assert_cli_supervise_pool_headless_fleet(monkeypatch, q, client, authority, route):
     """--pool --headless constructs a headless FleetSpawner with the configured
     --headless-agent (the headless-fleet embodiment for a remote pool host)."""
     import types

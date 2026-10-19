@@ -512,7 +512,7 @@ class SupervisorDaemon(BoundedReconciliation):
             adopted = set(current) | managed_companions | (self._managed_uncertain & present)
             self._reconcile_companion_receipts(adopted)
         except (CompanionError, CompanionIndeterminate, OSError) as exc:
-            log.warning("companion receipt reconciliation is incomplete: %s", exc)
+            log.warning("companion receipt reconciliation is incomplete: error_type=%s", type(exc).__name__)
         self._companion_resolutions = current
 
     def _managed_runtime(self) -> RuntimeMaterializer:

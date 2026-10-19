@@ -9,6 +9,15 @@ activation:
 - activation snapshots and restoration around inventory bootstrap; and
 - duplicate-key, malformed-shape, and wrong-type rejection before mutation.
 
+Canonical readers retain their opened snapshot during atomic publication.
+On Windows they share read, write and delete access; replacing an existing file
+uses native `ReplaceFileW`, since delete sharing alone does not make
+`MoveFileEx` replacement of an open target succeed. First publication and POSIX
+replacement retain `os.replace`. Native replacement errors remain explicit,
+without retrying an uncertain write. Strict managed metadata consumers can use
+`plugin_activation.fileio.open_binary_shared` while retaining their own
+inode, link, size and before/after integrity checks.
+
 Activation restoration retries an explicit Windows sharing or lock violation
 (`winerror` 32 or 33) once after one second. It retains the original snapshot,
 re-reads current documents and preserves refreshed inventory and unrelated

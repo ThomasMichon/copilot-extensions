@@ -212,6 +212,7 @@ class ReceiptReconciliation:
             or record.get("state") not in {"pending", "timeout", "unknown", "complete", "superseded"}
             or not isinstance(record.get("generation"), dict)
             or set(record["generation"]) != {"receipt", "selection"}
+            or any(value is not None and not isinstance(value, dict) for value in record["generation"].values())
             or record.get("generation_digest") != _canonical_digest(record["generation"])
             or type(record.get("owner_pid")) is not int
             or record["owner_pid"] <= 0
@@ -438,7 +439,33 @@ class ReceiptReconciliation:
             "started_at": time.time(), "deadline": deadline, "observed_at": time.time(),
         }
         self._write_operation(rid, record)
-        self._receipt_operations[rid] = executor.submit(self._reconcile_receipt_generation, rid, record)
+        execution = Future()
+
+        def execute():
+            if not execution.set_running_or_notify_cancel():
+                return
+            try:
+                self._reconcile_receipt_generation(rid, record)
+            except BaseException as error:
+                execution.set_exception(error)
+                raise
+            else:
+                execution.set_result(None)
+
+        try:
+            future = executor.submit(execute)
+        except RuntimeError as exc:
+            if execution.cancel():
+                with self._receipt_metadata_lock(self._operation_path(rid)):
+                    current = self._operation_record(rid)
+                    if current == record:
+                        self._write_operation(rid, {
+                            **record, "state": "superseded", "observed_at": time.time(),
+                        })
+            else:
+                self._receipt_operations[rid] = execution
+            raise lifecycle.CompanionIndeterminate("receipt operation submission was rejected") from exc
+        self._receipt_operations[rid] = future
         self._receipt_last_scheduled = rid
         blocked.add(rid)
 
@@ -484,7 +511,7 @@ class ReceiptReconciliation:
                         raise lifecycle.CompanionIndeterminate("receipt deletion is not confirmed")
                 # Retirement may consume the execution budget; finish only exact metadata.
                 completion_deadline = self.monotonic() + 1
-                if generation["selection"] is not None:
+                if snapshot is not None:
                     self.forget_managed(
                         rid, _operation=operation, _validated=validated,
                         _deadline=completion_deadline,

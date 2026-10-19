@@ -131,6 +131,28 @@ def test_stopped_withdrawal_logs_only_error_type_and_retains_adopted_ids(monkeyp
         daemon.shutdown()
 
 
+@pytest.mark.parametrize("site", ["withdrawal", "poll"])
+def test_outer_receipt_observation_errors_do_not_expose_private_paths(monkeypatch, caplog, site):
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", launcher=FakeLauncher(),
+        companion_controller=FakeCompanionController(),
+    )
+
+    def unavailable(*args):
+        raise OSError("private/receipt/inventory")
+
+    monkeypatch.setattr(daemon, "_reconcile_companion_receipts", unavailable)
+    try:
+        if site == "withdrawal":
+            daemon._withdraw_stopped_managed({})
+        else:
+            daemon._resolve_companion_desired({})
+        assert "error_type=OSError" in caplog.text
+        assert "private/receipt/inventory" not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
 @pytest.mark.parametrize("withdraw", [False, True])
 def test_slow_publication_readback_survives_deadline_and_settles_unknown(monkeypatch, withdraw):
     from types import SimpleNamespace

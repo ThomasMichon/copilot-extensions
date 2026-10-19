@@ -2217,3 +2217,52 @@ requested contract.
   Existing native Windows subprocess/filesystem coverage remains distinct from
   the still-open native POSIX #7020 cause and production adoption. Fresh full
   resulting-head review and every required CI check remain merge gates.
+
+### 2026-10-19 - Close concurrent metadata and authority-reversal defects
+
+- Full predecessor review `5578395994` identifies concurrent receipt/selection
+  publication, submission rejection after a pending milestone, interrupted
+  receipt-only root-pin withdrawal and outer inventory logging. Current-head
+  review `5578499365` additionally identifies list-valued generation metadata
+  and A-to-B-to-A authority reversal. These are real blocking findings,
+  including the predecessor's body-only issues.
+- A native Windows held-reader control reproduces `WinError 5` during atomic
+  replacement. Read/write/delete sharing alone still fails with `os.replace`;
+  canonical shared readers plus native `ReplaceFileW` for an existing target
+  succeed. The same binary reader covers strict metadata hashing. Parser,
+  digest, inode and concurrent-change rejection remain intact. Actual managed
+  publication preserves its ready process with either a held parser or hash
+  reader; the stale reader reports indeterminate metadata.
+- The canonical plugin-activation library owns this portability seam. Its one
+  physical customizing-copilot source copy is synchronized; all eight consuming
+  plugins/standalone packages have patch changefiles, including the existing
+  Dispatch entry. Windows state, restoration, installed-inventory, permission,
+  bounded retry and native subprocess tests remain in force. Fault fixtures
+  inject at the explicit replacement/read boundary, not an unused platform API.
+  Project fixtures use the receiving platform's actual key, including WSL.
+- A submission error cancels the separate execution admission before recording
+  an exact unstarted generation as superseded. A callback queued before a late
+  submission failure cannot subsequently mutate. Already-started execution
+  remains tracked with its original durable outcome. Interrupted managed
+  process-receipt-only generations withdraw their previously validated root pin
+  after retirement; corrupt metadata or an unrelated pin is never accepted.
+- Operation generation receipt/selection values must be objects or null even
+  with a matching digest. A changed uncancellable observation loses its retained
+  authority immediately, so A-to-B-to-A cannot reuse the first result. Outer
+  receipt polling logs only the exception type, preserving the underlying cause.
+- Two natural current-head CI jobs fail before tests because the coverage
+  baseline names the prior unparameterized headless-pool CLI case. That real
+  default case now retains its exact node; the central/local cases remain
+  separately parameterized through the same assertions. No selection item,
+  coverage policy, threshold, guard, retry or deadline is removed.
+- Disjoint contained Dispatch cohorts pass 442 master/receipt/authority/catalog
+  cases, 205 managed/native/retention cases with three platform skips, and all
+  three CLI cases: 650 successful cases. The complete canonical shared library
+  passes 139 cases on native Windows and the same 139 on native Ubuntu/WSL.
+  Install contract, exact vendored-source sync, fatal lint and contribution
+  ceilings pass. Initial failing controls remain documented failures.
+- First state publication and native subprocess consumption run in fresh
+  test-owned directories. No installer/provisioning flow changes or system
+  installation are performed; a separate full installation clean-room run is
+  not claimed. Hosted current-head CI and a fresh full review remain required,
+  and #7020's independent native causal investigation remains unresolved.
