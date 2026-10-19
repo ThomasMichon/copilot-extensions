@@ -266,6 +266,23 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-19 - Fix the actual merged-hook inventory CI gate
+
+- Current-head full review returned no open issues, but runtime CI exposed a
+  customization-inventory regression when the PR's merge tree included #7160's
+  native bootstrap-admission wrapper. The scanner did not recognize that
+  output-free wrapper and misclassified the suite's session-start stack.
+- Extended only the static scanner's standard-wrapper proof: capture selector
+  output, require the bounded empty-output wrapper structure and recursively
+  verify its legacy delegate. No adoption hook, installation policy, runtime,
+  test expectation or CI requirement was changed or bypassed.
+- Both wrapper regressions failed before the fix. The full customization suite
+  then passed 527 tests in isolated Python 3.12 state, using test-private Git LF
+  settings with safe-CRLF checks retained. A separate static replay of the actual
+  committed hook/writer sources classified them output-free without executing
+  admission, installers or any service operation. New-head review and CI remain
+  required before merge.
+
 ### 2026-10-19 - Replay frozen readiness packets at the public boundary
 
 - Full review confirmed the three recovery corrections resolved, then found

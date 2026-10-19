@@ -32,6 +32,7 @@ SESSION_CONTEXT_ROLES = {
 OUTPUT_FREE_SESSION_START_MARKERS = (
     "write-session-guidance.",
     "bootstrap-check.",
+    "bootstrap-check-admission.",
     "hook_client.py",
     "register-",
 )
@@ -365,11 +366,63 @@ def _python_prints_only_to_stderr(text: str) -> bool:
     )
 
 
+def _bootstrap_admission_is_output_free(script: Path, text: str) -> bool:
+    """Prove the standard captured-selector wrapper and its legacy delegate."""
+    templates = {
+        ".sh": r"""
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! mode="$(bash "$here/payload-mode.sh")"; then
+    printf '{}'
+    exit 126
+fi
+if [[ "$mode" == legacy ]]; then exec bash "$here/bootstrap-check.sh"; fi
+[[ "$mode" == cell ]] || { printf '%s\n' 'Unknown native installation mode' >&2; exit 126; }
+printf '{}'
+""",
+        ".ps1": """
+$ErrorActionPreference = 'Stop'
+try {
+    $mode = & (Join-Path $PSScriptRoot 'payload-mode.ps1')
+} catch {
+    [Console]::Error.WriteLine("Bootstrap admission refused: $($_.Exception.Message)")
+    [Console]::Out.Write('{}')
+    exit 126
+}
+if ($mode -ceq 'legacy') {
+    & (Join-Path $PSScriptRoot 'bootstrap-check.ps1')
+    exit $LASTEXITCODE
+}
+if ($mode -cne 'cell') { throw 'Native installation admission returned an unknown mode' }
+[Console]::Out.Write('{}')
+""",
+    }
+    template = templates.get(script.suffix.lower())
+    if template is None:
+        return False
+    def statements(value: str) -> list[str]:
+        return [
+            stripped for line in value.splitlines()
+            if (stripped := _strip_inline_comment(line, marker="#").strip())
+        ]
+    if statements(text) != statements(template):
+        return False
+    nested = script.with_name("bootstrap-check" + script.suffix)
+    try:
+        if nested.resolve(strict=True).parent != script.parent.resolve():
+            return False
+    except OSError:
+        return False
+    return _script_has_output_free_contract(nested)
+
+
 def _script_has_output_free_contract(script: Path) -> bool:
     try:
         text = script.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
+    if script.stem == "bootstrap-check-admission":
+        return _bootstrap_admission_is_output_free(script, text)
     suffix = script.suffix.lower()
     if suffix == ".sh":
         if any(

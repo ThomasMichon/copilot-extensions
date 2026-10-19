@@ -500,9 +500,9 @@ without executing hooks. It reports plugin identities and these roles only:
 
 - **complete declared output-capable** — a complete declaration says the hook
   may emit context;
-- **proven output-free** — a complete `context: none` declaration or a
-  suite-standard exact-session writer/bootstrap/registration shape proves the
-  hook does not emit model context; and
+- **proven output-free** — a complete `context: none` declaration backed by
+  verified empty-output behavior, or a suite-standard exact-session
+  writer/bootstrap/registration shape proves the hook emits no model context; and
 - **legacy direct or unknown** — no complete declaration proves the hook
   output-free.
 
@@ -514,6 +514,12 @@ proven merge contract for that event and field. An unavailable external payload
 is a warning by itself, but joins collision detection when another possible
 output is present. Reports never include hook commands, contributor argv, or
 emitted context.
+
+The standard native bootstrap-admission wrapper is output-free only when its
+selector output is captured, its remaining branches match the empty-output
+contract, and the sibling legacy bootstrap independently passes the existing
+content proof. This check reads both scripts without running admission or
+installers; an unknown wrapper, extra output or unverified delegate stays unknown.
 
 The version-1 `sessionContext` declaration remains useful as static proof that a
 side-effect hook returns only `{}`. Existing output-capable declarations are
