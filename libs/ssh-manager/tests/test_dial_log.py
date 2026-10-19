@@ -186,6 +186,7 @@ def test_busy_native_lock_keeps_production_drop_deadline(monkeypatch):
         try:
             dial_log.record("busy-lock", kind="reconnect", outcome="ok", elapsed_s=0)
             assert not path.exists()
+            assert list(clock) == []
         finally:
             owner.seek(0)
             msvcrt.locking(owner.fileno(), msvcrt.LK_UNLCK, 1)
