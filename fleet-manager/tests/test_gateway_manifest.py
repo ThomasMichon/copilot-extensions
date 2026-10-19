@@ -369,7 +369,8 @@ def test_sixteen_routes_per_slot(document: dict[str, Any]) -> None:
     b"", b"{", b"null", b"[]", b"{}", b'{"revision":1,"revision":2}',
     b'{"nested":{"key":1,"key":2}}', b'{"x":NaN}', b'{"x":Infinity}',
     b'{"x":-Infinity}', b'{"x":1e999}', b'{"x":"\\ud800"}', b"\xff",
-    b"[" * 20 + b"0" + b"]" * 20, b" " * (planning.MAX_BYTES + 1),
+    b"[" * 20 + b"0" + b"]" * 20,
+    pytest.param(b" " * (planning.MAX_BYTES + 1), id="oversized-json"),
 ])
 def test_strict_json_failures(raw: bytes) -> None:
     with pytest.raises(ManifestError):
