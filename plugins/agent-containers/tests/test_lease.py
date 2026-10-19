@@ -700,9 +700,11 @@ def test_unconfirmed_action_hold_survives_owner_exit_until_expiry(fleet):
 
 def test_lease_lock_cleanup_never_unlinks_new_owner(fleet):
     with lease_mod._lease_lock():
-        lease_mod._LOCK_FILE.write_text("replacement-owner", encoding="ascii")
+        kernel = lease_mod._LOCK_FILE / "kernel.lock"
+        kernel.write_text("replacement-owner", encoding="ascii")
 
-    assert lease_mod._LOCK_FILE.read_text(encoding="ascii") == "replacement-owner"
+    assert lease_mod._LOCK_FILE.is_dir()
+    assert kernel.read_text(encoding="ascii") == "replacement-owner"
 
 
 def test_corrupt_hold_is_observable_but_admission_stays_closed(fleet):

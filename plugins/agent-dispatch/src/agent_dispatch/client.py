@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import httpx
+from .client_cleanup_recovery import CleanupRecoveryClientMixin
 from .client_completion_review import CompletionReviewMixin
 from .client_categories import CategoryClientMixin
 from .client_errors import DispatchError, DispatchUpgradeRequired  # noqa: F401 -- public re-exports
@@ -25,7 +26,9 @@ from .client_suspend import SuspendClientMixin
 from .client_transport import make_http_client
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
-class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+
+
+class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -218,6 +221,19 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
         return self._unwrap(
             self._http.post(f"/tasks/{task_id}/start", json=body)
         )
+
+    def task_grant(
+        self, task_id: str, worker_id: str, owner_session_id: str,
+        *, expected_generation: int, expected_epoch: int,
+    ) -> dict:
+        """Issue or renew a grant without changing the task's ownership or lease."""
+        return self._unwrap(self._http.post(
+            f"/tasks/{task_id}/task-grant", headers=self._control_headers(),
+            json={
+                "worker_id": worker_id, "owner_session_id": owner_session_id,
+                "expected_generation": expected_generation, "expected_epoch": expected_epoch,
+            },
+        ))
 
     def yield_task(
         self, task_id: str, worker_id: str, *, note: str | None = None,
@@ -412,6 +428,14 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
             self._http.post(f"/tasks/{task_id}/heartbeat", json={"worker_id": worker_id})
         )
 
+    def scoped_heartbeat(self, task_id: str, worker_id: str, task_token: str) -> dict:
+        from .task_scope import TASK_SCOPE_HEADER
+
+        return self._unwrap(self._http.post(
+            f"/tasks/{task_id}/heartbeat", json={"worker_id": worker_id},
+            headers={TASK_SCOPE_HEADER: task_token},
+        ))
+
     def set_activity(
         self, task_id: str, activity: str | None, *, reservation_key: str,
         observed_at: float | None = None,
@@ -570,7 +594,28 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
         claim-plane discovery read."""
         return self._unwrap(self._http.get("/directory/coordinator"))
 
+    def directory_fencing_epoch(self) -> int:
+        """Read the authority's retained floor, never infer it from live presence."""
+        try:
+            result = self._unwrap(self._http.get("/directory/fencing-epoch"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise DispatchError(
+                502, "coordinator returned an invalid retained fencing epoch",
+            ) from exc
+        if (
+            not isinstance(result, dict) or type(result.get("epoch")) is not int
+            or not 0 <= result["epoch"] < 2**63
+        ):
+            raise DispatchError(502, "coordinator returned an invalid retained fencing epoch")
+        return result["epoch"]
+
     # -- spawn reservations --------------------------------------------------
+
+    def record_restricted_delivery(self, key: str, info: dict) -> dict:
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/restricted-delivery",
+            json=info, headers=self._control_headers(),
+        ))
 
     def reserve_spawn(
         self, task_id: str, *, reserved_by: str | None = None,
@@ -721,11 +766,6 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
             )
         )
 
-    def defer_spawn(self, key: str, *, detail: str | None = None) -> dict:
-        return self._unwrap(
-            self._http.post(f"/spawn-reservations/{key}/defer", json={"detail": detail})
-        )
-
     def request_spawn_release(
         self, key: str, *, detail: str | None = None,
         disposition: str = "failed", session_handle: str | None = None,
@@ -766,46 +806,6 @@ class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClien
             self._http.post(
                 f"/spawn-reservations/{key}/cold",
                 json={"release_exclusive": release_exclusive},
-            )
-        )
-
-    def record_spawn_conclusion(
-        self,
-        key: str,
-        *,
-        conclusion_state: str,
-        conclusion_detail: str,
-        detail: str | None = None,
-        claim_token: str | None = None,
-    ) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/conclusion",
-                json={
-                    "conclusion_state": conclusion_state,
-                    "conclusion_detail": conclusion_detail,
-                    "detail": detail,
-                    "claim_token": claim_token,
-                },
-            )
-        )
-
-    def claim_spawn_conclusion_retry(self, key: str) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/conclusion/claim",
-            )
-        )
-
-    def validate_spawn_conclusion_claim(
-        self,
-        key: str,
-        claim_token: str,
-    ) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/conclusion/validate",
-                json={"claim_token": claim_token},
             )
         )
 

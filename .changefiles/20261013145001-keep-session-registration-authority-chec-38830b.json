@@ -1,9 +1,0 @@
-{
-  "comment": "Avoid full project configuration resolution during session registration",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -41,6 +41,11 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     _git(["init", "-q", "-b", "main"], root)
+    _git(["config", "user.name", "Test"], root)
+    _git(["config", "user.email", "t@example.com"], root)
+    _git(["config", "commit.gpgsign", "false"], root)
+    _git(["config", "tag.gpgsign", "false"], root)
+    _git(["config", "core.autocrlf", "false"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)
@@ -132,6 +137,27 @@ def test_revert_finds_the_promotion_commit_even_through_a_pause_on_top(repo: Pat
 
     result = rb.revert(repo=repo, main_ref="main", reason="test", push=False)
     assert result["reverted_commit"] == promotion["commit"]
+
+
+@pytest.mark.parametrize("receipt", ["missing", "wrong-source"])
+def test_missing_latest_source_receipt_never_selects_an_older_release(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, receipt: str,
+) -> None:
+    first = _promote_one(repo, content="first release\n")
+    second = _promote_one(repo, content="second release\n")
+    _git(["tag", "-d", second["tag"]], repo)
+    if receipt == "wrong-source":
+        _git(["tag", second["tag"], first["commit"]], repo)
+    before = _git(["rev-parse", "main"], repo)
+
+    def forbidden(*args: object, **kwargs: object) -> str:
+        pytest.fail("an unrecognized latest landing must not prepare a rollback tree")
+
+    monkeypatch.setattr(rb, "_tree_with_state_overlay", forbidden)
+    with pytest.raises(pr.PromotionError, match="latest source release has no matching landing receipt"):
+        rb.revert(repo=repo, main_ref="main", reason="fixture only", push=False)
+    assert _git(["rev-parse", "main"], repo) == before
+    assert not _git(["tag", "--list", "rollback-*"], repo)
 
 
 def test_revert_refuses_when_no_promotion_commit_exists_in_history(repo: Path):

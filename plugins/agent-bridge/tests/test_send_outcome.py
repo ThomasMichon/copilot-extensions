@@ -159,7 +159,8 @@ def _run(monkeypatch, capsys, client, **kw):
 def test_live_delivery_reports_its_mode_and_keeps_the_existing_keys(monkeypatch, capsys, delivery, outcome):
     code, out, _ = _run(monkeypatch, capsys, _LiveClient(), delivery=delivery)
     assert code == 0
-    assert out["outcome"] == outcome and out["delivered"] is True and out["message_id"] == 7
+    assert out["outcome"] == outcome and out["delivered"] is None and out["message_id"] == 7
+    assert out["accepted"] is True  # legacy daemon has no delivery evidence
 
 
 def test_live_duplicate_is_accepted(monkeypatch, capsys):

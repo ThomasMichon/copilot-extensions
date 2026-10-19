@@ -192,6 +192,40 @@ Implemented for
   PR body either (see the marker gap below) -- both of this skill's normal
   paths come up empty even though the PR is genuine and well-attributed.
 
+### Fallback via commit trailers: reading the PR's own git history
+
+Before reaching for the raw session-state search below (which needs local
+access to the originating machine), check whether the PR's own commits
+already carry attribution -- this works from nothing but read access to the
+PR's branch, even across machines you can't SSH into at all:
+
+```
+git fetch origin <pr-branch>
+git log --format="%H%n%an <%ae>%n%b%n---" origin/<pr-branch> -N
+```
+
+Read each non-empty commit's trailers and committer identity:
+
+- **`Copilot-Session: <uuid>`** -- the originating session id. Multiple
+  commits sharing the same session id confirms they came from one
+  continuous drive, not several independent authors stitching commits
+  together.
+- **Committer email** -- often carries an environment-specific suffix (a
+  distinct local part, subdomain, or tag) that hints at *which fleet/cell*
+  authored it even when the worktree record, codename marker, and local
+  session search all come up empty. Confirmed live: a PR with a fully
+  pruned worktree record and no codename marker was still correctly traced
+  to a different operator's own cloud-codespace fleet purely from its
+  commits' committer-email suffix, resolving what had looked like an
+  orphaned PR.
+
+This is weaker than a codename match or a live `claimant-liveness` check --
+it's circumstantial identity evidence, not a cryptographic proof of
+ownership -- but it is the most durable fallback available: it survives
+local claim-store pruning, a missing codename marker, *and* having no
+access whatsoever to the originating machine's session state, since it
+only needs read access to the PR's own branch history.
+
 ### Fallback when the claim graph has nothing: raw session-state search
 
 When `claims find pr` returns no match and the PR carries no codename

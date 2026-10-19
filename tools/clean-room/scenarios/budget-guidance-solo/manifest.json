@@ -1,0 +1,35 @@
+{
+  "name": "budget-guidance-solo",
+  "description": "Credential-free first-use installation and offline posture/extension contracts from an exact local source snapshot; requires Python 3.10+ and Node.js 20+.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": ["bash", "python3", "uv", "node", "timeout", "sha256sum", "mktemp", "cut", "cat", "dirname", "grep", "rm"],
+    "provisioned_by_flow": []
+  },
+  "auth": { "copilot": "none", "gh": "none", "ado": "none" },
+  "base": "standalone-without-siblings",
+  "validates": [
+    "Stamping creates a self-contained payload without provisioning the runtime.",
+    "The first binstub use provisions after the original source copy is removed.",
+    "Installed source/version identity, unavailable posture, and synthetic static posture are preserved.",
+    "The installed snapshot's extension passes candidate-owned SDK fixtures without a live session or credentials."
+  ],
+  "config": {
+    "CR_HARNESS_MOUNT": "read-only local candidate checkout supplied with --harness-mount",
+    "CR_UV_INDEX": "explicit optional governed dependency feed"
+  },
+  "expected_artifacts": [
+    "~/.budget-guidance/payload-dir",
+    "~/.budget-guidance/versions/<version>",
+    "~/.local/bin/budget-guidance"
+  ],
+  "stages": [
+    { "n": 0, "title": "fresh credential-free environment and candidate source" },
+    { "n": 1, "title": "stamp a self-contained payload snapshot" },
+    { "n": 2, "title": "first-use provision after removing the original copy" },
+    { "n": 3, "title": "installed identity and offline posture" },
+    { "n": 4, "title": "isolated foreground extension contract" }
+  ]
+}

@@ -53,6 +53,7 @@ def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
         config_authority, "load_project_authority_config",
         lambda name, **_kwargs: config,
     )
+    monkeypatch.setattr(cfg, "load_project_config", lambda name, **_kwargs: config)
     path = tmp_tracking_dir / "wt-reg.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-reg", branch="worktree/wt-reg", worktree_path="/tmp/wt-reg",
@@ -79,6 +80,329 @@ def test_apply_session_register_creates_a_new_session_entry(record_path):
     assert result == {"ok": True, "linked_handoff": None}
     record = tracking.load_record(record_path)
     assert record.session_entry("sess-1") is not None
+
+
+def test_source_bound_bind_is_idempotent_but_new_source_opens_interval(record_path):
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "bind", "started_at": "first",
+        "source_identity": "native:first",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "started_at": "repeat",
+    })["ok"]
+    entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert len(entry.activations) == 1
+    assert entry.activations[0].source_identity == "native:first"
+
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:replacement",
+    })["ok"]
+    entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert len(entry.activations) == 2
+    assert entry.activations[0].end_source == "inferred:next-start"
+    assert entry.activations[1].source_identity == "native:replacement"
+
+    before = record_path.read_bytes()
+    result = tracking_session_registration_write.apply_session_register(args)
+    assert result["error"] == "lifecycle"
+    assert record_path.read_bytes() == before
+    result = tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": None,
+    })
+    assert result["error"] == "lifecycle"
+    assert record_path.read_bytes() == before
+
+
+def test_source_registration_reactivates_claim_after_old_end(record_path):
+    from agent_worktrees import obligations, tracking_session_deregistration_write
+
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "hook", "started_at": "first",
+        "source_identity": "native:first",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    result = tracking_session_deregistration_write.apply_session_deregister({
+        **args, "ended_at": "exit", "end_reason": "user_exit",
+    })
+    assert result["lifecycle"] == "ended"
+    record = tracking.load_record(record_path)
+    ref = tracking.format_claim_ref(
+        record.machine, record.repo, record.worktree_id, session="sess-1",
+    )
+    assert next(item for item in record.resources if item.ref == ref).state == obligations.RELEASED
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "started_at": "replacement", "source_identity": "native:replacement",
+    })["ok"]
+    record = tracking.load_record(record_path)
+    assert record.session_entry("sess-1").ended_at is None
+    assert next(item for item in record.resources if item.ref == ref).state == obligations.ACTIVE
+
+
+def test_delayed_duplicate_start_does_not_reactivate_ended_claim(record_path):
+    from agent_worktrees import obligations, tracking_session_deregistration_write
+
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-1",
+        "source": "hook:new", "started_at": "first", "source_identity": "native:first",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    assert tracking_session_deregistration_write.apply_session_deregister({
+        **args, "ended_at": "exit", "end_reason": "user_exit",
+    })["lifecycle"] == "ended"
+    before = record_path.read_bytes()
+    assert tracking_session_registration_write.apply_session_register(args)["lifecycle"] == "duplicate"
+    assert record_path.read_bytes() == before
+    record = tracking.load_record(record_path)
+    assert all(item.state == obligations.RELEASED for item in record.resources)
+
+
+def test_reused_physical_source_ambiguity_survives_history_pruning(record_path, monkeypatch):
+    from agent_worktrees import tracking_session_deregistration_write
+
+    monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 1)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "hook:resume", "started_at": "first",
+        "source_identity": "native:physical",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "started_at": "second",
+    })["ok"]
+    entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert len(entry.activations) == 1
+    assert entry.activations[0].ordinal == 2
+    assert entry.activations[0].source_ambiguous is True
+    before = record_path.read_bytes()
+    result = tracking_session_deregistration_write.apply_session_deregister({
+        **args, "end_reason": "user_exit",
+    })
+    assert result["lifecycle"] == "unconfirmed"
+    assert record_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("timestamp", [None, "not-a-timestamp", True])
+def test_uncertain_start_replay_cannot_reacquire_released_claim(record_path, timestamp):
+    from agent_worktrees import __main__ as main, obligations, tracking_session_deregistration_write
+
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-1",
+        "source": "hook:new", "started_at": main._hook_event_timestamp({"timestamp": timestamp}),
+        "source_identity": "native:original",
+    }
+    assert args["started_at"] is None
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    assert tracking_session_deregistration_write.apply_session_deregister({
+        **args, "ended_at": "2026-10-19T10:00:00", "end_reason": "user_exit",
+    })["lifecycle"] == "ended"
+    before = record_path.read_bytes()
+    replay = tracking_session_registration_write.apply_session_register(args)
+    assert replay.get("error") == "lifecycle"
+    assert "timestamp" in replay["message"]
+    assert record_path.read_bytes() == before
+    record = tracking.load_record(record_path)
+    assert len(record.sessions[0].activations) == 1
+    assert record.sessions[0].ended_at == "2026-10-19T10:00:00"
+    assert all(claim.state == obligations.RELEASED for claim in record.resources)
+
+
+def test_timestamped_same_source_logical_resume_remains_explicitly_ambiguous(record_path):
+    from agent_worktrees import obligations, tracking_session_deregistration_write
+
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-1",
+        "source": "hook:resume", "started_at": "2026-10-19T10:00:00",
+        "source_identity": "native:physical",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    assert tracking_session_deregistration_write.apply_session_deregister({
+        **args, "ended_at": "2026-10-19T11:00:00", "end_reason": "user_exit",
+    })["lifecycle"] == "ended"
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "started_at": "2026-10-19T12:00:00",
+    })["ok"]
+    record = tracking.load_record(record_path)
+    assert record.sessions[0].ended_at is None
+    assert all(item.source_ambiguous for item in record.sessions[0].activations)
+    assert all(claim.state == obligations.ACTIVE for claim in record.resources)
+
+
+def test_source_changing_linked_handoff_advances_revision_and_survives_stale_save(record_path):
+    assert tracking_session_registration_write.apply_session_register({
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "old", "source_identity": "native:old",
+    })["ok"]
+    record = tracking.load_record(record_path)
+    tracking.open_handoff(record, "old", "token", save=False)
+    tracking.save_record(record, record_path)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-1",
+        "source": "bind", "handoff_token": "token", "source_identity": "native:first",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["linked_handoff"] is not None
+    stale = tracking.load_record(record_path)
+    result = tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:replacement",
+    })
+    assert result["ok"] and result["linked_handoff"] is None
+    current = tracking.load_record(record_path)
+    assert current.lifecycle_revision > stale.lifecycle_revision
+    assert current.sessions[-1].activations[-1].source_identity == "native:replacement"
+    tracking.save_record(stale, record_path)
+    retained = tracking.load_record(record_path)
+    assert retained.sessions[-1].activations[-1].source_identity == "native:replacement"
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:replacement",
+    })["ok"]
+    assert tracking.load_record(record_path).lifecycle_revision == retained.lifecycle_revision
+
+
+def test_pruned_physical_source_cannot_regain_unambiguous_end_authority(record_path, monkeypatch):
+    from agent_worktrees import obligations, tracking_session_deregistration_write
+
+    monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 2)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "hook:resume",
+    }
+    for source, timestamp in (
+        ("native:A", "2026-10-19T10:00:00"), ("native:A", "2026-10-19T11:00:00"),
+        ("native:B", "2026-10-19T12:00:00"), ("native:B", "2026-10-19T13:00:00"),
+    ):
+        assert tracking_session_registration_write.apply_session_register({
+            **args, "source_identity": source, "started_at": timestamp,
+        })["ok"]
+    record = tracking.load_record(record_path)
+    assert len(record.sessions[0].activations) == 2
+    assert all(item.source_identity == "native:B" for item in record.sessions[0].activations)
+    replay = tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:A", "started_at": "2026-10-19T14:00:00",
+        "source": "bind",
+    })
+    assert replay.get("ok") or replay.get("error") == "lifecycle"
+    stops = []
+    monkeypatch.setattr(tracking_session_deregistration_write, "stop_fsmonitor_daemon", stops.append)
+    old_end = tracking_session_deregistration_write.apply_session_deregister({
+        **args, "source_identity": "native:A", "ended_at": "old-A-exit",
+        "end_reason": "user_exit",
+    })
+    assert old_end["lifecycle"] == "unconfirmed"
+    current = tracking.load_record(record_path)
+    assert current.sessions[0].ended_at is None
+    assert current.sessions[0].activations[-1].ended_at is None
+    assert all(claim.state == obligations.ACTIVE for claim in current.resources)
+    assert stops == []
+
+
+@pytest.mark.parametrize("equal_revision", [False, True])
+def test_pruning_fence_roundtrips_and_survives_stale_save(
+    record_path, monkeypatch, equal_revision,
+):
+    monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 1)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "bind", "source_identity": "native:A",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    stale = tracking.load_record(record_path)
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:B",
+    })["ok"]
+    current = tracking.load_record(record_path)
+    assert current.sessions[0].pruned_sources == ["native:A"]
+    if equal_revision:
+        stale.lifecycle_revision = current.lifecycle_revision
+    tracking.save_record(stale, record_path)
+    saved = tracking.load_record(record_path)
+    assert "native:A" in saved.sessions[0].pruned_sources
+    if equal_revision:
+        assert "native:B" in saved.sessions[0].pruned_sources
+    from agent_worktrees.tracking_session_activations import source_end_authoritative
+    assert not source_end_authoritative(saved.sessions[0], "native:A")
+
+
+def test_pruning_source_budget_saturates_stickily_and_refuses_before_claim(
+    record_path, monkeypatch,
+):
+    from agent_worktrees import tracking_session_activations as history
+    from agent_worktrees import tracking_session_deregistration_write
+
+    monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 1)
+    monkeypatch.setattr(history, "MAX_PRUNED_SOURCES", 2)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "bind",
+    }
+    for source in ("A", "B", "C", "D"):
+        assert tracking_session_registration_write.apply_session_register({
+            **args, "source_identity": source,
+        })["ok"]
+    current = tracking.load_record(record_path)
+    assert len(current.sessions[0].pruned_sources) == 2
+    assert current.sessions[0].source_history_saturated is True
+    stale = tracking.load_record(record_path)
+    stale.sessions[0].source_history_saturated = False
+    stale.sessions[0].pruned_sources = []
+    tracking.save_record(stale, record_path)
+    assert tracking.load_record(record_path).sessions[0].source_history_saturated is True
+    before = record_path.read_bytes()
+    for source in ("A", "D", "E", None):
+        assert tracking_session_registration_write.apply_session_register({
+            **args, "source_identity": source,
+        })["error"] == "lifecycle"
+        assert record_path.read_bytes() == before
+        assert tracking_session_deregistration_write.apply_session_deregister({
+            **args, "source_identity": source, "end_reason": "user_exit",
+        })["lifecycle"] == "unconfirmed"
+        assert record_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("metadata", [
+    {"pruned_sources": "source"}, {"pruned_sources": ["source", "source"]},
+    {"pruned_sources": [None]}, {"pruned_sources": [True]},
+    {"source_history_saturated": 1}, {"source_history_saturated": "true"},
+])
+def test_invalid_pruning_fence_is_rejected(metadata):
+    from agent_worktrees.tracking_session_activations import parse_pruning_fence
+    with pytest.raises(ValueError):
+        parse_pruning_fence(metadata)
+
+
+@pytest.mark.parametrize("source_identity", [None, "native:replacement"])
+def test_v2_daemon_cannot_downgrade_registration(
+    record_path, monkeypatch, monkeypatch_config, source_identity,
+):
+    from agent_worktrees import locks, status_monitor_runtime
+
+    assert tracking_session_registration_write.apply_session_register({
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source_identity": "native:original",
+    })["ok"]
+    requests = []
+    server = tracking_write.start_server(
+        lambda kind, payload: requests.append(payload) or {"ok": True},
+    )
+    server.start()
+    try:
+        fields = tracking_write.rendezvous_fields(server)
+        fields["tracking_write_verb_versions"]["session_register"] = 2
+        monkeypatch.setattr(locks, "read_lock", lambda path: fields)
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+        if source_identity is None:
+            before = record_path.read_bytes()
+            with pytest.raises(tracking.SessionLifecycleError, match="source"):
+                tracking.register_session("wt-reg", "sess-1")
+            assert record_path.read_bytes() == before
+        else:
+            tracking.register_session("wt-reg", "sess-1", source_identity=source_identity)
+            entry = tracking.load_record(record_path).session_entry("sess-1")
+            assert entry.activations[-1].source_identity == source_identity
+        assert requests == []
+    finally:
+        server.close()
 
 
 def test_apply_session_register_new_session_branch_feeds_claim_history(

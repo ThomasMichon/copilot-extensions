@@ -901,6 +901,7 @@ def scan_registrar_registry(
     *,
     previous: Mapping[str, RegistrarCandidate] | None = None,
     activation_report: ActivationReport | None = None,
+    activation_source: Callable[[], ActivationReport] | None = None,
 ) -> RegistrarRegistryReport:
     """Scan and reconcile attributed plugin registrar candidates."""
     root = Path(directory) if directory is not None else registrar_dropins_dir()
@@ -911,16 +912,14 @@ def scan_registrar_registry(
     def current_activation() -> ActivationReport:
         nonlocal resolved_activation
         if resolved_activation is None:
-            resolved_activation = resolve_active_plugins()
+            resolved_activation = (activation_source or resolve_active_plugins)()
         return resolved_activation
 
     snapshot = scan_directory(
         root,
         lambda path: _classify_manifest(
-            path,
-            current_activation,
-            prior.get(str(path)),
-            observed_sources,
+            path, current_activation,
+            prior.get(str(path)), observed_sources,
         ),
         registry=REGISTRY_NAME,
         suffixes=(".json",),

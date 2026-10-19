@@ -16,9 +16,12 @@ from typing import TYPE_CHECKING, Any, Iterator
 import yaml
 
 from .client_session_start import SessionStartClientMixin
+from .client_answers import AnswerClientMixin
 from .client_cli_mode import CliModeClientMixin
+from .client_live_results import LiveResultsClientMixin
 from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
+from .client_worktrees import InventoryClientMixin
 if TYPE_CHECKING:
     from collections.abc import Callable
 DEFAULT_RESTART_GRACE = 30.0
@@ -145,7 +148,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin):
+class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixin, LiveResultsClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -313,6 +316,7 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         *,
         params: dict[str, Any] | list[tuple[str, Any]] | None = None,
         request_timeout: float | None = None,
+        allow_retry: bool = True,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
         data = json.dumps(body).encode() if body else None
@@ -377,7 +381,9 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
                 except Exception:
                     detail = str(exc)
                 detail_text = str(detail).lower()
-                if exc.code == 503 and any(w in detail_text for w in ("initializing", "merging")):
+                if allow_retry and exc.code == 503 and any(
+                    w in detail_text for w in ("initializing", "merging")
+                ):
                     if readiness_deadline is None:
                         readiness_deadline = (
                             _time.monotonic() + self._connect_grace
@@ -397,7 +403,7 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
                 # unhandled BridgeClientError here previously escaped as a raw
                 # traceback from CLI commands like `create` that do not wrap
                 # every internal call in their own try/except).
-                if exc.code == 503 and "draining" in detail_text:
+                if allow_retry and exc.code == 503 and "draining" in detail_text:
                     if drain_deadline is None:
                         drain_deadline = _time.monotonic() + self._connect_grace
                         backoff = 0.25
@@ -414,7 +420,7 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
                 # daemon that adopted the session. Follow discovery immediately,
                 # then keep checking within the same bounded restart grace.
                 session_resource = path.startswith("/api/v1/sessions/")
-                if exc.code == 404 and session_resource and self._reresolve is not None:
+                if allow_retry and exc.code == 404 and session_resource and self._reresolve is not None:
                     if session_deadline is None:
                         session_deadline = (
                             _time.monotonic() + self._session_settle_grace
@@ -441,6 +447,10 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
                     raise BridgeConnectionError(
                         f"Connection to agent-bridge at {self._base} reset "
                         f"during non-idempotent {method}; request was not retried"
+                    ) from exc
+                if not allow_retry:
+                    raise BridgeConnectionError(
+                        f"Cannot connect to agent-bridge at {self._base}: {exc}"
                     ) from exc
                 if self._outage_deadline is None:
                     self._outage_deadline = (
@@ -573,7 +583,7 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
                 self._daemon_proto = (UNVERSIONED, UNVERSIONED)
         return self._daemon_proto
 
-    def daemon_supports(self, min_version: int) -> bool:
+    def daemon_supports(self, min_version: int, *, refresh: bool = False) -> bool:
         """Whether the live daemon speaks at least HTTP protocol ``min_version``.
 
         The capability gate for a client **newer** than the daemon it calls:
@@ -581,8 +591,11 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         and fall back gracefully when it is ``False``, instead of blind-sending a
         request an older daemon will ignore or reject (dotfiles #632). An
         unreachable or unversioned daemon reports version ``0`` → ``False``.
+        ``refresh`` rechecks a possibly replaced daemon before rejecting a feature.
         """
-        version, _min_supported = self.daemon_protocol()
+        version, _min_supported = (
+            self.daemon_protocol(refresh=True) if refresh else self.daemon_protocol()
+        )
         return version >= min_version
 
     def assert_client_supported(self) -> None:
@@ -655,21 +668,6 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
             path += "?include_unaddressable=true"
         return self._request("GET", path) or {}
 
-    def list_machines(self) -> list[dict[str, Any]]:
-        """GET /api/v1/machines"""
-        machines, _errors = self.list_machines_with_diagnostics()
-        return machines
-
-    def list_machines_with_diagnostics(
-        self,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
-        """GET /api/v1/machines, including invalid-topology diagnostics."""
-        resp = self._request("GET", "/api/v1/machines")
-        if not resp:
-            return [], []
-        errors = [str(e) for e in resp.get("topology_errors", [])]
-        return resp.get("machines", []), errors
-
     def list_sessions(self, *, status: str | None = None) -> list[dict[str, Any]]:
         """GET /api/v1/sessions"""
         params = {"status": status} if status else None
@@ -734,9 +732,12 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
 
     def resolve_live_result_target(self, handle: str) -> dict[str, Any]:
         """Resolve a represented live or wedged target for result inspection."""
+        from .client_protocol_floor import protocol_floored_request
+        from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
+
         self._require_represented_result_snapshots()
         try:
-            return self._request(
+            return protocol_floored_request(self, REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)(
                 "GET",
                 "/api/v1/live-sessions/result-target",
                 params={"handle": handle},
@@ -774,14 +775,25 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
             payload["idempotency_key"] = idempotency_key
         if expected_session_id:
             payload["expected_session_id"] = expected_session_id
+        request = self._request
         request_timeout = None
         if wait:
+            from .client_protocol_floor import protocol_floored_request
+            from .live_message_models import validate_live_reply_timeout
+            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+
+            try:
+                seconds = validate_live_reply_timeout(wait_timeout)
+            except ValueError as exc:
+                raise BridgeClientError(422, f"wait_timeout {exc}") from exc
+            self._require_live_message_receipts()
+            request = protocol_floored_request(self, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
             payload["wait"] = True
             if wait_timeout is not None:
-                payload["wait_timeout"] = wait_timeout
+                payload["wait_timeout"] = seconds
             # Give the HTTP read a margin beyond the server-side reply wait.
-            request_timeout = (wait_timeout or 120.0) + 15.0
-        return self._request(
+            request_timeout = seconds + 15.0
+        return request(
             "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
             request_timeout=request_timeout,
         ) or {}
@@ -895,78 +907,6 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
             body={"request_id": request_id, "option_id": option_id},
         ) or {}
 
-    def _require_represented_result_snapshots(self) -> None:
-        from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
-
-        if not self.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION):
-            version, _minimum = self.daemon_protocol()
-            raise BridgeClientError(
-                426,
-                "represented result snapshots require agent-bridge HTTP "
-                f"protocol v{REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION}; "
-                f"the daemon advertises v{version}. Update the agent-bridge "
-                "plugin + runtime.",
-            )
-
-    def get_live_result_snapshot(
-        self,
-        session_ref: str,
-        *,
-        position: str | None = None,
-        max_items: int | None = None,
-        max_text_chars: int | None = None,
-    ) -> dict[str, Any]:
-        """GET /api/v1/live-sessions/{ref}/result after a capability gate."""
-        self._require_represented_result_snapshots()
-        params: dict[str, Any] = {}
-        if position:
-            params["position"] = position
-        if max_items is not None:
-            params["max_items"] = max_items
-        if max_text_chars is not None:
-            params["max_text_chars"] = max_text_chars
-        return self._request(
-            "GET", f"/api/v1/live-sessions/{session_ref}/result",
-            params=params or None,
-        ) or {}
-
-    def expand_live_result_ref(
-        self, session_ref: str, ref: str
-    ) -> dict[str, Any]:
-        """GET represented result detail for one process-lifetime reference."""
-        self._require_represented_result_snapshots()
-        return self._request(
-            "GET",
-            f"/api/v1/live-sessions/{session_ref}/result/detail",
-            params={"ref": ref},
-        ) or {}
-
-    def answer_ask_user(
-        self,
-        session_id: str,
-        tool_call_id: str,
-        content: dict[str, Any] | None = None,
-        *,
-        action: str = "accept",
-    ) -> dict[str, Any]:
-        """POST /api/v1/sessions/{id}/ask-user -- answer a parked ask_user.
-
-        Resolves the dispatched agent's blocked ``ask_user`` elicitation so its
-        turn continues (the host acting as the human the agent reached for;
-        dotfiles#1275). ``action`` is ``accept`` (with ``content``), ``decline``,
-        or ``cancel``. Raises ``BridgeClientError`` (409) when no matching
-        question is outstanding.
-        """
-        return self._request(
-            "POST", f"/api/v1/sessions/{session_id}/ask-user",
-            body={
-                "tool_call_id": tool_call_id,
-                "content": content or {},
-                "action": action,
-            },
-        ) or {}
-
-
     def submit_prompt(
         self,
         session_id: str,
@@ -1062,30 +1002,24 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         *,
         reclaim: bool = False,
         strict: bool = False,
+        mode: str = "acp",
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
-        """POST /api/v1/worktrees/{id}/resume -- ensure a worktree has a live
-        owned session (resume its latest, or start a fresh one if the worktree
-        still exists on disk but has no resumable session).
+        """Resume the authoritative native head in explicit ACP or CLI mode.
 
-        ``reclaim`` is the break-glass take-over: a *fresh live* interactive CLI
-        holding the worktree normally yields a 409
-        (``reason: live_cli_holds_worktree``); ``reclaim=true`` bypasses that
-        guard so the caller can own a worktree it has just freed.
-
-        ``strict`` is the identity-preserving contract: never a silent fresh
-        replacement conversation. Either the existing session resumes, or the
-        call raises a 409 (``reason: resume_requires_existing_session``).
-
-        Gated on ``STRICT_RESUME_PROTOCOL_VERSION`` -- unlike most gated
-        fields, this one **fails closed** rather than degrading: ``strict`` is
-        a behaviorful request parameter an older daemon's ``/resume`` handler
-        would silently ignore, falling through to its own pre-existing
-        fresh-session fallback and defeating the exact history-loss guarantee
-        the caller explicitly asked for. Silently sending a non-strict
-        request in that case would be worse than refusing outright, so an
-        unsupported daemon raises instead of quietly downgrading.
+        The mode-qualified route is absent on older daemons, so a downgrade
+        between capability check and POST cannot select legacy fresh fallback.
+        Native resume always preserves history; ``strict`` remains accepted for
+        existing callers. ``reclaim`` never authorizes stopping a live holder.
         """
+        from .protocol import WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION
+
+        if mode not in {"acp", "cli"}:
+            raise ValueError("worktree resume mode must be acp or cli")
+        if not self.daemon_supports(WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION):
+            raise BridgeClientError(
+                426, "daemon cannot preserve an authoritative native head in the requested mode",
+            )
         params = {}
         if reclaim:
             params["reclaim"] = "true"
@@ -1104,7 +1038,7 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         return (
             self._request(
                 "POST",
-                f"/api/v1/worktrees/{worktree_id}/resume",
+                f"/api/v1/worktrees/{worktree_id}/resume/{mode}",
                 params=params or None,
                 request_timeout=request_timeout,
             )
@@ -1481,14 +1415,28 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         qualified_peer: bool = False,
     ) -> dict[str, Any]:
         """Deliver to a represented remote session through the carrier."""
+        if wait:
+            from .live_message_models import validate_live_reply_timeout
+
+            try:
+                wait_timeout = validate_live_reply_timeout(wait_timeout)
+            except ValueError as exc:
+                raise BridgeClientError(422, f"wait_timeout {exc}") from exc
         self._require_remote_commands()
         from .live_peer_address import peer_operation_timeout
         from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
         timeout = peer_operation_timeout(timeout, wait=wait, wait_timeout=wait_timeout)
+        request = self._request
+        if wait:
+            from .client_protocol_floor import protocol_floored_request
+            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+
+            self._require_live_message_receipts()
+            request = protocol_floored_request(self, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
         if (qualified_peer or reply_to is not None or wait):
             if not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
                 raise BridgeClientError(426, f"remote peer replies require HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}")
-        return self._request(
+        return request(
             "POST",
             self._remote_path(
                 host,

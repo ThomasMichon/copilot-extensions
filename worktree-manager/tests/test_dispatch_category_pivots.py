@@ -18,6 +18,7 @@ from worktree_manager.agent_worktrees_runtime import ensure_engine_runtime
 ensure_engine_runtime()
 
 from worktree_manager.production_picker.picker_tui import pivots  # noqa: E402
+from worktree_manager.production_picker.picker_tui.pivot_actions import format_form_template  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 PLUGIN = REPO / "plugins" / "agent-dispatch"
@@ -31,6 +32,10 @@ def _prior_tasks():
     prior["list"] = prior["list"][:-2]
     prior["actions"] = [
         action for action in prior["actions"] if action["key"] != "inspect-evidence"
+    ]
+    steer = next(action for action in prior["actions"] if action["key"] == "steer")
+    steer["run"] = [
+        "agent-dispatch", "steer", "submit", "{task_id}", "{fields}", "--expected-status", "{status}",
     ]
     assert (
         hashlib.sha256(
@@ -166,6 +171,16 @@ def test_dispatch_category_actual_total_order_preserves_builtin_owner_and_ids(tm
         name[:-5] for name in NAMES
     }
     assert len(report.contributions) == 2
+    for pivot in report.pivots:
+        action = next(action for action in pivot.actions if action.key == "steer")
+        assert action.form is not None
+        argv = format_form_template(
+            action.run,
+            {"task_id": "task-one", "status": "suspended", "steering_revision": "owner-snapshot"},
+            {"answer": "first\nsecond {steering_revision}"},
+        )
+        assert argv[argv.index("--expected-revision") + 1] == "owner-snapshot"
+        assert argv[argv.index("--field") + 1] == "answer=first\nsecond {steering_revision}"
     if pointers_before is not None:
         assert {name: (registry / name).read_bytes() for name in NAMES} == pointers_before
     again = pivots.scan_pivot_registry(registry, activation_report=_activation(root))

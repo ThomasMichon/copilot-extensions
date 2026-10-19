@@ -86,14 +86,37 @@ function Invoke-SupervisorTaskAction {
 }
 
 function Convert-SupervisorRetirementResult {
-    param([string]$Output)
-    $lines = @($Output -split "`n" | Where-Object { $_.Trim() })
-    $jsonLines = @($lines | Where-Object { $_.Trim().StartsWith('{') })
-    foreach ($line in $lines) {
-        if (-not $line.Trim().StartsWith('{')) {
-            Write-Warn "Supervisor retirement diagnostic: $line"
+    param([object[]]$Output)
+    # Preserve the native stream boundary: stderr is diagnostic, not JSON.
+    $stdout = @(
+        foreach ($record in $Output) {
+            if ($record -is [System.Management.Automation.ErrorRecord]) {
+                Write-Warn "Supervisor retirement diagnostic: $record"
+            } else {
+                [string]$record
+            }
+        }
+    ) -join "`n"
+    if (-not $stdout.Trim()) { throw 'Expected one retirement JSON result on stdout' }
+    if (-not $stdout.TrimStart().StartsWith('{')) { throw 'Expected retirement JSON object on stdout' }
+    $result = ConvertFrom-Json -InputObject $stdout -ErrorAction Stop
+    if ($result -isnot [pscustomobject] -or
+        $result.ok -isnot [bool] -or
+        $result.selected -isnot [array] -or
+        $result.retired -isnot [array] -or
+        $result.errors -isnot [array]) {
+        throw 'Invalid typed retirement JSON result'
+    }
+    foreach ($processId in @($result.selected) + @($result.retired)) {
+        if (($processId -isnot [int] -and $processId -isnot [long]) -or $processId -le 0) {
+            throw 'Invalid retirement process identity'
         }
     }
-    if ($jsonLines.Count -ne 1) { throw 'Expected one retirement JSON result' }
-    return ($jsonLines[0] | ConvertFrom-Json -ErrorAction Stop)
+    foreach ($processId in $result.retired) {
+        if ($processId -notin $result.selected) { throw 'Retired process was not selected' }
+    }
+    foreach ($message in $result.errors) {
+        if ($message -isnot [string]) { throw 'Invalid retirement error diagnostic' }
+    }
+    return $result
 }

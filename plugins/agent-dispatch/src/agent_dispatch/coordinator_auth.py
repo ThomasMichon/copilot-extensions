@@ -2,33 +2,24 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import secrets
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from .control_token import scoped_control_token  # noqa: F401 -- compatible public export
 from .task_scope import TASK_SCOPE_HEADER, TaskScopeTokenError, verify_task_scope_token
 
 TASK_SCOPE_ROUTES = frozenset({
     ("GET", "/tasks/{task_id}"),
     ("GET", "/tasks/{task_id}/payload"),
+    ("POST", "/tasks/{task_id}/start"),
     ("POST", "/tasks/{task_id}/progress"),
     ("POST", "/tasks/{task_id}/heartbeat"),
     ("POST", "/tasks/{task_id}/complete"),
     ("POST", "/tasks/{task_id}/abandon"),
 })
-
-
-def scoped_control_token(control_token: str, scope: str) -> str:
-    """Derive a bearer scoped to one producer-owned operation."""
-    return hmac.new(
-        control_token.encode("utf-8"),
-        scope.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
 
 
 def _make_auth(token: str | None, control_token: str | None):

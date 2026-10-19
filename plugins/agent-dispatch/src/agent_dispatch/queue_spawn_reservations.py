@@ -30,6 +30,9 @@ ordinary top-level names -- no circular import, and
 :class:`SpawnReservationMixin` is composed into
 :class:`agent_dispatch.queue.TaskQueue`; it relies on ``self._connect()``
 and ``self._now()`` from that class and is not usable standalone.
+Deferral lives in :mod:`agent_dispatch.queue_spawn_deferral`, inherited
+here so the historical ``SpawnReservationMixin.defer_spawn`` surface stays
+available.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ from collections.abc import Callable
 
 from .queue_allocation_revisions import revision_disposed
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
+from .queue_spawn_deferral import SpawnDeferralMixin
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -90,7 +94,7 @@ def _newer_worktree_reservation(
     return conn.execute(
         "SELECT key FROM spawn_reservations "
         "WHERE key <> ? AND (worktree = ? OR inherited_worktree = ?) "
-        "AND reserved_at > ? ORDER BY reserved_at DESC LIMIT 1",
+        "AND reserved_at >= ? ORDER BY reserved_at DESC LIMIT 1",
         (
             key,
             row["worktree"],
@@ -100,7 +104,7 @@ def _newer_worktree_reservation(
     ).fetchone()
 
 
-class SpawnReservationMixin:
+class SpawnReservationMixin(SpawnDeferralMixin):
     """Spawn-reservation lifecycle methods for :class:`TaskQueue`."""
 
     # -- spawn reservations --------------------------------------------------
@@ -248,6 +252,7 @@ class SpawnReservationMixin:
                 raise TaskError("explicit target conflicts with a replacement allocation revision")
             worktree_ownership = "targeted" if carried_worktree else None
             carried_session = None
+            prior = None
             carried_project = carried_path = carried_host = carried_driver = None
             if latest_allocation is not None and not new_allocation:
                 carried_project = latest_allocation["allocation_project"]
@@ -386,6 +391,8 @@ class SpawnReservationMixin:
                 carried_worktree, carried_session, worktree_ownership, agent_info = carry_agent(
                     conn, task, carried_worktree, carried_session, worktree_ownership,
                     conversation_retired, creation_key=creation_key)
+                if prior is not None and carried_worktree == prior["worktree"]:
+                    allocation_reservation_key = prior["allocation_reservation_key"] or prior["key"]
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
@@ -466,6 +473,8 @@ class SpawnReservationMixin:
                 or conclusion_detail is not None
                 or claim_token is not None
             ):
+                from .cleanup_recovery import validate_recovery
+                validate_recovery(self, conn, row)
                 _validate_conclusion_claim(
                     row["cleanup_claim_token"],
                     row["cleanup_claim_expires_at"],
@@ -797,22 +806,6 @@ class SpawnReservationMixin:
             claim_token=claim_token,
             release_requested=release_requested,
             guard=guard,
-            now=now,
-        )
-
-    def defer_spawn(
-        self, key: str, *, detail: str | None = None, now: float | None = None
-    ) -> SpawnReservation:
-        """Mark a reservation ``deferred``: the spawn declined, not failed,
-        because a carried session (same exclusive key) was confirmed still
-        live/busy. Releases the task so a fresh attempt may be reserved
-        immediately, but -- unlike :meth:`fail_spawn` -- never counts toward
-        dead-lettering, since no attempt actually failed."""
-        return self._update_reservation(
-            key,
-            to_state=SpawnState.DEFERRED,
-            allowed_from=(SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})),
-            detail=detail,
             now=now,
         )
 

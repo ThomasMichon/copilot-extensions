@@ -6,6 +6,7 @@ deep-merge) -- see `registrar_recipes.py` and
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1217,7 +1218,13 @@ def test_global_repository_issue_loop_equivalent_to_direct_kind(tmp_path):
     direct = read_declaration_file_set(direct_path)
     extended = read_declaration_file_set(extends_path)
 
-    assert extended == direct
+    assert {declaration.source_path for declaration in direct} == {str(direct_path)}
+    assert {declaration.source_path for declaration in extended} == {str(extends_path)}
+    assert extended == tuple(replace(declaration, source_path=str(extends_path)) for declaration in direct)
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+    assert [declaration_to_registration(declaration, machine=None) for declaration in extended] == [
+        declaration_to_registration(declaration, machine=None) for declaration in direct
+    ]
 
 
 def test_global_goal_driven_resolves_to_repository_issue_loop_with_identity(tmp_path):

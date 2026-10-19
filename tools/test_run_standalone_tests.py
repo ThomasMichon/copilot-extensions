@@ -3,14 +3,18 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import sysconfig
 import venv
+import zipfile
 from pathlib import Path
 
 import pytest
+
+from _promotion_workflow_test_support import source_workflow
 
 SCRIPT = Path(__file__).with_name("run-standalone-tests.py")
 SPEC = importlib.util.spec_from_file_location("run_standalone_tests", SCRIPT)
@@ -19,7 +23,75 @@ runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 
 
+@pytest.mark.parametrize("component,package", [
+    ("fleet-manager", "fleet_manager"),
+    ("services/index", "agent_index_service"),
+])
+def test_retained_preparation_builds_actual_standalone_resource_hooks(
+    tmp_path, monkeypatch, component, package,
+):
+    checkout = tmp_path / "checkout"
+    project = checkout / component
+    original = SCRIPT.parent.parent / component
+    project.mkdir(parents=True)
+    for name in ("pyproject.toml", "README.md", "setup.py", "_build_runtime_resource.py", "MANIFEST.in"):
+        if (original / name).is_file():
+            shutil.copy2(original / name, project / name)
+    shutil.copytree(original / "src", project / "src")
+    resources = checkout / "libs" / "versioned-runtime"
+    shutil.copytree(SCRIPT.parent.parent / "libs" / "versioned-runtime", resources)
+    expected = {
+        destination: (resources / source).read_bytes()
+        for source, destination in {
+            "versioned_runtime.py": "_versioned_runtime.py",
+            "versioned_runtime_leases.py": "versioned_runtime_leases.py",
+            "versioned_runtime_construction.py": "versioned_runtime_construction.py",
+            "versioned_runtime_source.py": "versioned_runtime_source.py",
+        }.items()
+    }
+    output = tmp_path / "artifacts"
+    output.mkdir()
+    actual_run = subprocess.run
+    retained = []
+
+    def uv(command, **kwargs):
+        if "--show-settings" in command:
+            return subprocess.CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
+                index_locations: IndexLocations { indexes: [], flat_index: [], },
+                exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+            }, }""", "")
+        retained.append(Path(kwargs["cwd"]))
+        assert retained[0] != checkout
+        for name in ("standalone_build.py", "versioned_runtime.py",
+                     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+                     "versioned_runtime_source.py"):
+            (resources / name).write_text("raise RuntimeError('mutable original reopened')\n")
+        candidate = Path(next(argument for argument in command if argument.endswith(str(Path(component)))))
+        result = actual_run(
+            [sys.executable, "-I", "-c",
+             "from setuptools.build_meta import build_wheel; "
+             f"build_wheel({str(output)!r})"],
+            cwd=candidate, capture_output=True, text=True, timeout=30,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result
+
+    monkeypatch.setattr(runner.subprocess, "run", uv)
+    runner.run_uv_install(
+        "uv", ["--no-config", "--python", sys.executable, str(project)],
+        cwd=checkout, trusted_source_roots=(checkout,), retained_resource_roots=(resources,),
+    )
+    assert len(retained) == 1 and not retained[0].exists()
+    with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
+        for name, data in expected.items():
+            assert wheel.read(f"{package}/{name}") == data
+
+
 def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
+        [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key not in ("trusted_source_roots", "retained_resource_roots")},
+    ))
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     python = runner.default_python("fleet-manager")
@@ -42,16 +114,26 @@ def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_pat
 
 @pytest.mark.parametrize("smoke", [False, True])
 def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monkeypatch, smoke):
+    monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
+        [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key not in ("trusted_source_roots", "retained_resource_roots")},
+    ))
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     metadata = tmp_path / "plugins" / "agent-index" / "pyproject.toml"
     metadata.parent.mkdir(parents=True)
-    metadata.write_text('[project]\nversion = "0.1.0-dev210"\n')
+    metadata.write_text(
+        '[project]\nversion = "0.1.0-dev210"\n'
+        '[tool.uv.sources]\nagent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
+    )
+    procutil = tmp_path / "libs" / "agent-procutil"
+    procutil.mkdir(parents=True)
+    (procutil / "pyproject.toml").write_text('[project]\nname="agent-procutil"\n')
 
     def install(command, **kwargs):
         calls.append(command)
         if "--override" in command:
             override = Path(command[command.index("--override") + 1])
+            assert override.parent.parent == tmp_path
             core_extra = "" if smoke else "[store,server]"
             assert override.read_text() == (
                 f"agent-index{core_extra} @ {metadata.parent.as_uri()}\n"
@@ -69,11 +151,16 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
     core_extra = "" if smoke else "[store,server]"
     service_extra = "[test]" if smoke else "[native,test]"
     assert str(tmp_path / "plugins" / "agent-index") + core_extra in calls[1]
+    assert str(tmp_path / "libs" / "zdd") not in calls[1]
+    assert str(procutil) not in calls[1]
     assert calls[1][-1] == str(tmp_path / "services/index") + service_extra
     assert not Path(calls[1][calls[1].index("--override") + 1]).exists()
 
 
 def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
+        [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key not in ("trusted_source_roots", "retained_resource_roots")},
+    ))
     monkeypatch.setattr(runner, "REPO", tmp_path)
     calls = []
     monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs: calls.append(argv))
@@ -83,6 +170,82 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
     python.touch()
     runner.prepare("worktree-manager", python)
     assert calls[-1][-2:] == ["--editable", str(tmp_path / "worktree-manager") + "[dev]"]
+
+
+@pytest.mark.parametrize("component", [
+    "fleet-manager", "worktree-manager", "services/index", "services/dispatch",
+    "services/chat",
+])
+def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch, component):
+    projects = {
+        "fleet-manager": "fleet-manager",
+        "worktree-manager": "worktree-manager",
+        "services/index": "agent-index-service",
+        "services/dispatch": "agent-dispatch-service",
+        "services/chat": "agent-chat-service",
+        "plugins/agent-index": "agent-index",
+        "plugins/agent-dispatch": "agent-dispatch",
+        "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
+        "libs/zdd": "agent-zdd",
+        "libs/agent-procutil": "agent-procutil",
+        "libs/dropin-registry": "agent-dropin-registry",
+        "libs/plugin-activation": "agent-plugin-activation",
+        "libs/plugin-resolve": "agent-plugin-resolve",
+        "libs/single-instance-lease": "agent-single-instance-lease",
+    }
+    for relative, name in projects.items():
+        project = tmp_path / relative
+        project.mkdir(parents=True, exist_ok=True)
+        (project / "pyproject.toml").write_text(
+            '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
+            f'[project]\nname="{name}"\nversion="1.0"\n'
+            '[project.optional-dependencies]\ndev=[]\nnative=[]\ntest=[]\nstore=[]\nserver=[]\n',
+            encoding="utf-8",
+        )
+        with (project / "pyproject.toml").open("a", encoding="utf-8") as manifest:
+            manifest.write('[tool.setuptools.packages.find]\nwhere=["src"]\n')
+        (project / "src").mkdir()
+    with (tmp_path / "plugins" / "agent-index" / "pyproject.toml").open("a") as manifest:
+        manifest.write(
+            '[tool.uv.sources]\n'
+            'agent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
+        )
+    (tmp_path / "libs" / "versioned-runtime").mkdir()
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    python = runner.default_python(component)
+    python.parent.parent.mkdir(parents=True)
+    admitted = runner.run_uv_install
+    probes = []
+    installs = []
+
+    def prepare(uv, arguments, **kwargs):
+        assert kwargs["trusted_source_roots"] == (tmp_path,)
+        assert kwargs["retained_resource_roots"] == (tmp_path / "libs" / "versioned-runtime",)
+        return admitted(uv, arguments, **kwargs)
+
+    def command(arguments, **kwargs):
+        if arguments[1] == "venv":
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.touch()
+        elif "--show-settings" in arguments:
+            probes.append(arguments)
+            return subprocess.CompletedProcess(arguments, 0, """PipInstallSettings { settings: PipSettings {
+                index_locations: IndexLocations { indexes: [], flat_index: [], },
+                exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+            }, }""", "")
+        else:
+            installs.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(runner, "run_uv_install", prepare)
+    monkeypatch.setattr(runner.subprocess, "run", command)
+    runner.prepare(component, python, smoke=component == "services/index")
+    assert len(probes) == 2 and len(installs) == 1
+    assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
+    extra = "[test]" if component == "services/index" else "[dev]"
+    assert any(argument.endswith(component.replace("/", os.sep) + extra) for argument in installs[0])
+    if component in ("services/index", "services/dispatch"):
+        assert "--override" in installs[0]
 
 
 @pytest.mark.parametrize("component", [
@@ -102,8 +265,13 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
     assert called == []
 
 
-def test_legacy_dispatch_name_uses_canonical_preparation_lease_and_tests(tmp_path, monkeypatch):
-    legacy, canonical = "agent-dispatch-service", "services/dispatch"
+@pytest.mark.parametrize("legacy,canonical", [
+    ("agent-dispatch-service", "services/dispatch"),
+    ("agent-chat-service", "services/chat"),
+])
+def test_service_alias_uses_canonical_preparation_lease_and_tests(
+    tmp_path, monkeypatch, legacy, canonical,
+):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     root = tmp_path / canonical
     (root / "tests").mkdir(parents=True)
@@ -229,45 +397,32 @@ def test_fixture_python_accepts_environment_beneath_symlinked_parent(tmp_path):
     assert len(list(actual.rglob("test-harness.pth"))) == 1
 
 
-def exercise_native_legacy_service_cli(tmp_path):
-    pairs = runner.COMPONENT_ALIASES
-    for canonical in pairs.values():
-        root = tmp_path / canonical
-        tests = root / "tests"
-        tests.mkdir(parents=True)
-        environment = tmp_path / ".test-venvs" / sys.platform / canonical
-        fixture_python(environment)
-        (tests / "test_contract.py").write_text(
-            "import os, sys, pytest\nfrom pathlib import Path\n"
-            "def test_contract():\n"
-            f"    assert Path.cwd() == Path({str(root)!r})\n"
-            f"    assert Path(sys.prefix).resolve() == Path({str(environment.resolve())!r})\n"
-            f"    assert Path(pytest.__file__).resolve() == Path({str(Path(pytest.__file__).resolve())!r})\n"
-            "    assert os.environ['COPILOT_EXTENSIONS_TEST_CONTAINED'] == '1'\n"
-            "    Path('executed.txt').write_text('canonical')\n",
-            encoding="utf-8",
-        )
-    script = (
-        "import importlib.util, sys\nfrom pathlib import Path\n"
-        f"sys.path.insert(0, {str(SCRIPT.parent)!r})\n"
-        f"spec = importlib.util.spec_from_file_location('standalone_runner', {str(SCRIPT)!r})\n"
-        "runner = importlib.util.module_from_spec(spec)\n"
-        "spec.loader.exec_module(runner)\n"
-        f"runner.REPO = Path({str(tmp_path)!r})\n"
-        f"for legacy in {tuple(pairs)!r}:\n"
-        "    assert runner.main([legacy, '--timeout', '10']) == 0\n"
+def exercise_native_legacy_service_cli(tmp_path, legacy, canonical):
+    root = tmp_path / canonical
+    tests = root / "tests"
+    tests.mkdir(parents=True)
+    environment = tmp_path / ".test-venvs" / sys.platform / canonical
+    fixture_python(environment)
+    (tests / "test_contract.py").write_text(
+        "import os, sys, pytest\nfrom pathlib import Path\n"
+        "def test_contract():\n"
+        f"    assert Path.cwd() == Path({str(root)!r})\n"
+        f"    assert Path(sys.prefix).resolve() == Path({str(environment.resolve())!r})\n"
+        f"    assert Path(pytest.__file__).resolve() == Path({str(Path(pytest.__file__).resolve())!r})\n"
+        "    assert os.environ['COPILOT_EXTENSIONS_TEST_CONTAINED'] == '1'\n"
+        "    Path('executed.txt').write_text('canonical')\n",
+        encoding="utf-8",
     )
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", script], capture_output=True, text=True, timeout=30,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    for legacy, canonical in pairs.items():
-        assert (tmp_path / canonical / "executed.txt").read_text() == "canonical"
-        assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
+    runner.REPO = tmp_path
+    assert runner.main([legacy, "--timeout", "10"]) == 0
+    assert (root / "executed.txt").read_text() == "canonical"
+    assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
 
 
-def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environments(tmp_path):
+@pytest.mark.parametrize("legacy,canonical", runner.COMPONENT_ALIASES.items())
+def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environments(
+    tmp_path, legacy, canonical,
+):
     python = fixture_python(tmp_path / "harness")
     script = (
         "import importlib.util, sys, sysconfig, pytest\nfrom pathlib import Path\n"
@@ -277,10 +432,12 @@ def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environ
         f"spec = importlib.util.spec_from_file_location('fixture_tests', {str(Path(__file__).resolve())!r})\n"
         "fixture = importlib.util.module_from_spec(spec)\n"
         "spec.loader.exec_module(fixture)\n"
-        f"fixture.exercise_native_legacy_service_cli(Path({str(tmp_path)!r}))\n"
+        f"fixture.exercise_native_legacy_service_cli(Path({str(tmp_path)!r}), "
+        f"{legacy!r}, {canonical!r})\n"
     )
     result = subprocess.run(
         [str(python), "-I", "-c", script], capture_output=True, text=True, timeout=30,
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -335,7 +492,7 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(
         captured.update(kwargs)
         assert command[1:4] == ["-I", "-m", "pytest"]
         if smoke:
-            assert command[5:16] == [
+            assert command[5:18] == [
                 str(root / "tests" / "test_cli.py"), str(root / "tests" / "test_config.py"),
                 str(root / "tests" / "test_release.py"),
                 str(root / "tests" / "test_release_cli.py"),
@@ -346,6 +503,8 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(
                 str(root / "tests" / "test_runtime_resource_distribution.py"),
                 str(root / "tests" / "test_distribution.py"),
                 str(root / "tests" / "test_release_distribution.py"),
+                str(root / "tests" / "test_container.py"),
+                str(root / "tests" / "test_fleet_image.py"),
             ]
         else:
             assert command[5] == str(root / "tests")
@@ -583,13 +742,17 @@ with owned_python(['-c', 'import time; time.sleep(120)'],
 
 
 def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
-    import yaml
+    root = SCRIPT.parent.parent
+    _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(
+        source_workflow(root, "ci.yml")["jobs"],
+        source_workflow(root, "validate-and-promote.yml")["jobs"],
+    )
 
-    workflows = SCRIPT.parent.parent / ".github" / "workflows"
-    ci = yaml.safe_load((workflows / "ci.yml").read_text(encoding="utf-8"))["jobs"]
-    promotion = yaml.safe_load(
-        (workflows / "validate-and-promote.yml").read_text(encoding="utf-8")
-    )["jobs"]
+
+def _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion):
+    import shlex
+    from packaging.requirements import Requirement
+
     discovery = next(step["run"] for step in ci["discover"]["steps"] if step.get("id") == "set")
     detector = next(
         step["run"] for step in ci["checks"]["steps"] if step.get("id") == "version-bump-engine"
@@ -597,6 +760,20 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
     assert r"standalone_consumers\.py" in detector
     for path in ("services/index/", "plugins/agent-index/", "libs/", "tools/"):
         assert path in discovery
+    for name in ("test-runner-linux", "test-runner-windows"):
+        command = next(
+            step["run"] for step in ci[name]["steps"]
+            if step.get("name") == "Test runner admission and isolation"
+        )
+        install = shlex.split(command.split("&&", 1)[0])
+        assert "tools/seasoned_uv.py" in install and "--system" in install
+        requirements = {
+            requirement.name: requirement
+            for requirement in map(Requirement, install[install.index("--system") + 1:])
+        }
+        assert {"pytest", "pytest-timeout", "pyyaml", "setuptools", "wheel"} <= requirements.keys()
+        assert "83.0.0" in requirements["setuptools"].specifier
+        assert "82.9.0" not in requirements["setuptools"].specifier
     for name in ("agent-index-service-linux", "agent-index-service-windows"):
         assert ci[name]["needs"] == "discover"
         assert "needs.discover.outputs.standalone_service == 'true'" in ci[name]["if"]

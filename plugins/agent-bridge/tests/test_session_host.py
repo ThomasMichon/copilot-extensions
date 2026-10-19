@@ -2245,7 +2245,7 @@ async def test_legacy_codespace_resume_replacement_uses_session_host(
         lambda *args, **kwargs: MagicMock(),
     )
     monkeypatch.setattr(
-        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        "agent_bridge.venue_plugins.prepare_venue_plugins",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(

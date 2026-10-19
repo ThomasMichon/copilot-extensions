@@ -29,7 +29,6 @@ This registry supersedes the legacy ``~/.git-repos`` file; use
 from __future__ import annotations
 
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -39,8 +38,10 @@ from pathlib import Path
 import yaml
 
 from agent_procutil import no_window_kwargs
+from machine_transport import detect_platform
 
 from . import bare_anchor_sync, git_ops, output, registry_paths
+from .repo_accounts import account_for_remote as account_for_remote
 from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
 # ---------------------------------------------------------------------------
@@ -101,7 +102,7 @@ class RepoEntry:
     """A single repo in the registry."""
 
     name: str
-    repo_class: str = "reference"  # reference | singleton | worktree
+    repo_class: str = "reference"  # reference | singleton | worktree | knowledge
     remote: str = ""
     default_branch: str = ""
     tags: list[str] = field(default_factory=list)
@@ -167,6 +168,7 @@ class ReposRegistry:
     # override (which stays the finest grain). See :func:`resolve_account` /
     # :func:`account_for_github_owner`. Keys are compared case-insensitively.
     account_map: dict[str, str] = field(default_factory=dict)
+    _baseline: tuple[str, str] | None = field(default=None, repr=False, compare=False)
 
 
 # ---------------------------------------------------------------------------
@@ -175,11 +177,7 @@ class ReposRegistry:
 
 def _current_platform() -> str:
     """Return 'windows', 'wsl', or 'linux'."""
-    if platform.system() == "Windows":
-        return "windows"
-    if os.environ.get("WSL_DISTRO_NAME"):
-        return "wsl"
-    return "linux"
+    return detect_platform()
 
 def _repos_yaml_path() -> Path:
     """Path to the repos registry file."""
@@ -196,65 +194,11 @@ def read_registry(*, strict: bool = False) -> ReposRegistry:
 
 
 def write_registry(registry: ReposRegistry) -> None:
-    """Write repos.yaml with hand-formatted YAML."""
-    path = _repos_yaml_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Write repos.yaml, refusing to overwrite a changed read baseline."""
+    from .repos_registry_transaction import write_checked
+    from .repos_registry_writer import render_registry
 
-    _rhdr = "# ~/.agent-worktrees/repos.yaml"  # marketplace-isolation: allow legacy
-    lines = [
-        _rhdr,
-        "# Registry of known repositories and source roots.",
-        "",
-    ]
-
-    # srcroot section
-    if registry.srcroot:
-        lines.append("srcroot:")
-        for plat in ("windows", "wsl", "linux"):
-            if plat in registry.srcroot:
-                lines.append(f"  {plat}: {_quote(registry.srcroot[plat])}")
-        lines.append("")
-
-    # account_map section (GitHub owner/org -> gh account login)
-    if registry.account_map:
-        lines.append("account_map:")
-        for owner in sorted(registry.account_map.keys()):
-            lines.append(f"  {_quote(owner)}: {_quote(registry.account_map[owner])}")
-        lines.append("")
-
-    # repos section
-    if registry.repos:
-        lines.append("repos:")
-        for name in sorted(registry.repos.keys()):
-            entry = registry.repos[name]
-            lines.append(f"  {name}:")
-            lines.append(f"    class: {entry.repo_class}")
-            # Emit `agent` only when it deviates from the class default
-            # (worktree/singleton => on, reference => off) to keep files minimal.
-            class_default_agent = entry.repo_class != "reference"
-            if entry.agent != class_default_agent:
-                lines.append(f"    agent: {'true' if entry.agent else 'false'}")
-            if entry.remote:
-                lines.append(f"    remote: {_quote(entry.remote)}")
-            if entry.account:
-                lines.append(f"    account: {_quote(entry.account)}")
-            if entry.copilot_account:
-                lines.append(f"    copilot_account: {_quote(entry.copilot_account)}")
-            if entry.default_branch:
-                lines.append(f"    default_branch: {_quote(entry.default_branch)}")
-            if entry.tags:
-                rendered = ", ".join(_quote(t) for t in entry.tags)
-                lines.append(f"    tags: [{rendered}]")
-            if entry.contributing:
-                lines.append(f"    contributing: {_quote(entry.contributing)}")
-            if entry.visibility:
-                lines.append(f"    visibility: {entry.visibility}")
-            for plat in ("windows", "wsl", "linux"):
-                if plat in entry.paths:
-                    lines.append(f"    {plat}: {_quote(entry.paths[plat])}")
-            lines.append("")
-
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_checked(_repos_yaml_path(), registry, render_registry(registry))
 
 
 def _quote(v: str) -> str:
@@ -285,13 +229,13 @@ def set_srcroot(path: str, plat: str | None = None) -> None:
     output.ok(f"Source root for {plat} set to {path}")
 
 
-def list_repos(class_filter: str | None = None) -> list[RepoEntry]:
+def list_repos(class_filter: str | None = None, *, strict: bool = False) -> list[RepoEntry]:
     """Return all repos, optionally filtered by management class.
 
     The filter accepts new class names (reference/singleton/worktree) and
     legacy type values (project/repo), normalizing both.
     """
-    registry = read_registry()
+    registry = read_registry(strict=strict)
     entries = list(registry.repos.values())
     if class_filter:
         wanted = normalize_class(class_filter)
@@ -499,8 +443,20 @@ def resolve_copilot_account(entry: RepoEntry | None) -> str | None:
     return (entry.copilot_account or None) if entry else None
 
 
-def copilot_account_for(name: str) -> str | None:
+def copilot_account_for(
+    name: str, *, project: str | None = None, strict: bool = False,
+) -> str | None:
     """Resolve the Copilot CLI login: ``copilot_account:`` -> default -> None. See #3296."""
+    if strict:
+        from .repos_configuration_sources import ConfigurationError, defaults, identity
+
+        if not project:
+            raise ConfigurationError("missing-project", "An explicit project is required.")
+        inherited = defaults(project)
+        entry = read_registry(strict=True).repos.get(name)
+        if entry is None:
+            raise ConfigurationError("not-registered", "The repository is not registered.")
+        return identity(entry.copilot_account, allow_empty=True) or inherited.login or None
     entry = find_repo(name)
     explicit = resolve_copilot_account(entry)
     if explicit:
@@ -639,20 +595,19 @@ def is_unresolved_registered_target(target: str | None) -> bool:
 
 
 def account_for_github_slug(slug: str | None) -> str | None:
-    """Resolve the effective account for a github ``owner/name`` slug, a bare
-    ``owner``, or a bare registered repo *name*.
+    """Resolve a GitHub slug or registry alias to its configured account.
 
-    A bare registered repo name resolves via its own matched entry's
-    :func:`resolve_account` (explicit ``account:`` -> ``account_map[owner]`` ->
-    the remote owner itself -> None) -- never by handing the owner alone to
-    the owner-*wide* resolver (:func:`account_for_github_owner`), which scans
-    every registered repo and can return a *different, sibling* repo's
-    explicit account for the same owner (see #3032 follow-up: with `proj-a`
-    unoverridden and `proj-b` -> `account-b` under the same owner,
-    `account-for proj-a` must not resolve to `account-b`).
+    Exact registered repository matches take precedence over owner-wide policy,
+    so sibling repositories can use different accounts. Bare registered names
+    resolve directly through their entry; unregistered slugs use owner policy.
     """
     if not slug:
         return None
+    if "/" in slug:
+        for entry in read_registry().repos.values():
+            remote_slug = github_slug(entry.remote)
+            if remote_slug and remote_slug.casefold() == slug.casefold():
+                return resolve_account(entry)
     if "/" not in slug:
         entry = find_repo(slug)
         if entry is not None:

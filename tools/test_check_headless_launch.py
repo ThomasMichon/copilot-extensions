@@ -681,3 +681,79 @@ def test_two_launches_on_one_line_need_two_baseline_entries(repo):
     assert len(_daemon_problems(guard.verify())) == 1
     _write_daemon_allow(repo, f"{key}  first\n{key}  second\n")
     assert _daemon_problems(guard.verify()) == []
+
+
+# -- rule 6: installer start-now PowerShell launches -------------------------
+
+
+def _write_installer(repo: Path, rel: str, text: str) -> None:
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _installer_problems(problems: list[str]) -> list[str]:
+    return [p for p in problems if "Start-Process conhost" in p]
+
+
+@pytest.mark.parametrize("rel", [
+    "plugins/agent-x/scripts/install.ps1",
+    "plugins/agent-x/transports/t/scripts/install-host.ps1",
+])
+@pytest.mark.parametrize("statement", [
+    "Start-Process -FilePath 'conhost.exe' -ArgumentList $a -WindowStyle Hidden | Out-Null",
+    "Start-Process conhost.exe -ArgumentList $a",
+    'Start-Process -FilePath "C:\\Windows\\System32\\conhost.exe" `\n    -ArgumentList $a `\n    -PassThru',
+    # named parameters in any order, positional after a named one, a variable
+    "Start-Process -WindowStyle Hidden -FilePath 'conhost.exe' -ArgumentList $a",
+    "Start-Process -WindowStyle Hidden conhost -ArgumentList $a",
+    "$p = Start-Process -ArgumentList $a -FilePath $conhost -PassThru",
+])
+def test_installer_conhost_start_process_is_reported(repo, rel, statement):
+    _write_installer(repo, rel, "function Start-It {\n    " + statement + "\n}\n")
+    problems = _installer_problems(guard.verify())
+    assert len(problems) == 1
+    assert problems[0].startswith(f"{rel}:2:")
+
+
+@pytest.mark.parametrize("text", [
+    # marker on the statement's own line
+    "Start-Process -FilePath 'conhost.exe' -PassThru  # daemon-spawn: allow foreground supervisor\n",
+    # marker on a continuation line
+    "Start-Process -FilePath 'conhost.exe' `\n    -PassThru  # daemon-spawn: allow waits on it\n",
+    # marker on the comment line directly above
+    "# daemon-spawn: allow warned last resort\nStart-Process -FilePath 'conhost.exe' -PassThru\n",
+    # not a launch: a scheduled-task action or Run-key value hands lifetime to Windows
+    "$a = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $x\n",
+    "New-ItemProperty -Path $k -Name n -Value \"conhost.exe $x\"\n",
+    # a comment or generated here-string text is not a statement
+    "# Start-Process -FilePath 'conhost.exe'\n",
+    "$inner = @\"\nStart-Process -FilePath 'conhost.exe'\n\"@\n",
+    "<#\n  a Start-Process child of conhost stays in the Job\n#>\nfunction F { }\n",
+    "<# Start-Process conhost.exe #>\n",
+    # another program
+    "Start-Process -FilePath pwsh -ArgumentList $a\n",
+    "Start-Process -FilePath $conhostLike -ArgumentList $a\n",
+    "Start-ScheduledTask -TaskName conhost\n",
+])
+def test_installer_rule_ignores_allowed_and_non_launch_lines(repo, text):
+    _write_installer(repo, "plugins/agent-x/scripts/install.ps1", text)
+    assert _installer_problems(guard.verify()) == []
+
+
+def test_installer_rule_needs_a_reason_and_an_adjacent_marker(repo):
+    _write_installer(
+        repo, "plugins/agent-x/scripts/install.ps1",
+        "# daemon-spawn: allow\nStart-Process conhost.exe\n"
+        "# daemon-spawn: allow too far away\n\nStart-Process conhost.exe\n",
+    )
+    problems = _installer_problems(guard.verify())
+    assert [p.split(":", 2)[1] for p in problems] == ["2", "5"]
+
+
+def test_installer_rule_scope_excludes_non_installer_scripts(repo):
+    _write_installer(
+        repo, "plugins/agent-x/scripts/bootstrap-check.ps1",
+        "Start-Process -FilePath 'conhost.exe' -ArgumentList $a\n",
+    )
+    assert _installer_problems(guard.verify()) == []

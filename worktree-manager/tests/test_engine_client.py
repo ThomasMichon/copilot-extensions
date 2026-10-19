@@ -906,6 +906,7 @@ def test_resolve_new_with_seed_forwards_seed_flag(monkeypatch):
         assert "--seed" in cmd
         assert cmd[cmd.index("--seed") + 1] == "fix the thing"
         assert "--stage-launch-seed" in cmd
+        assert "--require-native-seed" in cmd
         return _fake_completed(cmd, stdout=json.dumps({
             **_RESUME_PLAN, "seed_pending": True, "seed_id": "intent-new", "seed_kind": "new",
         }))
@@ -918,6 +919,7 @@ def test_resolve_new_with_seed_forwards_seed_flag(monkeypatch):
 def test_resolve_without_seed_omits_seed_flag(monkeypatch):
     def handler(cmd, kw):
         assert "--seed" not in cmd
+        assert "--require-native-seed" not in cmd
         return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
 
     _install_fake(monkeypatch, handler)

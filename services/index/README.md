@@ -5,6 +5,13 @@ For independently owned fresh state, the explicit host option
 [cold source-aware layout](../../plugins/agent-index/docs/source-aware-store.md).
 This is not legacy store adoption, data transfer or deployment/migration proof.
 
+Optional source-authorized fleet hosting is documented in
+[the core backend contract](../../plugins/agent-index/docs/fleet-backend.md).
+An explicit `fleet.policy` host reference and `[fleet]` distribution extra
+enable only the two signed-grant TLS routes; ordinary native hosting is
+unchanged. Gateway CLI routing and live fleet enrollment remain separate gates.
+Worker-local credential consumption is selected explicitly as described below.
+
 ## Generic offline Linux image context
 
 `agent-index-service container prepare` creates a runnable, explicit Docker build
@@ -27,7 +34,7 @@ Only glibc Linux CPython images are admitted by this initial adapter.
 Library callers use `container.ContainerTarget(python_version, platform,
 glibc_version)` and `container.prepare_container_context(descriptor_path, *,
 expected_source_commit, third_party_lock, third_party_wheels, output, base_image,
-target, uid=10001, gid=10001)`. The returned schema-1
+target, uid=10001, gid=10001, profile="native")`. The returned schema-1
 `agent-index-service.container-context` result names the context, selected
 revision/service version, contract digest, build argv and `prepared` versus
 `already_prepared` status.
@@ -49,6 +56,26 @@ Kernel-dependent requirement markers need separate deployment admission and are
 rejected rather than evaluated against the preparation host or guessed values.
 The service image rejects the embedding-engine/torch/sentence-transformers
 packages; a real warm engine remains an independently provisioned companion.
+
+For an explicitly selected fleet image, use `--profile fleet` on **all three**
+`release describe`, `release verify` and `container prepare` commands (or
+`profile="fleet"` on their Python APIs). This uses a schema-2 release descriptor
+with `profile: fleet` and exactly six first-party distributions: the five above
+plus `fleet-manager`. The default remains the unchanged schema-1 native profile;
+a descriptor cannot opt a native caller into fleet installation. Native candidate
+staging does not accept fleet descriptors.
+
+The fleet image selects `agent-index-service[fleet,native]`,
+`agent-index[fleet,store,server]` and `fleet-manager[auth]`. Their declared extra
+relationships, versions and complete transitive third-party auth closure must
+verify before output is created. `fleet-manager` is never a third-party lock
+entry, including in native images. The generated schema-2 context records the
+fleet profile, binds its release descriptor/extras to the independently pinned
+context digest, and extends the native installed probe with actual fleet
+backend, HTTP, TLS and Gateway-auth module imports. No Gateway server is started
+inside the index image. Profile selection does not enroll a principal, select a
+provider, expose an API, provision a model, activate a release or grant deployment
+authority; all runtime policy, TLS and credential inputs remain runtime-only.
 
 The context is an immutable snapshot of selected wheels, normalized release/
 install contracts, a stdlib pre-install byte-verification adapter, a native
@@ -116,9 +143,11 @@ parent directory private while granting access only to the intentionally mounted
 input. Git connectors label indexed content by repository identity, including a
 separate commit-source suffix; query filters use those indexed identities, not an
 arbitrary configuration alias. Never mount the native host's live SQLite or
-LanceDB into another writer. The image has no `EXPOSE`, public port or wildcard
-listener; the API and external warm engine remain on loopback in the same
-private execution namespace. A real engine's durable model cache belongs on an
+LanceDB into another writer. The image has no `EXPOSE` or public port mapping.
+Native hosting keeps the API and external warm engine on loopback in the same
+private execution namespace; an explicitly mounted fleet policy separately
+selects the signed-grant TLS listener under the core backend contract.
+A real engine's durable model cache belongs on an
 independently managed volume. The image does not start/provision that engine.
 
 Validate real queued synthetic ingestion, a mock-engine query, durable state
@@ -287,6 +316,36 @@ backups and local provider discovery are selected from this configuration,
 not ambient `AGENT_INDEX_*` values. Treat the home/provider directory as
 operator-owned, trusted state. Credentials remain external; account selection
 uses the existing source connector behavior, not bundled secrets.
+
+### Renewable Gateway ingestion credentials
+
+Install the selected `[fleet]` extra and set a source's
+`auth: {account: selected-account, gateway: /absolute/worker-policy.json}`.
+This absolute, non-secret reference is retained in detached workers' explicit
+source configuration. It selects the
+[credential worker policy](../../fleet-manager/docs/gateway-runtime.md#worker-local-source-consumption)
+and never resolves an ambient `gh` account or environment token.
+
+For Git, also supply `remote: https://example.test/owner/repo.git` and a dedicated
+absolute `path` for the independently materialized **bare** repository. An
+existing non-bare or differently configured repository is rejected, not reused
+or overwritten. `ref` must select a remote-tracking revision such as
+`origin/dev` (the default is remote `HEAD`), not a stale local branch or tag.
+Discovery fetches before recording a cursor and reads the verified commit;
+initialization alone is not successful ingestion.
+
+Each HTTP request/retry and Git fetch obtains a newly verified, acknowledged
+source credential through the configured subscribed controller. Git uses
+URL-scoped child-process configuration, not token-bearing argv or persistent
+Git config; helpers, prompts, redirects and ambient Git tracing are disabled.
+Credential acquisition, unavailable controllers, failed fetches and stale
+Gateway sessions fail explicitly. There is no anonymous, old-checkout or other
+account fallback. Sources without `auth.gateway` retain native behavior.
+
+The issuer and credential custodian own access-token reference renewal,
+private-key custody, enrollment and actual source permission verification.
+This consumer does not issue tokens, provision a controller service, authorize
+deployment or prove the operator's corpus/model parity.
 
 ## Pinned release bundles
 

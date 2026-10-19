@@ -1,6 +1,6 @@
 {
   "name": "budget-guidance",
-  "description": "Provider-neutral current budget posture: strict static readings, deterministic source resolution, sustainable-rate arithmetic, and shared human and machine-readable status.",
+  "description": "Provider-neutral budget posture, deterministic source resolution, sustainable-rate arithmetic, and an on-demand credential-free foreground-session quota capture tool.",
   "version": "0.1.0-dev16",
   "runtimeScope": "universal",
   "hooks": "hooks.json",

@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded attributable launch-time posture cues through output-free exact-session delivery.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

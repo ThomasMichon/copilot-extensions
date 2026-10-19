@@ -40,6 +40,7 @@ directory exists. Phase 2 lays only the lease + fence *mechanism*.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import Lock
 from typing import TYPE_CHECKING
 
 from .satellites import ROLE_COORDINATOR, ROLE_STANDBY
@@ -157,6 +158,11 @@ class CoordinatorLease:
 
     def tick(self) -> LeaseState:
         """Advance the lease one step against the current directory state."""
+        floor = getattr(self._rv, "fencing_epoch", None)
+        if floor is not None:
+            self._observe(int(floor()))
+        if self._active and self._epoch < self._observed_epoch:
+            self._active = False
         try:
             coord = self._rv.discover_coordinator()
         except Exception:
@@ -180,7 +186,10 @@ class CoordinatorLease:
             raise
         if coord is not None:
             self._observe(int(coord["epoch"]))
+            if int(coord["epoch"]) < self._observed_epoch:
+                return self._take_over()
             if coord["instance"] == self._instance:
+                self._epoch = int(coord["epoch"])
                 return self._renew()
             if float(coord.get("age", 0.0)) < self._lease_ttl:
                 return self._stand_by()
@@ -260,8 +269,10 @@ class CoordinatorLease:
 
 
 def current_fencing_epoch(rendezvous: Rendezvous) -> int:
-    """The epoch the directory currently fences at -- the discovered coordinator's
-    epoch, or ``0`` when no coordinator is live."""
+    """Retained directory floor, or the current discovery snapshot for adapters."""
+    floor = getattr(rendezvous, "fencing_epoch", None)
+    if floor is not None:
+        return int(floor())
     coord = rendezvous.discover_coordinator()
     return int(coord["epoch"]) if coord is not None else 0
 
@@ -279,10 +290,15 @@ class FencingGuard:
 
     def __init__(self, rendezvous: Rendezvous) -> None:
         self._rv = rendezvous
+        self._lock = Lock()
+        self._floor = 0
 
     def current_epoch(self) -> int:
-        """The current fencing epoch (the discovered coordinator's, or ``0``)."""
-        return current_fencing_epoch(self._rv)
+        """Highest authoritative epoch observed; zero only before federation."""
+        observed = current_fencing_epoch(self._rv)
+        with self._lock:
+            self._floor = max(self._floor, observed)
+            return self._floor
 
     def is_valid(self, token_epoch: int) -> bool:
         """Whether ``token_epoch`` still authorizes a write (>= current epoch)."""

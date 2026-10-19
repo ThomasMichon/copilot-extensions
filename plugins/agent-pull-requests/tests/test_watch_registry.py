@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import pytest
 
 from agent_pull_requests.watch_contract import CLOSED, MERGED, REVIEW_CHANGED, PRSnapshot
 from agent_pull_requests.watch_registry import WatchKey, WatchRegistry
@@ -160,3 +161,37 @@ def test_restore_state_skips_malformed_entries_without_raising():
     )
     assert count == 1
     assert reg.subscriber_count(_key(1)) == 1
+
+
+@pytest.mark.parametrize("acknowledged", [False, True])
+def test_older_non_native_baseline_without_head_adopts_once_then_detects_push(acknowledged):
+    reg = WatchRegistry()
+    key = _key()
+    reg.register(
+        key, "head-waiter", until=("head_changed",), notify={"argv": ["callback"]},
+        acknowledged=acknowledged,
+    )
+    reg.apply_snapshot(key, PRSnapshot(head_sha="A"))
+    saved = reg.snapshot_state()
+    saved[0].pop("baseline_head_sha", None)
+    restored = WatchRegistry()
+    assert restored.restore_state(saved, strict=True) == 1
+    assert restored.apply_snapshot(key, PRSnapshot(head_sha="B")) == ()
+    fired = restored.apply_snapshot(key, PRSnapshot(head_sha="C"))
+    assert len(fired) == 1
+    assert fired[0].transitions == ("head_changed",)
+
+
+@pytest.mark.parametrize("head", [True, 42, []])
+def test_invalid_saved_non_native_baseline_head_is_rejected(head):
+    reg = WatchRegistry()
+    key = _key()
+    reg.register(
+        key, "head-waiter", until=("head_changed",), notify={"argv": ["callback"]},
+        acknowledged=True,
+    )
+    reg.apply_snapshot(key, PRSnapshot(head_sha="A"))
+    saved = reg.snapshot_state()
+    saved[0]["baseline_head_sha"] = head
+    with pytest.raises(ValueError, match="persisted acknowledged"):
+        WatchRegistry().restore_state(saved)

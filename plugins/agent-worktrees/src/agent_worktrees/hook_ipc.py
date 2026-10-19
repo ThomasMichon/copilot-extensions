@@ -14,6 +14,9 @@ from pathlib import Path
 
 Decision = Callable[[str, dict, float], dict]
 _READ_TIMEOUT_S = 1.0
+_CAPABILITIES = [
+    "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
+]
 
 
 class HookUnavailable(Exception):
@@ -101,7 +104,7 @@ class _Handler(socketserver.StreamRequestHandler):
                     time.sleep(delay_s)
             response = {
                 "version": 1,
-                "capabilities": ["session-lifecycle-v1"],
+                "capabilities": list(_CAPABILITIES),
                 "result": result,
             }
             self.wfile.write(
@@ -150,6 +153,7 @@ class HookIpcServer:
             "hook_endpoint": f"{host}:{port}",
             "hook_token": self.token,
             "hook_generation": self.generation,
+            "hook_capabilities": list(_CAPABILITIES),
         }
 
     def close(self) -> None:

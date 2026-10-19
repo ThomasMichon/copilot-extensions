@@ -15,6 +15,20 @@ from agent_bridge.events import EventLog
 class TestEventLog:
     """EventLog append, get, and wait operations."""
 
+    def test_remote_history_cannot_start_or_finish_a_live_tool(self, event_log: EventLog):
+        event_log.append("tool_call_start", {"tool_call_id": "live/tool", "title": "Live"})
+        event_log.append("tool_call_start", {
+            "tool_call_id": "historical/tool", "history_replay": True,
+        })
+        event_log.append("tool_call_update", {
+            "tool_call_id": "live/tool", "status": "completed", "history_replay": True,
+        })
+        assert event_log.active_tool_call()["tool_call_id"] == "live/tool"
+        events = event_log.get_events()
+        event_log.rebuild([(event.event, event.data) for event in events])
+        assert event_log.active_tool_call()["tool_call_id"] == "live/tool"
+        assert len(event_log.get_events()) == 3
+
     def test_append_returns_event_with_id(self, event_log: EventLog) -> None:
         evt = event_log.append("test_event", {"key": "val"})
         assert evt.id == 1

@@ -13,7 +13,14 @@ from __future__ import annotations
 
 import sys
 
+import pytest
+
 from agent_bridge import __main__ as m
+
+
+@pytest.fixture(autouse=True)
+def neutral_launch_directory(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
 
 
 def test_launch_argv_uses_interpreter_not_bare_name():

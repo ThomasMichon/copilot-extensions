@@ -5,14 +5,22 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import platform
+import re
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Iterator, Literal
 
 from . import launch_admission, locks, status_monitor_runtime, tracking, tracking_write
+from . import terminal_pair_progress
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 from .worktree_status_daemon import _is_safe_identity_token
+
+
+class NativeSeedTransportError(ValueError):
+    """A provider transition and a native prompt cannot both be admitted."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,23 +63,30 @@ def _read(yaml_path: Path) -> LaunchSeed | None:
     return LaunchSeed(seed_id, "new" if kind == "new" else "resume", text, revision, handoff_id)
 
 
-def peek(yaml_path: Path) -> LaunchSeed | None:
+def peek(yaml_path: Path, *, read_only: bool = False) -> LaunchSeed | None:
+    """Read staged intent; previews never create a writer's lock sidecar."""
     if not state_path(yaml_path).exists():
         return None
+    if read_only:
+        return _peek_snapshot(yaml_path, read_only=True)
     with tracking._RecordLock(yaml_path, require_sidecar=True):
-        current = _read(yaml_path)
-        if current is None:
-            return None
-        try:
-            record = tracking.load_record(yaml_path)
-        except FileNotFoundError:
-            return None
-        if (
-            not getattr(record, "pending_seed", None)
-            and record.pending_seed_revision > current.revision
-        ):
-            return None
-        return current
+        return _peek_snapshot(yaml_path)
+
+
+def _peek_snapshot(yaml_path: Path, *, read_only: bool = False) -> LaunchSeed | None:
+    current = _read(yaml_path)
+    if current is None:
+        return None
+    try:
+        record = tracking.load_record(yaml_path)
+    except FileNotFoundError:
+        return None
+    if (
+        (read_only or not getattr(record, "pending_seed", None))
+        and record.pending_seed_revision > current.revision
+    ):
+        return None
+    return current
 
 
 def _write(yaml_path: Path, seed: LaunchSeed) -> None:
@@ -92,6 +107,38 @@ def _record(args: dict):
     return record
 
 
+def _require_known_execution_leg(record: tracking.WorktreeRecord) -> None:
+    if record.execution_leg_opaque:
+        raise NativeSeedTransportError("worktree uses a newer unsupported execution_leg schema")
+    if record.session_backend_opaque:
+        raise NativeSeedTransportError("worktree uses a newer unsupported session_backend schema")
+
+
+def _require_native_transport(record: tracking.WorktreeRecord) -> None:
+    _require_known_execution_leg(record)
+    leg = tracking.derive_execution_leg(record)
+    if leg is not None and leg.state in {"active", "unknown"}:
+        raise NativeSeedTransportError(
+            "Launch prompt requires a native execution leg; pending intent was not changed"
+        )
+
+
+@contextmanager
+def execution_leg_mutation(
+    path: Path, action: str, leg_state: str | None,
+) -> Iterator[tracking.WorktreeRecord]:
+    """Serialize provider activation against the same record as seed staging."""
+    with tracking._RecordLock(path, require_sidecar=True):
+        record = tracking.load_record(path)
+        _require_known_execution_leg(record)
+        if action == "reserve" or (action == "set" and leg_state in {"active", "unknown"}):
+            if record.pending_seed or peek(path) is not None:
+                raise NativeSeedTransportError(
+                    "execution-leg activation is blocked by a pending native launch prompt"
+                )
+        yield record
+
+
 def _apply_stage(args: dict) -> dict:
     path = Path(args["yaml_path"])
     with tracking._RecordLock(path, require_sidecar=True):
@@ -99,6 +146,8 @@ def _apply_stage(args: dict) -> dict:
         current = peek(path)
         text = args.get("text")
         kind = args.get("kind")
+        if text is not None or current is not None or record.pending_seed:
+            _require_native_transport(record)
         if text is None:
             legacy = getattr(record, "pending_seed", None)
             if current is not None and not (
@@ -136,10 +185,11 @@ def _apply_stage(args: dict) -> dict:
 def _apply_take(args: dict) -> dict:
     path = Path(args["yaml_path"])
     with tracking._RecordLock(path, require_sidecar=True):
-        _record(args)
+        record = _record(args)
         current = peek(path)
         if current is None:
             return {"seed": None, "reason": "missing"}
+        _require_native_transport(record)
         if args.get("seed_id") and current.seed_id != args["seed_id"]:
             return {"seed": None, "reason": "superseded"}
         if args.get("kind") and current.kind != args["kind"]:
@@ -193,33 +243,86 @@ def _apply_finish(args: dict) -> dict:
         return {"finished": True}
 
 
+def _remove_record_state(path: Path, target: Path, receipt: Path) -> None:
+    files = (path, target, receipt)
+    if any(file.is_symlink() for file in files):
+        raise ExecutionSpaceError("cannot authorize record-state removal through a symbolic link")
+    snapshots = {file: file.read_bytes() for file in files if file.exists()}
+    try:
+        target.unlink(missing_ok=True)
+        receipt.unlink(missing_ok=True)
+        # Keep authorization available across interrupted sidecar teardown.
+        path.unlink(missing_ok=True)
+    except OSError:
+        # Retain the authorized record and its evidence for a normal retry,
+        # without reserializing through a separate record writer.
+        for file, content in snapshots.items():
+            if not file.exists():
+                tracking._atomic_write(file, content)
+        raise
+
+
 def _apply_remove(args: dict) -> dict:
     path = Path(args["yaml_path"])
     target = state_path(path)
+    receipt = terminal_pair_progress.receipt_path(path)
     if args.get("worktree_id") != path.stem:
         raise ValueError("Launch-seed removal identity mismatch")
     with tracking._RecordLock(path, require_sidecar=True):
         if path.exists():
             _record(args)
-        elif target.exists():
+        elif target.exists() or (args.get("remove_record") and receipt.exists()):
             raise ExecutionSpaceError("cannot authorize launch-seed removal without its worktree record")
-        target.unlink(missing_ok=True)
         if args.get("remove_record"):
-            path.unlink(missing_ok=True)
+            _remove_record_state(path, target, receipt)
+        else:
+            target.unlink(missing_ok=True)
     return {"removed": True, "record_removed": bool(args.get("remove_record"))}
 
 
+def _valid_birth_token(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    pattern = (
+        r"[1-9][0-9]*:(?:0|[1-9][0-9]{0,5})"
+        if platform.system() == "Darwin" else r"(?:0|[1-9][0-9]*)"
+    )
+    return re.fullmatch(pattern, value) is not None
+
+
 def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
+    if verb in {"launch_seed_stage", "launch_seed_take"}:
+        min_version = max(min_version, 5)
     enabled = status_monitor_runtime._status_monitor_enabled()
+
+    def read_authority():
+        data = locks.read_lock(status_monitor_runtime._monitor_lock_path())
+        if (verb == "launch_seed_remove"
+                and tracking_write.endpoint_from_rendezvous(data, verb=verb, min_version=1)
+                and not tracking_write.endpoint_from_rendezvous(data, verb=verb, min_version=5)):
+            pid = data.get("pid")
+            if type(pid) is int and pid > 0:
+                if not locks.pid_alive(pid):
+                    return None
+                recorded = data.get("start_time")
+                if _valid_birth_token(recorded):
+                    current = locks.process_start_time(pid)
+                    if _valid_birth_token(current) and current != recorded:
+                        return None
+            raise ValueError("launch_seed_remove requires verb version 5; existing monitor is incompatible")
+        return data
+
     result = tracking_write.dispatch(
         verb, args,
-        read_lock_data=lambda: locks.read_lock(status_monitor_runtime._monitor_lock_path()),
+        read_lock_data=read_authority,
         ensure_monitor=status_monitor_runtime._ensure_status_monitor if enabled else None,
         boot_wait_s=tracking_write.BOOT_WAIT_S if enabled else 0.0,
         min_version=min_version,
     )
     if result.get("error") in {"execution_space", "launch_admission"}:
         raise ValueError(result["message"])
+    if result.get("error") == "native_transport":
+        raise NativeSeedTransportError(result["message"])
     return result
 
 
@@ -260,7 +363,7 @@ def remove(yaml_path: Path, *, remove_record: bool = False) -> dict:
     return _dispatch("launch_seed_remove", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "remove_record": remove_record,
-    }, min_version=4)
+    }, min_version=5)
 
 
 def pending(yaml_path: Path, record=None) -> LaunchSeed | None:
@@ -316,6 +419,8 @@ def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict
                 "Rejecting launch-seed mutation for %s: %s", args.get("worktree_id"), exc,
             )
             return {"error": "launch_admission", "message": str(exc)}
+        except NativeSeedTransportError as exc:
+            return {"error": "native_transport", "message": str(exc)}
         except ExecutionSpaceError as exc:
             logging.getLogger(__name__).warning(
                 "Rejecting launch-seed mutation for %s: %s", args.get("worktree_id"), exc,
@@ -324,8 +429,8 @@ def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict
     return apply
 
 
-tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=4)
-tracking_write.register_verb("launch_seed_take", _authority_checked(_apply_take), version=4)
+tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=5)
+tracking_write.register_verb("launch_seed_take", _authority_checked(_apply_take), version=5)
 tracking_write.register_verb("launch_seed_restore", _authority_checked(_apply_restore), version=4)
 tracking_write.register_verb("launch_seed_finish", _authority_checked(_apply_finish), version=4)
-tracking_write.register_verb("launch_seed_remove", _authority_checked(_apply_remove), version=4)
+tracking_write.register_verb("launch_seed_remove", _authority_checked(_apply_remove), version=5)

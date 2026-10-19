@@ -143,8 +143,12 @@ class TestMuxBindingForSession:
         entry.mkdir(parents=True)
         (entry / f"inuse.{pid}.lock").write_text("", encoding="utf-8")
 
+    @pytest.mark.parametrize("include_incarnation,incarnation", [
+        (False, None), (True, "$1:100"), (True, ""), (True, None),
+        (True, "#{session_id}:#{session_created}"),
+    ])
     def test_resolves_worktree_and_pane_from_lock_process_ancestry(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch, include_incarnation, incarnation
     ):
         self._session_lock(tmp_path, "sess-a", 300)
         monkeypatch.setattr(
@@ -179,13 +183,17 @@ class TestMuxBindingForSession:
 
         class _Result:
             returncode = 0
-            stdout = "wt-wt-a|%7|200\npersonal|%9|400\n"
+            stdout = "wt-wt-a|%7|200"
+            if include_incarnation and incarnation is not None:
+                stdout += "|" + incarnation
+            stdout += "\n"
 
+        seen = []
         monkeypatch.setattr(
-            "subprocess.run", lambda *args, **kwargs: _Result()
+            "subprocess.run", lambda argv, **kwargs: seen.append(argv) or _Result()
         )
 
-        assert mux_binding_for_session("sess-a", mux="psmux") == {
+        expected = {
             "worktree_id": "wt-a",
             "session_name": "wt-wt-a",
             "pane_id": "%7",
@@ -194,6 +202,16 @@ class TestMuxBindingForSession:
             "copilot_pid": 300,
             "copilot_start_time": "copilot-created",
         }
+        observed = mux_binding_for_session(
+            "sess-a", mux="psmux", include_incarnation=include_incarnation,
+        )
+        assert seen[0][-1].endswith("#{session_id}:#{session_created}") is include_incarnation
+        if include_incarnation and incarnation != "$1:100":
+            assert observed is None
+            return
+        if include_incarnation:
+            expected["session_incarnation"] = "$1:100"
+        assert observed == expected
 
     def test_resolves_expected_non_worktree_mux_session(
         self, tmp_path: Path, monkeypatch

@@ -236,6 +236,34 @@ class TaskQueue(
             run_queue_schema_migrations(conn, now_fn=self._now)
             self._ensure_handoff_fallback_schema(conn)
             self._migrate_producer_schema(conn)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS coordinator_fencing ("
+                " singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"
+                " epoch INTEGER NOT NULL CHECK (epoch >= 0))"
+            )
+
+    def advance_fencing_epoch(self, epoch: int) -> int:
+        """Retain the coordinator's nondecreasing floor with its durable queue."""
+        if type(epoch) is not int or not 0 <= epoch < 2**63:
+            raise ValueError("fencing epoch must be a nonnegative integer below 2**63")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT epoch FROM coordinator_fencing WHERE singleton = 1"
+            ).fetchone()
+            if row is not None and epoch <= row["epoch"]:
+                return row["epoch"]
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "INSERT INTO coordinator_fencing (singleton, epoch) VALUES (1, ?)"
+                " ON CONFLICT(singleton) DO UPDATE"
+                " SET epoch = MAX(coordinator_fencing.epoch, excluded.epoch)",
+                (epoch,),
+            )
+            floor = conn.execute(
+                "SELECT epoch FROM coordinator_fencing WHERE singleton = 1"
+            ).fetchone()["epoch"]
+            conn.commit()
+            return floor
 
     @staticmethod
     def _migrate_producer_schema(conn: sqlite3.Connection) -> None:

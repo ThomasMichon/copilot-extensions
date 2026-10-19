@@ -26,6 +26,7 @@ import re
 import shlex
 import subprocess
 import time
+from contextlib import contextmanager
 from urllib.parse import quote
 
 from agent_procutil import no_window_flags
@@ -73,10 +74,11 @@ class CodeSpaceTransport:
             self._connected = True
 
     async def run(
-        self, command: str, *, timeout: float = 60.0,
+        self, command: str, *, timeout: float = 60.0, input_bytes: bytes | None = None,
     ) -> tuple[int, str, str]:
         await self._ensure()
-        res = await self._manager.exec_command(self._name, command, timeout=timeout)
+        kwargs = {"input_bytes": input_bytes} if input_bytes is not None else {}
+        res = await self._manager.exec_command(self._name, command, timeout=timeout, **kwargs)
         return (res.exit_code, res.stdout, res.stderr)
 
     async def run_script(
@@ -271,6 +273,235 @@ def workspace_folder_from_acp_command(acp_command: str) -> str | None:
     return target if target.startswith("/") else None
 
 
+def _workspace_environment_probe(argument: str) -> str:
+    """Parse only the provider's variable/fallback grammar; never shell-eval it."""
+    variables = []
+    value = argument
+    while value.startswith("${"):
+        match = re.match(r"\$\{([A-Za-z_][A-Za-z0-9_]*)", value)
+        if match is None:
+            raise RuntimeError("Unsupported venue execution checkout expression")
+        variables.append(match.group(1))
+        tail = value[match.end():]
+        if tail == "}":
+            value = None
+            break
+        if not tail.startswith(":-") or not tail.endswith("}"):
+            raise RuntimeError("Unsupported venue execution checkout expression")
+        value = tail[2:-1]
+    if not variables or value is not None and (
+        value != "." and not value.startswith("/")
+        or any(character in value for character in "$`{};|&\"'\r\n")
+    ):
+        raise RuntimeError("Unsupported venue execution checkout expression")
+    script = (
+        "import json,os,pathlib,sys\n"
+        "names=json.loads(sys.argv[1]);fallback=json.loads(sys.argv[2])\n"
+        "value=next((os.environ[name] for name in names if os.environ.get(name)),fallback)\n"
+        "if not value: raise SystemExit('workspace environment is unset')\n"
+        "path=pathlib.Path(value).resolve(strict=False)\n"
+        "print(path)\n"
+    )
+    return (
+        f"export {' '.join(variables)} && "
+        f"python3 -c {shlex.quote(script)} {shlex.quote(json.dumps(variables))} "
+        f"{shlex.quote(json.dumps(value))}"
+    )
+
+
+async def resolve_execution_workspace(target: dict, transport) -> str:
+    """Resolve a fresh/replacement child's leading `cd` without launching it."""
+    leading_cd = re.match(r"^\s*cd\s", str(target.get("acp_command") or "")) is not None
+    existing = target.get("workspace_folder")
+    if isinstance(existing, str) and existing.startswith("/") and not leading_cd:
+        return existing
+    if (
+        "checkout_provision_command" not in target
+        and str(target.get("acp_command") or "").lstrip().startswith("[")
+    ):
+        await _refresh_checkout_metadata(target)
+    existing = target.get("workspace_folder")
+    leading_cd = re.match(r"^\s*cd\s", str(target.get("acp_command") or "")) is not None
+    if isinstance(existing, str) and existing.startswith("/") and not leading_cd:
+        return existing
+    clause, separator, command = str(target.get("acp_command") or "").partition("&&")
+    parts = shlex.split(clause)
+    if not separator or not parts or parts[0] != "cd" or len(parts) not in (2, 3):
+        raise RuntimeError("Cannot resolve the venue execution checkout from its launch command")
+    if len(parts) == 3 and parts[1] != "--":
+        raise RuntimeError("Unsupported venue execution checkout expression")
+    argument = parts[-1]
+    if argument.startswith("/") and argument == existing:
+        path = existing
+    else:
+        if argument.startswith("/"):
+            reader = "import pathlib,sys;print(pathlib.Path(sys.argv[1]).resolve(strict=False))"
+            probe = f"python3 -c {shlex.quote(reader)} {shlex.quote(argument)}"
+        elif argument.startswith("${"):
+            probe = _workspace_environment_probe(argument)
+        else:
+            raise RuntimeError("Unsupported venue execution checkout expression")
+        rc, output, _error = await transport.run(f"bash -lc {shlex.quote(probe)}", timeout=30)
+        path = output.strip()
+        if rc or not path.startswith("/") or "\n" in path or "\r" in path:
+            raise RuntimeError(f"Could not resolve the venue execution checkout (exit {rc})")
+    target["workspace_folder"] = path
+    target["acp_command"] = f"cd {shlex.quote(path)} && {command.strip()}"
+    return path
+
+
+async def _refresh_checkout_metadata(target: dict) -> None:
+    """Ask the provider to refresh legacy clone targets; never parse their shell."""
+    provider = target.get("provider_command")
+    if not isinstance(provider, list) or not provider or not all(
+        isinstance(part, str) and part for part in provider
+    ):
+        raise RuntimeError("Legacy checkout target requires fresh provider metadata")
+    argv = [*provider, "namespace-resolve", target["name"]]
+    requested = target.get("requested_repo") or target.get("repo")
+    if requested:
+        argv += ["--repo", requested]
+    if target.get("repo_remote"):
+        argv += ["--repo-remote", target["repo_remote"]]
+    proc = await asyncio.create_subprocess_exec(
+        *argv, stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        creationflags=_creation_flags(),
+    )
+    try:
+        output, _error = await asyncio.wait_for(proc.communicate(), timeout=60)
+    except BaseException:
+        proc.kill()
+        await proc.wait()
+        raise
+    if proc.returncode:
+        raise RuntimeError("Could not refresh legacy checkout provider metadata")
+    metadata = json.loads(output).get("codespace") or {}
+    if metadata.get("name") != target.get("name"):
+        raise RuntimeError("Provider returned a different CodeSpace checkout")
+    for key in (
+        "workspace_folder", "acp_command", "checkout_provision_command",
+        "requested_repo", "repo_remote",
+    ):
+        if key in metadata:
+            target[key] = metadata[key]
+
+
+async def provision_execution_checkout(target: dict, transport, *, prelude: str = "") -> None:
+    """Run only the provider's separate clone step, inside the ready relay barrier."""
+    if (
+        "checkout_provision_command" not in target
+        and str(target.get("acp_command") or "").lstrip().startswith("[")
+    ):
+        previous = target.get("workspace_folder")
+        await _refresh_checkout_metadata(target)
+        if previous and target.get("workspace_folder") != previous:
+            raise RuntimeError("Provider changed the execution checkout during preparation")
+    command = target.get("checkout_provision_command")
+    if not command:
+        return
+    if not isinstance(command, str):
+        raise RuntimeError("Invalid provider checkout provisioning command")
+    rc, _output, _error = await transport.run(
+        f"bash -lc {shlex.quote(prelude + command)}", timeout=600,
+    )
+    if rc:
+        raise RuntimeError(f"Required execution checkout provisioning failed (exit {rc})")
+
+
+def codespace_child_preparer(target, transport, *, prelude, controller_cwd,
+                             prepare_plugins, append_plugin_dirs):
+    """Share the authenticated checkout/preparation barrier across fresh/recovery."""
+    async def prepare_codespace_child(argv):
+        await provision_execution_checkout(target, transport, prelude=prelude)
+        workspace = target.get("workspace_folder") or ""
+        validation = (
+            f"test -d {shlex.quote(workspace)} && "
+            f"git -C {shlex.quote(workspace)} rev-parse --show-toplevel >/dev/null"
+        )
+        rc, _output, _error = await transport.run(
+            f"bash -lc {shlex.quote(prelude + validation)}", timeout=30,
+        )
+        if rc:
+            raise RuntimeError("Required execution checkout is missing or invalid after provisioning")
+        directories = await prepare_plugins(
+            target, transport, target.get("workspace_folder") or None,
+            prelude=prelude, controller_cwd=controller_cwd,
+        )
+        return ["bash", "-lc", prelude + append_plugin_dirs(target["acp_command"], directories)]
+    return prepare_codespace_child
+
+
+@contextmanager
+def codespace_launch_ownership(manager, session_id, target, owner, core, *,
+                              holder_ref=None, replace_session_id=None, retain_on_error=False,
+                              claim_metadata=None, persist_claim_metadata=None):
+    """Rollback only this start's resources, including preflight/cancellation failures."""
+    from ..session_manager import CodespaceClaimConflictError, CodespaceCoordinationRejectedError
+    from .spawner import RemoteSpawnCleanupPendingError
+
+    name = target["name"]
+    already_held = session_id in manager._codespace_lock_sessions
+    locked = claimed = transferred = False
+    connect_started = False
+
+    def enter_connect():
+        nonlocal connect_started
+        connect_started = True
+
+    if claim_metadata is not None and not already_held and not replace_session_id:
+        claim_metadata["codespace_claim"] = None
+        if persist_claim_metadata is not None:
+            persist_claim_metadata()
+    try:
+        if replace_session_id:
+            manager._transfer_codespace_lock(replace_session_id, session_id, name)
+            transferred = True
+        else:
+            manager._acquire_codespace_lock(session_id, name)
+        locked = True
+        status, detail = core._claim_codespace(
+            name, owner, holder_ref=holder_ref,
+        )
+        if status == "conflict":
+            raise CodespaceClaimConflictError(name, owner, detail)
+        if status == "coordination-rejected":
+            raise CodespaceCoordinationRejectedError(name, owner, detail)
+        claimed = status != "skipped"
+        if claim_metadata is not None:
+            inherited_receipt = (already_held or transferred) and "codespace_claim" in claim_metadata
+            if claimed or not inherited_receipt:
+                claim_metadata["codespace_claim"] = {"name": name, "owner": owner} if claimed else None
+            if persist_claim_metadata is not None:
+                persist_claim_metadata()
+        yield enter_connect
+    except RemoteSpawnCleanupPendingError:
+        raise
+    except BaseException as failure:
+        if not (retain_on_error and connect_started and not isinstance(failure, asyncio.CancelledError)):
+            if claimed and not already_held and not transferred:
+                detail = "release was not confirmed"
+                try:
+                    released = core._release_codespace_claim(name, owner) is True
+                except Exception as cleanup_error:
+                    released = False
+                    detail = f"release raised {type(cleanup_error).__name__}"
+                if not released:
+                    raise RuntimeError(
+                        f"CodeSpace claim cleanup is unconfirmed ({detail}); "
+                        "retaining the failed session's claim and TargetLock"
+                    ) from failure
+                if claim_metadata is not None:
+                    claim_metadata["codespace_claim"] = None
+                    if persist_claim_metadata is not None:
+                        persist_claim_metadata()
+            if transferred:
+                manager._transfer_codespace_lock(session_id, replace_session_id, name)
+            elif locked and not already_held:
+                manager._release_codespace_lock(session_id)
+        raise
+
+
 def parse_codespace_target(spawn_command: list[str]) -> dict | None:
     """Recognize a codespace command-target from its ``spawn_command`` shape.
 
@@ -332,6 +563,7 @@ def build_codespace_spawner(
     ready_timeout: float = 120.0,
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
+    provision_prelude: str = "",
 ):
     """Construct a :class:`CodeSpaceSpawner` wired to a CodeSpace transport.
 
@@ -358,4 +590,5 @@ def build_codespace_spawner(
         transport, remote_dir=remote_dir, ready_timeout=ready_timeout,
         unexpected_reap_seconds=unexpected_reap_seconds,
         active_reap_seconds=active_reap_seconds,
+        provision_prelude=provision_prelude,
     )

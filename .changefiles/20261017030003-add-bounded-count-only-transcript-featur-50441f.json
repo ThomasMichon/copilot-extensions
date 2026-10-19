@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded count-only transcript features and session-disjoint historical token calibration with explicit empirical uncertainty and unknowns.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

@@ -17,12 +17,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import claim_history, config as cfg
-from . import git_ops, hooks, obligations, output, pr_authority, pr_publication_state, pr_publish, publication_deadline, push_diagnostics, tracking
+from . import git_ops, hooks, obligations, output, pr_authority, pr_publication_checks, pr_publication_state, pr_publish, publication_deadline, push_diagnostics, tracking
 from .config import Config, SourceAttribution
 from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
     _patch_id as _patch_id,
 )
+from .pr_bypass_note import self_merge_bypass_note
 from .tracking import PRRecord
 
 HOLD_LABEL = "do-not-merge"
@@ -429,6 +430,10 @@ def create_pr(
     if not Path(worktree_path).exists():
         return {**base, "error": f"Worktree path not found: {worktree_path}"}
 
+    failure = pr_publication_checks.create_preflight(worktree_path, repo, base)
+    if failure:
+        return failure
+
     # Load tracking record (optional but expected).
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     record: tracking.WorktreeRecord | None = None
@@ -562,6 +567,8 @@ def create_pr(
     # reconcile down to the genuinely-live (or no) active PR.
     if not new and not branch and git_ops.has_remote(remote, cwd=worktree_path):
         while active_is_live and active is not None and active.branch:
+            if pr_publication_state.unpublished(active):
+                break
             if not pr_publish.head_branch_gone(repo, active, worktree_path):
                 break
             active.state = "merged"
@@ -725,12 +732,13 @@ def create_pr(
             f"Checkout '{wt_branch}' before create-pr."
         )}
 
-    reusing = bool(active_is_live and not new and active and active.branch == feature_branch)
+    try:
+        active = pr_publication_state.retry_candidate(record, active, feature_branch, prcfg.provider, default_pr_repo)
+        provisional_retry = pr_publication_state.unpublished_retry(active, feature_branch, prcfg.provider, default_pr_repo)
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
+    reusing = bool(active_is_live and not new and active and active.branch == feature_branch and not provisional_retry)
     ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
-
-    # Re-run fast path: under the old reset-to-upstream scheme (or after a
-    # sync-back) the published PR head may live only on the local feature
-    # branch. Re-push that branch instead of erroring on "already exists".
     if reusing and not ahead and git_ops.local_branch_exists(
         feature_branch, cwd=worktree_path
     ):
@@ -759,12 +767,9 @@ def create_pr(
         )}
 
     orig_sha = _rev(wt_branch, cwd=worktree_path)
-
-    # Reuse the live active PR record, or append a fresh one, and mark it
-    # 'creating' up front so a later publish failure is recoverable.
     target_pr: PRRecord | None = None
     if record is not None:
-        if reusing and active is not None:
+        if (reusing or provisional_retry) and active is not None:
             target_pr = active
             target_pr.state = "creating"
             target_pr.branch = feature_branch
@@ -777,12 +782,12 @@ def create_pr(
                     target_pr.head_observed_api_base = ""
                 target_pr.repo = target_repo
             if not target_pr.opened_at:
-                target_pr.opened_at = tracking._now_iso()
+                target_pr.opened_at = pr_publication_state.monotonic_opened_at(record)
         else:
             target_pr = PRRecord(
                 state="creating", branch=feature_branch,
                 provider=prcfg.provider, repo=default_pr_repo,
-                opened_at=tracking._now_iso(),
+                opened_at=pr_publication_state.monotonic_opened_at(record),
             )
             _want_attribution = (
                 prcfg.source_attribution if attribution is None else attribution
@@ -943,7 +948,7 @@ def create_pr(
     # 7. Record the open state on the target PR (preserving any url/number
     #    already recorded for a reused live PR).
     if record is not None and target_pr is not None:
-        target_pr.state = "open"
+        pr_publication_state.settle_creation(record, target_pr)
         target_pr.branch = feature_branch
         pr_publish.record_remote_identity(target_pr, publish_remote, remote, pushed.head_repo, getattr(pushed, "head_identity", ""), fork_owner)
         target_pr.base_sha = base_sha
@@ -1000,52 +1005,6 @@ def create_pr(
     if topic_note:
         result["topic_note"] = topic_note
     return result
-
-
-def self_merge_bypass_note(
-    flow, provider, repo: str, number: int | None, *,
-    api_base: str = "", token: str | None = None,
-) -> str | None:
-    """Explain a pr-self-merge repo's live self-merge availability, or None.
-
-    Answers the question an agent otherwise has to infer by hand from a raw
-    ``eligible: false`` / ``reason: "not yet approved"`` verdict: on a
-    ``pr-self-merge`` repo, "no verdict yet" does NOT necessarily mean merge
-    is blocked -- the acting identity may hold **Maintainer bypass rights**
-    on the repo's own required-review rule (discovered landing a live
-    ruleset requiring one approving review while granting the acting
-    Maintainer bypass rights; see :meth:`GitHubProvider.pull_review_gate`).
-    Surfacing this explicitly at both ``pr-status`` and ``create-pr``
-    matters because agents have been observed hesitating or declaring "I
-    can't self-merge" here, even as a Maintainer (#3296 follow-up).
-
-    Only ever returns a note for the ``pr-self-merge`` profile, only when a
-    provider exposes ``pull_review_gate`` (currently GitHub only, via
-    ``hasattr`` -- other providers/flows are silently unaffected), and only
-    when that live read confirms BOTH a required review AND actor
-    bypassability -- never a guess. ``number is None`` (no PR yet) or any
-    read failure returns ``None``, matching :func:`_live_pr_state`'s existing
-    "omit rather than guess" contract.
-    """
-    from . import pr_contract as pc
-
-    if flow.profile != pc.PROFILE_PR_SELF_MERGE:
-        return None
-    if number is None or not hasattr(provider, "pull_review_gate"):
-        return None
-    try:
-        review_required, bypassable = provider.pull_review_gate(
-            repo, number, api_base=api_base, token=token,
-        )
-    except Exception:
-        return None
-    if not (review_required and bypassable):
-        return None
-    return (
-        "No verdict yet, but this identity holds Maintainer bypass rights on "
-        "this repo's required-review rule -- `pr-merge <#> --now` self-merges "
-        "directly rather than waiting for a review that may never come."
-    )
 
 
 def _pr_claim_ref(pr: PRRecord) -> str:
@@ -1315,6 +1274,11 @@ def _open_via_provider(
         note = self_merge_bypass_note(
             flow, provider, scope.repo, pull.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
+            expected_head_sha=pull.head_sha,
+            hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
+            wip_title_prefixes=tuple(
+                getattr(prcfg, "wip_title_prefixes", ()) or ()
+            ),
         )
         if note:
             result["self_merge_note"] = note
@@ -1771,15 +1735,10 @@ def _live_pr_state(
     *,
     prcfg=None,
 ) -> dict | None:
-    """Best-effort live verdict/conflict/merge read for the active PR.
+    """Read the shared watch snapshot, gates and consent for a tracked PR.
 
-    Folds ``pr-watch``'s snapshot + the shared classifier into ``pr-status`` so
-    one command answers "where is my PR?" -- the review **verdict**, whether it
-    has a **conflict**, its **merge state**, and whether merge **consent** is
-    present/eligible -- alongside the tracked metadata.  Returns a ``{"live":
-    {...}}`` dict, or ``None`` when there is no numbered active PR or the
-    provider is unconfigured/unreachable (never fatal: pr-status still reports
-    the tracked state).
+    Unavailable provider evidence is reported separately from tracked metadata;
+    it must not be mistaken for an empty, successful live observation.
     """
     if active is None or active.number is None:
         return None
@@ -1795,14 +1754,13 @@ def _live_pr_state(
             getattr(prcfg, "api_base", "") or ""
         )
         token = providers.account_token_for_slug(target_repo, prcfg)
-        snap = provider.get_snapshot(
+        from .pr_observation import configured_snapshot
+        snap = configured_snapshot(provider,
             target_repo, active.number,
-            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+            prcfg=prcfg, api_base=getattr(prcfg, "api_base", "") or "", token=token,
         )
-    except Exception:
-        # Provider unconfigured/unreachable/unsupported -- omit the live block
-        # rather than guessing; the tracked state is still reported.
-        return None
+    except Exception as exc:
+        return {"live_error": str(exc)}
     evidence_matches_endpoint = (
         active.head_observed_api_base == authority_endpoint
     )
@@ -1830,6 +1788,11 @@ def _live_pr_state(
         self_merge_note = self_merge_bypass_note(
             flow, provider, target_repo, active.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
+            expected_head_sha=snap.head_sha,
+            hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
+            wip_title_prefixes=tuple(
+                getattr(prcfg, "wip_title_prefixes", ()) or ()
+            ),
         )
     live: dict = {
         **pr_checks.checks_payload(snap.checks_state, snap.check_failures, complete=snap.checks_complete, omitted=snap.check_failures_omitted),
@@ -1849,6 +1812,8 @@ def _live_pr_state(
     }
     if self_merge_note:
         live["self_merge_note"] = self_merge_note
+    if snap.observation is not None:
+        live["observation"] = snap.observation.to_dict()
     return {"live": live}
 
 

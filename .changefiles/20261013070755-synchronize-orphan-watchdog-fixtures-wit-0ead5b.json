@@ -1,0 +1,9 @@
+{
+  "comment": "Synchronize orphan-watchdog fixtures with real protocol readiness, cover delayed startup, quiesce injected test threads, and close owned TCP fixture transports.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

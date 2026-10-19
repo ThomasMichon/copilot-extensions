@@ -34,6 +34,7 @@ def _task(
     evaluator_ref=None,
     exclusive_key=None,
     producer_fence=None,
+    require_verification=False,
 ):
     reservation = {"session_handle": session_handle} if session_handle else None
     return {
@@ -59,6 +60,7 @@ def _task(
         "evaluator_ref": evaluator_ref,
         "exclusive_key": exclusive_key,
         "producer_fence": producer_fence,
+        "require_verification": require_verification,
         "spawn_reservation": reservation,
         "owner": owner,
     }
@@ -219,6 +221,73 @@ def test_cli_abandon_duplicate_of_implies_permit():
 
 
 # -- reattach() --------------------------------------------------------
+
+
+def test_reattach_pending_verification_refuses_before_probes_or_mutations():
+    task = _task(status="submitted", require_verification=True, exclusive_key="review")
+    task["spawn_reservation"] = {"key": "original-reservation", "session_handle": "local-body:sess-1"}
+    client = _FakeClient(get_task=task)
+    probed = []
+    with pytest.raises(reattach.ReattachError, match="awaiting verification"):
+        reattach.reattach(
+            client, "t-1", "sess-1",
+            local_session_verdict=lambda sid: probed.append(sid) or "live",
+        )
+    assert probed == []
+    assert client.fail_spawn_calls == client.create_calls == client.reserve_calls == []
+    assert client.record_spawn_calls == client.claim_calls == client.start_calls == []
+    assert client.bind_calls == []
+
+
+def test_reattach_pending_verification_keeps_real_queue_and_reservation_unchanged(tmp_path):
+    import httpx
+    from fastapi.testclient import TestClient
+
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.queue import TaskQueue
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create(
+        "review", repo="github.com/example/project", dedup_key="review:42",
+        exclusive_key="review:42", require_verification=True,
+    )
+    reserved, created = queue.reserve_spawn(task.id, reserved_by="worker")
+    assert created
+    queue.record_spawn(reserved.key, session_handle="local-body:sess-1")
+    queue.claim_one("worker", repo=task.repo, task_id=task.id)
+    queue.start(task.id, "worker")
+    assert queue.complete(task.id, "worker").status == "submitted"
+    api = TestClient(create_app(queue))
+    with queue._connect() as conn:
+        before = "\n".join(conn.iterdump())
+    requests = []
+
+    def exchange(request):
+        requests.append((request.method, request.url.path))
+        response = api.request(request.method, str(request.url), content=request.content)
+        return httpx.Response(response.status_code, json=response.json())
+
+    try:
+        with DispatchClient("http://testserver", transport=httpx.MockTransport(exchange)) as client:
+            with pytest.raises(reattach.ReattachError, match="awaiting verification"):
+                reattach.reattach(
+                    client, task.id, "sess-1", local_session_verdict=lambda sid: "live",
+                )
+    finally:
+        api.close()
+    assert requests == [("GET", f"/tasks/{task.id}")]
+    with queue._connect() as conn:
+        assert "\n".join(conn.iterdump()) == before
+
+
+def test_reattach_legacy_unverified_submission_still_releases_dedup():
+    client = _FakeClient(get_task=_task(status="submitted", require_verification=False))
+    result = reattach.reattach(
+        client, "t-1", "sess-1", local_session_verdict=lambda sid: "live", resume=False,
+    )
+    assert result.task_id == "t-2"
+    assert client.start_calls == [("t-2", "local-body:sess-1")]
 
 
 def test_reattach_refuses_when_session_not_live():

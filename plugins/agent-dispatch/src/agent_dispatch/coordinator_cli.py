@@ -13,7 +13,6 @@ import argparse
 import json as _json
 import os
 import socket as _socket
-import subprocess as _subprocess
 import sys
 import time
 import urllib.request as _urllib
@@ -397,9 +396,7 @@ def _cmd_cutover(
             return int(sock.getsockname()[1])
 
     def spawn_passive(port: int):
-        from agent_procutil import windowless_daemon_kwargs
-
-        from .procutil import resolve_own_runtime_python
+        from .procutil import resolve_own_runtime_python, spawn_dispatch_daemon
 
         # Never bare `_sys.executable`: a self-relaunch site must target the
         # canonically-resolved current-version slot, not whatever interpreter
@@ -438,29 +435,16 @@ def _cmd_cutover(
         # override the fresh selection -- `server._server_bind_port()` reads
         # the env var, not the CLI flag.
         child_env["AGENT_DISPATCH_PORT"] = str(port)
-        kwargs: dict[str, Any] = {
-            "env": child_env,
-            "stdin": _subprocess.DEVNULL,
-            "stdout": _subprocess.DEVNULL,
-            "stderr": _subprocess.DEVNULL,
-            # Same as the primary detached launch: run from the runtime root,
-            # never the caller's cwd (a worktree or payload directory), which a
-            # long-lived process would otherwise hold open on Windows.
-            "cwd": str(runtime_root),
-        }
-        # NOT windowless_python()/detached_kwargs(): this coordinator is a
-        # daemon with RECURRING console-subsystem descendants (it repeatedly
-        # shells out to `agent-worktrees` etc. for repo/worktree-status
-        # queries). A DETACHED_PROCESS root has no console for those children
-        # to inherit, so each one allocates its own fresh, visible Default
-        # Terminal window (confirmed via a live controlled comparison -- see
-        # docs/patterns/windows-background-process-launch.md and
-        # efforts/active/windows-launch-hardening/README.md). Keep the
-        # console-subsystem interpreter (`python`, not `pythonw.exe`) and use
-        # CREATE_NO_WINDOW so this process's own console stays hidden while
-        # still being inheritable by its children.
-        kwargs.update(windowless_daemon_kwargs(breakaway=True))
-        launcher = _subprocess.Popen(cmd, **kwargs)  # noqa: S603
+        # Console children: this coordinator keeps shelling out to
+        # `agent-worktrees` etc., which must inherit one hidden console rather
+        # than each allocating a visible window (see
+        # docs/patterns/windows-background-process-launch.md).
+        launcher = spawn_dispatch_daemon(
+            cmd,
+            log_name="logs/coordinator-generation.log",
+            env=child_env,
+            cwd=Path(os.path.abspath(runtime_root)),
+        )
         from .cutover_process import CoordinatorProcess, is_windows
 
         handle = CoordinatorProcess(launcher) if is_windows() else launcher

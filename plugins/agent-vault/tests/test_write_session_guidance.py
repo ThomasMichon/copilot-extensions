@@ -89,7 +89,9 @@ def test_main_always_emits_empty_object(monkeypatch, capsys):
 
 
 def test_wrapper_writes_exact_session_file(tmp_path):
-    shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    shell = shutil.which("pwsh")
+    if os.name == "nt":
+        shell = shell or shutil.which("powershell.exe")
     command = [shell, "-NoProfile", "-File", str(PLUGIN / "scripts" / "write-session-guidance.ps1")]
     if not shell:
         shell = shutil.which("bash")

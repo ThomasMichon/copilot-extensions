@@ -1,9 +1,0 @@
-{
-  "comment": "Ship shared procutil optional owned-process CPU observations while preserving stdlib-only default helpers.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

@@ -210,6 +210,77 @@ Any issuer-specific login/exchange/renewal is a selected provider adapter's
 responsibility, with attended requirements exposed before unattended use.
 Do not introduce a mandatory external IdP or hide a second issuer service in a UI.
 
+## Selected Windows/Entra application adapter
+
+Operator, verbatim:
+
+> Yes, Windows/Entra. Though we only need this to go through the API or any open ports on the Linux machines that aren't its management/SSH flow
+
+This selects one adopter's application identity provider, not a mandatory
+vendor for fleet-manager. It covers exposed fleet APIs and independently exposed
+non-management Linux application listeners. Existing SSH and substrate management
+authentication remain unchanged and independently protected. Private index/model
+listeners do not become public or anonymous to avoid this requirement.
+
+**Agent-recommended implementation amendment; review before provider code:**
+
+1. For an Entra-issued API credential path, establish an approved fleet API
+   resource/audience, Windows public-client registration, exact tenant/account
+   selection and API permissions. Treat those
+   as non-secret adopter configuration, never built-in identifiers. Choosing
+   the provider does not authorize directory application creation, consent or
+   permission grants. Tokens for unrelated Microsoft/source APIs and ID tokens
+   are not fleet access credentials. These are requirements of that OAuth path,
+   not an operator instruction to provision new directory applications for
+   every Windows-backed enrollment design. Any alternative must establish real
+   verified platform identity and reviewed key custody/enrollment; a PID,
+   forwarded username or self-asserted account is not sufficient.
+2. Reuse maintained MSAL/Windows broker acquisition and protected key custody.
+   Silent renewal continues while the actual provider session permits it;
+   background roles never initiate unattended sign-in UI. Preserve distinct
+   usable, actual challenge, denial/revocation and temporary-unavailability
+   outcomes, with no local presence timer or alternate-account fallback.
+3. Prove the actual broker credential/proof format for the selected registered
+   API before choosing the serving profile. MSAL Python's documented
+   `PopAuthScheme` binds method, URL and resource nonce through the broker.
+   Microsoft distinguishes legacy Signed HTTP Request (SHR) from RFC 9449 DPoP;
+   neither the word "PoP" nor a successfully acquired token proves compatibility
+   with the current ES256/P-256 `at+jwt`/`dpop+jwt` prerequisite.
+4. Have the retained authentication owner review and supply any needed explicit
+   provider profile through the common immutable identity/admission boundary.
+   Use maintained signature/proof validation, configured tenant/issuer/audience/
+   client/permission checks and current trust; do not broaden `jwt-pop-v1`,
+   relabel a legacy proof or add bearer-only outage fallback. Stable actor
+   mapping must use verified provider identifiers, not email/display names.
+5. Keep enrollment/grants and backend delegation separate from user identity.
+   The Gateway authenticates the exposed application edge; a fixed private
+   service independently validates narrowed execution authority. It does not
+   receive the user's broad source token or gain management/SSH authority.
+6. Inventory listeners at deployment: only approved authenticated application
+   endpoints are externally reachable. Keep index/model/backend sockets private
+   unless their service supplies the reviewed selected boundary. Existing
+   management endpoints retain their own configured protection; exclusion
+   from this adapter is not an anonymous-management exception.
+
+Provider evidence sources:
+[MSAL Python public API and broker configuration](https://msal-python.readthedocs.io/en/latest/),
+[MSAL Python PopAuthScheme](https://github.com/AzureAD/microsoft-authentication-library-for-python/blob/d73407a8137f409c40d018716bf98c5d9e71bf5d/msal/auth_scheme.py),
+[Microsoft's PoP variants and Windows broker guidance](https://learn.microsoft.com/en-us/entra/msal/dotnet/advanced/proof-of-possession-tokens),
+and [resource ownership of Entra access tokens](https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens).
+These establish provider/API requirements, not a live interoperability result.
+
+### Additional validation gates
+
+- Prove silent acquisition/renewal for the approved API on a real Windows
+  broker; verify exact account/tenant/audience and provider key custody.
+- Exercise actual selected-token/proof server interoperability over verified
+  TLS, including nonce/restart/replay, wrong resource/tenant/client and expired
+  or revoked enrollment. Synthetic cryptographic tests remain unit evidence only.
+- Prove challenge/unavailability handling without unattended UI, forced
+  presence checks, source-token substitution or fallback.
+- Prove Linux listener reachability matches the approved exposure inventory
+  and that management/SSH behavior and existing authentication are unchanged.
+
 ## Binding the existing consumers
 
 ### Origin push and current views

@@ -11,9 +11,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import session_context
 
 
 class _Args:
@@ -44,7 +48,7 @@ def test_emits_empty_outside_a_project(monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == "{}"
 
 
-def test_emits_empty_without_machines_yaml(monkeypatch, capsys):
+def test_emits_identity_without_machines_yaml(monkeypatch, capsys):
     monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
     monkeypatch.setattr(m.cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Config())
@@ -55,31 +59,35 @@ def test_emits_empty_without_machines_yaml(monkeypatch, capsys):
     monkeypatch.setattr(m.cfg, "load_machines_yaml", _raise)
     rc = m.cmd_machine_context(_Args())
     assert rc == 0
-    assert capsys.readouterr().out.strip() == "{}"
+    context = json.loads(capsys.readouterr().out)["additionalContext"]
+    assert "Machine: foo" in context
+    assert "Project: proj" in context
 
 
 def test_emits_additional_context_in_project(monkeypatch, capsys):
-    sentinel = object()
+    sentinel = cfg.MachineEntry(key="foo", display_name="Foo")
     monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
     monkeypatch.setattr(m.cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Config())
     monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda _rd: {"foo": sentinel})
-    monkeypatch.setattr(m.cfg, "find_machine_entry", lambda _reg, _name: sentinel)
     monkeypatch.setattr(
         m.cfg, "render_copilot_instructions",
-        lambda _entry, project="": "Machine: Foo\nHostname: bar\nProject: " + project,
+        lambda _entry, project="", machine="": (
+            f"Machine: {machine}\nHostname: bar\nProject: " + project
+        ),
     )
 
     rc = m.cmd_machine_context(_Args())
     assert rc == 0
     obj = json.loads(capsys.readouterr().out)
     assert set(obj.keys()) == {"additionalContext"}
-    assert "Machine: Foo" in obj["additionalContext"]
+    assert "Machine: foo" in obj["additionalContext"]
     assert "Project: proj" in obj["additionalContext"]
 
 
 def test_render_includes_normalized_machine_metadata_after_role(monkeypatch):
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "os-host-a")
     entry = cfg.MachineEntry(
         key="host-a",
         display_name="Host A",
@@ -93,7 +101,9 @@ def test_render_includes_normalized_machine_metadata_after_role(monkeypatch):
 
     assert rendered.splitlines() == [
         "Machine: Host A",
-        "Hostname: host-a",
+        "Hostname: os-host-a",
+        "Machine name: host-a",
+        "Alias/friendly name: Host A",
         "Environment: Linux",
         "Platform: linux",
         "Role: worker",
@@ -115,6 +125,149 @@ def test_render_omits_empty_machine_metadata(monkeypatch):
     assert "Role: worker" in rendered
     assert "Description:" not in rendered
     assert "Capabilities:" not in rendered
+
+
+def test_session_machine_identity_reads_registry_without_worktree_binding(tmp_path, monkeypatch):
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n"
+        "  worker-a:\n"
+        "    hostname: VM-ABC\n"
+        "    display_name: builder\n"
+        "    environment: Windows\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(session_context.socket, "gethostname", lambda: "VM-ABC")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    config = SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path)))
+
+    context = session_context.render_machine_context(config)
+    facts = json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0])
+
+    assert facts == {
+        "hostname": "VM-ABC", "machine": "worker-a", "alias": "builder",
+        "platform": "windows", "status": "resolved", "source": "machine-registry",
+    }
+    assert len(context.encode("utf-8")) < 1024
+
+
+@pytest.mark.parametrize("config_available", [True, False])
+def test_session_machine_identity_keeps_unresolved_hostname_explicit(
+    tmp_path, monkeypatch, config_available,
+):
+    monkeypatch.setattr(session_context.socket, "gethostname", lambda: "VM-ABC")
+    config = (
+        SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path)))
+        if config_available else None
+    )
+
+    context = session_context.render_machine_context(config)
+    facts = json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0])
+
+    assert facts["hostname"] == "VM-ABC"
+    assert facts["machine"] is None and facts["alias"] is None
+    assert facts["status"] == "unresolved"
+    assert facts["source"] == "os-hostname"
+    assert facts["reason"] == ("FileNotFoundError" if config_available else "project-unavailable")
+
+
+def test_session_machine_identity_does_not_guess_from_configured_machine(tmp_path, monkeypatch):
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n  other-host:\n    hostname: VM-OTHER\n    display_name: other\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(session_context.socket, "gethostname", lambda: "VM-ABC")
+    config = SimpleNamespace(
+        machine="other-host", default_repo=SimpleNamespace(anchor=str(tmp_path)),
+    )
+    facts = json.loads(
+        session_context.render_machine_context(config).split("```json\n", 1)[1].split("\n```", 1)[0]
+    )
+
+    assert facts["machine"] is None
+    assert facts["reason"] == "hostname-not-registered"
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl"])
+def test_session_machine_identity_selects_current_execution_platform(tmp_path, monkeypatch, platform):
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n"
+        "  worker-a:\n"
+        "    hostname: VM-ABC\n"
+        "    display_name: builder\n"
+        "    ssh:\n"
+        "      environments:\n"
+        "        - name: windows\n"
+        "          alias: worker-a\n"
+        "        - name: wsl\n"
+        "          alias: worker-a-wsl\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(session_context.socket, "gethostname", lambda: "VM-ABC")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    config = SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path)))
+    facts = json.loads(
+        session_context.render_machine_context(config).split("```json\n", 1)[1].split("\n```", 1)[0]
+    )
+
+    assert facts["machine"] == ("worker-a" if platform == "windows" else "worker-a-wsl")
+    assert facts["platform"] == platform
+    assert facts["status"] == "resolved"
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+def test_renderer_uses_explicit_platform_and_wrapper_remains_patchable(monkeypatch, platform):
+    from agent_worktrees import machine_instructions
+
+    entry = cfg.MachineEntry(
+        key="example-host", display_name="Example host", environment="Example environment",
+        role="worker", description="Shared metadata", capabilities=["tests"],
+        ssh_environments=[
+            cfg.SSHEnvironment(name=name, alias=f"independent-{name}-transport")
+            for name in ("windows", "wsl", "linux")
+        ],
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    machine = "example-host-wsl" if platform == "wsl" else "example-host"
+    direct = machine_instructions.render_copilot_instructions(
+        entry, "example", machine=machine, platform=platform,
+        hostname=cfg.socket.gethostname(),
+    )
+    assert cfg.render_copilot_instructions(entry, "example", machine=machine) == direct
+    assert f"Machine: {machine}\n" in direct
+    assert f"Platform: {platform}\n" in direct
+    assert f"Deployment environment: independent-{platform}-transport\n" in direct
+    assert direct.endswith("Binstub: example\n")
+
+
+@pytest.mark.parametrize("failure", ["config", "topology", "metadata", "missing", "render"])
+def test_machine_context_warning_stream(monkeypatch, capsys, failure):
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
+    monkeypatch.setattr(cfg, "set_active_project", lambda _p: None)
+    monkeypatch.setattr(cfg, "load_config", lambda: _Config(machine="example-host-wsl"))
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _repo: {})
+    monkeypatch.setattr(cfg, "find_machine_metadata", lambda *_args: object())
+    monkeypatch.setattr(
+        cfg, "render_copilot_instructions", lambda *_args, **_kwargs: "Machine: example-host-wsl",
+    )
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("fixture error")
+
+    if failure == "missing":
+        monkeypatch.setattr(cfg, "find_machine_metadata", lambda *_args: None)
+    else:
+        target = {
+            "config": "load_config", "topology": "load_machines_yaml",
+            "metadata": "find_machine_metadata", "render": "render_copilot_instructions",
+        }[failure]
+        monkeypatch.setattr(cfg, target, fail)
+    assert m.cmd_machine_context(_Args()) == 0
+    captured = capsys.readouterr()
+    assert len(captured.out.splitlines()) == 1
+    payload = json.loads(captured.out.splitlines()[0])
+    assert payload == {} if failure == "config" else "additionalContext" in payload
+    assert "warning:" in captured.err
 
 
 def test_deploy_retires_machine_files(tmp_path: Path):

@@ -9,6 +9,32 @@ import os
 import sys
 from collections.abc import Iterator
 
+try:
+    from update_telemetry.human import HumanOperation, current_operation
+    from update_telemetry.human import native_output as _native_output
+except ImportError:  # older runtimes without the shared human adapter
+    HumanOperation = None
+
+    def current_operation():
+        return None
+
+
+def human_operation(label: str, *, enabled: bool = True):
+    return HumanOperation(label) if HumanOperation and enabled else contextlib.nullcontext()
+
+
+def native_output():
+    return _native_output() if HumanOperation else contextlib.nullcontext()
+
+
+def _human(message: str, state: str | None = None) -> bool:
+    operation = current_operation()
+    if operation is None:
+        return False
+    operation.progress(message, state=state)
+    return True
+
+
 #: Envelope schema version for :func:`_json_output`'s versioned JSON mode.
 _JSON_SCHEMA_VERSION = 1
 
@@ -154,34 +180,50 @@ def _c(color: str, text: str) -> str:
 
 
 def ok(msg: str) -> None:
+    if _human(msg, "done"):
+        return
     print(f"  {_c('green', '✓')} {msg}")
 
 
 def changed(msg: str) -> None:
+    if _human(msg, "done"):
+        return
     print(f"  {_c('yellow', '→')} {msg}")
 
 
 def skipped(msg: str) -> None:
+    if _human(msg, "skipped"):
+        return
     print(f"  {_c('cyan', '○')} {msg}")
 
 
 def err(msg: str) -> None:
+    if _human(msg, "failed"):
+        return
     print(f"  {_c('red', '✗')} {msg}")
 
 
 def header(name: str) -> None:
+    if _human(name):
+        return
     bar = "═" * max(0, 56 - len(name))
     print()
     print(f"{_c('cyan', f'═══ {name} ')}{_c('dim', bar)}")
 
 
 def dry_run(msg: str) -> None:
+    if _human(f"(dry-run) {msg}", "skipped"):
+        return
     print(f"  {_c('magenta', '▷')} (dry-run) {msg}")
 
 
 def warn(msg: str) -> None:
+    if _human(msg, "warning"):
+        return
     print(f"  {_c('yellow', '⚠️')}  {msg}")
 
 
 def info(msg: str) -> None:
+    if _human(msg):
+        return
     print(f"  {msg}")

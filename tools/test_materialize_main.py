@@ -17,6 +17,85 @@ import materialize_main as mm
 import uv_editable_ref as uer
 
 
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("editable", [False, True])
+def test_materialize_declared_flat_python_modules(tmp_path, nested, editable):
+    root = tmp_path / "repo"
+    flat = root / "libs" / "flat-context"
+    flat.mkdir(parents=True)
+    (flat / "pyproject.toml").write_text(
+        '[project]\nname = "agent-flat-context"\nversion = "1.0.0"\n'
+        '[tool.setuptools]\npy-modules = ["flat_context", "_flat_helper"]\n',
+        encoding="utf-8",
+    )
+    (flat / "flat_context.py").write_text("from _flat_helper import value\n", encoding="utf-8")
+    (flat / "_flat_helper.py").write_text("value = 1\n", encoding="utf-8")
+    if nested:
+        _canonical_lib_with_dependency(
+            root, "owner", dep_lib="flat-context", dep_raw_path="../flat-context",
+        )
+        consumer = _uv_editable_consumer(
+            root, "plugins/agent-example", "agent-owner", "../../libs/owner",
+        )
+    else:
+        consumer = _uv_editable_consumer(
+            root, "plugins/agent-example", "agent-flat-context", "../../libs/flat-context",
+        )
+    reference = root / "libs" / "owner" if nested else consumer
+    if not editable:
+        manifest = reference / "pyproject.toml"
+        manifest.write_text(manifest.read_text().replace("editable = true", "editable = false"))
+    dependency_name = "flat-context" if nested else "agent-flat-context"
+    assert uer.is_retained_flat_ref(reference, dependency_name, flat) is (not editable)
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert log and all(line.startswith("OK") for line in log), log
+    copied = consumer / "libs" / "flat-context"
+    assert (copied / "flat_context.py").read_bytes() == (flat / "flat_context.py").read_bytes()
+    assert (copied / "_flat_helper.py").is_file()
+    assert not (copied / "src").exists()
+    if nested:
+        assert "editable" not in (consumer / "libs" / "owner" / "pyproject.toml").read_text()
+
+
+@pytest.mark.parametrize("editable", ['"false"', "1", None])
+def test_retained_flat_reference_requires_explicit_boolean_false(tmp_path, editable):
+    flat = tmp_path / "flat"
+    flat.mkdir()
+    (flat / "pyproject.toml").write_text('[tool.setuptools]\npy-modules = ["flat"]\n')
+    (flat / "flat.py").write_text("value = 1\n")
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    setting = f", editable = {editable}" if editable is not None else ""
+    (consumer / "pyproject.toml").write_text(
+        '[tool.uv.sources]\nagent-flat = { path = "../flat"' + setting + " }\n",
+    )
+    assert not uer.is_retained_flat_ref(consumer, "agent-flat", flat)
+
+
+@pytest.mark.parametrize("modules", [[], ["missing"], ["../outside"], ["a.b"], [True], ["x", "x"]])
+def test_materialize_refuses_undeclared_or_invalid_flat_sources(tmp_path, modules):
+    root = tmp_path / "repo"
+    flat = root / "libs" / "flat-context"
+    flat.mkdir(parents=True)
+    (flat / "x.py").write_text("value = 1\n")
+    (flat / "pyproject.toml").write_text(
+        '[project]\nname = "flat"\nversion = "1"\n'
+        '[tool.setuptools]\npy-modules = ' + json.dumps(modules).lower() + "\n",
+        encoding="utf-8",
+    )
+    assert not uer.has_canonical_python_sources(flat)
+    consumer = _uv_editable_consumer(
+        root, "plugins/agent-example", "agent-flat-context", "../../libs/flat-context",
+    )
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any(line.startswith("SKIP") for line in log)
+    assert not (consumer / "libs" / "flat-context").exists()
+
+
 def test_packaged_projection_assets_expand_into_own_payload(tmp_path):
     root = tmp_path / "repo"
     consumer = root / "plugins" / "agent-worktrees"
@@ -314,8 +393,8 @@ def _rewrite_to_local_path(pyproject: Path, *, name: str, raw_path: str, lib: st
         r'^([ \t]*(?:"' + re.escape(name) + r'"|\'' + re.escape(name) + r"'|" +
         re.escape(name) + r')\s*=\s*)\{\s*(?:'
         r'path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' + re.escape(raw_path) + r"')"
-        r'\s*,\s*editable\s*=\s*true'
-        r'|editable\s*=\s*true\s*,\s*path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' +
+        r'\s*,\s*editable\s*=\s*(?:true|false)'
+        r'|editable\s*=\s*(?:true|false)\s*,\s*path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' +
         re.escape(raw_path) + r"'))\s*\}[ \t]*(?:#.*)?$",
         re.MULTILINE,
     )
@@ -334,8 +413,8 @@ def _rewrite_nested_path(pyproject: Path, *, name: str, raw_path: str) -> None:
         r'^([ \t]*(?:"' + re.escape(name) + r'"|\'' + re.escape(name) + r"'|" +
         re.escape(name) + r')\s*=\s*)\{\s*(?:'
         r'path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' + re.escape(raw_path) + r"')"
-        r'\s*,\s*editable\s*=\s*true'
-        r'|editable\s*=\s*true\s*,\s*path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' +
+        r'\s*,\s*editable\s*=\s*(?:true|false)'
+        r'|editable\s*=\s*(?:true|false)\s*,\s*path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' +
         re.escape(raw_path) + r"'))\s*\}[ \t]*(?:#.*)?$",
         re.MULTILINE,
     )
@@ -346,6 +425,23 @@ def _rewrite_nested_path(pyproject: Path, *, name: str, raw_path: str) -> None:
     )
     assert count == 1, f"{pyproject}: missing nested entry for {name}"
     pyproject.write_text(text, encoding="utf-8")
+
+
+def _assert_reference_kind(consumer: Path, name: str, canonical: Path, editable: bool) -> None:
+    if editable:
+        return
+    sources = uer.tomllib.loads((consumer / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+    assert sources[name].get("editable") is False
+    assert not (canonical / "src").exists()
+    data = uer.tomllib.loads((canonical / "pyproject.toml").read_text())
+    modules = data["tool"]["setuptools"]["py-modules"]
+    assert modules and len(modules) == len(set(modules))
+    assert all(
+        isinstance(module, str) and module.isidentifier()
+        and (canonical / (module + ".py")).is_file()
+        and not (canonical / (module + ".py")).is_symlink()
+        for module in modules
+    )
 
 
 def _build_expected_vendored_tree(dest_lib: Path, *, canonical_root: Path) -> None:
@@ -359,7 +455,7 @@ def _build_expected_vendored_tree(dest_lib: Path, *, canonical_root: Path) -> No
 
     refs = uer.find_uv_editable_refs(dest_lib)
     for name, raw_path, lib, editable in refs:
-        assert editable, f"{dest_lib}: expected editable nested ref for {name}"
+        _assert_reference_kind(dest_lib, name, canonical_root / "libs" / lib, editable)
         nested_dest = dest_lib.parent.parent / "libs" / lib
         if not nested_dest.exists():
             shutil.copytree(canonical_root / "libs" / lib, nested_dest, ignore=mm._ignore)
@@ -684,7 +780,7 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
                 scripts.mkdir(exist_ok=True)
                 shutil.copy2(installer, scripts / installer.name)
         for name, raw_path, lib, editable in refs:
-            assert editable, f"{consumer}: expected editable ref for {name}"
+            _assert_reference_kind(consumer_dir, name, repo / "libs" / lib, editable)
             _rewrite_to_local_path(
                 expected_consumer_dir / "pyproject.toml", name=name, raw_path=raw_path, lib=lib
             )

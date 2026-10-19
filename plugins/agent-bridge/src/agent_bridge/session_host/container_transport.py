@@ -32,6 +32,7 @@ async def _run_provider(
     command: list[str],
     *,
     timeout: float,
+    cwd: str | None = None,
 ) -> tuple[int, bytes, bytes]:
     from ..transport import _wrap_batch_for_windows
 
@@ -45,6 +46,7 @@ async def _run_provider(
         creationflags=no_window_flags(),
         start_new_session=os.name != "nt",
         env=env,
+        **({"cwd": cwd} if cwd is not None else {}),
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)

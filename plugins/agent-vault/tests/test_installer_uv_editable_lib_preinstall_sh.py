@@ -1,8 +1,8 @@
-"""Guard for install.sh's non-uv (bare-pip) preinstall loop covering the
+"""Guard for install.sh's canonical-policy preinstall loop covering the
 `[tool.uv.sources]` workspace path deps: zdd (real local copy),
 agent-procutil, single-instance-lease (both `uv`-editable canonical
 references, vendor-pointer-generalization effort). Exercises the loop via
-real bash execution for both the uv path and the bare-pip fallback path,
+real bash execution for both the shared UV path and the policy-helper path,
 confirming plugin-local/repo-root-canonical resolution -- a regression
 here would still pass every other installer guard while silently
 reintroducing the bare-pip dependency failure the review on PR #4465
@@ -42,6 +42,7 @@ _fail() {{ echo "FAIL:$1"; exit 1; }}
 uv() {{ echo "UV_INSTALL_ARGS:$*" >> '{marker}'; }}
 invoke_uv_pip_install_resilient() {{ local uv_cmd=\"$1\"; shift; \"$uv_cmd\" pip install \"$@\"; }}
 VENV_PYTHON=venv_python_stub
+SCRIPT_DIR='{PLUGIN / "scripts"}'
 venv_python_stub() {{ echo "PIP_INSTALL_ARGS:$*" >> '{marker}'; }}
 PLUGIN_DIR='{plugin_dir}'
 have_uv={1 if have_uv else 0}
@@ -92,6 +93,9 @@ def test_preinstall_loop_resolves_plugin_local_copy(have_uv: bool, tmp_path: Pat
 
     proc = _run(bash, plugin_dir, have_uv, marker=marker)
     assert proc.returncode == 0, proc.stderr
+    if not have_uv:
+        assert "installer_dependency_policy.py" in marker.read_text()
+        assert "--uv uv -- --python" in marker.read_text()
 
     installs = _installed_paths(marker)
     assert len(installs) == 3
@@ -115,6 +119,9 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
 
     proc = _run(bash, plugin_dir, have_uv, marker=marker)
     assert proc.returncode == 0, proc.stderr
+    if not have_uv:
+        assert "installer_dependency_policy.py" in marker.read_text()
+        assert "--uv uv -- --python" in marker.read_text()
 
     installs = _installed_paths(marker)
     assert len(installs) == 3

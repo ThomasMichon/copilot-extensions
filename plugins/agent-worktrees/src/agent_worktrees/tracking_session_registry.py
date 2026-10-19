@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .tracking_session_activations import source_end_authoritative
+
 if TYPE_CHECKING:
     from . import tracking
 
@@ -50,12 +52,21 @@ def _start_session_activation(
     event_at: str,
     recorded_at: str,
     source: str,
+    source_identity: str | None = None,
 ) -> bool:
     tracking = _tracking()
     _ensure_activation_history(entry)
+    if source_identity is None and (
+        entry.pruned_sources or entry.source_history_saturated
+        or any(item.source_identity is not None for item in entry.activations)
+    ):
+        return False
     latest = max(entry.activations, key=lambda item: item.ordinal, default=None)
     if latest is not None and latest.ended_at is None:
-        if latest.started_at == event_at or source in ("bind", "handoff", "reconciled"):
+        same_source = latest.source_identity == source_identity
+        if same_source and (
+            latest.started_at == event_at or source in ("bind", "handoff", "reconciled")
+        ):
             entry.ended_at = None
             return False
         inferred_end = event_at
@@ -68,12 +79,20 @@ def _start_session_activation(
         latest.end_recorded_at = recorded_at
         latest.end_source = "inferred:next-start"
     ordinal = (latest.ordinal if latest is not None else 0) + 1
+    reused_sources = [
+        item for item in entry.activations
+        if source_identity is not None and item.source_identity == source_identity
+    ]
+    for item in reused_sources:
+        item.source_ambiguous = True
     entry.activations.append(
         tracking.SessionActivation(
             ordinal=ordinal,
             started_at=event_at,
             start_recorded_at=recorded_at,
             start_source=source,
+            source_identity=source_identity,
+            source_ambiguous=bool(reused_sources),
         )
     )
     if not entry.started_at:
@@ -88,9 +107,32 @@ def _end_session_activation(
     event_at: str,
     recorded_at: str,
     source: str,
+    source_identity: str | None = None,
+    end_reason: str | None = None,
 ) -> bool:
     _ensure_activation_history(entry)
     latest = max(entry.activations, key=lambda item: item.ordinal, default=None)
+    if source_identity is not None:
+        if not source_end_authoritative(entry, source_identity):
+            return False
+        matches = [item for item in entry.activations if item.source_identity == source_identity]
+        if len(matches) != 1 or matches[0].source_ambiguous:
+            return False
+        target = matches[0]
+        if target.ended_at is not None and target.end_source != "inferred:next-start":
+            return False
+        target.ended_at = event_at
+        target.end_recorded_at = recorded_at
+        target.end_source = source
+        target.end_reason = end_reason
+        if target is latest:
+            entry.ended_at = event_at
+        return True
+    if (
+        entry.pruned_sources or entry.source_history_saturated
+        or any(item.source_identity is not None for item in entry.activations)
+    ):
+        return False
     if latest is None:
         entry.ended_at = event_at
         return True
@@ -151,6 +193,7 @@ def register_session(
     handoff_token: str | None = None,
     candidate_token: str | None = None,
     initial_projection: bool = False,
+    source_identity: str | None = None,
 ) -> tracking.SessionHandoff | None:
     """Register (or reactivate) a Copilot session against a worktree.
 
@@ -200,6 +243,7 @@ def register_session(
             "handoff_token": handoff_token,
             "candidate_token": candidate_token,
             "initial_projection": initial_projection,
+            "source_identity": source_identity,
         },
         read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=(
@@ -207,7 +251,7 @@ def register_session(
         ),
         boot_wait_s=0.0,
         request_deadline_s=_SESSION_REGISTER_REQUEST_DEADLINE_S,
-        min_version=2,
+        min_version=3,
     )
     if result.get("error") in ("lifecycle", "execution_space"):
         raise tracking.SessionLifecycleError(result["message"])
@@ -309,7 +353,9 @@ def deregister_session(
     ended_at: str | None = None,
     source: str = "hook",
     recorded_at: str | None = None,
-) -> None:
+    source_identity: str | None = None,
+    end_reason: str | None = None,
+) -> dict | None:
     """Mark a Copilot session as ended on a worktree.
 
     Dispatches through the ``session_deregister`` verb (daemon write path
@@ -347,6 +393,8 @@ def deregister_session(
             "ended_at": ended_at,
             "source": source,
             "recorded_at": recorded_at,
+            "source_identity": source_identity,
+            "end_reason": end_reason,
         },
         read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=(
@@ -354,7 +402,8 @@ def deregister_session(
         ),
         boot_wait_s=0.0,
         request_deadline_s=_SESSION_DEREGISTER_REQUEST_DEADLINE_S,
-        min_version=2,
+        min_version=3,
     )
     if result.get("error") in ("lifecycle", "execution_space"):
         raise tracking.SessionLifecycleError(result["message"])
+    return result

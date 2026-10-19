@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import sys
 import time
+from dataclasses import dataclass, field
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -74,6 +77,7 @@ def app(tmp_path):
         port=0,
         bind="127.0.0.1",
         db_path=str(tmp_path / "test.db"),
+        enable_credential_relay=False,
     )
     return create_app(config=cfg, token="test-token")
 
@@ -1731,390 +1735,6 @@ class TestWorktreeRoutes:
         assert e.closure is None
         assert e.to_dict()["closure"] is None
 
-    def test_resume_worktree_with_no_session_404s(self, client) -> None:
-        self._seed_worktree("test-agent", "anomalous-potato-wsl-20250101-160000-empty")
-        resp = client.post(
-            "/api/v1/worktrees/anomalous-potato-wsl-20250101-160000-empty/resume",
-        )
-        assert resp.status_code == 404
-
-    def test_resume_worktree_strict_refuses_instead_of_fresh_when_no_session(
-        self, client,
-    ) -> None:
-        """``strict=true`` on a worktree with no bridge session at all must
-        refuse (409, ``resume_requires_existing_session``), never silently
-        start a fresh owned session -- the identity-preserving contract."""
-        wt_id = "anomalous-potato-wsl-20250101-160100-strictempty"
-        self._seed_worktree("test-agent", wt_id)
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume?strict=true")
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["reason"] == "resume_requires_existing_session"
-        assert detail["worktree_id"] == wt_id
-
-    def test_resume_worktree_strict_refuses_instead_of_fresh_on_resume_failure(
-        self, client, app,
-    ) -> None:
-        """``strict=true`` must refuse (409) rather than fall back to a
-        fresh replacement conversation when the existing session's resume
-        itself fails -- the exact history-loss case this contract closes."""
-        from unittest.mock import AsyncMock
-
-        wt_id = "anomalous-potato-wsl-20250101-160200-strictfail"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        stopped = Session("sess-dead-strict-1", "cold-fern", target, "test-agent")
-        stopped.status = SessionStatus.STOPPED
-        stopped.acp_session_id = "acp-dead-strict-1"
-        mgr._sessions[stopped.session_id] = stopped
-
-        mgr.resume_session = AsyncMock(side_effect=RuntimeError("acp session gone"))
-        mgr.start_session = AsyncMock()
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume?strict=true")
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["reason"] == "resume_requires_existing_session"
-        assert detail["worktree_id"] == wt_id
-        mgr.start_session.assert_not_awaited()  # never a silent replacement
-
-    def test_resume_worktree_strict_refuses_instead_of_404_on_concurrent_removal(
-        self, client, app,
-    ) -> None:
-        """``strict=true`` must refuse (409), not 404, when the session is
-        removed between the worktree-session lookup and the resume call
-        itself (a racing cleanup raising ``KeyError``) -- a non-strict
-        caller treats 404 as license to fall back to its own singleton
-        creation, which would be exactly the silent-replacement history
-        loss this contract exists to close."""
-        from unittest.mock import AsyncMock
-
-        wt_id = "anomalous-potato-wsl-20250101-160300-strictrace"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        stopped = Session("sess-dead-strict-race", "cold-fern", target, "test-agent")
-        stopped.status = SessionStatus.STOPPED
-        stopped.acp_session_id = "acp-dead-strict-race"
-        mgr._sessions[stopped.session_id] = stopped
-
-        mgr.resume_session = AsyncMock(
-            side_effect=KeyError(stopped.session_id),
-        )
-        mgr.start_session = AsyncMock()
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume?strict=true")
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["reason"] == "resume_requires_existing_session"
-        assert detail["worktree_id"] == wt_id
-        mgr.start_session.assert_not_awaited()  # never a silent replacement
-
-    def test_resume_worktree_non_strict_still_404s_on_concurrent_removal(
-        self, client, app,
-    ) -> None:
-        """Non-strict behavior must stay exactly as-is: a racing-cleanup
-        ``KeyError`` is still a plain 404 when the caller never asked for
-        the identity-preserving contract."""
-        from unittest.mock import AsyncMock
-
-        wt_id = "anomalous-potato-wsl-20250101-160400-norace"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        stopped = Session("sess-dead-norace", "cold-fern", target, "test-agent")
-        stopped.status = SessionStatus.STOPPED
-        stopped.acp_session_id = "acp-dead-norace"
-        mgr._sessions[stopped.session_id] = stopped
-
-        mgr.resume_session = AsyncMock(side_effect=KeyError(stopped.session_id))
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 404
-
-    def test_resume_worktree_returns_already_live_session(
-        self, client, app,
-    ) -> None:
-        wt_id = "anomalous-potato-wsl-20250101-170000-live"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        session = Session("sess-live-1", "warm-bay", target, "test-agent")
-        session.status = SessionStatus.IDLE
-        session.acp_session_id = "acp-live-1"
-        mgr._sessions[session.session_id] = session
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["session_id"] == "sess-live-1"
-        assert data["acp_session_id"] == "acp-live-1"
-
-    def test_resume_worktree_local_host_alive_trusts_idle_status(
-        self, client, app,
-    ) -> None:
-        """(Phase 2, #6744) A local Session Host record whose pid is
-        genuinely alive confirms the RUNNING/IDLE status -- the same happy
-        path as the plain (no host record) case above, now with an explicit
-        live check instead of an implicit "no record, so trust it"."""
-        import os
-
-        from agent_bridge.session_host.host_index import HostRecord
-
-        wt_id = "anomalous-potato-wsl-20250101-170100-hostlive"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        session = Session("sess-hostlive-1", "sunny-cove", target, "test-agent")
-        session.status = SessionStatus.IDLE
-        session.acp_session_id = "acp-hostlive-1"
-        mgr._sessions[session.session_id] = session
-        mgr._host_index.register(HostRecord(
-            session_id=session.session_id, port=1,
-            host_pid=os.getpid(), child_pid=os.getpid(), boundary="local",
-        ))
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 200
-        assert resp.json()["session_id"] == "sess-hostlive-1"
-
-    def test_resume_worktree_reclassifies_dead_local_host_to_cold(
-        self, client, app,
-    ) -> None:
-        """(Phase 2, #6744) A session stuck at IDLE/RUNNING whose local
-        Session Host child is confirmed dead (pid 0 -- never alive) must
-        NOT be trusted as live -- it is reclassified to stopped and the
-        route falls through to the normal resume path (here: the stopped
-        session has no ACP id, so it starts a fresh session instead,
-        exactly like the existing no-prior-session fresh-start case)."""
-        from unittest.mock import AsyncMock, MagicMock
-        import time
-
-        from agent_bridge.session_host.host_index import HostRecord
-        from agent_bridge.transport import SpawnTarget as _SpawnTarget
-
-        wt_id = "anomalous-potato-wsl-20250101-170200-deadhost"
-        self._seed_worktree("test-agent", wt_id)
-        self._register_agent(app, "test-agent")
-        app.state.resolver.resolve = MagicMock(
-            return_value=_SpawnTarget(type="local")
-        )
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        stale = Session("sess-deadhost-1", "faded-elm", target, "test-agent")
-        stale.status = SessionStatus.IDLE
-        # Deliberately no acp_session_id -- resume_session would refuse it
-        # anyway, so the reclassify-to-stopped path must go through the
-        # fresh-session fallback, not mgr.resume_session.
-        mgr._sessions[stale.session_id] = stale
-        mgr._db.create_session(
-            stale.session_id, stale.name, "test-agent", "/wt", "local",
-            SessionStatus.IDLE.value, time.time(),
-        )
-        mgr._host_index.register(HostRecord(
-            session_id=stale.session_id, port=1,
-            host_pid=0, child_pid=0, boundary="local",
-        ))
-
-        fresh_target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
-        fresh = Session("fresh-sess-deadhost", "brisk-tide", fresh_target, "test-agent")
-        fresh.status = SessionStatus.IDLE
-        mgr.start_session = AsyncMock(return_value=fresh)
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 200
-        assert resp.json()["session_id"] == "fresh-sess-deadhost"
-        # The stale session's in-memory status was reclassified...
-        assert stale.status == SessionStatus.STOPPED
-        # ...and so was the persisted row (review #3142: asserting only the
-        # in-memory object wouldn't catch a regression dropping the DB write).
-        row = mgr._db.execute_read(
-            "SELECT status FROM sessions WHERE id=?", (stale.session_id,)
-        )
-        assert row[0]["status"] == SessionStatus.STOPPED.value
-        # The stale host record is reaped, not left to linger.
-        assert mgr._host_index.get(stale.session_id) is None
-        # The worktree-ownership reservation must follow the replacement
-        # session, not still name the reclassified-stale one (review #3142).
-        owner = mgr._db.get_worktree_ownership(wt_id)
-        assert owner is not None
-        assert owner["session_id"] == "fresh-sess-deadhost"
-
-    def test_resume_worktree_falls_back_to_fresh_session(
-        self, client, app,
-    ) -> None:
-        """If the stopped session can't be resumed, start a fresh one."""
-        from unittest.mock import AsyncMock
-
-        wt_id = "anomalous-potato-wsl-20250101-180000-fallback"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        stopped = Session("sess-dead-1", "cold-fern", target, "test-agent")
-        stopped.status = SessionStatus.STOPPED
-        stopped.acp_session_id = "acp-dead-1"
-        mgr._sessions[stopped.session_id] = stopped
-
-        fresh = Session("sess-fresh-1", "new-dawn", target, "test-agent")
-        fresh.status = SessionStatus.IDLE
-        fresh.acp_session_id = "acp-fresh-1"
-
-        # resume_session blows up (ACP session gone); start_session succeeds.
-        mgr.resume_session = AsyncMock(side_effect=RuntimeError("acp session gone"))
-        mgr.start_session = AsyncMock(return_value=fresh)
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["session_id"] == "sess-fresh-1"
-        assert data["acp_session_id"] == "acp-fresh-1"
-        mgr.start_session.assert_awaited_once()
-
-    def test_reservation_race_409_names_the_live_holder_not_resuming_session(
-        self, client, app,
-    ) -> None:
-        """When ``reserve_worktree_ownership`` refuses (a live CLI raced the
-        reservation), the 409's session_id must be the ACTUAL live CLI
-        holder -- never the resuming session's own id. A reclaim caller
-        fences on this id to confirm a stopped holder is really gone before
-        forcing; the resuming session's id would trivially "match" every
-        time and silently defeat that safety check."""
-        wt_id = "anomalous-potato-wsl-20250101-190000-racedholder"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        stopped = Session("sess-resuming-1", "quiet-marsh", target, "test-agent")
-        stopped.status = SessionStatus.STOPPED
-        mgr._sessions[stopped.session_id] = stopped
-
-        db = app.state.db
-        db.reserve_worktree_ownership = lambda *a, **k: False
-        db.register_live_session(
-            "cli-real-holder", machine="test-agent", cwd=None,
-            worktree_id=wt_id, repo=None, branch=None, pid=None, role=None,
-            now=time.time(),
-        )
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["reason"] == "live_cli_holds_worktree"
-        assert detail["session_id"] == "cli-real-holder"
-        assert detail["session_id"] != stopped.session_id
-
-    def test_reservation_conflict_without_live_cli_reports_distinct_reason(
-        self, client, app,
-    ) -> None:
-        """``reserve_worktree_ownership`` also refuses when another active
-        ACP reservation owns the worktree, entirely without a live CLI. That
-        must NOT be reported as ``live_cli_holds_worktree`` -- a reclaim
-        caller treats that reason as "stop-and-force through the interactive
-        CLI", which does nothing for an ACP ownership conflict and would
-        otherwise run a pointless (and unfenced, since there is no CLI
-        holder id) restart."""
-        wt_id = "anomalous-potato-wsl-20250101-190100-acpowned"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="local", cwd="/wt", worktree_id=wt_id)
-        stopped = Session("sess-resuming-2", "still-pond", target, "test-agent")
-        stopped.status = SessionStatus.STOPPED
-        mgr._sessions[stopped.session_id] = stopped
-
-        db = app.state.db
-        db.reserve_worktree_ownership = lambda *a, **k: False
-        # No live_session registered at all -- the refusal is purely an ACP
-        # ownership conflict. Seed the reservation row directly.
-        db.execute_write(
-            "INSERT INTO worktree_ownership (worktree_id, session_id, "
-            "reserved_at, updated_at) VALUES (?, ?, ?, ?)",
-            (wt_id, "acp-other-owner", time.time(), time.time()),
-        )
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["reason"] == "worktree_owned_by_another_session"
-        assert detail["session_id"] == "acp-other-owner"
-
-    def test_resume_worktree_does_not_bypass_provider_refresh_failure(
-        self, client, app,
-    ) -> None:
-        """An unsafe provider target is never reused by fresh-start fallback."""
-        from unittest.mock import AsyncMock
-
-        from agent_bridge.session_manager import ProviderTargetRefreshError
-
-        wt_id = "anomalous-potato-wsl-20250101-180000-provider"
-        self._seed_worktree("test-agent", wt_id)
-
-        mgr: SessionManager = app.state.session_manager
-        target = SpawnTarget(type="command", worktree_id=wt_id)
-        stopped = Session("sess-provider-1", "stale-bay", target, "test-agent")
-        stopped.status = SessionStatus.STOPPED
-        stopped.acp_session_id = "acp-provider-1"
-        mgr._sessions[stopped.session_id] = stopped
-        mgr.resume_session = AsyncMock(
-            side_effect=ProviderTargetRefreshError("provider unavailable")
-        )
-        mgr.start_session = AsyncMock()
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-
-        assert resp.status_code == 502
-        assert resp.json()["detail"] == ProviderTargetRefreshError.public_message
-        mgr.start_session.assert_not_awaited()
-
-    def test_resume_singleton_anchor_no_session_starts_fresh(
-        self, client, app
-    ) -> None:
-        """A singleton repo key (`<repo>@anchor`) reuses the worktree-keyed
-        resume ladder and starts a fresh session in the anchor checkout."""
-        from unittest.mock import AsyncMock, MagicMock, patch
-
-        from agent_bridge.singleton_anchor import SingletonRepo
-        from agent_bridge.transport import SpawnTarget
-
-        wt_id = "llama.cpp@anchor"
-        app.state.resolver = MagicMock(agents={})
-        app.state.resolver.agents["repo-agent"] = AgentConfig(
-            name="repo-agent", project="llama.cpp",
-        )
-        app.state.resolver._is_local_loopback_agent = lambda cfg: True
-        app.state.resolver.resolve = MagicMock(return_value=SpawnTarget(type="local"))
-
-        mgr = app.state.session_manager
-        fresh = Session(
-            "fresh-singleton-1",
-            "quiet-anvil",
-            SpawnTarget(type="local", cwd="/src/llama.cpp", worktree_id=wt_id),
-            "repo-agent",
-        )
-        fresh.status = SessionStatus.IDLE
-        mgr.start_session = AsyncMock(return_value=fresh)
-
-        with patch(
-            "agent_bridge.routes.worktree_probe.find_singleton_repo",
-            return_value=SingletonRepo(name="llama.cpp", path="/src/llama.cpp"),
-        ):
-            resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-
-        assert resp.status_code == 200
-        assert resp.json()["session_id"] == "fresh-singleton-1"
-        spawned_target = mgr.start_session.call_args.args[0]
-        assert spawned_target.worktree_id == wt_id
-        assert spawned_target.cwd == "/src/llama.cpp"
-        assert mgr.start_session.call_args.kwargs["agent_name"] == "repo-agent"
-
     # -- Worktree-scoped session reading (proxied to agent-worktrees) ------
 
     def _register_agent(self, app, agent_name: str) -> None:
@@ -2884,220 +2504,510 @@ class TestWorktreeRoutes:
         assert db.get_live_session("cli-original")["status"] == "taken-over"
         assert db.get_live_session("cli-new-claimant")["status"] == "live"
 
-    def test_resume_worktree_no_session_starts_fresh(self, client, app) -> None:
-        """A worktree with no prior bridge session (e.g. just taken over, its
-        interactive Copilot never persisted a session) starts a *fresh* owned
-        session instead of 404-ing (#1683)."""
-        from unittest.mock import AsyncMock, MagicMock
+@dataclass
+class _HttpNativeResume:
+    manager: SessionManager
+    target: SpawnTarget
+    entry: Any
+    head: dict[str, Any]
+    workspace: dict[str, Any]
+    preflight: dict[str, Any]
+    load: AsyncMock
+    acp: Any
+    owner_live: list[dict[str, Any]] = field(default_factory=list)
+    calls: list[list[str]] = field(default_factory=list)
+    head_reads: int = 0
 
-        from agent_bridge.transport import SpawnTarget
+    async def owner(
+        self, owner: str, config: AgentConfig, resolver: Any, args: list[str],
+    ) -> str:
+        assert owner == "test-agent"
+        assert config.project == self.target.project
+        assert resolver.agents[owner] is config
+        self.calls.append(list(args))
+        if args[0] == "head-session":
+            assert args == ["head-session", "--worktree-id", self.entry.id, "--json"]
+            self.head_reads += 1
+            return json.dumps(self.head)
+        if args[0] == "list":
+            assert args == ["list", "--json", "--worktree-id", self.entry.id]
+            return json.dumps({"worktrees": [self.workspace] if self.workspace else []})
+        if args[0] == "record":
+            assert args == ["record", "--worktree-id", self.entry.id, "--json"]
+            return json.dumps({"ok": True, "worktree": self.workspace})
+        if args[0] == "list-sessions":
+            assert args == ["list-sessions", "--worktree", self.entry.id, "--json"]
+            return json.dumps({
+                "head_session": self.head["head_session"], "sessions": self.owner_live,
+            })
+        if args[0] == "embody":
+            assert args == [
+                "embody", "--worktree-id", self.entry.id, "--json",
+                "--bridge-acquisition", "native-original",
+                "--require-native-admission", "--dry-run",
+            ]
+            return json.dumps(self.preflight)
+        raise AssertionError(args)
 
-        wt_id = "anomalous-potato-wsl-20250101-193500-fresh"
-        self._seed_worktree("test-agent", wt_id)
-        self._register_agent(app, "test-agent")
-        # resolver.resolve must yield a real SpawnTarget (replace() needs a
-        # dataclass), not a bare MagicMock.
-        app.state.resolver.resolve = MagicMock(
-            return_value=SpawnTarget(type="local")
+    def imported(self) -> Session:
+        return self.manager.import_native_session(
+            self.target, "native-original", agent_name="test-agent",
         )
 
-        mgr = app.state.session_manager
-        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
-        fresh = Session("fresh-sess-1", "brisk-vale", target, "test-agent")
-        fresh.status = SessionStatus.IDLE
-        mgr.start_session = AsyncMock(return_value=fresh)
+    def register_live(self, session_id: str = "cli-incumbent") -> None:
+        self.manager._db.register_live_session(
+            session_id, machine="test-agent", cwd=self.target.cwd,
+            worktree_id=self.entry.id, repo=self.target.project, branch=self.entry.branch,
+            pid=None, role=None, now=time.time(),
+        )
 
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
 
-        assert resp.status_code == 200
-        assert resp.json()["session_id"] == "fresh-sess-1"
-        # spawned scoped to the worktree dir + id
-        spawned_target = mgr.start_session.call_args.args[0]
-        assert spawned_target.worktree_id == wt_id
-        assert spawned_target.cwd == f"/wt/{wt_id}"
-        assert mgr.start_session.call_args.kwargs["caller_id"] == wt_id
+@pytest.fixture
+def http_native_resume(app, tmp_path, monkeypatch):
+    """Exercise the adapter, native import, strict Manager load and SQLite fences."""
+    from agent_bridge.routes import worktrees as wt
 
-    def test_resume_worktree_fresh_session_reports_conflict_when_reservation_fails(
-        self, client, app,
+    entry = wt._WorktreeEntry(
+        id="wt-http-native", agent_name="test-agent", machine="test-agent",
+        path=str(tmp_path / "workspace"), branch="worktree/http-native", status="active",
+    )
+    target = SpawnTarget(
+        type="local", project="test-chamber", cwd=entry.path,
+        worktree_id=entry.id, explicit_cwd=True,
+    )
+    config = AgentConfig(name="test-agent", project=target.project)
+    app.state.resolver = AgentResolver({"test-agent": config}, {})
+    monkeypatch.setattr(app.state.resolver, "resolve", MagicMock(return_value=target))
+    wt.get_cache()._cache = {"test-agent": [entry]}
+    manager = app.state.session_manager
+    acp = SimpleNamespace(
+        pid=None, is_running=True, shutdown=AsyncMock(), stderr_tail=lambda: "",
+        has_active_background_tasks=False, mark_host_child_exited=MagicMock(),
+        new_session=AsyncMock(side_effect=AssertionError("native history must not be created")),
+    )
+
+    async def load(session: Session, **kwargs: Any) -> tuple[Any, str]:
+        assert kwargs["load_existing"] is True
+        assert session.acp_session_id == "native-original"
+        assert session.target.native_resume_id == "native-original"
+        assert session.target.cwd == entry.path
+        assert session.target.project == target.project
+        assert session.target.explicit_cwd is True
+        return acp, session.acp_session_id
+
+    transport_load = AsyncMock(side_effect=load)
+    monkeypatch.setattr(manager, "_try_reattach_live_host", AsyncMock(return_value=False))
+    monkeypatch.setattr(manager, "_refresh_provider_target", AsyncMock())
+    monkeypatch.setattr(manager, "_resume_via_new_remote_host", transport_load)
+    monkeypatch.setattr(manager, "_detach_host", AsyncMock())
+    monkeypatch.setattr(manager, "resume_session", AsyncMock(wraps=manager.resume_session))
+    monkeypatch.setattr(
+        manager, "start_session",
+        AsyncMock(side_effect=AssertionError("HTTP resume must never start fresh")),
+    )
+    monkeypatch.setattr("agent_bridge.session_resume._MAX_RESUME_ROUNDS", 1)
+    boundary = _HttpNativeResume(
+        manager=manager, target=target, entry=entry, acp=acp, load=transport_load,
+        head={
+            "tracked": True, "worktree_id": entry.id, "head_session": "native-original",
+            "state": "active", "head_revision": 7, "pending_handoffs": [],
+        },
+        workspace={
+            "id": entry.id, "path": entry.path, "repo": target.project, "status": "active",
+            "branch": entry.branch,
+            "last_session_id": "native-original",
+            "execution_leg_opaque": False, "session_backend_opaque": False,
+            "bound_agent": None,
+        },
+        preflight={
+            "ok": True, "dry_run": True, "worktree_id": entry.id,
+            "work_dir": entry.path, "resume_session": "native-original",
+            "native_admission_version": 1,
+        },
+    )
+    monkeypatch.setattr(wt, "_run_for_agent", boundary.owner)
+    yield boundary
+    manager.start_session.assert_not_called()
+    acp.new_session.assert_not_called()
+    wt.get_cache()._cache = {}
+
+
+@pytest.fixture(params=["", "?strict=true", "/acp"])
+def native_resume_url(request, http_native_resume) -> str:
+    return f"/api/v1/worktrees/{http_native_resume.entry.id}/resume{request.param}"
+
+
+class TestHttpNativeResume:
+    """Legacy and mode-qualified HTTP resume both preserve owner-native history."""
+
+    @pytest.mark.parametrize("known", [False, True])
+    def test_cold_import_or_known_session_keeps_exact_native(
+        self, client, http_native_resume, native_resume_url, known: bool,
     ) -> None:
-        """The pre-spawn live-holder recheck does not cover the spawn itself
-        (mgr.start_session is the slow, awaited step) -- a genuinely
-        different claimant can register during it. The post-spawn
-        reservation attempt's result must be checked: a False result must
-        surface as a 409 (with the raced-in fresh session cleaned up, not
-        leaked), never silently return the fresh session as if it were
-        safely owned (that would recreate the duplicate-controller
-        race)."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from agent_bridge.transport import SpawnTarget
-
-        wt_id = "anomalous-potato-wsl-20250101-193510-freshraced"
-        self._seed_worktree("test-agent", wt_id)
-        self._register_agent(app, "test-agent")
-        app.state.resolver.resolve = MagicMock(
-            return_value=SpawnTarget(type="local")
+        b = http_native_resume
+        previous = b.imported() if known else None
+        response = client.post(native_resume_url)
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["acp_session_id"] == data["durable_session_id"] == "native-original"
+        assert data["worktree_id"] == b.entry.id
+        assert data["target_dir"] == b.entry.path
+        assert data["project"] == "test-chamber"
+        assert data["mode"] == "acp" and data["status"] == "idle"
+        if previous:
+            assert data["session_id"] == previous.session_id
+        b.manager.resume_session.assert_awaited_once_with(
+            data["session_id"], drain=False, allow_recreate=False, owner_native_resume=True,
         )
+        b.load.assert_awaited_once()
+        assert len(b.manager.list_sessions()) == 1
+        stored = b.manager._db.get_session(data["session_id"])
+        assert stored["acp_session_id"] == "native-original"
+        assert stored["status"] == "idle"
+        assert b.manager._db.get_worktree_ownership(b.entry.id)["session_id"] == data["session_id"]
+        assert not b.manager._db.execute_read("SELECT * FROM acquisition_launch_gates")
+        assert ["record", "--worktree-id", b.entry.id, "--json"] in b.calls
+        assert not any(args[0] == "list" for args in b.calls)
 
-        mgr = app.state.session_manager
-        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
-        fresh = Session("fresh-sess-raced", "amber-loop", target, "test-agent")
-        fresh.status = SessionStatus.IDLE
+    @pytest.mark.parametrize("host", ["unindexed", "alive", "dead"])
+    def test_warm_same_head_reused_or_dead_host_reloads_same_native(
+        self, client, http_native_resume, native_resume_url, host: str,
+    ) -> None:
+        import os
 
-        db = app.state.db
+        from agent_bridge.session_host.host_index import HostRecord
 
-        async def _start_session_races_in_a_claimant(*a, **k):
-            # Simulate a different interactive CLI registering WHILE the
-            # spawn is in flight (after the pre-spawn holder recheck, before
-            # this returns) -- the exact window the fixed post-spawn
-            # reservation check exists to catch.
-            db.register_live_session(
-                "cli-raced-in", machine="test-agent", cwd=None,
-                worktree_id=wt_id, repo=None, branch=None, pid=None,
-                role=None, now=time.time(),
+        b = http_native_resume
+        session = b.imported()
+        session.status = SessionStatus.IDLE
+        session.client = b.acp
+        b.manager._db.update_session_status(session.session_id, "idle", time.time())
+        if host != "unindexed":
+            pid = os.getpid() if host == "alive" else 0
+            b.manager._host_index.register(HostRecord(
+                session_id=session.session_id, port=1, host_pid=pid, child_pid=pid,
+                boundary="local",
+            ))
+        response = client.post(native_resume_url)
+        assert response.status_code == 200, response.text
+        assert response.json()["session_id"] == session.session_id
+        assert response.json()["acp_session_id"] == "native-original"
+        if host == "dead":
+            b.load.assert_awaited_once()
+            assert b.manager._host_index.get(session.session_id) is None
+            assert b.manager._db.get_session(session.session_id)["status"] == "idle"
+            assert b.manager._db.get_worktree_ownership(b.entry.id)["session_id"] == session.session_id
+        else:
+            b.load.assert_not_called()
+            b.manager.resume_session.assert_not_called()
+
+    @pytest.mark.parametrize(("change", "reason"), [
+        ({"tracked": False}, "head_unknown"),
+        ({"head_session": None}, "head_unavailable"),
+        ({"state": "concluded"}, "head_unavailable"),
+        ({"pending_handoffs": [{"ordinal": 1}]}, "head_unavailable"),
+    ])
+    def test_missing_or_retired_native_refuses_without_fresh(
+        self, client, http_native_resume, native_resume_url,
+        change: dict[str, Any], reason: str,
+    ) -> None:
+        b = http_native_resume
+        b.head.update(change)
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == reason
+        assert not b.manager.list_sessions()
+        b.load.assert_not_called()
+
+    @pytest.mark.parametrize("change", [
+        {"path": "another-workspace"}, {"repo": ""}, {"status": "archived"},
+        {"execution_leg_opaque": True}, {"session_backend_opaque": True},
+    ])
+    def test_workspace_identity_change_refuses_before_import(
+        self, client, http_native_resume, native_resume_url, change: dict[str, Any],
+    ) -> None:
+        b = http_native_resume
+        b.workspace.update(change)
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "workspace_identity_changed"
+        assert not b.manager.list_sessions()
+        b.load.assert_not_called()
+
+    @pytest.mark.parametrize("change", [
+        {"resume_session": "another-native"}, {"work_dir": "another-workspace"},
+        {"ok": False}, {"dry_run": False},
+    ])
+    def test_unproven_native_never_imports_or_creates(
+        self, client, http_native_resume, native_resume_url, change: dict[str, Any],
+    ) -> None:
+        b = http_native_resume
+        b.preflight.update(change)
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "native_resume_unproven"
+        assert not b.manager.list_sessions()
+        b.load.assert_not_called()
+
+    def test_old_owner_without_native_admission_capability_refuses_without_fresh(
+        self, client, http_native_resume, native_resume_url,
+    ) -> None:
+        b = http_native_resume
+        b.preflight.pop("native_admission_version")
+        response = client.post(native_resume_url)
+        assert response.status_code == 503, response.text
+        assert response.json()["detail"]["reason"] == "owner_capability_missing"
+        assert not b.manager.list_sessions()
+        b.manager.resume_session.assert_not_called()
+        b.load.assert_not_called()
+
+    @pytest.mark.parametrize("after_load", [False, True])
+    def test_head_change_is_not_a_successful_resume(
+        self, client, http_native_resume, native_resume_url, monkeypatch, after_load: bool,
+    ) -> None:
+        from agent_bridge.routes import worktrees as wt
+
+        b = http_native_resume
+
+        async def changing(*args: Any) -> str:
+            if args[-1][0] == "head-session" and b.head_reads == (2 if after_load else 1):
+                b.head["head_session"] = "new-authoritative-head"
+                b.head["head_revision"] += 1
+            return await b.owner(*args)
+
+        monkeypatch.setattr(wt, "_run_for_agent", changing)
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "head_changed"
+        if after_load:
+            b.load.assert_awaited_once()
+            assert b.manager.list_sessions()[0].acp_session_id == "native-original"
+        else:
+            assert not b.manager.list_sessions()
+            b.load.assert_not_called()
+
+    @pytest.mark.parametrize("failure", ["load", "provider"])
+    def test_load_or_provider_failure_preserves_native_and_retry_fence(
+        self, client, http_native_resume, native_resume_url, failure: str,
+    ) -> None:
+        from agent_bridge.session_manager import ProviderTargetRefreshError
+
+        b = http_native_resume
+        if failure == "provider":
+            b.manager._refresh_provider_target.side_effect = ProviderTargetRefreshError(
+                "private provider diagnostic",
             )
-            return fresh
+            reason = "provider_target_unavailable"
+        else:
+            b.load.side_effect = RuntimeError("native load unavailable")
+            reason = "native_resume_failed"
+        response = client.post(native_resume_url)
+        assert response.status_code == 502, response.text
+        assert response.json()["detail"]["reason"] == reason
+        if failure == "provider":
+            assert response.json()["detail"]["detail"] == ProviderTargetRefreshError.public_message
+            assert "private provider diagnostic" not in response.text
+            b.load.assert_not_called()
+        session = b.manager.list_sessions()[0]
+        assert session.acp_session_id == "native-original"
+        assert b.manager._db.get_session(session.session_id)["acp_session_id"] == "native-original"
+        assert b.manager._db.execute_read("SELECT * FROM acquisition_launch_gates")
 
-        mgr.start_session = AsyncMock(side_effect=_start_session_races_in_a_claimant)
-        mgr.end_session = AsyncMock()
-        db.reserve_worktree_ownership = lambda *a, **k: False
-
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["reason"] == "live_cli_holds_worktree"
-        assert detail["session_id"] == "cli-raced-in"
-        # The raced-in fresh session must not be leaked -- it's cleaned up
-        # rather than left running unreserved alongside the real holder.
-        mgr.end_session.assert_awaited_once_with("fresh-sess-raced", force=True)
-
-    def test_resume_worktree_unknown_still_404s(self, client, app) -> None:
-        """A worktree that is not discoverable at all (no session, not on disk)
-        still 404s -- the fresh-start only rescues a *known* worktree (#1683)."""
-        from unittest.mock import AsyncMock
-
-        mgr = app.state.session_manager
-        mgr.start_session = AsyncMock(
-            side_effect=AssertionError("must not start a session for an "
-                                       "unknown worktree")
-        )
-        resp = client.post("/api/v1/worktrees/does-not-exist-anywhere/resume")
-        assert resp.status_code == 404
-
-    def test_resume_worktree_cache_blind_still_succeeds(self, client, app) -> None:
-        """(#6744) A worktree the fleet-wide discovery cache has never crawled
-        (cache empty/stale, never seeded via ``_seed_worktree``) must still
-        resume successfully via a targeted, live, single-worktree query --
-        the cache is only ever a performance shortcut for "does this exist,"
-        never the authority. Before the fix, ``_start_fresh_worktree_session``
-        only consulted ``cache.get_all()`` and 404'd here identically to a
-        genuinely-unknown worktree."""
-        from unittest.mock import AsyncMock, MagicMock, patch
-
-        from agent_bridge.transport import SpawnTarget
-
-        from agent_bridge.routes import worktrees as wt_routes
-
-        wt_id = "anomalous-potato-wsl-20250101-193700-cacheblind"
-        self._register_agent(app, "test-agent")
-        # Deliberately do NOT seed the cache -- simulates a fresh daemon
-        # start, or a worktree created after the last crawl.
-        wt_routes.get_cache()._cache = {"test-agent": []}
-
-        app.state.resolver.resolve = MagicMock(
-            return_value=SpawnTarget(type="local")
-        )
-        mgr = app.state.session_manager
-        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
-        fresh = Session("fresh-sess-cb", "quiet-mesa", target, "test-agent")
-        fresh.status = SessionStatus.IDLE
-        mgr.start_session = AsyncMock(return_value=fresh)
-
-        live_payload = (
-            '{"worktrees": [{"id": "%s", "path": "/wt/%s", '
-            '"branch": "worktree/%s", "status": "active"}]}'
-            % (wt_id, wt_id, wt_id)
-        )
-        with patch(
-            "agent_bridge.routes.worktrees._run_for_agent",
-            new=AsyncMock(return_value=live_payload),
-        ):
-            resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-
-        assert resp.status_code == 200
-        assert resp.json()["session_id"] == "fresh-sess-cb"
-        # The fresh session must be spawned using the *probed* entry's
-        # path/id, not an empty/incorrect cwd (review #3121) -- mirrors the
-        # cache-backed fresh-start assertion above.
-        spawned_target = mgr.start_session.call_args.args[0]
-        assert spawned_target.worktree_id == wt_id
-        assert spawned_target.cwd == f"/wt/{wt_id}"
-        assert mgr.start_session.call_args.kwargs["agent_name"] == "test-agent"
-
-    def test_resume_worktree_cache_blind_probe_rejects_missing_path(
-        self, client, app
+    def test_concurrent_removal_refuses_without_replacement(
+        self, client, http_native_resume, native_resume_url,
     ) -> None:
-        """(review #3121) A live probe match with no on-disk path (e.g. a
-        reaped/tombstoned record the probe shouldn't have matched at all)
-        must never be used to spawn a fresh session -- refuse (404), not
-        proceed with a stale/empty ``cwd``."""
-        from unittest.mock import AsyncMock, MagicMock, patch
+        b = http_native_resume
+        session = b.imported()
+        b.manager.resume_session.side_effect = KeyError(session.session_id)
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "native_resume_refused"
+        assert b.manager.list_sessions() == [session]
+        b.load.assert_not_called()
 
-        from agent_bridge.transport import SpawnTarget
-        from agent_bridge.routes import worktrees as wt_routes
-
-        wt_id = "anomalous-potato-wsl-20250101-193800-nopath"
-        self._register_agent(app, "test-agent")
-        wt_routes.get_cache()._cache = {"test-agent": []}
-
-        app.state.resolver.resolve = MagicMock(
-            return_value=SpawnTarget(type="local")
-        )
-        mgr = app.state.session_manager
-        mgr.start_session = AsyncMock(
-            side_effect=AssertionError(
-                "must not start a session for an entry with no path"
-            )
-        )
-
-        # No "path" key at all -- parses to the empty-string default.
-        live_payload = (
-            '{"worktrees": [{"id": "%s", "branch": "worktree/%s", '
-            '"status": "active"}]}' % (wt_id, wt_id)
-        )
-        with patch(
-            "agent_bridge.routes.worktrees._run_for_agent",
-            new=AsyncMock(return_value=live_payload),
-        ):
-            resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-
-        assert resp.status_code == 404
-
-    def test_resume_worktree_fresh_start_failed_status_502(
-        self, client, app
+    @pytest.mark.parametrize("failed_status", [False, True])
+    def test_manager_cannot_return_failed_or_different_native_as_success(
+        self, client, http_native_resume, native_resume_url, failed_status: bool,
     ) -> None:
-        """A fresh start that connects-fails (SessionManager returns a FAILED
-        session rather than raising) surfaces as 502, not a healthy 200 (#1683
-        hardening)."""
-        from unittest.mock import AsyncMock, MagicMock
+        b = http_native_resume
+        session = b.imported()
 
-        from agent_bridge.transport import SpawnTarget
+        async def invalid_result(*args: Any, **kwargs: Any) -> Session:
+            session.status = SessionStatus.FAILED if failed_status else SessionStatus.IDLE
+            if not failed_status:
+                session.acp_session_id = "replacement-conversation"
+            return session
 
-        wt_id = "anomalous-potato-wsl-20250101-193600-failstart"
-        self._seed_worktree("test-agent", wt_id)
-        self._register_agent(app, "test-agent")
-        app.state.resolver.resolve = MagicMock(
-            return_value=SpawnTarget(type="local")
+        b.manager.resume_session.side_effect = invalid_result
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "native_identity_changed"
+        assert b.manager._db.get_session(session.session_id)["acp_session_id"] == "native-original"
+        assert b.manager._db.execute_read("SELECT * FROM acquisition_launch_gates")
+        b.load.assert_not_called()
+
+    def test_uncertain_load_retry_retains_same_bridge_and_native_identity(
+        self, client, http_native_resume, native_resume_url,
+    ) -> None:
+        b = http_native_resume
+        loader = b.load.side_effect
+        b.load.side_effect = RuntimeError("native load unavailable")
+        failed = client.post(native_resume_url)
+        assert failed.status_code == 502, failed.text
+        session = b.manager.list_sessions()[0]
+        b.load.side_effect = loader
+        response = client.post(native_resume_url)
+        assert response.status_code == 200, response.text
+        assert response.json()["session_id"] == session.session_id
+        assert response.json()["acp_session_id"] == "native-original"
+        assert len(b.manager.list_sessions()) == 1
+        assert not b.manager._db.execute_read("SELECT * FROM acquisition_launch_gates")
+
+    @pytest.mark.parametrize("reclaim", [False, True])
+    @pytest.mark.parametrize("holder", ["owner-cli", "registered-cli", "owned-acp"])
+    def test_live_holder_refuses_even_reclaim(
+        self, client, http_native_resume, native_resume_url, reclaim: bool, holder: str,
+    ) -> None:
+        b = http_native_resume
+        if holder == "owner-cli":
+            b.owner_live = [{"id": "cli-incumbent", "live": True}]
+        elif holder == "registered-cli":
+            b.register_live()
+        else:
+            incumbent = b.imported()
+            incumbent.acp_session_id = "different-live-native"
+            incumbent.status = SessionStatus.RUNNING
+            incumbent.client = b.acp
+        response = client.post(native_resume_url, params={"reclaim": reclaim})
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "live_holder"
+        b.manager.resume_session.assert_not_called()
+        b.load.assert_not_called()
+        if holder == "registered-cli":
+            assert b.manager._db.get_live_session("cli-incumbent")["status"] == "live"
+
+    def test_dormant_reclaim_preserves_native(
+        self, client, http_native_resume, native_resume_url,
+    ) -> None:
+        response = client.post(native_resume_url, params={"reclaim": True})
+        assert response.status_code == 200, response.text
+        assert response.json()["acp_session_id"] == "native-original"
+
+    def test_cli_racing_preflight_loses_no_fence(
+        self, client, http_native_resume, native_resume_url, monkeypatch,
+    ) -> None:
+        from agent_bridge.routes import worktrees as wt
+
+        b = http_native_resume
+
+        async def racing(*args: Any) -> str:
+            if args[-1][0] == "embody":
+                b.register_live("cli-raced-in")
+            return await b.owner(*args)
+
+        monkeypatch.setattr(wt, "_run_for_agent", racing)
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "live_holder"
+        assert b.manager._db.get_live_session("cli-raced-in")["status"] == "live"
+        b.load.assert_not_called()
+
+    def test_other_persisted_acp_reservation_cannot_be_overwritten(
+        self, client, http_native_resume, native_resume_url,
+    ) -> None:
+        b = http_native_resume
+        db = b.manager._db
+        db.create_session(
+            "other-acp-owner", "incumbent", "test-agent", b.entry.path, "local",
+            "idle", time.time(), target_json=b.target.to_json(),
         )
+        assert db.reserve_worktree_ownership(b.entry.id, "other-acp-owner", now=time.time())
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "live_holder"
+        assert db.get_worktree_ownership(b.entry.id)["session_id"] == "other-acp-owner"
+        b.load.assert_not_called()
 
-        mgr = app.state.session_manager
-        target = SpawnTarget(type="local", cwd=f"/wt/{wt_id}", worktree_id=wt_id)
-        failed = Session("failed-sess-1", "dim-fen", target, "test-agent")
-        failed.status = SessionStatus.FAILED
-        mgr.start_session = AsyncMock(return_value=failed)
+    def test_kernel_executor_refuses_concurrent_resume(
+        self, client, http_native_resume, native_resume_url,
+    ) -> None:
+        from agent_bridge.acquisition_executor import executor
 
-        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
-        assert resp.status_code == 502
+        b = http_native_resume
+        with executor(b.manager._db, b.entry.id):
+            response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "executor_live"
+        assert not b.calls
+        b.load.assert_not_called()
+
+    def test_existing_sqlite_launch_gate_is_not_overwritten(
+        self, client, http_native_resume, native_resume_url,
+    ) -> None:
+        from agent_bridge.acquisition_store import AcquisitionStore
+
+        b = http_native_resume
+        AcquisitionStore(b.manager._db).gate_workspace(
+            b.entry.id, "other-delivery", "cli", None, "native-original", "other-driver",
+        )
+        response = client.post(native_resume_url)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "launch_gate_held"
+        gate = b.manager._db.execute_read("SELECT * FROM acquisition_launch_gates")[0]
+        assert gate["delivery_id"] == "other-delivery"
+        assert gate["mode"] == "cli" and gate["native_session_id"] == "native-original"
+        b.load.assert_not_called()
+
+    def test_cache_blind_owner_lookup_still_loads_exact_native(
+        self, client, http_native_resume, native_resume_url,
+    ) -> None:
+        from agent_bridge.routes import worktrees as wt
+
+        b = http_native_resume
+        wt.get_cache()._cache = {"test-agent": []}
+        response = client.post(native_resume_url)
+        assert response.status_code == 200, response.text
+        assert response.json()["acp_session_id"] == "native-original"
+        assert response.json()["target_dir"] == b.entry.path
+        assert ["record", "--worktree-id", b.entry.id, "--json"] in b.calls
+        assert not any(args[0] == "list" for args in b.calls)
+        b.load.assert_awaited_once()
+
+    @pytest.mark.parametrize("missing_path", [False, True])
+    def test_unknown_or_pathless_workspace_is_404_without_fresh(
+        self, client, http_native_resume, native_resume_url, missing_path: bool,
+    ) -> None:
+        from agent_bridge.routes import worktrees as wt
+
+        b = http_native_resume
+        wt.get_cache()._cache = {"test-agent": []}
+        if missing_path:
+            b.workspace.pop("path")
+        else:
+            b.workspace.clear()
+        response = client.post(native_resume_url)
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"]["reason"] == "worktree_unknown"
+        assert not b.manager.list_sessions()
+        b.load.assert_not_called()
+
+    def test_strict_singleton_without_native_history_never_starts_fresh(
+        self, client, http_native_resume, monkeypatch,
+    ) -> None:
+        from agent_bridge.singleton_anchor import SingletonRepo
+
+        b = http_native_resume
+        b.entry.id = "test-chamber@anchor"
+        b.head.update(worktree_id=b.entry.id, head_session=None)
+        monkeypatch.setattr(
+            "agent_bridge.singleton_resume.find_singleton_repo",
+            lambda name: SingletonRepo(name="test-chamber", path=b.entry.path),
+        )
+        response = client.post(f"/api/v1/worktrees/{b.entry.id}/resume?strict=true")
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["reason"] == "singleton_head_unavailable"
+        assert not b.manager.list_sessions()
+        b.load.assert_not_called()
 
 
 class TestAcpAliasResolution:
@@ -3353,7 +3263,7 @@ def test_worktree_discovery_crawl_is_single_flight() -> None:
 
     calls = {"n": 0}
 
-    async def _slow_crawl_agent(name, config, res, *, classify=True):
+    async def _slow_crawl_agent(name, config, res, *, epoch=None, classify=True):
         calls["n"] += 1
         await asyncio.sleep(0.2)  # simulate a slow / stuck `list`
         return []
@@ -3390,7 +3300,7 @@ def test_worktree_discovery_crawl_if_empty_no_reentrant_deadlock() -> None:
     resolver.agents = {"local": agent_cfg}
     cache._resolver = resolver
 
-    async def _crawl_agent(name, config, res, *, classify=True):
+    async def _crawl_agent(name, config, res, *, epoch=None, classify=True):
         return []
 
     async def _run() -> None:
@@ -3423,7 +3333,7 @@ def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
 
     seen_classify: list[bool] = []
 
-    async def _fake_crawl_agent(name, config, res, *, classify=True):
+    async def _fake_crawl_agent(name, config, res, *, epoch=None, classify=True):
         seen_classify.append(classify)
         return []
 
@@ -3438,12 +3348,8 @@ def test_crawl_if_empty_never_blocks_on_classify_budget() -> None:
     assert True in seen_classify, "backfill task must still request --classify"
 
 
-def test_stop_cancels_pending_classify_backfill() -> None:
-    """worktree-finality-and-obligations (Phase 5): ``stop()`` must cancel and
-    await any in-flight classify-backfill task (not just the periodic
-    ``_task``) -- otherwise a backfill scheduled by an on-demand request can
-    keep running (and mutating the cache) past application shutdown
-    (#discussion_r4004943069)."""
+def test_stop_cancels_classify_wrapper_but_retains_its_refresh_holder() -> None:
+    """Shutdown fences publication and cancels scheduling, not actual ownership."""
     import asyncio
 
     from agent_bridge.routes.worktrees import WorktreeDiscoveryCache
@@ -3458,11 +3364,12 @@ def test_stop_cancels_pending_classify_backfill() -> None:
     cache._resolver = resolver
 
     started = asyncio.Event()
+    release = asyncio.Event()
 
-    async def _hanging_crawl_agent(name, config, res, *, classify=True):
+    async def _hanging_crawl_agent(name, config, res, *, epoch=None, classify=True):
         if classify:
             started.set()
-            await asyncio.sleep(10)  # would outlive the test if not cancelled
+            await release.wait()
         return []
 
     async def _run() -> None:
@@ -3470,8 +3377,14 @@ def test_stop_cancels_pending_classify_backfill() -> None:
             await asyncio.wait_for(cache.crawl_if_empty(), timeout=5)
             assert len(cache._backfill_tasks) == 1
             await asyncio.wait_for(started.wait(), timeout=5)
+            holder = cache._refresh.task
             await asyncio.wait_for(cache.stop(), timeout=5)
             assert len(cache._backfill_tasks) == 0
+            assert cache._refresh.task is holder
+            assert cache._refresh.pending
+            release.set()
+            await holder
+            assert not cache._refresh.pending
 
     asyncio.run(_run())
 

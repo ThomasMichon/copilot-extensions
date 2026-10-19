@@ -34,6 +34,99 @@ in. It does not enable a repair worker or supply inference/repository authority.
    missing binstub/payload makes only that namespace inactive and is diagnosed
    by `agent-bridge doctor`.
 
+## Dispatch-only restricted workers
+
+An image-backed restricted fleet can opt into `dispatch_only: true`. This is a
+creation-time policy, not an advisory borrow: ordinary `exec`, provider SSH and
+unqualified bridge launches are refused. Existing ordinary restricted fleets
+remain unchanged. Recreate an old member when changing this policy.
+
+The trusted host calls `dispatch-prepare <name> --expected-container-id <full-id>`
+with a bounded JSON object on stdin containing `task_id`, `worker_id`,
+`generation`, `coordinator_epoch` and `coordinator_url`. The provider retains a
+nonsecret binding and returns its explicit `spawn_command`; a different task,
+generation, epoch, worker or endpoint cannot reuse that physical container.
+Releasing a borrow or ending a session does not clear this fence: a different
+incarnation needs a new physical container. One provider worker is admitted at
+a time. Admission, lifecycle and projection writers share a kernel-owned
+host lock that is never stolen based on file age. Task execution additionally
+holds a guest `flock` on a stable root-owned file for the worker's lifetime:
+terminating only the host wrapper does not admit a duplicate surviving worker.
+
+Preparation also returns an explicit, nonsecret `agent` address:
+`container:dispatch/<full-physical-id>/<birth-binding-id>/<name>`. Only this
+prepared address participates in namespace readiness and resolution for a
+dispatch-only member; ordinary `container:<name>` remains refused. Every
+resolution rechecks the retained birth binding, exact physical member, live
+restricted posture and lifecycle hold without changing task ownership.
+Its `instance_pinned_exec` capability is backed by the expected physical-ID
+and birth-binding fences in the returned execution command; ordinary
+name-based wrappers do not advertise that guarantee.
+Use Bridge's protocol-36 `create <agent> --creation-key <key>
+--provider-instance` to establish a replay-safe native session without
+inventing a worktree or sending a first prompt. A missing binding or replaced
+member refuses; neither resolution nor a new borrow clears the incarnation.
+Destructive lifecycle probes that guest lock under its provider hold, both
+before rescue and immediately before stop/removal/recreation; an active or
+unreadable lock defers the action even without host admission or Copilot markers.
+Before the destructive action, the provider closes guest admission under that
+lock. Root-owned admission generations fence delayed Docker exec commands even
+after their host wrapper dies; a later admitted host launch gets a new nonce
+and cannot revive old launches or delayed helpers. Closure failure defers the
+action. This does not change task ownership, token authority or lease duration.
+The opt-in `test_dispatch_admission_gate.py` acceptance proof uses
+`CE_TEST_DISPATCH_DOCKER=1` with a cached `node:22-bookworm-slim` image.
+Its disposable guest is offline, read-only and capability-dropped; it verifies
+host-wrapper death before guest lock acquisition, delayed-launch refusal,
+monotonic helper fencing and a fresh admitted launch without changing deadlines.
+Lock-protocol cutover waits for an existing legacy lock file to be released;
+it never steals or deletes that file. The new `leases.lock` is a private
+directory with its kernel lock inside, so old O_EXCL/unlink writers cannot
+enter or unlink the persistent lock after cutover. Live legacy admission and
+lifecycle writers must finish before new mutations are admitted. A crashed,
+unidentifiable legacy lock file requires verified operator quiescence rather
+than automatic age-based removal; no active wrapper is forcibly terminated.
+Legacy records from another environment remain blocking even after heartbeat
+expiry: cutover prevents their old writers from refreshing that heartbeat.
+Quiesce them in their owning environment and run `lifecycle-clear` there.
+Its cleanup-only transaction removes only locally verified-dead legacy records
+that are also no longer live. An uncertain destructive hold remains live until
+its fixed expiry even after its wrapper exits. Cleanup preserves foreign and
+live records, so each environment can clean up
+without opening normal admission prematurely. Expiry alone never proves
+foreign legacy quiescence.
+The provider's creation-time binding identity is pinned in both an
+immutable Docker label and owner-private state. Missing, corrupt or mismatched
+birth state is not an unused slot: preparation refuses it and requires
+recreation instead of letting a surviving old worker consume a new task grant.
+
+After establishing the worker's native session and obtaining its grant from the
+coordinator, the trusted host calls
+`dispatch-project <name> --expected-container-id <full-id>` with `binding_id`,
+`owner_session_id`, `task_token` and `expires_at` on stdin. The native session
+is write-once, including after an interrupted delivery. Only the credential
+travels over stdin to a root-owned atomic file at
+`/run/agent-dispatch/task-token`; the nonroot worker can read but not overwrite
+it. Neither Docker configuration, retained binding metadata, launch argv nor
+command output stores the token. Rotation preserves the same incarnation.
+The host persists a monotonic attempted-expiry fence before delivery, separately
+from acknowledged expiry. An interrupted publication cannot permit an older
+grant to replace a potentially delivered newer one; equal-expiry retries remain
+admissible without claiming a failed delivery succeeded.
+Publication also holds a separate guest kernel lock and checks a root-owned
+monotonic expiry fence before replacing the token. A guest helper surviving its
+Docker client's timeout cannot overwrite a newer publication when it resumes;
+contention fails explicitly so the trusted supervisor can retry.
+
+The explicit launch projects only the pinned task/worker/endpoint and token-file
+path, using an immutable absolute Bash executable outside writable mounts and
+without shell startup files. The image must provide Bash, Node and `flock` outside its
+writable surfaces, plus its own worker tools. No host signing key, shared bearer
+or credential relay is projected. This channel does not issue grants, extend
+task leases, schedule renewal, supply inference credentials or open a network:
+the supervisor and coordinator still own those decisions. Automatic dispatch
+placement and supervisor renewal are not yet integrated.
+
 ## Concepts
 
 ### Optional restricted SSH runtime
@@ -71,8 +164,13 @@ The deploy manifest records package version separately from runtime slot/profile
 Profile changes start no service, SSH listener, Docker container or fleet.
 Helper packages are installed non-editably into that slot; health checks reject
 code resolved from a mutable source checkout outside it.
-Windows keeps signed stdlib interpreter copies but skips pip/setuptools seeding
-when uv installs packages. Without uv, the ordinary-pip fallback remains seeded.
+Every selected profile uses the canonical seven-day dependency resolver against
+the configured feed; unavailable UV or a selected dependency fails closed
+without replacing the active slot. Windows keeps signed stdlib interpreter
+copies without pip/setuptools seeding; unrestricted pip fallback is unsupported.
+The staged profile coordinator runs in Python isolated mode and loads its
+runtime helper from the same payload directory explicitly, so safe-path
+settings and ambient Python modules cannot redirect that import.
 
 With an explicit installation-cell context, configuration loading validates the
 Containers owner before using config overrides. Its optional knowledge-repo
@@ -161,6 +259,41 @@ unchanged.
   only to host loopback. The per-container token remains request authorization
   for Azure-token minting on the shared relay; it is no longer compensating for
   a host-network-reachable endpoint.
+
+## Plugin preparation
+
+Trusted container launches share the `plugin-resolve` install/copy/register
+barrier with CodeSpaces. Bridge selects related-repository plugins and retains
+that selection independently of the provider's legacy launch argv. Its headed
+CLI handoff carries explicit `--stage-plugin` and `--plugin-root` inputs;
+`--stage-plugin-disabled SOURCE` prepares the same payload but preserves its
+disabled selection. Both staging flags are repeatable; plain source values
+remain unchanged, including paths containing spaces or `=false`. Retained
+provider metadata carries each selection as a `{source, enable}` row while
+accepting older plain-source rows as enabled.
+Standalone container CLI use does not depend on importing bridge's runtime.
+All required remote installs and local copies complete before the execution
+repository's `.github/copilot/settings.local.json` is merged and the child
+starts. The target repository's own enabled remote plugins join that same
+installation barrier. ACP also receives each effective directory explicitly; CLI discovers
+the registered identities from repository settings, without duplicate external
+directory entries. Explicit worktree mode targets that worktree's repository,
+not the fleet's default checkout. Attached and detached native CLI attempts run
+the idempotent plugin barrier before the remote reuse/create decision, even if
+the host live-session registration remains fresh. Preparation failure blocks
+creation; a genuine rejoin still reuses the running child without changing its
+active bindings or replaying its seed. Guaranteed surviving Session Host
+reattachment skips preparation. Restricted fleets remain outside host plugin
+projection.
+Attached CLI launch binds its child login shell to the exact checkout selected
+for preparation, after login profiles run. A worktree resolver's returned path
+wins over conventional workspace metadata; failure to enter it prevents launch.
+
+See [`plugin-resolve`](../../libs/plugin-resolve/README.md#trusted-venue-preparation)
+for settings ownership, isolated installation cache, retained snapshots and
+selected-asset handling. Manifest companions outside the eligible selection are
+diagnostics for caller-owned execution routing, not permission to propagate
+additional plugins.
 
 ## CLI
 
@@ -321,6 +454,25 @@ attached/detached CLI launches re-read that existing host source for each launch
 the native Copilot process receives the selected inference token: a private,
 one-use launch file is consumed by a narrow executable wrapper, not sourced
 into the Session Host, `embody`, tmux, container, or session environment.
+Shared launch inputs and companion authentication use private mode-0700
+directories under `/dev/shm/agent-containers-<user>/launch`, even when HOME
+is disk-backed. The writer verifies tmpfs, ownership, permissions and
+non-symlink ancestors before reading credential input; an unavailable or
+unsafe RAM destination refuses the launch without a disk fallback. Final
+files are created with mode 0600 and exclusive, no-clobber writes. Companion
+authentication must share the validated RAM-backed launch owner directory.
+Promotion into a companion auth file is an exclusive same-filesystem link,
+followed by removing its staging name; an existing destination refuses rather
+than being replaced. Cleanup and abandoned-input reaping validate both storage
+roots, including filesystem, ownership, mode and non-symlink ancestry, before
+removal. Missing roots remain an idempotent cleanup case.
+The credential-free executable wrapper and nonsecret lifecycle receipts live
+in a separate private `/tmp/agent-containers-<user>/launch` directory because
+Linux commonly mounts `/dev/shm` with `noexec`. Wrapper content contains only
+the RAM credential path and variable name, never credential bytes. Cleanup
+and the abandoned-input reaper cover both directories together.
+Existing launch inputs in the former home-directory location are not migrated
+or swept by the new RAM-only reaper.
 Successful CLI startup must confirm the native child consumed its file before
 cleanup removes the executable wrapper; an `embody` return alone is not proof
 of native startup. Explicit create-or-resume receipts distinguish a new native

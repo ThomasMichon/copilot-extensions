@@ -12,10 +12,40 @@ from argparse import Namespace
 from types import SimpleNamespace
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _stub_plugin_preparation(monkeypatch):
+    def stage(args, target, *, prepared_context=None, **kwargs):
+        if prepared_context is not None:
+            prepared_context["workspace"] = target.workspace_folder
+        return ""
+    monkeypatch.setattr("agent_containers.plugin_preparation.stage_for_attached_launch", stage)
+    monkeypatch.setattr("agent_containers.container_shims.deploy", lambda *a, **kw: None)
+    monkeypatch.setattr("agent_containers.container_shims.git_credential_environment", lambda: {})
+    monkeypatch.setattr("agent_containers.copilot_process_auth.stage_env", lambda *a, **kw: None)
+    monkeypatch.setattr("agent_containers.ssh_transport.container_environment",
+                        lambda *a, **kw: {"PATH": "/usr/bin"})
 import ssh_manager
 
 from agent_containers import copilot_venue
 from agent_containers.config import ContainersConfig, FleetConfig, RESTRICTED_PROFILE
+
+
+@pytest.mark.parametrize("detach", [False, True])
+def test_native_cli_parser_keeps_disabled_plugin_selections(detach):
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    copilot_venue.add_copilot_subparser(parser.add_subparsers())
+    args = parser.parse_args([
+        "copilot", "example", "--stage-plugin-disabled", "sample@synthetic",
+        "--stage-plugin", "/plain source=false", *(["--detach"] if detach else []),
+    ])
+    assert args.stage_plugins == [
+        {"source": "sample@synthetic", "enable": False}, "/plain source=false",
+    ]
+    assert args.detach is detach
 
 
 def _args(**kw) -> Namespace:
@@ -140,6 +170,38 @@ def _call(
     return rc, seen
 
 
+@pytest.mark.parametrize("child_alive", [False, True])
+@pytest.mark.parametrize("failure", [None, "copy", "install"])
+def test_attached_live_ledger_requires_preparation_before_remote_decision(
+    monkeypatch, child_alive, failure,
+):
+    events = []
+    monkeypatch.setattr("venue_copilot.live_session_for", lambda *a: {"status": "live"})
+
+    def stage(args, target, **kwargs):
+        events.append("stage")
+        assert args.stage_plugins == [{"source": "sample@synthetic", "enable": False}]
+        kwargs["prepared_context"]["workspace"] = target.workspace_folder
+        return "REQUIRED_PLUGIN_PREPARATION && "
+
+    def run(argv, **kwargs):
+        assert argv[-1].startswith("REQUIRED_PLUGIN_PREPARATION && ")
+        events.append("prepare")
+        if not failure:
+            events.append("reuse" if child_alive else "create")
+        return SimpleNamespace(returncode=1 if failure else 0)
+
+    monkeypatch.setattr("agent_containers.plugin_preparation.stage_for_attached_launch", stage)
+    rc, _ = _call(
+        _args(stage_plugins=[{"source": "sample@synthetic", "enable": False}]),
+        target=_target(), monkeypatch=monkeypatch, subprocess_run=run,
+    )
+    assert rc == (1 if failure else 0)
+    assert events == (["stage", "prepare"] if failure else [
+        "stage", "prepare", "reuse" if child_alive else "create",
+    ])
+
+
 @pytest.mark.guard
 @pytest.mark.parametrize("receipt", ["missing", "resumed", "created"])
 def test_attached_failed_connection_uses_receipt_before_cleanup(monkeypatch, receipt):
@@ -150,6 +212,7 @@ def test_attached_failed_connection_uses_receipt_before_cleanup(monkeypatch, rec
     cleaned = []
     consumed = []
     monkeypatch.setattr(auth, "prepare_launch", lambda *a, **k: "/launch/auth.env")
+    monkeypatch.setattr(auth, "stage_env", lambda *a, **k: "/launch/general.env")
     monkeypatch.setattr(ssh_transport, "container_environment", lambda *a: {"PATH": "/bin"})
     monkeypatch.setattr(ssh_transport, "write_remote_env", lambda *a: "/launch/general.env")
     monkeypatch.setattr(ssh_transport, "cleanup_remote_env", lambda *a: cleaned.append(a[-1]))

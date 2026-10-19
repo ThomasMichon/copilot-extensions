@@ -341,24 +341,119 @@ def test_digest_covers_the_staged_host_role_closure():
     assert set(a.AUTHORITY_MODULES) == names | {"agent_procutil"}
 
 
-def test_release_label_does_not_change_authority_digest(monkeypatch):
+@pytest.mark.parametrize("label", ["_FALLBACK_VERSION", "__version__"])
+@pytest.mark.parametrize("version", ["0.9.64-dev1", "99.99.99"])
+def test_release_label_does_not_change_authority_digest(
+    monkeypatch: pytest.MonkeyPatch, label: str, version: str,
+) -> None:
     from importlib.util import find_spec
     import re
 
     original = find_spec
-    before = a.component_digest()
+    source = original("agent_bridge").loader.get_source("agent_bridge")
+    if label == "__version__":
+        source = '__version__ = "0.4.1-dev3"\n'
 
-    def changed(name):
+    def changed(name: str):
         spec = original(name)
         if name == "agent_bridge":
-            source = re.sub(
-                r'(?m)^__version__\s*=\s*["\'][^"\']+["\']\s*$',
-                '__version__ = "99.99.99"', spec.loader.get_source(name),
-            )
             return SimpleNamespace(loader=SimpleNamespace(get_source=lambda ignored: source))
         return spec
 
     monkeypatch.setattr("importlib.util.find_spec", changed)
+    before = a.component_digest()
+    source, count = re.subn(
+        rf'''(?m)^{label}[ \t]*=[ \t]*["'][^"'\r\n]+["'][ \t]*$''',
+        f'{label} = "{version}"', source,
+    )
+    assert count == 1
+    assert a.component_digest() == before
+
+
+def test_root_executable_change_remains_authority_bound(
+    monkeypatch: pytest.MonkeyPatch, sealed: tuple,
+) -> None:
+    from importlib.util import find_spec
+
+    original = find_spec
+    before = a.component_digest()
+    expected, frame = sealed
+    receipt = a.verify_frame(frame, expected, 321)
+    assert validate_receipt(receipt, 321) == receipt
+
+    def changed(name: str):
+        spec = original(name)
+        if name == "agent_bridge":
+            source = spec.loader.get_source(name)
+            statement = 'raise AttributeError(f"module {__name__!r} has no attribute {name!r}")'
+            assert source.count(statement) == 1
+            source = source.replace(statement, statement.replace("AttributeError", "RuntimeError"))
+            return SimpleNamespace(loader=SimpleNamespace(get_source=lambda ignored: source))
+        return spec
+
+    monkeypatch.setattr("importlib.util.find_spec", changed)
+    assert a.component_digest() != before
+    assert validate_receipt(receipt, 321) is None
+
+
+@pytest.mark.parametrize("source_view", ["canonical", "already-materialized"])
+def test_generated_release_preserves_authority_digest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source_view: str,
+) -> None:
+    import shutil
+    from importlib.util import find_spec
+
+    repo = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(repo / "tools"))
+    import accumulate_bumps
+    import materialize_main
+
+    plugin = tmp_path / "plugins" / "agent-bridge"
+    shutil.copytree(repo / "plugins" / "agent-bridge", plugin)
+    root = plugin / "src" / "agent_bridge" / "__init__.py"
+    manifest = plugin / "plugin.json"
+    if source_view == "already-materialized":
+        initial_version = json.loads(manifest.read_text(encoding="utf-8"))["version"]
+        stamped_version = "98.99.99" if initial_version != "98.99.99" else "97.99.99"
+        assert accumulate_bumps._write_source_fallbacks(
+            plugin, initial_version, stamped_version,
+        ) == 1
+        assert accumulate_bumps._write_version(
+            manifest, accumulate_bumps._JSON_VERSION_RE, stamped_version,
+        )
+        assert accumulate_bumps._write_project_version(plugin / "pyproject.toml", stamped_version)
+        log = materialize_main.materialize(tmp_path, canonical_root=repo)
+        assert not any(line.startswith("SKIP") for line in log), log
+        assert (plugin / "scripts" / "installer-engine.sh").is_file()
+
+    old_version = json.loads(manifest.read_text(encoding="utf-8"))["version"]
+    replacement = "99.99.99" if old_version != "99.99.99" else "99.99.98"
+    assert replacement != old_version
+    original_source = root.read_text(encoding="utf-8")
+    assert accumulate_bumps._write_source_fallbacks(
+        plugin, old_version, replacement,
+    ) == 1
+    assert root.read_text(encoding="utf-8") != original_source
+    if source_view == "canonical":
+        log = materialize_main.materialize(tmp_path, canonical_root=repo)
+        assert not any(line.startswith("SKIP") for line in log), log
+
+    original = find_spec
+    before = a.component_digest()
+
+    def materialized(name: str):
+        spec = original(name)
+        if name in a.AUTHORITY_MODULES:
+            base = plugin / "src" if name.startswith("agent_bridge") else (
+                plugin / "libs" / "agent-procutil" / "src"
+            )
+            path = base.joinpath(*name.split("."))
+            path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
+            source = path.read_text(encoding="utf-8")
+            return SimpleNamespace(loader=SimpleNamespace(get_source=lambda ignored: source))
+        return spec
+
+    monkeypatch.setattr("importlib.util.find_spec", materialized)
     assert a.component_digest() == before
 
 

@@ -53,6 +53,15 @@ def _control_plane_providers_dir() -> Path:
     return cfg.install_dir() / _CONTROL_PLANE_PROVIDERS_SUBDIR
 
 
+def _machine_control_plane_providers_dir() -> Path:
+    """Standalone Manager registration is machine-global, never cell-owned."""
+    configured = os.environ.get(_CONTROL_PLANE_PROVIDERS_DIR_ENV, "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    home = Path(os.environ.get("USERPROFILE") or Path.home())
+    return home / ".agent-worktrees" / _CONTROL_PLANE_PROVIDERS_SUBDIR  # marketplace-isolation: allow standalone-manager-registration
+
+
 class _LeakedTestTmpPathManifestError(ValueError):
     """A manifest field resolves into a pytest sandbox, not a real install.
 
@@ -162,7 +171,9 @@ def _parse_control_plane_provider_manifest(
     )
 
 
-def _discover_control_plane_provider_manifests() -> dict[str, _ControlPlaneProviderManifest]:
+def _discover_control_plane_provider_manifests(
+    *, directory: Path | None = None,
+) -> dict[str, _ControlPlaneProviderManifest]:
     # Local import: avoids a module-load-time cycle with front_door_cli (which
     # imports this module). By call time front_door_cli is always fully
     # loaded, so this only exists to preserve the long-standing test-patching
@@ -170,7 +181,8 @@ def _discover_control_plane_provider_manifests() -> dict[str, _ControlPlaneProvi
     from .front_door_cli import _core_helper
 
     manifests: dict[str, _ControlPlaneProviderManifest] = {}
-    root = _core_helper("_control_plane_providers_dir", _control_plane_providers_dir)()
+    root = (directory if directory is not None else
+            _core_helper("_control_plane_providers_dir", _control_plane_providers_dir)())
     try:
         entries = sorted(root.glob("*.json"))
     except OSError:

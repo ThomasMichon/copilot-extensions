@@ -150,7 +150,9 @@ def test_plugin_activation_import_survives_stage_cleanup_when_installed_from_rea
     project = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     sources = project["tool"]["uv"]["sources"]
 
-    for lib in ("plugin-activation", "dropin-registry", "plugin-resolve"):
+    for lib in (
+        "plugin-activation", "dropin-registry", "plugin-resolve", "single-instance-lease",
+    ):
         source = (PLUGIN_ROOT / sources[f"agent-{lib}"]["path"]).resolve()
         assert source.is_relative_to(REPO)
         shutil.copytree(source, stage_root / lib)
@@ -171,9 +173,12 @@ def test_plugin_activation_import_survives_stage_cleanup_when_installed_from_rea
             sys.executable,
             "-c",
             (
-                "import json, plugin_activation;"
+                "import json, plugin_activation, single_instance_lease;"
                 "print(json.dumps({"
                 "'pkg': plugin_activation.__file__, "
+                "'lease': single_instance_lease.__file__, "
+                "'operation': single_instance_lease.operation.__file__, "
+                "'preservation': plugin_activation.preservation.__file__, "
                 "'resolver': plugin_activation.resolve_active_plugins.__module__"
                 "}))"
             ),
@@ -188,4 +193,6 @@ def test_plugin_activation_import_survives_stage_cleanup_when_installed_from_rea
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)
     assert Path(payload["pkg"]).is_relative_to(site_packages)
+    for module in ("lease", "operation", "preservation"):
+        assert Path(payload[module]).is_relative_to(site_packages)
     assert payload["resolver"] == "plugin_activation.resolver"

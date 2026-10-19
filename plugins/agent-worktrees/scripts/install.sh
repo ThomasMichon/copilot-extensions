@@ -999,12 +999,27 @@ _payload_hash() {
     # and content-based. Fails with no output on any hashing error, which the
     # completion-marker check treats as "unknown, force a rebuild" and the
     # marker writer as "do not publish".
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
+    # Stream the identical byte sequence; repeated string concatenation makes
+    # completion revalidation quadratic in the full materialized source size.
+    local -a __hash
+    if command -v sha256sum >/dev/null 2>&1; then
+        __hash=(sha256sum)
+    elif command -v shasum >/dev/null 2>&1; then
+        __hash=(shasum -a 256)
+    elif command -v openssl >/dev/null 2>&1; then
+        __hash=(openssl dgst -sha256 -r)
+    else
+        return 1
+    fi
+    local __d
+    __d="$(
+    set -o pipefail
+    {
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then printf '%s' "$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
         local __f
         while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
+            printf '\n%s' "$(cat "$__f")"
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
     local __src_roots=("$PLUGIN_DIR/src")
@@ -1018,7 +1033,7 @@ _payload_hash() {
     for __root in "${__src_roots[@]}"; do
         [[ -d "$__root" ]] || continue
         while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"${__f#"$PLUGIN_DIR"}"$'\n'"$(cat "$__f" 2>/dev/null)"
+            printf '\n%s\n%s' "${__f#"$PLUGIN_DIR"}" "$(cat "$__f" 2>/dev/null)"
         done < <(find "$__root" -type d \( -name '*.egg-info' -o -name '*.dist-info' \) -prune -o -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' -print 2>/dev/null | sort)
     done
     # #5472: [tool.uv.sources] `path = "../../libs/<lib>"` dev-checkout
@@ -1036,10 +1051,10 @@ _payload_hash() {
             __resolved="$(cd "$PLUGIN_DIR" 2>/dev/null && cd "$__rel" 2>/dev/null && pwd)"
             [[ -n "$__resolved" ]] || continue
             [[ "$__resolved" == "$PLUGIN_DIR/libs"/* ]] && continue
-            [[ -f "$__resolved/pyproject.toml" ]] && __parts="$__parts"$'\n'"$(cat "$__resolved/pyproject.toml")"
+            [[ -f "$__resolved/pyproject.toml" ]] && printf '\n%s' "$(cat "$__resolved/pyproject.toml")"
             [[ -d "$__resolved/src" ]] || continue
             while IFS= read -r __f; do
-                __parts="$__parts"$'\n'"${__f#"$__resolved"}"$'\n'"$(cat "$__f" 2>/dev/null)"
+                printf '\n%s\n%s' "${__f#"$__resolved"}" "$(cat "$__f" 2>/dev/null)"
             done < <(find "$__resolved/src" -type d \( -name '*.egg-info' -o -name '*.dist-info' \) -prune -o -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' -print 2>/dev/null | sort)
         done < <(
             sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$PLUGIN_DIR/pyproject.toml" |
@@ -1048,18 +1063,8 @@ _payload_hash() {
             sort
         )
     fi
-    # Fails (no output) when no SHA-256 implementation works: the caller must
-    # then refuse to publish a slot without its fingerprint.
-    local __d
-    if command -v sha256sum >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
-    elif command -v shasum >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
-    elif command -v openssl >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
-    else
-        return 1
-    fi
+    } | "${__hash[@]}" 2>/dev/null
+    )" || return 1
     __d="${__d%% *}"
     [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
     printf '%s\n' "$__d"
@@ -1585,72 +1590,32 @@ _wait_for_versioned_slot_lease() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python exclude-venv-dir)"
-    if [[ -z "$py" ]]; then
-        # No bootstrap python to run the actual census with (e.g. a
-        # uv-only machine with no system python on PATH yet and no prior
-        # `venv` link to borrow from). An ABSENT slot needs no validation
-        # at all -- genuinely clean, return 0. But an EXISTING slot (e.g.
-        # abandoned/incomplete from a prior attempt) must fail CLOSED here
-        # rather than silently reporting "clean": returning success would
-        # let the caller proceed straight to `uv venv --allow-existing`
-        # over it without ever having actually validated it, defeating the
-        # whole point of this check.
-        [[ -e "$VENV_DIR" ]] && return 1
-        return 0
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
     fi
-    # Propagate the underlying python call's real exit code (never the
-    # trailing `sed`'s, and never force-succeed via `|| true`) -- callers
-    # must be able to tell a genuinely dirty/contended slot from a clean one
-    # (#5416).
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'
-    return "${PIPESTATUS[0]}"
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    if ! py="$(_bootstrap_python)" || [[ -z "$py" ]]; then
-        err "Completion publication requires bootstrap Python -- refusing activation"
-        return 1
-    fi
-    local ph
-    if ! ph="$(_payload_hash)" || [[ -z "$ph" ]]; then
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -z "$actual_hash" ]]; then
         err "Runtime input fingerprint unavailable -- refusing completion publication"
         return 1
     fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    args+=(--payload-hash "$ph")
-    local rc
-    if "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
-        rc=0
-    else
-        local -a pipeline_status=("${PIPESTATUS[@]}")
-        rc="${pipeline_status[0]}"
-        if [[ "${pipeline_status[1]}" -ne 0 ]]; then
-            rc="${pipeline_status[1]}"
-            err "Completion output formatter failed (exit $rc; publisher exit ${pipeline_status[0]}) -- refusing activation"
-        fi
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
+        return 1
     fi
-    if [[ "$rc" -ne 0 ]]; then
-        err "Completion publication failed for versions/$SRC_VERSION -- refusing activation"
-    fi
-    return "$rc"
+    _runtime_construction_complete "$actual_hash"
 }
 
 _test_slot_already_complete() {
@@ -1783,7 +1748,7 @@ deploy_package() {
     # marketplace layouts.
     local cfg_migrate_dir="$PLUGIN_DIR/libs/config-migrate"
     if [[ -f "$cfg_migrate_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-config-migrate \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-config-migrate \
                 "$cfg_migrate_dir" --quiet; then
             err "config-migrate library install failed"
             return 1
@@ -1795,7 +1760,7 @@ deploy_package() {
     # from the local path (mirrors config-migrate above).
     local plugin_resolve_dir="$PLUGIN_DIR/libs/plugin-resolve"
     if [[ -f "$plugin_resolve_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-plugin-resolve \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-plugin-resolve \
                 "$plugin_resolve_dir" --quiet; then
             err "plugin-resolve library install failed"
             return 1
@@ -1808,7 +1773,7 @@ deploy_package() {
     # unpublished dependency from the package index.
     local zdd_dir="$PLUGIN_DIR/libs/zdd"
     if [[ -f "$zdd_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-zdd \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-zdd \
                 "$zdd_dir" --quiet; then
             err "zdd library install failed"
             return 1
@@ -1819,8 +1784,11 @@ deploy_package() {
     # remote_login_shell, copilot-extensions#5207). Same materialized-release
     # guard as zdd above.
     local remote_login_shell_dir="$PLUGIN_DIR/libs/remote-login-shell"
+    if [[ ! -f "$remote_login_shell_dir/pyproject.toml" ]]; then
+        remote_login_shell_dir="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/remote-login-shell"
+    fi
     if [[ -f "$remote_login_shell_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-remote-login-shell \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-remote-login-shell \
                 "$remote_login_shell_dir" --quiet; then
             err "remote-login-shell library install failed"
             return 1
@@ -1828,12 +1796,15 @@ deploy_package() {
     fi
 
     # Vendored machine-transport lib (agent-machine-transport / module
-    # machine_transport). Same materialized-release guard as
-    # remote-login-shell above -- installed after it since machine-transport
-    # itself depends on remote-login-shell.
+    # machine_transport); local release payload or canonical dev source.
+    # Installed after remote-login-shell since machine-transport itself
+    # depends on remote-login-shell.
     local machine_transport_dir="$PLUGIN_DIR/libs/machine-transport"
+    if [[ ! -f "$machine_transport_dir/pyproject.toml" ]]; then
+        machine_transport_dir="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/machine-transport"
+    fi
     if [[ -f "$machine_transport_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-machine-transport \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-machine-transport \
                 "$machine_transport_dir" --quiet; then
             err "machine-transport library install failed"
             return 1
@@ -1845,14 +1816,14 @@ deploy_package() {
     # above; stdlib-only, so it has no ordering constraint of its own.
     local update_telemetry_dir="$PLUGIN_DIR/libs/update-telemetry"
     if [[ -f "$update_telemetry_dir/pyproject.toml" ]]; then
-        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-update-telemetry \
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-update-telemetry \
                 "$update_telemetry_dir" --quiet; then
             err "update-telemetry library install failed"
             return 1
         fi
     fi
 
-    if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
+    if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1
     fi
@@ -1912,6 +1883,9 @@ deploy_venv() {
         fi
         return 1
     fi
+    _versioned_slot_clean || return 1
+    [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]] && return 2
+
     # Re-check completeness NOW, under the just-acquired lease: a concurrent
     # process may have already finished building AND activating this exact
     # slot while we were waiting for the lease (#5439) -- the pre-lease
@@ -2118,8 +2092,11 @@ deploy_wrappers() {
     deploy_runtime_resolvers || return 1
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_shell_parser.py anchor_write_guard.py pr_supersede_guard.py registry_root.py nudge_status.py bind_nudge.py hook_runtime.py hook_client.py post-tool-hook.ps1 terminal_probe.py bind-nudge.sh bind-nudge.ps1; do
+    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_shell_parser.py anchor_write_guard.py pr_supersede_guard.py registry_root.py nudge_status.py bind_nudge.py hook_runtime.py hook_lifecycle_runtime.py native_source_context.py hook_client.py post-tool-hook.ps1 terminal_probe.py bind-nudge.sh bind-nudge.ps1; do
         local script_src="$SCRIPT_DIR/$script"
+        if [[ "$script" == native_source_context.py ]]; then
+            script_src="$SCRIPT_DIR/../src/agent_worktrees/$script"
+        fi
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
             cp "$script_src" "$tmp"
@@ -2200,6 +2177,9 @@ reconcile_binstubs() {
     # for every registered project and remove signature-matched stubs for
     # deregistered ones. Delegates to the Python implementation (single,
     # cross-platform source of truth) so it runs regardless of project context.
+    if [[ "${AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION:-}" == "1" ]]; then
+        return 0
+    fi
     if [[ ! -x "$VENV_PYTHON" ]]; then
         return 0
     fi
@@ -2220,8 +2200,7 @@ deploy_binstub() {
         warn "Refusing to deploy project binstub for reserved runtime name 'agent-worktrees' (global command owned by deploy_tool_binstub)"
         return 0
     fi
-    # Generate a project entry point pinned to this payload. The payload owns
-    # runtime/context selection for both interactive and subcommand paths.
+    # Leave runtime resolution to the installed user-side command.
     local tmp
     tmp="$(mktemp "$LOCAL_BIN/$PROJECT_NAME.XXXXXX")"
     cat > "$tmp" <<'BINSTUB_HEAD'
@@ -2231,7 +2210,7 @@ BINSTUB_HEAD
     cat >> "$tmp" <<BINSTUB_BODY
 export PYTHONUTF8=1
 export AGENT_WORKTREES_LAUNCH_ID="$PROJECT_NAME-\$\$-\$RANDOM-\$(date +%s)"
-exec "$PLUGIN_DIR/bin/payload/agent-worktrees" --project "$PROJECT_NAME" "\$@"
+exec "$LOCAL_BIN/agent-worktrees" --project "$PROJECT_NAME" "\$@"
 BINSTUB_BODY
     chmod +x "$tmp"
     mv -f "$tmp" "$LOCAL_BIN/$PROJECT_NAME"
@@ -3009,9 +2988,9 @@ case "$ACTION" in
             ok "Context runtime installed at $INSTALL_DIR"
             exit 0
         fi
+        write_deploy_manifest
         remove_legacy_scripts
         remove_legacy_binstubs
-        reconcile_binstubs
         # Deploy the self-provisioning `agent-worktrees` TOOL binstub
         # unconditionally (project or not). A bare / runtime-only `install`
         # (no --project-name, e.g. the Worktree Manager core-install path) must
@@ -3019,6 +2998,7 @@ case "$ACTION" in
         # deploy_binstub below only runs under $HAS_PROJECT, so relying on it
         # left a project-less install with no tool binstub at all.
         deploy_tool_binstub
+        reconcile_binstubs
         deploy_copilot_plugin
         ensure_copilot_experimental
         assert_path
@@ -3043,8 +3023,6 @@ case "$ACTION" in
         # upgrades ~/.agent-worktrees/{config,repos,projects}.yaml. Non-fatal.
         PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees config-migrate 2>&1 \
             | sed 's/^/  /' || warn "Config migration skipped"
-
-        write_deploy_manifest
 
         echo ""
         ok "Installation complete"
@@ -3280,12 +3258,13 @@ case "$ACTION" in
         _deploy_venv_and_package
         deploy_wrappers || exit 1
         _versioned_activate || exit 1
+        write_deploy_manifest
         remove_legacy_scripts
         remove_legacy_binstubs
-        reconcile_binstubs
         # Deploy the tool binstub unconditionally (see the install action) so a
         # project-less `update` also keeps `agent-worktrees` on PATH.
         deploy_tool_binstub
+        reconcile_binstubs
         deploy_copilot_plugin
         ensure_copilot_experimental
 
@@ -3309,8 +3288,6 @@ case "$ACTION" in
         # upgrades ~/.agent-worktrees/{config,repos,projects}.yaml. Non-fatal.
         PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees config-migrate 2>&1 \
             | sed 's/^/  /' || warn "Config migration skipped"
-
-        write_deploy_manifest
 
         ok "Update complete"
         ;;

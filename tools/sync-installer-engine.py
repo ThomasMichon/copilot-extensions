@@ -17,6 +17,7 @@ Adopters can now exist in one of two valid dev-time forms:
 This tool's ``--check`` verifies both forms correctly. Its write mode keeps
 vendored adopters byte-identical and removes stale local copies from
 canonical-reference adopters.
+Linked destinations are refused before reading, copying or changing permissions.
 
 Usage::
 
@@ -51,7 +52,7 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
             REPO / "plugins" / plugin / "scripts" / name,
         )
         for plugin in ADOPTERS
-        for name in FILES
+        for name in (*FILES, *ier.support_files(CANONICAL_DIR))
     ]
 
 
@@ -96,7 +97,7 @@ def _ref_state(plugin: str, ext: str) -> tuple[str, str | None]:
         return (
             "malformed",
             f"plugins/{plugin}/scripts/install.{ext} references {ref.raw_path} "
-            f"(resolved {ref.resolved()}) which is not {canonical.relative_to(REPO)}",
+            f"(resolved {ref.resolved()}) which is not {canonical.relative_to(REPO).as_posix()}",
         )
     return (
         "malformed",
@@ -149,6 +150,16 @@ def _local_copy_problems(plugin: str) -> list[str]:
             source.stat().st_mode
         ):
             problems.append(f"{relative} mode differs from {source.relative_to(REPO)}")
+    for name in ier.support_files(CANONICAL_DIR):
+        source = CANONICAL_DIR / name
+        destination = plugin_dir / "scripts" / name
+        relative = destination.relative_to(REPO).as_posix()
+        if uer._find_symlinked_ancestor(source, REPO.resolve()) is not None or destination.is_symlink():
+            problems.append(f"{relative}: support asset is linked -- refusing")
+        elif not source.is_file():
+            problems.append(f"canonical source missing: {source.relative_to(REPO)}")
+        elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
+            problems.append(f"{relative} is missing or differs from {source.relative_to(REPO)}")
     return problems
 
 
@@ -169,6 +180,15 @@ def _canonical_copy_problems(plugin: str) -> list[str]:
                 f"{destination.relative_to(REPO).as_posix()} should not exist in dev once "
                 f"{plugin} uses the canonical reference"
             )
+    for name in ier.support_files(CANONICAL_DIR):
+        source = CANONICAL_DIR / name
+        destination = plugin_dir / "scripts" / name
+        if uer._find_symlinked_ancestor(source, REPO.resolve()) is not None or not source.is_file():
+            problems.append(f"canonical support source missing or linked: {source.relative_to(REPO)}")
+        elif destination.is_symlink() or (
+            destination.exists() and destination.read_bytes() != source.read_bytes()
+        ):
+            problems.append(f"{destination.relative_to(REPO)} differs from canonical support source")
     return problems
 
 
@@ -242,6 +262,23 @@ def verify() -> list[str]:
         )
     for plugin in ADOPTERS:
         problems.extend(_adopter_problems(plugin))
+    if ier.human_output_enabled(CANONICAL_DIR):
+        source = CANONICAL_DIR / ier.HUMAN_HELPER
+        for plugin in ier.human_output_adopters(REPO, ADOPTERS):
+            scripts = REPO / "plugins" / plugin / "scripts"
+            helper = scripts / ier.HUMAN_HELPER
+            script = scripts / "install.ps1"
+            declaration = script.with_suffix(".human-output.json")
+            try:
+                for path in (source, helper, script, declaration):
+                    if uer._find_symlinked_ancestor(path, REPO.resolve()) is not None:
+                        raise ValueError(f"{path}: linked human-output asset refused")
+                if helper.read_bytes() != source.read_bytes():
+                    raise ValueError(f"{helper}: native human-output initializer differs")
+                if declaration.read_text(encoding="utf-8") != ier.human_output_json(script):
+                    raise ValueError(f"{declaration}: native human-output declaration drift")
+            except (OSError, ValueError) as error:
+                problems.append(str(error))
     return problems
 
 
@@ -254,27 +291,22 @@ def sync() -> list[str]:
                 "installer-engine adopter is not in a complete recognized form:\n  - "
                 + "\n  - ".join(structural_problems)
             )
-        if mode == "canonical":
-            for name in FILES:
-                source = CANONICAL_DIR / name
-                bad_ancestor = uer._find_symlinked_ancestor(source, REPO.resolve())
-                if bad_ancestor is not None:
-                    raise RuntimeError(f"{bad_ancestor} is a symlink -- refusing")
-                if not source.is_file():
-                    raise FileNotFoundError(f"canonical source missing: {source}")
-                destination = REPO / "plugins" / plugin / "scripts" / name
-                if destination.exists() or destination.is_symlink():
-                    destination.unlink()
-                    written.append(f"removed {destination.relative_to(REPO).as_posix()}")
-            continue
-        for name in FILES:
+        for name in (*FILES, *ier.support_files(CANONICAL_DIR)):
             source = CANONICAL_DIR / name
             bad_ancestor = uer._find_symlinked_ancestor(source, REPO.resolve())
             if bad_ancestor is not None:
                 raise RuntimeError(f"{bad_ancestor} is a symlink -- refusing")
             destination = REPO / "plugins" / plugin / "scripts" / name
+            bad_destination = uer._find_symlinked_ancestor(destination, REPO.resolve())
+            if bad_destination is not None:
+                raise RuntimeError(f"{bad_destination} is a symlink -- refusing")
             if not source.is_file():
                 raise FileNotFoundError(f"canonical source missing: {source}")
+            if mode == "canonical" and name in FILES:
+                if destination.exists() or destination.is_symlink():
+                    destination.unlink()
+                    written.append(f"removed {destination.relative_to(REPO).as_posix()}")
+                continue
             content_matches = destination.is_file() and destination.read_bytes() == source.read_bytes()
             mode_matches = destination.is_file() and (
                 os.name == "nt"
@@ -288,6 +320,24 @@ def sync() -> list[str]:
             if os.name != "nt":
                 shutil.copymode(source, destination)
             written.append(destination.relative_to(REPO).as_posix())
+    if ier.human_output_enabled(CANONICAL_DIR):
+        source = CANONICAL_DIR / ier.HUMAN_HELPER
+        for plugin in ier.human_output_adopters(REPO, ADOPTERS):
+            scripts = REPO / "plugins" / plugin / "scripts"
+            helper = scripts / ier.HUMAN_HELPER
+            script = scripts / "install.ps1"
+            declaration = script.with_suffix(".human-output.json")
+            for path in (source, helper, script, declaration):
+                linked = uer._find_symlinked_ancestor(path, REPO.resolve())
+                if linked is not None:
+                    raise RuntimeError(f"{linked}: linked human-output asset refused")
+            if not helper.is_file() or helper.read_bytes() != source.read_bytes():
+                shutil.copyfile(source, helper)
+                written.append(helper.relative_to(REPO).as_posix())
+            expected = ier.human_output_json(script)
+            if not declaration.is_file() or declaration.read_text(encoding="utf-8") != expected:
+                declaration.write_text(expected, encoding="utf-8")
+                written.append(declaration.relative_to(REPO).as_posix())
     return written
 
 

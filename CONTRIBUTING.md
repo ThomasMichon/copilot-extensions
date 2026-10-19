@@ -127,7 +127,8 @@ base branch.
 >    "merge = shipped" mental model: your merge has to (a) finish `dev`'s own
 >    CI, (b) clear the `Validation Gate`, (c) get promoted into a generated
 >    `release/promote-<run id>` candidate PR against `main`, and (d) have that
->    candidate PR's own (fast) check pass before it auto-merges. If you want to
+>    candidate PR's own (fast) check pass before the pipeline performs an
+>    atomic expected-head squash merge. If you want to
 >    confirm your change actually shipped, watch for that candidate PR
 >    merging (`gh pr list --search "is:merged head:release/promote-"`, or just
 >    watch `main`'s commit history) rather than assuming your `dev` merge was
@@ -168,9 +169,9 @@ copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
 #   → wait up to 10 minutes for Copilot's review to land (re-requesting a
 #     review is itself not instant -- give it room to actually run)
-#   → Contributor PR, Approved: merge. Owner-authored PR, clean Comment (no
-#     Medium/High findings open): merge -- that's the passing verdict here,
-#     Copilot structurally never renders Approve on this repo's own PRs.
+#   → Approve for either author type, or owner-authored clean Comment (no
+#     Medium/High findings open): merge once the separate required approval
+#     and CI gates pass. Contributor PRs still need Maintainer acceptance.
 #     Otherwise: address findings, push, wait up to 10 minutes for the
 #     automatic post-push review; still not passing -> re-request review via
 #     the API (see "Requesting a fresh review" below), wait up to 10 minutes
@@ -184,6 +185,12 @@ copilot-extensions finalize          # clean up the worktree
 - **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
   `pr/<slug>` head; it will NOT land on `main`).
 - Managed publication has a 30-second `pr.push_timeout_seconds` deadline.
+  Pre-push reads every non-deletion ref update from Git, validates its pushed
+  tree, and uses the published tip as the incremental base. First publication
+  or rewritten refs select a related contribution/release base; unavailable
+  objects or an unrelated base refuse publication instead of skipping checks.
+  This keeps main-based bootstrap branches independent of unrelated `dev`
+  history without weakening identifier or blob-size checks.
   Pre-push retains identifier-leak and pushed-blob size checks; repository
   contract, architecture, version, documentation, and whole-tree guards run
   in required CI instead of delaying transport. Staged Python lint, skill
@@ -198,6 +205,15 @@ copilot-extensions finalize          # clean up the worktree
   uniformly).
 
 ### Waiting for a verdict
+
+**Authorized Maintainers drive completion; they do not request an extra
+permission merely because GitHub still displays a CODEOWNER-review
+requirement.** After satisfying the review policy below and required CI, and
+with no outstanding reviewer change request, hold, draft or conflict, use
+`pr-merge <#> --now`. A live provider-confirmed review-rule exception is part
+of this repository's expected Maintainer flow. It does not waive blocking
+feedback or checks, authorize raw bypass commands, or grant an unlisted actor
+Maintainer rights. Contributor PRs retain their separate human-acceptance gate.
 
 > **TL;DR (the shared stopping rule both the author and reviewer converge
 > on for Copilot's own verdict — a separate gate from required status checks
@@ -261,27 +277,16 @@ expect a `CHANGES_REQUESTED` state from it.) Approvals are enabled in this repo
 (Settings → Copilot → Code review → Auto-approval) — see [`REVIEW.md`](REVIEW.md)'s
 directive requiring Copilot to render `Approve` whenever it has no blocking
 findings, rather than habitually leaving a `Comment` review that just
-narrates readiness. **That directive, and "a genuinely ready PR should come
-back `Approve`," only holds for a PR authored by someone other than this
-repo's owner.** This repo's owner-authored PRs (i.e. this repo's own,
-self-merge PRs — the common case when driving work here) are a documented,
-empirically confirmed exception: GitHub's Copilot code review structurally
-never renders `Approve` there, only ever `Comment`
-(`plugins/agent-worktrees/src/agent_worktrees/pr_contract.py`'s
-`NONBLOCKING_VERDICT_STATES`; every review across every merged owner-authored
-PR in this repo's history has been `Comment`, with zero `Approve`s ever
-observed). On an owner-authored PR, the passing verdict is a **clean
-`Comment`** — zero remaining Medium/High-severity findings — not a `Comment`
-that is merely "waited out." Do not spend further review rounds chasing an
-`Approve` that literally cannot land there.
+narrates readiness. Owner-authored PRs can receive `Approve` too; do not
+infer the available verdict shape from an account name or historical service
+behavior. On an owner-authored PR, either `Approve` or a **clean `Comment`**
+with zero remaining Medium/High-severity findings satisfies this repo's
+Copilot gate. A comment merely "waited out" is not clean evidence.
 
-> **This never-`Approve` quirk is specific to the literal GitHub repository
-> *owner* account, not the wider Maintainer group.** The other Maintainers
-> are ordinary (non-owner) accounts from Copilot's perspective — their own
-> PRs should be treated like a Contributor's for verdict *shape* (wait for a
-> genuine `Approve`, not a clean-`Comment` substitute) even though they
-> don't need anyone else's approving review to merge (the ruleset bypass
-> above).
+> Other Maintainers' PRs retain the documented contributor verdict-shape
+> policy below unless the repository explicitly accepts a different shape.
+> Their live review-rule exception removes the need for another person's
+> approval, not the responsibility to address Copilot's findings.
 >
 > This is a bigger gap than verdict *shape* alone: without
 > `MAINTAINER_REVIEW_PAT` (see [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation)), the automatic request never
@@ -296,7 +301,7 @@ that is merely "waited out." Do not spend further review rounds chasing an
 **Everyone — Contributor and Maintainer alike — waits for a verdict before
 merging**, and no one merges past an open Medium/High-severity finding.
 What differs is only the *shape* of the passing verdict: Contributor PRs
-need `Approve`; the repo owner's own PRs need a `Comment` review with
+need `Approve`; the repo owner's own PRs accept `Approve` or a `Comment` review with
 nothing Medium/High left open (see the note above for the other
 Maintainers). Each wait below uses `pr-watch wait <owner>/<repo>
 <PR> --since <cursor> --until approved,commented,changes_requested
@@ -320,7 +325,7 @@ each attempt real room to actually land before treating it as a timeout:
    timeout, not a review event):** there's nothing to address or push yet —
    skip straight to step 4's re-request action rather than inventing an
    unrelated commit.
-2. **Contributor PR, `Approve` landed:** proceed to merge (subject to the
+2. **Either author type, `Approve` landed:** proceed to merge (subject to the
    separate required-approving-review gate for a Contributor's PR — see
    [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation);
    Copilot's own `Approve` never substitutes for that).
@@ -334,8 +339,9 @@ each attempt real room to actually land before treating it as a timeout:
    **`Comment` landed, but every finding is dismissed/explained with no
    actual change needed:** there's nothing new for a re-review to see —
    skip the push and go straight to step 4's re-request action.
-4. **Automatic post-push review landed `Approve` (contributor PR) or a
-   clean `Comment` (owner-authored PR):** merge. **Still not there** (a
+4. **Automatic post-push review landed `Approve` (either author type) or a
+   clean `Comment` (owner-authored PR):** merge, preserving the separate
+   Contributor acceptance and required CI gates. **Still not there** (a
    `Comment` with a Medium/High finding still open, or the post-push wait
    also timed out with nothing landing): explicitly re-request a review —
    see "Requesting a fresh review" below — then wait up to 10 minutes again
@@ -365,19 +371,13 @@ each attempt real room to actually land before treating it as a timeout:
    proceeding past this step at all, regardless of Maintainer approval,
    until it's resolved and a *subsequent* review actually passes — merely
    re-requesting a review is not itself a verdict.
-- **This is agent discipline, not yet tool-enforced.** `pr-merge --now`
-  itself does not check Copilot's verdict before merging --
-  `.agent-worktrees/config.yaml`'s `review_blocking: false` makes every
-  `pr-merge` call pass `--admin` to the provider (bypassing GitHub's own
-  review-gate check unconditionally), so nothing currently stops a driving
-  agent from merging before this loop is actually satisfied. Follow the
-  loop above deliberately; do not rely on the tooling to refuse a premature
-  merge on your behalf. (Flipping `review_blocking` to `true` is a real
-  lever for closing this gap, but is a separate decision with its own
-  behavior-change risk -- e.g. this repo's own ruleset already exempts the
-  maintainer from any required approving review count, so the practical
-  effect for the maintainer's own PRs needs its own validation, not an
-  assumption -- and is out of scope for this documentation change.)
+- **Review assessment remains the author's responsibility.** The GitHub
+  provider attempts a normal, head-pinned merge first. Where repository
+  configuration authorizes its fallback, it verifies the required checks
+  before an administrative merge attempt; it does not unconditionally pass
+  that flag on every call. This is not yet complete enforcement of the review
+  assessment loop or every reviewer veto. Follow the loop and all negative
+  feedback deliberately; never infer that a merge-capable actor may ignore it.
 - **`pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet
   approved"` fields still refer only to the codeowner/review-count gate**
   (see [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation)), not to Copilot's own verdict — for the maintainer's
@@ -558,6 +558,12 @@ reopen the issue, and record the correction; a null `commit_id` in an issue
 closure event is not by itself evidence that an agent called an issue-close API.
 
 ### Documentation impact (required before opening a PR)
+
+Dependency changes also run `python tools/check-dependency-age.py`: external
+literal floors/pins must be at least seven days old, across build, runtime,
+development and optional declarations. A weekly update schedule alone is not
+an age check. Installation must independently enforce the configured-feed
+artifact cutoff; see `docs/install-contract.md` (*External dependency seasoning*).
 
 Assess the final diff and repeat the assessment after material scope or
 implementation changes. Apply this review to every change classification,
@@ -1299,14 +1305,15 @@ changes*): even a `source.kind = local` install rebuilds from a **checkout on
 disk**, so it still requires committing (or at least saving) your edit and
 re-running that plugin's installer to pick it up.
 
-**`agent-codespaces` has adopted the mutable-dev-slot pattern
+**`agent-codespaces` uses claim-owned development generations
 (`docs/patterns/mutable-dev-slot.md`, #3376) as the preferred path** for this:
 from your worktree, run `pwsh -File plugins\agent-codespaces\scripts\install.ps1
-dev` (`./scripts/install.sh dev` on POSIX). This claims a protected, mutable
-`versions/dev` slot, builds it as an **editable** install against your
+dev` (`./scripts/install.sh dev` on POSIX). This claims development ownership,
+builds a fresh protected generation as an **editable** install against your
 checkout, and activates it -- a plain source edit is then reflected by the
 deployed `agent-codespaces` CLI immediately, no rebuild needed; re-run `dev`
-only when you change a dependency. Release when done with the DEPLOYED CLI's
+only when you change a dependency. Each refresh preserves the working dependency
+environment until its replacement is healthy. Release with the DEPLOYED CLI's
 own verb: `agent-codespaces dev-release` (works even without a checkout
 present -- see the design doc's "Runtime accessibility" section), which
 restores the machine to whatever version was active before you claimed dev

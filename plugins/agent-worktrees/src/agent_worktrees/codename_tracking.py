@@ -97,7 +97,7 @@ def allocation_lock(tracking_path: Path) -> tracking._RecordLock:
     Backed by ``tracking._RecordLock`` (already the tracking store's own
     cross-process RMW primitive) against a sentinel lock path -- ``@codenames``
     is not a real worktree id, so it never collides with one (worktree ids are
-    always ``<machine>-<platform>-<timestamp>-<suffix>[-k]``, ``sys-*``, or the
+    always ``<machine-environment>-<timestamp>-<suffix>[-k]``, ``sys-*``, or the
     reserved ``@anchor`` -- none of which is ``@codenames``). ``require_sidecar``
     means a real failure to acquire the lock in time raises ``TimeoutError``
     (visible to the caller) rather than silently proceeding without

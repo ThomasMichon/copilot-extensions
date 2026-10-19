@@ -158,8 +158,10 @@ envdump), hint, [autofix]}`. The taxonomy makes a red line *legible*:
 |----------|-------------|---------------|
 | `toolchain-uv` | uv absent, or (**most common**) present but its index is unconfigured (pip's internal feed is set, uv's is not) so `uv` hits the blocked public PyPI | derive the internal index from `pip config get global.index-url` and export it to uv (`UV_INDEX_URL`/`UV_DEFAULT_INDEX`) — uv does **not** read `pip.conf` |
 | `toolchain-venv` / `pythonpath` | venv not created / wrong interpreter / PYTHONPATH leak | recreate under the runtime dir; unset inherited PYTHONPATH |
+| `runtime-install` | the real installer returned nonzero before a usable runtime was published | inspect the captured installer error; repair the owning installation path, not the scenario |
 | `pip-feed-governance` | public PyPI blocked and no index configured for the tool in use | point both pip *and* uv at the internal index |
 | `npm-registry` | `@github/copilot` / node install blocked | pass an internal registry build-arg |
+| `node-prerequisite` | Node.js is absent or below the scenario's declared version floor | use the supported base-image Node toolchain; do not misclassify this as a package-feed failure |
 | `auth-gh` / `auth-copilot` / `auth-ado` | clone/login/relay 401/403 | re-auth; correct account (EMU vs personal) |
 | `repo-config` | knowledge binding / `state-root` unresolved | re-run the setup/link step |
 | `codespace-config` | CodeSpace create/connect/relay fails | check machine/repo prereqs; relay port |

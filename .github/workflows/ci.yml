@@ -1,4 +1,5 @@
 name: CI
+run-name: ${{ inputs.promotion_run != '' && format('CI promotion {0} at {1}', inputs.promotion_run, inputs.promotion_sha) || '' }}
 
 # Fast smoke CI (budget: under ~5 min for a PR).
 #
@@ -8,8 +9,9 @@ name: CI
 #   * discover       - resolve which plugin suites to run (changed on PR, all on
 #                      push to main), split into a fast set (smoke) and the one
 #                      heavy plugin (agent-worktrees, ~11 min) handled separately.
-#   * smoke          - full suite per fast plugin, in parallel (wall-time ~= the
-#                      slowest, agent-bridge ~2 min). fail-fast: false.
+#   * smoke          - full suite per fast plugin, in parallel; dispatch PRs use
+#                      coverage-selected tests + curated smoke + guards.
+#                      Push/manual portfolios stay full. fail-fast: false.
 #   * worktrees-smoke- agent-worktrees is too slow for the budget, so on PR/push
 #                      it only gets a cheap import/collection smoke; its full
 #                      suite runs via the manual `full` workflow below.
@@ -39,25 +41,37 @@ on:
   push:
     branches: [main, dev]
   workflow_dispatch:
+    inputs:
+      promotion_sha:
+        description: "Exact generated candidate or merged release SHA"
+        required: false
+        type: string
+      promotion_run:
+        description: "Owning promotion run-attempt identity"
+        required: false
+        type: string
+      promotion_phase:
+        description: "Qualify an immutable candidate before merge or verify a legacy release"
+        required: false
+        type: choice
+        default: release
+        options:
+          - release
+          - candidate
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  # `false` (not the prior `true`): a rolling build, not cancel-and-restart.
-  # GitHub's default queue:single semantics for a shared group already give
-  # exactly this -- at most one run in progress, at most one pending, and a
-  # newer push only ever supersedes the *pending* run, never kills the one
-  # already in progress. `cancel-in-progress: true` risked starving this
-  # workflow entirely under rapid pushes to the same ref (an in-flight run
-  # gets killed and restarted from zero every time, so if pushes arrive
-  # faster than this suite completes, NO run ever finishes) -- which in turn
-  # means Validation Gate/Promote downstream never fire at all
-  # (ThomasMichon/copilot-extensions#3592).
-  cancel-in-progress: false
+  # New PR heads supersede old work; metadata edits do not cancel executing CI.
+  # Dev pushes and manual qualification retain rolling queue:single behavior:
+  # a newer push replaces only pending work, never an executing validation.
+  # This preserves the dev-advancement starvation protection from #3592.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 permissions:
   contents: read
 
 env:
+  CI_PROMOTION_RUN: ${{ inputs.promotion_run }}
   # The heavy plugin (~11 min) kept out of the fast lane; runs full only on
   # workflow_dispatch, and gets a collect-only smoke on PR/push.
   HEAVY_PLUGIN: agent-worktrees
@@ -78,19 +92,79 @@ jobs:
     name: guards + lint
     runs-on: ubuntu-latest
     steps:
+      - name: Verify the dispatched promotion snapshot before checkout
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          (inputs.promotion_sha != '' || inputs.promotion_run != '' || inputs.promotion_phase == 'candidate')
+        env:
+          EXPECTED_SHA: ${{ inputs.promotion_sha }}
+          PROMOTION_RUN: ${{ inputs.promotion_run }}
+          RUN_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_REF: ${{ github.ref }}
+          PROMOTION_PHASE: ${{ inputs.promotion_phase }}
+        run: |
+          case "$PROMOTION_PHASE" in
+            candidate)
+              ref_pattern='^refs/heads/release/promote-[0-9]+$'
+              [ "$RUN_REF" = "refs/heads/release/promote-${PROMOTION_RUN%-*}" ] || {
+                echo "::error::Candidate branch does not belong to the qualifying promotion."
+                exit 1
+              }
+              ;;
+            release) ref_pattern='^refs/tags/promote-[0-9]{14}-[0-9a-f]{8}$' ;;
+            *) echo "::error::Unknown promotion qualification phase."; exit 1 ;;
+          esac
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+          [[ "$PROMOTION_RUN" =~ ^[0-9]+-[0-9]+$ ]] &&
+          [[ "$RUN_REF" =~ $ref_pattern ]] &&
+          [ "$RUN_SHA" = "$EXPECTED_SHA" ] && [ "$WORKFLOW_SHA" = "$EXPECTED_SHA" ] || {
+            echo "::error::Promotion dispatch does not execute the exact qualification snapshot."
+            exit 1
+          }
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
       - name: Install tooling
-        run: python -m pip install --upgrade pip pytest pyyaml ruff
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml ruff packaging "setuptools>=83.0.0" wheel
+      - id: dependency-age
+        name: Detect dependency declaration and policy changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+            head="HEAD"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$base" "$head" | grep -Eq \
+            '(^|/)(pyproject\.toml|package(-lock)?\.json|[^/]*requirements[^/]*\.txt)$|^tools/(check-dependency-age\.py|dependency_age\.py|seasoned_uv\.py|seasoned_public_feed\.py)$|^worktree-manager/scripts/picker-snapshot/install\.py$|^libs/installer-engine/|^\.github/(dependabot\.yml|workflows/ci\.yml)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Seasoned dependency declarations
+        if: steps.dependency-age.outputs.run == 'true'
+        timeout-minutes: 5
+        run: python tools/check-dependency-age.py
+      - name: Dependency seasoning contracts
+        if: steps.dependency-age.outputs.run == 'true'
+        run: python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_seasoned_npm_install.py
       - name: Version consistency
         run: python tools/check-version-consistency.py
       - name: Required source metadata contract tests
         run: |
-          npm ci --prefix .github/actions --ignore-scripts --no-audit --no-fund
+          python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions --health-module commonmark --health-module parse5
           node --test .github/actions/required-pr-attribution.test.cjs
           python -m pytest -q tools/test_required_source_attribution_workflow.py
       - name: Changefile presence (touched plugins must have a pending changefile; PR-into-dev only)
@@ -281,8 +355,32 @@ jobs:
         run: python -m pytest -q tools/test_check_agent_bridge_contracts.py
       - name: Git hook interpreter tests
         run: python -m pytest -q tools/test_hook_interpreter.py
+      - &detect_pre_push_scope
+        id: pre-push-scope
+        name: Detect publication guard changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "push" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|tools/hooks/.*|tools/(check-no-internal-identifiers|check-large-files|test_pre_push_ref_scope|test_hook_interpreter|test_check_large_files|test_check_no_internal_identifiers)\.py)$'; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - name: Real Git publication scope tests
+        if: steps.pre-push-scope.outputs.run == 'true'
+        run: python -m pytest -q tools/test_pre_push_ref_scope.py
       - name: Promotion exact-PR merge wait regression tests
-        run: python -m pytest -q tools/test_promotion_merge_wait.py
+        run: python -m pytest -q tools/test_promotion_merge_wait.py tools/test_promotion_lifecycle.py tools/test_promotion_lifecycle_workflow.py tools/test_promotion_dispatch.py
       - name: Trusted PR policy contract tests
         run: python -m pytest -q tools/test_trusted_pr_policy.py tools/test_post_ci_policy.py tools/test_identifier_guard_workflow.py tools/test_check_no_internal_identifiers.py
       - name: Payload invocation generated files
@@ -358,7 +456,7 @@ jobs:
         # Procutil's optional metrics fixture must execute in this lane;
         # install its backend explicitly without changing default consumers.
         run: >-
-          python -m pip install pytest-asyncio fastapi uvicorn "psutil>=7.0" &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest-asyncio fastapi uvicorn "psutil>=7.0" &&
           python -m pytest -q libs/work-coalescing-singleton/tests &&
           python -m pytest -q libs/lazy-cli-dispatch/tests &&
           python -m pytest -q libs/credential-relay/tests &&
@@ -374,6 +472,38 @@ jobs:
           python -m pytest -q libs/fleet-contracts/tests &&
           python -m pytest -q libs/fleet-index-adapter/tests &&
           python -m pytest -q libs/fleet-vault-adapter/tests
+      - name: Docker identity CI selection contract
+        run: python -m pytest -q tools/test_docker_identity_ci_scope.py
+      - id: docker-identity
+        name: Detect Docker identity changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          run="$(python tools/docker_identity_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Docker identity promotion compatibility
+        if: steps.docker-identity.outputs.run == 'true'
+        run: python -m pytest -q tools/test_accumulate_bumps.py::test_docker_resource_producer_canonical_version_is_promotable
+      - uses: actions/setup-python@v5
+        id: docker-identity-python
+        if: steps.docker-identity.outputs.run == 'true'
+        with:
+          python-version: "3.10"
+          update-environment: false
+      - uses: astral-sh/setup-uv@v9.0.0
+        id: docker-identity-uv
+        if: steps.docker-identity.outputs.run == 'true'
+        with:
+          enable-cache: false
+      - name: Docker identity fixture contracts (Python 3.10)
+        if: steps.docker-identity.outputs.run == 'true'
+        timeout-minutes: 3
+        run: |
+          python tools/seasoned_uv.py --uv uv -- --python "${{ steps.docker-identity-python.outputs.python-path }}" --system pytest pytest-timeout
+          "${{ steps.docker-identity-python.outputs.python-path }}" -m pytest -q --timeout=20 libs/docker-resource-producer/tests
       - id: zdd-singleton
         name: Detect zdd singleton changes
         shell: bash
@@ -518,12 +648,14 @@ jobs:
             base="${{ github.event.pull_request.base.sha }}"
           elif [ "${{ github.event_name }}" = "push" ]; then
             base="${{ github.event.before }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$CI_PROMOTION_RUN" ]; then
+            base="$(git rev-parse --verify HEAD^)"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py))$'; then
+          if git diff --name-only "$base"...HEAD | grep -Eq -e '^tools/((test_)?ci_plugin_partitions|promotion_admission_evidence)\.py$' -e \
+            '^((.*/)?\.gitattributes|\.changefiles/[^/]+\.json|\.github/plugin/marketplace\.json|docs/patterns/entity-relationship-model\.md|(plugins|libs|worktree-manager|fleet-manager|services/(index|dispatch|chat))/.+|\.github/workflows/(validate-and-promote|ci|workflow-lockdown-guard|base-branch-reminder)\.yml|tools/(_promotion_workflow_test_support\.py|materialized_candidate_inventory\.py|validate_materialized_candidate\.py|test_validate_materialized_candidate\.py|tag_promotion\.py|test_tag_promotion\.py|verify_promotion_workflows\.py|test_verify_promotion_workflows\.py|promote_release\.py|test_promote_release\.py|promotion_candidate\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|promotion_artifact_readiness\.py|test_promotion_artifact_readiness\.py|test_promotion_candidate_retry\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_merge_wait\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py|(test_)?(rollback_release|promotion_source_alias|release_publication_boundary|candidate_qualification_inventory|qualify_promotion_candidate|promotion_(lifecycle(_workflow)?|dispatch)|reuse_promotion_artifacts|publish_candidate_artifacts|promotion_source_identity)\.py|(test_)?(materialize_main|materialize_installer_engine|materialize_launch_wrapper_assets|nested_uv_editable_ref|installer_engine_ref|launch_wrapper_assets_ref|standalone_consumers|accumulate_bumps|changefile|seasoned_uv)\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -533,29 +665,47 @@ jobs:
         # governed-python-artifact-promotion effort, Phase 2: build_python_artifacts.py
         # + build_toolchain_lock.py/governed_feed_trust.py's own trust-gate,
         # concurrency, and build-requirement regressions -- gated by changed
-        # paths (TESTING.md's "Gate specialized suites by changed paths"
-        # invariant) since this is a large, subprocess-adjacent suite most
-        # PRs never touch.
+        # paths, including source closures, attribute policy and materializers
+        # consumed by the producer/verifier even when no artifact tool changes.
+        # Keep both platform selectors aligned; unrelated docs remain excluded.
         run: >-
           python -m pytest -q tools/test_build_python_artifacts.py tools/test_seasoned_public_feed.py
           tools/test_public_toolchain_source.py tools/test_promote_release.py
           tools/test_promotion_control.py
           tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
           tools/test_promotion_workflow_adapter.py
+          tools/test_promotion_merge_wait.py
+          tools/test_tag_promotion.py
+          tools/test_verify_promotion_workflows.py
+          tools/test_promotion_artifact_readiness.py tools/test_promotion_candidate_retry.py
+          tools/test_validate_materialized_candidate.py
+          tools/test_qualify_promotion_candidate.py tools/test_promotion_source_identity.py
+          tools/test_reuse_promotion_artifacts.py tools/test_publish_candidate_artifacts.py
+          tools/test_promotion_source_alias.py tools/test_release_publication_boundary.py
+          tools/test_rollback_release.py
       - uses: astral-sh/setup-uv@v9.0.0
         if: steps.python-artifact-builder.outputs.run == 'true'
       - name: Fresh seasoned-public toolchain and shared real wheel builds
         if: steps.python-artifact-builder.outputs.run == 'true'
         timeout-minutes: 3
         run: python tools/smoke_public_toolchain.py
+      - uses: actions/setup-python@v5
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        with:
+          python-version: "3.10"
       - name: Promotion artifact compatibility (Python 3.10 floor)
         if: steps.python-artifact-builder.outputs.run == 'true'
         timeout-minutes: 2
         run: >-
-          uv run --python 3.10 --with-requirements tools/artifact_validation_requirements.txt
-          --with pytest --with pyyaml --with tomli
+          python tools/seasoned_uv.py --uv uv -- --system
+          --only-binary :all: --require-hashes -r tools/artifact_validation_requirements.txt &&
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml tomli &&
           python -m pytest -q tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
-          -k "bundle_and_transfer_roundtrip or digest_matches_sha256 or real_export_subprocess or wheel_source_mapping or self_consistent_injected_wheel or runtime_metadata"
+          -k "bundle_and_transfer_roundtrip or digest_matches_sha256 or real_export_subprocess or materialized_producer_verifier_roundtrip or wheel_source_mapping or self_consistent_injected_wheel or runtime_metadata"
+      - uses: actions/setup-python@v5
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        with:
+          python-version: "3.12"
       - name: Asyncio timeout handlers (Python 3.10 daemon)
         # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
         # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --
@@ -571,7 +721,9 @@ jobs:
         # 'coverage-guided-selection-integration' job below): it spawns a
         # real 'uv run --with coverage ...' subprocess against a real
         # plugin's suite, which doesn't belong in this fast, always-on lane.
-        run: python -m pytest -q tools/test_coverage_guided_selection.py
+        run: >-
+          python -m pytest -q tools/test_coverage_guided_selection.py
+          tools/test_coverage_fallback_equivalence.py tools/test_coverage_selected_execution.py
       # Internal-identifier enforcement moved out of this untrusted PR lane.
       # Fork PRs receive no repository secrets on `pull_request`, and repo
       # `vars.*` would be plain-text/public, so this workflow can never hold the
@@ -626,7 +778,10 @@ jobs:
     # on windows-latest.
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
-    timeout-minutes: 5
+    # Native composed Git fixtures share this bound with setup and toolchain checks.
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.python-artifact-builder.outputs.run }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -643,12 +798,14 @@ jobs:
             base="${{ github.event.pull_request.base.sha }}"
           elif [ "${{ github.event_name }}" = "push" ]; then
             base="${{ github.event.before }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$CI_PROMOTION_RUN" ]; then
+            base="$(git rev-parse --verify HEAD^)"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_build_python_artifacts\.py))$'; then
+          if git diff --name-only "$base"...HEAD | grep -Eq -e '^tools/((test_)?ci_plugin_partitions|promotion_admission_evidence)\.py$' -e \
+            '^((.*/)?\.gitattributes|\.changefiles/[^/]+\.json|\.github/plugin/marketplace\.json|docs/patterns/entity-relationship-model\.md|(plugins|libs|worktree-manager|fleet-manager|services/(index|dispatch|chat))/.+|\.github/workflows/(validate-and-promote|ci|workflow-lockdown-guard|base-branch-reminder)\.yml|tools/(_promotion_workflow_test_support\.py|materialized_candidate_inventory\.py|validate_materialized_candidate\.py|test_validate_materialized_candidate\.py|tag_promotion\.py|test_tag_promotion\.py|verify_promotion_workflows\.py|test_verify_promotion_workflows\.py|promote_release\.py|test_promote_release\.py|promotion_candidate\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|promotion_artifact_readiness\.py|test_promotion_artifact_readiness\.py|test_promotion_candidate_retry\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_merge_wait\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py|(test_)?(rollback_release|promotion_source_alias|release_publication_boundary|candidate_qualification_inventory|qualify_promotion_candidate|promotion_(lifecycle(_workflow)?|dispatch)|reuse_promotion_artifacts|publish_candidate_artifacts|promotion_source_identity)\.py|(test_)?(materialize_main|materialize_installer_engine|materialize_launch_wrapper_assets|nested_uv_editable_ref|installer_engine_ref|launch_wrapper_assets_ref|standalone_consumers|accumulate_bumps|changefile|seasoned_uv)\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -656,18 +813,117 @@ jobs:
       - name: Windows-only governed Python artifact builder tests
         if: steps.python-artifact-builder.outputs.run == 'true'
         run: >-
-          uv run --with pytest python -m pytest -q -m windows_only
+          python tools/seasoned_uv.py --uv uv -- --system pytest &&
+          python -m pytest -q -m windows_only
           -W ignore::pytest.PytestUnknownMarkWarning
           tools/test_build_python_artifacts.py
       - name: Explicit public toolchain policy tests (Windows)
         if: steps.python-artifact-builder.outputs.run == 'true'
-        run: uv run --with pytest python -m pytest -q tools/test_public_toolchain_source.py
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q tools/test_public_toolchain_source.py
       - name: Composed promotion artifact contracts (Windows)
         if: steps.python-artifact-builder.outputs.run == 'true'
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q --durations=10
           tools/test_promotion_control.py tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
           tools/test_promotion_workflow_adapter.py
+
+  promotion-candidate-windows:
+    name: Native promotion candidate contracts (Windows)
+    needs: windows-python-artifact-builder
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    # Independent contract groups retain separate five-minute bounds.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+      - name: Native candidate readiness and retry contracts (Windows)
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q
+          tools/test_promotion_artifact_readiness.py tools/test_promotion_candidate_retry.py
+          tools/test_verify_promotion_workflows.py
+          tools/test_tag_promotion.py
+          -k 'native or binary_read'
+
+  promotion-publication-windows:
+    name: Source-owned promotion publication contracts (Windows)
+    needs: windows-python-artifact-builder
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+      - name: Source-owned qualification and publication contracts (Windows)
+        if: needs.windows-python-artifact-builder.outputs.run == 'true'
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q --durations=10
+          tools/test_qualify_promotion_candidate.py tools/test_promotion_lifecycle.py tools/test_promotion_lifecycle_workflow.py tools/test_promotion_dispatch.py tools/test_promotion_source_identity.py
+          tools/test_reuse_promotion_artifacts.py tools/test_publish_candidate_artifacts.py
+          tools/test_promotion_source_alias.py tools/test_release_publication_boundary.py
+          tools/test_rollback_release.py
+
+  construction-macos:
+    name: Runtime construction (stock macOS Bash)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: construction
+        name: Detect construction lifecycle changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA"...HEAD | grep -Eq \
+            '^(libs/versioned-runtime/|plugins/agent-bridge/tests/test_failed_construction\.py$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.construction.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: steps.construction.outputs.run == 'true'
+      - name: Native Bash 3.2 construction and signal settlement
+        if: steps.construction.outputs.run == 'true'
+        env:
+          VERSIONED_RUNTIME_TEST_SOURCE: ${{ github.workspace }}/libs/versioned-runtime/versioned_runtime.py
+          VERSIONED_RUNTIME_TEST_BASH: /bin/bash
+        run: |
+          /bin/bash -c 'printf "Native Bash: %s\n" "$BASH_VERSION"; test "${BASH_VERSINFO[0]}" -eq 3'
+          python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout
+          python -m pytest -q --noconftest -p no:cacheprovider plugins/agent-bridge/tests/test_failed_construction.py
 
   windows-hooks:
     name: Git hooks (Windows)
@@ -676,11 +932,20 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest
       - run: python -m pytest -q tools/test_hook_interpreter.py
+      - *detect_pre_push_scope
+      - name: Real Git publication scope tests
+        if: steps.pre-push-scope.outputs.run == 'true'
+        run: python -m pytest -q tools/test_pre_push_ref_scope.py
 
   bootstrap-killswitch-powershell-5-1:
     name: Bootstrap-killswitch guard (Windows PowerShell 5.1)
@@ -699,7 +964,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest
       - name: Guard tests under Windows PowerShell 5.1
         env:
           BOOTSTRAP_KILLSWITCH_TEST_SHELL: powershell.exe
@@ -710,15 +978,75 @@ jobs:
     # The Worktree Manager is delivered OUTSIDE the plugin pipe, so the
     # per-plugin matrix below never runs its tests. This dedicated job gives it
     # real CI.
-    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    needs: discover
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.manager_contracts == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test worktree-manager
         working-directory: worktree-manager
         run: uv run --extra dev pytest -q
+      - name: Test materialized Manager collection
+        working-directory: worktree-manager
+        run: uv run --extra dev pytest -q ../tools/test_worktree_manager_collection.py
+
+  repositories-configuration:
+    name: Repositories Configuration (native owner + Manager)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: ubuntu-latest
+    # Keep the real native owner/UI contract out of the six-minute full Manager
+    # lane: preparing its CLI alone took 57 seconds in the first live run.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Repositories Configuration CI contract
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q tools/test_repositories_configuration_ci_scope.py
+      - id: repositories-configuration
+        name: Detect native Repositories Configuration changes
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(\.github/workflows/ci\.yml|tools/(test_repositories_configuration_ci_scope|run-plugin-tests|run-standalone-tests|standalone_consumers|plugin_test_containment)\.py|plugins/agent-worktrees/(src/agent_worktrees/(repos[^/]*|config[^/]*|related[^/]*|state_root[^/]*|installer[^/]*|tracking[^/]*|registry_paths|project_state|context_cli|inrepo_config_source)\.py|pivots/repositories-config\.json|tests/test_(repos_configuration|repos_registry_transaction|registry_paths|context_resolution)\.py)|worktree-manager/(src/worktree_manager/production_picker/(context|picker_tui/(configuration[^/]*|engine_configuration_preview|pivot_registry_materialization|tasks))\.py|tests/production_picker/test_repositories_configuration\.py))$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - id: repositories-owner
+        name: Test native Repositories owner and prepare its isolated CLI
+        if: steps.repositories-configuration.outputs.run == 'true'
+        run: |
+          python tools/run-plugin-tests.py agent-worktrees -k "repos_configuration or repos_registry_transaction or registry_paths or picker_bootstrap"
+          echo "python=$GITHUB_WORKSPACE/.test-venvs/linux/agent-worktrees/bin/python" >> "$GITHUB_OUTPUT"
+      - name: Test real Repositories Configuration UI
+        env:
+          REPOSITORIES_CONFIG_TEST_PYTHON: ${{ steps.repositories-owner.outputs.python }}
+          PYTEST_ADDOPTS: -k repositories_configuration
+        if: steps.repositories-configuration.outputs.run == 'true'
+        run: python tools/run-standalone-tests.py worktree-manager --prepare --admission-wait 60 --timeout 120
 
   agent-dispatch-service:
     name: agent-dispatch-service (out-of-plugin)
@@ -732,7 +1060,13 @@ jobs:
     # run-standalone-tests.py harness agent-index-service's own job uses,
     # which supplies the needed local path sources directly (see
     # run-standalone-tests.py's prepare()).
-    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    needs: discover
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.dispatch_contracts == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -744,11 +1078,51 @@ jobs:
       - name: Test agent-dispatch-service with installed plugin and host containment
         run: python tools/run-standalone-tests.py services/dispatch --prepare --admission-wait 60 --timeout 180
 
+  agent-chat-service-linux:
+    name: agent-chat-service (ubuntu-latest)
+    needs: discover
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.chat_contracts == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test portable conversation core and installed artifact
+        run: python tools/run-standalone-tests.py services/chat --prepare --admission-wait 60 --timeout 120
+
+  agent-chat-service-windows:
+    name: agent-chat-service (windows-latest)
+    needs: discover
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.chat_contracts == 'true'))
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test portable conversation core and installed artifact
+        run: python tools/run-standalone-tests.py services/chat --prepare --admission-wait 60 --timeout 120
+
   test-runner-linux:
     name: test runner (ubuntu-latest)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -770,7 +1144,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(tools/(run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            '^(tools/(ci_plugin_partitions\.py|test_ci_plugin_partitions\.py|run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|plugin_test_selection\.py|pytest_test_selection\.py|test_plugin_test_selection\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|full_worktrees_worker_contract\.py|test_run_.*\.py|test_standalone_materialized_preparation\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/(ci|validate-and-promote)\.yml|plugins/agent-worktrees/pyproject\.toml|TESTING\.md)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -779,15 +1153,42 @@ jobs:
         if: steps.runner-contracts.outputs.run == 'true'
         env:
           PYTHONPATH: libs/single-instance-lease/src
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}
+          PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout pyyaml "setuptools>=83.0.0" wheel &&
+          python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
+          libs/single-instance-lease/tests/test_operation.py
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
+          tools/test_ci_plugin_partitions.py
+          tools/test_plugin_test_selection.py
           tools/test_run_standalone_tests.py
+          tools/test_standalone_materialized_preparation.py
           tools/test_run_tests_in_devcontainer.py
           tools/tests/test_komodo_role_fleet.py
+
+      - id: source-runtime-contracts
+        name: Detect source runtime changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(libs/versioned-runtime/|plugins/agent-bridge/(scripts/|pyproject\.toml$|plugin\.json$)|tools/clean-room/scenarios/merged-dev-runtime/|tools/(prepare_runtime_source|materialize_main|materialize_installer_engine|materialize_launch_wrapper_assets|uv_editable_ref|nested_uv_editable_ref|run-plugin-tests)\.py$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Source runtime admission and native boundary
+        if: steps.source-runtime-contracts.outputs.run == 'true'
+        run: python tools/run-plugin-tests.py runtime-source --admission-wait 60 --plugin-timeout 180 --subsuite-timeout 180
 
       - id: payload-cwd-contracts
         name: Detect dev PR payload CWD changes
@@ -808,41 +1209,80 @@ jobs:
         if: steps.payload-cwd-contracts.outputs.run == 'true'
         shell: bash
         run: |
-          uv run --with pytest python -m pytest tools/test_payload_cwd_ci_scope.py -q
-          uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or launch_survives"
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python -m pytest tools/test_payload_cwd_ci_scope.py -q
+          python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or launch_survives"
 
-      - id: fleet-contracts
-        name: Detect standalone fleet contract changes
+  fleet-native-linux:
+    name: fleet-manager (ubuntu-latest, ${{ matrix.partition.name }})
+    needs: discover
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.fleet_contracts == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: &fleet-native-partitions
+          - name: planner
+            selector: 'not gateway_ and not (artifact or client_distribution or client_diagnostics) and not (allocation_ or ledger or node_journal or observation_store)'
+          - name: storage
+            selector: 'not gateway_ and not (artifact or client_distribution or client_diagnostics) and (allocation_ or ledger or node_journal or observation_store)'
+          - name: artifacts
+            selector: 'not gateway_ and artifact'
+          - name: client-distribution
+            selector: 'not gateway_ and not artifact and (client_distribution or client_diagnostics)'
+          - name: gateway
+            selector: 'gateway_ and not gateway_processes'
+          - name: gateway-processes
+            selector: 'gateway_processes'
+    steps: &fleet-native-steps
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Check fleet coverage partition
+        if: matrix.partition.name == 'planner'
         shell: bash
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml && python -m pytest -q tools/test_fleet_ci_scope.py tools/test_ci_job_admission.py
+      - name: Test fleet partition with installed package and host containment
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/(single-instance-lease|agent-procutil|versioned-runtime)/|\.github/workflows/ci\.yml$)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Test thin fleet planner with installed package and host containment
-        if: steps.fleet-contracts.outputs.run == 'true'
-        env:
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
-        run: |
-          uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && 600 || 120 }}
+          PYTEST_ADDOPTS: >-
+            ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
+            -k "${{ matrix.partition.selector }}"
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || 120 }}
+
+  fleet-native-windows:
+    name: fleet-manager (windows-latest, ${{ matrix.partition.name }})
+    needs: discover
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.base.ref != 'main' && needs.discover.result == 'success' &&
+        needs.discover.outputs.admission_validated == 'true' &&
+        needs.discover.outputs.fleet_contracts == 'true'))
+    runs-on: windows-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: *fleet-native-partitions
+    steps: *fleet-native-steps
 
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
     needs: discover
-    if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
+    # Preserve prior non-PR always() semantics; exclude only cancelled PRs.
+    if: always() && (github.event_name != 'pull_request' || !cancelled()) && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -853,15 +1293,16 @@ jobs:
         shell: bash
         run: |
           MODE="--smoke"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$CI_PROMOTION_RUN" ]; then MODE=""; fi
           python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
   agent-index-service-windows:
     name: agent-index-service (windows-latest, out-of-plugin)
     needs: discover
-    if: always() && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
+    # Preserve prior non-PR always() semantics; exclude only cancelled PRs.
+    if: always() && (github.event_name != 'pull_request' || !cancelled()) && (github.event_name == 'workflow_dispatch' || needs.discover.outputs.standalone_service == 'true')
     runs-on: windows-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -872,16 +1313,16 @@ jobs:
         shell: bash
         run: |
           MODE="--smoke"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$CI_PROMOTION_RUN" ]; then MODE=""; fi
           python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
-  test-runner-windows:
-    name: test runner (windows-latest)
+  installation-context-windows:
+    name: Installation-context native diagnostics (Windows)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: windows-latest
-    # Native diagnostic/wrapper acceptance shares this job with runner,
-    # payload-CWD and fleet contracts; retain each selection's own bound.
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 7 }}
+    # Keep native acceptance independent of runner/fleet work; their combined
+    # elapsed time can cancel an otherwise passing required Windows lane.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -900,29 +1341,38 @@ jobs:
         run: |
           run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
           echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Installation-context CI selection contracts (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q tools/test_installation_context_ci_scope.py
       - name: Source provenance and read-only diagnostics (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
-          tools/test_installation_context_ci_scope.py
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q
           libs/installation-context/tests/test_installation_mode_governance.py
           libs/installation-context/tests/test_diagnostic_consumers.py
-          libs/installation-context/tests/test_payload_source.py
-          libs/payload-invocation/tests/test_command_binding.py
-          libs/payload-invocation/tests/test_command_lifecycle.py
-          -k "payload_source or installation_context_ci_scope or command_binding or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+          -k "status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+      - name: Payload source attribution (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q libs/installation-context/tests/test_payload_source.py
       - name: Derived native diagnostics (Windows PowerShell 5.1)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
-        run: >-
-          uv run --with pytest python -m pytest -q
-          -m "not derived_diagnostic_full"
-          libs/payload-invocation/tests/test_derived_diagnostic_cli.py
+        run: |
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q -m "not derived_diagnostic_full" libs/payload-invocation/tests/test_derived_diagnostic_cli.py
       - name: Manager read-only wrapper (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
@@ -936,9 +1386,121 @@ jobs:
         timeout-minutes: 2
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
-          --test-file test_reconcile.py --test-file test_installer_command_binding.py
+          --test-file tests/test_reconcile.py
+          --test-file tests/test_installer_command_binding.py
           -k "runtime_resolution_real_helper_read_only or command_binding"
           --admission-wait 60 --timeout 120
+
+  command-lifecycle-windows:
+    name: Command binding and lifecycle (Windows)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    # The combined provenance/lifecycle command took 316s on native Windows.
+    # Keep real installer/teardown coverage out of the two-minute read-only lane.
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - id: installation-context
+        name: Detect command lifecycle changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Command catalog native contracts (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q --durations=20
+          libs/payload-invocation/tests/test_command_binding.py
+          -k "command_binding"
+      - name: Command lifecycle read-only contracts (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q --durations=20
+          libs/payload-invocation/tests/test_command_lifecycle.py
+          libs/payload-invocation/tests/test_command_lifecycle_stdio.py
+          -k "command_binding and not (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"
+      - name: Command lifecycle native first-touch (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q --durations=20
+          libs/payload-invocation/tests/test_command_lifecycle.py
+          -k "command_binding and (real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage)"
+
+  vault-snapshot-windows:
+    name: Vault snapshot first-use (Windows)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - id: vault-snapshot
+        name: Detect snapshot installation changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(plugins/agent-vault/|libs/(installer-engine|versioned-runtime|installation-context|single-instance-lease|zdd|agent-procutil)/|tools/(materialize_main|uv_editable_ref|run-plugin-tests|seasoned_uv)\.py$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Native snapshot provision and compatibility launcher
+        if: steps.vault-snapshot.outputs.run == 'true'
+        timeout-minutes: 2
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_install_snapshot_ps1.py
+          -k "stamp_supports_first_use_provision or snapshot_compatibility_launcher"
+          --admission-wait 60 --timeout 120
+
+  test-runner-windows:
+    name: test runner (windows-latest)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 15 || 7 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
       - id: runner-contracts
         name: Detect runner contract changes
         shell: bash
@@ -952,7 +1514,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(tools/(run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            '^(tools/(ci_plugin_partitions\.py|test_ci_plugin_partitions\.py|run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|plugin_test_selection\.py|pytest_test_selection\.py|test_plugin_test_selection\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|full_worktrees_worker_contract\.py|test_run_.*\.py|test_standalone_materialized_preparation\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/(ci|validate-and-promote)\.yml|plugins/agent-worktrees/pyproject\.toml|TESTING\.md)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -961,13 +1523,40 @@ jobs:
         if: steps.runner-contracts.outputs.run == 'true'
         env:
           PYTHONPATH: libs/single-instance-lease/src
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}
+          PYTEST_ADDOPTS: ${{ (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') && '-m "not runner_exhaustive"' || '' }}
         run: >-
-          uv run --with pytest --with pyyaml python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pytest-timeout pyyaml "setuptools>=83.0.0" wheel &&
+          python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
+          libs/single-instance-lease/tests/test_operation.py
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
+          tools/test_ci_plugin_partitions.py
+          tools/test_plugin_test_selection.py
           tools/test_run_standalone_tests.py
+          tools/test_standalone_materialized_preparation.py
+
+      - id: source-runtime-contracts
+        name: Detect source runtime changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(libs/versioned-runtime/|plugins/agent-bridge/(scripts/|pyproject\.toml$|plugin\.json$)|tools/clean-room/scenarios/merged-dev-runtime/|tools/(prepare_runtime_source|materialize_main|materialize_installer_engine|materialize_launch_wrapper_assets|uv_editable_ref|nested_uv_editable_ref|run-plugin-tests)\.py$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Source runtime admission and native boundary
+        if: steps.source-runtime-contracts.outputs.run == 'true'
+        run: python tools/run-plugin-tests.py runtime-source --admission-wait 60 --plugin-timeout 180 --subsuite-timeout 180
 
       - id: payload-cwd-contracts
         name: Detect dev PR payload CWD changes
@@ -988,34 +1577,9 @@ jobs:
         if: steps.payload-cwd-contracts.outputs.run == 'true'
         shell: bash
         run: |
-          uv run --with pytest python -m pytest tools/test_payload_cwd_ci_scope.py -q
-          uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
-
-      - id: fleet-contracts
-        name: Detect standalone fleet contract changes
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/(single-instance-lease|agent-procutil|versioned-runtime)/|\.github/workflows/ci\.yml$)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Test thin fleet planner with installed package and host containment
-        if: steps.fleet-contracts.outputs.run == 'true'
-        env:
-          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full and not observation_retention_full"' || '' }}
-        run: |
-          uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout ${{ github.event_name == 'workflow_dispatch' && 600 || 120 }}
+          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python -m pytest tools/test_payload_cwd_ci_scope.py -q
+          python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
 
   archive-sources-windows:
     name: archive sources (windows-latest)
@@ -1037,13 +1601,19 @@ jobs:
   discover:
     name: discover suites
     if: >-
-      github.event_name != 'workflow_dispatch' &&
+      (github.event_name != 'workflow_dispatch' || inputs.promotion_run != '') &&
       (github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main')
     runs-on: ubuntu-latest
     outputs:
       smoke: ${{ steps.set.outputs.smoke }}
+      smoke_matrix: ${{ steps.set.outputs.smoke_matrix }}
       heavy: ${{ steps.set.outputs.heavy }}
       standalone_service: ${{ steps.set.outputs.standalone_service }}
+      admission_validated: ${{ steps.admission.outputs.admission_validated }}
+      fleet_contracts: ${{ steps.admission.outputs.fleet_contracts }}
+      manager_contracts: ${{ steps.admission.outputs.manager_contracts }}
+      dispatch_contracts: ${{ steps.admission.outputs.dispatch_contracts }}
+      chat_contracts: ${{ steps.admission.outputs.chat_contracts }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1051,6 +1621,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - id: admission
+        name: Select standalone jobs before runner allocation
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python tools/ci_job_admission.py --event "$EVENT_NAME"
+          --base "$BASE_SHA" --head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       - id: set
         name: Resolve target plugins
         run: |
@@ -1069,9 +1648,29 @@ jobs:
           fi
           FULL=$(python tools/run-plugin-tests.py $MODE --list)
           SMOKE=$(python tools/run-plugin-tests.py $MODE --exclude "$HEAVY_PLUGIN" --list)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PILOT_PATHS=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              .github/workflows/ci.yml tools/coverage_guided_selection/ \
+              tools/ci_plugin_partitions.py \
+              tools/run-coverage-selected-tests.py tools/run-plugin-tests.py \
+              tools/plugin_test_selection.py tools/pytest_test_selection.py \
+              tools/plugin_test_containment.py tools/pytest_portfolio_guard.py \
+              tools/run_tests_in_devcontainer.py tools/_devcontainer_selection.py \
+              tools/_devcontainer_network_scope.py)
+            if [ -n "$PILOT_PATHS" ]; then
+              FULL=$(python -c 'import json,sys; print(json.dumps(sorted(set(json.loads(sys.argv[1])) | {"agent-dispatch"})))' "$FULL")
+              SMOKE=$(python -c 'import json,sys; print(json.dumps(sorted(set(json.loads(sys.argv[1])) | {"agent-dispatch"})))' "$SMOKE")
+            fi
+          fi
           echo "Full set:  $FULL"
           echo "Fast set:  $SMOKE"
           echo "smoke=$SMOKE" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE" --single-job-plugin agent-dispatch)
+          else
+            SMOKE_MATRIX=$(python tools/ci_plugin_partitions.py matrix "$SMOKE")
+          fi
+          echo "smoke_matrix=$SMOKE_MATRIX" >> "$GITHUB_OUTPUT"
           if echo "$FULL" | python -c "import json,sys,os; sys.exit(0 if os.environ['HEAVY_PLUGIN'] in json.load(sys.stdin) else 1)"; then
             echo "heavy=true" >> "$GITHUB_OUTPUT"
           else
@@ -1079,17 +1678,25 @@ jobs:
           fi
 
   smoke:
-    name: ${{ matrix.plugin }}
+    name: ${{ matrix.name }}
     needs: discover
     if: needs.discover.outputs.smoke != '[]' && needs.discover.outputs.smoke != ''
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.plugin == 'agent-dispatch' && 12 || 8 }}
+    # These consumers include setup and independent native/integration lanes.
+    # Bridge's real TLS HTTP2/WSS lane exceeded eight minutes including cleanup
+    # despite passing steps; retain fresh peer processes and a bounded 12m job.
+    # Full dispatch runs retain their complete process-group partitions.
+    # Its PR-only coverage selection runs once, not once per full-suite partition.
+    # No item, sub-suite, plugin or job deadline is increased.
+    timeout-minutes: ${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}
     strategy:
       fail-fast: false
       matrix:
-        plugin: ${{ fromJson(needs.discover.outputs.smoke) }}
+        include: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ matrix.plugin == 'agent-dispatch' && github.event_name == 'pull_request' && '0' || '1' }}
       - name: Fetch Agent Bridge contract provenance
         if: matrix.plugin == 'agent-bridge'
         run: git fetch --no-tags --prune --unshallow
@@ -1098,7 +1705,36 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test ${{ matrix.plugin }}
-        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+        if: matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'
+        env:
+          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-bridge' && inputs.promotion_run != '' && '-n 2 --dist=worksteal' || '' }}
+          PLUGIN: ${{ matrix.plugin }}
+          PARTITION: ${{ matrix.partition }}
+          PARTITIONS: ${{ matrix.partitions }}
+        run: |
+          args=()
+          if [ "$PARTITIONS" -gt 1 ]; then
+            files=$(python tools/ci_plugin_partitions.py files \
+              --plugin "$PLUGIN" --partition "$PARTITION" --partitions "$PARTITIONS")
+            mapfile -t args <<< "$files"
+          fi
+          python tools/run-plugin-tests.py "$PLUGIN" "${args[@]}"
+      - name: Coverage-selected dispatch PR tests plus smoke and guards
+        if: matrix.plugin == 'agent-dispatch' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          python tools/run-coverage-selected-tests.py
+          --repo "$GITHUB_REPOSITORY" --plugin agent-dispatch --base-ref "$BASE_SHA"
+          --smoke-budget 120 --commit-volume-threshold 200 --age-threshold-seconds 604800
+          --out "$RUNNER_TEMP/dispatch-selection.json"
+      - name: Upload dispatch selection evidence
+        if: always() && matrix.plugin == 'agent-dispatch' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-selection
+          path: ${{ runner.temp }}/dispatch-selection.json
       - name: Test shared SSH proxy contracts
         if: matrix.plugin == 'agent-bridge'
         # ssh-manager is now consumed as a `uv`-editable canonical
@@ -1237,6 +1873,11 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           -k "status_daemon_console_root_contains_psmux_descendants or test_default_setup_ps1_double_dash_copilot_args_not_mis_bound_positionally"
+      - name: Test durable payload activation restoration
+        timeout-minutes: 2
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_update_install_preservation.py
       - name: Stop psmux test session
         if: always()
         shell: pwsh
@@ -1248,7 +1889,9 @@ jobs:
 
   full:
     name: full - ${{ matrix.plugin }}
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.promotion_run == '' || inputs.promotion_phase == 'candidate')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1272,6 +1915,8 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
+        env:
+          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-worktrees' && inputs.promotion_run != '' && '-n 2 --dist=worksteal' || '' }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
 
   coverage-guided-selection-integration:
@@ -1283,7 +1928,7 @@ jobs:
     # spawn a real 'uv run --with coverage --with pytest-cov --with
     # pytest-json-report' subprocess against a real plugin's suite (or a
     # constructed throwaway one).
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.promotion_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1296,8 +1941,68 @@ jobs:
         env:
           CGS_RUN_INTEGRATION_TEST: "1"
         run: >-
-          uv run --with pytest python -m pytest -q
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q
           tools/test_coverage_guided_selection.py
+          tools/test_coverage_selected_execution.py
+
+  promotion-gate:
+    name: Promotion snapshot gate
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.promotion_run != ''
+    needs:
+      - checks
+      - windows-python-artifact-builder
+      - promotion-candidate-windows
+      - promotion-publication-windows
+      - windows-hooks
+      - construction-macos
+      - bootstrap-killswitch-powershell-5-1
+      - worktree-manager
+      - repositories-configuration
+      - agent-dispatch-service
+      - agent-chat-service-linux
+      - agent-chat-service-windows
+      - agent-index-service-linux
+      - agent-index-service-windows
+      - test-runner-linux
+      - test-runner-windows
+      - installation-context-windows
+      - command-lifecycle-windows
+      - vault-snapshot-windows
+      - fleet-native-linux
+      - fleet-native-windows
+      - archive-sources-windows
+      - discover
+      - smoke
+      - worktrees-smoke
+      - worktrees-windows-launch
+      - full
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require all main-push coverage at the dispatched release snapshot
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+          PROMOTION_PHASE: ${{ inputs.promotion_phase }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          results = json.loads(os.environ["NEEDS_JSON"])
+          phase = os.environ["PROMOTION_PHASE"]
+          if phase not in ("candidate", "release"):
+              raise SystemExit("Unknown promotion qualification phase.")
+          if phase == "release":
+              if results.get("full", {}).get("result") != "skipped":
+                  raise SystemExit("Legacy release verification unexpectedly changed full-suite coverage.")
+              results.pop("full")
+          bad = {name: info["result"] for name, info in results.items()
+                 if info["result"] != "success"}
+          if bad:
+              raise SystemExit(f"Required promotion snapshot coverage did not succeed: {bad}")
+          print("Every required main-push job succeeded at this release snapshot.")
+          PY
 
   pr-gate:
     name: PR gate (required check)
@@ -1308,9 +2013,9 @@ jobs:
     # is in scope) -- neither shape can be named directly as a GitHub
     # required status check without risking a PR that never triggers a given
     # dynamic/conditional name getting stuck forever on "Expected -- waiting
-    # for status to be reported." This job is unconditional (`if: always()`)
-    # and always reports exactly one of success/failure, so it is always
-    # itself observable regardless of what its dependencies did.
+    # for status to be reported." This job reports success/failure even after
+    # dependency failures, but stops with a cancelled PR. Obsolete heads must
+    # not keep allocating runners just to publish an irrelevant aggregate.
     #
     # Exists because neither of #4151 nor #4166 (the regressions that stalled
     # dev's CI for hours) was actually invisible: #4151's own PR-time
@@ -1318,17 +2023,28 @@ jobs:
     # no required-status-checks branch protection on dev/main at all --
     # nothing technically blocked it. This job is the anchor that lets that
     # protection finally exist without brittleness.
-    if: always() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
+    if: always() && !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
     needs:
       - checks
       - windows-python-artifact-builder
+      - promotion-candidate-windows
+      - promotion-publication-windows
       - windows-hooks
+      - construction-macos
       - worktree-manager
+      - repositories-configuration
       - agent-dispatch-service
+      - agent-chat-service-linux
+      - agent-chat-service-windows
       - agent-index-service-linux
       - agent-index-service-windows
       - test-runner-linux
       - test-runner-windows
+      - installation-context-windows
+      - command-lifecycle-windows
+      - vault-snapshot-windows
+      - fleet-native-linux
+      - fleet-native-windows
       - archive-sources-windows
       - discover
       - smoke
@@ -1347,6 +2063,26 @@ jobs:
           import sys
 
           results = json.loads(os.environ["NEEDS_JSON"])
+          discovery = results.get("discover", {})
+          outputs = discovery.get("outputs", {})
+          families = {
+              "fleet_contracts": ("fleet-native-linux", "fleet-native-windows"),
+              "manager_contracts": ("worktree-manager",),
+              "dispatch_contracts": ("agent-dispatch-service",),
+              "chat_contracts": ("agent-chat-service-linux", "agent-chat-service-windows"),
+          }
+          if (discovery.get("result") != "success"
+                  or outputs.get("admission_validated") != "true"
+                  or any(outputs.get(key) not in ("true", "false") for key in families)):
+              print("Standalone job discovery is missing, failed, or invalid.")
+              sys.exit(1)
+          selected_skips = [
+              job for key, jobs in families.items() if outputs[key] == "true"
+              for job in jobs if results.get(job, {}).get("result") != "success"
+          ]
+          if selected_skips:
+              print("Selected standalone jobs did not succeed:", selected_skips)
+              sys.exit(1)
           bad = {name: info["result"] for name, info in results.items()
                  if info["result"] not in ("success", "skipped")}
           if bad:

@@ -467,7 +467,7 @@ def claim_entries_for_worktree(
     resources: Iterable[Any],
     active_pr: Mapping[str, Any] | None = None,
     *,
-    limit: int = 2,
+    limit: int | None = 2,
     pecking_order: Mapping[str, int] | None = None,
     own_repo: str | None = None,
     label_overrides: Mapping[str, str] | None = None,
@@ -478,9 +478,9 @@ def claim_entries_for_worktree(
     claim as its own hyperlinked segment rather than a single flat string.
     ``url`` is ``None`` when the claim kind/ref has no resolvable URL (see
     :func:`claim_url`). Shares the PR-backfill logic with
-    :func:`claims_summary_for_worktree` via :func:`_claims_with_pr_backfill`
+    :func:`claims_summary_for_worktree` via :func:`claims_with_pr_backfill`
     so the two never drift apart on which claims they consider."""
-    claims = _claims_with_pr_backfill(resources, active_pr)
+    claims = claims_with_pr_backfill(resources, active_pr)
     top = rank_claims(claims, limit=limit, pecking_order=pecking_order)
     return [
         {
@@ -492,7 +492,7 @@ def claim_entries_for_worktree(
     ]
 
 
-def _claims_with_pr_backfill(
+def claims_with_pr_backfill(
     resources: Iterable[Any], active_pr: Mapping[str, Any] | None,
 ) -> list[Any]:
     """The shared backfill step :func:`claims_summary_for_worktree` and
@@ -509,6 +509,18 @@ def _claims_with_pr_backfill(
         ref = f"{repo}#{number}" if repo else f"#{number}"
         claims.append({"kind": "pr", "ref": ref, "state": "active"})
     return claims
+
+
+def live_pr_claim_identities(resources: Iterable[Any]) -> set[str]:
+    """Collect dedupe identities without ranking or sorting the resource ledger."""
+    identities: set[str] = set()
+    for claim in resources:
+        if _field(claim, "kind") != "pr" or not _is_live(claim):
+            continue
+        ref = _field(claim, "ref")
+        if ref:
+            identities.add(claim_url("pr", str(ref)) or str(ref))
+    return identities
 
 
 def claims_summary_for_worktree(
@@ -538,7 +550,7 @@ def claims_summary_for_worktree(
     ``resources``/``active_pr`` may be real ``ResourceClaim``/``PRRecord``
     objects or plain dicts, both duck-typed identically to every other
     entry point here."""
-    claims = _claims_with_pr_backfill(resources, active_pr)
+    claims = claims_with_pr_backfill(resources, active_pr)
     return summarize_claims(
         claims, limit=limit, pecking_order=pecking_order, own_repo=own_repo,
         label_overrides=label_overrides,

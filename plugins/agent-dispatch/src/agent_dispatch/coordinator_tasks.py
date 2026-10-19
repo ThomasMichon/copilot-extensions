@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import asdict
+import uuid
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
@@ -51,7 +52,9 @@ from .queue import (
     TaskQueue,
     worker_id_for,
 )
-from .task_authority import mint_task_token, resolve_task_authority
+from .task_authority import mint_task_token, register_task_grant_route, resolve_task_authority
+from .queue_dedup import DedupConflictError
+from .steering import SteeringError, steer_request_fingerprint, steer_wake_message
 
 #: Event types that run periodically for every live task without ever
 #: transitioning its state (a heartbeat lease extension, a routine activity
@@ -63,7 +66,7 @@ _NO_TELEMETRY_EVENT_TYPES = frozenset({"task.heartbeat", "task.activity_updated"
 
 
 def _task_dict(task: Task) -> dict:
-    return asdict(task)
+    return {**asdict(task), "steering_revision": task.steering_revision}
 
 
 def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict | None:
@@ -85,7 +88,7 @@ def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict | None:
 
 
 def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict:
-    result = asdict(task)
+    result = _task_dict(task)
     latest = queue.latest_reservation(task.id)
     if latest is not None:
         result["spawn_reservation"] = asdict(latest)
@@ -96,7 +99,7 @@ def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict:
 
 
 def _bulk_task_dict(task: Task) -> dict:
-    result = asdict(task)
+    result = _task_dict(task)
     result.pop("result")
     return result
 
@@ -118,6 +121,7 @@ def register_task_routes(
     resolve_owner_session_id: Callable[[str | None], str | None],
     fencing_guard: FencingGuard | None = None,
 ) -> None:
+    register_task_grant_route(app, queue, control_token, fencing_guard, bus)
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
     register_category_routes(app, queue, control_token=control_token,
@@ -272,6 +276,8 @@ def register_task_routes(
             raise HTTPException(
                 status_code=status, detail=exc.detail(operation="create")
             ) from exc
+        except DedupConflictError as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if outcome.event_type is not None:
@@ -291,9 +297,40 @@ def register_task_routes(
         exclusive_key: str | None = None,
         category: CategorySelection | None = None,
         q: str | None = None,
+        dedup_key: str | None = None,
         sweep: bool = False,
-        limit: int = 200,
+        limit: int | None = None,
     ) -> list[dict]:
+        if dedup_key is not None:
+            selectors = {
+                "status": status,
+                "target_machine": target_machine,
+                "target_repo": target_repo,
+                "label": label,
+                "evaluator_ref": evaluator_ref,
+                "source": source,
+                "origin_ref": origin_ref,
+                "exclusive_key": exclusive_key,
+                "category": category,
+                "q": q,
+                "limit": limit,
+            }
+            conflicts = [key for key, value in selectors.items() if value is not None]
+            if sweep:
+                conflicts.append("sweep")
+            if conflicts:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"dedup_key lookup cannot combine selectors: {conflicts}",
+                )
+            try:
+                task = queue.lookup_dedup(dedup_key, repo=repo)
+            except DedupConflictError as exc:
+                raise HTTPException(status_code=409, detail=exc.detail()) from exc
+            except TaskError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return [] if task is None else [_task_with_spawn_dict(queue, task)]
+        limit = 200 if limit is None else limit
         if sweep:
             return [_bulk_task_dict(t) for t in queue.sweep(repo=repo, limit=limit, category=category)]
         if q is not None:
@@ -480,15 +517,22 @@ def register_task_routes(
         )
         owner_session_id = owner_session_id or resolve_owner_session_id(worker_id)
         result = _guard(
-            lambda: queue.start(task_id, worker_id, owner_session_id=owner_session_id),
+            lambda: queue.start(
+                task_id, worker_id, owner_session_id=owner_session_id,
+                expected_owner_session_id=(
+                    owner_session_id if getattr(request.state, "task_scope", None) is not None else None
+                ),
+                expected_generation=_scoped_generation(request),
+            ),
             "task.started",
         )
-        token = mint_task_token(
-            control_token, fencing_guard, task_id, worker_id,
-            result.get("owner_session_id"), result["generation"],
-        )
-        if token is not None:
-            result["task_token"] = token
+        if getattr(request.state, "task_scope", None) is None:
+            token = mint_task_token(
+                control_token, fencing_guard, task_id, worker_id,
+                result.get("owner_session_id"), result["generation"],
+            )
+            if token is not None:
+                result["task_token"] = token
         return result
 
     @app.post("/tasks/{task_id}/yield")
@@ -747,11 +791,17 @@ def register_task_routes(
 
     @app.post("/tasks/{task_id}/steer")
     def steer(task_id: str, body: SteerBody) -> dict:
-        message = body.message or (
-            f"Task {task_id} received steering. Resume, run `agent-dispatch "
-            f"steer take {task_id} --all`, re-read the task for any direction "
-            "or ambient-state changes, and continue."
-        )
+        message = steer_wake_message(task_id, body.message)
+        try:
+            request_id = body.idempotency_key or (
+                "card:" + steer_request_fingerprint(
+                    fields=body.fields, sender=body.sender, wake_requested=body.wake,
+                    wake_message=message, expected_status=body.expected_status,
+                    expected_revision=body.expected_revision,
+                ) if body.expected_revision is not None else uuid.uuid4().hex
+            )
+        except SteeringError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         task = _guard(
             lambda: queue.submit_steer(
                 task_id,
@@ -760,20 +810,40 @@ def register_task_routes(
                 wake_requested=body.wake,
                 wake_message=message,
                 expected_status=body.expected_status,
-                idempotency_key=body.idempotency_key,
+                expected_revision=body.expected_revision,
+                idempotency_key=request_id,
             ),
             "task.steer",
         )
-        owner = task.get("owner")
+        try:
+            receipt = queue.steer_receipt(task_id, request_id)
+        except TaskError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if receipt is None:
+            raise HTTPException(status_code=409, detail="steering acceptance receipt is unavailable")
         return {
             **task,
+            "steer_receipt": receipt,
             "steer_woken": None,
-            "steer_wake_status": (
-                task.get("wake_status")
-                if body.wake and owner
-                else "no_owner" if body.wake else "not_requested"
-            ),
+            "steer_wake_status": receipt["wake_status"],
         }
+
+    @app.post("/tasks/{task_id}/steer/guarded")
+    def guarded_steer(task_id: str, body: SteerBody) -> dict:
+        if not body.expected_revision:
+            raise HTTPException(status_code=422, detail="expected_revision is required for guarded steering")
+        return steer(task_id, body)
+
+    @app.get("/tasks/{task_id}/steer-receipt")
+    def get_steer_receipt(task_id: str, request_id: str) -> dict:
+        _require(queue.get(task_id))
+        try:
+            receipt = queue.steer_receipt(task_id, request_id)
+        except TaskError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if receipt is None:
+            raise HTTPException(status_code=404, detail="no such steering receipt")
+        return receipt
 
     @app.post("/tasks/{task_id}/card-draft")
     def save_card_draft(task_id: str, body: CardDraftBody) -> dict:

@@ -12,6 +12,7 @@ exactly like a plain `uv venv` -- surfacing any other failure immediately."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -37,6 +38,8 @@ def _extract_ps1_functions(*names: str) -> str:
 def _run_harness(
     tmp_path: Path, shell: str, uv_stub_body: str, extra_script: str, delays_file: Path
 ) -> subprocess.CompletedProcess:
+    if shell == "powershell.exe" and os.name != "nt":
+        pytest.skip("Windows PowerShell cannot consume this POSIX fixture's paths and executables")
     exe = shutil.which(shell)
     if not exe:
         pytest.skip(f"{shell} is not installed")

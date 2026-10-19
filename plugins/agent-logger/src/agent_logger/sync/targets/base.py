@@ -30,6 +30,7 @@ from typing import Protocol
 from agent_procutil import no_window_kwargs
 
 from agent_logger.sync.detritus import rsync_exclude
+from agent_logger.sync.log_archive_readback import ProcessLogReadback
 
 # On Windows, child processes (rsync, ssh) launched from a windowless parent --
 # e.g. pythonw.exe under a Scheduled Task -- each allocate a fresh console
@@ -262,6 +263,8 @@ class PushResult:
     #: WAL/SHM) had at least one file deferred -- same reasoning as
     #: ``deferred_sessions``, kept separate since the index is not a session.
     index_deferred: bool = False
+    #: Positive process-log publication completion, not a generic transport no-op.
+    process_logs_complete: bool = False
 
 
 @dataclass
@@ -496,6 +499,10 @@ class Target(ABC):
         explicit follow-up, never silently applied by a target here.
         """
         return PushResult(ok=True, detail=f"{self.describe()} does not support process-log sync")
+
+    def process_log_readback(self, machine: str) -> ProcessLogReadback:
+        """Resolve pass-local ZIP readback; an ordinary successful push is no proof."""
+        return ProcessLogReadback(self.name)
 
     def prune(self, machine: str, retention_days: int | None) -> int:
         """Remove session data older than *retention_days*.

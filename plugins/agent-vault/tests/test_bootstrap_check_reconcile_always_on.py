@@ -37,6 +37,12 @@ _OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
 # Git Bash first on PATH -- the alias interception happens below PATH search,
 # at CreateProcess time, unless the explicit resolved path is used.
 _BASH = shutil.which("bash")
+if (
+    os.name == "nt" and _BASH and os.environ.get("SystemRoot")
+    and Path(_BASH).resolve().is_relative_to(Path(os.environ["SystemRoot"]).resolve())
+):
+    # The Windows WSL launcher cannot execute these native Windows fixture paths.
+    _BASH = None
 
 
 def test_hook_scripts_exist():

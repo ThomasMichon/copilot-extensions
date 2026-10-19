@@ -1,0 +1,9 @@
+{
+  "comment": "tracing-claimant-graphs: add commit-trailer fallback for tracing PR ownership when claim graph, codename marker, and local session state are all unavailable",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

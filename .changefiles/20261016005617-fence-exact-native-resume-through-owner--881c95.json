@@ -1,0 +1,9 @@
+{
+  "comment": "Fence exact native resume through owner-side process admission and share it with mux embodiment",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

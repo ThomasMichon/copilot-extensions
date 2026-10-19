@@ -67,6 +67,7 @@ from public_toolchain_source import (  # noqa: E402
     validate_lock_provenance,
 )
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS  # noqa: E402
+from seasoned_uv import DependencyPolicyError, run_uv_install  # noqa: E402
 
 #: The exact packages a locked build-toolchain venv pins -- every
 #: `pyproject.toml` under `plugins/` and `libs/` uses the same
@@ -81,6 +82,13 @@ from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS  # noqa: E402
 #: would otherwise always fail on a genuinely clean machine with just
 #: Python and `uv` installed.
 _LOCKED_TOOLCHAIN_PACKAGES = ("setuptools", "wheel", "packaging")
+
+
+def _seasoned_install(arguments: list[str], env: dict) -> subprocess.CompletedProcess:
+    try:
+        return run_uv_install("uv", arguments, env=env, capture_output=True, text=True)
+    except DependencyPolicyError as exc:
+        raise ArtifactBuildError(f"build-toolchain dependency seasoning refused: {exc}") from exc
 
 #: Interpreter-selection environment variables that could let an ambient
 #: process redirect a DIRECTLY-INVOKED interpreter (the locked toolchain's
@@ -734,14 +742,12 @@ def resolve_toolchain_lock(
                 os.close(fd)
             install_env = dict(sanitized_env)
             install_env["UV_CONFIG_FILE"] = str(index_config_path)
-            install = subprocess.run(
+            install = _seasoned_install(
                 [
-                    "uv", "pip", "install",
                     *(["--only-binary", ":all:"] if public else []),
                     "--python", str(staging_venv_python),
                     *(public.install_args(staging_venv_dir) if public else _LOCKED_TOOLCHAIN_PACKAGES),
-                ],
-                capture_output=True, text=True, env=install_env,
+                ], install_env,
             )
             if install.returncode != 0:
                 raise ArtifactBuildError(

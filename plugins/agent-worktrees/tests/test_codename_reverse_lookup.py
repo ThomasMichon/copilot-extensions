@@ -31,6 +31,7 @@ def _machine(key, *, alias="", copilot=True, ssh_ready=True):
 
 class TestKnownMachineKeys:
     def test_excludes_self_and_non_ssh_ready(self, monkeypatch):
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
         monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("atlas-core"))
         monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: {
             "atlas-core": _machine("atlas-core", alias="lc-alias"),

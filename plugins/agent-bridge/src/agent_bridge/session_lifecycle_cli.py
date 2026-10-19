@@ -120,6 +120,7 @@ def _cmd_resume(args: argparse.Namespace) -> None:
         target=args.session_id,
         reclaim=bool(getattr(args, "force", False)),
         strict=bool(getattr(args, "strict", False)),
+        cli=bool(getattr(args, "cli", False)),
         as_json=bool(getattr(args, "json", False)),
         json_out=core._json_out,
         match_agents=core._match_agents,
@@ -258,13 +259,14 @@ def _legacy_worktrees_runtime_prefix(own_root: Path) -> list[str] | None:
     return [str(python), "-I", "-X", "utf8", "-m", "agent_worktrees"] if python else None
 
 
-def _agent_worktrees_environment() -> dict[str, str]:
+def _agent_worktrees_environment(inherited: dict[str, str] | None = None) -> dict[str, str]:
     """Keep registry and Python routing with the resolved owner installation."""
     excluded = {
         "AGENT_HOME", "AGENT_RT_ROOT", "AGENT_RT_PY", "COPILOT_PLUGIN_ROOT",
         "VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "__PYVENV_LAUNCHER__",
     }
-    return {key: value for key, value in os.environ.items() if key.upper() not in excluded}
+    source = os.environ if inherited is None else inherited
+    return {key: value for key, value in source.items() if key.upper() not in excluded}
 
 
 def _cmd_handoff_check(args: argparse.Namespace) -> None:
@@ -329,6 +331,22 @@ def _cmd_answer(args: argparse.Namespace) -> None:
     client = core._get_client()
     caller_id = core._caller_id_for(args)
     sid = args.session_id
+    option_id = getattr(args, "option_id", None)
+    if option_id is not None:
+        request_id = getattr(args, "request_id", None)
+        if (
+            not request_id or args.decline or args.cancel
+            or args.fields or args.content_json or args.tool_call_id is not None
+        ):
+            print("[FAIL] A permission option requires --request-id and no form/decline/cancel arguments.", file=sys.stderr)
+            raise SystemExit(2)
+        try:
+            client.answer_permission(sid, request_id, option_id)
+        except BridgeClientError as exc:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+            raise SystemExit(1)
+        print(f"[OK] Submitted correlated permission answer on {sid}.")
+        return
     action = "accept"
     if args.decline:
         action = "decline"
@@ -353,6 +371,7 @@ def _cmd_answer(args: argparse.Namespace) -> None:
                     sys.exit(1)
                 content[key.strip()] = value
 
+    request_id = getattr(args, "request_id", None)
     tool_call_id = args.tool_call_id
     if not tool_call_id:
         try:
@@ -361,6 +380,8 @@ def _cmd_answer(args: argparse.Namespace) -> None:
             print(f"[FAIL] {exc.detail}", file=sys.stderr)
             sys.exit(1)
         pending = st.get("pending_ask_user") or []
+        if request_id is not None:
+            pending = [q for q in pending if q.get("request_id") == request_id]
         if not pending:
             print(f"[FAIL] Session {sid} has no parked ask_user to answer.", file=sys.stderr)
             sys.exit(1)
@@ -371,7 +392,10 @@ def _cmd_answer(args: argparse.Namespace) -> None:
         tool_call_id = pending[0].get("tool_call_id")
 
     try:
-        client.answer_ask_user(sid, tool_call_id, content, action=action)
+        client.answer_ask_user(
+            sid, tool_call_id, content, action=action,
+            **({"request_id": request_id} if request_id is not None else {}),
+        )
     except BridgeClientError as exc:
         if exc.status == 404:
             print(f"[FAIL] Session {sid} not found", file=sys.stderr)
@@ -444,6 +468,7 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
     resume_p.add_argument("session_id", metavar="target", help="Session ID (owned ACP session) or worktree handle to load")
     resume_p.add_argument("--force", "--reclaim", dest="force", action="store_true", help="Break-glass take-over: adopt the worktree even if a live interactive CLI holds it (stop that CLI first)")
     resume_p.add_argument("--strict", action="store_true", help="Identity-preserving contract: refuse (409) rather than silently start a fresh replacement conversation when the worktree has no existing session or its resume fails")
+    resume_p.add_argument("--cli", action="store_true", help="Resume the exact native head in a headed/muxed CLI instead of headless ACP")
     resume_p.set_defaults(func=_cmd_resume)
 
     from . import restart_worktree_cli
@@ -477,6 +502,8 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
     answer_p.add_argument("--field", dest="fields", action="append", default=[], metavar="KEY=VALUE", help="A form field answer (repeatable). Values are strings; use --json for numbers/booleans/complex values.")
     answer_p.add_argument("--json", dest="content_json", default=None, help="Full answer content as a JSON object (overrides --field).")
     answer_p.add_argument("--tool-call-id", dest="tool_call_id", default=None, help="Which parked question to answer (defaults to the sole pending one; required when more than one is outstanding -- see `status`).")
+    answer_p.add_argument("--request-id", default=None, help="Exact live answer token from a remote approval event/status; required for remote forms.")
+    answer_p.add_argument("--option-id", default=None, help="Select one exact offered permission option instead of answering a form; requires --request-id.")
     answer_p.add_argument("--decline", action="store_true", help="Decline the question instead of submitting an answer.")
     answer_p.add_argument("--cancel", action="store_true", help="Cancel the question instead of submitting an answer.")
     answer_p.set_defaults(func=_cmd_answer)

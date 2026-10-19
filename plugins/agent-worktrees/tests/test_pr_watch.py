@@ -231,6 +231,8 @@ class TestDecorateEvents:
                 "mergeable": True, "consent_present": False,
                 "consent_action": "skip", "consent_label": "", "eligible": False,
                 "needs_consent": False, "clear_to_merge": False, "held": [],
+                "operation": "consent", "ready_for_direct_merge": False,
+                "review_assessment_required": False,
                 "wip": False,
                 "occupancy": "needs-consent",
                 "reason": "no auto-merge label configured (binding absent)",
@@ -252,6 +254,65 @@ class TestDecorateEvents:
         assert merge["consent_present"] is False
         assert merge["consent_label"] == "auto-merge"
         assert merge["reason"] == "approved at current head"
+
+    def test_self_merge_payload_uses_direct_readiness_without_consent_label(self):
+        snap = _snap(
+            pr_state="open", mergeable=True, head_sha="abc",
+            reviews=(pc.Review(3, "APPROVED", "bob"),), labels=(),
+        )
+        payload = prw.decorate_events(
+            [{"event": "approved"}], "o/r", 7, snap,
+            flow_profile=pc.PROFILE_PR_SELF_MERGE,
+        )
+        merge = payload["merge"]
+        assert merge["operation"] == "direct"
+        assert merge["ready_for_direct_merge"] is True
+        assert merge["needs_consent"] is False
+        assert merge["occupancy"] == "needs-merge"
+
+    def test_self_merge_payload_preserves_known_blockers_before_mergeability(self):
+        cases = (
+            (
+                _snap(
+                    pr_state="open", mergeable=None, head_sha="head",
+                    reviews=(pc.Review(2, "CHANGES_REQUESTED", "reviewer",
+                                       commit_id="head"),),
+                ),
+                {},
+                ("needs-revision", "changes requested"),
+            ),
+            (
+                _snap(
+                    pr_state="open", mergeable=None, head_sha="head",
+                    reviews=(pc.Review(1, "APPROVED", "reviewer",
+                                       commit_id="head"),),
+                    labels=("hold",),
+                ),
+                {"hold_labels": ("hold",)},
+                ("held", "hold label present: hold"),
+            ),
+            (
+                _snap(
+                    pr_state="open", mergeable=None, head_sha="head",
+                    reviews=(pc.Review(1, "APPROVED", "reviewer",
+                                       commit_id="head"),),
+                    draft=True,
+                ),
+                {},
+                ("wip", "draft"),
+            ),
+        )
+        for snap, kwargs, expected in cases:
+            payload = prw.decorate_events(
+                [], "o/r", 7, snap,
+                flow_profile=pc.PROFILE_PR_SELF_MERGE,
+                **kwargs,
+            )
+            merge = payload["merge"]
+            assert (merge["occupancy"], merge["reason"]) == expected
+            assert merge["eligible"] is False
+            assert merge["needs_consent"] is False
+            assert merge["clear_to_merge"] is False
 
     def test_merge_block_consent_already_present(self):
         snap = _snap(pr_state="open", mergeable=True, head_sha="abc",

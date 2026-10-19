@@ -7,6 +7,7 @@ The functions below were moved verbatim, with no behavior change.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -105,11 +106,11 @@ def _pr_merge_now(
     policy bypass. Other providers honor ``prefer_auto_merge`` (#225, default
     on): first try ``enable_auto_merge``, then fall back to ``merge_pull`` where
     auto-merge is unavailable or disabled. A provider-supplied
-    ``pull_review_gate`` (currently GitHub) can additionally skip straight to
-    ``merge_pull(admin=True)`` when a *live, actor-bypassable* required review
-    is the only thing that would otherwise leave auto-merge armed forever
-    (#3296 follow-up); a required review the actor cannot bypass remains
-    provider-enforced either way.
+    ``pull_review_exception`` (currently GitHub) can additionally skip straight
+    to ``merge_pull(admin=True)`` only when complete live evidence identifies
+    an actor-bypassable missing CODEOWNER approval as the remaining review
+    rule; active vetoes, unknown evidence, holds, drafts and head movement
+    refuse that exception.
     Any other profile is refused-with-reminder, steering the agent to the
     sanctioned wait/consent path.
     Returns a shell exit code (0 success, 1 merge failure, 2 refusal/usage).
@@ -119,6 +120,7 @@ def _pr_merge_now(
     from . import pr_contract as pc
     from .providers import (
         ProviderError,
+        PullResult,
         account_token_for_slug,
         actor_viewer_permission,
         get_provider,
@@ -215,7 +217,7 @@ def _pr_merge_now(
             # head behind: adopt the provider's head when it is that HEAD.
             try:
                 live = provider.get_pull(args.repo, args.pr, api_base=base, token=tok).head_sha
-            except (ProviderError, OSError, ValueError, AttributeError):
+            except (ProviderError, OSError, ValueError, TypeError, AttributeError):
                 live = ""  # unreadable: merge against the recorded head, as before
             if live and live != expected_head_sha:
                 expected_head_sha = _pr_cli._adopt_pushed_head(
@@ -226,19 +228,42 @@ def _pr_merge_now(
     # (a maintainer's choice), but that never implies the identity running
     # THIS command holds merge rights -- a repo with several maintainers and
     # outside contributors needs the actor's live permission checked, not
-    # assumed. Fail-open on an unknown/failed read (None): only a confident
-    # read-only/no-access verdict (False) refuses. A maintainer is never
-    # blocked by a permission-read hiccup; a contributor is never told to
-    # self-merge a PR they cannot actually merge.
+    # assumed. Unknown evidence is not permission: only a positive live read
+    # may reach a merge write. A confident denial gets contributor guidance;
+    # an unavailable read is a retryable non-mutating refusal.
     live_permission = viewer_permission
-    if live_permission is None:
-        live_permission = actor_viewer_permission(
-            provider,
-            args.repo,
-            api_base=base,
-            token=tok,
+    authority = True if provider.name == "azure-devops" else None
+    if authority is None:
+        if live_permission is None:
+            live_permission = actor_viewer_permission(
+                provider,
+                args.repo,
+                api_base=base,
+                token=tok,
+            )
+        authority = pc.actor_merge_authority(live_permission)
+    if authority is None:
+        reason = (
+            "live merge authority could not be established; retry after the "
+            "repository permission read succeeds"
         )
-    authority = pc.actor_merge_authority(live_permission)
+        rem = pc.pr_reminder(
+            flow, "pr-merge", ok=False, reason=reason,
+        )
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo,
+                "pr": args.pr,
+                "error": "actor merge authority unavailable",
+                "viewer_permission": live_permission,
+                "flow_profile": flow.profile,
+                "applied": False,
+                "reminder": rem.as_dict(),
+            }))
+        else:
+            output.err(f"pr-merge refused: {reason}. Nothing merged.")
+            print(rem.text(), file=sys.stderr)
+        return 1
     if authority is False:
         reason = (
             "a live permission check found the acting identity does not have "
@@ -299,6 +324,8 @@ def _pr_merge_now(
                             "pr": args.pr,
                             "action": "auto-complete",
                             "applied": False,
+                            "merged": False,
+                            "completion_verified": None,
                             "error": err,
                             "flow_profile": flow.profile,
                             "reminder": rem.as_dict(),
@@ -321,6 +348,7 @@ def _pr_merge_now(
                         "action": "auto-complete",
                         "applied": True,
                         "merged": False,
+                        "completion_verified": None,
                         "flow_profile": flow.profile,
                         "reminder": rem.as_dict(),
                     }
@@ -333,6 +361,55 @@ def _pr_merge_now(
             )
             print(rem.text(), file=sys.stderr)
         return 0
+
+    hold_labels = tuple(getattr(prcfg, "hold_labels", ()) or ())
+    wip_title_prefixes = tuple(getattr(prcfg, "wip_title_prefixes", ()) or ())
+
+    def refuse_mutation(reason: str) -> int:
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo, "pr": args.pr, "action": "merge",
+                "applied": False, "merged": False, "completion_verified": False,
+                "error": reason, "flow_profile": flow.profile,
+            }))
+        else:
+            output.err(f"pr-merge --now: {reason}. Nothing merged.")
+        return 1
+
+    # GitHub auto-merge can complete immediately. Read complete provider
+    # evidence immediately before any write, and refuse unknown evidence.
+    if getattr(provider, "name", "") == "github":
+        try:
+            snap = provider.get_snapshot(
+                args.repo, args.pr, api_base=base, token=tok,
+                strict_safety=True,
+            )
+        except (ProviderError, OSError, ValueError, TypeError, AttributeError) as exc:
+            return refuse_mutation(
+                "GitHub mutation safety evidence is unreadable "
+                f"({type(exc).__name__})"
+            )
+        if not isinstance(snap.head_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", snap.head_sha):
+            return refuse_mutation("GitHub merge head is unavailable or invalid")
+        if expected_head_sha and snap.head_sha != expected_head_sha:
+            return refuse_mutation("PR head changed before mutation")
+        expected_head_sha = expected_head_sha or snap.head_sha
+        safety = pc.classify_state(
+            snap,
+            hold_labels=hold_labels,
+            wip_title_prefixes=wip_title_prefixes,
+            approval_required=False,
+            review_blocking=flow.review_blocking,
+        )
+        if (
+            not expected_head_sha or snap.pr_state != "open" or snap.merged
+            or safety.wip or safety.held or safety.conflict
+            or safety.verdict == "CHANGES_REQUESTED"
+        ):
+            return refuse_mutation(
+                "mutation safety gate refused the write "
+                f"({safety.reason or safety.merge_state})"
+            )
 
     # Other providers prefer native CI-gated auto-merge (so the merge waits on
     # required checks) and fall back to an immediate self-merge only where the
@@ -347,17 +424,21 @@ def _pr_merge_now(
     # follow-up: discovered landing a real-world case with a live ruleset
     # requiring 1 approving review but granting the acting Maintainer
     # pull-request-scoped bypass rights). Only a provider that
-    # exposes ``pull_review_gate`` (currently GitHub) is checked; other
+    # exposes ``pull_review_exception`` (currently GitHub) is checked; other
     # providers' auto-merge already means what it says.
     bypass_review_gate = False
-    if prefer_auto and hasattr(provider, "pull_review_gate"):
-        try:
-            review_required, bypassable = provider.pull_review_gate(
-                args.repo, args.pr, api_base=base, token=tok,
+    if prefer_auto and hasattr(provider, "pull_review_exception"):
+        bypass_review_gate, unsafe_exception, exception_reason = provider.pull_review_exception(
+            args.repo, args.pr,
+            expected_head_sha=expected_head_sha,
+            hold_labels=hold_labels,
+            wip_title_prefixes=wip_title_prefixes,
+            api_base=base, token=tok,
+        )
+        if unsafe_exception:
+            return refuse_mutation(
+                f"review-exception evidence refused mutation ({exception_reason})"
             )
-        except ProviderError:
-            review_required, bypassable = False, None
-        bypass_review_gate = bool(review_required and bypassable)
 
     auto_armed = False
     if prefer_auto and not bypass_review_gate:
@@ -388,6 +469,7 @@ def _pr_merge_now(
                         "action": "auto-merge",
                         "applied": True,
                         "merged": False,
+                        "completion_verified": False if getattr(provider, "name", "") == "github" else None,
                         "flow_profile": flow.profile,
                         "reminder": rem.as_dict(),
                     }
@@ -402,19 +484,41 @@ def _pr_merge_now(
             print(rem.text(), file=sys.stderr)
         return 0
 
-    try:
-        err = provider.merge_pull(
-            args.repo,
-            args.pr,
-            squash=True,
-            admin=bypass_review_gate or not flow.review_blocking,
-            delete_source_branch=getattr(prcfg, "delete_source_branch", True),
-            api_base=base,
-            token=tok,
-            expected_head_sha=expected_head_sha,
-        )
-    except ProviderError as exc:
-        err = str(exc)
+    err = ""
+    if getattr(provider, "name", "") == "github" and not expected_head_sha:
+        try:
+            observed = provider.get_pull(args.repo, args.pr, api_base=base, token=tok)
+            if (
+                not isinstance(observed, PullResult)
+                or not isinstance(observed.head_sha, str)
+                or not re.fullmatch(r"[0-9a-f]{40}", observed.head_sha)
+            ):
+                err = "GitHub merge head is unavailable or invalid; no merge was requested"
+            else:
+                expected_head_sha = observed.head_sha
+        except (ProviderError, OSError, ValueError, TypeError, AttributeError) as exc:
+            err = f"GitHub merge head lookup failed ({type(exc).__name__}); no merge was requested"
+    if not err:
+        try:
+            merge_kwargs = {}
+            if getattr(provider, "name", "") == "github":
+                merge_kwargs = {
+                    "hold_labels": hold_labels,
+                    "wip_title_prefixes": wip_title_prefixes,
+                }
+            err = provider.merge_pull(
+                args.repo,
+                args.pr,
+                squash=True,
+                admin=bypass_review_gate,
+                delete_source_branch=getattr(prcfg, "delete_source_branch", True),
+                api_base=base,
+                token=tok,
+                expected_head_sha=expected_head_sha,
+                **merge_kwargs,
+            )
+        except ProviderError as exc:
+            err = str(exc)
 
     if err:
         rem = pc.pr_reminder(
@@ -428,6 +532,8 @@ def _pr_merge_now(
                         "pr": args.pr,
                         "action": "merge",
                         "applied": False,
+                        "merged": False,
+                        "completion_verified": False if getattr(provider, "name", "") == "github" else None,
                         "error": err,
                         "flow_profile": flow.profile,
                         "reminder": rem.as_dict(),
@@ -439,6 +545,39 @@ def _pr_merge_now(
             print(rem.text(), file=sys.stderr)
         return 1
 
+    if getattr(provider, "name", "") == "github":
+        merge_confirmed = False
+        observation_error = ""
+        try:
+            confirmation = provider.get_pull(args.repo, args.pr, api_base=base, token=tok)
+            if not isinstance(confirmation, PullResult) or type(confirmation.merged) is not bool:
+                observation_error = "GitHub merge completion returned invalid lifecycle data"
+            elif expected_head_sha and confirmation.head_sha != expected_head_sha:
+                observation_error = "GitHub merge completion returned a different or unavailable head"
+            else:
+                merge_confirmed = confirmation.merged
+        except (ProviderError, OSError, ValueError, TypeError, AttributeError) as exc:
+            observation_error = (
+                "GitHub accepted the merge request but completion lookup failed "
+                f"({type(exc).__name__})"
+            )
+        if observation_error or not merge_confirmed:
+            rem = pc.pr_reminder(flow, "pr-watch", ok=not observation_error)
+            message = observation_error or "GitHub accepted the merge request; completion is still pending"
+            if args.json:
+                print(_json.dumps({
+                    "repo": args.repo, "pr": args.pr, "action": "merge-pending",
+                    "applied": True, "merged": False, "flow_profile": flow.profile,
+                    "completion_verified": False, "reminder": rem.as_dict(),
+                    **({"error": observation_error} if observation_error else {}),
+                }))
+            else:
+                (output.err if observation_error else output.ok)(
+                    f"pr-merge --now: {message}. Use pr-watch before finalizing."
+                )
+                print(rem.text(), file=sys.stderr)
+            return 1 if observation_error else 0
+
     rem = pc.pr_reminder(flow, "pr-merge", state=pc.PR_STATE_MERGED, ok=True)
     if args.json:
         print(
@@ -448,6 +587,8 @@ def _pr_merge_now(
                     "pr": args.pr,
                     "action": "merge",
                     "applied": True,
+                    "merged": True,
+                    "completion_verified": True if getattr(provider, "name", "") == "github" else None,
                     "bypassed_review_gate": bypass_review_gate,
                     "flow_profile": flow.profile,
                     "reminder": rem.as_dict(),

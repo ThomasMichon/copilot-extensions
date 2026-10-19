@@ -2,6 +2,9 @@
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [project]
 name = "agent-zdd"
 version = "0.1.0-dev7"

@@ -48,6 +48,7 @@ class TestPhasedTimeouts:
     def test_client_forwards_startup_request_timeout(self) -> None:
         client = object.__new__(BridgeClient)
         client._request = MagicMock(return_value={})
+        client.daemon_supports = MagicMock(return_value=True)
 
         client.start_session(agent="container:repo-1", request_timeout=1770.0)
         assert client._request.call_args.kwargs["request_timeout"] == 1770.0

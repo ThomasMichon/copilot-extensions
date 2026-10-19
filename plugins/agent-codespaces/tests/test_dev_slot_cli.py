@@ -152,7 +152,9 @@ class TestCmdDevRelease:
         (tmp_path / "versioned_runtime.py").write_text("# stub\n")
         release_result = subprocess.CompletedProcess(
             args=[], returncode=0,
-            stdout=json.dumps({"owner": "/wt", "previous_version": "1.2.3"}), stderr="",
+            stdout=json.dumps({
+                "owner": "/wt", "previous_version": "1.2.3", "restored_version": "1.2.3",
+            }), stderr="",
         )
         activate_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="activated", stderr="")
 
@@ -167,7 +169,8 @@ class TestCmdDevRelease:
         assert rc == 0
         out = capsys.readouterr().out
         assert "1.2.3" in out
-        assert any("activate" in c for c in calls)
+        assert len(calls) == 1
+        assert "--restore" in calls[0]
 
     def test_missing_previous_version_leaves_current_untouched(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr("agent_codespaces.__main__.RUNTIME_DIR", tmp_path)

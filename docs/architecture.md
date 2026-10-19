@@ -29,6 +29,12 @@ standalone product, not a marketplace plugin. Its owner page defines current
 planning, release, and deployment scope. Installing a client does not itself
 establish a hosted controller or container manager.
 
+The standalone [agent-chat-service](../services/chat/README.md) currently
+provides a dependency-free conversation state and callable RPC core. It does
+not start a listener or daemon or supply a plugin, installed user-facing client
+or managed hosting lifecycle; those remain separate slices of the
+[graduation effort](../efforts/active/agent-chat-graduation/README.md).
+
 ### Runtime plugins (installer-deployed runtime + payload-local commands)
 
 | Plugin | Kind | Legacy runtime home | Global command surface (legacy wrapper / project binstubs) | Lifecycle |

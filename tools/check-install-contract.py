@@ -49,10 +49,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installer_engine_ref as ier
+from update_machine_gate_contract import check_machine_gate
 
 from install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
+    declares_stamp_provision as _declares_stamp_provision,
     is_ignored_scan_path,
     persistent_environment_violations,
 )
@@ -69,6 +71,11 @@ INSTALLER_ENGINE_SYNC = Path(__file__).resolve().parent / "sync-installer-engine
 # docs/patterns/README.md § "Runtime installs are immutable and versioned".
 VERSIONED_MARKER = "install-contract:v3 versioned-venv"
 VERSIONED_RUNTIME_FILE = "versioned_runtime.py"
+VERSIONED_RUNTIME_COMPONENTS = (
+    "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    "versioned_runtime_native.ps1",
+    "versioned_runtime_source.py",
+)
 # The one canonical source of the primitive. Every Python runtime plugin's
 # scripts/versioned_runtime.py is vendored byte-identically from here by
 # tools/sync-versioned-runtime.py; this check enforces it (drift => run sync).
@@ -117,19 +124,6 @@ EXEMPT_SESSION_HOOK: frozenset[str] = frozenset()
 # EMPTY: all Thread-B service runtimes (agent-dispatch, agent-vault, agent-index,
 # agent-bridge) are ported -- their install.ps1 now declares stamp/provision.
 BASELINE_NO_STAMP_PS1: frozenset[str] = frozenset()
-
-
-def _declares_stamp_provision(text: str, ext: str) -> bool:
-    """True if an entrypoint declares BOTH a `stamp` and a `provision` action.
-
-    ps1: the tokens ``'stamp'`` / ``'provision'`` appear (ValidateSet + switch).
-    sh:  ``stamp`` / ``provision`` appear as a case label -- immediately followed
-    by ``)`` or ``|`` -- so a combined ``stamp|provision|init)`` label and the
-    incidental phrase "stamp build info" are handled correctly.
-    """
-    if ext == "ps1":
-        return ("'stamp'" in text) and ("'provision'" in text)
-    return bool(re.search(r"\bstamp[)|]", text)) and bool(re.search(r"\bprovision[)|]", text))
 
 
 def _session_hook_problem(plugin: Path) -> str | None:
@@ -456,7 +450,7 @@ def _fails_unconditionally(
 
 
 # The writer invocation inside each helper, and how its status must be handled.
-_SH_WRITER = re.compile(r'"\$py"\s+"\$\{args\[@\]\}"')
+_SH_WRITER = re.compile(r'"\$py"\s+"\$\{args\[@\]\}"|(?<![\w])_runtime_construction_complete\b')
 _PS1_WRITER = re.compile(r"&\s*\$py\b")
 _PS1_STATUS_CHECK = re.compile(r"\bif\s*\(\s*\$(?:LASTEXITCODE|\w+\.ExitCode)\s+-ne\s+0\s*\)\s*\{")
 
@@ -475,6 +469,19 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
         if not line.lstrip().startswith("#")
     )
     if suffix == ".ps1":
+        code = re.sub(r"<#.*?#>", "", code, flags=re.S)
+        attached = re.search(
+            r"(?m)^[ \t]*Complete-RuntimeConstruction[ \t]+-PayloadHash[ \t]+"
+            r"(?:\$\w+|\(Get-PayloadHash\))[ \t]*$",
+            code,
+        )
+        if attached:
+            before = _strip_quoted_strings(code[:attached.start()])
+            return (
+                before.count("{") == before.count("}")
+                and not re.search(r"\b(?:try|catch|trap)\b", before)
+                and code[attached.end():].strip() == "return $true"
+            )
         writer = _PS1_WRITER.search(code)
         check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
         return bool(check) and _fails_unconditionally(
@@ -619,12 +626,49 @@ def _calls_engine_function(text: str, ext: str, *names: str) -> bool:
 
 
 def _uses_engine_uv_install(text: str, ext: str) -> bool:
-    return _uses_installer_engine(text, ext) and _calls_engine_function(
+    ordinary_call = _calls_engine_function(
         text,
         ext,
         "Invoke-UvPipInstallResilient",
         "invoke_uv_pip_install_resilient",
     )
+    captured_call = ext == "sh" and any(
+        re.search(
+            r'^\s*(?:if\s+)?(?:!\s*)?\w+="?\$\(\s*invoke_uv_pip_install_resilient\s',
+            line,
+        )
+        for line in _non_comment_lines(text)
+    )
+    return _uses_installer_engine(text, ext) and (ordinary_call or captured_call)
+
+
+def _uses_dependency_policy_install(text: str, ext: str) -> bool:
+    if ext != "sh":
+        return False
+    code = "\n".join(_non_comment_lines(text))
+    return bool(re.search(
+        r'(?m)^\s*"\$VENV_PYTHON"\s+-I\s+'
+        r'"\$SCRIPT_DIR/installer_dependency_policy\.py"\s+\\?\s*--uv\s+',
+        code,
+    ))
+
+
+def _incomplete_dependency_policy_calls(text: str) -> int:
+    code = "\n".join(_non_comment_lines(text))
+    code = re.sub(r"(?:\\|`)[ \t]*\n[ \t]*", " ", code)
+    incomplete = 0
+    for line in code.splitlines():
+        calls = list(re.finditer(r"installer_dependency_policy\.py", line))
+        for index, call in enumerate(calls):
+            if "-I" not in line[:call.start()]:
+                continue
+            end = calls[index + 1].start() if index + 1 < len(calls) else len(line)
+            arguments = line[call.end():end]
+            provider = re.search(r"(?:\s--uv(?:\s|=)|['\"]--uv['\"]\s*,)", arguments)
+            separator = re.search(r"(?:\s--(?:\s|$)|['\"]--['\"]\s*,)", arguments)
+            if not provider or not separator:
+                incomplete += 1
+    return incomplete
 
 
 def _uses_engine_manifest_writer(text: str, ext: str) -> bool:
@@ -695,6 +739,7 @@ def check() -> int:
         return 1
 
     violations.extend(_runtime_scope_violations(PLUGINS_DIR))
+    violations.extend(check_machine_gate(PLUGINS_DIR / "agent-worktrees" / "src" / "agent_worktrees"))
     violations.extend(_exec_stderr_swallow_violations(PLUGINS_DIR))
     violations.extend(_mark_complete_result_violations(PLUGINS_DIR))
 
@@ -778,6 +823,16 @@ def check() -> int:
                 )
             else:
                 vrt_hashes[name] = hashlib.sha256(vrt.read_bytes()).hexdigest()
+            for component in VERSIONED_RUNTIME_COMPONENTS:
+                canonical = VERSIONED_RUNTIME_CANONICAL.with_name(component)
+                supplied = plugin / "scripts" / component
+                if (not canonical.is_file() or canonical.is_symlink()
+                        or not supplied.is_file() or supplied.is_symlink()
+                        or supplied.read_bytes() != canonical.read_bytes()):
+                    violations.append(
+                        f"{name}: missing or drifted scripts/{component} "
+                        "-- run 'python tools/sync-versioned-runtime.py'"
+                    )
         # Session-start reconcile invariant (dotfiles#779): a Python runtime plugin
         # must self-reconcile its binstub at launch. Payload runtimes are exempt
         # (no binstub); the baseline set tracks pre-existing gaps.
@@ -796,11 +851,18 @@ def check() -> int:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
 
+            incomplete_policy_calls = _incomplete_dependency_policy_calls(text)
+            if incomplete_policy_calls:
+                violations.append(
+                    f"{name}/{script}: {incomplete_policy_calls} dependency policy "
+                    "call(s) missing the explicit UV provider or argument separator"
+                )
             uses_engine = _uses_installer_engine(text, ext)
             if (
                 not is_payload
                 and "uv pip install" not in text
                 and not (uses_engine and _uses_engine_uv_install(text, ext))
+                and not _uses_dependency_policy_install(text, ext)
             ):
                 violations.append(f"{name}/{script}: no 'uv pip install' (package must not be file-copied)")
             if not is_payload and VERSIONED_MARKER not in text:

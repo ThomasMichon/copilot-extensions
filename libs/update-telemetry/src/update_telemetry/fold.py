@@ -184,6 +184,15 @@ def fold(
         for name, t in sorted(targets.items())
         if t.get("advisory_outcome")
     ]
+    auth = [event["details"] for event in events
+            if event.get("phase") == "auth_report" and event.get("event") == "info"
+            and isinstance(event.get("details"), dict)
+            and isinstance(event["details"].get("auth"), dict)]
+    auth_uses = [event["details"]["auth"]["id"] for event in events
+                 if event.get("phase") == "auth_fallback" and event.get("event") == "info"
+                 and isinstance(event.get("details"), dict)
+                 and isinstance(event["details"].get("auth"), dict)
+                 and isinstance(event["details"]["auth"].get("id"), str)]
     return {
         "schema": STATUS_SCHEMA,
         "version": STATUS_VERSION,
@@ -195,5 +204,11 @@ def fold(
         "restart_reasons": [f"{name}: {targets[name].get('detail') or 'restart required'}"
                             for name in restart],
         "advisories": advisories,
+        **({"auth": {
+            "report": [item["auth"] for item in auth],
+            "fallback_used": sorted({item["auth"]["id"] for item in auth
+                                     if item.get("fallback_applied")} | set(auth_uses)),
+            "cleanup_offer": None,
+        }} if auth or auth_uses else {}),
         "plugins": {name: t for name, t in sorted(targets.items()) if "@" in name},
     }

@@ -187,8 +187,8 @@ def _lock_index_after_precheck(monkeypatch, anchor: Path) -> Path:
     lock = anchor / ".git" / "index.lock"
     real = bare_anchor_files.precheck
 
-    def precheck_then_lock(path: str, old: str, new: str):
-        result = real(path, old, new)
+    def precheck_then_lock(path: str, old: str, new: str, *, no_hooks: bool = False):
+        result = real(path, old, new, no_hooks=no_hooks)
         if Path(path).resolve() == anchor.resolve():
             lock.write_text("", encoding="utf-8")
         return result

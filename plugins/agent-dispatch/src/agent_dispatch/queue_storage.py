@@ -40,6 +40,7 @@ from .queue_producer_fences import (
     ProducerScopeValidationError,
 )
 from .queue_records import Status, TaskError
+from .queue_dedup import find_live_dedup_task
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -331,9 +332,10 @@ class QueueStorageMixin:
         that work via ``working-cross-repo``, never by launching another repo's
         harness.)
 
-        If ``dedup_key`` collides with an existing non-terminal task in the same
-        repo lane, no new row is created and the *existing* task is returned.
-        Terminal rows release the key so a later request can create new work.
+        If ``dedup_key`` collides with a live task in the same repo lane, no new
+        row is created and the *existing* task is returned. Verification-pending
+        submissions remain live; unverified submissions and terminal rows release
+        the key. Multiple live candidates raise a per-key conflict without repair.
         Managed creates use a separate ``producer_request_id`` ledger: an exact
         retry with that generation's capability returns the accepted task from
         any status after generation retirement, while a new request id retains
@@ -740,54 +742,16 @@ class QueueStorageMixin:
                                 producer_request_id=request_id,
                             )
                 if accepted is None and dedup_key is not None:
-                    existing = conn.execute(
-                        f"SELECT {_TASK_SELECT} FROM tasks WHERE repo = ? "
-                        "AND dedup_key = ? AND status IN (?,?,?,?,?)",
-                        (
-                            canonical_repo,
-                            dedup_key,
-                            Status.PROPOSED,
-                            Status.QUEUED,
-                            Status.CLAIMED,
-                            Status.STARTED,
-                            Status.SUSPENDED,
-                        ),
-                    ).fetchone()
-                    if existing is not None:
-                        accepted = Task._from_row(existing)
-                    else:
-                        target = (
-                            self._reviewer_target(dedup_key)
+                    accepted = find_live_dedup_task(
+                        conn,
+                        canonical_repo,
+                        dedup_key,
+                        reviewer_target_for_key=(
+                            self._reviewer_target
                             if source == "recipe" and origin_ref == "reviewer"
                             else None
-                        )
-                        if target is not None:
-                            rows = conn.execute(
-                                f"SELECT {_TASK_SELECT} FROM tasks WHERE repo = ? "
-                                "AND source = ? AND origin_ref = ? "
-                                "AND status IN (?,?,?,?,?) "
-                                "AND dedup_key LIKE 'recipe:reviewer:%'",
-                                (
-                                    canonical_repo,
-                                    "recipe",
-                                    "reviewer",
-                                    Status.PROPOSED,
-                                    Status.QUEUED,
-                                    Status.CLAIMED,
-                                    Status.STARTED,
-                                    Status.SUSPENDED,
-                                ),
-                            ).fetchall()
-                            legacy = next(
-                                (
-                                    row
-                                    for row in rows
-                                    if self._reviewer_target(row["dedup_key"]) == target
-                                ),
-                                None,
-                            )
-                            if legacy is not None:
-                                accepted = Task._from_row(legacy)
+                        ),
+                    )
                 if fence is not None and accepted is not None and not request_already_recorded:
                     raise ProducerFenceError(
                         "managed create dedup collided with a task that is not "

@@ -172,6 +172,29 @@ export AGENT_VAULT_CACHE=1
 `cache-verify` exits `2` if any requested entry is missing. The cache requires
 `cryptography`; without it, cache operations are a safe no-op.
 
+### Shared owner keys
+
+For configured-vault PR identity setup, run
+`<agent-vault catalog argv[0]> identity-key context --json` to obtain the
+non-secret pinned environment, then explicitly enable its selected protected
+cache and run `identity-key setup --entry Identity/PR-attribution`.
+Retain the exact emitted cache directory: it is scoped to the selected
+database and installation, not the ordinary global cache. Population reuses
+the existing shared vault value and leaves all older protected caches intact.
+Only `--prompt` authorizes an unlock prompt. Normal setup reuses the live key,
+never treating a cache miss or read failure as permission to create one.
+When setup is delegated through a contained adapter, pass `--require-running`.
+Provision and explicitly start the selected owning vault outside that adapter
+first; the delegated call must refuse a stopped service, not spawn a resident
+that the adapter's kill-on-close lifetime would retire. Use the catalog's
+owning payload for both independent start and delegated setup.
+For a genuinely new owner, obtain separate user confirmation before passing
+both `--initialize-owner --confirm-first-owner`. Initialize once on the
+designated authoritative copy and confirm synchronization before ordinary
+setup on other machines. Never initialize an already-established owner.
+The [plugin README](../../README.md#shared-owner-key-setup) defines JSON and
+source-context pinning; failures are secret-free and require explicit action.
+
 ### Envelope KEK (`seal` / `unseal`)
 
 Use this when a consumer owns its own on-disk cache and needs a local encryption

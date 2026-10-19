@@ -1,0 +1,9 @@
+{
+  "comment": "Discover conventional repository mesh sources without crossing Git boundaries; reject invalid refresh inputs before actuation.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

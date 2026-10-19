@@ -238,9 +238,9 @@ class PRProvider(Protocol):
         :meth:`request_auto_complete`, which signals *consent* and lets a review
         gate merge later; ``merge_pull`` performs the merge itself.
 
-        - **github** runs ``gh pr merge <n> --squash`` (``--admin`` when ``admin``
-          is set for the owner's sanctioned merge past a non-blocking gate).
-          Blocking review policy must use ``admin=False``. ``delete_source_branch``
+        - **github** runs ``gh pr merge <n> --squash``. ``admin=True`` permits
+          only the provider-verified missing-CODEOWNER-approval fallback; it
+          does not follow from non-blocking review mode. ``delete_source_branch``
           (default ``True``, matching :meth:`request_auto_complete`) passes
           ``--delete-branch``: safe because ``finalize``/``pr-complete`` verify a
           merged PR against the tracked record's own ``pr.head_sha``, never by

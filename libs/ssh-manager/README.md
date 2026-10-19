@@ -29,6 +29,26 @@ agent-codespaces) import this library instead of spawning SSH directly.
   target (a readable prefix plus a digest). Recording is best-effort and never raises into a dial (on an event loop's thread it does no file I/O: a bounded background writer appends the line, dropping it when saturated);
   `ssh_manager.dial_log.summary()` counts dials per outcome over the last 10
   minutes and hour.
+- **Safe carrier startup diagnostics** -- failed framed-HELLO negotiation reports
+  its stage, exception type, observed pre-cleanup exit code (or unknown), and an
+  allowlisted stderr reason. Stderr is drained concurrently with raw protocol
+  stdout, including after successful startup; raw stderr, arguments and request
+  payloads are never included in these diagnostics. A reason is a diagnostic
+  hint, not proof of the remote failure's cause. `carrier.diagnostics()` adds
+  `startup_failure` after failure and clears it on successful negotiation.
+  Cleanup bounds the final stderr drain and closes its owned read transport
+  even when a descendant keeps the remote pipe open; it does not change
+  process-tree ownership. An exited transport is retired under the failure lock
+  with its epoch invalidated before a replacement opens. Requests are registered
+  only after startup and bound to that transport's epoch and output queue.
+  Retirement fails the old transport's outstanding requests with the existing
+  transport-loss error, including requests without a timeout; it neither fails
+  fresh startup waiters nor resubmits operations on a replacement. Ownership
+  metadata lasts only as long as the corresponding pending request. Retirement
+  uses the existing transport-failure path, preserving subscription termination,
+  eligible subscription restoration, reconnect backoff and automatic recovery.
+  Existing reconnect/idle-retirement ownership is established before cancellable
+  process cleanup so interruption cannot orphan live owners.
 
 ## Usage
 

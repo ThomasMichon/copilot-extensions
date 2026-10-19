@@ -1,0 +1,34 @@
+{
+  "name": "merged-dev-runtime",
+  "description": "Credential-free Tier-P source installation from one clean merged dev commit, using the real non-editable installer, installed command and immutable reuse (or Bridge serving identity).",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": ["git", "python3", "uv"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "none",
+    "gh": "none",
+    "ado": "none"
+  },
+  "config": {
+    "CR_SOURCE_REPO": "https://github.com/ThomasMichon/copilot-extensions.git",
+    "CR_SOURCE_COMMIT": "optional exact commit reachable from fetched dev; defaults to its captured tip",
+    "CR_SOURCE_PLUGIN": "agent-bridge (default), agent-codespaces, agent-containers, agent-mcp, agent-ssh, agent-machines, agent-pull-requests or budget-guidance"
+  },
+  "expected_artifacts": [
+    "~/.<selected-plugin>/current-version",
+    "~/.<selected-plugin>/versions/<source-qualified-generation>/.install-complete.json",
+    "~/.local/bin/<selected-plugin>"
+  ],
+  "stages": [
+    {"n": 0, "title": "fresh machine without installed runtime"},
+    {"n": 1, "title": "acquire and pin clean merged dev source"},
+    {"n": 2, "title": "materialize source and run the real installer"},
+    {"n": 3, "title": "verify completed source-qualified runtime and installed command"},
+    {"n": 4, "title": "invoke the runtime with the source checkout unavailable"},
+    {"n": 5, "title": "verify immutable reuse and actual runtime use"}
+  ]
+}

@@ -13,6 +13,7 @@ from textual.widgets import Static
 
 from . import derive
 from .engine_helpers import C_DIM, C_WARN
+from .worktree_assets import claim_coverage, needs_descendant_details
 
 
 class WtDetailsScreen(ModalScreen[None]):
@@ -39,7 +40,9 @@ class WtDetailsScreen(ModalScreen[None]):
         self._engine = engine
         assets = rec.get("asset_hints") or {}
         self._details = list(assets.get("details") or [])
-        self._loading = bool(assets.get("details_available"))
+        self._loading = bool(assets.get("details_available")) or needs_descendant_details(
+            rec.get("raw") or rec,
+        )
         self._error = None
 
     def on_mount(self) -> None:
@@ -103,6 +106,13 @@ class WtDetailsScreen(ModalScreen[None]):
         relation = (rec.get("reciprocal_relation") or {}).get("state")
         if relation and relation != "unbound":
             text.append(f"\nrelation  {relation}\n", style=C_DIM)
+        coverage = claim_coverage(rec)
+        if coverage or rec.get("claims_links") or rec.get("claims_summary"):
+            from .engine_helpers import _claims_cell
+
+            text.append("\nclaim preview:\n", style="bold")
+            text.append(_claims_cell(rec, 0))
+            text.append("\n")
         sid = rec.get("last_session_id")
         if sid:
             if rec.get("mux_live") and rec.get("session_bare_orphan"):
@@ -119,16 +129,27 @@ class WtDetailsScreen(ModalScreen[None]):
                 lock = ""
             text.append(f"\nsession   {sid}{lock}\n", style=C_DIM)
         if self._loading:
-            count = (rec.get("asset_hints") or {}).get("held_count", 0)
+            count = (rec.get("asset_hints") or {}).get("held_count", "unknown")
             text.append(f"\nheld claims ({count}): loading full details...\n", style=C_DIM)
         elif self._error:
             text.append(f"\nheld claims: {self._error}\n", style=C_WARN)
         elif self._details:
-            text.append(f"\nheld claims ({len(self._details)}):\n", style="bold")
+            heading = "held claims"
+            if any(claim.get("state") == "unresolved" for claim in self._details):
+                heading += " and unresolved edges"
+            text.append(f"\n{heading} ({len(self._details)}):\n", style="bold")
             for claim in self._details:
+                owner = " -> ".join(claim.get("path") or [])
+                if owner:
+                    text.append(f"  owner {owner}\n", style=C_DIM)
+                url = claim.get("url") or claim.get("ref") or ""
                 text.append(
                     f"  {claim.get('kind', 'resource')} [{claim.get('state') or 'active'}]"
-                    f": {self._asset_label(claim)}\n", style=C_DIM,
+                    f": {self._asset_label(claim)}\n",
+                    style=C_WARN if claim.get("state") == "unresolved" else (
+                        f"underline link {url}" if url.startswith(("https://", "http://"))
+                        else C_DIM
+                    ),
                 )
         else:
             text.append("\nheld claims: none\n", style=C_DIM)

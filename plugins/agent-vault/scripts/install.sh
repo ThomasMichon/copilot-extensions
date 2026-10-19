@@ -372,50 +372,28 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")"
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    # The freshly built slot's own interpreter: it already passed the health
-    # gate, and an ambient one may be absent or unusable.
-    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
-    if [[ -z "$py" ]]; then
-        _fail "Cannot publish the completion marker for versions/$SRC_VERSION without a bootstrap Python interpreter -- not activating"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    local ph
-    if ! ph="$(_payload_hash)" || [[ -z "$ph" ]]; then
-        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
-        return 1
-    fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    local out rc=0
-    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
-    [[ -z "$out" ]] || printf '%s\n' "$out" | sed 's/^/  ...    /'
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to publish the completion marker for versions/$SRC_VERSION (exit $rc) -- not activating"
-        return "$rc"
-    fi
+    _runtime_construction_complete "$actual_hash"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -591,6 +569,9 @@ _ensure_runtime() {
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _ok "Directories: $INSTALL_DIR"
 
+    _versioned_slot_clean || return 1
+    [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]] && return 0
+
     if [[ ! -x "$VENV_PYTHON" ]]; then
         _versioned_slot_clean
         if ! new_signed_venv "$uv_cmd" "$VENV_DIR" "3.10"; then
@@ -626,7 +607,7 @@ _ensure_runtime() {
                     exit 1
                 fi
             else
-                "$VENV_PYTHON" -m pip install --quiet "$_lib_dir" \
+                "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$_lib_dir" \
                     || { _fail "$_lib library install failed"; exit 1; }
             fi
         fi
@@ -634,13 +615,13 @@ _ensure_runtime() {
 
     if [[ "$have_uv" -eq 1 ]]; then
         pkg_out=""
-        if ! pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "${uv_cmd:-uv}" --python "$VENV_PYTHON" --no-deps "$PLUGIN_DIR" --quiet); then
+        if ! pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "${uv_cmd:-uv}" --python "$VENV_PYTHON"  "$PLUGIN_DIR" --quiet); then
             [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
             _fail 'Failed to install agent-vault package into venv'
             exit 1
         fi
     else
-        "$VENV_PYTHON" -m pip install --quiet --no-deps "$PLUGIN_DIR" 2>/dev/null \
+        "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$PLUGIN_DIR" 2>/dev/null \
             || { _fail 'Failed to install agent-vault package into venv'; exit 1; }
     fi
     _ok 'Package installed: agent-vault'
@@ -859,9 +840,10 @@ do_uninstall() {
     fi
     if [[ "$PURGE" -eq 1 ]]; then
         if [[ "$DRY_RUN" -eq 1 ]]; then
-            echo "[dry-run] would PURGE: $INSTALL_DIR"
+            echo "[dry-run] would purge runtime/config contents (coordination retained): $INSTALL_DIR"
         else
-            rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR"
+            remove_install_runtime_content "$INSTALL_DIR" || return 1
+            _ok "Runtime purged (transaction/staging coordination retained): $INSTALL_DIR"
         fi
     else
         # Remove the runtime venv. Versioned: the `.venv` link + the versions/
@@ -891,11 +873,11 @@ do_uninstall() {
 # === install-transaction lock (fail-closed) ===
 # Serializes every mutating action of this runtime (stamp/install/update/
 # provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
-# a pid-symlink fallback where flock is unavailable) held for the whole build +
+# an exact-path PID receipt fallback where flock is unavailable) held for the whole build +
 # publish transaction. A concurrent run waits up to the timeout
 # (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
 # never proceeds unlocked. The OS drops the flock if this process dies; a dead
-# owner's pid symlink is reaped.
+# owner's receipt is reclaimed; legacy dangling PID symlinks remain readable.
 __install_lock_link=""
 __install_lock_fd=""
 
@@ -908,10 +890,83 @@ _install_lock_timeout() {
     printf '%s' "$__t"
 }
 
+_create_install_lock_owner() {
+    local __path="$1" __private __result=1
+    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-create.XXXXXX")" || return 1
+    # link(1), unlike ln(1), creates exactly the named entry, never a child
+    # beneath an existing directory or directory symlink (also on BSD/macOS).
+    if printf 'copilot-extensions.install-lock-pid:v1:%s\n' "$$" > "$__private/owner" &&
+       link "$__private/owner" "$__path" 2>/dev/null; then
+        __result=0
+    fi
+    # The published link is a second, independent directory entry on the same
+    # inode: once link(1) above succeeds, admission already happened and must
+    # be reported regardless of what happens to this private staging
+    # directory next. A concurrent purge is free to reclaim unreferenced
+    # staging scratch at any time (it never follows the published link), so a
+    # best-effort cleanup failure here must never flip a successful
+    # publication back into a reported failure -- that would abandon the
+    # mutex this call just admitted, with nothing left to ever release it.
+    rm -f "$__private/owner" 2>/dev/null
+    rmdir "$__private" 2>/dev/null
+    return "$__result"
+}
+
+_read_install_lock_owner() {
+    local __path="$1" __private __record="" __owner="" __result=1
+    if [[ -L "$__path" ]]; then
+        # Legacy PID symlinks represent IDs, not references to existing filesystem nodes.
+        [[ ! -e "$__path" ]] || return 1
+        __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
+        # Preserve target bytes before command substitution can trim newlines.
+        if readlink "$__path" > "$__private/owner" &&
+           [[ -L "$__path" && ! -e "$__path" ]] &&
+           ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
+           [[ "$__record" == *$'\n' ]]; then
+            __owner="${__record%$'\n'}"
+            case "$__owner" in
+                *[!0-9]*|"") ;;
+                *) __result=0 ;;
+            esac
+        fi
+        rm -f "$__private/owner" || __result=1
+        rmdir "$__private" || __result=1
+        [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
+        return "$__result"
+    fi
+    [[ -f "$__path" ]] || return 1
+    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
+    # Capture the inode before opening it. A raced FIFO/device/link remains
+    # non-regular in this private snapshot and cannot cause a blocking open.
+    if link "$__path" "$__private/owner" 2>/dev/null &&
+       [[ -f "$__private/owner" && ! -L "$__private/owner" && ! -L "$__path" &&
+          "$__private/owner" -ef "$__path" ]]; then
+        # A NUL delimiter reports NUL instead of silently dropping it.
+        # Only EOF within the byte bound can yield a complete receipt.
+        if ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
+           [[ "$__record" == *$'\n' ]]; then
+            __record="${__record%$'\n'}"
+            case "$__record" in
+                copilot-extensions.install-lock-pid:v1:*)
+                    __owner="${__record#copilot-extensions.install-lock-pid:v1:}"
+                    case "$__owner" in
+                        *[!0-9]*|"") ;;
+                        *) __result=0 ;;
+                    esac
+                    ;;
+            esac
+        fi
+    fi
+    rm -f "$__private/owner" || __result=1
+    rmdir "$__private" || __result=1
+    [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
+    return "$__result"
+}
+
 _exit_install_lock() {
     if [[ -n "$__install_lock_link" ]]; then
         local __owner
-        __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+        __owner="$(_read_install_lock_owner "$__install_lock_link" 2>/dev/null || true)"
         [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
         __install_lock_link=""
     elif [[ -n "$__install_lock_fd" ]]; then
@@ -933,61 +988,60 @@ _enter_install_lock() {
         __install_lock_fd=8
         return 0
     fi
-    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __now
+    if ! command -v link >/dev/null 2>&1 || ! command -v mktemp >/dev/null 2>&1; then
+        _fail "PID-fallback install admission requires link(1) and mktemp; refusing to proceed unlocked"
+        return 1
+    fi
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __acquired
     __deadline=$(( $(date +%s) + __timeout ))
-    until ln -s "$$" "$__link" 2>/dev/null; do
-        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
-            return 1
-        fi
-        __owner="$(readlink "$__link" 2>/dev/null || true)"
-        if [[ -z "$__owner" ]]; then
-            # The link vanished after the failed `ln -s` (its holder released
-            # it or a reaper removed it), or the path is not a symlink this
-            # lock can attribute. Never unlink here: lock creators are not
-            # serialized by the reap mutex, so an unlink could delete a live
-            # lock taken meanwhile. Retry; an unattributable path fails
-            # closed at the deadline.
-            sleep 0.1
-            continue
-        fi
-        case "$__owner" in
-            *[!0-9]*) __live=0 ;;
-            *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
-        esac
-        if [[ "$__live" == 1 ]]; then
-            sleep 1
-        elif ln -s "$$" "$__link.reap" 2>/dev/null; then
-            # Serialize stale-owner recovery: without this PID-bearing reap
-            # mutex, two contenders could both see the same stale owner, and
-            # one's `rm -f` could delete the live lock the other just took.
-            # Unlink only if the link still holds the owner judged stale above
-            # and that owner is still not live: a dead owner cannot release its
-            # own link and only serialized reapers remove a stale one, so that
-            # value is stable under this mutex. An absent link, or one naming a
-            # different (possibly just-released) holder, is never removed.
-            __now="$(readlink "$__link" 2>/dev/null || true)"
-            if [[ -n "$__now" && "$__now" == "$__owner" ]]; then
-                case "$__now" in
-                    *[!0-9]*) rm -f "$__link" ;;
-                    *) kill -0 "$__now" 2>/dev/null || rm -f "$__link" ;;
+    # Always attempt admission once before enforcing the deadline: computing
+    # the deadline and this loop's own `date +%s` are two separate calls, so a
+    # short timeout (e.g. 1s) can straddle a second boundary between them and
+    # make a pre-check-only loop condition skip even an uncontended
+    # acquisition. Checking the deadline only after the first attempt (below)
+    # removes that race.
+    while :; do
+        __live=0
+        if _create_install_lock_owner "$__link.reap"; then
+            # Admission and stale cleanup share this mutex; no acquirer may
+            # replace the owner between a reaper's read and unlink.
+            __acquired=0
+            if _create_install_lock_owner "$__link"; then
+                __acquired=1
+            else
+                __owner="$(_read_install_lock_owner "$__link" 2>/dev/null || true)"
+                case "$__owner" in
+                    *[!0-9]*|"") ;; # Missing or malformed evidence never authorizes deletion.
+                    *)
+                        if kill -0 "$__owner" 2>/dev/null; then
+                            __live=1
+                        elif [[ "$(_read_install_lock_owner "$__link" 2>/dev/null || true)" == "$__owner" ]] &&
+                             rm -f "$__link" && _create_install_lock_owner "$__link"; then
+                            __acquired=1
+                        fi
+                        ;;
                 esac
             fi
-            rm -f "$__link.reap"
-        else
-            # Another contender is reaping. A reap mutex whose owner died
-            # mid-reap is deliberately never reclaimed automatically (that
-            # would reintroduce the check-then-unlink race); the run fails
-            # closed at its deadline until the stale .reap link is removed.
-            sleep 0.1
+            if [[ "$__acquired" == 1 ]]; then
+                __install_lock_link="$__link"
+            fi
+            if ! rm -f "$__link.reap"; then
+                _exit_install_lock
+                return 1
+            fi
+            [[ "$__acquired" != 1 ]] || return 0
         fi
+        # A dead admission-mutex owner requires explicit repair, never another reaper.
+        [[ "$(date +%s)" -lt "$__deadline" ]] || break
+        if [[ "$__live" == 1 ]]; then sleep 1; else sleep 0.1; fi
     done
-    __install_lock_link="$__link"
-    return 0
+    return 1
 }
 # === end install-transaction lock ===
 
-case "$ACTION" in
-    install|update|stamp|provision)
+case "$ACTION:${DRY_RUN:-0}" in
+    uninstall:1) ;;
+    install:*|update:*|stamp:*|provision:*|uninstall:*)
         if ! _enter_install_lock; then
             _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
             exit 1

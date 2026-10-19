@@ -14,8 +14,8 @@ shares the identical "install straight from $PLUGIN_DIR" pattern, so
 ``_pip_install`` gets the same fix.
 
 ``_pip_install`` must scrub ``$PLUGIN_DIR/build`` and
-``$PLUGIN_DIR/*.egg-info`` after every install attempt (uv or plain-pip
-branch, success or failure), and must still return the underlying install's
+``$PLUGIN_DIR/*.egg-info`` after every policy-admitted UV install attempt
+(success or failure), and must still return the underlying install's
 real exit code. It must also scrub ``$PLUGIN_DIR/src/*.egg-info`` -- the
 src-layout egg-info location a bare root-level glob never reaches, which
 shadowed a real upstream fix and broke a live deployment for an extended
@@ -24,13 +24,23 @@ period before being caught.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+_FIXTURE_SPEC = importlib.util.spec_from_file_location(
+    "_dispatch_owned_fixtures", Path(__file__).with_name("test_installer_engine_adoption.py")
+)
+assert _FIXTURE_SPEC is not None and _FIXTURE_SPEC.loader is not None
+_FIXTURES = importlib.util.module_from_spec(_FIXTURE_SPEC)
+_FIXTURE_SPEC.loader.exec_module(_FIXTURES)
+LIBRARIES = _FIXTURES.LIBRARIES
+_stage_owned_source = _FIXTURES._stage_owned_source
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
@@ -84,21 +94,74 @@ def _extract_function(name: str) -> str:
 def _run_harness(
     plugin_dir: Path, uv_stub_body: str, extra_script: str, *, have_uv: str = "1"
 ) -> subprocess.CompletedProcess:
-    harness = plugin_dir / "harness.sh"
+    engine = _stage_owned_source(
+        plugin_dir,
+        {
+            package: plugin_dir / "libs" / lib
+            for package, lib in LIBRARIES.items()
+            if (plugin_dir / "libs" / lib).is_dir()
+        },
+    )
+    fixture_bin = plugin_dir / "fixture-bin"
+    fixture_bin.mkdir()
+    uv = fixture_bin / "uv"
+    uv.write_text(
+        f'#!{_BASH}\n'
+        """if [[ " $* " == *" --show-settings "* ]]; then
+    printf '%s\\n' 'PipInstallSettings { settings: PipSettings {
+    index_locations: IndexLocations {
+        flat_index: [],
+    },
+    exclude_newer: ExcludeNewer {
+        global: None,
+        package: ExcludeNewerPackage({}),
+    },
+}, }'
+    exit 0
+fi
+"""
+        + uv_stub_body
+        + f"""
+count_path="{plugin_dir / "install-count.txt"}"
+count=0
+[[ ! -f "$count_path" ]] || read -r count < "$count_path"
+printf '%s\\n' "$((count + 1))" > "$count_path"
+uv "$@"
+code=$?
+roots=("{plugin_dir}" "{plugin_dir}"/libs/*/)
+for argument in "$@"; do
+    [[ ! -d "$argument" ]] || roots+=("$argument")
+done
+for root in "${{roots[@]}}"; do
+    [[ -d "$root" ]] || continue
+    mkdir -p "$root/build" "$root/some_pkg.egg-info" "$root/src/some_pkg.egg-info" \\
+        "$root/some_vendored_pkg.egg-info" "$root/src/some_vendored_pkg.egg-info"
+done
+exit "$code"
+""",
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    env = os.environ.copy()
+    for key in tuple(env):
+        if key.startswith(("AGENT_", "COPILOT_PLUGIN_", "PYTHON", "UV_")):
+            env.pop(key)
+    env["PATH"] = str(fixture_bin) + os.pathsep + env.get("PATH", "")
+    env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
+    harness = engine / "harness.sh"
     harness.write_text(
         "#!/bin/sh\nset -eu\n"
         f'PLUGIN_DIR="{plugin_dir}"\n'
+        f'SCRIPT_DIR="{engine}"\n'
         f'have_uv={have_uv}\n'
         'UV_CMD=uv\n'
         '_warn() { echo "$*" >&2; }\nsleep() { :; }\n'
-        f'. "{_PLUGIN_ROOT.parents[1] / "libs/installer-engine/installer-engine.sh"}"\n'
-        'VENV_PYTHON="python3"\n'
+        f'. "{engine / "installer-engine.sh"}"\n'
+        f'VENV_PYTHON="{sys.executable}"\n'
         '_STALE_CACHE_REFRESH_PACKAGES=(agent-dispatch)\n'
         + _extract_function("_scrub_payload_build_artifacts")
         + "\n\n"
         + _extract_function("_pip_install")
-        + "\n\n"
-        + uv_stub_body
         + "\n\n"
         + extra_script
         + "\n",
@@ -107,9 +170,10 @@ def _run_harness(
     harness.chmod(0o755)
     return subprocess.run(
         [_BASH, str(harness)],
+        cwd=plugin_dir,
         capture_output=True,
         text=True,
-        env=os.environ,
+        env=env,
         timeout=20,
         check=True,
     )
@@ -173,15 +237,13 @@ fi
     assert not (plugin_dir / "some_pkg.egg-info").exists()
 
 
-def test_plain_pip_fallback_branch_also_scrubs(tmp_path: Path) -> None:
+def test_unresolved_uv_policy_branch_also_scrubs(tmp_path: Path) -> None:
     plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
     _seed_build_residue(plugin_dir)
     uv_stub = """
-python3() {
-    shift  # drop -m
-    shift  # drop pip
-    echo "python3 $*"
+uv() {
+    echo "policy-admitted install"
     return 0
 }
 """
@@ -195,29 +257,24 @@ fi
     result = _run_harness(plugin_dir, uv_stub, extra, have_uv="0")
     assert "EXIT:0" in result.stdout
     assert not (plugin_dir / "build").exists()
+    assert (plugin_dir / "install-count.txt").read_text().strip() == "2"
 
 
-def test_plain_pip_fallback_rescrubs_between_the_two_calls(tmp_path: Path) -> None:
-    """Regression: the no-uv fallback runs TWO sequential pip calls
-    (--force-reinstall --no-deps, then a plain install). The first call can
-    itself recreate build/egg-info residue before the second call's own
-    build starts -- confirm the second call sees a clean directory, not
-    residue the first call just left behind."""
+def test_unresolved_uv_policy_branch_rescrubs_between_calls(tmp_path: Path) -> None:
+    """Both selected UV calls use the policy and see a clean source tree."""
     plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
     _seed_build_residue(plugin_dir)
     uv_stub = f"""
-python3() {{
-    shift  # drop -m
-    shift  # drop pip
-    if [ "$1" = "install" ] && [ "$2" = "--force-reinstall" ]; then
+uv() {{
+    if [[ "$(cat "{plugin_dir}/install-count.txt")" -eq 1 ]]; then
         # Simulate the first call recreating residue as a side effect.
         mkdir -p "{plugin_dir}/build/lib/some_pkg"
         mkdir -p "{plugin_dir}/some_pkg.egg-info"
         return 0
     fi
     if [ -e "{plugin_dir}/build" ] || [ -e "{plugin_dir}/some_pkg.egg-info" ]; then
-        echo 'residue still present before the second pip call' >&2
+        echo 'residue still present before the second policy call' >&2
         return 1
     fi
     return 0
@@ -235,7 +292,7 @@ fi
     assert "residue still present" not in result.stderr
     assert not (plugin_dir / "build").exists()
     assert not (plugin_dir / "some_pkg.egg-info").exists()
-    assert not (plugin_dir / "some_pkg.egg-info").exists()
+    assert (plugin_dir / "install-count.txt").read_text().strip() == "2"
 
 
 def _seed_vendored_lib_build_residue(plugin_dir: Path, lib_name: str) -> Path:

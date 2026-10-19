@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 from typing import Any
+
+RESTORE_RETRY_DELAY_S = 1.0
 
 
 class PluginStateError(ValueError):
@@ -26,6 +30,7 @@ class ActivationSnapshot:
     user_value_existed: bool
     user_value: bool | None
     inventory_enabled: bool | None
+    inventory_record_existed: bool = False
 
 
 @dataclass
@@ -410,11 +415,30 @@ def capture(identity: str, home: Path | None = None) -> ActivationSnapshot:
             if documents.record is not None
             else None
         ),
+        inventory_record_existed=documents.record is not None,
     )
 
 
 def restore(snapshot: ActivationSnapshot, home: Path | None = None) -> None:
     """Restore activation fields without rolling back refreshed inventory."""
+    for attempt in range(2):
+        try:
+            _restore_once(snapshot, home)
+            return
+        except (OSError, PluginStateError) as error:
+            cause = error.__cause__ if isinstance(error, PluginStateError) else error
+            code = getattr(cause, "winerror", None)
+            if attempt or code not in (32, 33):
+                raise
+            logging.getLogger(__name__).warning(
+                "Activation restoration for %s hit Windows lock error %s; "
+                "retrying the original snapshot once",
+                snapshot.identity, code,
+            )
+            sleep(RESTORE_RETRY_DELAY_S)
+
+
+def _restore_once(snapshot: ActivationSnapshot, home: Path | None) -> None:
     home = home or copilot_home()
     settings_path = home / "settings.json"
     _, settings = read_json_object(settings_path)
@@ -462,11 +486,12 @@ def run_install_preserving_activation(
     identity: str,
     *,
     home: Path | None = None,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     **run_kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
     """Run an install command and restore activation on every exit path."""
     snapshot = capture(identity, home)
     try:
-        return subprocess.run(argv, **run_kwargs)
+        return (runner if runner is not None else subprocess.run)(argv, **run_kwargs)
     finally:
         restore(snapshot, home)

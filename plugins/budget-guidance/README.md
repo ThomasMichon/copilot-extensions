@@ -10,6 +10,18 @@ budget-guidance status --config ./budget.json --json
 budget-guidance status --config ./budget.json
 ```
 
+Both native installers accept an explicitly
+[prepared source payload](../../tools/prepare_runtime_source.md). The verified
+receipt selects a source-qualified immutable runtime while `source.version`
+remains the package version; `runtime_version` and `runtime_source` identify
+the deployed assembly. Source snapshots preserve all hashed inputs and their
+noneditable vendored dependency closure. Legacy payloads retain the ordinary
+package-version and agent-procutil injection paths.
+An existing source-qualified snapshot is verified and reused without rewriting
+its contents. All mutating installer actions share the same bounded transaction
+lock (`COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC`, default 300 seconds); uninstall
+retains the lock and staging coordination while removing runtime/configuration.
+
 Without `--config`, the command reads
 `$BUDGET_GUIDANCE_CONFIG` or `~/.budget-guidance/config.json`. A missing file is
 reported as unavailable; it is never interpreted as zero consumption or a full
@@ -39,13 +51,27 @@ composition is proven at the supported Copilot CLI version floor.
 See [Configuration](docs/configuration.md) and
 [Architecture](docs/architecture.md).
 
-The [session quota reader](docs/session-quota.md) adds a bounded helper over an
-existing Copilot SDK session and a credential-filtered offline capture command.
+The [session quota reader](docs/session-quota.md) adds the on-demand
+`budget_guidance_session_quota` extension tool, a bounded helper over an
+existing Copilot SDK session, and a credential-filtered offline capture command.
+The tool joins only the foreground session and reports unsupported when that
+host lacks the public quota RPC. It never creates a fallback client.
 It preserves requesting-session attribution and labels cached compatibility
-freshness unknown. Opt-in [provider evidence](docs/provider-quota.md) evaluates
+freshness unknown. Optional credential-free account matching brackets the
+quota read with session authentication status without inspecting credentials
+or claiming an atomic account/quota binding.
+Opt-in [provider evidence](docs/provider-quota.md) evaluates
 one provider's observation, units, business state, and raw reset separately.
 Qualified incumbent readings reuse posture arithmetic for sustainable pace.
 Compatible monthly usage adds a labeled
 [cycle-average projection and advice-only pacing](docs/provider-pacing.md).
 Provider-observed entitlement acquisition and requesting-account proof remain
 later slices.
+
+Credential-free fresh-machine validation is available through the
+[`budget-guidance-solo` clean-room scenario](../../tools/clean-room/scenarios/budget-guidance-solo/manifest.json).
+It installs only inside a disposable container from a read-only candidate
+checkout, proves first-use provisioning without the original source copy,
+checks installed source/version identity and offline posture, and runs the
+isolated extension fixture. It never starts a live Copilot session, borrows
+account credentials, or authorizes host rollout.

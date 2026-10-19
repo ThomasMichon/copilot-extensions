@@ -16,6 +16,7 @@ from . import config as cfg
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
+from .worktree_naming import session_worktree_id
 
 if TYPE_CHECKING:
     from .__main__ import LaunchPreflight
@@ -195,7 +196,13 @@ def _launch_profile_selection(
     if record is None:
         return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     copilot_args = getattr(args, "copilot_args", []) or []
-    if "--acp" in copilot_args or getattr(record, "resolved_interface", "cli") != "cli":
+    native_replay = resume_session is not None and resume_session in {
+        getattr(args, "native_resume_session", None),
+        getattr(args, "bridge_acquisition", None),
+    }
+    if not native_replay and (
+        "--acp" in copilot_args or getattr(record, "resolved_interface", "cli") != "cli"
+    ):
         return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if (
         getattr(record, "resolved_origin", "user") != "user"
@@ -209,7 +216,10 @@ def _launch_profile_selection(
             fallback_profile=ordinary_profile,
         )
     if not allocate_new:
-        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
+        warning = ""
+        if getattr(args, "dry_run", False) and policy and policy.armed and lane in policy.eligible_lanes:
+            warning = "Random profile assignment is deferred until launch; this preview reserves no profile."
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile, warning=warning)
     if policy is None:
         return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if not policy.armed:
@@ -312,7 +322,8 @@ def _resolve_base_repo(
     output.warn("Commits will go directly to the current branch.")
     print()
 
-    dirty = git_ops.get_dirty_files(repo.anchor) if sys.stdin.isatty() else []
+    # Even an informational status scan can refresh the Git index.
+    dirty = git_ops.get_dirty_files(repo.anchor) if not args.dry_run and sys.stdin.isatty() else []
     if dirty:
         output.warn(f"Anchor repo has {len(dirty)} uncommitted change(s):")
         for path in dirty[:5]:
@@ -445,53 +456,57 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     if launch_preflight.error:
         return _launch_preflight_error(launch_preflight)
 
-    try:
-        with tracking._RecordLock(record.yaml_path, require_sidecar=True):
-            fresh = tracking.load_record(record.yaml_path)
-            require_record_mutation(fresh, config)
-            tracking.mark_resumed(fresh, save=False)
-            tracking.save_record(fresh)
-    except ExecutionSpaceError as exc:
-        output.err(str(exc))
-        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
-        return 3
-    except TimeoutError as exc:
-        message = f"Cannot resume {record.worktree_id}: contended by another process ({exc})"
+    if args.dry_run and getattr(args, "restore", False):
+        message = "--restore preview is unsupported; no session was restored"
         output.err(message)
         _emit_plan({"action": "error", "error": message, "exit_code": 3})
         return 3
-    record.resume_count = fresh.resume_count
-    record.last_resumed_at = fresh.last_resumed_at
-    if hasattr(fresh, "codename") and not fresh.codename:
+    if not args.dry_run:
         try:
-            fresh = codename_tracking.ensure_codename(
-                fresh,
-                cfg.tracking_dir(),
-                codename_tracking.wordlist_for_repo(config),
-                **codename_tracking.allocation_policy_kwargs_for_repo(config),
-            )
-        except codename_tracking.CodenameAttributionPolicyError as exc:
+            with tracking._RecordLock(record.yaml_path, require_sidecar=True):
+                fresh = tracking.load_record(record.yaml_path)
+                require_record_mutation(fresh, config)
+                tracking.mark_resumed(fresh, save=False)
+                tracking.save_record(fresh)
+        except ExecutionSpaceError as exc:
             output.err(str(exc))
             _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
             return 3
-        record.codename = fresh.codename
-        record.codename_source = fresh.codename_source
-
-    activity.log_event(
-        "worktree_resumed",
-        worktree_id=record.worktree_id,
-        branch=record.branch,
-        resume_count=record.resume_count,
-    )
-
-    if verdict is not None:
-        try:
-            tracking.stamp_mux_live(record.worktree_id, verdict.mux_live, refresh=True)
-            tracking.stamp_bound_live(
-                record.worktree_id, bool(verdict.live_session_ids), refresh=True
-            )
-        except Exception:
-            pass
+        except TimeoutError as exc:
+            message = f"Cannot resume {record.worktree_id}: contended by another process ({exc})"
+            output.err(message)
+            _emit_plan({"action": "error", "error": message, "exit_code": 3})
+            return 3
+        record.resume_count = fresh.resume_count
+        record.last_resumed_at = fresh.last_resumed_at
+        if hasattr(fresh, "codename") and not fresh.codename:
+            try:
+                fresh = codename_tracking.ensure_codename(
+                    fresh,
+                    cfg.tracking_dir(),
+                    codename_tracking.wordlist_for_repo(config),
+                    **codename_tracking.allocation_policy_kwargs_for_repo(config),
+                )
+            except codename_tracking.CodenameAttributionPolicyError as exc:
+                output.err(str(exc))
+                _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+                return 3
+            record.codename = fresh.codename
+            record.codename_source = fresh.codename_source
+        activity.log_event(
+            "worktree_resumed",
+            worktree_id=record.worktree_id,
+            branch=record.branch,
+            resume_count=record.resume_count,
+        )
+        if verdict is not None:
+            try:
+                tracking.stamp_mux_live(record.worktree_id, verdict.mux_live, refresh=True)
+                tracking.stamp_bound_live(
+                    record.worktree_id, bool(verdict.live_session_ids), refresh=True
+                )
+            except Exception:
+                pass
 
     if (
         not args.dry_run
@@ -519,6 +534,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             record.worktree_path, compose_pair=True, config=config,
         )
 
+    native_resume = getattr(args, "native_resume_session", None)
     resume_target = None
     if not getattr(args, "no_resume", False):
         resume_target = sessions.resolve_resume_target(record)
@@ -531,14 +547,16 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             generation_key=f"new:{record.worktree_id}",
             ordinary_profile=context.profile,
             explicit_profile=context.profile if context.profile_is_explicit else None,
-            resume_session=resume_target,
-            allocate_new=(not args.dry_run and not bool(verdict and verdict.mux_live)),
+            resume_session=native_resume or resume_target,
+            allocate_new=(not native_resume and not args.dry_run and not bool(verdict and verdict.mux_live)),
         )
     except profile_assignment.ProfileAssignmentError as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
     _dispatch_reflect_assignment(record, selection)
+    if args.dry_run and (warning := getattr(selection, "warning", "")):
+        output.warn(warning)
 
     launch_cmd = _build_launch_cmd(
         config,
@@ -595,6 +613,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         merged_env[_session_bind_session_key()] = resume_target
 
     seed_pending = bool(staged_seed and not bare_resume)
+    if native_resume and (seed_pending or not no_resume):
+        return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
     if seed_pending:
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
@@ -604,6 +624,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, admission_only=True,
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
+            native_resume_session=native_resume,
         )
 
     print()
@@ -666,11 +687,9 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
         return 3
     repo = config.default_repo
     platform_name = cfg.detect_platform()
-    plat_short = "win" if platform_name == "windows" else platform_name
-
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
-    worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
+    worktree_id = session_worktree_id(config.machine, platform_name, timestamp, suffix)
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 

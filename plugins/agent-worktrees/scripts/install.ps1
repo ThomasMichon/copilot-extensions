@@ -58,6 +58,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {
+        throw 'Required installer human-output initializer is unavailable.'
+    }
+    . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
 if ($BootstrapPython) {
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
     $OutputEncoding = [Console]::OutputEncoding
@@ -1630,60 +1637,31 @@ function Wait-ForVersionedSlotLease {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
-       --allow-existing` over a corpse (#935); the current/active slot is never
-       tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op ($true -- nothing to clean) in legacy mode.
-
-       Returns $true iff the slot is confirmed clean (or cleaning was a no-op);
-       $false when the underlying `slot --clean-incomplete` call failed (e.g.
-       "incomplete runtime slot is still in use"), OR when an EXISTING slot
-       can't be verified at all because no bootstrap Python could be
-       resolved (an absent slot needs no validation and is trivially clean)
-       -- callers must not build a signed-Python venv straight into a slot
-       this reports dirty (#2413): a still-populated $VenvDir predictably
-       fails `--copies` and silently downgrades to an unsigned uv-built
-       interpreter. Uses -ExcludeVenvDir: running the census with the
-       TARGET slot's own interpreter would make the helper process itself
-       show up as "a live process running from this slot", permanently
-       self-reporting an incomplete slot with a stale python.exe as still
-       in use on every retry. #>
-    if (-not $VersionedRuntime) { return $true }
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython -ExcludeVenvDir
-    if (-not $py) { return -not (Test-Path $VenvDir) }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
-    return ($LASTEXITCODE -eq 0)
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+    return $true
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so "marker present" == "healthy, complete build". A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py -or -not (Test-Path -LiteralPath $py -PathType Leaf)) {
-        Write-ServiceErr "Completion publication requires bootstrap Python -- refusing activation"
-        return $false
+    param([string]$PayloadHash = '')
+    $actualHash = Get-PayloadHash
+    if (-not $actualHash) {
+        throw 'Runtime input fingerprint unavailable -- refusing completion publication'
     }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
-    if (-not $ph) {
-        Write-ServiceErr "Runtime input fingerprint unavailable -- refusing completion publication"
-        return $false
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
-    $mcArgs += @('--payload-hash', $ph)
-    $result = Invoke-NativeCapture { & $py @mcArgs }
-    if ($result.Output) {
-        ($result.Output -split '\r?\n') | ForEach-Object { Write-Host "  ...    $_" }
-    }
-    if ($result.ExitCode -ne 0) {
-        Write-ServiceErr "Completion publication failed for versions/$SrcVersion -- refusing activation"
-        return $false
-    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 
@@ -2043,79 +2021,24 @@ finally:
 }
 
 function Invoke-VenvPackageInstall {
-    <# Install a local package dir into the venv, forcing the local code to
-       refresh even when its (dev) version string is unchanged.
-
-       PREFERS `uv` (harness convention: always uv, never bare pip). uv is
-       immune to a failure class pip is not: pip's post-install "scripts on
-       PATH?" check `realpath`s EVERY %PATH% entry, so an untrusted junction on
-       PATH -- e.g. Agency's `%APPDATA%\agency\CurrentVersion` -- makes pip die
-       with `WinError 448` under Windows RedirectionGuard (dotfiles book2). uv
-       never resolves PATH entries, so it sidesteps it. Falls back to
-       `<venv python> -m pip` ONLY when uv is unavailable (uv strictly preferred
-       whenever present). Every command runs from a trusted CWD (SystemDrive
-       root), never the profile mount, so the WinGet uv.exe reparse shim is safe
-       on SAC / profile-mount Cloud PCs.
-
-       Returns [pscustomobject]@{ ExitCode; Output }. #>
     param(
         [Parameter(Mandatory)][string]$VenvPython,
         [Parameter(Mandatory)][string]$PkgName,
         [Parameter(Mandatory)][string]$PkgDir
     )
-
     $uvPath = Get-ApplicationPath -Name @('uv')
-    $uvAvailable = [bool]$uvPath
-    $out = ''
-    $rc = 0
-
-    $prevLoc = Get-Location
-    Set-Location "$env:SystemDrive\"
-    try {
-        if ($uvAvailable) {
-            Ensure-UvIndex
-            # Install-contract: resolved-path equivalent of `uv pip install`.
-            $result = Invoke-NativeCapture {
-                & $uvPath pip install --python $VenvPython `
-                    --reinstall-package $PkgName "$PkgDir" --quiet
-            }
-            $out = $result.Output
-            $rc = $result.ExitCode
+    if (-not $uvPath) {
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output = 'uv is required; unrestricted pip fallback is not supported'
         }
-        if (-not $uvAvailable -or $rc -ne 0) {
-            # Fallback only when uv is absent (or its install failed). pip may
-            # itself fail here on a machine whose PATH carries an untrusted
-            # junction (see the header) -- which is why uv is preferred.
-            $pipVersion = Invoke-NativeCapture { & $VenvPython -m pip --version }
-            $hasPip = $pipVersion.ExitCode -eq 0
-            if ($hasPip) {
-                # 1) Resolve + install dependencies (idempotent once present).
-                $result = Invoke-NativeCapture {
-                    & $VenvPython -m pip install "$PkgDir" --quiet
-                }
-                $pipOut = $result.Output
-                $rc = $result.ExitCode
-                if ($rc -eq 0) {
-                    # 2) Force just the local package's code to refresh (deps are
-                    #    already satisfied) so unchanged dev versions still update.
-                    $result = Invoke-NativeCapture {
-                        & $VenvPython -m pip install --force-reinstall `
-                            --no-deps "$PkgDir" --quiet
-                    }
-                    $pipOut = "$pipOut`n$($result.Output)".Trim()
-                    $rc = $result.ExitCode
-                }
-                $out = if ($out) {
-                    @($out, $pipOut) -join [Environment]::NewLine
-                } else {
-                    $pipOut
-                }
-            }
-        }
-    } finally {
-        Set-Location $prevLoc
     }
-    return [pscustomobject]@{ ExitCode = $rc; Output = $out }
+    Ensure-UvIndex
+    return Invoke-NativeCapture {
+        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') `
+            --uv $uvPath -- --python $VenvPython `
+            --reinstall-package $PkgName "$PkgDir" --quiet
+    }
 }
 
 function Deploy-Package {
@@ -2519,6 +2442,12 @@ function Deploy-Venv {
         return $false
     }
 
+    [void](Invoke-VersionedSlotClean)
+    if ($script:RuntimeConstructionReuse) {
+        $script:DeployVenvAlreadyComplete = $true
+        return $true
+    }
+
     # Re-check completeness NOW, under the just-acquired lease: see the
     # $script:DeployVenvAlreadyComplete doc comment above for why the
     # pre-lease check alone isn't enough.
@@ -2674,8 +2603,11 @@ function Deploy-Wrappers {
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_runtime.py', 'hook_client.py', 'post-tool-hook.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
+    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_runtime.py', 'hook_lifecycle_runtime.py', 'native_source_context.py', 'hook_client.py', 'post-tool-hook.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
         $src = Join-Path $ScriptDir $script
+        if ($script -eq 'native_source_context.py') {
+            $src = Join-Path $ScriptDir "../src/agent_worktrees/$script"
+        }
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
             Copy-Item $src $dst -Force
@@ -2744,7 +2676,7 @@ function Deploy-RuntimeResolvers {
 
 function Deploy-Binstub {
     <# Generate the project-specific binstub in ~/.local/bin/.
-       Every path routes through this payload's attributable command. #>
+       Every path routes through the installed user-side command. #>
     Ensure-InstallDir $LocalBin
 
     # Reserved-name guard (belt-and-suspenders with the ProjectName resolution
@@ -2756,29 +2688,29 @@ function Deploy-Binstub {
         return
     }
 
-    $payloadCmd = Join-Path $PluginDir 'bin\payload\agent-worktrees.cmd'
-    $payloadPs1 = Join-Path $PluginDir 'bin\payload\agent-worktrees.ps1'
+    $userCmd = Join-Path $LocalBin 'agent-worktrees.cmd'
+    $userPs1 = Join-Path $LocalBin 'agent-worktrees.ps1'
     $content = @"
 @echo off
 rem agent-worktrees project binstub
 set "PYTHONUTF8=1"
 set "AGENT_WORKTREES_LAUNCH_ID=$ProjectName-%RANDOM%-%RANDOM%"
-call "$payloadCmd" --project $ProjectName %*
+"$userCmd" --project $ProjectName %*
 exit /b %ERRORLEVEL%
 "@
     $dst = Join-Path $LocalBin "$ProjectName.cmd"
     Set-Content -Path $dst -Value $content -NoNewline
 
-    # Primary .ps1 (PowerShell prefers it over .cmd); both pin the payload.
+    # Primary .ps1 (PowerShell prefers it over .cmd).
     $ps1Content = (@'
 # agent-worktrees project binstub
 $env:PYTHONUTF8 = '1'
 $env:AGENT_WORKTREES_LAUNCH_ID = '%%PROJECT%%-' + [guid]::NewGuid().ToString('N')
-& '%%PAYLOAD%%' --project '%%PROJECT%%' @args
+& '%%COMMAND%%' --project '%%PROJECT%%' @args
 exit $LASTEXITCODE
 '@).Replace('%%PROJECT%%', $ProjectName).Replace(
-        '%%PAYLOAD%%',
-        $payloadPs1.Replace("'", "''")
+        '%%COMMAND%%',
+        $userPs1.Replace("'", "''")
     )
     $ps1Dst = Join-Path $LocalBin "$ProjectName.ps1"
     [System.IO.File]::WriteAllText($ps1Dst, $ps1Content, (New-Object System.Text.UTF8Encoding($false)))
@@ -3478,150 +3410,42 @@ function Get-UsableWorktreeManagerBin {
     return $cmd.Source
 }
 
-function Deploy-TerminalFragmentViaWorktreeManager {
-    <# Phase 3e Step 5b (copilot-extensions#3390): deploy the Windows Terminal
-       fragment through the relocated ``worktree_manager.terminal_fragment
-       .deploy_fragment`` mechanism when a usable Worktree Manager install is
-       on PATH. Returns ``$true`` only when the deploy actually ran and
-       succeeded (exit 0) -- callers fall back to the local implementation on
-       ``$false``, the same present-or-fallback shape as the interactive mux
-       launch's own Worktree-Manager check (Phase 3b Sub-slice 2a). #>
-    param([string]$Machine, [string]$ProjectName)
+function Deploy-Shortcuts {
+    <# Compatibility entry point; Manager owns profile and shortcut reconciliation. #>
+    param([string]$Machine)
 
-    $wmBin = Get-UsableWorktreeManagerBin
-    if (-not $wmBin) { return $false }
-
-    & $wmBin terminal-fragment $ProjectName --machine $Machine --deploy --live 2>&1 |
-        ForEach-Object { Write-ServiceChanged "terminal-fragment: $_" }
-    if ($LASTEXITCODE -ne 0) {
-        Write-ServiceWarn "Worktree Manager terminal-fragment --deploy failed (exit $LASTEXITCODE) -- falling back to the local implementation"
+    if ($env:AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION -eq '1') { return $true }
+    $manager = Get-UsableWorktreeManagerBin
+    if (-not $manager) {
+        Write-ServiceWarn 'Worktree Manager is required to reconcile profiles and shortcuts.'
         return $false
     }
-    Write-ServiceOk "Windows Terminal profiles deployed via Worktree Manager"
+    $managerArgs = @('refresh-profiles')
+    if ($ProjectName) { $managerArgs += $ProjectName }
+    $managerArgs += @('--machine', $Machine)
+    $profileJson = & $manager @managerArgs
+    $profileExit = $LASTEXITCODE
+    try {
+        $profileResult = ($profileJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-ServiceWarn "Profile refresh returned an invalid result; update Worktree Manager: $_"
+        return $false
+    }
+    if ($profileResult -isnot [PSCustomObject] -or
+        -not $profileResult.PSObject.Properties['schema'] -or
+        $profileResult.schema -ne 'copilot-extensions.terminal-profile-refresh' -or
+        -not $profileResult.PSObject.Properties['version'] -or $profileResult.version -ne 1 -or
+        -not $profileResult.PSObject.Properties['status']) {
+        Write-ServiceWarn 'Profile refresh protocol is unavailable; update Worktree Manager.'
+        return $false
+    }
+    if ($profileExit -ne 0 -or $profileResult.status -ne 'verified_current') {
+        $detail = if ($profileResult.PSObject.Properties['error']) { $profileResult.error } else { "exit $profileExit" }
+        Write-ServiceWarn "Profile refresh did not verify current local integration: $detail"
+        return $false
+    }
+    Write-ServiceOk 'Windows Terminal profiles and shortcuts reconciled via Worktree Manager'
     return $true
-}
-
-function Deploy-TerminalFragmentLocally {
-    <# Phase 3e Step 6 (copilot-extensions#3390): Terminal Fragment generation
-       is no longer owned by agent-worktrees at all -- ``agent_worktrees``'s
-       own ``terminal-fragment``/``profiles`` verbs (the only thing this
-       function used to shell out to) were retired in Step 6; see
-       ``visions/plugins/agent-worktrees``'s *Not a Terminal Fragment owner*
-       Non-Goal. There is no local (non-Worktree-Manager) implementation left
-       to fall back to -- degrade loudly instead of attempting a command that
-       no longer exists. Always returns ``$false`` (matching the historical
-       ``Deploy-Shortcuts`` behaviour of skipping shortcut creation when the
-       fragment can't be deployed), so this machine's WT profiles/shortcuts
-       simply go stale until a usable Worktree Manager install is present. #>
-    param([string]$Machine)
-
-    Write-ServiceWarn "Worktree Manager is required to deploy Windows Terminal profiles (agent-worktrees no longer owns Terminal Fragments -- see visions/plugins/agent-worktrees's 'Not a Terminal Fragment owner' Non-Goal). Install or repair Worktree Manager, then re-run 'refresh-profiles'."
-    return $false
-}
-
-function Deploy-Shortcuts {
-    <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts.
-       Handles WT state cleanup so new/changed profiles appear correctly on next WT launch.
-
-       Phase 3e Step 5b (copilot-extensions#3390): prefers the relocated
-       Worktree Manager deploy mechanism when a usable install is on PATH,
-       falling back to the local implementation otherwise -- the same
-       present-or-fallback shape Phase 3b's mux launch repoint used. #>
-    param([string]$Machine)
-
-    $deployed = Deploy-TerminalFragmentViaWorktreeManager -Machine $Machine -ProjectName $ProjectName
-    if (-not $deployed) {
-        $deployed = Deploy-TerminalFragmentLocally -Machine $Machine
-    }
-    if (-not $deployed) { return }
-
-    # Create .lnk shortcuts for each registered project
-    $shell = New-Object -ComObject WScript.Shell
-    $wtExe = "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe"
-
-    $registry = Read-ProjectsRegistry
-    $allProjects = @($ProjectName)
-    if ($registry.projects -is [PSCustomObject]) {
-        foreach ($p in $registry.projects.PSObject.Properties) {
-            if ($p.Name -notin $allProjects) { $allProjects += $p.Name }
-        }
-    } elseif ($registry.projects -is [hashtable]) {
-        foreach ($p in $registry.projects.Keys) {
-            if ($p -notin $allProjects) { $allProjects += $p }
-        }
-    }
-
-    # One-time sweep: remove truncated, zero-length shortcut residue left by an
-    # earlier unquoted-path bug -- e.g. "Dotfiles (WSL" (no closing paren, no
-    # extension) sitting beside the real "Dotfiles (WSL).lnk". The stale-shortcut
-    # cleanup below only matches *.lnk, so these orphans were never swept. Scope
-    # strictly to EMPTY, extension-less files carrying the " (" label signature,
-    # so real binstubs (.cmd/.ps1), shortcuts (.lnk) and foreign files are safe.
-    Get-ChildItem -LiteralPath $LocalBin -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Length -eq 0 -and -not $_.Extension -and $_.Name -like '* (*' } |
-        ForEach-Object {
-            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-            Write-ServiceChanged "Removed shortcut residue: $($_.Name)"
-        }
-
-    foreach ($proj in $allProjects) {
-        # Resilience: a single malformed / incomplete projects.yaml entry (e.g. a
-        # null-bodied orphan left by a partial registration) must NOT abort the
-        # whole shortcut deploy. Do as much as possible -- note the bad entry,
-        # flag it, and move on so every other project's shortcut still lands.
-        try {
-            $displayName = ($proj -replace '-', ' ') -replace '(^| )(.)', { $_.Value.ToUpper() }
-
-            $lnkPath = Join-Path $LocalBin "$displayName.lnk"
-            $lnk = $shell.CreateShortcut($lnkPath)
-            $lnk.TargetPath = $wtExe
-            $lnk.Arguments = "-p `"$displayName`""
-            $lnk.WorkingDirectory = "%USERPROFILE%"
-            $lnk.Description = "$displayName - Worktree Session Manager"
-            $lnk.Save()
-
-            # WSL shortcut -- only when WSL support is recorded in registry. Guard
-            # the entry TYPE before touching .PSObject: a null-valued project key
-            # (``realproj:`` with no body) yields $null here, and $null.PSObject
-            # .Properties throws "The property 'Properties' cannot be found" --
-            # the exact crash this hardening prevents.
-            $projWslInfo = $null
-            if ($registry.projects -is [PSCustomObject] -and $registry.projects.PSObject.Properties[$proj]) {
-                $projEntry = $registry.projects.$proj
-                if ($projEntry -is [PSCustomObject] -and $projEntry.PSObject.Properties['wsl'] -and $projEntry.wsl) {
-                    $projWslInfo = $projEntry.wsl
-                }
-            }
-            $shortcutWslState = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['state']) { $projWslInfo.state } else { $null }
-            $shortcutWslDistro = if ($projWslInfo -is [PSCustomObject] -and $projWslInfo.PSObject.Properties['distro']) { $projWslInfo.distro } else { $null }
-            if ($shortcutWslState -and $shortcutWslDistro) {
-                $wslLabel = "$displayName (WSL)"
-                $lnkPath = Join-Path $LocalBin "$wslLabel.lnk"
-                $lnk = $shell.CreateShortcut($lnkPath)
-                $lnk.TargetPath = $wtExe
-                $lnk.Arguments = "-p `"$wslLabel`""
-                $lnk.WorkingDirectory = "%USERPROFILE%"
-                $lnk.Description = "$displayName - Worktree Session Manager (WSL)"
-                $lnk.Save()
-            } else {
-                # Remove stale WSL shortcut if it exists from a previous install
-                foreach ($pattern in @("$displayName (WSL).lnk", "$displayName (WSL: *).lnk")) {
-                    Get-ChildItem -Path $LocalBin -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-                }
-            }
-        } catch {
-            Write-ServiceWarn "Skipped shortcut for project '$proj' (malformed or incomplete registry entry): $_"
-            continue
-        }
-    }
-
-    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
-
-    # Global binstub deploy now runs as its own early step (Deploy-GlobalBinstub)
-    # in the install/update paths, so it is no longer dependent on this WT-heavy
-    # function completing. Kept here as an idempotent safety net.
-    Deploy-GlobalBinstub
-    Write-ServiceOk "Shortcuts deployed to $LocalBin (targeting wt.exe profiles)"
 }
 
 function Deploy-CopilotPlugin {
@@ -3850,6 +3674,7 @@ function Reconcile-Binstubs {
        remove signature-matched stubs for deregistered ones. Delegates to the
        Python implementation (single, cross-platform source of truth) so it runs
        regardless of whether this install has a project context. #>
+    if ($env:AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION -eq '1') { return }
     if (-not (Test-Path $VenvPython)) { return }
     $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
     try {
@@ -3930,6 +3755,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+try {
 switch ($Action) {
     'stamp' {
         Invoke-Stamp
@@ -4009,6 +3835,7 @@ switch ($Action) {
             Write-ServiceOk "Context runtime installed at $InstallDir"
             exit 0
         }
+        Write-V3Manifest
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental
@@ -4027,7 +3854,7 @@ switch ($Action) {
             Deploy-Config -Machine $machine | Out-Null
             Register-ProjectEntry
             Reconcile-Binstubs
-            Deploy-Shortcuts -Machine $machine
+            [void](Deploy-Shortcuts -Machine $machine)
             if ($RepoDir) { Deploy-GitHooksPath }
 
             # Retire migrated managed instruction files (machine identity now via the session-machine hook)
@@ -4050,8 +3877,6 @@ switch ($Action) {
         } catch {
             Write-ServiceWarn "Config migration skipped: $_"
         }
-
-        Write-V3Manifest
 
         Write-Host ""
         Write-ServiceOk "Installation complete"
@@ -4326,7 +4151,7 @@ switch ($Action) {
                 } catch { }
             }
         }
-        Deploy-Shortcuts -Machine $refreshMachine
+        if (-not (Deploy-Shortcuts -Machine $refreshMachine)) { exit 1 }
     }
 
     'update' {
@@ -4359,6 +4184,7 @@ switch ($Action) {
         Deploy-VenvAndPackage
         if (-not (Deploy-Wrappers)) { exit 1 }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
+        Write-V3Manifest
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental
@@ -4383,7 +4209,7 @@ switch ($Action) {
                     if ($cfgObj.machine) { $updateMachine = $cfgObj.machine }
                 } catch { }
             }
-            Deploy-Shortcuts -Machine $updateMachine
+            [void](Deploy-Shortcuts -Machine $updateMachine)
             if ($RepoDir) { Deploy-GitHooksPath }
 
             # Retire migrated managed instruction files (machine identity now via the session-machine hook)
@@ -4407,8 +4233,12 @@ switch ($Action) {
             Write-ServiceWarn "Config migration skipped: $_"
         }
 
-        Write-V3Manifest
-
         Write-ServiceOk "Update complete"
+    }
+}
+
+} finally {
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        Stop-RuntimeConstruction
     }
 }

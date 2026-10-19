@@ -17,6 +17,7 @@ from . import (
     claims_transitive_cli,
     obligations,
     output,
+    producer_views_cli,
     tracking,
     worktree_identity,
 )
@@ -48,27 +49,19 @@ def add_parsers(sub) -> None:
         "target",
         nargs="*",
         default=None,
-        help="[worktree_id] to show, OR 'add <kind> <ref>' to journal "
-        "a new outbound claim, OR 'release <ref>' to retire one, "
-        "OR 'annotate <ref> --note NOTE' to update an existing claim's note, "
-        "OR 'settle <ref>' to mark it at-rest (settled) / released, "
-        "OR 'sweep' to reclaim provably-gone+safe obligations "
-        "(never-wedge), OR 'reconcile-at-rest [<worktree-id> ...]' to "
-        "release lingering at-rest claims on existing records (never "
-        "active; no selector = all; --apply to act), OR 'orphans' to "
-        "list obligations re-homed by an --abandon finalize (pending "
-        "cleanup), OR 'cleanup [<ref-or-source-worktree> ...]' to "
-        "reclaim matching re-homed obligations (no selector = all; "
-        "--apply to act), OR 'fleet-audit' for a read-only obligation "
-        "inventory, OR 'find pr --repo <owner/name> [--state ...] "
-        "[--live]' to sweep every registered project's worktrees for "
-        "one holding a claim on a PR there, OR 'transitive [worktree_id]' "
-        "to list every unsettled obligation anywhere in a worktree's whole "
-        "subtree (itself + every worktree it created, transitively) -- "
-        "a diagnostic convenience, never a substitute for the per-hop "
-        "finalize gate, OR 'history <ref>' to list the durable, ordered "
-        "claim/release/settle event history recorded for a claimed "
-        "resource (today: pr-kind only)",
+        help="[worktree_id] to show; 'add <kind> <ref>' to journal an outbound claim; "
+        "'release <ref>' to retire it; 'annotate <ref> --note NOTE' to update its note; "
+        "'settle <ref>' to mark it at-rest/released; 'sweep' to reclaim provably-gone+safe "
+        "obligations (never-wedge); 'reconcile-at-rest [<worktree-id> ...]' to release "
+        "lingering at-rest claims (never active; no selector = all; --apply to act); "
+        "'orphans' to list obligations re-homed by --abandon finalize (pending cleanup); "
+        "'cleanup [<ref-or-source-worktree> ...]' to reclaim matching re-homed obligations "
+        "(no selector = all; --apply to act); 'fleet-audit' for read-only inventory; "
+        "'find pr --repo <owner/name> [--state ...] [--live]' to search all registered "
+        "projects for PR claims; 'transitive [worktree_id]' to list unsettled obligations "
+        "throughout a worktree's subtree (diagnostic only, not a per-hop finalize gate); "
+        "'history <ref>' for ordered claim/release/settle events (today: pr-kind only); "
+        "'ownership' for a strict read-only disposable ownership snapshot across registered projects",
     )
     p.add_argument(
         "--remove",
@@ -111,7 +104,8 @@ def add_parsers(sub) -> None:
         "--owner-ref",
         default=None,
         dest="claim_owner_ref",
-        help="with add/settle: journal/settle onto the owner named by "
+        help="with ownership: filter the strict disposable ownership snapshot; "
+        "with add/settle: journal/settle onto the owner named by "
         "this qualified ref (machine/project/worktree_id) instead "
         "of the current project's cwd-inferred worktree -- resolves "
         "cross-project on THIS machine (a cross-machine owner is "
@@ -160,6 +154,7 @@ def add_parsers(sub) -> None:
         "--remote", action="store_true",
         help="with history: also merge mirrored remote claim-history events (network)",
     )
+    producer_views_cli.add_arguments(p)
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
 
@@ -221,6 +216,8 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
 def cmd_claims(args: argparse.Namespace) -> int:
     """Dispatch the claims verb."""
     target = list(getattr(args, "target", None) or [])
+    if target and target[0] == "ownership":
+        return producer_views_cli.cmd_ownership(args, target[1:])
     if target and target[0] == "owner": return claims_owner.cmd_claims_owner(args, target[1:])
     if target and target[0] == "handoff":
         return _claims_handoff(args, target[1:])

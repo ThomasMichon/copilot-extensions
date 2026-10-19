@@ -19,6 +19,7 @@ from typing import Any
 
 from agent_procutil import (
     no_window_kwargs as _no_window_kwargs,
+    spawn_daemon as _spawn_daemon,
     windowless_daemon_kwargs as _windowless_daemon_kwargs,
 )
 
@@ -31,6 +32,7 @@ from .install_paths import (
 )
 
 no_window_kwargs = _no_window_kwargs
+spawn_daemon = _spawn_daemon
 windowless_daemon_kwargs = _windowless_daemon_kwargs
 _peer_launch = _peer_launch_module
 install_dir = _install_dir
@@ -320,7 +322,6 @@ from .inventory_cli import (  # noqa: F401
     register_inventory_commands,
 )
 from .service_process_cli import (  # noqa: F401
-    _BrokeredProcessHandle,
     _acquire_ensure_lock,
     _cmd_service,
     _daemon_launch_argv,
@@ -328,6 +329,7 @@ from .service_process_cli import (  # noqa: F401
     _ensure_retired_daemon_exited,
     _force_kill_agent_bridge_tree,
     _kill_pid,
+    _launch_bridge_daemon,
     _pid_from_lock,
     _pid_is_agent_bridge,
     _pid_on_port,
@@ -339,8 +341,6 @@ from .service_process_cli import (  # noqa: F401
     _service_stop,
     _spawn_detached_argv,
     _spawn_detached_daemon,
-    _spawn_via_wmi_broker,
-    _spawn_via_wmi_broker_pid,
     _spawn_watchdog_replacement,
     _systemd_available,
     _wait_for_ensure_owner,
@@ -457,8 +457,6 @@ from .venue_cli import (  # noqa: F401
     _cmd_deploy,
     _cmd_parity,
     _fault_frontend_restart_hostindex_loss,
-    _passive_daemon_creationflags,
-    _passive_daemon_stdio_kwargs,
     register_venue_commands,
 )
 

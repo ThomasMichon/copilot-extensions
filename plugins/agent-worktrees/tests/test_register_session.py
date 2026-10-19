@@ -1019,6 +1019,242 @@ def test_deregister_session_worktree_is_optional_for_hook_inference():
 
 
 class TestDeregisterSessionStdin:
+    def test_resident_binding_uses_only_transported_origin_environment(self, monkeypatch):
+        from agent_worktrees import session_binding_cli
+
+        keys = (
+            session_binding_cli._session_bind_session_key(),
+            session_binding_cli._session_bind_worktree_key(),
+            session_binding_cli._session_bind_project_key(),
+        )
+        for key, value in zip(keys, ("native-session", "stale-worktree", "stale-project")):
+            monkeypatch.setenv(key, value)
+        monkeypatch.setattr(
+            session_binding_cli, "_resolve_active_project", lambda project: (project, None),
+        )
+        assert session_binding_cli._activate_hook_session_binding(
+            "native-session", {}, resident=True,
+        ) is None
+        origin = dict(zip(keys, ("native-session", "original-worktree", "original-project")))
+        assert session_binding_cli._activate_hook_session_binding(
+            "native-session", {"_agentWorktrees": {"environment": origin}}, resident=True,
+        ) == "original-worktree"
+
+    def test_resident_old_source_end_preserves_current_same_uuid_activation(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch,
+    ):
+        from agent_worktrees import native_source_context, obligations, session_binding_cli
+
+        sid = "00000000-0000-4000-8000-000000000001"
+        epoch = {"platform": "linux", "environment_id": "a" * 32, "boot_id": sid}
+        token = native_source_context.identity(sid, 101, "100", epoch)
+        monkeypatch.setattr(native_source_context, "epoch", lambda: epoch)
+        monkeypatch.setattr(
+            native_source_context, "capture",
+            lambda: pytest.fail("resident must use original transported ancestry"),
+        )
+        _save_record(tmp_tracking_dir, "wt-end", "/tmp/src/wt-end")
+        m.tracking.register_session(
+            "wt-end", sid, started_at="old", source_identity=token,
+        )
+        m.tracking.register_session(
+            "wt-end", sid, started_at="current", source_identity="native:current",
+        )
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "wrong-resident-session")
+        monkeypatch.setattr(
+            session_binding_cli, "_capture_session_title",
+            lambda *_: pytest.fail("historical End title write"),
+        )
+        holder = []
+        args = argparse.Namespace(
+            worktree_id="wt-end", session_id=None, cwd=None, stdin=False,
+            resident_environment=True, source_bound=True, result_holder=holder,
+            hook_payload={
+                "sessionId": sid, "reason": "user_exit",
+                "timestamp": "2026-08-27T11:00:00Z",
+                "_agentWorktrees": {"nativeSource": {
+                    "version": 1, "qualified": True, **epoch,
+                    "ancestors": [{"pid": 101, "start_time": "100"}],
+                }},
+            },
+        )
+        assert m.cmd_deregister_session(args) == 0
+        assert holder[-1]["lifecycle"] == "historical"
+        assert m.cmd_deregister_session(args) == 0
+        assert holder[-1]["lifecycle"] == "duplicate"
+        record = load_record(tmp_tracking_dir / "wt-end.yaml")
+        entry = record.session_entry(sid)
+        assert entry.ended_at is None
+        assert entry.activations[-1].ended_at is None
+        assert entry.activations[0].end_reason == "user_exit"
+        ref = m.tracking.format_claim_ref(
+            record.machine, record.repo, record.worktree_id, session=sid,
+        )
+        assert next(item for item in record.resources if item.ref == ref).state == obligations.ACTIVE
+
+    def test_warm_end_uses_original_binding_with_same_uuid_in_two_records(
+        self, tmp_path, tmp_tracking_dir, monkeypatch_config, monkeypatch,
+    ):
+        import importlib.util
+        from types import SimpleNamespace
+        from agent_worktrees import native_source_context, obligations, session_binding_cli
+        from agent_worktrees.hook_ipc import HookIpcServer
+
+        sid = "00000000-0000-4000-8000-000000000001"
+        epoch = {"platform": "linux", "environment_id": "a" * 32, "boot_id": sid}
+        origin = {
+            "version": 1, "qualified": True, **epoch,
+            "ancestors": [{"pid": 101, "start_time": "100"}],
+        }
+        monkeypatch.setattr(native_source_context, "epoch", lambda: epoch)
+        monkeypatch.setattr(m.sys, "platform", "linux")
+        monkeypatch.setattr(session_binding_cli, "_resolve_active_project", lambda project: (project, None))
+        for wt_id, source in (
+            ("aaa-other", "native:other"),
+            ("zzz-bound", native_source_context.identity(sid, 101, "100", epoch)),
+        ):
+            _save_record(tmp_tracking_dir, wt_id, f"/path/to/{wt_id}")
+            tracking.register_session(wt_id, sid, source_identity=source)
+        unrelated = tmp_tracking_dir / "aaa-other.yaml"
+        before = unrelated.read_bytes()
+        for key, value in (
+            (session_binding_cli._session_bind_session_key(), sid),
+            (session_binding_cli._session_bind_worktree_key(), "zzz-bound"),
+            (session_binding_cli._session_bind_project_key(), "test-repo"),
+        ):
+            monkeypatch.setenv(key, value)
+        script = Path(__file__).resolve().parents[1] / "scripts" / "hook_client.py"
+        spec = importlib.util.spec_from_file_location("bound_end_client", script)
+        client = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(client)
+        monkeypatch.setattr(client, "_capture_native_source", lambda: origin)
+        monkeypatch.setattr(client, "_probe_terminal", lambda: pytest.fail("End terminal probe"))
+        server = HookIpcServer(lambda kind, payload, deadline: m._resident_hook_decision(
+            kind, payload, segment_cache=SimpleNamespace(), policy=SimpleNamespace(),
+        ))
+        server.start()
+        try:
+            runtime = tmp_path / ".agent-worktrees"
+            runtime.mkdir()
+            (runtime / "status-monitor.lock").write_text(json.dumps(server.rendezvous()))
+            result = client.decide("sessionEnd", {
+                "sessionId": sid, "reason": "user_exit", "cwd": str(tmp_path / "outside"),
+            }, home=tmp_path)
+        finally:
+            server.close()
+        assert result["lifecycle"] == "ended"
+        assert unrelated.read_bytes() == before
+        record = tracking.load_record(tmp_tracking_dir / "zzz-bound.yaml")
+        assert record.sessions[0].ended_at is not None
+        assert next(item for item in record.resources if item.kind == "session").state == obligations.RELEASED
+
+    @pytest.mark.parametrize("resident", [False, True])
+    @pytest.mark.parametrize("source_identity", [None, "native:qualified"])
+    def test_source_aware_end_defers_legacy_and_bound_authority_to_writer(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch, resident, source_identity,
+    ):
+        from agent_worktrees import native_source_context, obligations, tracking_session_deregistration_write
+
+        sid = "00000000-0000-4000-8000-000000000001"
+        epoch = {"platform": "linux", "environment_id": "a" * 32, "boot_id": sid}
+        monkeypatch.setattr(native_source_context, "epoch", lambda: epoch)
+        _save_record(tmp_tracking_dir, "wt-legacy-end", "/path/to/worktree")
+        tracking.register_session(
+            "wt-legacy-end", sid, started_at="2026-10-19T10:00:00",
+            source_identity=source_identity,
+        )
+        path = tmp_tracking_dir / "wt-legacy-end.yaml"
+        before = path.read_bytes()
+        stops = []
+        monkeypatch.setattr(tracking_session_deregistration_write, "stop_fsmonitor_daemon", stops.append)
+        holder = []
+        assert m.cmd_deregister_session(argparse.Namespace(
+            worktree_id="wt-legacy-end", session_id=None, cwd=None, stdin=False,
+            resident_environment=resident, source_bound=True, result_holder=holder,
+            hook_payload={
+                "sessionId": sid, "reason": "user_exit", "timestamp": "2026-10-19T11:00:00Z",
+                "_agentWorktrees": {"nativeSource": {
+                    "version": 1, "qualified": True, **epoch,
+                    "ancestors": [{"pid": 101, "start_time": "100"}],
+                }},
+            },
+        )) == 0
+        record = tracking.load_record(path)
+        entry = record.session_entry(sid)
+        claim = next(item for item in record.resources if item.kind == "session")
+        if source_identity is None:
+            assert entry.ended_at is not None
+            assert entry.activations[0].source_identity is None
+            assert entry.activations[0].end_reason is None
+            assert claim.state == obligations.RELEASED
+            assert stops == [record.worktree_path]
+        else:
+            assert holder[-1]["lifecycle"] == "unconfirmed"
+            assert path.read_bytes() == before
+            assert claim.state == obligations.ACTIVE
+            assert stops == []
+
+    @pytest.mark.parametrize("replacement_at", [None, "before-read", "after-read"])
+    def test_title_persistence_revalidates_same_uuid_ended_activation(
+        self, tmp_tracking_dir, tmp_session_state_dir, monkeypatch_config,
+        monkeypatch, replacement_at,
+    ):
+        from agent_worktrees import native_lifecycle_source, obligations, session_binding_cli, session_title
+
+        sid = "00000000-0000-4000-8000-000000000001"
+        wt_id = "wt-title-fence"
+        _save_record(tmp_tracking_dir, wt_id, "/path/to/worktree")
+        tracking.register_session(
+            wt_id, sid, started_at="2026-10-19T10:00:00", source_identity="native:original",
+        )
+        session_dir = tmp_session_state_dir / sid
+        session_dir.mkdir()
+        workspace = session_dir / "workspace.yaml"
+        workspace.write_text("summary: Original execution title\n")
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_session_state_dir)
+        monkeypatch.setattr(native_lifecycle_source, "end_identity", lambda *_: "native:original")
+        original_capture = session_title.capture_session_title
+        original_read = session_title.yaml.safe_load
+
+        def replace():
+            tracking.register_session(
+                wt_id, sid, started_at="2026-10-19T12:00:00",
+                source_identity="native:replacement",
+            )
+            workspace.write_text("summary: Replacement execution title\n")
+
+        def capture(worktree_id, session_id, **kwargs):
+            if replacement_at == "before-read":
+                replace()
+            return original_capture(worktree_id, session_id, **kwargs)
+
+        def read(stream):
+            data = original_read(stream)
+            if replacement_at == "after-read" and getattr(stream, "name", None) == str(workspace):
+                replace()
+            return data
+
+        monkeypatch.setattr(session_binding_cli, "_capture_session_title", capture)
+        monkeypatch.setattr(session_title.yaml, "safe_load", read)
+        holder = []
+        assert m.cmd_deregister_session(argparse.Namespace(
+            worktree_id=wt_id, session_id=None, cwd=None, stdin=False,
+            resident_environment=True, source_bound=True, result_holder=holder,
+            hook_payload={"sessionId": sid, "reason": "user_exit", "timestamp": "2026-10-19T11:00:00Z"},
+        )) == 0
+        assert holder[-1]["lifecycle"] == "ended"
+        record = tracking.load_record(tmp_tracking_dir / f"{wt_id}.yaml")
+        ref = tracking.format_claim_ref(record.machine, record.repo, wt_id, session=sid)
+        claim = next(item for item in record.resources if item.ref == ref)
+        if replacement_at is None:
+            assert record.title == "Original execution title"
+            assert claim.state == obligations.RELEASED
+        else:
+            assert record.title is None
+            assert record.sessions[0].activations[-1].source_identity == "native:replacement"
+            assert record.sessions[0].activations[-1].ended_at is None
+            assert claim.state == obligations.ACTIVE
+
     def test_session_end_emits_stage_12_via_the_existing_session_ended_event(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

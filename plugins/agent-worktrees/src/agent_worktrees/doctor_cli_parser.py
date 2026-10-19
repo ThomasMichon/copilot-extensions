@@ -47,8 +47,27 @@ def add_parser(sub) -> None:
         "(identity-bound duplicate/stale generation reap). Default: report only.",
     )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
+    sp.add_argument(
+        "--guest-distribution", metavar="NAME",
+        help="Inspect only the designated WSL guest/default. With --fix, register "
+        "a verified named guest entry; never change the host default or repair records.",
+    )
     from .tracking_yaml_repair import add_doctor_arguments
     add_doctor_arguments(sp)
+    sp.add_argument(
+        "--repair-machine-record", metavar="WORKTREE_ID",
+        help="Inspect one exact native record's legacy local machine label; "
+        "--fix normalizes only that label to the configured local identity.",
+    )
+    sp.add_argument(
+        "--from-machine", metavar="NAME",
+        help="Exact previous local machine label; requires --repair-machine-record.",
+    )
+    sp.add_argument(
+        "--to-machine", metavar="KEY",
+        help="With --repair-machine-record: assert the exact configured local target; "
+        "never selects a different execution space.",
+    )
     sp.add_argument(
         "--repair-creation", metavar="WORKTREE_ID",
         help="Inspect only a cold worktree's retained New setup; --fix completes it.",

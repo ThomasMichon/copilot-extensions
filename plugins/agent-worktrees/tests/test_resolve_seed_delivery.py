@@ -88,7 +88,7 @@ def _args(**overrides):
     return argparse.Namespace(**base)
 
 
-def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, **kwargs):
+def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, selection_calls=None, **kwargs):
     from agent_worktrees import resolve_launch_cli as rlc
 
     args = _args(
@@ -96,8 +96,14 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, *
         profile=None, **kwargs,
     )
     command = command if command is not None else ["copilot"]
+    def selection(*args, **kwargs):
+        if selection_calls is not None:
+            selection_calls.append(kwargs)
+        return SimpleNamespace(profile=None, assignment=None)
     monkeypatch.setattr(m, "_build_launch_cmd", lambda *a, **kw: command)
     if surface == "json":
+        if selection_calls is not None:
+            monkeypatch.setattr(m, "_launch_profile_selection", selection)
         code = resolve_cli.cmd_resolve(args)
         payload = json.loads(capfd.readouterr().out)
         return code, payload.get("launch", payload)
@@ -107,7 +113,7 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, *
     monkeypatch.setattr(rlc.tracking, "stamp_bound_live", lambda *a, **kw: None)
     monkeypatch.setattr(
         rlc, "_dispatch_launch_profile_selection",
-        lambda *a, **kw: SimpleNamespace(profile=None, assignment=None),
+        selection,
     )
     monkeypatch.setattr(rlc, "_dispatch_reflect_assignment", lambda *a: None)
     monkeypatch.setattr(rlc, "_dispatch_apply_assignment_env", lambda env, selection: env)
@@ -121,6 +127,32 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, *
         config=config, args=args, record=record,
     ))
     return code, plans[-1]
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+def test_native_resume_is_carried_to_the_real_deferred_owner_boundary(
+    tmp_path, monkeypatch, capfd, surface,
+):
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path, codename="already-set",
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    selected = []
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface=surface,
+        no_resume=True, native_resume_session="native-original", selection_calls=selected,
+    )
+    assert code == 0
+    command = plan["cmd"]
+    assert command[command.index("--native-resume-session") + 1] == "native-original"
+    assert "--admission-only" in command
+    assert command[-2:] == ["--", "copilot"]
+    assert len(selected) == 1
+    assert selected[0]["resume_session"] == "native-original"
+    assert selected[0]["allocate_new"] is False
 
 
 @pytest.mark.parametrize("surface", ["json", "interactive"])
@@ -331,6 +363,106 @@ def test_no_seed_cold_launch_has_execution_admission_fence(
     assert "--admission-only" in payload["launch"]["cmd"]
     assert payload["launch"]["cmd"][-2:] == ["--", "copilot"]
     assert not payload["launch"]["seed_pending"]
+
+
+@pytest.mark.parametrize(("machine", "environment"), [
+    ("Example-Host", "WSL"),
+    ("example-host-wsl", None),
+])
+def test_resume_preserves_historical_host_and_separate_wsl_platform(
+    tmp_path: Path, monkeypatch, capfd, machine: str, environment: str | None,
+) -> None:
+    directory = tmp_path / "state" / "worktrees"
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
+    monkeypatch.setattr(cfg, "project_dir", lambda _project=None: directory.parent)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    config = _create_config(tmp_path, machine="example-host-wsl", platform="wsl")
+    (directory.parent / "config.yaml").write_text(json.dumps({
+        "repo_name": config.repo_name, "machine": config.machine, "platform": "wsl",
+        "repos": {config.repo_name: {
+            "anchor": config.default_repo.anchor,
+            "worktree_root": config.default_repo.worktree_root,
+        }},
+    }), encoding="utf-8")
+    work_dir = Path(config.default_repo.worktree_root) / "wt-a"
+    work_dir.mkdir(parents=True)
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+        "machines:\n"
+        "  example-host:\n"
+        "    ssh:\n"
+        "      environments:\n"
+        "        - {name: windows, alias: native-ssh}\n"
+        "        - {name: wsl, alias: guest-ssh}\n",
+        encoding="utf-8",
+    )
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(work_dir), "demo-repo", "example-host",
+        "wsl", directory,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *_args, **_kwargs: pytest.fail("The local WSL record must not dispatch through SSH"),
+    )
+
+    assert resolve_cli.cmd_resolve(_args(machine=machine, environment=environment)) == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["launch"]["action"] == "exec"
+    assert payload["launch"]["work_dir"] == str(work_dir)
+    record = tracking.load_record(directory / "wt-a.yaml")
+    assert (record.machine, record.platform, record.resume_count) == ("example-host", "wsl", 1)
+
+
+from machine_transport import legacy_alias_forms
+
+ALIAS_RESUME_CELLS = [
+    (platform, alias)
+    for platform in ("windows", "wsl")
+    for base in ("Example-Host", "Generated-Host", "Legacy-Alias", "Example Workstation")
+    for form in legacy_alias_forms(base, platform)
+    for alias in (form, form.swapcase())
+]
+
+
+@pytest.mark.parametrize("platform,alias", ALIAS_RESUME_CELLS)
+def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, capfd, platform, alias):
+    directory = tmp_path / "state" / "worktrees"
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
+    monkeypatch.setattr(cfg, "project_dir", lambda _project=None: directory.parent)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    current = "Example-Host-wsl" if platform == "wsl" else "Example-Host"
+    config = _create_config(tmp_path, machine=current, platform=platform)
+    (directory.parent / "config.yaml").write_text(json.dumps({
+        "repo_name": config.repo_name, "machine": current, "platform": platform,
+        "repos": {config.repo_name: {
+            "anchor": config.default_repo.anchor, "worktree_root": config.default_repo.worktree_root,
+        }},
+    }), encoding="utf-8")
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(json.dumps({"machines": {
+        "Example-Host": {
+            "hostname": "Generated-Host", "alias": "Legacy-Alias",
+            "display_name": "Example Workstation", "ssh": {"environments": [
+                {"name": "windows", "alias": "native-profile"},
+                {"name": "wsl", "alias": "guest-profile"},
+            ]},
+        },
+    }}), encoding="utf-8")
+    checkout = Path(config.default_repo.worktree_root) / "wt-a"
+    checkout.mkdir(parents=True)
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(checkout), config.repo_name, alias, platform, directory,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *_args, **_kwargs: pytest.fail("same execution tuple must not self-SSH"),
+    )
+    assert resolve_cli.cmd_resolve(_args(machine=alias, environment=platform)) == 0
+    assert json.loads(capfd.readouterr().out)["launch"]["work_dir"] == str(checkout)
+    record = tracking.load_record(directory / "wt-a.yaml")
+    assert (record.machine, record.platform, record.resume_count) == (alias, platform, 1)
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell consumer unavailable")

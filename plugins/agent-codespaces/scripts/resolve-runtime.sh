@@ -225,18 +225,29 @@ if [ -n "$_rt_root" ]; then
   # slot, matching versioned_runtime.resolve_python. The key transform makes
   # plain POSIX sort version-aware (dev185 > dev50) without GNU `sort -V`.
   if [ -z "$AGENT_RT_PY" ]; then
-    # shellcheck disable=SC2046  # version names never contain whitespace
-    for _rt_v in $(
-      for _rt_dir in "$_rt_root"/versions/*; do
-        [ -d "$_rt_dir" ] || continue
-        printf '%s\n' "${_rt_dir##*/}"
-      done | _rt_version_key | LC_ALL=C sort | cut -f2-
-    ); do
-      if _rt_try_slot "$_rt_v"; then
-        _rt_trace_source="newest"
-        _rt_trace_version="$_rt_v"
-      fi
+    _rt_source_present=0
+    for _rt_dir in "$_rt_root"/versions/*; do
+      [ -d "$_rt_dir" ] || continue
+      case "${_rt_dir##*/}" in
+        *+source.*|*.source.*) _rt_source_present=1; break ;;
+      esac
     done
+    if [ "$_rt_source_present" = 1 ]; then
+      printf '%s\n' 'Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback' >&2
+    else
+      # shellcheck disable=SC2046  # version names never contain whitespace
+      for _rt_v in $(
+        for _rt_dir in "$_rt_root"/versions/*; do
+          [ -d "$_rt_dir" ] || continue
+          printf '%s\n' "${_rt_dir##*/}"
+        done | _rt_version_key | LC_ALL=C sort | cut -f2-
+      ); do
+        if _rt_try_slot "$_rt_v"; then
+          _rt_trace_source="newest"
+          _rt_trace_version="$_rt_v"
+        fi
+      done
+    fi
   fi
 
   if [ -n "$AGENT_RT_PY" ]; then
@@ -245,7 +256,7 @@ if [ -n "$_rt_root" ]; then
     _rt_boot_trace resolver-slot-result none miss
   fi
 
-  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir \
+  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir _rt_source_present \
     _rt_trace_source _rt_trace_version _rt_bt_raw _rt_bt_plugin _rt_bt_extra \
     _rt_bt_log_path _rt_bt_log_dir _rt_bt_line _rt_bt_iso \
     _rt_phase _rt_now_ms _rt_resolution_source _rt_result _rt_version \

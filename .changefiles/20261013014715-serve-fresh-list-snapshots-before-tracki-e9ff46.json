@@ -1,9 +1,0 @@
-{
-  "comment": "Serve fresh list snapshots before tracking enumeration or monitor boot.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

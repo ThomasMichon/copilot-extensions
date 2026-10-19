@@ -162,6 +162,15 @@ def test_passive_service_stays_inert_until_owned_promotion(
 
     starts: list[str] = []
     evidence: list[str] = []
+    queries: list[str] = []
+    from agent_index.search import engine as search_engine
+
+    class FakeEngine:
+        def search(self, query, **_kwargs):
+            queries.append(query)
+            return []
+
+    monkeypatch.setattr(search_engine, "create_search_engine", lambda: FakeEngine())
 
     class FakeRunner:
         async def start(self) -> None:
@@ -201,6 +210,7 @@ def test_passive_service_stays_inert_until_owned_promotion(
         passive_read = client.get("/search", params={"q": "not-yet"})
         assert passive_read.status_code == 503
         assert passive_read.json()["detail"]["code"] == "service_passive"
+        assert queries == []
 
         missing_instance = client.post(
             "/promote",
@@ -233,6 +243,7 @@ def test_passive_service_stays_inert_until_owned_promotion(
         assert evidence == ["publish:True:True:False"]
         assert client.get("/health").json()["status"] == "ok"
         assert client.get("/search", params={"q": "ready"}).status_code == 200
+        assert queries == ["ready"]
         replayed = client.post("/promote", headers=promotion_headers)
         assert replayed.status_code == 200
         assert starts == ["start"]

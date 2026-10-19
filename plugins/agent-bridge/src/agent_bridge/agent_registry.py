@@ -339,6 +339,9 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
                     f"across topology profiles: {previous!r}, {key!r}"
                 )
 
+    from .execution_identity import resolve_execution_space
+
+    selector = resolve_execution_space(cfg, all_machines)
     for profile_name, profile, machines in loaded_profiles:
         if profile.agents_config:
             agents_path = Path(profile.agents_config).expanduser()
@@ -356,7 +359,6 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             log.info("Control-plane project '%s' (from %s)", cp_project, cp_source)
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
-        selector = getattr(cfg, "local_execution_space", None)
         local_machine, local_platform = (
             _detect_local_machine(machines, selector) if selector in machines
             else (None, _detect_platform()) if selector is not None
@@ -383,7 +385,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     discovered = discover_local_agents()
     if discovered and all_machines:
         _enrich_local_agents(
-            discovered, all_machines, getattr(cfg, "local_execution_space", None),
+            discovered, all_machines, selector,
         )
     for name, agent in discovered.items():
         if name in all_agents:
@@ -393,7 +395,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             )
             continue
         covering = _find_covering_agent(
-            agent, all_agents, all_machines, getattr(cfg, "local_execution_space", None),
+            agent, all_agents, all_machines, selector,
         )
         if covering:
             log.info(
@@ -410,7 +412,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             all_agents,
             all_machines,
             topology_errors=topology_errors,
-            local_execution_space=getattr(cfg, "local_execution_space", None),
+            local_execution_space=selector,
         )
         log.info(
             "Resolver built: %d machines, %d agents (%d derived, %d auto-discovered)",

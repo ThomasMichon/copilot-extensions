@@ -48,6 +48,12 @@ import sys
 from pathlib import Path
 
 args = sys.argv[1:]
+if "--show-settings" in args:
+    print('''PipInstallSettings { settings: PipSettings {
+        index_locations: IndexLocations { indexes: [], flat_index: [], },
+        exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
+    }, }''')
+    raise SystemExit(0)
 with Path(os.environ["TEST_UV_LOG"]).open("a", encoding="utf-8") as stream:
     stream.write(json.dumps(args) + "\\n")
 mode = os.environ["TEST_UV_MODE"]
@@ -56,6 +62,17 @@ if args == ["--version"]:
     raise SystemExit(0)
 if mode == "fail-all":
     raise SystemExit(23)
+if args[:2] == ["python", "find"]:
+    if mode in ("bootstrap-run", "bootstrap-fails"):
+        raise SystemExit(23)
+    print(os.environ["TEST_BASE_PYTHON"])
+    raise SystemExit(0)
+if args and args[0] == "run" and "-c" in args:
+    assert args[-1] == "import sys; print(sys.executable)"
+    if mode == "bootstrap-fails":
+        raise SystemExit(23)
+    print(os.environ["TEST_BASE_PYTHON"])
+    raise SystemExit(0)
 if args and args[0] == "run":
     script_index = next(i for i, arg in enumerate(args) if arg.endswith(".py"))
     result = subprocess.run(
@@ -175,8 +192,10 @@ def _run(
         check=False,
     )
     assert_installer_isolated(fake_bin)
-    if action == "install":
-        calls = [json.loads(line) for line in (fake_bin.parent / "uv.jsonl").read_text().splitlines()]
+    if action == "install" and result.returncode == 0:
+        log = fake_bin.parent / "uv.jsonl"
+        assert log.is_file(), result.stdout
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
         assert ["--version"] in calls, result.stdout
     return result
 
@@ -228,6 +247,25 @@ def test_uv_only_clean_host_installs_without_precreating_slot(tmp_path: Path) ->
     assert (_slot(home) / ".install-complete.json").is_file()
 
 
+@pytest.mark.parametrize("mode", ["bootstrap-run", "bootstrap-fails"])
+def test_uv_only_construction_bootstrap_is_fail_closed(tmp_path: Path, mode: str) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    fake_bin = _write_fake_uv(tmp_path)
+    result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode=mode, uv_only=True)
+    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+    assert ["python", "find", "3.11"] in calls
+    assert any(call[:2] == ["run", "--no-project"] and "-c" in call for call in calls)
+    if mode == "bootstrap-fails":
+        assert result.returncode != 0
+        assert "Construction requires a bootstrap Python interpreter" in result.stdout
+        assert not list((home / ".agent-codespaces").rglob(".install-complete.json"))
+        assert not any(call[0] in ("venv", "pip") for call in calls)
+    else:
+        assert result.returncode == 0, result.stdout
+        assert (_slot(home) / ".install-complete.json").is_file()
+
+
 def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -253,7 +291,7 @@ def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0, result.stdout
-    assert "requires distinct-generation health repair" in result.stdout
+    assert "runtime slot has a construction or retention owner" in result.stdout
     assert all(path.read_bytes() == content for path, content in before.items())
     assert not (slot / ".install-complete.json").exists()
 
@@ -318,26 +356,29 @@ def test_install_refuses_selected_slot_with_incomplete_metadata(tmp_path: Path) 
     result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode="success")
 
     assert result.returncode != 0, result.stdout
-    assert "requires distinct-generation health repair" in result.stdout
+    assert "runtime slot has a construction or retention owner" in result.stdout
     assert all(path.read_bytes() == content for path, content in before.items())
     assert not (slot / "pyvenv.cfg").exists()
     assert not (slot / ".install-complete.json").exists()
 
 
-def test_install_rebuilds_slot_with_malformed_completion_state(tmp_path: Path) -> None:
+def test_install_refuses_slot_with_malformed_completion_state(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
     slot = _seed_healthy_slot(home)
     (slot / ".install-complete.json").write_text("{not-json", encoding="ascii")
     (slot / "stale.txt").write_text("discard me", encoding="ascii")
+    before = {
+        path: path.read_bytes()
+        for path in (slot / ".install-complete.json", slot / "stale.txt", slot / "pyvenv.cfg")
+    }
 
     result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode="success")
 
-    assert result.returncode == 0, result.stdout
-    assert not (slot / "stale.txt").exists()
-    marker = json.loads((slot / ".install-complete.json").read_text(encoding="utf-8"))
-    assert marker["version"] == VERSION
+    assert result.returncode != 0, result.stdout
+    assert "health-repair-required" in result.stdout
+    assert all(path.read_bytes() == content for path, content in before.items())
 
 
 @pytest.mark.parametrize(
@@ -358,25 +399,33 @@ def test_install_stage_failures_return_nonzero(
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
     if seed_slot:
-        _seed_healthy_slot(home)
+        slot = _slot(home)
+        slot.mkdir(parents=True)
+        (slot / "partial.txt").write_text("unowned incomplete candidate", encoding="ascii")
 
     result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode=mode, force=force)
 
     assert result.returncode != 0, result.stdout
     assert "[FAIL]" in result.stdout
+    calls = [json.loads(line) for line in (tmp_path / "uv.jsonl").read_text().splitlines()]
+    if mode == "fail-pip":
+        assert any(call[:2] == ["pip", "install"] for call in calls), result.stdout
+    else:
+        assert any(call[0] == "venv" for call in calls), result.stdout
 
 
 def test_failed_activation_returns_nonzero(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
-    _seed_healthy_slot(home)
-    (home / ".agent-codespaces" / "current-version").mkdir()
+    selector = home / ".agent-codespaces" / "current-version"
+    selector.mkdir(parents=True)
 
     result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode="success")
 
     assert result.returncode != 0, result.stdout
     assert "Runtime activation failed" in result.stdout
+    assert selector.is_dir()
 
 
 def test_first_use_propagates_provision_failure(tmp_path: Path) -> None:

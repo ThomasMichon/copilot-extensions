@@ -16,6 +16,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Callable
+from _devcontainer_selection import rewrite_selection
 
 Canonicalize = Callable[[str], str]
 
@@ -46,7 +47,7 @@ def prepare_dependencies(
     test could still open a socket during that import, with network
     reach, before this pass's own disconnect ever runs. ``--prepare-only``
     never imports a single test file."""
-    prep_passthrough = list(passthrough)
+    prep_passthrough, _ = rewrite_selection(passthrough, canonicalize, None)
     if not any(
         canonicalize(arg.partition("=")[0]) == "--prepare-only"
         for arg in prep_passthrough

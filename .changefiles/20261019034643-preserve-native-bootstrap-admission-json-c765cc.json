@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve native bootstrap admission JSON and failure semantics, with pre-merge whole-suite hook coverage",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

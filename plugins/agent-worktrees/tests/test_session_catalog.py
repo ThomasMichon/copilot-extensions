@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from conftest import make_session_dir
 
 from agent_worktrees import config as cfg
@@ -126,6 +128,70 @@ def test_discovery_preserves_existing_derived_head_and_same_day_order(
         "older", "current", "newer-unasserted"]
     assert after.head_session == "current"
     assert after.resolved_head_session == "current"
+
+
+@pytest.mark.parametrize("catalog_started", [
+    "2026-06-01T10:00:00.000Z", "2026-06-02T10:00:00.000Z",
+])
+def test_pid_catalog_refresh_preserves_source_bound_start_through_end(
+    tmp_path, monkeypatch, catalog_started,
+):
+    from agent_worktrees import (
+        config_authority, obligations, tracking_session_registration_write,
+        tracking_session_deregistration_write,
+    )
+
+    record = _record("wt-source", str(tmp_path / "wt-source"), sessions_list=[])
+    tracking_dir, state_dir = _wire(tmp_path, monkeypatch, [record])
+    path = tracking_dir / "wt-source.yaml"
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="windows", repo_name="test",
+        repos={"test": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"))},
+    )
+    monkeypatch.setattr(config_authority, "load_project_authority_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    assert tracking_session_registration_write.apply_session_register({
+        "yaml_path": str(path), "worktree_id": record.worktree_id,
+        "session_id": "qualified", "pane_id": "%1", "source": "hook",
+        "source_identity": "native:original", "started_at": "2026-06-01T10:00:00",
+    })["ok"]
+    started = tracking.load_record(path)
+    assert started.sessions[0].pid is None
+    ref = tracking.format_claim_ref(
+        record.machine, record.repo, record.worktree_id, session="qualified",
+    )
+    assert next(item for item in started.resources if item.ref == ref).state == obligations.ACTIVE
+    make_session_dir(
+        state_dir, "qualified", record.worktree_path, updated_at=catalog_started,
+    )
+    monkeypatch.setattr(session_catalog, "_session_live_pid", lambda _entry: 12345)
+    reconciler = session_catalog.ResidentSessionReconciler(record_budget=8, session_budget=8)
+    report = reconciler.step()
+    refreshed = tracking.load_record(path)
+    assert report["pids"] == 1
+    assert refreshed.sessions[0].pid == 12345
+    assert len(refreshed.sessions[0].activations) == 1
+    assert refreshed.sessions[0].activations[0].source_identity == "native:original"
+    assert refreshed.sessions[0].activations[0].ended_at is None
+    assert refreshed.lifecycle_revision == started.lifecycle_revision
+    stops = []
+    monkeypatch.setattr(tracking_session_deregistration_write, "stop_fsmonitor_daemon", stops.append)
+    assert tracking_session_deregistration_write.apply_session_deregister({
+        "yaml_path": str(path), "session_id": "qualified",
+        "source_identity": "native:original", "end_reason": "user_exit",
+        "ended_at": "2026-06-03T10:00:00",
+    })["lifecycle"] == "ended"
+    ended = tracking.load_record(path)
+    assert ended.sessions[0].ended_at == "2026-06-03T10:00:00"
+    assert next(item for item in ended.resources if item.ref == ref).state == obligations.RELEASED
+    assert stops == [record.worktree_path]
+    reconciler.step()
+    final = tracking.load_record(path)
+    assert final.sessions[0].ended_at == ended.sessions[0].ended_at
+    assert final.sessions[0].activations == ended.sessions[0].activations
+    assert final.lifecycle_revision == ended.lifecycle_revision
+    assert next(item for item in final.resources if item.ref == ref).state == obligations.RELEASED
+    assert stops == [record.worktree_path]
 
 
 def test_empty_registry_derives_newest_across_same_catalog_cycle(

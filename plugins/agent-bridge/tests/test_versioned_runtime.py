@@ -56,6 +56,84 @@ def test_slot_creates_version_dir(tmp_path):
     assert d.is_dir()
 
 
+def _complete_dev_generation(root, version, owner):
+    _install(root, version)
+    vr.mark_complete(root, version, payload_hash="a" * 64, dev_owner=owner)
+
+
+def test_dev_generation_publication_requires_claim_and_completion(tmp_path):
+    owner = "worktree:dev-owner"
+    version = "dev-" + "a" * 32
+    _install(tmp_path, version)
+    with pytest.raises(RuntimeError, match="canonical claim owner"):
+        vr.mark_complete(tmp_path, version, dev_owner=owner)
+    vr.claim_dev(tmp_path, owner)
+    with pytest.raises(RuntimeError, match="completed construction"):
+        vr.activate(tmp_path, version, dev_owner=owner, link_free=True)
+    assert vr.current_version(tmp_path) is None
+    assert "selected_generation" not in vr.read_dev_claim(tmp_path)
+    vr.mark_complete(tmp_path, version, payload_hash="a" * 64, dev_owner=owner)
+    with pytest.raises(RuntimeError, match="canonical claim owner"):
+        vr.activate(tmp_path, version, dev_owner="other", link_free=True)
+    vr.activate(tmp_path, version, dev_owner=owner, link_free=True)
+    assert vr.read_dev_claim(tmp_path)["selected_generation"] == version
+
+
+def test_dev_generation_reclaim_preserves_selection_and_original_rollback(tmp_path):
+    owner = "worktree:dev-owner"
+    version = "dev-" + "a" * 32
+    vr.claim_dev(tmp_path, owner, previous_version="1.0.0")
+    _complete_dev_generation(tmp_path, version, owner)
+    vr.activate(tmp_path, version, dev_owner=owner, link_free=True)
+    before = vr.marker_path(tmp_path, version).read_bytes()
+    reclaimed = vr.claim_dev(tmp_path, owner, previous_version=version)
+    assert reclaimed["previous_version"] == "1.0.0"
+    assert reclaimed["selected_generation"] == version
+    assert vr.marker_path(tmp_path, version).read_bytes() == before
+    with pytest.raises(RuntimeError, match="canonical claim owner"):
+        vr.mark_complete(tmp_path, "dev-" + "b" * 32, dev_owner="other")
+
+
+def test_gc_protects_claimed_dev_generation_even_when_not_selected(tmp_path):
+    owner = "worktree:dev-owner"
+    version = "dev-" + "a" * 32
+    for numbered in ("1.0.0", "2.0.0"):
+        _install(tmp_path, numbered)
+        vr.mark_complete(tmp_path, numbered)
+    vr.claim_dev(tmp_path, owner, previous_version="1.0.0")
+    _complete_dev_generation(tmp_path, version, owner)
+    vr.activate(tmp_path, version, dev_owner=owner, link_free=True)
+    vr.activate(tmp_path, "2.0.0", link_free=True)
+    assert vr.gc(tmp_path, min_age_days=0) == []
+    vr.release_dev(tmp_path, owner)
+    assert set(vr.gc(tmp_path, min_age_days=0)) == {"1.0.0", version}
+
+
+@pytest.mark.parametrize("healthy_rollback", [False, True])
+def test_dev_restore_is_atomic_with_claim_settlement(tmp_path, healthy_rollback):
+    owner = "worktree:dev-owner"
+    version = "dev-" + "a" * 32
+    _install(tmp_path, "1.0.0")
+    if healthy_rollback:
+        vr.mark_complete(tmp_path, "1.0.0")
+    vr.claim_dev(tmp_path, owner, previous_version="1.0.0")
+    _complete_dev_generation(tmp_path, version, owner)
+    vr.activate(tmp_path, version, dev_owner=owner, link_free=True)
+    before = vr.dev_claim_path(tmp_path).read_bytes()
+    if healthy_rollback:
+        released = vr.release_dev(tmp_path, owner, restore=True)
+        assert released["restored_version"] == "1.0.0"
+        assert vr.current_version(tmp_path) == "1.0.0"
+        assert vr.read_last_known_good(tmp_path) == "1.0.0"
+        assert vr.read_dev_claim(tmp_path) is None
+    else:
+        with pytest.raises(RuntimeError, match="not a completed runtime"):
+            vr.release_dev(tmp_path, owner, restore=True)
+        assert vr.dev_claim_path(tmp_path).read_bytes() == before
+        assert vr.current_version(tmp_path) == version
+        assert vr.read_last_known_good(tmp_path) == version
+
+
 def test_slot_clean_is_vacuous_when_target_does_not_exist(tmp_path, monkeypatch):
     monkeypatch.setattr(
         vr,

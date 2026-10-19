@@ -15,6 +15,10 @@ from .engine_prompt_dialog import PromptDlgScreen
 
 def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
     """Compose a retry-staged prompt for a stopped worktree's resume."""
+    if not rec.get("is_local", True):
+        screen.debug = "Resume prompt requires a local native target; use ordinary Resume."
+        return
+
     def _eligible():
         wt_id = (rec.get("raw") or {}).get("id")
         current, _error = screen._find_internal_worktree(wt_id, rec.get("source_id"))
@@ -25,10 +29,20 @@ def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
 
     if not _eligible():
         return
+    leg = rec.get("execution_leg") or (rec.get("raw") or {}).get("execution_leg")
+    refusal: str | None = None
+    if ahp:
+        refusal = "Prompt launch is unsupported with AHP; choose a native cold resume."
+    elif isinstance(leg, dict) and leg.get("state", "unknown") in {"active", "unknown"}:
+        refusal = (
+            f"Prompt launch is unsupported while the execution leg is {leg.get('state', 'unknown')}; "
+            "choose a native cold resume."
+        )
     title = rec.get("title") or rec.get("id4") or "this worktree"
     scr = PromptDlgScreen(
         f"Resume prompt · {title}",
         "Prompt (optional; saved for retry until Copilot takes this cold resume):",
+        seed_refusal=refusal,
     )
 
     def _after(confirmed):

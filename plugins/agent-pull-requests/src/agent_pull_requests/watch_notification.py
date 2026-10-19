@@ -9,6 +9,7 @@ import copy
 
 from agent_procutil import no_window_kwargs
 from .watch_contract import ALL_TRANSITIONS
+from .watch_process import run_owned
 
 ACKNOWLEDGED_NOTIFICATIONS = "acknowledged_notifications/v1"
 CALLBACK_TIMEOUT = 30.0
@@ -42,8 +43,10 @@ def validate_notify(spec: object, acknowledged: bool) -> dict:
     return json.loads(json.dumps(spec, allow_nan=False))
 
 
-def event_payload(event) -> dict:
-    if event.subscriber.pending is not None:
+def event_payload(event, *, current: bool = False) -> dict:
+    if event.frozen_payload is not None and not current:
+        return copy.deepcopy(event.frozen_payload)
+    if event.subscriber.pending is not None and not current:
         return copy.deepcopy(event.subscriber.pending["payload"])
     payload = {
         "repo": event.key.repo,
@@ -57,6 +60,9 @@ def event_payload(event) -> dict:
             "pr_state", "merged", "review_decision", "mergeable", "checks_state",
         ):
             payload[name] = getattr(event.snapshot, name)
+        if event.snapshot.native_snapshot is not None:
+            payload["snapshot"] = copy.deepcopy(event.snapshot.native_snapshot)
+            payload["snapshot_protocol"] = "agent-worktrees.pr-snapshot/v1"
     return payload
 
 
@@ -66,6 +72,12 @@ def default_notify(event) -> int | None:
     argv = spec.get("argv") if isinstance(spec, dict) else None
     if not argv or not isinstance(argv, list):
         return None
+    if event.key.worktrees_command:
+        result = run_owned(
+            [str(a) for a in argv], timeout=spec.get("timeout", CALLBACK_TIMEOUT),
+            input_text=json.dumps(event_payload(event)), capture=False,
+        )
+        return result.returncode
     result = subprocess.run(  # noqa: S603 -- explicit subscriber callback argv
         [str(a) for a in argv],
         input=json.dumps(event_payload(event)),
@@ -115,4 +127,12 @@ def validate_pending(pending: object, key, sub) -> None:
         )
     ):
         raise ValueError("invalid acknowledged delivery state")
+    if "snapshot" in payload or "snapshot_protocol" in payload:
+        from .watch_provider import decode_snapshot
+
+        if payload.get("snapshot_protocol") != "agent-worktrees.pr-snapshot/v1":
+            raise ValueError("invalid pending snapshot protocol")
+        decode_snapshot(payload.get("snapshot"), key.repo, key.number)
+    if "coalesced" in payload and payload["coalesced"] is not True:
+        raise ValueError("invalid coalesced event marker")
     json.dumps(pending, allow_nan=False)

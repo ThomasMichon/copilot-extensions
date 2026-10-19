@@ -2,6 +2,9 @@
 requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [project]
 name = "agent-installation-context"
 version = "0.1.0-dev3"
@@ -25,6 +28,7 @@ py-modules = [
     "_installation_context_runtime_slot_ownership",
     "_installation_context_runtime_slot_completion",
     "_installation_context_resolution",
+    "_installation_context_guest_environment",
     "_installation_context_activation",
     "_installation_context_legacy_attribution",
     "_installation_context_legacy_transition",

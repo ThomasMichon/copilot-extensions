@@ -16,6 +16,8 @@ narrowing scope again.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -105,6 +107,7 @@ _payload_hash
 """
     result = subprocess.run(
         [bash, "-c", script], capture_output=True, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     out = result.stdout.strip()
@@ -144,6 +147,33 @@ def test_payload_hash_is_stable_for_identical_content(tmp_path: Path) -> None:
     first = _run_payload_hash(plugin_dir)
     second = _run_payload_hash(plugin_dir)
     assert first == second
+
+
+@pytest.mark.parametrize("size", [16, 65536])
+def test_streamed_payload_hash_preserves_existing_completion_bytes(tmp_path: Path, size: int) -> None:
+    plugin_dir, external_src = _make_plugin_tree(tmp_path)
+    local_lib = plugin_dir / "libs" / "local-lib"
+    local_src = local_lib / "src" / "local_lib"
+    local_src.mkdir(parents=True)
+    (local_lib / "pyproject.toml").write_bytes(b'[project]\nname = "local-lib"\n\n')
+    (local_src / "__init__.py").write_bytes(b"z" * size + b"\n\n\n")
+    plugin_source = plugin_dir / "src" / "agent_worktrees" / "__init__.py"
+    external_source = external_src / "__init__.py"
+    external = external_src.parent.parent
+    for source in (
+        plugin_dir / "pyproject.toml", plugin_source,
+        external / "pyproject.toml", external_source,
+    ):
+        source.write_bytes(source.read_text(encoding="utf-8").encode("utf-8"))
+    expected = (plugin_dir / "pyproject.toml").read_bytes().rstrip(b"\n")
+    expected += b"\n" + (local_lib / "pyproject.toml").read_bytes().rstrip(b"\n")
+    for source in (plugin_source, local_src / "__init__.py"):
+        expected += b"\n/" + source.relative_to(plugin_dir).as_posix().encode()
+        expected += b"\n" + source.read_bytes().rstrip(b"\n")
+    expected += b"\n" + (external / "pyproject.toml").read_bytes().rstrip(b"\n")
+    expected += b"\n/" + external_source.relative_to(external).as_posix().encode()
+    expected += b"\n" + external_source.read_bytes().rstrip(b"\n")
+    assert _run_payload_hash(plugin_dir) == hashlib.sha256(expected).hexdigest()
 
 
 def test_payload_hash_ignores_generated_packaging_metadata(tmp_path: Path) -> None:

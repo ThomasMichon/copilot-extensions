@@ -5,6 +5,12 @@ The **SSH connectivity layer** for the agent fabric. It provides a standalone
 and defines the transport-provider contract used by direct and tunnel
 transports.
 
+The installer's `uninstall` action serializes with install/update. It removes
+runtime/config contents but keeps transaction-lock files and `.install-stage`
+coordination, so the install directory may remain. Normal self-staging reap
+removes dead-owner stages on later invocations. Its preview takes no transaction lock and removes no contents;
+normal transient payload self-staging still applies.
+
 ## What you can do with only this plugin
 
 `agent-ssh` does not require a harness, daemon, or sibling plugin. From a
@@ -108,7 +114,7 @@ host, the already-durable interactive-session dispatch coordinator can
 re-launch the watchdog even when the historical Startup-folder shortcut did not
 fire for that logon or the launcher died later in the session.
 
-`mesh-status [--json]` is a fail-open view of a calling repository's
+`mesh-status [--json]` is a read-only view of a calling repository's
 `machines.yaml`. In addition to SSH readiness and environments, it shows the
 optional static machine metadata shared with agent-worktrees and agent-bridge:
 `role` is a stable terse classification, `description` explains the machine's
@@ -116,7 +122,14 @@ purpose, and `capabilities` is an ordered list of broad discovery hints. These
 fields describe topology, not live machine state.
 
 Both `mesh-status` and `refresh-mesh` resolve "the calling repository" from the
-process's current working directory (git toplevel, or walking up parents).
+process's current working directory. Within the Git toplevel they search, in
+order, `machines.yaml`, `.agent-worktrees/machines.yaml`,
+`config/machines.yaml`, and `.github/machines.yaml`, matching Bridge's existing
+conventional-location priority. They never borrow topology from outside that
+Git repository or from a nearer subdirectory. Without Git, parent walking
+remains available but stops at a `.git` directory or worktree file.
+Git source lookup is bounded to ten seconds and ignores inherited `GIT_*`
+overrides, so another checkout cannot redirect the calling-repository scope.
 Running either through agent-worktrees' `<repo> ssh …` front door (e.g.
 `<repo> ssh mesh-status`) pins this to the named `<repo>`'s own checkout
 regardless of the invoking shell's actual cwd -- agent-worktrees resolves
@@ -124,6 +137,15 @@ regardless of the invoking shell's actual cwd -- agent-worktrees resolves
 rather than `agent-ssh` resolving the name itself. An unresolvable `<repo>`
 fails that routed invocation closed instead of silently falling back to the
 caller's cwd.
+
+An explicit `--path` is authoritative: a missing, unreadable, malformed or
+non-file source fails rather than selecting another source or reporting an
+empty mesh. The selected conventional source has the same validation behavior;
+invalid higher-priority input never falls through to a lower-priority file.
+An absent conventional source and an explicitly empty `machines: {}` remain
+successful no-ops. Refresh validates the source before transport discovery,
+profile publication or reachability probes. This source-discovery behavior
+does not yet add direct-profile refresh or knowledge-repository resolution.
 
 `refresh-mesh [--path machines.yaml] [--config-d dir] [--timeout N] [--json]`
 reconciles this machine's *outbound* reach into the mesh: it re-runs the

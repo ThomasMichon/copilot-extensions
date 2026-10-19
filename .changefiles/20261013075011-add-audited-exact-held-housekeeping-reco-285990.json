@@ -1,0 +1,9 @@
+{
+  "comment": "Add audited exact held housekeeping recovery without restarting completed tasks",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

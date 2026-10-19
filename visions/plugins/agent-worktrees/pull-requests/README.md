@@ -9,7 +9,7 @@
 - **Scope:** leaf (child of the
   [agent-worktrees](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-10-18
 - **Reality docs:** the agent-worktrees plugin `docs/`;
   `skills/worktree/references/pr-workflow.md` (the "Addressing a foreign
   repo" section is the authoritative, maintained description of
@@ -48,6 +48,14 @@ clean-room scenario-eval, a dry run — can be proven against it with the same
 confidence as the real thing.
 
 ## Concepts & Components
+
+### First-class PR ownership with worktree compatibility
+
+The [dedicated PR plugin and service](../../agent-pull-requests/README.md)
+provide the PR-domain surface. Worktree-aware operations retain source-control
+publication, obligations and repository policy while composing that shared
+capability. Existing provider behavior and command compatibility converge
+through one domain contract rather than a second forge implementation.
 
 ### The PR capability, as one provider-neutral surface
 
@@ -122,6 +130,34 @@ losing their target or confusing one subscriber's outcome with another's.
 This complements ordinary status queries and synchronous waits; it does not
 make a durable subscription service a prerequisite for every PR operation.
 
+### repository-declared-pr-requirements
+
+A related repository declares the PR features, review and discussion
+requirements, human-only completion gates and supplemental agent guidance its
+workflows need. The provider supplies authoritative native evidence through the
+same central PR operations. Persistent approval, approval after the latest
+source push, overlapping required reviewer sets and revision-bound discussion
+resolution remain separate facts rather than being flattened into a
+GitHub-shaped verdict or an exact-head approval assumption.
+
+Status and observation distinguish actionable feedback, running validation,
+dependent policies, human-only requirements and unavailable evidence. A policy
+that aggregates other requirements remains visible without being mistaken for
+an independent code failure. Agents can drive the actionable work and wait for
+external transitions through the existing observation owner; they never need a
+repository-specific polling program. Unknown evidence cannot establish that
+only human completion gates remain, and configuration cannot waive a native
+gate or grant authority to perform a human action.
+
+### operation-aware-completion-readiness
+
+Author status, observation and completion share one evidence-based account of
+the selected operation's remaining gates. Actor authority, reviewer evidence
+and vetoes, required validation, revision freshness and optional merge consent
+remain distinct. A consent-only prerequisite must not appear as a blocker for
+a direct-submit operation, nor may an authorized exception to an absent
+required approval be mistaken for permission to ignore a blocking review.
+
 ### operator-authorized-pr-recovery
 
 An operator can deliberately recover an existing PR when historical worktree
@@ -161,6 +197,15 @@ When a named target repo is not registered, or its registered provider
 cannot be reached, the operation reports that plainly rather than silently
 falling back to the caller's own repo/provider or guessing at the target's
 identity.
+
+### authorized-completion-is-clear-and-bounded
+
+An authorized submitter can drive a reviewed, validated change through the
+repository's supported completion path without an unnecessary new permission
+ceremony. Status guidance accurately describes existing reviews and the next
+authorized action. Unknown authority or evidence remains explicitly unknown,
+and every mutation preserves current reviewer vetoes, required validation and
+the source revision it was authorized to complete.
 
 ### recovery-does-not-require-perfect-bookkeeping
 
@@ -211,10 +256,10 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
 - **Not a replacement for a repository's own review policy or rubric.**
   Provider-neutral operations execute policy; they do not define what a
   repository requires to approve or land a change.
-- **Not a packaging decision.** Whether this capability remains part of
-  agent-worktrees or is later split into its own dedicated plugin is a
-  future wiring/packaging question outside this vision's scope; this vision
-  describes the capability's shape independent of which module hosts it.
+- **Not a replacement worktree lifecycle.** Dedicated PR plugin/service
+  ownership does not move source-control publication, worktree obligations or
+  repository review policy into the daemon. This vision states the shared
+  capability contract; the dedicated plugin vision owns its client/service shape.
 - **Not a specification.** This vision fixes the capability's shape and
   guarantees, not the provider protocol's exact method signatures, the mock
   provider's storage format, or a CLI flag's exact name.
@@ -222,6 +267,7 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
 ## See Also
 
 - Parent vision: [agent-worktrees](../README.md)
+- PR-domain owner: [agent-pull-requests](../../agent-pull-requests/README.md)
 - Composing sibling:
   [agent-dispatch/reviewer](../../agent-dispatch/reviewer/README.md) — the
   cooperative reviewer loop this capability is meant to compose rather than
@@ -292,15 +338,15 @@ reopen the exact retroactive-exposure gap this guarantee exists to close.
   exists, migrated via a one-time freeze-at-first-touch rather than an
   unbounded live-config fallback — this is a clarification of the
   guarantee's boundary, not a new capability.
-- **2026-09-14** — Authored from an odsp-web-harness clean-room session's
+- **2026-09-14** — Authored from a downstream harness clean-room session's
   real finding: a `code-review` scenario-eval run correctly reported a
   `noop`/BLOCKED verdict for "no PR available" rather than fabricate a
   review, which surfaced three related gaps the operator named directly: no
   mock PR provider to exercise such a flow without a real PR; the reviewer
   side of PR interaction (diffs, comments, threads, verdicts) has no
   first-class primitive the way the author side does; and PR operations
-  require a local checkout of the target repo, which breaks for a repo like
-  odsp-web that is worked on without one. Filed the mock-provider piece
+  require a local checkout of the target repo, which breaks for a repository
+  that is worked on without one. Filed the mock-provider piece
   upstream as
   [#2691](https://github.com/ThomasMichon/copilot-extensions/issues/2691)
   before this vision existed; this vision generalizes that single issue into

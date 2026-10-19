@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
+import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -13,6 +17,234 @@ _SPEC = importlib.util.spec_from_file_location("sync_installer_engine", MODULE_P
 assert _SPEC is not None and _SPEC.loader is not None
 sync_installer_engine = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(sync_installer_engine)
+
+
+def _human_admission():
+    path = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "installer_capabilities.py"
+    spec = importlib.util.spec_from_file_location("native_human_capability", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.powershell_human_utf8_supported
+
+
+def test_human_output_declarations_bind_real_packaged_entrypoints():
+    contract = sync_installer_engine.ier
+    source = REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
+    supports = _human_admission()
+    for name in contract.human_output_adopters(REPO, contract.ADOPTERS):
+        script = REPO / "plugins" / name / "scripts" / "install.ps1"
+        assert (script.parent / contract.HUMAN_HELPER).read_bytes() == source.read_bytes()
+        assert supports(script), name
+        declaration = json.loads(script.with_suffix(".human-output.json").read_text("utf-8"))
+        assert declaration == contract.human_output_declaration(script)
+
+
+def _copy_real_installer_engine(root: Path) -> None:
+    contract = sync_installer_engine.ier
+    canonical = root / "libs" / "installer-engine"
+    canonical.mkdir(parents=True)
+    origin = REPO / "libs" / "installer-engine"
+    for asset in (*contract.FILES, *contract.support_files(origin)):
+        (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(origin / asset, canonical / asset)
+
+
+def test_real_engine_fixture_retains_nested_support_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract = sync_installer_engine.ier
+    origin = tmp_path / "input"
+    canonical = origin / "libs" / "installer-engine"
+    assets = (*contract.FILES, "nested/support.py")
+    for asset in assets:
+        path = canonical / asset
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"fixture {asset}\n", encoding="utf-8")
+    monkeypatch.setattr(contract, "support_files", lambda _: ("nested/support.py",))
+    monkeypatch.setattr(f"{__name__}.REPO", origin)
+    destination = tmp_path / "output"
+    _copy_real_installer_engine(destination)
+    for asset in assets:
+        assert (destination / "libs" / "installer-engine" / asset).read_bytes() == (
+            canonical / asset
+        ).read_bytes()
+
+
+def _real_human_consumer(root: Path, name: str, layout: str) -> Path:
+    import materialize_installer_engine
+
+    contract = sync_installer_engine.ier
+    consumer = root / "plugins" / name
+    scripts = _mk_plugin_scripts(root, name)
+    for asset in ("install.ps1", "install.sh", contract.HUMAN_HELPER):
+        shutil.copyfile(REPO / "plugins" / name / "scripts" / asset, scripts / asset)
+    for ext in ("ps1", "sh"):
+        script = scripts / f"install.{ext}"
+        ref = contract.find_engine_ref(script, ext)
+        if ref is None:
+            assert name == "agent-worktrees"
+            continue
+        old_line = (
+            contract.local_line(ext) if contract.is_local_ref(ref, consumer)
+            else contract.canonical_line(ext)
+        )
+        text = script.read_text(encoding="utf-8")
+        lines = text.splitlines(keepends=True)
+        assert sum(line.lstrip().startswith(old_line) for line in lines) == 1
+        script.write_text("".join(
+            line.replace(old_line, contract.canonical_line(ext), 1)
+            if line.lstrip().startswith(old_line) else line
+            for line in lines
+        ), encoding="utf-8")
+        assert contract.is_canonical_ref(
+            contract.find_engine_ref(script, ext), consumer, repo_root=root,
+        )
+    script = scripts / "install.ps1"
+    script.with_suffix(".human-output.json").write_text(
+        contract.human_output_json(script), encoding="utf-8",
+    )
+    assert layout in {"canonical", "materialized"}
+    if layout == "materialized":
+        log = materialize_installer_engine.materialize_ref_into(
+            source_consumer_dir=consumer, dest_consumer_dir=consumer,
+            canonical_root=root, dest_root=root,
+        )
+        assert not any(line.startswith("SKIP") for line in log), log
+        if name in contract.ADOPTERS:
+            assert any(line.startswith("OK") for line in log), log
+    return consumer
+
+
+@pytest.mark.parametrize("layout", ["canonical", "materialized"])
+def test_materialized_human_declaration_binds_rewritten_entrypoint(
+    tmp_path: Path, layout: str,
+) -> None:
+    import materialize_installer_engine
+
+    contract = sync_installer_engine.ier
+    source_root = tmp_path / "source"
+    _copy_real_installer_engine(source_root)
+    source = _real_human_consumer(source_root, "agent-bridge", layout)
+    destination = tmp_path / "payload"
+    shutil.copytree(source, destination)
+    scripts = destination / "scripts"
+    before = (scripts / "install.ps1").read_bytes()
+    log = materialize_installer_engine.materialize_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=destination,
+        canonical_root=source_root, dest_root=tmp_path,
+    )
+    if layout == "canonical":
+        assert any(line.startswith("OK") for line in log), log
+        assert (scripts / "install.ps1").read_bytes() != before
+    else:
+        assert log == []
+        assert (scripts / "install.ps1").read_bytes() == before
+    for ext in ("ps1", "sh"):
+        assert contract.is_local_ref(
+            contract.find_engine_ref(scripts / f"install.{ext}", ext), destination,
+        )
+    canonical = source_root / "libs" / "installer-engine"
+    for asset in (*contract.FILES, *contract.support_files(canonical)):
+        assert (scripts / asset).read_bytes() == (canonical / asset).read_bytes()
+    assert _human_admission()(scripts / "install.ps1")
+    snapshot = {path.name: path.read_bytes() for path in scripts.iterdir()}
+    assert materialize_installer_engine.materialize_ref_into(
+        source_consumer_dir=destination, dest_consumer_dir=destination,
+        canonical_root=source_root, dest_root=tmp_path,
+    ) == []
+    assert {path.name: path.read_bytes() for path in scripts.iterdir()} == snapshot
+    with (scripts / contract.HUMAN_HELPER).open("a", encoding="ascii") as stream:
+        stream.write("# drift\n")
+    assert not _human_admission()(scripts / "install.ps1")
+    with pytest.raises(ValueError, match="conflicting native human-output assets"):
+        materialize_installer_engine.materialize_ref_into(
+            source_consumer_dir=source, dest_consumer_dir=destination,
+            canonical_root=source_root, dest_root=tmp_path,
+        )
+
+
+@pytest.mark.parametrize("in_place", [False, True])
+@pytest.mark.parametrize("layout", ["canonical", "materialized"])
+def test_whole_payload_human_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, in_place: bool, layout: str,
+) -> None:
+    import materialize_main
+
+    contract = sync_installer_engine.ier
+    names = contract.human_output_adopters(REPO, contract.ADOPTERS)
+    monkeypatch.chdir(tmp_path)
+    source_root = Path("source")
+    destination = Path("payload")
+    _copy_real_installer_engine(source_root)
+    for name in names:
+        source = REPO / "plugins" / name
+        consumer = _real_human_consumer(source_root, name, layout)
+        (consumer / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\nversion = "0.0.0"\n', encoding="utf-8",
+        )
+        for manifest in ("launch-wrapper-assets.json", "packaged-assets.json"):
+            if (source / manifest).is_file():
+                shutil.copyfile(source / manifest, consumer / manifest)
+                data = json.loads((source / manifest).read_text(encoding="utf-8"))
+                for asset in data["files"]:
+                    origin = REPO / data["canonicalDir"] / asset
+                    assert origin.resolve().is_relative_to(REPO.resolve())
+                    target = source_root / data["canonicalDir"] / asset
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(origin, target)
+    original = materialize_main.materialize_launch_wrapper_assets
+
+    def later_owner(dest, *, canonical_root):
+        result = original(dest, canonical_root=canonical_root)
+        # Exercise ordering after the real final asset materializer, including
+        # the engine's own installer (which has no installer-engine reference).
+        script = dest / "plugins" / "agent-worktrees" / "scripts" / "install.ps1"
+        with script.open("a", encoding="ascii") as stream:
+            stream.write("\n# later owning materializer\n")
+        return result
+
+    monkeypatch.setattr(materialize_main, "materialize_launch_wrapper_assets", later_owner)
+    if in_place:
+        shutil.copytree(source_root, destination)
+        report = materialize_main.materialize(destination, canonical_root=destination)
+    else:
+        report = materialize_main.build(destination, source_root=source_root)
+    assert not [line for line in report if line.startswith("SKIP")], report
+    supports = _human_admission()
+    assert len(names) == 9
+    for name in names:
+        script = destination / "plugins" / name / "scripts" / "install.ps1"
+        assert supports(script), name
+        assert (script.parent / contract.HUMAN_HELPER).read_bytes() == (
+            REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
+        ).read_bytes()
+
+
+@pytest.mark.parametrize("asset", [
+    "install.ps1", "install.human-output.json", "installer-human-output.ps1",
+])
+def test_same_root_invalid_human_source_fails_before_any_rewrite(tmp_path, monkeypatch, asset):
+    import materialize_main
+
+    root = tmp_path / "source"
+    source = REPO / "plugins" / "agent-bridge" / "scripts"
+    scripts = root / "plugins" / "agent-bridge" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("install.ps1", "install.human-output.json", "installer-human-output.ps1"):
+        shutil.copyfile(source / name, scripts / name)
+    canonical = root / "libs" / "installer-engine"
+    canonical.mkdir(parents=True)
+    shutil.copyfile(source / "installer-human-output.ps1", canonical / "installer-human-output.ps1")
+    with (scripts / asset).open("a", encoding="ascii") as stream:
+        stream.write("\n# invalid original source\n")
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    monkeypatch.setattr(
+        materialize_main, "materialize_file_pointers",
+        lambda *args, **kwargs: pytest.fail("rewrites must not precede source validation"),
+    )
+    with pytest.raises(ValueError, match="conflicting native human-output assets"):
+        materialize_main.materialize(root, canonical_root=root)
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
 
 
 @pytest.fixture
@@ -320,6 +552,39 @@ def test_sync_removes_stale_local_copy_when_wrappers_are_canonical(fake_repo):
     assert not (scripts / "installer-engine.sh").exists()
 
 
+@pytest.mark.parametrize("mode", ["canonical", "local"])
+@pytest.mark.parametrize("initial", ["missing", "stale"])
+def test_sync_repairs_python_support_in_both_wrapper_modes(fake_repo, mode, initial):
+    scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
+    writer = _write_canonical_refs if mode == "canonical" else _write_local_refs
+    writer(scripts)
+    canonical = fake_repo / "libs" / "installer-engine"
+    with (canonical / "installer-engine.sh").open("a", encoding="utf-8") as stream:
+        stream.write("# installer_dependency_policy.py\n")
+    for name in sync_installer_engine.ier.SUPPORT_FILES:
+        source = canonical / name
+        source.write_text(f"# canonical {name}\n", encoding="utf-8")
+        source.chmod(0o700)
+        if initial == "stale":
+            (scripts / name).write_text("# stale support\n", encoding="utf-8")
+    if mode == "canonical" and initial == "missing":
+        assert sync_installer_engine.verify() == []
+    else:
+        assert sync_installer_engine.verify()
+    written = sync_installer_engine.sync()
+    for name in sync_installer_engine.ier.SUPPORT_FILES:
+        source = canonical / name
+        destination = scripts / name
+        assert f"plugins/agent-registered/scripts/{name}" in written
+        assert destination.read_bytes() == source.read_bytes()
+        if os.name != "nt":
+            assert stat.S_IMODE(destination.stat().st_mode) == stat.S_IMODE(source.stat().st_mode)
+    for name in sync_installer_engine.FILES:
+        assert (scripts / name).exists() == (mode == "local")
+    assert sync_installer_engine.verify() == []
+    assert sync_installer_engine.sync() == []
+
+
 def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
@@ -333,3 +598,46 @@ def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
 
     with pytest.raises(RuntimeError, match="symlink -- refusing"):
         sync_installer_engine.sync()
+
+
+@pytest.mark.parametrize("mode", ["canonical", "local"])
+@pytest.mark.parametrize("name", sync_installer_engine.ier.SUPPORT_FILES)
+@pytest.mark.parametrize("target_state", ["different", "matching", "dangling"])
+def test_sync_refuses_linked_support_without_touching_target(fake_repo, mode, name, target_state):
+    scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
+    writer = _write_canonical_refs if mode == "canonical" else _write_local_refs
+    writer(scripts)
+    canonical = fake_repo / "libs" / "installer-engine"
+    with (canonical / "installer-engine.sh").open("a", encoding="utf-8") as stream:
+        stream.write("# installer_dependency_policy.py\n")
+    for support in sync_installer_engine.ier.SUPPORT_FILES:
+        source = canonical / support
+        source.write_text(f"# canonical {support}\n", encoding="utf-8")
+        source.chmod(0o700)
+    outside = fake_repo / "unrelated"
+    outside.mkdir()
+    target = outside / name
+    if target_state != "dangling":
+        target.write_bytes(
+            (canonical / name).read_bytes() if target_state == "matching" else b"unrelated bytes\n"
+        )
+        target.chmod(0o600)
+    destination = scripts / name
+    destination.symlink_to(target)
+    original_link = os.readlink(destination)
+    before = (
+        target.read_bytes(), stat.S_IMODE(target.stat().st_mode), target.stat().st_mtime_ns,
+    ) if target.exists() else None
+
+    assert sync_installer_engine.verify()
+    with pytest.raises(RuntimeError, match="symlink -- refusing"):
+        sync_installer_engine.sync()
+
+    assert destination.is_symlink()
+    assert os.readlink(destination) == original_link
+    if before is None:
+        assert not target.exists()
+    else:
+        assert (
+            target.read_bytes(), stat.S_IMODE(target.stat().st_mode), target.stat().st_mtime_ns,
+        ) == before

@@ -12,6 +12,9 @@ import pytest
 
 from test_install_engine_adoption import PLUGIN, environment, function, run_ps
 from test_installer_publication_and_health import publication_fixture
+from test_installer_publication_provisioning import (
+    engine_construction_fixture, stage_index_policy_sources,
+)
 
 
 @pytest.mark.parametrize("fallback", [False, True])
@@ -82,17 +85,35 @@ echo "$UV_COMMAND"
 
 
 def test_windows_runtime_and_engine_share_uv_bootstrap_before_build(tmp_path):
+    import importlib.util
+
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     definitions, root = publication_fixture(tmp_path)
+    construction = engine_construction_fixture(tmp_path)
     started, ready = (tmp_path / name for name in ("started", "ready"))
     attempting = tmp_path / "attempting"
-    package = tmp_path / "package"
-    (package / "src").mkdir(parents=True)
+    source_repository = tmp_path / "source-repository"
+    package = stage_index_policy_sources(source_repository, materialized=False)
+    (package / "src").mkdir()
     exe = root / "tool" / ("uv.cmd" if os.name == "nt" else "uv")
-    complete = "@echo off\r\necho uv-fixture-complete\r\nexit /b 0\r\n" if os.name == "nt" else (
-        "#!/bin/sh\nprintf 'uv-fixture-complete\\n'\n"
+    settings = (
+        "PipInstallSettings { settings: PipSettings {\n"
+        " index_locations: IndexLocations { indexes: [], flat_index: [], },\n"
+        " exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\n"
+        " }, }"
+    )
+    complete = (
+        "@echo off\r\n"
+        'for %%a in (%*) do if "%%a"=="--show-settings" goto settings\r\n'
+        "echo uv-fixture-complete\r\nexit /b 0\r\n"
+        ":settings\r\n" + "".join(f"echo {line}\r\n" for line in settings.splitlines())
+        + "exit /b 0\r\n"
+    ) if os.name == "nt" else (
+        "#!/bin/sh\ncase \" $* \" in\n"
+        f"*' --show-settings '*) printf '%s\\n' '{settings}' ;;\n"
+        "*) printf 'uv-fixture-complete\\n' ;;\nesac\n"
     )
     encoded = base64.b64encode(complete.encode()).decode()
     script = (definitions + function("Install-Runtime", "ps1") +
@@ -102,13 +123,15 @@ $PkgSrcDir='{package / "src"}'; $PluginDir='{package}'
 $LocalBin='{tmp_path / "bin"}'
 $VersionedRuntime=$false
 $LinkDir=$VenvDir; $VenvPython='fixture_python'; $LinkPython=$VenvPython
-$EngineHome='{tmp_path / "engine"}'; $EngineVenv=Join-Path $EngineHome 'venv'
+$EngineHome='{tmp_path / "engine"}'; $EngineVenv=Join-Path $EngineHome 'versions\\2.0.0'
 $EngineVenvPython='fixture_python'
+{construction}
 function Write-Warn {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
 function Get-Command {{
     [CmdletBinding()]param($Name,$CommandType)
     if ($Name -in @('python','python3','py')) {{ return [pscustomobject]@{{ Source=$BasePython }} }}
-    throw "forbidden executable rediscovery: $Name"
+    if ($Name -eq 'uv') {{ throw "forbidden executable rediscovery: $Name" }}
+    return Microsoft.PowerShell.Core\\Get-Command $Name -ErrorAction SilentlyContinue
 }}
 function Ensure-Uv {{
     param($InstallRoot)
@@ -136,7 +159,6 @@ function Ensure-Uv {{
     if ($LASTEXITCODE -ne 0 -or $version -ne 'uv-fixture-complete') {{ throw 'bootstrap incomplete' }}
     return $path
 }}
-function New-IndexVenv {{ param($Dir,$Python,$PythonCmd,$PreferSignedPython) return $true }}
 function Test-IndexVenv {{ param($Dir,$Python) return $false }}
 function Get-SignedBasePython {{ return $null }}
 function Get-ActivationRole {{ return 'client' }}
@@ -175,7 +197,7 @@ function Enter-IndexStampLock {{
     if ($Scope -eq 'Uv') {{ [IO.File]::WriteAllText('{attempting}', 'attempting') }}
     return (& $enter -Scope $Scope -TimeoutSeconds $TimeoutSeconds -LockRoot $LockRoot)
 }}
-if (-not (Install-Engine -Upgrade)) {{ throw 'engine fixture failed' }}
+if (-not (Install-Engine)) {{ throw 'engine fixture failed' }}
 """)
     with subprocess.Popen([pwsh, "-NoProfile", "-File", str(worker)], env=environment(tmp_path),
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as child:
@@ -185,3 +207,17 @@ if (-not (Install-Engine -Upgrade)) {{ throw 'engine fixture failed' }}
     assert child.returncode == 0, stdout + stderr
     assert (tmp_path / "writers").read_text().splitlines() == ["runtime"]
     assert exe.read_bytes() == complete.encode()
+    assert (tmp_path / "engine/current-version").read_text().strip() == "2.0.0"
+    assert (tmp_path / "engine/versions/2.0.0/.install-complete.json").is_file()
+    spec = importlib.util.spec_from_file_location(
+        "acquisition_dependency_policy", PLUGIN / "scripts/installer_dependency_policy.py",
+    )
+    assert spec and spec.loader
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    admitted = policy.prepare_uv_install(
+        str(exe), ["--python", sys.executable, str(package)], env=environment(tmp_path),
+        cwd=package,
+        trusted_source_roots=(source_repository.resolve(),),
+    )
+    assert "--exclude-newer" in admitted

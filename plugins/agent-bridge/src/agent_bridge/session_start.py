@@ -115,6 +115,8 @@ class _SessionStartMixin:
 
         if parity_fault not in {None, FAILED_ACP_HANDSHAKE_FAULT}:
             raise ValueError(f"unsupported parity fault: {parity_fault}")
+        if target.native_resume_id:
+            raise ValueError("native resume authority cannot create a fresh conversation")
         core = _core()
         # Per-session copilot args: append to the resolved target's args for
         # THIS spawn only (a fresh target copy so a shared/cached AgentConfig
@@ -122,6 +124,9 @@ class _SessionStartMixin:
         # so this reaches local, SSH, and command launches uniformly.
         existing_venue = target.venue if isinstance(target.venue, dict) else {}
         existing_overrides = existing_venue.get(_REQUEST_OVERRIDES_KEY)
+        controller_origin = (existing_overrides if isinstance(existing_overrides, dict) else {}).get(
+            "controller_worktree_origin", "explicit" if target.caller_worktree is not None else "affinity",
+        )
         existing_request_env = (
             existing_overrides.get("env")
             if isinstance(existing_overrides, dict)
@@ -162,7 +167,7 @@ class _SessionStartMixin:
         # step records it on the spawned (bridge) worktree, enabling the Picker's
         # "Jump to caller". caller_id is the caller's WORKTREE_ID (agent-bridge
         # convention); a non-worktree caller simply won't resolve in the Picker.
-        if caller_id and not target.caller_worktree:
+        if caller_id and target.caller_worktree is None and controller_origin != "explicit":
             target = replace(target, caller_worktree=caller_id)
         # resource-obligation-settlement Ph3c: carry the caller's qualified
         # ClaimRef onto the target so the worktree-resolve stamps it as the
@@ -171,7 +176,7 @@ class _SessionStartMixin:
         # the caller's finalize gate sees the bridge session as an obligation and
         # the bridge worktree's finalize settles it (Phase 3a). Best-effort:
         # None (a non-worktree caller / stale runtime) simply skips it.
-        if caller_owner_ref and not target.caller_owner_ref:
+        if caller_owner_ref is not None and target.caller_owner_ref is None:
             target = replace(target, caller_owner_ref=caller_owner_ref)
         session_id = creation_session_id or str(uuid.uuid4())[:12]
         if session_id in self._sessions:
@@ -246,11 +251,7 @@ class _SessionStartMixin:
 
         # Wire ACP events into the session's event log
         def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
-            if session.event_log:
-                session.event_log.append(event_type, data)
-            self._capture_progress(session, event_type, data)
-            if event_type == "usage_update":
-                self._handle_usage_update(session, data)
+            self._route_acp_event(session, event_type, data)
 
         # Persist to DB. `config_json` carries `mcp_servers` -- otherwise a
         # session's declared per-session MCP toolset (e.g. a reviewer's
@@ -332,6 +333,11 @@ class _SessionStartMixin:
                 and target.container.get("name")
                 else None
             )
+            if cs_target is not None or container_target is not None:
+                from .venue_plugins import with_controller_origin
+                target = with_controller_origin(target, controller_origin)
+                session.target = target
+                self._db.update_session_target(session_id, target.to_json(), target.cwd)
             if parity_fault:
                 session.parity_fault_result = {
                     "fault": parity_fault,
@@ -353,6 +359,8 @@ class _SessionStartMixin:
                     effort=effort,
                 )
             elif container_target is not None:
+                from .venue_plugins import prepare_venue_plugins, resolve_controller_cwd
+                controller_cwd = await resolve_controller_cwd(target, caller_session_id=session.caller_session_id)
                 # Trusted containers use the same durable far-side Session Host
                 # model as CodeSpaces.  agent-containers prepares only the SSH
                 # endpoint and one launch's secret-backed env command; all Host,
@@ -435,15 +443,17 @@ class _SessionStartMixin:
                         or container_target.get("workspace_folder")
                         or None
                     )
-                    plugin_dirs = (
-                        []
-                        if parity_fault
-                        else await core._resolve_remote_ai_plugin_dirs(
-                            container_spawner.transport,
-                            f"container:{container_target['name']}",
-                            remote_cwd,
-                        )
-                    )
+                    if not parity_fault:
+                        async def prepare_container_child(argv):
+                            plugin_dirs = await prepare_venue_plugins(
+                                container_target, container_spawner.transport, remote_cwd,
+                                remote_env=prepared.get("remote_env"), controller_cwd=controller_cwd,
+                            )
+                            return _container_remote_child_argv(
+                                container_target, prepared, plugin_dirs,
+                                copilot_args=target.copilot_args,
+                            )
+                        container_spawner.prepare_child = prepare_container_child
                     client, acp_sid = await self._connect_via_session_host(
                         target,
                         tracker=tracker,
@@ -455,7 +465,7 @@ class _SessionStartMixin:
                         remote_child_argv=_container_remote_child_argv(
                             container_target,
                             prepared,
-                            plugin_dirs,
+                            [],
                             acp_command_override=(
                                 _failed_acp_handshake_command()
                                 if parity_fault
@@ -517,6 +527,8 @@ class _SessionStartMixin:
                             ):
                                 self._release_container_lock(session_id)
             elif cs_target is not None:
+                from .venue_plugins import prepare_venue_plugins, resolve_controller_cwd
+                controller_cwd = await resolve_controller_cwd(target, caller_session_id=session.caller_session_id)
                 # CodeSpace Session-Host mode (#177): bootstrap the Host inside
                 # the CodeSpace, forward its loopback endpoint, and drive ACP over
                 # it -- so a host sleep/tunnel flap disconnects the front while
@@ -533,119 +545,49 @@ class _SessionStartMixin:
                 # dispatching to an already-claimed CodeSpace is bounced instead
                 # of clobbering the incumbent. Degrade-safe: no owner / disabled
                 # / binstub absent -> proceed unclaimed, today's behavior.
-                claim_owner = getattr(target, "caller_worktree", None) or caller_id
+                from .session_host.codespace_transport import codespace_launch_ownership
+                claim_owner = getattr(target, "caller_worktree", None) or caller_id or controller_cwd
                 core = _core()
-                _claim_status, _claim_detail = core._claim_codespace(
-                    cs_target["name"],
-                    claim_owner or "",
+                with codespace_launch_ownership(
+                    self, session_id, cs_target, claim_owner or "", core,
                     holder_ref=getattr(target, "caller_owner_ref", None),
-                )
-                if _claim_status == "conflict":
-                    raise CodespaceClaimConflictError(
-                        cs_target["name"], claim_owner or "", _claim_detail
+                    replace_session_id=replace_session_id, retain_on_error=parity_fault,
+                    claim_metadata=target.venue[_REQUEST_OVERRIDES_KEY],
+                    persist_claim_metadata=lambda: self._db.update_session_target(
+                        session_id, target.to_json(), target.cwd,
+                    ),
+                ) as enter_connect:
+                    from .relay_state import get_live_relay_port
+                    relay_prelude, relay_port = core._resolve_relay_launch_env(
+                        cs_target["name"], get_live_relay_port(),
                     )
-                if _claim_status == "coordination-rejected":
-                    raise CodespaceCoordinationRejectedError(
-                        cs_target["name"], claim_owner or "", _claim_detail
+                    cs_spawner = build_codespace_spawner(
+                        cs_target["name"], cs_target["repo"], relay_port=relay_port,
+                        provision_prelude=relay_prelude,
+                        unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
+                        active_reap_seconds=self._session_host_active_reap_seconds,
                     )
-
-                # Same-machine mirror of the container lock acquired below (see
-                # ``_codespace_locks``'s docstring in ``session_core``): guards
-                # the shared credential-relay reverse-forward this Session-Host
-                # transport is about to open against a concurrent local
-                # ``agent-codespaces ssh``/``copilot`` invocation (or a second
-                # daemon dispatch) against the SAME CodeSpace on this machine.
-                if replace_session_id:
-                    self._transfer_codespace_lock(
-                        replace_session_id, session_id, cs_target["name"],
-                    )
-                else:
-                    self._acquire_codespace_lock(session_id, cs_target["name"])
-
-
-                # path injects, so a detached copilot on the CS has working
-                # ADO/git auth over the credential relay (the daemon owns the
-                # relay; the per-codespace token is minted by agent-codespaces).
-                # Guarded: if agent-codespaces isn't importable, the Host runs
-                # auth-light (fine for ACP + non-ADO turns).
-                #
-                # Source the port from the daemon's *actually-bound* relay
-                # (get_live_relay_port) rather than agent-codespaces' static
-                # config port, so the CS env + the persistent forward's ``-R``
-                # follow the live relay -- mirroring the mesh path (commit
-                # 8a8bd8f8) and fixing CodeSpace ADO auth when the relay isn't on
-                # the declared 9857 (dotfiles #489/#540 pt3). None -> the callee
-                # falls back to the config port.
-                relay_prelude = ""
-                relay_port = None
-                from .relay_state import get_live_relay_port
-                core = _core()
-                relay_prelude, relay_port = core._resolve_relay_launch_env(
-                    cs_target["name"], get_live_relay_port()
-                )
-                cs_spawner = build_codespace_spawner(
-                    cs_target["name"], cs_target["repo"], relay_port=relay_port,
-                    unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
-                    active_reap_seconds=self._session_host_active_reap_seconds,
-                )
-                # The acp_command is a far-side SHELL string (e.g.
-                # ``cd /workspaces/repo && copilot --acp --stdio``), not an argv,
-                # so the Session Host execs it through a login shell (with the
-                # relay prelude prepended); copilot inherits the host's stdio pipe
-                # as fd 0/1 and its exit ends the shell (child-liveness tracks it).
-                #
-                # Model/effort are NOT passed as ``--model`` launch flags here:
-                # copilot ignores them in ``--acp`` mode. The dispatched agent's
-                # model is set by the ACP client after the session exists, via
-                # ``session/set_config_option`` (see AcpClient._apply_model_config,
-                # dotfiles#790) -- the single, uniform mechanism for every
-                # dispatch path.
-                acp_command = cs_target["acp_command"]
-                # Fold the CodeSpace repo's OWN enabled ``.ai`` plugin dirs into
-                # the launch as ``--plugin-dir`` so the dispatched ACP agent
-                # loads the product repo's own in-repo skills/MCP. ``copilot
-                # --acp`` ignores ``enabledPlugins`` -- only ``--plugin-dir``
-                # surfaces plugin skills -- and this Session-Host path (never the
-                # front-owns-stdio ``agent-codespaces ssh`` path) is where a real
-                # CodeSpace dispatch launches, so the fold MUST happen here
-                # (dotfiles#1274 WS1-skills). Resolved by shelling agent-codespaces'
-                # own venv (process boundary), mirroring the relay-launch-env
-                # seam. Best-effort: [] on any failure -> unchanged launch. The
-                # payloads already live in the checkout, so ``--plugin-dir`` at
-                # ``/workspaces/<repo>/.ai/<name>`` needs no install/egress. The
-                # flags append to the tail of ``cd <repo> && copilot --acp …``, so
-                # they land on the ``copilot`` invocation.
-                ai_plugin_dirs = (
-                    []
-                    if parity_fault
-                    else await core._resolve_remote_ai_plugin_dirs(
-                        cs_spawner.transport,
-                        f"codespace:{cs_target['name']}",
-                        cs_target.get("workspace_folder") or None,
-                    )
-                )
-                acp_command = (
-                    _failed_acp_handshake_command()
-                    if parity_fault
-                    else _append_plugin_dirs(acp_command, ai_plugin_dirs)
-                )
-                if ai_plugin_dirs:
-                    log.info(
-                        "Folded %d repo-own .ai --plugin-dir(s) into %s launch: %s",
-                        len(ai_plugin_dirs), cs_target["name"], ai_plugin_dirs,
-                    )
-                remote_argv = [
-                    "bash", "-lc", relay_prelude + acp_command,
-                ]
-                # Copilot runs its tools from the ACP session cwd, so it must be
-                # the CodeSpace workspace checkout (e.g. /workspaces/example-web) --
-                # NOT the _default_cwd() /home/<user> fallback, or the agent works
-                # blind with no repo in view. Prefer the structured provider
-                # workspace_folder; else the cd-target parsed from acp_command.
-                remote_cwd = cs_target.get("workspace_folder") or None
-                from .session_host.spawner import RemoteSpawnCleanupPendingError
-
-                try:
+                    # Resolve intent before provisioning; strict Git validation
+                    # runs after relay/authenticated hooks in prepare_child.
+                    from .session_host.codespace_transport import resolve_execution_workspace
+                    remote_cwd = await resolve_execution_workspace(cs_target, cs_spawner.transport)
+                    target.codespace = cs_target
+                    target.cwd = remote_cwd
+                    self._db.update_session_target(session_id, target.to_json(), remote_cwd)
+                    acp_command = cs_target["acp_command"]
+                    if not parity_fault:
+                        from .session_host.codespace_transport import codespace_child_preparer
+                        cs_spawner.prepare_child = codespace_child_preparer(
+                            cs_target, cs_spawner.transport, prelude=relay_prelude,
+                            controller_cwd=controller_cwd, prepare_plugins=prepare_venue_plugins,
+                            append_plugin_dirs=_append_plugin_dirs,
+                        )
+                    if parity_fault:
+                        acp_command = _failed_acp_handshake_command()
+                    # Model/effort still use ACP session/set_config_option, not
+                    # native CLI flags; ACP cwd matches the concrete child cd.
+                    remote_argv = ["bash", "-lc", relay_prelude + acp_command]
+                    enter_connect()
                     client, acp_sid = await self._connect_via_session_host(
                         target,
                         tracker=tracker,
@@ -660,15 +602,6 @@ class _SessionStartMixin:
                         effort=effort,
                         parity_fault_result=session.parity_fault_result,
                     )
-                except RemoteSpawnCleanupPendingError:
-                    raise
-                except Exception:
-                    if not parity_fault:
-                        claim_key = _codespace_claim_key(session.target)
-                        if claim_key is not None:
-                            core._release_codespace_claim(*claim_key)
-                        self._release_codespace_lock(session_id)
-                    raise
             elif self._is_codespace_target(target):
                 # A CodeSpace target MUST run under a Session Host: only then does
                 # copilot's stdio belong to a survivable host on the far side, so

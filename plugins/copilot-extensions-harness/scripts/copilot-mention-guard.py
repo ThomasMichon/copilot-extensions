@@ -141,7 +141,7 @@ def current_repo_candidates(cwd: str | None = None) -> list[str]:
         result = subprocess.run(
             ["git", "remote"],
             cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
-            env=env,
+            env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
         return []
@@ -155,7 +155,7 @@ def current_repo_candidates(cwd: str | None = None) -> list[str]:
             url_result = subprocess.run(
                 ["git", "remote", "get-url", name],
                 cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
-                env=env,
+                env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.SubprocessError):
             continue

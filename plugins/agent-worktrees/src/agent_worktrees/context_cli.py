@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import output
 from . import git_ops, sessions, state_root as state_root_mod, tracking
@@ -62,6 +64,7 @@ _GET_KEYS: dict[str, str] = {
     "src-dir": "Source root (parent of repos)",
     "config-dir": "Per-project config directory (~/.{project})",
     "machine": "Machine name from config",
+    "execution-identity": "Versioned configured execution identity (JSON)",
     "platform": "Platform (win/wsl/linux)",
     "project": "Project name",
     "owner-ref": "This worktree's qualified claim ref "
@@ -301,7 +304,8 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 
     try:
         config = cfg.load_config()
-    except Exception:
+    except Exception as exc:
+        print(f"warning: Cannot load machine context config: {exc}", file=sys.stderr)
         return _empty()
 
     project = getattr(config, "repo_name", "") or project
@@ -309,26 +313,43 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
     if not project or not machine:
         return _empty()
 
+    def _identity_only() -> int:
+        raw = (
+            f"Machine: {machine}\nPlatform: {cfg.detect_platform()}\n"
+            f"Project: {project}\nBinstub: {project}"
+        )
+        print(_json.dumps({"additionalContext": raw}))
+        return 0
+
     try:
         repo_dir = config.default_repo.anchor
     except Exception:
         repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
-        return _empty()
+        return _identity_only()
 
     try:
         registry = cfg.load_machines_yaml(repo_dir)
-    except (FileNotFoundError, ValueError):
-        return _empty()
-
-    entry = cfg.find_machine_entry(registry, machine)
-    if entry is None:
-        return _empty()
+    except FileNotFoundError:
+        return _identity_only()
+    except ValueError as exc:
+        print(f"warning: Cannot load machine topology: {exc}", file=sys.stderr)
+        return _identity_only()
 
     try:
-        raw = cfg.render_copilot_instructions(entry, project=project).rstrip()
-    except Exception:
-        return _empty()
+        entry = cfg.find_machine_metadata(registry, machine)
+    except ValueError as exc:
+        print(f"warning: Cannot resolve machine metadata: {exc}", file=sys.stderr)
+        return _identity_only()
+    if entry is None:
+        print(f"warning: Machine topology has no metadata for {machine!r}", file=sys.stderr)
+        return _identity_only()
+
+    try:
+        raw = cfg.render_copilot_instructions(entry, project=project, machine=machine).rstrip()
+    except Exception as exc:
+        print(f"warning: Cannot render machine context: {exc}", file=sys.stderr)
+        return _identity_only()
     if not raw:
         return _empty()
 
@@ -365,6 +386,10 @@ def cmd_get(args: argparse.Namespace) -> int:
             session_cwd = None
             _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(None)
 
+    if key == "execution-identity":
+        from .execution_identity_read import cmd_get_execution_identity
+
+        return cmd_get_execution_identity()
     try:
         config = cfg.load_config(
             include_control_plane_related_pr=key in _PR_GRAFT_DEPENDENT_KEYS
@@ -419,8 +444,6 @@ def cmd_get(args: argparse.Namespace) -> int:
     session_is_anchor = False
     if session_cwd is not None and not wt_id:
         try:
-            from agent_procutil import no_window_kwargs
-
             proc = subprocess.run(
                 ["git", "-C", str(session_cwd), "rev-parse", "--show-toplevel"],
                 capture_output=True,
@@ -505,11 +528,16 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
     if not resolved:
         return output._json_error(f"unknown project {project!r}")
     should_switch = bool(anchor is not None and not _cwd_is_inside_project(anchor))
+    tracking_path = cfg.project_dir(resolved) / "worktrees"
+    invocation_cwd = _core()._INVOCATION_CWD or Path.cwd()
+    worktree_id = tracking.find_worktree_id_by_cwd(str(invocation_cwd), project=resolved)
+    record = tracking.load_record_by_id(worktree_id, tracking_path=tracking_path) if worktree_id else None
     payload = {
         "version": 1,
         "project": resolved,
         "should_switch_cwd": should_switch,
         "cwd": str(anchor.resolve()) if should_switch and anchor is not None else None,
+        "workspace": record.worktree_path if record is not None and record.repo == resolved else None,
         "default_live": not _in_ssh_session(),
     }
     if getattr(args, "json", False):
@@ -833,6 +861,10 @@ def cmd_config_root_dispatch(argv: list[str]) -> int:
 
 def cmd_knowledge_dispatch(argv: list[str]) -> int:
     """Manage the launch-time harness/knowledge composition boundary."""
+    if argv and argv[0] == "control-plane":
+        from .control_plane_cli import main
+
+        return main(argv[1:])
     p = argparse.ArgumentParser(
         prog="agent-worktrees knowledge",
         description=(
@@ -841,6 +873,10 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
         ),
     )
     sub = p.add_subparsers(dest="command")
+    sub.add_parser(
+        "control-plane",
+        help="Read the declared harness/knowledge roles from an explicit topology",
+    )
     compose_p = sub.add_parser(
         "compose-plugins",
         help=(

@@ -10,7 +10,9 @@ from types import SimpleNamespace
 import pytest
 
 from zdd import breadcrumb, conditional, routing
-from zdd.conditional import ConditionalCutover, PreparedCutover, RuntimeAttestation, RuntimeSnapshot
+from zdd.conditional import (
+    ConditionalCutover, PreparedCutover, RuntimeAttestation, RuntimePreparation, RuntimeSnapshot,
+)
 from zdd.cutover import CutoverOrchestrator
 from zdd.cutover_lock import CutoverLock
 
@@ -108,6 +110,242 @@ def case(tmp_path, monkeypatch):
         pick_free_port=lambda: 61002,
     )
     return tmp_path, old, events, handle, snapshot, request, orch
+
+
+def two_phase(case, *, prepare_change=None, activate_change=None):
+    root, old, events, _, snapshot, request, orch = case
+    state = {"active": False}
+
+    def attest(endpoint):
+        result = snapshot.attest(endpoint)
+        if endpoint.pid != old.pid:
+            result = replace(result, ready=state["active"])
+        return result
+
+    def prepared(endpoint):
+        assert not state["active"]
+        assert routing.read_active_endpoint(root, verify_listener=False) == old
+        events.append("prepare")
+        result = RuntimePreparation(
+            endpoint.pid, endpoint.process_start_time, endpoint.version,
+            snapshot.identity, True,
+        )
+        return prepare_change(result) if prepare_change else result
+
+    def activate(endpoint):
+        assert endpoint.generation > old.generation
+        assert routing.read_active_endpoint(root, verify_listener=False) == endpoint
+        assert not attest(endpoint).ready
+        # The coordinator must not hold the routing fence across a receiver
+        # callback: another native lock owner has to be able to acquire it.
+        acquired = []
+        def receiver_fence():
+            with routing.routing_lock(root, deadline=time.monotonic() + 0.05):
+                acquired.append(True)
+        worker = threading.Thread(target=receiver_fence)
+        worker.start()
+        worker.join(timeout=1)
+        assert not worker.is_alive() and acquired == [True]
+        events.append("activate")
+        if activate_change:
+            return activate_change(endpoint, state)
+        state["active"] = True
+
+    def retire(old_endpoint, new_endpoint):
+        assert state["active"] and attest(new_endpoint).ready
+        snapshot.retire(old_endpoint, new_endpoint)
+
+    def relay(endpoint):
+        assert "shutdown" in events and state["active"]
+        events.append("relay")
+        return {"adopted": True}
+
+    two_stage = replace(
+        snapshot, attest=attest, attest_prepared=prepared, activate_successor=activate,
+        retire=retire, adopt_successor=relay,
+    )
+    return replace(request, capture_runtime=lambda _: two_stage), orch
+
+
+def test_two_phase_preparation_is_not_readiness_before_publication(case):
+    root, _, events, _, _, _, _ = case
+    request, orch = two_phase(case)
+    result = orch.run(conditional=request, health_timeout=0)
+    assert result.ok and result.retirement_confirmed
+    assert events == ["spawn", "prepare", "activate", "drain", "shutdown", "relay"]
+    assert routing.read_active_endpoint(root, verify_listener=False) == result.serving_endpoint
+    assert "published successor activated and ready" in result.steps
+    assert breadcrumb.read_breadcrumb(root) is None
+
+
+def test_two_phase_adoption_keeps_only_allowlisted_diagnostics(case):
+    request, orch = two_phase(case)
+    snapshot = request.capture_runtime(request.expected_active)
+
+    def adopt(endpoint):
+        response = snapshot.adopt_successor(endpoint)
+        return {**response, "private_settings": "fixture-private-adoption-secret"}
+
+    captured = replace(snapshot, adopt_successor=adopt)
+    result = orch.run(
+        conditional=replace(request, capture_runtime=lambda _: captured), health_timeout=0,
+    )
+    assert result.ok and result.retirement_confirmed
+    assert "successor resource adoption confirmed" in result.steps
+    assert "fixture-private-adoption-secret" not in repr(result.to_dict())
+    assert "private_settings" not in repr(result.to_dict())
+
+
+@pytest.mark.parametrize("field,value", [
+    ("pid", 303), ("pid", True), ("process_start_time", "999"),
+    ("version", "other"), ("config_identity", "other"),
+    ("prepared", False), ("prepared", 1), ("prepared", "true"),
+])
+def test_invalid_preparation_never_publishes_or_activates(case, field, value):
+    root, old, events, _, _, _, _ = case
+    request, orch = two_phase(case, prepare_change=lambda reply: replace(reply, **{field: value}))
+    result = orch.run(conditional=request, health_timeout=0)
+    assert not result.ok and not result.committed and result.rolled_back
+    assert events == ["spawn", "prepare", "terminate"]
+    assert routing.read_active_endpoint(root, verify_listener=False) == old
+
+
+def test_serving_attestation_cannot_substitute_for_preparation(case):
+    _, _, events, _, _, _, _ = case
+    request, orch = two_phase(case, prepare_change=lambda reply: RuntimeAttestation(
+        reply.pid, reply.process_start_time, reply.version, reply.config_identity, True,
+    ))
+    result = orch.run(conditional=request, health_timeout=0)
+    assert not result.ok and not result.committed
+    assert "activate" not in events and "drain" not in events and "shutdown" not in events
+
+
+@pytest.mark.parametrize("failure", ["exception", "not-ready", "invalid-result", "route"])
+def test_activation_failure_retains_promoted_candidate_without_retirement(case, failure):
+    root, old, events, handle, _, _, _ = case
+    winner = replace(old, pid=303, process_start_time="3030", version="3", generation=20)
+
+    def fail(endpoint, state):
+        if failure == "exception":
+            raise ValueError("fixture-private-secret")
+        if failure == "invalid-result":
+            return {"ready": True, "secret": "fixture-private-secret"}
+        if failure == "route":
+            state["active"] = True
+            routing._atomic_write(root / "active.json", {"active": winner.to_dict()})
+
+    request, orch = two_phase(case, activate_change=fail)
+    result = orch.run(conditional=request, health_timeout=0)
+    assert not result.ok and not result.committed and not result.rolled_back
+    assert events[:3] == ["spawn", "prepare", "activate"]
+    assert "drain" not in events and "shutdown" not in events and "terminate" not in events
+    assert handle.poll() is None
+    expected = winner if failure == "route" else old
+    active = routing.read_active_endpoint(root, verify_listener=False)
+    assert active.pid == expected.pid
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+    assert "fixture-private-secret" not in repr(result.to_dict())
+
+
+def test_active_readiness_is_rechecked_after_preparation_and_activation(case):
+    root, old, events, _, snapshot, _, _ = case
+    request, orch = two_phase(case)
+    base = request.capture_runtime(old)
+
+    def drained(old_endpoint, new_endpoint, timeout):
+        result = snapshot.drain_predecessor(old_endpoint, new_endpoint, timeout)
+        return result
+
+    def attest(endpoint):
+        reply = base.attest(endpoint)
+        if endpoint.pid != old.pid and "drain" in events:
+            return replace(reply, ready=False)
+        return reply
+
+    altered = replace(base, attest=attest, drain_predecessor=drained)
+    request = replace(request, capture_runtime=lambda _: altered)
+    result = orch.run(conditional=request, health_timeout=0)
+    assert not result.ok and not result.committed
+    assert events == ["spawn", "prepare", "activate", "drain", "undrain"]
+    assert routing.read_active_endpoint(root, verify_listener=False).pid == old.pid
+
+
+@pytest.mark.parametrize("missing", ["attest_prepared", "activate_successor"])
+def test_two_phase_callbacks_must_be_explicitly_paired(case, missing):
+    snapshot = case[4]
+    supplied = (
+        {"activate_successor": lambda _: None}
+        if missing == "attest_prepared" else
+        {"attest_prepared": lambda _: None}
+    )
+    with pytest.raises(ValueError, match="must be paired"):
+        replace(snapshot, **supplied)
+
+
+@pytest.mark.parametrize("operation", ["attest_prepared", "activate_successor"])
+def test_two_phase_async_callbacks_are_not_accepted(case, operation):
+    async def invalid(_):
+        pytest.fail("callback must never be scheduled")
+    callbacks = {
+        "attest_prepared": lambda _: None, "activate_successor": lambda _: None,
+        operation: invalid,
+    }
+    with pytest.raises(ValueError, match="synchronous"):
+        replace(case[4], **callbacks)
+
+
+@pytest.mark.parametrize("operation", ["attest_prepared", "activate_successor"])
+def test_two_phase_returned_coroutine_is_closed_not_scheduled(case, operation):
+    _, _, events, _, _, _, _ = case
+    request, orch = two_phase(case)
+    base = request.capture_runtime(request.expected_active)
+    invoked = []
+
+    async def invalid():
+        invoked.append("scheduled")
+
+    coroutine = invalid()
+    altered = replace(base, **{operation: lambda _: coroutine})
+    result = orch.run(
+        conditional=replace(request, capture_runtime=lambda _: altered), health_timeout=0,
+    )
+    assert not result.ok and not result.committed
+    assert coroutine.cr_frame is None and not invoked
+    assert "drain" not in events and "shutdown" not in events
+
+
+@pytest.mark.parametrize("failure", ["exception", "false", "missing", "coercion", "readiness"])
+def test_two_phase_final_resource_adoption_failure_is_not_success(case, failure):
+    root, _, events, handle, _, _, _ = case
+    request, orch = two_phase(case)
+    base = request.capture_runtime(request.expected_active)
+    state = {"adopted": False}
+
+    def adopt(endpoint):
+        assert "shutdown" in events
+        if failure == "exception":
+            raise ValueError("fixture-private-secret")
+        state["adopted"] = True
+        return {
+            "false": {"adopted": False}, "missing": {},
+            "coercion": {"adopted": 1}, "readiness": {"adopted": True},
+        }[failure]
+
+    def attest(endpoint):
+        response = base.attest(endpoint)
+        return replace(response, ready=False) if state["adopted"] else response
+
+    altered = replace(base, adopt_successor=adopt, attest=attest)
+    result = orch.run(
+        conditional=replace(request, capture_runtime=lambda _: altered), health_timeout=0,
+    )
+    assert not result.ok and result.committed and result.retirement_confirmed
+    assert result.serving_endpoint is None
+    assert events == ["spawn", "prepare", "activate", "drain", "shutdown"]
+    assert handle.poll() is None
+    assert routing.read_active_endpoint(root, verify_listener=False).pid == handle.pid
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+    assert "fixture-private-secret" not in repr(result.to_dict())
 
 
 def test_routing_budget_is_fresh_after_runtime_capture(case, monkeypatch):
@@ -515,9 +753,11 @@ def test_conditional_post_flip_route_winner_prevents_rollback_and_retirement(cas
 def test_conditional_post_flip_lock_contention_retains_generations_and_recovery(case):
     root, _, events, _, snapshot, request, orch = case
     acquired, release = threading.Event(), threading.Event()
+    contention_started = []
 
     def hold():
         with routing._routing_lock(root):
+            contention_started.append(time.monotonic())
             acquired.set()
             assert release.wait(5)
 
@@ -532,7 +772,6 @@ def test_conditional_post_flip_lock_contention_retains_generations_and_recovery(
             return response
 
     try:
-        started = time.monotonic()
         result = orch.run(
             conditional=replace(
                 request,
@@ -542,7 +781,7 @@ def test_conditional_post_flip_lock_contention_retains_generations_and_recovery(
                 ),
             )
         )
-        assert time.monotonic() - started < 1
+        assert time.monotonic() - contention_started[0] < 1
     finally:
         release.set()
         thread.join(2)
@@ -556,9 +795,11 @@ def test_native_routing_thread_contention_has_bounded_owner_outcome(case, post_s
     root, old, events, _, snapshot, request, orch = case
     acquired = threading.Event()
     release = threading.Event()
+    contention_started = []
 
     def hold():
         with routing._routing_lock(root):
+            contention_started.append(time.monotonic())
             acquired.set()
             assert release.wait(5)
 
@@ -576,10 +817,9 @@ def test_native_routing_thread_contention_has_bounded_owner_outcome(case, post_s
     else:
         thread.start()
         assert acquired.wait(2)
-    started = time.monotonic()
     try:
         result = orch.run(conditional=request, health_timeout=0)
-        assert time.monotonic() - started < 1
+        assert time.monotonic() - contention_started[0] < 1
     finally:
         release.set()
         thread.join(2)

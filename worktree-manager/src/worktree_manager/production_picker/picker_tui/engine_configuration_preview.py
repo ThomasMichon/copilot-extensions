@@ -13,6 +13,13 @@ from .pivot_actions import format_form_template
 from .pivot_manifest import resolve_path
 
 
+def _provider_row(row):
+    # The renderer adds these two cross-link labels to cached rows in place.
+    # They are not provider configuration and may arrive after the first paint.
+    return {key: value for key, value in row.items()
+            if key not in ("_worktree_short", "worktree_title")}
+
+
 class ConfigurationPreviewFlow:
     def __init__(self, engine, reg, action, row, ctx, fields, summary):
         self.engine, self.reg, self.action = engine, reg, action
@@ -37,7 +44,7 @@ class ConfigurationPreviewFlow:
             )
             and engine._reg_pivot() == self.reg
             and self.action in engine._reg_pivot().actions
-            and any(row == self.row for row in engine._task_rows())
+            and any(_provider_row(row) == _provider_row(self.row) for row in engine._task_rows())
         )
 
     def edit(self, values=None):

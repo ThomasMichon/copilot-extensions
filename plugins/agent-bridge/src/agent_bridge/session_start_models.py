@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .preference_models import PreferenceRequestFields
 
@@ -13,11 +13,20 @@ class StartSessionRequest(PreferenceRequestFields):
     """Request to start a new agent session."""
 
     agent: str | None = None
+    remote_session_id: str | None = Field(default=None, min_length=1, max_length=1024)
     target_dir: str | None = None
     topology: str | None = None
     worktree_id: str | None = None  # agent-worktrees worktree ID for session roll
     creation_key: str | None = Field(default=None, min_length=1, max_length=1024)
     creation_prompt: str | None = None
+    provider_instance: bool = False  # explicit keyed provider-native creation, never a worktree
+
+    @model_validator(mode="after")
+    def require_provider_creation_key(self) -> StartSessionRequest:
+        if self.provider_instance and self.creation_key is None:
+            raise ValueError("provider_instance requires creation_key")
+        return self
+
     caller_id: str | None = None  # caller identity for session affinity
     caller_session_id: str | None = None  # creating Copilot session's id; invalid -> dropped
     sender_repo: str | None = None  # caller's repo (agent-worktrees `get project`

@@ -5,8 +5,9 @@ line reads for the session-intelligence accounting pipeline. `session-sync`
 can now additionally publish process-log evidence alongside session-state for
 the ordinary local-machine sync path (`sync.process_logs.enabled`, opt-in,
 filesystem targets only). Optional scheduled ZIP snapshots preserve settled
-local logs without deleting originals; reclamation and usage ingestion remain
-separate implementation slices.
+local logs without deleting originals. Separately opted-in machine-only native
+Windows runs can retire raw revisions after all-target verification; usage
+ingestion remains a separate implementation slice.
 
 ## Supported observations
 
@@ -91,9 +92,10 @@ are propagated unchanged.
 The configured final root must be a real directory, not an alias. Pinning lasts
 for the operation, not across separate enumeration and read calls: references
 are observations, not immutable snapshots. Concurrent content writes remain
-possible. Sync destination writes and session-state readers retain their
-separate ancestor-containment limitations; this source-read change does not
-close the complete containment tracker.
+possible. Process-log payload destinations have their own pinned boundary
+described below. Session-state readers/writers and transfer-health metadata
+retain separate ancestor-containment limitations; the complete containment
+tracker remains open.
 
 ## See Also
 
@@ -123,8 +125,43 @@ Two scope limits, both deliberate rather than overlooked:
   repo-scoped sync needs its own design -- a known, explicit follow-up, never
   silently approximated here.
 
-Source reclamation after settled-log ZIP verification, SSH/ingest target support, and
-admission fencing for repo-scoped syncs remain outstanding.
+Source retirement has a separate machine-only gate below. SSH/ingest target
+support and admission fencing for repo-scoped syncs remain outstanding.
+
+### Filesystem payload destination boundary
+
+Process-log transfers pin every lexical destination ancestor, beginning at the
+filesystem anchor, before creating the next child. Configured destination
+symlinks and name-surrogate reparse points are rejected rather than resolved.
+No pathname-based directory creation precedes that boundary.
+
+POSIX directory creation, incremental inspection, temporary creation, metadata,
+atomic replacement, byte-count inspection and temporary cleanup use the held
+directory descriptors or the newly created file descriptor. If an ancestor is
+renamed after opening, publication stays in that original directory; a replacement
+symlink cannot redirect later operations. Windows holds native handles denying
+ancestor rename through creation and payload I/O, then releases every handle at
+operation exit. Its final payload move retains the existing write-through move
+barrier; POSIX additionally fsyncs every held parent and the replacement directory.
+Parent barriers also run for existing children, so retries after a failed flush
+and concurrent directory creation cannot bypass durability acknowledgement.
+Missing primitives or unsupported durability barriers fail explicitly.
+
+Source identity/size and entry revalidation still run before publication.
+Replacement no longer unlinks a previous good process-log payload first: a
+rejected source or a failed atomic move leaves that copy intact. Native Windows
+restrictions such as a read-only destination can therefore report a failed move
+rather than delete the old file to force replacement. Ordinary destination
+inspection, metadata and publication errors are visible failures, not missing
+source candidates. Existing source-churn and sharing-violation deferral remains.
+An error after a successful move (for example, its durability acknowledgement or
+byte-count inspection) reports failure without deleting the landed evidence.
+
+This boundary covers process-log payloads only, not `sync-meta.json`,
+session-state publication, identity admission or session readers. It does not
+serialize independent writers, make mutable source bytes immutable, or implement
+kernel-owned ZIP snapshot claims. Those contracts and the remaining #5727 work
+are separate. Payload publication alone never authorizes source retirement.
 
 ### Additive settled-log ZIP snapshots
 
@@ -187,9 +224,9 @@ Windows ancestor handles denying directory rename. Intentionally relocated
 ancestors resolve once before pinning; later redirects cannot redirect archive
 I/O. ZIP file contents are flushed on both platforms; POSIX also flushes the
 containing directory. Windows directory-entry power-loss durability is not
-claimed. Process-log source reads also reuse this boundary; older destination
-writes and session-state readers remain outside it, and their containment
-tracker stays open.
+claimed. Process-log source reads also reuse this boundary. Process-log payload
+transfers use the separate destination boundary above; the containment tracker
+stays open for session-state and health-metadata paths.
 Windows snapshot/verification read handles additionally deny writes and rename.
 Fingerprints use birth time there because native `lstat` and `fstat` can expose
 different `ctime` meanings; POSIX retains change time. Published ZIP verification
@@ -198,9 +235,169 @@ stays on the kernel-owned original handle and checks the published file identity
 Raw sources remain present and continue syncing alongside ZIP revisions.
 Readers deliberately retain those aliases; accounting must reconcile them by
 evidence identity, not count each path as new usage. This slice adds scheduled
-ZIP preservation, **not storage reclamation or completed compaction**. Source
-retirement, full normalized-storage parity, and native platform acceptance
-remain separate completion gates.
+ZIP preservation, **not storage reclamation**. The separate retirement policy
+below never changes manual snapshot-only behavior. Full normalized-storage
+parity remains a separate completion gate.
+
+### Exact-entry retirement boundary
+
+`sync.log_retirement_file` supplies an internal exact-file boundary for native
+Windows retirement. It is used only after the scheduled all-target/policy gate,
+never by the manual snapshot command. A caller-held archive directory pins
+ancestry; the source opens with read/delete access and no sharing. Existing and
+new writable opens and source renames are excluded while that original handle
+is held. Full revision fingerprint and content hash must still match before
+an explicit disposition commit; abandoning the context without commit retains
+the source. An optional caller-owned commit guard enters after the final raw
+hash and metadata checks, not before that potentially long read. Its lifetime
+spans disposition. The `committed` observation stays true if a subsequent guard
+or close acknowledgement fails; such failures cannot truthfully claim rollback.
+Read-only sources and hardlinked/reparse entries are rejected
+without attribute changes or pathname-delete fallbacks.
+
+POSIX retirement is explicitly unsupported by this primitive. Directory
+descriptors and advisory file locks alone do not prove exact-entry deletion
+and writer exclusion. The all-target readback, required-target set, explicit
+retention age and validation obligations remain in the
+[reclamation contract](../../../efforts/active/session-intelligence-and-accounting/process-log-reclamation.md).
+No local or target ZIP is removed by this primitive.
+
+### Readback and policy preparation
+
+`Target.process_log_readback(machine)` resolves an internal, pass-local
+destination. Filesystem targets (`local` and `onedrive`) support full
+single-member ZIP hash/length verification against a `LogArchiveRevision`.
+SSH, SSH-tunnel and ingest explicitly return unsupported, never successful
+verification. An all-target result requires a nonempty set and every result
+to be supported and verified. It never uses transfer success, file count,
+size/mtime equality or a prior verification receipt as evidence.
+
+Readback pins the lexical destination ancestry without creating directories
+or issuing durability writes. Before accepting a POSIX readback, it rechecks
+every lexical parent/child edge against the held directory identities; a moved
+original directory cannot stand in for a replaced configured destination.
+Ordinary publication still stays in its pinned original after a rename.
+A missing/offline root, redirected ancestor,
+changed ZIP entry, unsupported codec or corrupt member is a failed result.
+The result names the content-addressed archive and failure class without
+exposing configured paths. OneDrive readback proves local stored bytes only,
+not cloud upload acknowledgement. These observations alone do not authorize
+retirement or promise continued retention at the destination.
+
+The machine-local `sync.process_logs.reclamation` block is strictly
+parsed: boolean `enabled`, positive integer `min_age_seconds` with no default,
+and explicit `required_targets` transport names including the active target.
+Enabling also requires process-log collection, ZIP snapshots and the local
+producer attestation. Inactive target option defaults are not required targets.
+The internal target-set resolver reuses existing options, resolves them once,
+and rejects unknown/unsupported, duplicate and source-overlapping destinations.
+It does not turn ordinary session-state sync into a multi-target transfer.
+
+### Machine-only scheduled reclamation
+
+Reclamation is disabled by default. It requires an explicit positive
+`min_age_seconds` (no default), a nonempty `required_targets` list including the
+active target, and all preservation opt-ins above. The quiet threshold is not
+retention. Changing source code does not authorize enabling this policy, deleting
+production evidence or changing a scheduled task.
+
+The initial supported invocation is `session-sync run --machine-config-only`
+on native Windows. It excludes repository configuration completely, including
+`sync.local_path`: explicitly supply every required destination in the machine's
+`config.yaml`. An embedded caller must use `load_config(include_repo=False)`.
+Default repository-layered loads and ad-hoc/tenant `Config` instances remain
+usable by ordinary consumers, preserving repository settings, but supply no
+retirement authority: an enabled `run` refuses them before sync writes.
+Filtered runs, namespace labels, detached runs and unsupported required
+transports also refuse retirement; there is no implicit fallback. Manual
+`compact-logs`, status, namespace publication, preparation and chronicle commands
+remain non-retiring and usable with that same machine policy.
+POSIX enabled non-dry runs refuse before any sync writes.
+
+The existing sync lock spans provenance/target preparation, origin/worktree
+sidecars, snapshots, ordinary active-target publication and retirement. Only
+the exact selected ZIP is additionally published to other required targets;
+session-state and neighboring raw/gzip files are not fanned out. Partial log
+publication, including locked-file deferral, retains raw originals.
+An initially absent process-log directory visibly skips reclamation without
+blocking valid session-state synchronization. A directory that appears later
+is not adopted for retirement until a subsequent pass.
+
+The loader binds the original machine file's identity/hash and a deep copy of
+effective configuration. At commit, its file and lexical ancestry are reopened
+read-only under native sharing exclusions and remain protected through
+disposition. Changed or missing files, settings, environment-resolved
+source/target paths, source root, machine identity, lock policy or automation
+consent invalidate the pass. Configuration is not held locked during long
+transfers: an operator can disable reclamation before the final guard. No
+repository reload or cached receipt substitutes for machine-local authority.
+
+`session-sync run --machine-config-only --dry-run` inspects existing evidence
+without acquiring/writing the sync lock, creating archives/directories,
+publishing or retiring anything. It reports eligibility, retained files and
+missing verification/platform capability, not a promise of successful deletion.
+Manual `compact-logs` remains additive even when given a machine-only config
+that enables scheduled reclamation.
+
+### Exact-ZIP publication preparation
+
+`sync.log_archive_publication` supplies an internal publisher for one
+`LogArchiveRevision` to the already-resolved filesystem destinations. It copies
+only that revision's ZIP, never neighboring raw/gzip logs, other archives or
+session-state. Bounded streaming verifies both the complete compressed-byte copy
+and its single member. Source identity is rechecked around copying and
+publication; a protected source handle and pinned lexical ancestry remain held
+through the operation.
+
+Publication uses a kernel-owned no-replace claim. An existing ZIP is fully
+verified, not overwritten. The claim closes before independent fresh readback,
+so native Windows sharing restrictions cannot turn the publisher's own handle
+into a readback failure. An additional read-only directory guard must identify
+the original publication root and hold its lexical ancestry through readback;
+even a replacement directory containing a valid ZIP cannot stand in for it.
+Missing, offline, corrupt or unsupported destinations
+produce separate failure results without skipping later targets. POSIX source
+or target ancestor replacement cannot produce a successful verification for
+the replacement path. A failure after publication may leave additive ZIP
+evidence; the helper never deletes that copy to simulate rollback.
+
+Dry run performs source and existing-target verification without creating
+directories, claims or archives, or issuing durability writes. Missing evidence
+remains unverified. Scheduled reclamation calls this helper only for its exact
+selected ZIP; manual snapshotting never does. The remaining
+retirement gates in the [reclamation contract](../../../efforts/active/session-intelligence-and-accounting/process-log-reclamation.md)
+remain open.
+
+### Post-publication retirement sequence
+
+`sync.log_reclamation.reclaim_process_logs` composes the prepared primitives
+under the machine-only scheduled adapter. Tenant, namespace and manual
+snapshot callers do not participate.
+
+A caller must own the sync lock and supply the complete resolved target set,
+explicit preservation/retention settings and a current-policy commit guard.
+The internal sequence requires native Windows for any retirement. It selects
+only quiet, old raw producer files with an exited PID, holds the original
+exclusively, and requires an existing local ZIP for the current raw hash.
+A late raw revision lacking its own ZIP is retained for another snapshot pass.
+It never substitutes an older archive or creates a new local snapshot itself.
+
+All required target roots are pinned before exact-ZIP publication. After
+publication and fresh readback, the complete local and target ZIPs are verified
+again through protected handles held across the retirement commit. Final raw
+hashing precedes the caller's policy guard; source-root identity, retention,
+quietness and producer exit are checked inside that guard immediately before
+original-handle disposition. A changed policy or any missing, corrupt,
+unsupported, redirected or unreadable replacement retains the raw source.
+
+Results separately count inspected, eligible, retained and retired files,
+confirmed reclaimed raw bytes and filename-only failures. A disposition that
+committed but lost a later acknowledgement is separately
+`committed_unconfirmed`, never counted as retained, confirmed retired bytes or
+a successful rollback. Every local/target ZIP and unrelated raw/gzip/session
+file remains untouched by retirement. Dry run only inspects raw and existing
+ZIP evidence, with no publication, mkdir, durability write or retirement;
+eligible files remain retained and missing verification stays visible.
 
 ### Combined transfer health
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Verify current-roster CLI freshness dispatch against the cache-render source contract.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

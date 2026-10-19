@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import json
 import re
+import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 from . import config as cfg
 from . import launch_admission, launch_seed_state, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
+from .worktree_naming import parse_session_worktree_id, session_worktree_id
 
 MAX_REQUEST_BYTES = 7 * 1024
 
@@ -70,7 +72,12 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
         not isinstance(receipt, dict) or not required.issubset(receipt)
         or type(receipt["version"]) is not int or receipt["version"] != 1
         or receipt["request_id"] != request_id or receipt["seed_id"] != request_id
-        or receipt["suffix"] != request_id or receipt["kind"] not in ("new", "resume")
+        or not isinstance(receipt["suffix"], str)
+        or (
+            receipt["suffix"] != request_id
+            and re.fullmatch(r"[0-9a-f]{4}", receipt["suffix"]) is None
+        )
+        or receipt["kind"] not in ("new", "resume")
         or not isinstance(receipt["fingerprint"], str)
         or re.fullmatch(r"[0-9a-f]{64}", receipt["fingerprint"]) is None
         or not isinstance(receipt["timestamp"], str)
@@ -88,6 +95,10 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
         or Path(wid).name != wid or "/" in wid or "\\" in wid
     ):
         raise ValueError("Invalid stored launch admission worktree identity")
+    if receipt["suffix"] != request_id:
+        allocation = parse_session_worktree_id(wid)
+        if allocation is None or allocation[1:] != (receipt["timestamp"], receipt["suffix"]):
+            raise ValueError("Invalid stored launch admission allocation")
     return receipt
 
 
@@ -122,7 +133,7 @@ def _apply_admit(args: dict) -> dict:
                 "version": 1, "request_id": args["request_id"],
                 "fingerprint": args["fingerprint"], "kind": args["kind"],
                 "worktree_id": args["worktree_id"], "timestamp": args["timestamp"],
-                "suffix": args["request_id"], "seed_id": args["request_id"],
+                "suffix": args.get("suffix", args["request_id"]), "seed_id": args["request_id"],
                 "prior_revision": prior_revision,
             }
             _validate_admission(receipt, args["request_id"])
@@ -134,18 +145,37 @@ def _apply_admit(args: dict) -> dict:
 def execute(config, request: dict) -> dict:
     """Admit once; recover the same worktree after a lost response."""
     directory = cfg.tracking_dir()
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     detected_platform = cfg.detect_platform()
-    platform = "win" if detected_platform == "windows" else detected_platform
     request_id = request["request_id"]
-    wid = request["worktree_id"] or f"{config.machine}-{platform}-{timestamp}-{request_id}"
+    # Reuse a prior New admission's allocation when one already exists (a
+    # retry or a concurrent racer), rather than generating a fresh
+    # timestamp/suffix that would only be discarded once the receipt is read
+    # back below -- keeps admission_args deterministic and auditable across
+    # retries. Resume always carries its own worktree_id and a request_id
+    # suffix, so its allocation is already deterministic; reusing a stored
+    # value there would also mask a genuine reused-identity mismatch that
+    # `_require_replay_identity` is meant to catch.
+    existing = None
+    if request["kind"] == "new":
+        with contextlib.suppress(FileNotFoundError):
+            existing = _read_admission(directory, request_id)
+    if existing is not None:
+        timestamp = existing["timestamp"]
+        suffix = existing["suffix"]
+        wid = existing["worktree_id"]
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        suffix = secrets.token_hex(2) if request["kind"] == "new" else request_id
+        wid = request["worktree_id"] or session_worktree_id(
+            config.machine, detected_platform, timestamp, suffix,
+        )
     fingerprint = hashlib.sha256(
         json.dumps(request, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     admission_args = {
         "tracking_dir": str(directory), "request_id": request_id,
         "fingerprint": fingerprint, "kind": request["kind"],
-        "worktree_id": wid, "timestamp": timestamp,
+        "worktree_id": wid, "timestamp": timestamp, "suffix": suffix,
     }
     receipt = _dispatch("launch_request_admit", admission_args)
     wid = receipt["worktree_id"]
@@ -162,7 +192,10 @@ def execute(config, request: dict) -> dict:
                 )
             if request["kind"] != "new":
                 raise ValueError("Requested Resume worktree does not exist")
-            expected_wid = f"{config.machine}-{platform}-{receipt['timestamp']}-{receipt['suffix']}"
+            expected_wid = session_worktree_id(
+                config.machine, detected_platform, receipt["timestamp"], receipt["suffix"],
+                legacy=len(receipt["suffix"]) == 32,
+            )
             if wid != expected_wid:
                 raise ValueError(
                     "Stored New allocation no longer matches this machine/platform; "
@@ -329,7 +362,7 @@ def inspect(request_id: str) -> dict:
 
 def _dispatch(verb: str, args: dict) -> dict:
     result = launch_seed_state._dispatch(
-        verb, args, min_version=3 if verb == "launch_request_stage" else 2,
+        verb, args, min_version=5 if verb == "launch_request_stage" else 3,
     )
     if result.get("error"):
         raise ValueError(result["error"])
@@ -346,7 +379,7 @@ def _guard(handler):
     return apply
 
 
-tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=2)
-tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=3)
-tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=2)
-tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=2)
+tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=3)
+tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=5)
+tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=3)
+tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=3)

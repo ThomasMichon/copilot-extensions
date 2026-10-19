@@ -306,6 +306,8 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
         "COPILOT_PLUGIN_ROOT": str(fixture["payload"]),
         "POWERSHELL_TELEMETRY_OPTOUT": "1",
         "POWERSHELL_UPDATECHECK": "Off",
+        # The shell's asynchronous cache must not race the product-write snapshot.
+        "PSModuleAnalysisCachePath": os.devnull,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     for relative in (".cache/powershell", ".local/share/powershell/Modules"):
@@ -358,6 +360,13 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
         wrapper.chmod(0o755)
     environment["PATH"] = str(wrapper_dir) + os.pathsep + os.environ["PATH"]
     return environment
+
+
+def test_command_binding_catalog_disables_shell_metadata_cache(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PSModuleAnalysisCachePath", str(binding_fixture["home"] / "parent-cache"))
+    assert _catalog_environment(binding_fixture)["PSModuleAnalysisCachePath"] == os.devnull
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog interpreter")

@@ -693,6 +693,148 @@ class TestMergeReadiness:
         assert m["consent_label"] == ""
         assert "no auto-merge label" in m["reason"]
 
+    def test_direct_operation_does_not_require_a_missing_consent_binding(self):
+        m = pc.merge_readiness(_approved(), operation="direct")
+        assert m["operation"] == "direct"
+        assert m["ready_for_direct_merge"] is True
+        assert m["review_assessment_required"] is False
+        assert m["needs_consent"] is False
+        assert m["clear_to_merge"] is True
+        assert m["consent_action"] == "not-applicable"
+        assert m["occupancy"] == "needs-merge"
+
+    def test_direct_clean_comment_requires_assessment_not_consent(self):
+        snap = _approved(reviews=(_rev(1, "COMMENT"),))
+        m = occupancy_from_readiness(pc.merge_readiness(
+            snap, operation="direct", review_blocking=False,
+            approval_required=False,
+        ))
+        assert m["verdict"] == "COMMENTED"
+        assert m["review_assessment_required"] is True
+        assert m["ready_for_direct_merge"] is False
+        assert m["needs_consent"] is False
+        assert m["clear_to_merge"] is False
+        assert m["occupancy"] == "needs-review-assessment"
+
+    def test_direct_readiness_ignores_configured_consent_label(self):
+        for labels in ((), ("auto-merge",)):
+            approved = pc.merge_readiness(
+                _approved(labels=labels), operation="direct",
+                automerge_label="auto-merge",
+            )
+            assert approved["ready_for_direct_merge"] is True
+            assert approved["eligible"] is True
+            assert approved["needs_consent"] is False
+            assert approved["consent_action"] == "not-applicable"
+
+            commented = pc.merge_readiness(
+                _approved(reviews=(_rev(1, "COMMENT"),), labels=labels),
+                operation="direct", automerge_label="auto-merge",
+                review_blocking=False, approval_required=False,
+            )
+            assert commented["review_assessment_required"] is True
+            assert commented["eligible"] is False
+            assert commented["clear_to_merge"] is False
+            assert commented["needs_consent"] is False
+
+    def test_direct_custom_consent_label_does_not_mask_missing_approval(self):
+        readiness = pc.merge_readiness(
+            _approved(reviews=(), labels=("auto-complete",)),
+            operation="direct",
+            automerge_label="auto-complete",
+        )
+        assert readiness["ready_for_direct_merge"] is False
+        assert readiness["eligible"] is False
+        assert readiness["needs_consent"] is False
+        assert readiness["reason"] == "not yet approved"
+
+    def test_consent_operation_retains_classifier_eligibility(self):
+        readiness = pc.merge_readiness(
+            _approved(), automerge_label="auto-merge",
+            operation="consent",
+        )
+        assert readiness["eligible"] is True
+        assert readiness["needs_consent"] is True
+        assert readiness["clear_to_merge"] is True
+
+    def test_direct_unknown_mergeability_names_the_actual_blocker(self):
+        snap = _approved(mergeable=None)
+        readiness = pc.merge_readiness(snap, operation="direct")
+        assert readiness["ready_for_direct_merge"] is False
+        assert readiness["eligible"] is False
+        assert readiness["needs_consent"] is False
+        assert readiness["clear_to_merge"] is False
+        assert readiness["occupancy"] == "needs-mergeability"
+        assert readiness["reason"] == (
+            "mergeability is unknown; re-read before direct merge"
+        )
+
+    def test_direct_terminal_state_precedes_unknown_mergeability(self):
+        merged = pc.merge_readiness(
+            _approved(pr_state="closed", merged=True, mergeable=None),
+            operation="direct",
+        )
+        assert merged["occupancy"] == "merged"
+        assert merged["reason"] == "already merged"
+
+        closed = pc.merge_readiness(
+            _approved(pr_state="closed", merged=False, mergeable=None),
+            operation="direct",
+        )
+        assert closed["occupancy"] == "closed"
+        assert closed["reason"] == "closed without merging"
+
+    def test_direct_known_blocker_precedence_matrix(self):
+        blockers = (
+            (
+                lambda mergeable: _approved(
+                    mergeable=mergeable,
+                    reviews=(_rev(2, "CHANGES_REQUESTED", commit_id="head"),),
+                ),
+                {},
+                {None: ("needs-revision", "changes requested"),
+                 True: ("needs-revision", "changes requested"),
+                 False: ("author-conflict", "not mergeable (conflict -> needs rebase)")},
+            ),
+            (
+                lambda mergeable: _approved(
+                    mergeable=mergeable, labels=("hold",),
+                ),
+                {"hold_labels": ("hold",)},
+                {value: ("held", "hold label present: hold")
+                 for value in (None, True, False)},
+            ),
+            (
+                lambda mergeable: _approved(
+                    mergeable=mergeable, title="WIP: unfinished",
+                ),
+                {"wip_title_prefixes": ("WIP:",)},
+                {value: ("wip", "WIP title prefix")
+                 for value in (None, True, False)},
+            ),
+            (
+                lambda mergeable: _approved(
+                    mergeable=mergeable, head_sha="new",
+                    reviews=(_rev(1, "APPROVED", commit_id="old"),),
+                ),
+                {},
+                {None: ("needs-review", "not yet approved"),
+                 True: ("needs-review", "not yet approved"),
+                 False: ("author-conflict", "not mergeable (conflict -> needs rebase)")},
+            ),
+        )
+        for make_snapshot, kwargs, expected in blockers:
+            for mergeable in (None, True, False):
+                readiness = pc.merge_readiness(
+                    make_snapshot(mergeable), operation="direct", **kwargs,
+                )
+                occupancy, reason = expected[mergeable]
+                assert readiness["occupancy"] == occupancy
+                assert readiness["reason"] == reason
+                assert readiness["eligible"] is False
+                assert readiness["needs_consent"] is False
+                assert readiness["clear_to_merge"] is False
+
     def test_review_blocking_false_reports_comment_verdict(self):
         snap = _approved(reviews=(_rev(1, "COMMENT"),))
         m = pc.merge_readiness(snap, review_blocking=False, **_BINDING)
@@ -703,12 +845,12 @@ class TestDefaultUntil:
     def test_blocking_true_is_default_until(self):
         assert pc.default_until(True) == pc.DEFAULT_UNTIL
 
-    def test_blocking_false_swaps_verdict_events_for_commented(self):
+    def test_blocking_false_adds_comment_events_without_losing_other_reviews(self):
         until = pc.default_until(False)
         assert until == pc.NONBLOCKING_DEFAULT_UNTIL
         assert "commented" in until
-        assert "approved" not in until
-        assert "changes_requested" not in until
+        assert "approved" in until
+        assert "changes_requested" in until
         # Everything else (merge-state/lifecycle) is preserved unchanged.
         for name in ("conflict", "mergeable", "checks_failed",
                      "approval_dismissed", "merged", "closed"):
@@ -999,8 +1141,8 @@ class TestPRReminder:
         assert "pr-merge" in r.next_step and "--now" in r.next_step
         assert "self-approve" not in r.next_step
         assert "cannot approve their own" not in r.next_step
-        assert "tooling needs no" in r.next_step
-        assert "wait for a clean review verdict" in r.next_step
+        assert "configured review and required CI pass" in r.next_step
+        assert "outstanding change request still blocks" in r.next_step
 
     def test_notes_surface_as_a_caution_line_in_reminder_text(self):
         flow = _self_merge_flow(notes="ask the on-call before merging on Fridays")
@@ -1041,13 +1183,11 @@ class TestPRReminder:
         assert "required checks/reviews" in r.next_step
         assert "self-approve" not in r.next_step
 
-    def test_non_blocking_self_approval_needs_no_approval_regardless_of_provider(self):
-        # review_blocking=False: nothing gates the merge, so the "no approval
-        # required" phrasing applies the same way on every provider, not just
-        # GitHub.
+    def test_non_blocking_self_merge_preserves_review_and_ci_on_every_provider(self):
         flow = _self_merge_flow(provider="azure-devops", review_blocking=False)
         r = pc.pr_reminder(flow, "create-pr")
-        assert "tooling needs no" in r.next_step
+        assert "configured review and required CI pass" in r.next_step
+        assert "outstanding change request still blocks" in r.next_step
         assert "self-approve" not in r.next_step
 
     def test_non_blocking_no_reviewer_does_not_mention_a_verdict(self):
@@ -1056,8 +1196,8 @@ class TestPRReminder:
         # submitter to wait for one that will never exist.
         flow = _self_merge_flow(reviewer="", review_blocking=False)
         r = pc.pr_reminder(flow, "create-pr")
-        assert "tooling needs no" in r.next_step
-        assert "wait for a clean review verdict" not in r.next_step
+        assert "required CI passes" in r.next_step
+        assert "configured review" not in r.next_step
 
     def test_blocking_self_merge_reminder_waits_on_approval(self):
         flow = _self_merge_flow(review_blocking=True)
@@ -1252,6 +1392,18 @@ class TestApprovalRequired:
         assert st.consent_action == "skip"
         assert "changes requested" in st.reason
 
+    def test_existing_consent_label_does_not_override_a_change_request(self):
+        snap = pc.PRSnapshot(
+            pr_state="open", mergeable=True, labels=("auto-complete",),
+            reviews=(_rev(1, "CHANGES_REQUESTED"),),
+        )
+        st = pc.classify_state(
+            snap, automerge_label="auto-complete", approval_required=False,
+        )
+        assert st.consent_present is True
+        assert st.consent_action == "skip"
+        assert st.reason == "changes requested"
+
     def test_approved_eligible_regardless(self):
         snap = pc.PRSnapshot(pr_state="open", mergeable=True,
                              reviews=(_rev(1, "APPROVED"),))
@@ -1339,6 +1491,23 @@ class TestApprovalRequired:
         assert readiness["clear_to_merge"] is True
         assert "after current head" in readiness["reason"]
 
+    def test_direct_readiness_honors_non_dismissing_stale_approval(self):
+        snap = pc.PRSnapshot(
+            pr_state="open",
+            mergeable=True,
+            head_sha="new",
+            reviews=(_rev(1, "APPROVED", commit_id="old"),),
+        )
+        readiness = pc.merge_readiness(
+            snap,
+            operation="direct",
+            dismiss_stale_reviews=False,
+        )
+        assert readiness["verdict"] == "APPROVED"
+        assert readiness["approval_stale"] is True
+        assert readiness["ready_for_direct_merge"] is True
+        assert readiness["clear_to_merge"] is True
+
     def test_post_approval_push_remains_unapproved(self):
         snap = pc.PRSnapshot(
             pr_state="open",
@@ -1397,4 +1566,3 @@ class TestCreatePrPushedReminder:
         r = pc.pr_reminder(_self_merge_flow(), "create-pr", pc.PR_STATE_DRY_RUN)
         assert (r.state, r.headline) == ("dry-run", "dry run: nothing was pushed or opened")
         assert "without `--dry-run`" in r.next_step and "set-pr" not in r.next_step
-

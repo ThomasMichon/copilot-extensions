@@ -32,6 +32,13 @@ from worktree_manager.production_picker.picker_tui.engine import (  # noqa: E402
 from worktree_manager.production_picker.picker_tui.selection import ListSelection  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _bind_composer_project(_reset_active_project) -> None:
+    from worktree_manager.production_picker import context
+
+    context.set_project("demo")
+
+
 def _quit_modal_open(scr):
     """True when the F4 QuitConfirmScreen modal is on the app's screen stack."""
     from worktree_manager.production_picker.picker_tui.engine import QuitConfirmScreen
@@ -2312,7 +2319,7 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
     asyncio.run(run())
 
 
-def test_resume_prompt_offered_for_local_and_remote_cold_resume_rows():
+def test_resume_prompt_offered_only_for_local_cold_resume_rows():
     """Live and sessionless Open never offer a Resume prompt."""
     from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
         PickerScreenWorktreeActionsMixin as M,
@@ -2338,7 +2345,7 @@ def test_resume_prompt_offered_for_local_and_remote_cold_resume_rows():
     acts = M._session_action_verbs(local_resumable)
     assert "Resume" in acts
     assert "Resume prompt…" in acts
-    assert "Resume prompt…" in M._session_action_verbs(
+    assert "Resume prompt…" not in M._session_action_verbs(
         dict(local_resumable, is_local=False))
     assert "Resume prompt…" not in M._session_action_verbs(
         dict(local_resumable, sessionless=True))
@@ -4735,15 +4742,8 @@ def test_new_worktree_dialog_focus_stops_prompt_list_buttons():
     asyncio.run(run())
 
 
-def test_new_worktree_bare_drops_seed_prompt(monkeypatch):
-    """#4778-ish (picker-new-session-prompt-and-composer Phase A item 3): a
-    Bare worktree gets no Copilot bootstrap at all -- nothing to seed -- so
-    confirming Create with Bare checked must silently drop whatever was
-    typed into the SAME dialog's prompt box, never forwarding it toward a
-    launch that could never deliver it. ``_SEED_PROMPT_ENABLED`` is on by
-    default now that both delivery seams (engine_client's --seed forward +
-    launch-session.{ps1,sh}'s post-create `embody` call) are closed; this
-    monkeypatch is now a no-op defensive pin, not a feature-gate override."""
+def test_new_worktree_bare_refuses_prompt_but_allows_blank_launch(monkeypatch):
+    """Bare has no prompt handoff; refuse without discarding the draft."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     from worktree_manager.production_picker.picker_tui.field_widgets import (
         _AutoExpandTextArea,
@@ -4771,6 +4771,14 @@ def test_new_worktree_bare_drops_seed_prompt(monkeypatch):
             await pilot.press("space")          # toggle Bare on
             await pilot.press("tab")            # options -> buttons
             await pilot.press("enter")          # confirm Create
+            await pilot.pause()
+            assert app.screen is dlg and app.result is None
+            field = dlg.query_one("#q-0", _AutoExpandTextArea)
+            assert field.text == "fix the flaky test"
+            field.load_text("")
+            from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
+            dlg.on_focus_group_activated(
+                FocusGroup.Activated(dlg.query_one(FocusGroup), 0, "confirm"))
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
@@ -4958,7 +4966,7 @@ def test_new_worktree_modifiers_can_be_combined():
 
 
 def test_remote_new_worktree_options_hide_ahp():
-    """Remote prompts share the composer; AHP remains same-machine only."""
+    """Remote targets hide unsupported prompts and same-machine-only AHP."""
     src = _fixture_source()
 
     async def run():
@@ -4972,7 +4980,7 @@ def test_remote_new_worktree_options_hide_ahp():
             assert dlg is not None
             labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "AHP" not in labels
-            assert dlg._show_prompt is True
+            assert dlg._show_prompt is False
 
     asyncio.run(run())
 
@@ -5015,8 +5023,9 @@ def test_new_worktree_anchor_option_shows_selected_state():
     asyncio.run(run())
 
 
-def test_new_worktree_remote_target_carries_seed_prompt(monkeypatch):
-    """Confirmed remote text reaches target-owned launch admission."""
+@pytest.mark.parametrize("target", ["remote", "cross-environment"])
+def test_new_worktree_remote_target_remains_seedless(monkeypatch, target):
+    """Unsupported targets never offer a prompt; ordinary launches remain valid."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
@@ -5025,23 +5034,27 @@ def test_new_worktree_remote_target_carries_seed_prompt(monkeypatch):
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
-            scr.create_target = lambda: ("remote-host", "WSL")
+            machine = "remote-host" if target == "remote" else src.LOCAL[0]
+            environment = "other-environment"
+            scr.create_target = lambda: (machine, environment)
             scr._open_optmenu()
             await pilot.pause()
             dlg = _scope_dlg(scr)
             assert dlg is not None
             from worktree_manager.production_picker.picker_tui.engine import FocusGroup
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
-            assert dlg._show_prompt is True
-            await pilot.press("tab")
-            await pilot.press(*list("remote task"))
-            await pilot.press("enter")
+            assert dlg._show_prompt is False
             await pilot.press("enter")
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
-        assert app.result["machine"] == "remote-host"
-        assert app.result["options"]["seed_prompt"] == "remote task"
+        assert app.result["machine"] == machine
+        assert app.result["options"]["seed_prompt"] == ""
+        from worktree_manager.seed_launch import require_supported_seed
+        require_supported_seed(types.SimpleNamespace(
+            mode="new", machine=machine, environment=environment,
+            seed_prompt=app.result["options"]["seed_prompt"],
+        ))
 
     asyncio.run(run())
 
@@ -9634,7 +9647,7 @@ def test_registered_pivot_create_action_opens_and_submits(tmp_path, monkeypatch)
             await pilot.pause()
 
             assert rt.resolved == [
-                str(Path(sys.executable).resolve()), "create", "Fix the flaky test",
+                str(Path(sys.executable).absolute()), "create", "Fix the flaky test",
                 "--prompt", "investigate and fix it",
             ]
             assert rt.invalidated is True
@@ -9844,7 +9857,7 @@ def test_registered_pivot_create_action_confirm_gate(tmp_path, monkeypatch):
             await pilot.pause()
             assert not isinstance(app.screen, CreateActionScreen)
             assert rt.resolved == [
-                str(Path(sys.executable).resolve()), "create", "A title",
+                str(Path(sys.executable).absolute()), "create", "A title",
                 "--prompt", "",
             ]
 
@@ -9954,7 +9967,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             await pilot.pause()
 
             assert rt.resolved == [
-                str(Path(sys.executable).resolve()), "steer", "submit", "t1",
+                str(Path(sys.executable).absolute()), "steer", "submit", "t1",
                 "--field", "feedback=ship it",
                 "--field", "decision=revise",
             ]
@@ -10039,7 +10052,7 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
                 if rt.resolved is not None:
                     break
             assert rt.resolved == [
-                str(Path(sys.executable).resolve()), "steer", "submit", "t1",
+                str(Path(sys.executable).absolute()), "steer", "submit", "t1",
                 "--field", "feedback=ship it",
                 "--field", "decision=revise",
             ]

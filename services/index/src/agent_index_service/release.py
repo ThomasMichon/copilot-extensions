@@ -41,6 +41,7 @@ _SCHEMA = "agent-index-service.release"
 _DISTRIBUTIONS = frozenset({
     "agent-index-service", "agent-index", "agent-zdd", "agent-procutil", "agent-dropin-registry",
 })
+_FLEET_DISTRIBUTIONS = _DISTRIBUTIONS | {"fleet-manager"}
 _FIELDS = {
     "schema", "schema_version", "source_commit", "service_version", "core_version",
     "config_schema_version", "artifacts",
@@ -61,6 +62,14 @@ _REPEATED_HEADERS = {
 
 class ReleaseError(ValueError):
     """The bundle or pinned descriptor violates the release contract."""
+
+
+def _distributions(profile: str) -> frozenset[str]:
+    if profile == "native":
+        return _DISTRIBUTIONS
+    if profile == "fleet":
+        return _FLEET_DISTRIBUTIONS
+    raise ReleaseError("release profile must be native or fleet")
 
 
 @dataclass(frozen=True)
@@ -382,9 +391,13 @@ def inspect_wheel(path: Path, *, distributions: frozenset[str], native: bool = F
         raise ReleaseError(f"cannot inspect wheel: {type(exc).__name__}") from exc
 
 
-def _dependencies(wheels: dict[str, _Wheel]) -> None:
-    if set(wheels) != _DISTRIBUTIONS:
-        raise ReleaseError("bundle must contain exactly the five required distributions")
+def _dependencies(wheels: dict[str, _Wheel], profile: str) -> None:
+    if set(wheels) != _distributions(profile):
+        raise ReleaseError(
+            "bundle must contain exactly the "
+            + ("five" if profile == "native" else "six")
+            + " required distributions"
+        )
     for wheel in wheels.values():
         for requirement in wheel.requirements:
             target = canonicalize_name(requirement.name)
@@ -419,18 +432,32 @@ def _dependencies(wheels: dict[str, _Wheel]) -> None:
     }
     if not {"agent-zdd", "agent-procutil", "agent-dropin-registry"} <= unconditional:
         raise ReleaseError("core must declare the bundled shared-library requirements")
+    if profile == "fleet":
+        for wheel, dependency, extras in (
+            (service, "agent-index", {"store", "server", "fleet"}),
+            (core, "fleet-manager", {"auth"}),
+        ):
+            if "fleet" not in wheel.extras or not any(
+                canonicalize_name(req.name) == dependency
+                and req.marker is not None and str(req.marker) == 'extra == "fleet"'
+                and extras <= {canonicalize_name(extra) for extra in req.extras}
+                for req in wheel.requirements
+            ):
+                raise ReleaseError(f"fleet profile requires an explicit {dependency} extra dependency")
 
 
-def _assemble(wheels: list[_Wheel], commit: str) -> dict[str, Any]:
+def _assemble(wheels: list[_Wheel], commit: str, profile: str) -> dict[str, Any]:
     by_name: dict[str, _Wheel] = {}
     for wheel in wheels:
         name = wheel.artifact["distribution"]
         if name in by_name:
             raise ReleaseError(f"duplicate bundled distribution: {name}")
         by_name[name] = wheel
-    _dependencies(by_name)
+    _dependencies(by_name, profile)
     return {
-        "schema": _SCHEMA, "schema_version": 1, "source_commit": commit,
+        "schema": _SCHEMA, "schema_version": 1 if profile == "native" else 2,
+        **({"profile": profile} if profile == "fleet" else {}),
+        "source_commit": commit,
         "service_version": by_name["agent-index-service"].artifact["version"],
         "core_version": by_name["agent-index"].artifact["version"],
         "config_schema_version": 1,
@@ -438,17 +465,20 @@ def _assemble(wheels: list[_Wheel], commit: str) -> dict[str, Any]:
     }
 
 
-def build_descriptor(bundle: Path, *, source_commit: str) -> dict:
-    """Read five wheels and return normalized schema 1 without writing files.
+def build_descriptor(bundle: Path, *, source_commit: str, profile: str = "native") -> dict:
+    """Read the explicitly selected first-party closure without writing files.
 
     source_commit is supplied provenance, not an attestation of release approval.
     All immediate .whl artifacts participate; third-party wheels are rejected.
     """
     commit = _commit(source_commit)
+    distributions = _distributions(profile)
     try:
         root = _root(bundle)
         filenames = sorted(path.name for path in root.iterdir() if path.suffix.lower() == ".whl")
-        return _assemble([_wheel(root, name) for name in filenames], commit)
+        return _assemble(
+            [_wheel(root, name, distributions=distributions) for name in filenames], commit, profile,
+        )
     except (
         OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError, zlib.error,
     ) as exc:
@@ -468,13 +498,16 @@ def _reject_constant(value: str) -> None:
     raise ReleaseError(f"invalid JSON constant: {value}")
 
 
-def verify_descriptor(path: Path, *, expected_source_commit: str) -> dict:
+def verify_descriptor(
+    path: Path, *, expected_source_commit: str, profile: str = "native",
+) -> dict:
     """Verify pinned revision, exact schema, wheel bytes/metadata and requirements.
 
     expected_source_commit must come from the trusted release controller. Hashes
     do not authenticate the descriptor or prove main-release or migration safety.
     """
     expected = _commit(expected_source_commit)
+    distributions = _distributions(profile)
     try:
         before = _stat(path)
         with path.open("rb") as stream:
@@ -487,32 +520,39 @@ def verify_descriptor(path: Path, *, expected_source_commit: str) -> dict:
         descriptor = _keys(json.loads(
             text.decode("utf-8"), object_pairs_hook=_unique_object,
             parse_constant=_reject_constant,
-        ), _FIELDS, "descriptor")
-        if descriptor["schema"] != _SCHEMA or any(
-            type(descriptor[key]) is not int or descriptor[key] != 1
-            for key in ("schema_version", "config_schema_version")
+        ), _FIELDS | ({"profile"} if profile == "fleet" else set()), "descriptor")
+        if (
+            descriptor["schema"] != _SCHEMA
+            or type(descriptor["schema_version"]) is not int
+            or descriptor["schema_version"] != (1 if profile == "native" else 2)
+            or type(descriptor["config_schema_version"]) is not int
+            or descriptor["config_schema_version"] != 1
+            or profile == "fleet" and descriptor["profile"] != profile
         ):
             raise ReleaseError("unsupported descriptor/config schema")
         if _commit(descriptor["source_commit"]) != expected:
             raise ReleaseError("descriptor source_commit does not match trusted revision")
         artifacts = descriptor["artifacts"]
-        if not isinstance(artifacts, list) or len(artifacts) != len(_DISTRIBUTIONS):
-            raise ReleaseError("descriptor requires exactly five artifacts")
+        if not isinstance(artifacts, list) or len(artifacts) != len(distributions):
+            raise ReleaseError(
+                "descriptor requires exactly " + ("five" if profile == "native" else "six")
+                + " artifacts"
+            )
         root = _root(path.parent)
         wheels: list[_Wheel] = []
         for raw in artifacts:
             artifact = _keys(raw, _ARTIFACT_FIELDS, "artifact")
-            if _text(artifact["distribution"], "artifact distribution") not in _DISTRIBUTIONS:
+            if _text(artifact["distribution"], "artifact distribution") not in distributions:
                 raise ReleaseError("unexpected artifact distribution")
             version = _version(artifact["version"], "artifact version")
             digest = artifact["sha256"]
             if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
                 raise ReleaseError("sha256 must be exactly 64 lowercase hexadecimal characters")
-            wheel = _wheel(root, _filename(artifact["file"]))
+            wheel = _wheel(root, _filename(artifact["file"]), distributions=distributions)
             if wheel.artifact != {**artifact, "version": version}:
                 raise ReleaseError("artifact digest or wheel identity does not match descriptor")
             wheels.append(wheel)
-        result = _assemble(wheels, expected)
+        result = _assemble(wheels, expected, profile)
         if (
             _version(descriptor["service_version"], "service_version") != result["service_version"]
             or _version(descriptor["core_version"], "core_version") != result["core_version"]

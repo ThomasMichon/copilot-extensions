@@ -83,14 +83,14 @@ boundary (`agent-worktrees --json`), owning no worktree logic of its own.
 
 ## Participants
 
-_Solo effort — one participant drives all phases; recorded here (rather than
-omitted per the template's single-effort allowance) solely so an
-agent-worktrees worktree can durably bind to this effort via `effort-focus
-bind` and refuse to finalize before the effort reaches `Status: Done`._
+Existing phase ownership is unchanged. The restart-recovery implementation
+participant owns only the explicitly assigned slice below, not every open
+item in this umbrella.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
+| Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 
 ## Context
 
@@ -1143,6 +1143,14 @@ severity AppleScript-injection finding (shell-quoting alone doesn't escape
 the AppleScript string literal the quoted command is embedded in) was also
 fixed with a dedicated `_applescript_quote` helper and regression test.
 
+### Machine-restart session recovery
+
+- [ ] Deliver the focused [machine-restart recovery plan](machine-restart-recovery.md)
+      under #4564: durable live-session evidence, intentional-exit exclusion,
+      shutdown capture, duplicate-safe restoration of original conversations,
+      and an explicit restart/status-check seed. Implementation starts only
+      after this plan clears review; host rollout remains separately authorized.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -1153,6 +1161,10 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
     (see Journal, 2026-10-05); closes the issue.
 
 ## Validation Plan
+
+- [ ] Complete the [restart-recovery validation matrix](machine-restart-recovery.md#validation-plan),
+      including clean exits, abrupt restart, daemon-only replacement and
+      concurrent recovery. A process-launch receipt is not successful recovery.
 
 - [ ] Complete the wave-specific [Configuration validation matrix](phase-5-configuration-workbench.md#validation-plan).
       No implementation wave is complete from a parser test or rendered
@@ -1217,6 +1229,67 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-18** - Claimed the machine-restart recovery slice on #4564 and
+  captured the operator's request in a focused sub-plan. Existing attachment
+  observation from #5573 is retained; missing-mux tombstones are not treated as
+  intentional-exit evidence. A dedicated CLI implementer is assigned the
+  `steady-resistor` source after plan review; unrelated umbrella work remains
+  with its existing owners. No runtime behavior or host configuration changed.
+
+- **2026-10-16** — Submitted-prompt recovery merged through
+  [#6176](https://github.com/ThomasMichon/copilot-extensions/pull/6176) as
+  `dc68e210ba09c64c9d4815bdf8fd125b8cc696b1`, from reviewed head
+  `73ea4ed4bc351885a0c1c56b25382e376dd82aa4`. Exact-head review approved with
+  no findings and the explicit required PR gate passed before managed merge.
+  The change retains accepted local-native prompts before launch failures,
+  validates private history stores, and fences native seed staging against
+  hosted-provider activation. Review follow-ups close structured-wrapper
+  version skew, disappearing SQLite journals, incompatible initialized stores,
+  and unsupported remote/cross-environment composer admission. Focused
+  validation includes 172 engine cases (one platform skip), 88 remote/CLI
+  cases, 64 history cases (four platform/privilege skips), and the final
+  16 native-fence cases. The merged PR claim is released and the source
+  worktree reconciled through the managed flow with recovery refs retained.
+  No installation, deployment or live cross-machine acceptance is claimed.
+  [Remote Picker Seed Parity](../remote-picker-seed-parity/README.md) retains
+  its release/live-validation obligations; this receipt does not complete that
+  effort or this umbrella's remaining configuration, AHP and update work.
+
+- **2026-10-14** — Implemented the #6721 native Repositories vertical locally:
+  read-only registration/route/state-root/tracked-pair inspection and the existing
+  machine-local Copilot preference's revisioned preview/set/reset. Ordinary
+  registry writers share the same bounded native lock and exact read-baseline
+  fence; no source-file editor, login, credential lookup or agent activation was
+  added. Contained Windows registry/preference compatibility selection passes
+  201 cases. Production Manager UI invokes the actual owner CLI for cancel,
+  set, no-field reset, changed inheritance and stale proposals after an ordinary
+  concurrent registry command, with source-tree/sentinel assertions. This also
+  fixes project-context compatibility for legacy lists and presentation-only
+  row enrichment invalidation. Scoped Linux integration, review/merge,
+  promotion and installed acceptance remain open; this is not Wave 2 or parent
+  completion.
+
+- **2026-10-14** — Claimed #6721 as `creaky-valve` for the next reviewed
+  consumer: native Repositories registration/route/state-root/pair inspection
+  and the existing machine-local `copilot_account` preference set/reset.
+  Reuse #6719's preview interaction; add native revision/shared-writer
+  serialization and real consumer/source-safety proof. No versioned-configuration
+  writer, route/pair writer, credential/login action, service start or worker launch.
+  #6379/#6283/#3296 retain their existing scopes; installed acceptance remains
+  a separate gate. Continue the same active managed source worktree.
+
+- **2026-10-14** — Shared Configuration preview landed through #6719 at
+  `a6742923bfd9cda45112369fb9d2df8981f970b5`; #6717 is closed. Reviewed head
+  `83394d97a5816d1dc7c2d6f2cbf9ea3c97702e4b` has current-head approval;
+  the sole documentation-assessment finding is resolved. Latest required CI
+  `38592321480` passed, including the Ubuntu Manager suite (2,229 passed,
+  25 skipped), before the normal role-scoped merge. The provider confirmed
+  MERGED even though the merge response returned a transient 502; native
+  status reconciled that result. Re-read Phase 5 and Validation Plan: only
+  the shared interaction is complete, not Waves 1-5 or installed acceptance.
+  Pulled the same managed worktree forward to the actual merge; the native
+  Repositories consumer is the next separately claimed slice.
 
 - **2026-10-14** — Implemented #6717's optional Configuration row-form preview
   candidate: strict provider result/row-target binding, bounded off-thread

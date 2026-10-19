@@ -70,6 +70,27 @@ def test_provision_command_falls_back_when_codespace_flag_unsupported():
     ]
 
 
+def test_provision_phases_separate_helpers_from_authenticated_hooks():
+    ok = subprocess.CompletedProcess([], 0, "PHASE\n", "")
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", return_value=ok) as run:
+        assert spawner._resolve_provision_command("cs-1", "helpers") == "PHASE\n"
+        assert spawner._resolve_provision_command("cs-1", "hooks") == "PHASE\n"
+    assert [call.args[0][1:] for call in run.call_args_list] == [
+        ["provision-command"],
+        ["provision-command", "--codespace", "cs-1", "--phase", "hooks"],
+    ]
+
+
+def test_unsupported_hooks_phase_never_falls_back_to_unseparated_command(caplog):
+    bad = subprocess.CompletedProcess([], 2, "", "unrecognized phase")
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", return_value=bad) as run:
+        assert spawner._resolve_provision_command("cs-1", "hooks") is None
+    assert run.call_count == 1
+    assert "provisioning phase was not executed" in caplog.text
+
+
 def test_codespace_transport_exposes_its_name():
     from agent_bridge.session_host.codespace_transport import CodeSpaceTransport
 

@@ -3,23 +3,32 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from agent_worktrees import __main__ as m
+
+pytestmark = pytest.mark.guard
 
 
 def _args() -> argparse.Namespace:
     return argparse.Namespace()
 
 
-def _wire(monkeypatch):
+def _wire(monkeypatch, blocked):
     calls = {"binstubs": 0}
-    monkeypatch.setattr(m.inst, "reconcile_binstubs",
-                        lambda: calls.__setitem__("binstubs", calls["binstubs"] + 1))
+
+    def reconcile():
+        calls["binstubs"] += 1
+        return {"blocked": blocked}
+
+    monkeypatch.setattr(m.inst, "reconcile_binstubs", reconcile)
     return calls
 
 
-def test_repair_reconciles_binstubs(monkeypatch):
-    calls = _wire(monkeypatch)
-    assert m.cmd_repair(_args()) == 0
+@pytest.mark.parametrize(("blocked", "exit_code"), [([], 0), (["example"], 1)], ids=["ready", "blocked"])
+def test_repair_reconciles_binstubs(monkeypatch, blocked, exit_code):
+    calls = _wire(monkeypatch, blocked)
+    assert m.cmd_repair(_args()) == exit_code
     assert calls["binstubs"] == 1
 
 

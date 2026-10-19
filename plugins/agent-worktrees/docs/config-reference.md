@@ -56,6 +56,14 @@ that carries no in-repo config.
 
 ## Execution-space identity
 
+Launch selectors accept both `--machine example-host --environment WSL` and
+`--machine example-host-wsl`. The suffix decomposes into physical host
+`example-host` and environment `wsl`; it does not make the native Windows
+execution space local to its guest. Conflicting requests such as
+`example-host-wsl` with `Win` are rejected. Historical worktree records retain
+their machine and separately recorded platform rather than being relabeled
+merely because a launch used a logical key.
+
 A machine registry entry opts into independent execution-space identity with
 `execution_platform: windows`, `wsl` or `linux`. Its registry key is canonical;
 `physical_host` is optional grouping metadata, not registry or ownership
@@ -83,6 +91,13 @@ opting in, ambiguous legacy records and foreign-space lifecycle mutations are
 refused; review their provenance before any separate migration. Cross-space
 owned creation is still unsupported before allocation. This feature does not
 add reservation/receipt authority.
+
+Explicit [native machine-record repair](machine-record-repair.md) is available
+through `doctor --repair-machine-record <exact-id> --from-machine <old>`.
+`--to-machine <key>` optionally asserts the configured local target. Existing
+checkouts retain linked-Git proof; removed ones require canonical native
+registration and exact receiving-namespace evidence. Only the label changes:
+same-machine alias relationships remain intact, without automatic rebinding.
 
 Claim and handoff transactions recheck each freshly loaded source, consumer,
 and child record while holding its sidecar lock. Authority comes from the
@@ -181,12 +196,12 @@ repos:
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `srcroot` | string | `""` | Source root — parent directory of your repos. |
-| `machine` | string | auto-detected | Machine key (matches `machines.yaml`). |
+| `machine` | string | auto-detected | Local execution identity; native configured values remain unchanged, while WSL resolves a guest identity with `-wsl`. |
 | `platform` | string | auto-detected | `windows` \| `wsl` \| `linux`. Selects which platform-keyed command map applies. |
 | `repo_name` | string | `""` | Which `repos.<name>` is the default repo. Optional when exactly one repo is defined. |
 | `headless` | bool | `false` | CLI-only project: the bare binstub lists worktrees instead of launching an interactive Copilot session. |
 | `auto_fast_forward` | bool | `true` | On resume, fast-forward a clean worktree that is strictly behind upstream. Only ever a FF — never touches dirty / ahead / diverged worktrees. |
-| `default_copilot_account` | string | `""` | This machine's default **Copilot CLI** login for a repo with no explicit `copilot_account` override (see `repos.<name>.copilot_account`). Machine-local policy, not a portable knowledge-repo preference. Resolves machine-local `config.yaml` > global `~/.agent-worktrees/config.yaml` only. Empty means no machine-wide preference (ambient Copilot login). |
+| `default_copilot_account` | string | `""` | This machine's default **Copilot CLI** login for a repo with no explicit `copilot_account` override (see `repos.<name>.copilot_account`). Machine-local policy, not a portable knowledge-repo preference. Resolves selected project's machine-local `config.yaml` > active `config.d` drop-ins > global `~/.agent-worktrees/config.yaml`. Empty means no machine-wide preference (ambient Copilot login). [Repositories Configuration](repositories-configuration.md) supports revisioned local override set/reset without logging in. |
 | `copilot_identity_switch_enabled` | bool | `false` | Master switch for the Copilot CLI identity-enforcement feature (`copilot-identity ensure`, run automatically at the start of every session launch, and available manually). **Off by default** — when false, `ensure` is a pure no-op regardless of `default_copilot_account`/a repo's `copilot_account`: it never mints a `gh` token, shells out to `copilot login`, or reads `~/.copilot/config.json`. Deliberately config-file based (not an environment-variable opt-out) so the choice is durable and visible in `config.yaml`. Same tiering as `default_copilot_account`. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
@@ -198,6 +213,48 @@ Explicit `resolve --machine` targets use the same identity matching as local
 operations: the current key, hostname, identity alias, or display name selects
 a local launch when the requested environment is native. A same-host WSL or
 other-environment target still uses its configured transport.
+
+### Execution machine identity
+
+Registries declaring `execution_platform` require an explicitly configured
+execution-space key; hostname detection and legacy guest suffix inference do
+not select that authority. The configured key and actual platform must satisfy
+the execution-space mutation fence.
+
+For legacy registries without execution-space declarations,
+`machine` resolves machine-local > global > OS hostname. Repository config
+does not override that precedence. Windows and native Linux retain the winning
+configured string, or the OS hostname when unconfigured: there is no
+alias-to-key ownership migration. Direct native topology detection retains its
+existing `alias`-or-key result. WSL maps through topology keys and always uses
+`<host>-wsl`, adding the suffix
+only once, including when a local/global setting still names the host.
+Qualification follows the actual execution environment, not an inherited
+`platform` path-selection override.
+
+Related-repo availability compares topology-equivalent keys, hostnames, and
+identity aliases without rewriting `config.machine` or the declared routing
+target. This applies to local/machine loci, container availability, and doctor
+checks even when native config retains its raw hostname.
+
+Host and guest entries may share a raw `hostname`; the guest's hostname lookup
+is qualified. Key/hostname/alias conflicts fail closed. `display_name` is human
+metadata and may be shared between entries; unique legacy display lookups remain
+compatible without shadowing identity fields. Explicitly selecting a duplicated
+display label fails with an instruction to use an identity field.
+Missing guest entries produce a warning and retain the qualified key only if it
+is not already owned by a native entry; a collision fails closed. Optional null
+hostname/alias/display-name labels are treated as absent. Machine context may borrow host metadata
+without treating the host as local. With no topology, context still emits the
+execution identity. `ssh.environments[].alias` is an independently configured
+transport name and is never rewritten or used as execution identity.
+Detection/config loading does not migrate historical worktree or claim owners.
+In legacy registries, an old native-host ownership label can resolve locally
+only through its exact trusted WSL worktree record: project, worktree id,
+platform and configured checkout namespace must match. Claim lookup, liveness
+and handoff checks share this record-scoped exception. It does not make a
+native machine target local or relax registered execution-space authority.
+Machine-context warnings go to stderr; stdout remains one JSON hook response.
 
 ### Same-machine AHP sessions
 
@@ -299,6 +356,33 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `requires_external_state_root` | bool | `false` | Personal state (efforts/visions/logs) must be written to a separately-bound knowledge repo; the resolver refuses rather than falling back to this repo. |
 | `compose_knowledge_plugins` | bool | `true` | When false, never graft the paired knowledge repo's marketplaces/plugins into the harness session overlay. |
 | `knowledge_only` | bool | `false` | This repo is a **knowledge-only companion**: it exists solely to be carved as another project's paired `-k` knowledge worktree, never driven directly. `create` (and the interactive new-worktree flow) refuses a standalone worktree for it; binstub reconcile skips/reclaims its `<repo>` binstub; the Worktree Manager excludes it from implicit-default/ambiguous-selection project listings. The internal pairing carve is unaffected. Set the matching registry `repos add/update --class knowledge` too so `repos list`/the Manager's repo view reflect it. See the `knowledge-only-repos` effort. |
+
+An adopter's selected `machines.yaml` may declare a paired control plane:
+
+```yaml
+control_plane:
+  project: example-harness
+  harness: example-harness
+  knowledge: example-knowledge
+```
+
+`agent-worktrees knowledge control-plane --path <machines.yaml> --json` is a
+read-only, no-project front door. It returns a version-1 object containing the
+source path, native execution `platform`, declared roles, `paired`, `legacy_project` and
+`legacy_compatible`. It needs neither a pre-existing machine-local harness
+config nor a running Bridge. It does not register, bind or launch anything.
+Missing, malformed and conflicting declarations return an explicit error.
+The platform comes from the shared execution-root classifier, not a caller's
+`WSL_DISTRO_NAME`; containers on a WSL kernel remain Linux.
+Legacy scalar/project-only declarations retain their executable project and
+report no companion.
+
+The optional `harness-knowledge` setup writer consumes this declaration to
+establish the existing machine-local `knowledge_repo` pointer after native
+canonical-registration and configuration-root validation. Keep the selected
+pair in the adopter's configuration, never in a shared harness's committed
+configuration. Existing knowledge-class registrations support the paired
+worktree lifecycle without becoming standalone agent projects.
 
 **Platform-keyed maps** (`launch`, `launch_recovery`, `validate_hook`,
 `post_install_hook`) use the keys `windows`, `wsl`, `linux`, each mapping to a
@@ -469,6 +553,12 @@ armed user configuration still fails before any worktree mutation.
 ---
 
 ## PR workflow — `repos.<name>.pr` (machine-local **or** in-repo)
+
+Optional `publication_checks` configures fixed built-in self-review and scope
+checks that gate managed code publication. No external check commands or dynamic
+registry are accepted. See [publication checks](pr-publication-checks.md) for the
+strict schema, related-repository configuration and central `pr-watch checks`
+commands. Omission preserves existing defaults.
 
 Controls whether sign-off goes through a pull request instead of direct-push
 finalization. This block can be set in the machine-local config **or** in the

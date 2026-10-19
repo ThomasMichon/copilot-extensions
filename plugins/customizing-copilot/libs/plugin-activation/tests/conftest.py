@@ -13,3 +13,4 @@ sys.path.insert(0, str(LIB / "src"))
 # be on sys.path too, or the import fails outright.
 sys.path.insert(0, str(LIB.parent / "dropin-registry" / "src"))
 sys.path.insert(0, str(LIB.parent / "plugin-resolve" / "src"))
+sys.path.insert(0, str(LIB.parent / "single-instance-lease" / "src"))

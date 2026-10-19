@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from agent_index.sources.base import FileEntry
+from agent_index.sources.credentials import TokenProvider, authorization, https_origin
 from agent_index.sources.good_citizen_http import (
     ApiResult as _ApiResult,
 )
@@ -40,13 +41,26 @@ class GitHubConnector:
         client: httpx.Client | None = None,
         min_interval_s: float = _DEFAULT_MIN_INTERVAL_S,
         since: str | None = None,
+        token_provider: TokenProvider | None = None,
     ) -> None:
         self._source = source
         self.owner, self.repo = self._parse_source(source)
-        self.api_base = (api_base or os.environ.get("AGENT_INDEX_GITHUB_API") or _DEFAULT_API_BASE)
+        self.api_base = api_base or (
+            _DEFAULT_API_BASE if token_provider is not None
+            else os.environ.get("AGENT_INDEX_GITHUB_API") or _DEFAULT_API_BASE
+        )
         self.api_base = self.api_base.rstrip("/")
-        self._token = token or _env_token()
-        if not self._token:
+        self._token_provider = token_provider
+        if token_provider is not None:
+            if token is not None:
+                raise ValueError("renewable credentials cannot be combined with a static token")
+            https_origin(self.api_base)
+            if client is not None and str(client.base_url).rstrip("/") != self.api_base:
+                raise ValueError("renewable credentials require the configured API base")
+            if client is not None and client.auth is not None:
+                raise ValueError("renewable credentials cannot be combined with client authentication")
+        self._token = None if token_provider is not None else token or _env_token()
+        if not self._token and token_provider is None:
             log.warning("GitHubConnector running without a token; API rate limits will be low")
         self._http = GoodCitizenSession(
             base_url=self.api_base,
@@ -55,6 +69,7 @@ class GitHubConnector:
             client=client,
             timeout=_DEFAULT_TIMEOUT,
             min_interval_s=min_interval_s,
+            request_headers=self._renewed_headers if token_provider is not None else None,
         )
         self._client = self._http.client
         self._owns_client = self._http.owns_client
@@ -245,6 +260,10 @@ class GitHubConnector:
     def _api_get(self, path: str, **params: Any) -> _ApiResult:
         """GET JSON through the shared good-citizen HTTP path."""
         return self._http.get_json(path, params=params)
+
+    def _renewed_headers(self) -> dict[str, str]:
+        assert self._token_provider is not None
+        return {"Authorization": authorization(self._token_provider)}
 
     @staticmethod
     def _parse_source(source: str) -> tuple[str, str]:

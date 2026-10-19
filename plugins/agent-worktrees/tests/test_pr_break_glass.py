@@ -99,6 +99,12 @@ def test_blank_reason_is_not_confirmation(
     {"source_head": "short"},
     {"expected_head": ""},
     {"destination_fingerprint": "short"},
+    {"saved_head": "short"},
+    {"publication_fingerprint": "short"},
+    {"evidence_fingerprint": "short"},
+    {"action": "refresh-lease"},
+    {"action": "settle-publication"},
+    {"evidence_status": "assumed"},
 ])
 def test_malformed_operation_is_explicit(changes: dict[str, object]) -> None:
     fields = {
@@ -390,10 +396,17 @@ def test_recovery_keeps_transport_and_protected_history_gates(
         hook.write_text("#!/bin/sh\necho recovery-hook-refusal >&2\nexit 1\n")
         hook.chmod(0o755)
         git_ops.git("config", "core.hooksPath", str(hook_dir), cwd=str(wt))
-    assert not finalize.push_changes(
-        wid, config, break_glass_reason="Approved recovered plan",
-        confirm_break_glass=required.value.preview["confirmation"],
-    )
+    if defect == "moved":
+        with pytest.raises(recovery.ConfirmationRequired, match="no longer matches"):
+            finalize.push_changes(
+                wid, config, break_glass_reason="Approved recovered plan",
+                confirm_break_glass=required.value.preview["confirmation"],
+            )
+    else:
+        assert not finalize.push_changes(
+            wid, config, break_glass_reason="Approved recovered plan",
+            confirm_break_glass=required.value.preview["confirmation"],
+        )
     expected = moved if defect == "moved" else "" if defect == "deleted" else old
     assert pr_publish._tip("origin", branch, str(wt)) == expected
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").pr.head_sha == old

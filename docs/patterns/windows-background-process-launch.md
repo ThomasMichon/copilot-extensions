@@ -77,18 +77,34 @@ for recurring console descendants), or, at sites not yet migrated to it,
 `windowless_daemon_kwargs(breakaway=True)` / `detached_kwargs(breakaway=True)`.
 `spawn_daemon` also requires an explicit durable `cwd` (the runtime root or
 home, never the caller's cwd or a plugin payload) and appends the daemon's
-output to a `log_path` instead of discarding it.
+output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
+of discarding it.
 Do not remove the caller's Job or make every child break away to repair one
-daemon. The containing Job must permit breakaway; a rejected spawn is an error
-to surface, not a reason to silently retry with caller-owned lifetime.
-`spawn_daemon` raises `DaemonSpawnError` in that case. A caller whose daemon
-already ran inside its caller's Job before migrating, and for which that
-degraded lifetime is still better than no daemon, may opt in to
-`contained_fallback=True`: the daemon then starts inside the caller's Job, with
-the fallback logged as a warning and in the daemon log, and does not outlive the
-Job. Durable survival therefore holds only where breakaway is permitted (and
-never in contained test mode).
+daemon. If Windows refuses its explicit breakaway request, `spawn_daemon`
+uses the shared, bounded WMI lifetime broker. Its windowless, stdlib-only
+bootstrap uses the actual base interpreter with WMI's supported detached-process
+flag, so a venv redirector cannot change the identity being adopted. It receives
+launch data through an authenticated one-use channel,
+stages the actual child suspended, and transfers a pinned native process
+handle before resume. Shell interpolation, credential-bearing command lines,
+temporary launch files and wrapper PIDs are not part of this contract.
+The caller receives the actual daemon's PID and exit/control methods.
+An uncommitted failed launch is reaped before retry; both direct and broker
+failure produce `DaemonSpawnError`, never an apparently successful contained
+daemon. Independent cleanup branches preserve that failure type. If process
+exit cannot be confirmed, the error carries `cleanup_confirmed=False` and no
+contained retry is permitted.
+A caller for which the degraded lifetime is still better than no daemon may
+opt in to `contained_fallback=True`: only after broker failure does the daemon
+start inside the caller's Job, with a warning and log entry. That daemon does
+not outlive the Job. Explicit `breakaway=False` and contained test mode never
+invoke the broker.
 Contained tests deliberately suppress escape and retain process-tree cleanup.
+The native survival regression separately exercises Jobs with and without
+breakaway permission, with two complete launch/stop cycles, exact argv and
+environment delivery, split logs and foreground/window observation. The
+broker-only handle-control case proves timeout, termination and actual exit
+status rather than polling an unrelated wrapper.
 
 PowerShell `Start-Process` and .NET `CreateNoWindow` provide no Job-escape
 promise. A one-shot installer should call the service's common user-mode ensure
@@ -127,7 +143,15 @@ check into recurring self-SSH process churn.
   is not a resident daemon carries `# daemon-spawn: allow <reason>` on its
   `Popen` line. `tools/daemon-spawn.allow` is a shrink-only, reasoned baseline
   of the sites not yet migrated: each entry covers one launch, and a stale
-  entry fails the check.
+  entry fails the check;
+- an installer (`plugins/*/scripts/install*.ps1`,
+  `plugins/*/transports/*/scripts/install*.ps1`) may not start a process with
+  `Start-Process` of `conhost`: that child stays in the installer's Job. Start
+  a daemon now through its user-mode ensure path (built on `spawn_daemon`), or
+  WMI `Win32_Process.Create` for a PowerShell-only daemon; a child the caller
+  deliberately owns (a foreground supervisor that waits on it, a warned last
+  resort) carries `# daemon-spawn: allow <reason>` on the statement or the
+  comment line directly above it.
 
 `agent_procutil.spawn_daemon` is an approved headless primitive: a launch
 through it is windowless by construction. It approves only its own call; a raw

@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 35,
+        "current": 40,
         "minimum": 1,
-        "previous_generation": 34,
+        "previous_generation": 39,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -41,7 +41,12 @@
           32,
           33,
           34,
-          35
+          35,
+          36,
+          37,
+          38,
+          39,
+          40
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -94,21 +99,26 @@
         "native_bound_prompt": 33,
         "owner_qualified_acquisition": 34,
         "workspace_creation": 34,
-        "qualified_live_peer": 35
+        "qualified_live_peer": 35,
+        "provider_creation": 36,
+        "worktree_render_cache": 37,
+        "remote_acp": 38,
+        "live_message_receipt": 39,
+        "worktree_native_resume": 40
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "be3b892314c276413057a50c10456ba65b5226c4310d3a22f8a066624c308d58",
+          "sha256": "7dcba30c6b554d346d3f37bb39c4c2f2aec10d9f3a3c01322144634843850714",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "122e62540a0c83dce0b72836414e1e4f5ac0f93b11ba6de93d377f80e28b9576",
+          "sha256": "e331a1ec42767780babd06068e553b1769b974f46968febf57ec726c07de55cf",
           "semantic": false,
-          "non_semantic_reason": "Preserves public model imports through re-exports; session start schemas now live in the registered session_start_models.py owner."
+          "non_semantic_reason": "Only local topology configuration gains an automatically captured source-repository locator; HTTP request/response models and wire generation are unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -118,13 +128,13 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "ffb8a0624abedc810559a34bee124fa43e07240dc9be28be5d8e54093035da39",
+          "sha256": "e37027daeea2923f57d5f34827a084580551b12c0a02d89b620162cfd75fe8c0",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "sha256": "378724c75ff132a7ecaa50de90d8c5e45aef5b051326a0c815fb546d84b50abc",
+          "sha256": "916d4687bab944aa33ab395e70d506535e4d3e180ab59b6f3d3cd3d195ee83c3",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -136,7 +146,7 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_wire_compat.py",
-          "sha256": "83728e07defb2ce501055554ec7c26e9707038a04c477e75e18b23525a0620a4",
+          "sha256": "4f41ee6015666a3a144b254a8a9adfc5efd5bd710f244451f4ffabc1473df2b4",
           "semantic": false,
           "non_semantic_reason": "This guard asserts tolerant reading but does not produce the registered wire shape."
         },
@@ -154,7 +164,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
-          "sha256": "8c9cdf4bee879d348779b5589077845887b50f22a0e8a60ea81d11de61bed903",
+          "sha256": "6fd92672388d225e31b307235b383465c3f4608cf475a6272331b57cc3f3dfb1",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -167,6 +177,120 @@
         {
           "path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "sha256": "212ba2f30dfc0c1cdfe788b379f473620b48a1e5a4f6fd5b20fb211074e1f88d",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "sha256": "f92a052889feda87ce29dd63b4e3f2fa42b8a21fc1dbae699a4f6a24ecbd0a8e",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "sha256": "a85d7ef19f9afa05d6c40f06fb6a5e6a5956b18c260be6cd4666f0c01623880e",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "sha256": "3b848128648297a1a0e79bd3c55fae5981f9b81375a10070c8a5765107c74363",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "sha256": "56558c3959289bad2d5ce7801d66ce0f81bf5f666e971a5fc3c6305920f65ac2",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "sha256": "a07369bc24b429039e36cc8af0fb58d696918aeb7248ec4fc75d2125779fd408",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "sha256": "b16d9044ccd1f8fd37054825b4f4a6c4c6a4e2b4b79d2dd1b3b0f2a4086f9f95",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "sha256": "15b4598ea31081173f418fc0e03a1bbecf0dac5d451cf27a726cf43a45671335",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "sha256": "8c07a9783129cccd9ba2e19d7de84e89b4c4b9e49f8d0f4febb84be5bea5a68e",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "sha256": "94711e727ebb19c0e090f4a4c5611bb5c44bed31058e9af802afd504c37a7751",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "sha256": "a0de77c3f1ef2119cdd16b67d0291dc367ec68c9931d0e80e04bf07ce1ef3b46",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "sha256": "214fe3f869274504b0a2c1d51d33df38dc182bd128cb56fc8e7e9478c3b03b4d",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "sha256": "178c24707f1957706aeb80466f067e9591c206ec215cc6596730234ba115a942",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "sha256": "03bbc897a991d68c0e862e7d87b802d9b2d5a058647ce7117385cb5f1de60509",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "sha256": "de7ee7f6fdfb6aa8404efabb56a3b8b225f86da70c6d17a5578837b546366a3a",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+          "sha256": "17d5d8c5c054feeb080000b77bdb33dacd255160c24b1bab16a46f71dd844cf1",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "sha256": "5188f9cbc9063cc4b0289402ca8ad626a452d6f1c0b91381710e0c68528f3a60",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "sha256": "fac4bc5486b3095c28fb1a747822f2c108a9179e1b707070163c48afb418a865",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/client.py",
+          "sha256": "f69b14d54afc42013482491342aa5cf0fa65dd612d1c1c471d83497b45360766",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "sha256": "1f0ee4f1599af18cdf3f1184af115eb660a2f8d1ff23db812cfac342667132f5",
           "semantic": true,
           "non_semantic_reason": null
         }
@@ -198,9 +322,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol.json",
-          "sha256": "18026e314eb8961eef4cd443f28277518b13d81b3d1a5dd718539f7771f0ece3",
-          "role": "current additive acquisition capability constants and refusal contract",
-          "generation": 32
+          "sha256": "edcf2d53edae6aca9684f5438f0fd21b07df155ad69c73fe9de8ba1d986711b3",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
@@ -367,14 +491,14 @@
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-30/acquisition-protocol.json",
           "sha256": "e73e6de23803c793529ef873921122bb81b877d3fa4c7a746c258bda93cf8d98",
-          "role": "previous acquisition generation retained across recovery rollout",
-          "generation": 30
+          "generation": 30,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-31/acquisition-protocol.json",
           "sha256": "e7f75c2f93e3ac9516c709df7eaf5f75ce3789851117b229202c0ae8f6559541",
-          "role": "previous acquisition generation retained across retirement-recovery rollout",
-          "generation": 31
+          "generation": 31,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-31.json",
@@ -495,9 +619,999 @@
           "sha256": "c20a5dac95eaa941b63344f04533a2a9344807ba601011b93d2679b1b40df2ea",
           "role": "Generation-35 workspace-creation-routes evidence; prior capability floors retained",
           "generation": 35
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-36.json",
+          "sha256": "9f1c7f98d582460bca1009792204e00ab2bd1d3136c8e8702fb7a633173a4d0f",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-36.json",
+          "sha256": "271cea4715f17018ee5d71b9266b70a9a71bc249d69a1e7e7a9b5362a3d158ea",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-36.json",
+          "sha256": "7e2956bff9d4a143966bcba848baa08b5079f8ae54642d27c56301a270980040",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-36.json",
+          "sha256": "3811285342608356602eba9ed8f7edec711e5af86113950a93d8c6296587014e",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-36.json",
+          "sha256": "1fcfb666530a7c4a5f6883d4764815aaecdbeba381dcfc0f991f7f1666d94892",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-36.json",
+          "sha256": "6c6659d7458b28a226d4f40b354f02194e9c5e93421f0350e463654943b3bd5c",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-36.json",
+          "sha256": "9cd342636129145c786781d08b33e3bbd8444ba62f387334d33153666d6bb59e",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-36.json",
+          "sha256": "c8c64c794fd5f9f40700541fd92e33ae1acf553a60597110b1bb2fd45f373ff2",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-36.json",
+          "sha256": "f717e34b7b27b44c4f0518b34586ce246d4b376a0a2dabdf87bed74515c91d44",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-36.json",
+          "sha256": "d3b3fb29e6f63f8ba5327cadd09013b79a40d359982c33a3f84e285791f957c2",
+          "role": "Generation-36 explicit provider-native creation and retained prior capability evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-36.json",
+          "sha256": "7d5f8e731230ab23792f3634566839200454fbe3de245056f4fe3a3e0cdb1813",
+          "role": "Generation-36 provider-native replay and recovery boundary evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-36.json",
+          "sha256": "267072cac9433d04b3d4632c09555a4ca8ce3aa0dd364b6ff948ec5b50be9fa8",
+          "role": "Generation-36 provider cold-resume placement and native continuity evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-36.json",
+          "sha256": "d22d1edf7433e2594dae8932fdfc6fec2d4da74313090d723df4763102095954",
+          "role": "Generation-36 worktree render opt-in and live-refresh evidence; earlier capability floors and fixtures retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-36.json",
+          "sha256": "f0f5f097970d8b935d74e218e090eca688eb0154daa1d0b4dcdbd1237677d88e",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-36.json",
+          "sha256": "e0915313e689ed7a7fbcb327a50a244821cec40aac45c47b24e5555246dca710",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-36.json",
+          "sha256": "b7e62b7fcf831d91629303639457526d154d6229aa177c7ede22a01647c7c867",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-36.json",
+          "sha256": "904e02cf32113bc3f97d588478e443832e15e4a0fe75f423ad686d1209942380",
+          "role": "Generation-36 exact owner evidence; prior wire fields and capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-36.json",
+          "sha256": "475bd3fdeb815f191109cc593e1593e0d566070f140e0d806eb1aea24b3e7513",
+          "role": "Generation-36 stable worktree row schema and rendering evidence",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-37.json",
+          "sha256": "cbc858ceffe8334f4c5d9b2b3d9548e38f129a0fc91e2358e4fd911b670b6f37",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-37.json",
+          "sha256": "51b45c2563a18cf9fe7740672d29755612db0c8900d7d12f892716cda1af3e30",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-37.json",
+          "sha256": "b5aaee735cfd259b98b915a0125f41cb2475da66f22bdeafdca0f98b03ac3598",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-37.json",
+          "sha256": "ad3729be58a52b685579a8656ffe70fa571cdf910c1d33b1084b94a91afb7921",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-37.json",
+          "sha256": "e82617f36df2b13a4910bbf4cf775084bb206dfbf88867abb95bd06fd1046e36",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-37.json",
+          "sha256": "604164f5133e37debe9f0606cf00f8bd25836cb6bc9f11d3a66a7ec8dca8c175",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-37.json",
+          "sha256": "da47cd7745b7ca3755c7671981cba3e5077d8496eda9497e07557ed20a7881a3",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-37.json",
+          "sha256": "72264919781d7f0db44f8bd14d09bfa573fdbdce9dfa5fb8023b7f1eaacf8707",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-37.json",
+          "sha256": "65922704d1d7da731524b11bee54aca8b46f72598e3cdd0992d15cb75e3f700c",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-37.json",
+          "sha256": "02e5af6080e73998b2657757874e5f1857edc23c6c82342e7d5c1cd29b47ac31",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-37.json",
+          "sha256": "09199d46ab625cb12968d3d05f21ceec7e83236f0a7e9db246ccbf7f8189b0fa",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-37.json",
+          "sha256": "5abd2e4310a7b816bc9f77b314219f88c194c163c60844c1b58b63cf9dd5e6e9",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-37.json",
+          "sha256": "b3860f0db4ac8a7fa38a3b957e174a72138a194dd16d3a4973744a1a4fa41e51",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-37.json",
+          "sha256": "441d484d65b83f7487a77e148dc7e620cf7473144ecce9f733a959547cecfd2a",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-37.json",
+          "sha256": "7c4f821a410a0583f9a0b85d4807779b473d388b173a70cb62e198450125df1c",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-37.json",
+          "sha256": "699bbeb1b52c8e72566da2272b02e5293a58a6299f1fcbf19300981710542c7c",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-37.json",
+          "sha256": "6311e82f3112b343fa0e76c511084df3c61365fcec08f792e76422bad8df5463",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-37.json",
+          "sha256": "1e0cf0f8374bdeda86d35d4cc97bcd52345f5041385a4c511638ad487b4b99b1",
+          "role": "Generation-37 cache-render integration; preserve provider-creation and prior capability floors without changing historical evidence",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-38.json",
+          "sha256": "1ae87047489c232d50b41b92e61f6ba4d971b0ac87ecb99dc60658a3a2003ec6",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-38.json",
+          "sha256": "7ed884f4cb0c0f23ec894a3c30928756063e97c41abaf960507bcb04cf5ce835",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-38.json",
+          "sha256": "7aadb18bdfb16d7422c590f5684d689ebd8d0282e31c20f0c0f16b3fecfdddf9",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-38.json",
+          "sha256": "74734b5a9219a1ecbd1a9dcd87262e16623e49c785fe0ac3feeddae0ad0ab536",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-38.json",
+          "sha256": "2e844756ff80a4b3a25c0dee1988e98db41f80910b77b12ed61855fb017348bd",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-38.json",
+          "sha256": "b690d8ef2b603b699c9e664716d815600b534e50253590d0ec153742cea61457",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-38.json",
+          "sha256": "1a617f78b4e53409400bfdecdc6be706dc606d8d8391310fa13d7d749e9b5995",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-38.json",
+          "sha256": "204cbe2de0aad35f2e848d165fd1a936d2ff0a96d13994fc6a1ce4dda18134b7",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-38.json",
+          "sha256": "5047b8d2869d89c51d8924820f0c2e53a6c10f486d1815531d22af3653020cb2",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-38.json",
+          "sha256": "680a965be9ce8990adeea2529ee4597b0955f6c229f2a0dfbaec5e602148c90e",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-38.json",
+          "sha256": "ab375ccf530a0f9d49445751520554ea57ccdbad0077ad4b7dcbd0d0054e2e6b",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-38.json",
+          "sha256": "19fbd125186a95e09601eccf3b568bd7c6a993f844a08bbf74543cac37e57eba",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-38.json",
+          "sha256": "ce5ba86dc3ba29cc6290bfc8bf6a4587aafadaf668cde71d76b925a03a06c98c",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-38.json",
+          "sha256": "ae4c0775fa9481a454ea0b26b371a358d97c82576ff8b6cc88801fb79b9cb516",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-38.json",
+          "sha256": "6a1335ad6fde11e47f13c28e5917b62fa66e1600ae5a0f95796ff71374b4ada8",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-38.json",
+          "sha256": "cbb123a01be06c4fdc56b64946e9e20711ec0f608b07c1c0c7b9174955aeeb6f",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-38.json",
+          "sha256": "266356314455f454f576e87267ffa1914b63ccfd8768f455a879e7847f219f7a",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-38.json",
+          "sha256": "df00d2147ba47e16988334cb38ea90341b7bde127e1e4bfc2b0bc361d1c79cb7",
+          "role": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-38.json",
+          "sha256": "d598ccc81e9488ad3cb0fc6666f32bd52ed80679188303972f6ea79d44dea02d",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-38.json",
+          "sha256": "af0cb34190af71d24c20844d1acf305007948e845ea653bf1a294493d68397b4",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-38.json",
+          "sha256": "98c439c4c002bee1735e394e730e09afe9268e9670ef4afd899652a24e657a6d",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-38.json",
+          "sha256": "793eefdcd3becd43390be234ffd6f8511de7cd3c9349435dd191c030c5b42330",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-38.json",
+          "sha256": "f162059ebc3fa0a7a47b9af9aad60415c332bdbfd400f9bff105c7edc05d1269",
+          "role": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-38.json",
+          "sha256": "445ffcf9384c61e7b1761dc8d781ad64ad3add8527817b919c6ac271b03ce499",
+          "role": "Independently expected progress and freshness projection, verified through actual manager rehydration with live failure followed by historical success.",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt.json",
+          "sha256": "59ed02679a7aadcb742c9c0547b29d23aba967350957d735d3c7212a61f302a0",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-32/acquisition-protocol.json",
+          "sha256": "18026e314eb8961eef4cd443f28277518b13d81b3d1a5dd718539f7771f0ece3",
+          "generation": 32,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-39.json",
+          "sha256": "92df12939c9646d669ff11e3dfcc06717bdc0b75e72a0ae21835995e1d3a234e",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-39.json",
+          "sha256": "40aa42619ce0f609c16aaa9be0aa6e74b8ed8abba706c6361b90c84c341743fd",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-39.json",
+          "sha256": "e90d180f3a090c6708a46d86e81a1cb03f2e7952551e7bf565a9d9fa9285064a",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-39.json",
+          "sha256": "5c42ee5772d39a529cd43bc1183ce8579546067d05a337e449870c8e601387ea",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-39.json",
+          "sha256": "e2eb7ec6cf907152621b0a8fdada3705070dca6ccf3dc3d5168ca54f6aaf3ba7",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-39.json",
+          "sha256": "8cef00644982af547776d7c4320d97100685efe3f7797c5dbbe1fc4975778bcd",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-39.json",
+          "sha256": "45dda0fe1439d711032257317b4ed0dd10b7090c289759880e668f482fb4a933",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-39.json",
+          "sha256": "5b99de066fef7fbb95d4a59a1bec2491c497a3a9d9714c539dfc7043cfb06aff",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-39.json",
+          "sha256": "569f740cfb379345426a17a996933b45561cf6c9ea409a8e7249ea5f2bd87697",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-39.json",
+          "sha256": "ceb8dce6d779dfa1c65f91674bd259cbe0ce0b52cf42f5675ad1b23e88729be6",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-39.json",
+          "sha256": "8a6d06db94c7b04358d8bdf6513ad15ff9f92b459a684ed636a0e6b82089e5ac",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-39.json",
+          "sha256": "4a8d7d6f966dfadbe34e57a800273b7d89e5f0bb20d7b171fbeec593b72d83ff",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-39.json",
+          "sha256": "7d6f2b758b5c79b9f012aec44699dc4a14f8273bbe6c452e1839ae9ddb04ead9",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-39.json",
+          "sha256": "86c467cbca0855980284e016016334c631eb46d4bb439436b48210125bb5fa8d",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-39.json",
+          "sha256": "57fd13eec7f88601e38a2058d8b70a008b571f17d960f7d64fe490d9cffcaa06",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-39.json",
+          "sha256": "5ca67ff2dc083e38fe1a5eb26750ef6fc01f6680a3415969c67eae65a4ffd4dc",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-39.json",
+          "sha256": "a58d0b5f6b57e8b9c15bd6e773ae101dd4c5ac82b59003ddb5fa4dec0ff78cfb",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-39.json",
+          "sha256": "62ca2863ac5f7745bca2ed4213fc691ad147345bfc58b5606062002a9595dc83",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-39.json",
+          "sha256": "a8a83257eb48d5c1d2e310095b6be9824eaadd60fb0782551e4e00b8e2d9910a",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-39.json",
+          "sha256": "4beadda60046e1ba6faf33479043c27680c8451c128f3aafd5d246f8e1adee9e",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-39.json",
+          "sha256": "81d9e2416aceb5c893e28a8da45a0e079b2808c4ee416ac4f33db7755b95c99a",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-39.json",
+          "sha256": "e132525b6fb3a7f36fb6dbcbc5c1e4c597e552e3c303dc51af84b728b5e28c43",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-39.json",
+          "sha256": "671466b977fc12a6243bb5dcebedb0ebf609ceaf10821d90f0b17609e38e409e",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-39.json",
+          "sha256": "67e0a3f752ce786307538d24316ff89828d2083fe6e76ea7a854ebbedee75955",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-39.json",
+          "sha256": "ddcb733046c5f6b7632d5028758d6eb71d5244595ba0302d51e76fafabeea50c",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-39.json",
+          "sha256": "7841ea796eede1c1945058f7e290a1dc019e79ac4ac87e340b8a78a9cc1b4242",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-39.json",
+          "sha256": "24ce754ec6197d198a3b4209f7f4b28bc049d95a326fdaf95683e2f94042b77b",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-39.json",
+          "sha256": "cf3545221721bd2541abaa4dcbe59dcbe5b2ab4f0dbf4979618a3a1f4c17a305",
+          "generation": 39,
+          "role": "Committed receipt-39 integration; prior independent wire expectations retained"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-39.json",
+          "sha256": "f98ded39e1cbb604ee01bfd4c70b88c9080edcf6d64ec4f5cc5d3a9a7c7ba0ed",
+          "generation": 39,
+          "role": "Extracted bridge-owned carrier version selection; real request matrix and two-bridge tests retain wire behavior"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-generation-39.json",
+          "sha256": "af6e8b7c43bb4de85b7238c8a506f21f9ecd8a9b0e60a7006b06c992ceb0178c",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-models-generation-39.json",
+          "sha256": "7e5d771a5ac793beffc58df08c7f2b6e74349ab400d32ed672f8e0ae36307021",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/workspace-creation-routes-generation-39.json",
+          "sha256": "0b9d6be67b6b17c1523eee2740d88672608433753d826b51ead97fc68e063972",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-peer-generation-39.json",
+          "sha256": "5689080b90045bac976cd44c39e58a4c5aa11d34a1274fa5c4eb559f92dee65e",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/agents-list-generation-39.json",
+          "sha256": "39a86054bb9f404f3f905c0b0e03567517a16b274c442a85808f7434a4b0addc",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/native-bound-extracted-prompt_models-generation-39.json",
+          "sha256": "f7118a525d9e185e755b6450c412157ccffdab9ddd4eac443fece5ce1f2196aa",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-models-generation-39.json",
+          "sha256": "608e764b535e6e245e58df139be57a2d30dd0254dfde6614c6a974bf03d660ec",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/native-bound-extracted-routes-prompts-generation-39.json",
+          "sha256": "e98ecd570693e8acf17bf429ab7190ac55eb994bc33c86dc63ff9af3487dd437",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/live-registration-generation-39.json",
+          "sha256": "4f2be75060ac400c9ef63ceaf075f55abb2f076a1290b79dd9a214382b6625db",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-admission-generation-39.json",
+          "sha256": "aeb025923a05d904fcbf3bb4ceae425efec463c337efed4bcb81f487d88290d7",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-native-generation-39.json",
+          "sha256": "4b6c741e487d0326170d96c97f6abe88a85042bf6f1c42207ac532613825a86f",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-resume-generation-39.json",
+          "sha256": "0abbae52caaf3d63cbb1f501b6b6b67a5cd62318fd2071f98fb03d38fac2eea7",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/provider-creation-refresh-generation-39.json",
+          "sha256": "28207ae5f42af5b45bf77ec360641b2c7c0d11b20ea45f4f0d38f268eabb8ccb",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/worktree-render-worktrees-generation-39.json",
+          "sha256": "92f723da0f8e02340a536ef10825e4259c24513a2e5a53a31a4ef84ba0d9a5e7",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/worktree-render-worktree_refresh-generation-39.json",
+          "sha256": "163692ea6e098bb51cca109e4c7d0ff8c3fc486e9e7d7e8a8f4c713d2febb41e",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/worktree-render-client_worktrees-generation-39.json",
+          "sha256": "d2daca825850e987672d256aaa01bb90aadd5c266053880922bf167711a0b986",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/worktree-render-worktree_entry-generation-39.json",
+          "sha256": "f0da1b984581a6de100843b88cd0b56dcd7b030585b62d00286a990fb9f42d47",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-client_session_start-generation-39.json",
+          "sha256": "7dc06391e4ba205cad5e8bd7515becff34f0cfdbc5216c93f35e7015d2223d0c",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-client_answers-generation-39.json",
+          "sha256": "13bf5bc7de839c004fe7963a831b217286e885bb190d0d2fa294f04671c8a28f",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-routes-answers-generation-39.json",
+          "sha256": "9019bf69f29ff90ea0fb146bc6d339bb1876b2058fcb051e1cac712707647623",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/native-recovery-draft-generation-39/remote-acp-remote_acp_sessions-generation-39.json",
+          "sha256": "b14a997693783ece4a00e69c70a8287f7300b9e1cc4b7c6c37b1dffc9f824d1f",
+          "role": "Retained native-recovery draft: Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-39.json",
+          "sha256": "2057af4d5a435ea6ef7c8151491c7adb1ee83a2cfa0383e59210dc2e14a5e7a2",
+          "role": "Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-39.json",
+          "sha256": "1074a13694ab1541b8ef1c92c42a93f17972e0b2b65180d14dfabe2436d45ccc",
+          "role": "Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-39.json",
+          "sha256": "138186648eee6d7f17eb8b07a49cbcf0d01e65710167da2060dcbdb27ae9be83",
+          "role": "Generation-39 native recovery and retained wire compatibility evidence",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-39.json",
+          "sha256": "cb3c8f5338c34221102417e6ebbe39c67b26795ed096446db4fb3b8a3764e1b9",
+          "role": "Generation-39 exact native launch receipt and fresh runtime confirmation",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-39.json",
+          "sha256": "7eb3b7139efb201d63d129adb77cd97d4f50f826cd5962853c2ac2020711e57b",
+          "role": "Generation-39 cache-blind exact-record owner lookup without roster publication",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-39.json",
+          "sha256": "ffa74852a610fd49df436adea2814847d239c64e38a1314f1fce40fade614b8e",
+          "role": "Generation-39 retained execution reconciliation and exact reservation release",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-39.json",
+          "sha256": "57a95e62f9adcdf7e12e659079e0d6ae94cced288e945a640094ab3636ac5333",
+          "role": "Generation-39 authoritative singleton host liveness before client readiness",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol-generation-40.json",
+          "sha256": "f812c21e70a7a2b9b857bdeaa8268736e4ca131c1bbcbaf9de31030bc73e2fc1",
+          "role": "Generation-40 combined receipt/native producer evidence: protocol.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt-generation-40.json",
+          "sha256": "982635127731888e1b063e607b238c0cee1cfde97af82aec9d999969f40cd99c",
+          "role": "Generation-40 combined receipt/native producer evidence: live_message_models.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-40.json",
+          "sha256": "2e71517d75a740450c36b5cc5d7ea06db263fe48ecb126d6086e87725ea2bf0c",
+          "role": "Generation-40 combined receipt/native producer evidence: protocol.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-40.json",
+          "sha256": "012813b4381d558e90e5a4e483d958978e4306d6b298a2915767c9dbdc87fe19",
+          "role": "Generation-40 combined receipt/native producer evidence: protocol.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-40.json",
+          "sha256": "7288c6437bbdbdfe8489711f3b037076cf5bf0f21b26713053eb88d7fac9c451",
+          "role": "Generation-40 combined receipt/native producer evidence: remote_operations.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-40.json",
+          "sha256": "84ee7333760f8d330d0c79d1d193fbab9d23120d10d86dae27ffbaf4dfc0f05d",
+          "role": "Generation-40 combined receipt/native producer evidence: remote.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-40.json",
+          "sha256": "d4bf53afc5e6018d33a59a2c629ce719ed33328e24caaa38ee2d39acda363d48",
+          "role": "Generation-40 combined receipt/native producer evidence: protocol.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-40.json",
+          "sha256": "de128f113bd3bf879bbde6714c93addfa98b758a977a264b358d6bf792736f66",
+          "role": "Generation-40 combined receipt/native producer evidence: sessions.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-40.json",
+          "sha256": "fec2a1a3c6f4cb80818a4e50fe09cb365d058139216f420985976c56923d3a61",
+          "role": "Generation-40 combined receipt/native producer evidence: remote.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-40.json",
+          "sha256": "0022cf79c2d49d303be2b67ec45777cc6fd4ccaf88d44dda0eca79883e6ec1d0",
+          "role": "Generation-40 combined receipt/native producer evidence: agents.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-40.json",
+          "sha256": "58e47e7e63ab1fe009c0cebc49872fe3c1459a826469ba5c6b8dadddbc0703ac",
+          "role": "Generation-40 combined receipt/native producer evidence: prompt_models.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-40.json",
+          "sha256": "ddecab0826c20c2182e7c142be71cc5d1563017bb6d06a807bff90073017cd25",
+          "role": "Generation-40 combined receipt/native producer evidence: session_start_models.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-40.json",
+          "sha256": "61cc3ee6749cce4a4ddebb8341b9459d8b7dba1019666f9a99a1e155783483ee",
+          "role": "Generation-40 combined receipt/native producer evidence: prompts.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-40.json",
+          "sha256": "5d16bb99125b8f902d5b34d0bfd31f44a8141eafd505a214d3ba74d2da393470",
+          "role": "Generation-40 combined receipt/native producer evidence: cli_mode_models.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-40.json",
+          "sha256": "2aeb23f8e37566d2e369bf4e43239167debe2cca9de8198985b8b26d949a00ea",
+          "role": "Generation-40 combined receipt/native producer evidence: workspace_creation.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-40.json",
+          "sha256": "eded34e2815d0dc7c0618dac5b1ad8f8ce3a07ee3970ee3068b3db35ea6e2b7e",
+          "role": "Generation-40 combined receipt/native producer evidence: provider_creation.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-40.json",
+          "sha256": "20f3d31e76a912ca2d2b202f250aed5341c5187b2bf95cf428140c436e22e66d",
+          "role": "Generation-40 combined receipt/native producer evidence: session_resume.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-40.json",
+          "sha256": "e105620c9052edb2e04a3e61ea4690e876a439fc9d85fa477e62ea8499a8f51c",
+          "role": "Generation-40 combined receipt/native producer evidence: session_core.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-40.json",
+          "sha256": "5055361934dfd5195376fbac4d822bf25ba4575a543b1c2f51dc645bdde3e43e",
+          "role": "Generation-40 combined receipt/native producer evidence: protocol.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-40.json",
+          "sha256": "23e4d00cd2fc2e3a17e0a0c98334d430f917a73b6ec51ceaadfba9a3daa5f9c6",
+          "role": "Generation-40 combined receipt/native producer evidence: session_start_models.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-40.json",
+          "sha256": "294894e81bccf880e03700d5b5dcc588e853ed187a4dc0f48c7cadf5a0bf46f2",
+          "role": "Generation-40 combined receipt/native producer evidence: worktrees.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-40.json",
+          "sha256": "e8b2a1898d32e3de469fd93fe815a0895607c0c14edb9dc4d5e962d1a2132170",
+          "role": "Generation-40 combined receipt/native producer evidence: worktree_refresh.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-40.json",
+          "sha256": "7cc4c0698c3dbafc44fff47062201979542c33c24fdb8f634d0b9b3e0dbd6c6c",
+          "role": "Generation-40 combined receipt/native producer evidence: client_worktrees.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-40.json",
+          "sha256": "bec581b3d82ff607e0550f3962f4d2266b5e3c13be84bd42d12a0254e921e71b",
+          "role": "Generation-40 combined receipt/native producer evidence: worktree_entry.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-40.json",
+          "sha256": "ecf0013b822e6d65422ef74ac9078f78a0ac5b50c634ea3e94f6f2e0015b99e9",
+          "role": "Generation-40 combined receipt/native producer evidence: models.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-40.json",
+          "sha256": "668b1fa4d567d93d7acb8d77fb9d8fffdeaf339a832d97b931fb09b7f0a770fd",
+          "role": "Generation-40 combined receipt/native producer evidence: client_session_start.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-40.json",
+          "sha256": "cb7345714ed488f7b4d3fb4a269a06b9171a5b3c67a28ae2fa3a6957724b85fe",
+          "role": "Generation-40 combined receipt/native producer evidence: client_answers.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-40.json",
+          "sha256": "eb1aba4550f0b56bcb368446d404dbe92dc5890153fb16922f9cba915d829e1b",
+          "role": "Generation-40 combined receipt/native producer evidence: answers.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-40.json",
+          "sha256": "995aa922b10236c46bd0798da23858483551162a5550b4ea392c6ec678c110e9",
+          "role": "Generation-40 combined receipt/native producer evidence: remote_acp_sessions.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-40.json",
+          "sha256": "4d8b6d1c283d59aad298302fb1fc368a2edd35e96374135663f5b1b769a1c83b",
+          "role": "Generation-40 combined receipt/native producer evidence: session_core.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-40.json",
+          "sha256": "f3e19f68e4085de6f2f93ebd293ae6bef63710d27f748e1b4059d48ece312262",
+          "role": "Generation-40 combined receipt/native producer evidence: remote_operation_versions.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-40.json",
+          "sha256": "1474f54b45c7f64c1dfba3f828036439191fb3347f01439a72aae99f059d7e1d",
+          "role": "Generation-40 combined receipt/native producer evidence: worktree_native_resume.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-40.json",
+          "sha256": "41be3be0d4cb52dac6d1de609a91bcdc3a89b0c44b6b9a23b72c202677c60c96",
+          "role": "Generation-40 combined receipt/native producer evidence: client.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-40.json",
+          "sha256": "06457ac92aa2488c52332cc973a9d1edede6ddd02facb8aca023cadec04b7861",
+          "role": "Generation-40 combined receipt/native producer evidence: singleton_resume.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-40.json",
+          "sha256": "c0278aa147dce9f4515d898af7cf7a68b829db16e80c8c913e3340df4f68ca50",
+          "role": "Generation-40 combined receipt/native producer evidence: worktree_native_resume.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-40.json",
+          "sha256": "35fba64451766a681429df168a5f79b75f4a2e5519de675b3cb7e2cd519556fa",
+          "role": "Generation-40 combined receipt/native producer evidence: worktree_probe.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-40.json",
+          "sha256": "4b1e516da42ecf6db08c3e35ffb199acc93e67c07ffb91f920fee5a22f5582f0",
+          "role": "Generation-40 combined receipt/native producer evidence: worktree_native_resume.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-40.json",
+          "sha256": "c5b9a07129bb290a663fbbc12d3668cf00fc95ef375d09553a31fb0ee3e9d75b",
+          "role": "Generation-40 combined receipt/native producer evidence: singleton_resume.py",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/receipt-before-ssh-profile-generation-39/remote-message-receipt-generation-39.json",
+          "sha256": "45455f171ae7960b4c561b0f0062af4ffe2784bd357bd82fc310fb1e14d0a844",
+          "generation": 39,
+          "role": "Retained published receipt-39 capture before SSH-profile identity correction"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/receipt-before-ssh-profile-generation-39/worktree-render-worktrees-generation-39.json",
+          "sha256": "6aaf466d5a11fdf1b769b3c2885255a1ef24d61a9e203979691d0aa53b0a1f31",
+          "generation": 39,
+          "role": "Retained published receipt-39 capture before SSH-profile identity correction"
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-ssh-profile-generation-40.json",
+          "sha256": "38e6b684c1df9bd47a5798a78f64f4c039feb81d6b601aa09db816d982c7fa0d",
+          "role": "HTTP-40 unchanged wire shape with configured SSH-profile identity retained",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-ssh-profile-generation-40.json",
+          "sha256": "3c8416d74afceefa437a94b0af6fb04fa6de8c2624a51d960bbf10f0b6ff5a23",
+          "role": "HTTP-40 unchanged wire shape with configured SSH-profile identity retained",
+          "generation": 40
         }
       ],
       "provenance": [
+        {
+          "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "94c94293ff2a03e4b959639cd5adb1fa0577baf6",
+          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after the internal SSH profile-authority correction; native profile and missing-alias regressions preserve valid routing."
+        },
+        {
+          "commit": "8ec9770bd3c21b16d5d109aff05579086434b282",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+          "capture_method": "Preserve independent receipt-39 packet and version-skew expectations after selecting configured SSH profiles without topology user or port overrides."
+        },
+        {
+          "commit": "95cdb907d5ad1276a47960630a21b0e27d84a0bc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "27fee5e86ead7bbe780b194956e60c3d25c0dbe6",
+          "capture_method": "Re-attest unchanged HTTP-39 render and refresh vectors after clarifying optional-host validation and the retained legacy user keyword; native profile regressions retain both configured identities."
+        },
         {
           "commit": "9aa7aa03f5ba2762eba4c92d02bf7b6c6b425934",
           "plugin_version": "0.4.1-dev3",
@@ -1425,9 +2539,1577 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
           "capture_method": "Exact rebased producer source; independent peer round-trip, native prompt and workspace fixture assertions retain prior capability floors."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "0ea5edff1c18e4f16264a8988526bd29ba5b52e8",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "4c366724eabfec7d69b556bbe7654d2f3575de54",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "332e5d36e42bfef8b1f1d5849bb75cc1c5b9b18f",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "19251a9530df3c5658c2482c51c09aa5d6facfeb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "c867e7e037e7534f8066d353c2dbd086c889cdbd",
+          "capture_method": "Freeze committed source with current request/response model serialization for explicit provider creation; re-attest unchanged prior capability shapes. Connected native creation, refusal, replay and older-client behavior are exercised by test_provider_creation."
+        },
+        {
+          "commit": "fe5a893ab7d0057bc4948a7cf5dc134c89ecec97",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "7947752cdd158f3888cd23778bfc3feeb43e71a7",
+          "capture_method": "Recapture provider native admission after opaque JSON key encoding correction; native Unicode/surrogate replay and real ACP subprocess tests retain one original native start."
+        },
+        {
+          "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "b4dac600729f0d583d36e1e285f4eb5e5d2870ef",
+          "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
+        },
+        {
+          "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
+        },
+        {
+          "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+          "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
+        },
+        {
+          "commit": "5483f83b886c78031f5a9a1485fd256ab5bf7b65",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "3ce38f533716cc084a4cdc995b9496a1619dae1c",
+          "capture_method": "Freeze committed provider replay corrections: ordinary send/load failure cannot recreate the keyed native, handoff retries retain caller-worktree scope, and request validation precedes affinity reuse; connected regressions and ordinary resume/workspace compatibility pass."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "0ea5edff1c18e4f16264a8988526bd29ba5b52e8",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "4a4479c7c4c0138b8ad7ce5fba05869d73b1785a",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "eaff730260367b704f2fd79286f8604a464d29e1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "3ce38f533716cc084a4cdc995b9496a1619dae1c",
+          "capture_method": "Recapture the explicit instance-pinned execution precondition. Native admission refuses name-only wrappers; real Docker replacement between namespace resolution and emitted payload execution is rejected before the replacement agent command runs, while existing projection remains valid."
+        },
+        {
+          "commit": "270cf0110d0675be3b4262d0b12aa7c008b89e21",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Freeze keyed provider cold-resume corrections: effective placement drift refuses before persistence/spawn, ACP load retains the guest workspace without changing host cwd. Real offline ACP stop/load and native provider/ordinary refresh compatibility tests exercise these boundaries."
+        },
+        {
+          "commit": "270cf0110d0675be3b4262d0b12aa7c008b89e21",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "95d0d8d3a14c8c9b9513abf8fcbbeb5931cf6b5f",
+          "capture_method": "Freeze keyed provider cold-resume corrections: effective placement drift refuses before persistence/spawn, ACP load retains the guest workspace without changing host cwd. Real offline ACP stop/load and native provider/ordinary refresh compatibility tests exercise these boundaries."
+        },
+        {
+          "commit": "270cf0110d0675be3b4262d0b12aa7c008b89e21",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1b251b41ec48c41d47ff4026edce83f29b0db97f",
+          "capture_method": "Freeze keyed provider cold-resume corrections: effective placement drift refuses before persistence/spawn, ACP load retains the guest workspace without changing host cwd. Real offline ACP stop/load and native provider/ordinary refresh compatibility tests exercise these boundaries."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "51db9415f157a2f0eb4e78f75e5b0d2b18e717ed",
+          "capture_method": "Exact committed producer/client source; independent route serialization, measured wall waits, retained-holder and version-skew regressions exercise cache-only rendering and live refresh."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "1ff7df726ed780d28b58276582bf73004b1fa394",
+          "capture_method": "Exact committed producer/client source; independent route serialization, measured wall waits, retained-holder and version-skew regressions exercise cache-only rendering and live refresh."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "186b50375f9e83c05e3cbf60606177efbf22cf7c",
+          "capture_method": "Exact committed producer/client source; independent route serialization, measured wall waits, retained-holder and version-skew regressions exercise cache-only rendering and live refresh."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "d6f86bc69365e357468af2c4da180b20c56c5d01",
+          "capture_method": "Exact committed producer/client source; independent route serialization, measured wall waits, retained-holder and version-skew regressions exercise cache-only rendering and live refresh."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "90f2a01f70488a96e6f5160bfbf12cbfe66d65b6",
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "2894e033092d2b70057b9f67b2921a22c07ae07d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest unchanged committed wire/model source and its independently asserted prior request/response alongside additive worktree render generation 36."
+        },
+        {
+          "commit": "49e45d4df4ae9d330ea6d2fc42df7283cbfbe3a7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "837bf94cc1e5f8dc2b6eb8dbbba07b1d00af1e8f",
+          "capture_method": "Exact committed captured-epoch refresh owner and stable row extraction; independent swap-before-start, shutdown retention and compatible serialization assertions exercise this generation."
+        },
+        {
+          "commit": "49e45d4df4ae9d330ea6d2fc42df7283cbfbe3a7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "945f9d76a8c86bd18fccd480d52c5ec9444779d7",
+          "capture_method": "Exact committed captured-epoch refresh owner and stable row extraction; independent swap-before-start, shutdown retention and compatible serialization assertions exercise this generation."
+        },
+        {
+          "commit": "49e45d4df4ae9d330ea6d2fc42df7283cbfbe3a7",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "09087b6a323c6535fc103b5c24d60829cd46eac9",
+          "capture_method": "Exact committed captured-epoch refresh owner and stable row extraction; independent swap-before-start, shutdown retention and compatible serialization assertions exercise this generation."
+        },
+        {
+          "commit": "a7ba72882c2e4e2bc30f545bea308b2155e1dde1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "92d75056fc0709d767355f454ec60e4de0c0e854",
+          "capture_method": "Committed source-fresh live continuation, source/metadata validation and preserved row serialization; independent cached-versus-live, queued single-flight, routing/shutdown fences and skew assertions exercise the wire contract."
+        },
+        {
+          "commit": "a7ba72882c2e4e2bc30f545bea308b2155e1dde1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "1d99700144d7ba0f144b454be7865e0082ce32ac",
+          "capture_method": "Committed source-fresh live continuation, source/metadata validation and preserved row serialization; independent cached-versus-live, queued single-flight, routing/shutdown fences and skew assertions exercise the wire contract."
+        },
+        {
+          "commit": "a7ba72882c2e4e2bc30f545bea308b2155e1dde1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Committed source-fresh live continuation, source/metadata validation and preserved row serialization; independent cached-versus-live, queued single-flight, routing/shutdown fences and skew assertions exercise the wire contract."
+        },
+        {
+          "commit": "a7ba72882c2e4e2bc30f545bea308b2155e1dde1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "bb841c4b584411eead3a318c35a7c6c3de1524d1",
+          "capture_method": "Committed source-fresh live continuation, source/metadata validation and preserved row serialization; independent cached-versus-live, queued single-flight, routing/shutdown fences and skew assertions exercise the wire contract."
+        },
+        {
+          "commit": "43ee83ac739350f1884af16b1cb4938aff740e14",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "9e12ba761c8980ea1af740d95f88b9c1e41e23d3",
+          "capture_method": "Exact source with native project capture and generation-fenced option verdicts; independent old-provider fallback and replacement capability assertions prevent cache poisoning."
+        },
+        {
+          "commit": "5cb63357acdd2a746f41df1177d576fa54429a72",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "3cb55835ff01c56096d01534621fb5ae227b9aea",
+          "capture_method": "Committed replacement warm-up continuation; independent single-render cached/live retirement, repeated epochs, cancellation, shutdown and non-overlap regressions establish current projection completion."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "a1424f1cc719707e6df8f690eac0599c86458569",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "95d0d8d3a14c8c9b9513abf8fcbbeb5931cf6b5f",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1b251b41ec48c41d47ff4026edce83f29b0db97f",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "6e29f6d7366650d17f63a69ffea384275784ca33",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "3cb55835ff01c56096d01534621fb5ae227b9aea",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "bb841c4b584411eead3a318c35a7c6c3de1524d1",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "adc283e80178b526efbf5dff8d7c94abf872a22b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest the committed integration source at HTTP generation 37; exercise unchanged earlier wire shapes and cache-render capability negotiation with deterministic regression tests."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "a1424f1cc719707e6df8f690eac0599c86458569",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "037bdb4e0da26357e6ed34b9621c75f2713796cb",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "95d0d8d3a14c8c9b9513abf8fcbbeb5931cf6b5f",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1b251b41ec48c41d47ff4026edce83f29b0db97f",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "6e29f6d7366650d17f63a69ffea384275784ca33",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "3cb55835ff01c56096d01534621fb5ae227b9aea",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "089d88aeefe1dccadfe27941424cfe774f50ee8a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest the committed HTTP-37 integration including the focused inventory facade; preserve all historical fixture bytes and prior capability floors."
+        },
+        {
+          "commit": "40ef5b2c2a58c02041ef4667f02aede6f1c66da2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "942bb51fe709a761b4c763ff38578920b20a5966",
+          "capture_method": "Capture committed current-roster source-evidence corrections; deterministic regressions preserve observation age and last-good rows, and real source CLI dispatch cannot acknowledge a live refresh."
+        },
+        {
+          "commit": "40ef5b2c2a58c02041ef4667f02aede6f1c66da2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "d43bb04d1ba5fa05191bd84eeba57a953b8cb1bb",
+          "capture_method": "Capture committed current-roster source-evidence corrections; deterministic regressions preserve observation age and last-good rows, and real source CLI dispatch cannot acknowledge a live refresh."
+        },
+        {
+          "commit": "b0799ad2c0296011f0d3c8b68bb9a8edac403e7d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "d155a2e05781484053fee33253fcbf053edaf97e",
+          "capture_method": "Re-attest the committed source after the supported Python 3.10 async-timeout correction; the version-independent regression preserves pending-holder ownership and the timed-out outcome."
+        },
+        {
+          "commit": "cefda27acb0c104c839e8f82596c20479b98ada2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+          "capture_method": "Re-attest committed roster-contract and legacy-source observation corrections; regress unsupported version types, missing projections and mixed-speed source freshness without changing historical evidence."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "eecdc1270435a31537d8325ea6219fd0cb000a49",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "73a077eaaf14ae64365268b0a857b2b912594998",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "00fad21adb39873dd52f44123a0e11daf75e5a74",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "00716efcae35c09044ec17727664b26ddadbaf95",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "942bb51fe709a761b4c763ff38578920b20a5966",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Generation-38 re-attestation of retained generation-37 request/response and capability-floor evidence; only advertised current health advances; historical fixtures remain immutable."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "e1e9bf456c33f1cf5f5ba58cda0cfc198c23c93f",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "ff9b0f6b3dc5a7e6e9b939d916d9564487943eb8",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "4af47cfb2171ce3e5aa9faada59a47607ed0b5c6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "3c609aad9fb1b7642d588d8df244f5856d535240",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "e1c95c1065f20e29cf40e933701222b3ba2ea6ce",
+          "capture_method": "Generation-38 independently authored expected remote-target and correlated-answer control-plane observations, verified by model/client/route tests and separate real HTTP2/WSS consumer tests."
+        },
+        {
+          "commit": "1f8c7242444df382d4649d292cd118a164d982c2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
+          "capture_method": "Independently expected progress and freshness projection, verified through actual manager rehydration with live failure followed by historical success."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "3b751ac95114ed2aaaf32f2b41856c9676993b96",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "73a077eaaf14ae64365268b0a857b2b912594998",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "00fad21adb39873dd52f44123a0e11daf75e5a74",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "942bb51fe709a761b4c763ff38578920b20a5966",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "fd5fe3e722ef027a6e96e169a66a4b5dfb3d0912",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "ff9b0f6b3dc5a7e6e9b939d916d9564487943eb8",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "e1c95c1065f20e29cf40e933701222b3ba2ea6ce",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "7ee9ecda25dfbd806565c2935cc497b159675d09",
+          "capture_method": "Re-attest independently expected wire fields against the committed receipt-39 integration; real model, HTTP/carrier and version-skew regressions verify behavior."
+        },
+        {
+          "commit": "ad14b0a408be559564b8f479e54be309210de2d4",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "b5337dfe12cef78c3206a94b9389535958267152",
+          "capture_method": "Re-attest committed carrier version extraction against unchanged independent receipt wait packet and version-skew expectations."
+        },
+        {
+          "commit": "ad14b0a408be559564b8f479e54be309210de2d4",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+          "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
+          "capture_method": "Re-attest committed carrier version extraction against unchanged independent receipt wait packet and version-skew expectations."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "a8230efb6cc11dc710c1c8d2541ae4b049dc34e3",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "9abaefff89267fa0742855b9dab07e22f375f8b0",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "73a077eaaf14ae64365268b0a857b2b912594998",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "0f10a43a6b6ce23e03ef674d95f0bc6a7f7eff95",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "1e8acf28f921b8737a0bdd4f23c1ea16d306cba3",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "ff9b0f6b3dc5a7e6e9b939d916d9564487943eb8",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "e1c95c1065f20e29cf40e933701222b3ba2ea6ce",
+          "capture_method": "Re-attest retained remote ACP and other wire evidence against committed generation-39 source alongside exact-native recovery; preserve generation-38 fixtures and prior capability floors."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "04c7dcb340ef9826aa6e030903a1440ecfc325b7",
+          "capture_method": "Freeze exact native-resume route, identity, capability and refusal assertions from the committed source; actual client route construction and owner/native boundary regressions independently exercise this evidence."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+          "source_git_blob": "bc00673acf0433ced3352a2263f52a6e1fe3fa0d",
+          "capture_method": "Freeze exact native-resume route, identity, capability and refusal assertions from the committed source; actual client route construction and owner/native boundary regressions independently exercise this evidence."
+        },
+        {
+          "commit": "14361daca512f97be499acf9a86964b1e93d37bf",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "280ba9b618b0f343d59d393333296bae75eb4e1e",
+          "capture_method": "Freeze exact native-resume route, identity, capability and refusal assertions from the committed source; actual client route construction and owner/native boundary regressions independently exercise this evidence."
+        },
+        {
+          "commit": "107727e4b4ae83cf3591971e41dd9b5fd70742d3",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "721d52c5fdfb04b948129a15dce2946457378add",
+          "capture_method": "Freeze the committed exact owner launch receipt and fresh represented-runtime confirmation contract; real owner/HTTP/native continuity and refusal regressions independently exercise both modes."
+        },
+        {
+          "commit": "107727e4b4ae83cf3591971e41dd9b5fd70742d3",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "source_git_blob": "149d82a7f33756bbe30edd94796a483a09f23866",
+          "capture_method": "Freeze the committed exact-record lookup request and validation contract; cache-blind HTTP and independent owner subprocess tests exercise lookup without resident inventory."
+        },
+        {
+          "commit": "bff44efdc82f9e758e02ec69ec35ff6c2e8a9fe5",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "72bc966647f1b5a9714e63dd031dfaa0f58f4154",
+          "capture_method": "Freeze reviewed native recovery reconciliation, exact reservation cleanup and finalizing refusal behavior; real SQLite, local host-liveness reducer and HTTP regressions exercise each branch."
+        },
+        {
+          "commit": "fd0c82376f725ec7367c526478e930b8b796e4b8",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "70ea2045fbe8ac3b945ccfaa837ec1dbd3ccc752",
+          "capture_method": "Freeze authoritative retained-host reconciliation before singleton client readiness; actual reducer and persistent-status regressions cover connected, disconnected and absent retained clients."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+          "source_git_blob": "8e5b05fea60fc6731dae15de4f0d3d15d734527a",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "ff9b0f6b3dc5a7e6e9b939d916d9564487943eb8",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "e946340310a85d26ae48dda02213412974fce857",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "3d00ae22a1fec171ee977e3c91b618902b973ab0",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "e1c95c1065f20e29cf40e933701222b3ba2ea6ce",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+          "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "b5337dfe12cef78c3206a94b9389535958267152",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "73a077eaaf14ae64365268b0a857b2b912594998",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "source_git_blob": "149d82a7f33756bbe30edd94796a483a09f23866",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "495dce001237f5a265db3fe614df332d425e6138",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "1e8acf28f921b8737a0bdd4f23c1ea16d306cba3",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "39e94e60112335c41108b8afce8dedfcf43a9a48",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "b597b83deb5ad08f34698231db9f34e9151b6f1d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "d4f0ae02d049b387fad1dd04eeffcce25e7166c1",
+          "capture_method": "Executed canonical test_provider_creation.py, test_provider_creation_stdio.py and test_contract_registry.py: 96 passed before re-attestation. The real HTTP route, SessionManager/provider-creation producer and response-model consumer exactly matched the retained independent generation-40 response projection, with only fixed opaque identities and terminal transport controlled; the two pre-existing optional top-level null fields were asserted separately. Existing real refusal, cold-placement-drift and guest-workspace tests checked the retained capability/compatibility values. Private request-metadata preservation changes no wire generation; all other frozen fixtures and prior provenance remain unchanged."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "0f10a43a6b6ce23e03ef674d95f0bc6a7f7eff95",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "70ea2045fbe8ac3b945ccfaa837ec1dbd3ccc752",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "ee591b72e932696b43e16334de8b95999901c258",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "72bc966647f1b5a9714e63dd031dfaa0f58f4154",
+          "capture_method": "Re-attest retained independent wire vectors against committed HTTP-40 producers; preserve receipt floor 39, remote ACP floor 38, and all official and draft generation-39 bytes."
+        },
+        {
+          "commit": "57138b8432bb04b8903cc0c84925dbe8cb6207ab",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "e19fbf57d7e5798c9df5a1269b9ec332bc4d65b9",
+          "capture_method": "Re-attest unchanged HTTP-40 packets against combined committed native-recovery and SSH-profile producers; real OpenSSH effective-config and encoded-command tests cover routing without a network connection."
+        },
+        {
+          "commit": "57138b8432bb04b8903cc0c84925dbe8cb6207ab",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+          "capture_method": "Re-attest unchanged HTTP-40 packets against combined committed native-recovery and SSH-profile producers; real OpenSSH effective-config and encoded-command tests cover routing without a network connection."
+        },
+        {
+          "commit": "440a69dfd3136eedd3e153c31bdf0f5584ba54f2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "6f789f626eb69b882a79e3a336fa8ba443be29fe",
+          "capture_method": "Committed-source compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "440a69dfd3136eedd3e153c31bdf0f5584ba54f2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "a761babc5786ddd6c497ee4037f117013e5f0dc4",
+          "capture_method": "Committed-source compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "d73e640e35b90800ebba360113179a9c8cbd4d40",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "1f79ce0214043e2b857b2d41b9785d92267b27e8",
+          "capture_method": "Executed test_provider_creation.py and test_provider_creation_stdio.py against the merged native-continuation and request-provenance producer: 44 passed. Real HTTP production and response-model consumption retain the independent generation-40 projection, capability floors and compatibility values; preserving private request metadata adds no wire generation. Historical fixtures and provenance are retained."
+        },
+        {
+          "commit": "440a69dfd3136eedd3e153c31bdf0f5584ba54f2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "72394d712de2b6574cc05fa57ecbd550c3326e0d",
+          "capture_method": "Committed-source compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "440a69dfd3136eedd3e153c31bdf0f5584ba54f2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
+          "capture_method": "Committed-source compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "440a69dfd3136eedd3e153c31bdf0f5584ba54f2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
+          "capture_method": "Committed-source compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "1e03bd09418fcafd46b1e91825e941a1ac3454c1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "0af348e0e6e021812acc42ca1245e735d671bf55",
+          "capture_method": "Re-attest unchanged HTTP-40 wire vectors after tracking the periodic-discovery cancellation request explicitly (Python 3.10 has no Task.cancelling()); the capture/restore/wire contract is unaffected."
+        },
+        {
+          "commit": "1e03bd09418fcafd46b1e91825e941a1ac3454c1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "479172e6483513d6ecd60652ac2c995c94603a2e",
+          "capture_method": "Re-attest unchanged HTTP-40 wire vectors after resolving native resume through the app-bound worktree cache instead of the process-global one; the owner-boundary route and payload shape are unaffected."
+        },
+        {
+          "commit": "0977c7bd5bc3c3163bb5c36e498c0fd79f477b04",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "fcea1e7ac8a723a4b590750c6da45702273f2ad1",
+          "capture_method": "Re-attest unchanged HTTP-40 wire vectors after clearing the periodic-discovery cancel-requested flag on restart; the capture/restore/wire contract is unaffected."
+        },
+        {
+          "commit": "0977c7bd5bc3c3163bb5c36e498c0fd79f477b04",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+          "capture_method": "Re-attest unchanged HTTP-40 wire vectors after resolving the singleton-anchor fresh-init resume path through the app-bound worktree cache instead of the process-global one; the owner-boundary route and payload shape are unaffected."
+        },
+        {
+          "commit": "6981d0c57dccfcae97a8f2c3a96c09e170c4cc7b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
+          "capture_method": "Re-attest unchanged HTTP-40 wire vectors after clearing the retained completed task and cancel-requested flag on a periodic-to-on-demand restart; the capture/restore/wire contract is unaffected."
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
+      "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",
@@ -1466,13 +4148,13 @@
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
-          "sha256": "7d29a673827436d7445fcaa488d0140ab89872d5d8fe2aae6e002e9ed4f73cc8",
+          "sha256": "9473a9a76e14beb44e08f7fe334e964d74550d4430f48ca623d3247c0a486360",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
-          "sha256": "328543932b380484e7c454f90e6bc0c31c45b515087a7a94b5907158f2613868",
+          "sha256": "1b233a1f1043aff0a3568f7cd4aeb9d3e8a0f16695f6b6b1511763fd10083704",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1502,7 +4184,7 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_session_host.py",
-          "sha256": "d3237815587ca1fab3d7aff43590781fadc34fb18c1f14754ea86826e8d68577",
+          "sha256": "d53b777d64463e4e6e71b0ce5e7334f5eadabdc922dfd43d866361d982050c96",
           "semantic": false,
           "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape."
         }
@@ -1510,7 +4192,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json",
-          "sha256": "73c717cdbb604b5f2fb1bb8de8769f3d80c59e439dbc716e9d95e787f749cdd5",
+          "sha256": "9f7fee5aa1f36829bd6e8497d7ea9227b4a17f8f86ee5d25668b1dab280e7983",
           "role": "current framing, control/data messages and optional preference HELLO tail",
           "generation": 1
         },
@@ -1522,7 +4204,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-authority-v1.json",
-          "sha256": "49859da75a171d7c88f313444086221008f3fcf079e906d75108baeea620eb85",
+          "sha256": "ddaf564af725891084194bf6b9ed75baa9665f621efd0961c881e1a60fee84b3",
           "role": "launch-bound wrapper v1 authority and receipt-v2 validity vectors",
           "generation": 1
         },
@@ -1534,13 +4216,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-exec.json",
-          "sha256": "162dae62af837b2120951bd1579e574cc1be64e97d063d5e9dc8708b55b07455",
+          "sha256": "35a6ada680dcf9315afeabdef41cd9a8653154b7fadc1049b4bffde5f64fa4f8",
           "role": "terminal exec consent, private environment closure and PID preservation",
           "generation": 1
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-consent.json",
-          "sha256": "0eb2cc10ec42a78fc87920c880d198516dd5444d563c4b8917179a1bc8519cb1",
+          "sha256": "c6d2f29dc3c2e98395a66beec9a30d66d5644527044b4bb9ab06709a0c3043d6",
           "role": "complete staged authority closure and consent-owner failure ordering",
           "generation": 1
         },
@@ -1651,6 +4333,110 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
           "source_git_blob": "dde0d3566ce5d0cd92a49d8f6438dd907d533993",
           "capture_method": "Read the immutable Git blob from the published runtime that introduced unknown-message skipping."
+        },
+        {
+          "commit": "e736ab5182587b2fef26a4044783d45d0a485803",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "source_git_blob": "b7b62f6ab7bb3ca499359f8a3fdb26e037a79743",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "e736ab5182587b2fef26a4044783d45d0a485803",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "e736ab5182587b2fef26a4044783d45d0a485803",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+          "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "6cbb62f0f91d36a125641b9383c7d0af576b0c1e",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "source_git_blob": "b7b62f6ab7bb3ca499359f8a3fdb26e037a79743",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "6cbb62f0f91d36a125641b9383c7d0af576b0c1e",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "6cbb62f0f91d36a125641b9383c7d0af576b0c1e",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+          "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "97170e0be3a9e3c3a2c1709a341c2748ac2e8c2e",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "source_git_blob": "b7b62f6ab7bb3ca499359f8a3fdb26e037a79743",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "97170e0be3a9e3c3a2c1709a341c2748ac2e8c2e",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "97170e0be3a9e3c3a2c1709a341c2748ac2e8c2e",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+          "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "440a69dfd3136eedd3e153c31bdf0f5584ba54f2",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+          "source_git_blob": "54bf4599b2af3b1147fe0d2f9e71a2bd1249d803",
+          "capture_method": "Committed-source compatibility re-attestation after native continuation integration: retain independent current request/response vectors and capability floors, verify with test_contract_registry and guard producer tests. Historical fixtures remain unchanged."
+        },
+        {
+          "commit": "9e7c228ac0affcad8a225771fa4b5fbee7f6e27a",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "source_git_blob": "b7b62f6ab7bb3ca499359f8a3fdb26e037a79743",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "9e7c228ac0affcad8a225771fa4b5fbee7f6e27a",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "9e7c228ac0affcad8a225771fa4b5fbee7f6e27a",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+          "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
         }
       ],
       "support_window": "Session Host generation 1 is the only published envelope and remains supported by the current frontend mux.",
@@ -1682,7 +4468,7 @@
       "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1448",
       "reason": "The delegation effort owns lifecycle vocabulary and product semantics; the compatibility registry must not redefine them.",
       "reference_path": "plugins/agent-bridge/docs/delegation-contract.md",
-      "reference_sha256": "411872464178f57ff4e8aa97ba1ec5b1217d1ce9275909a8ed0a8349a1438054"
+      "reference_sha256": "a28a0e2b0b0c5290ac50fdfd414b1196448d23dfe51b85fdfc933adc3ac02fb2"
     },
     {
       "id": "agent-bridge.event-history-identity",

@@ -21,6 +21,7 @@ idempotent; safe to re-run.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -33,78 +34,22 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 
 MANAGED_MARKER = "<!-- managed by harness-knowledge -->"
 
+_yaml_spec = importlib.util.spec_from_file_location(
+    "binding_yaml", Path(__file__).with_name("binding_yaml.py")
+)
+_binding_yaml = importlib.util.module_from_spec(_yaml_spec)
+_yaml_spec.loader.exec_module(_binding_yaml)
+_strip_yaml_comment = _binding_yaml.strip_yaml_comment
+_yaml_scalar = _binding_yaml.yaml_scalar
+_check_existing_binding = _binding_yaml.check_existing_binding
+read_issue_route = _binding_yaml.read_issue_route
+set_top_yaml_key = _binding_yaml.set_top_yaml_key
 
-def _strip_yaml_comment(value: str) -> str:
-    quote = ""
-    for index, char in enumerate(value):
-        if quote:
-            if char == quote:
-                quote = ""
-            continue
-        if char in {"'", '"'}:
-            quote = char
-        elif char == "#" and (index == 0 or value[index - 1].isspace()):
-            return value[:index].rstrip()
-    return value.rstrip()
-
-
-def _yaml_scalar(value: str) -> str:
-    value = _strip_yaml_comment(value.strip())
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
-
-
-def read_issue_route(config: Path) -> dict[str, str] | None:
-    """Read the supported ``issues`` YAML subset without requiring PyYAML."""
-    if not config.is_file():
-        return None
-    lines = config.read_text(encoding="utf-8").splitlines()
-    for index, line in enumerate(lines):
-        match = re.match(r"^issues\s*:\s*(.*?)\s*$", line)
-        if not match:
-            continue
-        inline = _strip_yaml_comment(match.group(1))
-        if inline:
-            body = inline.strip()
-            if body.startswith("{") and body.endswith("}"):
-                body = body[1:-1]
-            if not body.strip():
-                return {}
-            route = {}
-            for item in body.split(","):
-                if ":" not in item:
-                    continue
-                key, value = item.split(":", 1)
-                key = key.strip()
-                if key in {"provider", "repo"}:
-                    route[key] = _yaml_scalar(value)
-            if not route:
-                raise ValueError("issues block has an unrecognized inline shape")
-            return route
-
-        children = []
-        for child in lines[index + 1 :]:
-            if child.strip() == "" or child.lstrip().startswith("#"):
-                continue
-            indent = len(child) - len(child.lstrip())
-            if indent == 0:
-                break
-            children.append((indent, child))
-        direct_indent = min((indent for indent, _ in children), default=0)
-        route = {}
-        for indent, child in children:
-            if indent != direct_indent:
-                continue
-            child_match = re.match(r"^\s+(provider|repo)\s*:\s*(.*?)\s*$", child)
-            if child_match:
-                route[child_match.group(1)] = _yaml_scalar(child_match.group(2))
-        if not children:
-            return {}
-        if not route:
-            raise ValueError("issues block has an unrecognized nested shape")
-        return route
-    return None
+_git_spec = importlib.util.spec_from_file_location(
+    "binding_git", Path(__file__).with_name("binding_git.py")
+)
+_binding_git = importlib.util.module_from_spec(_git_spec)
+_git_spec.loader.exec_module(_binding_git)
 
 
 def knowledge_origin(knowledge_path: str) -> str:
@@ -112,23 +57,9 @@ def knowledge_origin(knowledge_path: str) -> str:
     if not knowledge_path or not path.is_dir():
         return ""
     try:
-        root = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if root.returncode != 0 or Path(root.stdout.strip()).resolve() != path:
-            return ""
-        result = subprocess.run(
-            ["git", "-C", str(path), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        return sanitize_remote(_binding_git.origin(str(path)))
+    except RuntimeError:
         return ""
-    return sanitize_remote(result.stdout.strip()) if result.returncode == 0 else ""
 
 
 def sanitize_remote(remote: str) -> str:
@@ -153,76 +84,7 @@ def sanitize_remote(remote: str) -> str:
     )
 
 
-def knowledge_default_branch(knowledge_path: str) -> str:
-    path = Path(knowledge_path).resolve()
-    if not knowledge_path or not path.is_dir():
-        return ""
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(path),
-                "ls-remote",
-                "--symref",
-                "origin",
-                "HEAD",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        result = None
-    if result is not None and result.returncode == 0:
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("ref:") and "HEAD" in line:
-                ref = line[len("ref:"):].split("\t", 1)[0].strip()
-                if ref.startswith("refs/heads/"):
-                    return ref.removeprefix("refs/heads/")
-
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(path),
-                "symbolic-ref",
-                "--quiet",
-                "--short",
-                "refs/remotes/origin/HEAD",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip().removeprefix("origin/")
-
-    for candidate in ("main", "master"):
-        try:
-            result = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(path),
-                    "rev-parse",
-                    "--verify",
-                    "--quiet",
-                    f"refs/remotes/origin/{candidate}",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
-        if result.returncode == 0:
-            return candidate
-    return ""
+knowledge_default_branch = _binding_git.default_branch
 
 
 def classify_origin(remote: str) -> tuple[str, str]:
@@ -281,6 +143,7 @@ def _run_agent_worktrees(
             text=True,
             stdin=subprocess.DEVNULL if noninteractive else None,
             timeout=120,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -309,6 +172,7 @@ def _registration_argv(
     remote: str,
     default_branch: str,
     account: str,
+    repo_class: str = "knowledge",
 ) -> list[str]:
     argv = [
         "repos",
@@ -316,7 +180,7 @@ def _registration_argv(
         knowledge,
         knowledge_path,
         "--class",
-        "worktree",
+        repo_class,
     ]
     if remote:
         argv.extend(["--remote", remote])
@@ -394,6 +258,7 @@ def inspect_registration(
     knowledge_path: str,
     agent_worktrees_path: str,
     account_override: str = "",
+    *, platform_key: str = "",
 ) -> dict[str, object]:
     """Inspect canonical registration without mistaking fallback discovery for it."""
     remote = knowledge_origin(knowledge_path)
@@ -431,6 +296,19 @@ def inspect_registration(
         base["reason"] = "agent-worktrees repos list returned invalid JSON"
         return base
 
+    if "platform" in payload:
+        native_platform = payload["platform"]
+        if not isinstance(native_platform, str) or native_platform not in {
+            "windows", "wsl", "linux",
+        }:
+            base["reason"] = "agent-worktrees repos list returned an invalid native platform"
+            return base
+        if platform_key and platform_key != native_platform:
+            base["reason"] = "native inventory and control-plane platforms disagree"
+            return base
+        platform_key = native_platform
+    platform_key = platform_key or _current_platform_key()
+
     entry = next(
         (
             item
@@ -462,7 +340,7 @@ def inspect_registration(
             "path_source": "canonical_registry",
             "resolved_path": str(
                 collision_paths.get(
-                    _current_platform_key(),
+                    platform_key,
                     "",
                 )
             ),
@@ -486,7 +364,7 @@ def inspect_registration(
         }
     if entry is not None:
         paths = entry.get("paths") if isinstance(entry.get("paths"), dict) else {}
-        resolved_path = str(paths.get(_current_platform_key(), "") or "")
+        resolved_path = str(paths.get(platform_key, "") or "")
         repo_class = str(entry.get("class", "") or "")
         account = str(entry.get("resolved_account", "") or entry.get("account", "") or "")
         explicit_account = str(entry.get("account", "") or "")
@@ -506,10 +384,13 @@ def inspect_registration(
             remote=effective_remote,
             default_branch=effective_branch,
             account=account_override or explicit_account,
+            repo_class=repo_class if repo_class in {"knowledge", "worktree"} else "knowledge",
         )
         mismatches = []
-        if repo_class != "worktree":
-            mismatches.append(f"class is {repo_class or 'unset'}, expected worktree")
+        if repo_class not in {"knowledge", "worktree"}:
+            mismatches.append(
+                f"class is {repo_class or 'unset'}, expected knowledge or worktree"
+            )
         if not _same_path(resolved_path, knowledge_path):
             mismatches.append(
                 f"registered path is {resolved_path or 'unset'}, expected {knowledge_path}"
@@ -613,12 +494,14 @@ def ensure_registration(
     knowledge_path: str,
     agent_worktrees_path: str,
     account_override: str = "",
+    *, platform_key: str = "",
 ) -> dict[str, object]:
     registration = inspect_registration(
         knowledge,
         knowledge_path,
         agent_worktrees_path,
         account_override,
+        platform_key=platform_key,
     )
     if registration["status"] == "ready":
         return registration
@@ -648,6 +531,7 @@ def ensure_registration(
         knowledge_path,
         agent_worktrees_path,
         account_override,
+        platform_key=platform_key,
     )
     if registration["status"] != "ready":
         detail = result.stderr.strip() or result.stdout.strip()
@@ -665,6 +549,8 @@ def inspect_state_root(
     knowledge_path: str,
     harness_path: str,
     agent_worktrees_path: str,
+    *,
+    harness: str = "",
 ) -> dict[str, object]:
     if not harness_path or not Path(harness_path).is_dir():
         return {
@@ -676,7 +562,7 @@ def inspect_state_root(
         }
     result = _run_agent_worktrees(
         agent_worktrees_path,
-        ["state-root", "--json"],
+        (["-p", harness] if harness else []) + ["state-root", "--json"],
         cwd=harness_path,
     )
     if result is None:
@@ -806,34 +692,6 @@ def inspect_issue_routing(knowledge_path: str) -> dict[str, str]:
     }
 
 
-def set_top_yaml_key(text: str, key: str, value: str) -> str:
-    """Replace or insert a top-level ``key: value`` line, preserving the rest.
-
-    Line-based (not a YAML round-trip) so comments and formatting survive. If the
-    key already exists at column 0, its line is replaced; otherwise the pair is
-    inserted after any leading comment/blank block (so it lands near the top,
-    below the file header).
-    """
-    line = f"{key}: {value}"
-    pat = re.compile(rf"^{re.escape(key)}\s*:.*$", re.MULTILINE)
-    if pat.search(text):
-        return pat.sub(line, text, count=1)
-
-    lines = text.splitlines()
-    insert_at = 0
-    for i, ln in enumerate(lines):
-        s = ln.strip()
-        if s == "" or s.startswith("#"):
-            insert_at = i + 1
-            continue
-        break
-    lines.insert(insert_at, line)
-    out = "\n".join(lines)
-    if text.endswith("\n") and not out.endswith("\n"):
-        out += "\n"
-    return out
-
-
 def bind(
     harness: str,
     knowledge: str,
@@ -846,6 +704,9 @@ def bind(
     agent_worktrees_path: str = "",
     register: bool = False,
     account: str = "",
+    preserve_binding: bool = False,
+    config_root: Path | None = None,
+    platform_key: str = "",
 ) -> dict:
     """Write the machine-local binding. Idempotent. Returns a summary dict."""
     del product_repos  # Retained as a compatibility argument for existing callers.
@@ -855,6 +716,7 @@ def bind(
             knowledge_path,
             agent_worktrees_path,
             account,
+            platform_key=platform_key,
         )
         if register
         else inspect_registration(
@@ -862,17 +724,17 @@ def bind(
             knowledge_path,
             agent_worktrees_path,
             account,
+            platform_key=platform_key,
         )
     )
-    base = Path(home) / f".{harness}"
-    base.mkdir(parents=True, exist_ok=True)
-
+    if preserve_binding and registration["status"] != "ready":
+        raise RuntimeError(
+            "canonical companion registration changed before binding: "
+            + str(registration["reason"])
+        )
+    base = config_root if config_root is not None else Path(home) / f".{harness}"
     cfg = base / "config.yaml"
-    existing = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
-    if not existing.strip():
-        existing = f"# Machine-local config for {harness} (harness-knowledge managed pointer).\nrepo_name: {harness}\n"
-    updated = set_top_yaml_key(existing, "knowledge_repo", knowledge)
-    cfg.write_text(updated, encoding="utf-8")
+    _binding_yaml.write_binding(cfg, harness, knowledge, preserve=preserve_binding)
 
     legacy_fragments = (
         base / ".github" / "instructions" / "knowledge-binding.instructions.md",
@@ -899,6 +761,7 @@ def bind(
             knowledge_path,
             harness_path,
             agent_worktrees_path,
+            harness=harness if preserve_binding else "",
         ),
         "issues": inspect_issue_routing(knowledge_path),
     }
@@ -939,8 +802,14 @@ def main(argv: list[str] | None = None) -> int:
         prog="bind_knowledge",
         description="Write the machine-local harness<->knowledge binding (idempotent).",
     )
-    p.add_argument("--harness", required=True, help="The stateless harness repo name (e.g. citadel-harness).")
-    p.add_argument("--knowledge", required=True, help="The knowledge repo name.")
+    p.add_argument("--harness", default="", help="The stateless harness repo name.")
+    p.add_argument("--knowledge", default="", help="The knowledge repo name.")
+    p.add_argument("--capabilities", action="store_true", help="Report binding support without effects.")
+    p.add_argument(
+        "--control-plane",
+        default="",
+        help="Explicit machines.yaml carrying the registered harness/knowledge pair.",
+    )
     p.add_argument("--knowledge-path", default="", help="Local checkout path of the knowledge repo.")
     p.add_argument("--harness-path", default="", help="Local checkout path of the harness (for the label).")
     p.add_argument(
@@ -965,19 +834,64 @@ def main(argv: list[str] | None = None) -> int:
         metavar="name=path",
         help=argparse.SUPPRESS,
     )
-    p.add_argument("--home", default=str(Path.home()), help="Home dir override (testing).")
+    p.add_argument("--home", default=None, help="Home dir override (testing).")
     p.add_argument("--json", action="store_true", help="Emit the summary as JSON.")
     args = p.parse_args(argv)
+    if args.capabilities:
+        print(json.dumps({
+            "version": 1, "registration_classes": ["knowledge", "worktree"],
+            "preserves_registration_class": True, "control_plane_pair": True,
+        }))
+        return 0
+    if not args.control_plane and not (args.harness and args.knowledge):
+        p.error("--harness and --knowledge are required without --control-plane")
 
     try:
+        declaration = None
+        if args.control_plane:
+            import importlib.util
+
+            path = Path(__file__).with_name("control_plane_binding.py")
+            spec = importlib.util.spec_from_file_location("control_plane_binding", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            declaration = module.resolve_binding(
+                sys.modules[__name__],
+                args.control_plane,
+                args.agent_worktrees_path,
+                home=Path(args.home) if args.home is not None else None,
+                harness=args.harness,
+                knowledge=args.knowledge,
+                harness_path=args.harness_path,
+                knowledge_path=args.knowledge_path,
+            )
+            args.harness = declaration["harness"]
+            args.knowledge = declaration["knowledge"]
+            args.harness_path = declaration["harness_path"]
+            args.knowledge_path = declaration["knowledge_path"]
         summary = bind(
             args.harness, args.knowledge, args.knowledge_path,
-            home=Path(args.home), harness_path=args.harness_path,
+            home=Path(args.home) if args.home is not None else Path.home(),
+            harness_path=args.harness_path,
             product_repos=_parse_products(args.product),
             agent_worktrees_path=args.agent_worktrees_path,
             register=args.register,
             account=args.account,
+            preserve_binding=declaration is not None,
+            config_root=Path(declaration["config_root"]) if declaration else None,
+            platform_key=declaration["platform_key"] if declaration else "",
         )
+        if declaration is not None:
+            summary["control_plane"] = declaration["control_plane"]
+            summary["control_plane_source"] = declaration["source"]
+            if (
+                summary["registration"]["status"] != "ready"
+                or summary["state_root"]["status"] != "ready"
+                or summary.get("plugins_error")
+            ):
+                print(json.dumps(summary, indent=2))
+                print("error: paired control-plane binding is incomplete", file=sys.stderr)
+                return 1
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -249,7 +249,7 @@ class _CarrierTransportMixin:
                         reconnectable=True,
                     )
                 )
-            await self._closer(process)
+            # Preserve recovery custody if process cleanup is cancelled.
             if (
                 not self._closed
                 and (self._logical_clients or self._subscriptions)
@@ -260,6 +260,7 @@ class _CarrierTransportMixin:
                 )
             else:
                 self._schedule_idle_retirement()
+            await self._closer(process)
 
 
     async def _reconnect_loop(self) -> None:
@@ -269,4 +270,3 @@ class _CarrierTransportMixin:
                 return
             except CarrierError:
                 continue
-

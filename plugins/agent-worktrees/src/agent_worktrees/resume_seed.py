@@ -22,11 +22,16 @@ def seed_for_attempt(
         return launch_seed_state.stage(path, kind="resume", text=explicit)
     if explicit:
         return launch_seed_state.LaunchSeed("preview", "resume", explicit, 0)
-    seed = launch_seed_state.peek(path)
+    seed = (
+        launch_seed_state.peek(path, read_only=True)
+        if getattr(args, "dry_run", False) else launch_seed_state.peek(path)
+    )
     if getattr(record, "pending_seed", None):
         if getattr(args, "dry_run", False):
-            return launch_seed_state.LaunchSeed("preview", "new", record.pending_seed, 0)
-        seed = launch_seed_state.stage(path)
+            if seed is None:
+                seed = launch_seed_state.LaunchSeed("preview", "new", record.pending_seed, 0)
+        else:
+            seed = launch_seed_state.stage(path)
     if expected_id and (seed is None or seed.seed_id != expected_id):
         raise ValueError("Staged launch prompt is missing or superseded; refresh and retry")
     return seed

@@ -247,6 +247,7 @@ class _ContainerAdapter:
         self.target = target
         self.inputs_safe_to_cleanup = True
         self._hold_updated_at: float | None = None
+        self.plugin_args = None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, command, timeout=timeout)
@@ -264,6 +265,12 @@ class _ContainerAdapter:
 
         auth_env = None
         try:
+            if self.plugin_args is not None:
+                from .plugin_preparation import prepare_plugins
+                prepare_plugins(
+                    self.plugin_args, self.target, run_input=self.run_input,
+                    remote_env=self.remote_env, relay_port=self.relay_port,
+                )
             if self.target is not None:
                 auth_env = prepare_launch(
                     self.target.config, self.target.fleet, self.name, self.target.user,
@@ -402,6 +409,7 @@ def cmd_detach(
             target=target,
         )
         _progress("prepare", "registration credentials on the container")
+        adapter.plugin_args = args
         rc, payload = launch_detached(
             adapter,
             plan,

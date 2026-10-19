@@ -7,9 +7,13 @@ import re
 import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
+
+import materialize_main as mm
 
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -52,31 +56,81 @@ def _isolated_install_env(home: Path) -> dict[str, str]:
 def _stage_payload(tmp_path: Path) -> Path:
     payload = tmp_path / "plugins" / "agent-ssh"
     payload.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
     staged_libs = tmp_path / "libs"
     staged_libs.mkdir(parents=True, exist_ok=True)
-    for lib in (
-        "installer-engine",
-        "agent-procutil",
-        "ssh-manager",
-        "venue-copilot",
-        "zdd",
-        "remote-login-shell",
-        "fleet-contracts",
-        "machine-transport",
-    ):
-        shutil.copytree(_PLUGIN_ROOT.parents[1] / "libs" / lib, staged_libs / lib)
+    pending = []
+    with ThreadPoolExecutor(max_workers=16) as copies:
+        def queue_copy(source, destination):
+            pending.append(copies.submit(shutil.copy2, source, destination))
+            return destination
+
+        shutil.copytree(
+            _PLUGIN_ROOT, payload, copy_function=queue_copy,
+            ignore=lambda directory, names: mm._ignore(directory, names) | {"tests"},
+        )
+        for lib in ("installer-engine", *_RUNTIME_LIBS):
+            shutil.copytree(
+                _PLUGIN_ROOT.parents[1] / "libs" / lib, staged_libs / lib,
+                copy_function=queue_copy, ignore=mm._ignore,
+            )
+        # Do not expose a partially copied payload or hide a worker's copy error.
+        for future in pending:
+            future.result()
     return payload
+
+
+def _remove_required_library(payload: Path, library: str) -> None:
+    """Remove both resolver inputs: embedded release copy and checkout fallback."""
+    candidates = (payload / "libs" / library, payload.parents[1] / "libs" / library)
+    assert any((candidate / "pyproject.toml").is_file() for candidate in candidates)
+    for candidate in candidates:
+        if candidate.exists():
+            shutil.rmtree(candidate)
+    assert all(not candidate.exists() for candidate in candidates)
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("inputs", ["payload", "canonical-libraries"])
+def test_stage_payload_preserves_input_bytes(tmp_path: Path, inputs: str) -> None:
+    if inputs == "payload":
+        roots = [(_PLUGIN_ROOT, Path("plugins") / "agent-ssh", True)]
+    else:
+        roots = [
+            (_PLUGIN_ROOT.parents[1] / "libs" / lib, Path("libs") / lib, False)
+            for lib in ("installer-engine", *_RUNTIME_LIBS)
+        ]
+    expected = []
+    for source_root, relative_root, omit_tests in roots:
+        for directory, names, files in os.walk(source_root):
+            ignored = mm._ignore(directory, names + files)
+            if omit_tests:
+                ignored.add("tests")
+            names[:] = [name for name in names if name not in ignored]
+            for name in files:
+                if name not in ignored:
+                    source = Path(directory) / name
+                    destination = tmp_path / relative_root / source.relative_to(source_root)
+                    expected.append((source, destination, sha256(source.read_bytes()).digest()))
+
+    _stage_payload(tmp_path)
+
+    for source, destination, digest in expected:
+        assert sha256(source.read_bytes()).digest() == digest, source
+        assert sha256(destination.read_bytes()).digest() == digest, destination
+
+
+@pytest.mark.guard
+def test_stage_payload_propagates_copy_failure(tmp_path: Path, monkeypatch) -> None:
+    copy = shutil.copy2
+
+    def fail_copy(source, destination):
+        if Path(source).name == "plugin.json":
+            raise OSError("injected fixture copy failure")
+        return copy(source, destination)
+
+    monkeypatch.setattr(shutil, "copy2", fail_copy)
+    with pytest.raises(OSError, match="injected fixture copy failure"):
+        _stage_payload(tmp_path)
 
 
 def _host_pip_index_url() -> str | None:
@@ -99,6 +153,21 @@ def _host_pip_index_url() -> str | None:
 def _assert_snapshot_transport(snapshot: Path) -> None:
     for filename in ("__init__.py", "identity.py", "registry.py", "transport.py"):
         assert (snapshot / "libs" / "machine-transport" / "src" / "machine_transport" / filename).is_file()
+
+
+def _assert_snapshot_dependency_sources(snapshot: Path) -> None:
+    import importlib.util
+
+    helper = snapshot / "scripts" / "installer_dependency_policy.py"
+    spec = importlib.util.spec_from_file_location("snapshot_dependency_policy", helper)
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    for manifest in [snapshot / "pyproject.toml", *snapshot.glob("libs/*/pyproject.toml")]:
+        sources = policy._toml(manifest).get("tool", {}).get("uv", {}).get("sources", {})
+        for source in sources.values():
+            assert not source.get("editable", False)
+            assert (manifest.parent / source["path"]).resolve().is_relative_to(snapshot)
+    policy._check_project(snapshot, (snapshot,), set())
 
 
 def _assert_snapshot_transport_install(root: Path, env: dict[str, str]) -> None:
@@ -215,6 +284,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     for lib in _RUNTIME_LIBS:
         assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
     _assert_snapshot_transport(snapshot)
+    _assert_snapshot_dependency_sources(snapshot)
     assert not (home / ".agent-ssh" / "versions" / _source_version()).exists()
 
     shutil.rmtree(payload)
@@ -432,7 +502,7 @@ def test_stamp_fails_before_publish_when_required_library_missing(
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
-    shutil.rmtree(tmp_path / "libs" / missing_library)
+    _remove_required_library(payload, missing_library)
 
     stamp = subprocess.run(
         [
@@ -513,7 +583,7 @@ def test_powershell_stamp_fails_before_publish_when_required_library_missing(
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
-    shutil.rmtree(tmp_path / "libs" / missing_library)
+    _remove_required_library(payload, missing_library)
 
     stamp = subprocess.run(
         [
@@ -941,6 +1011,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
     for lib in _RUNTIME_LIBS:
         assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
     _assert_snapshot_transport(snapshot)
+    _assert_snapshot_dependency_sources(snapshot)
     assert not (home / ".agent-ssh" / "versions" / _source_version()).exists()
 
     shutil.rmtree(payload)

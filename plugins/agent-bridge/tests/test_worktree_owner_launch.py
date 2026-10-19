@@ -6,6 +6,7 @@ import json
 import argparse
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -22,24 +23,105 @@ from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionReq
 
 pytestmark = pytest.mark.contract("agent_bridge.acquisition.worktree_owner")
 PLUGIN = Path(__file__).resolve().parents[1]
+_NATIVE_WINDOWS = os.name == "nt"
 
 
-@pytest.fixture
-def installation(tmp_path, monkeypatch):
+def deploy_installed_layout(own: Path, shell: str) -> None:
+    """Run the installer's real deployment boundary, without service actions."""
+    if shell == "bash" and _NATIVE_WINDOWS:
+        pytest.skip("Bash installer requires a native POSIX test host")
+    scripts = PLUGIN / "scripts"
+    if shell == "bash":
+        text = (scripts / "install.sh").read_text(encoding="utf-8")
+        start = text.index("\ndeploy_binstub() {")
+        function = text[start:text.index("\ndo_stamp()", start)]
+        command = [
+            shutil.which("bash"), "-c",
+            "set -eu\n"
+            f"SCRIPT_DIR={shlex.quote(str(scripts))}\n"
+            f"INSTALL_DIR={shlex.quote(str(own))}\n"
+            "PUBLISH_GLOBAL_BINSTUBS=false\n_ok() { :; }\n"
+            + function + "\ndeploy_binstub\n",
+        ]
+    else:
+        text = (scripts / "install.ps1").read_text(encoding="utf-8")
+        start = text.index("\nfunction Write-Binstubs {")
+        function = text[start:text.index("\nfunction Resolve-SnapshotInstallerEngineSource", start)]
+        quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+        payload = own.parent / "payload"
+        shutil.copytree(scripts, payload)
+        harness = payload / "deploy-fixture.ps1"
+        harness.write_text(
+            "$ErrorActionPreference = 'Stop'\n"
+            f"$InstallDir = {quote(own)}\n"
+            "$publishGlobalBinstubs = $false\nfunction Write-Ok { param($message) }\n"
+            + function + "\nWrite-Binstubs\n",
+            encoding="utf-8",
+        )
+        command = [
+            shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(harness),
+        ]
+    result = subprocess.run(
+        command, check=False, capture_output=True, text=True, timeout=20,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_NATIVE_WINDOWS", True)
+    launch = Mock()
+    monkeypatch.setattr(subprocess, "run", launch)
+    with pytest.raises(pytest.skip.Exception, match="native POSIX test host"):
+        deploy_installed_layout(tmp_path / "bridge", "bash")
+    launch.assert_not_called()
+
+
+@pytest.fixture(params=["bash", "powershell"])
+def installation(tmp_path, monkeypatch, request):
+    executable = "pwsh" if request.param == "powershell" else "bash"
+    if not shutil.which(executable):
+        pytest.skip(f"{executable} unavailable")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     own = tmp_path / ".agent-bridge"
-    scripts = own / "scripts"
-    scripts.mkdir(parents=True)
-    shutil.copy2(PLUGIN / "scripts" / "versioned_runtime.py", scripts)
+    deploy_installed_layout(own, request.param)
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
-    monkeypatch.setenv("PATH", "/usr/bin:/bin" if os.name != "nt" else "")
+    monkeypatch.setenv("PATH", "")
     which = Mock(return_value=None)
     monkeypatch.setattr(lifecycle.shutil, "which", which)
     peer = tmp_path / ".agent-worktrees"
     return own, peer, which
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_installer_deploys_complete_canonical_resolver(tmp_path, shell):
+    executable = "pwsh" if shell == "powershell" else "bash"
+    if not shutil.which(executable):
+        pytest.skip(f"{executable} unavailable")
+    own = tmp_path / "bridge"
+    deploy_installed_layout(own, shell)
+    for name in (
+        "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_construction.py",
+        "versioned_runtime_source.py",
+    ):
+        assert (own / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import importlib.util, pathlib, sys; "
+         "p = pathlib.Path(sys.argv[1]); "
+         "s = importlib.util.spec_from_file_location('installed_resolver', p); "
+         "m = importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+         "m._runtime_component('versioned_runtime_construction'); "
+         "assert m.resolve_python(p.parent.parent / 'absent') is None",
+         str(own / "scripts" / "versioned_runtime.py")],
+        check=False, capture_output=True, text=True, timeout=15,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def complete_slot(peer, version="1.0.0", *, interpreter=True):
@@ -66,23 +148,42 @@ def test_completed_installed_owner_precedes_path(installation):
     which.assert_not_called()
 
 
-@pytest.mark.parametrize("state", ["absent", "incomplete", "corrupt"])
-def test_absent_or_uncompleted_runtime_does_not_fabricate_owner(installation, state):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["absent", "incomplete", "corrupt", "missing-interpreter"])
+async def test_absent_or_uncompleted_runtime_does_not_fabricate_owner(installation, state):
     _, peer, which = installation
     if state != "absent":
-        python = complete_slot(peer)
-        marker = python.parent.parent / ".install-complete.json"
-        marker.write_text("" if state == "incomplete" else "{}", encoding="utf-8")
+        python = complete_slot(peer, interpreter=state != "missing-interpreter")
+        if state != "missing-interpreter":
+            marker = python.parent.parent / ".install-complete.json"
+            marker.write_text("" if state == "incomplete" else "{}", encoding="utf-8")
     assert lifecycle._agent_worktrees_launch_prefix() is None
     which.assert_called_once_with("agent-worktrees")
+    with pytest.raises(AcquisitionRefused) as error:
+        await authority.worktree_command(["list", "--json"], None)
+    assert error.value.code == "worktrees_unavailable"
+    assert error.value.effect is None
 
 
-def test_retired_legacy_owner_never_uses_global_command(installation):
+@pytest.mark.asyncio
+async def test_retired_legacy_owner_never_uses_global_command(installation):
     _, peer, which = installation
     complete_slot(peer)
     (peer / ".installation-ownership.json").write_text("{}", encoding="utf-8")
     with pytest.raises(ContextRefused, match="installation-cell ownership"):
         lifecycle._agent_worktrees_launch_prefix()
+    with pytest.raises(AcquisitionRefused) as error:
+        await authority.worktree_command(["list", "--json"], None)
+    assert error.value.code == "worktrees_unavailable"
+    assert error.value.effect is None
+    which.assert_not_called()
+
+
+def test_foreign_bridge_root_cannot_resolve_legacy_owner(installation):
+    own, peer, which = installation
+    complete_slot(peer)
+    with pytest.raises(ContextRefused, match="requires an installation context"):
+        lifecycle._legacy_worktrees_runtime_prefix(own.parent / "foreign-bridge")
     which.assert_not_called()
 
 
@@ -151,6 +252,7 @@ def test_guidance_renderer_retains_service_derived_cell(installation, monkeypatc
 async def test_actual_installed_peer_executes_with_service_path(installation, monkeypatch):
     _, peer, which = installation
     python = complete_slot(peer, interpreter=False)
+    assert not (peer / "scripts").exists()
     slot = python.parent.parent
     subprocess.run(
         [sys.executable, "-m", "venv", "--without-pip", str(slot)],

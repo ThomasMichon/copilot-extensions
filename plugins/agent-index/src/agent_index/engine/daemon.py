@@ -19,12 +19,14 @@ fine over ``external`` mode -- that decoupling is the whole point.
 from __future__ import annotations
 
 import os
+import importlib.util
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from agent_procutil import (
-    windowless_daemon_kwargs,
+    spawn_daemon,
     windowless_python,
     windowless_python_env,
 )
@@ -41,8 +43,23 @@ def engine_home() -> Path:
 
 
 def engine_venv_python(home: Path | None = None) -> Path:
-    """Path to the durable engine venv's Python interpreter."""
-    root = (home or engine_home()) / ".venv"
+    """Resolve a completed engine slot, retaining pre-migration legacy engines."""
+    home = home or engine_home()
+    helper = home / "versioned_runtime.py"
+    if any((home / name).exists() or (home / name).is_symlink() for name in (
+        "current-version", "last-known-good",
+    )):
+        spec = importlib.util.spec_from_file_location("_agent_index_engine_runtime", helper)
+        if spec is None or spec.loader is None:
+            raise FileNotFoundError("Durable engine runtime resolver is unavailable")
+        runtime = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = runtime
+        spec.loader.exec_module(runtime)
+        python = runtime.resolve_python(home)
+        if python is None:
+            raise FileNotFoundError("No completed durable engine runtime is selectable")
+        return python
+    root = home / ".venv"
     if os.name == "nt":
         return root / "Scripts" / "python.exe"
     return root / "bin" / "python"
@@ -126,24 +143,65 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _spawn(cmd: list[str], *, python: str, home: Path) -> subprocess.Popen:
-    kwargs: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "env": os.environ.copy(),
-        # Never the caller's ambient cwd: this is a long-lived, detached
-        # daemon that may outlive whatever repo/worktree checkout the
-        # caller happened to be running `agent-index engine start` from
-        # (service-lifecycle-supervision's "nothing pins the plugin
-        # payload" rule, generalized to every deletable checkout). Its own
-        # durable engine home is already a stable, versioned-runtime-
-        # independent location -- root it there.
-        "cwd": str(home),
-    }
-    kwargs["env"].update(windowless_python_env(python))
-    kwargs.update(windowless_daemon_kwargs())
-    return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
+#: Uvicorn log level for the engine. Spawned engines default to ``warning`` so
+#: their append-only stdio log carries startup failures, not one access line
+#: per embedding request; a foreground ``engine run`` keeps ``info``.
+ENGINE_LOG_LEVEL_ENV = "AGENT_INDEX_ENGINE_LOG_LEVEL"
+
+
+def engine_log_path(home: Path | None = None) -> Path:
+    """Append-only stdout/stderr log of a spawned persistent engine."""
+    return Path(os.path.abspath(home or engine_home())) / "logs" / "engine-stdio.log"
+
+
+#: Runs ``agent_index_engine.app`` as ``__main__`` with ``uvicorn.run`` taking
+#: its level from :data:`ENGINE_LOG_LEVEL_ENV`. The durable engine venv is
+#: preserved across service updates, so its installed app may predate that
+#: variable and hard-code ``info``; this keeps its access lines out of the
+#: append-only log without rebuilding the engine.
+_LOG_LEVEL_BOOTSTRAP = (
+    "import os, runpy, uvicorn\n"
+    "_run = uvicorn.run\n"
+    "def _run_at_level(*args, **kwargs):\n"
+    f"    kwargs['log_level'] = os.environ.get({ENGINE_LOG_LEVEL_ENV!r}) or kwargs.get('log_level', 'info')\n"
+    "    return _run(*args, **kwargs)\n"
+    "uvicorn.run = _run_at_level\n"
+    "runpy.run_module('agent_index_engine.app', run_name='__main__', alter_sys=True)\n"
+)
+
+
+def _with_log_level_bootstrap(cmd: list[str]) -> list[str]:
+    if cmd[1:3] == ["-m", "agent_index_engine.app"]:
+        return [cmd[0], "-c", _LOG_LEVEL_BOOTSTRAP, *cmd[3:]]
+    return list(cmd)
+
+
+def _spawn(
+    cmd: list[str], *, python: str, home: Path, contained_fallback: bool = True
+) -> subprocess.Popen:
+    """Launch the persistent engine through ``spawn_daemon``.
+
+    Runs from its durable engine home, never the caller's cwd (a checkout that
+    may be deleted, or the plugin payload), breaks away from a kill-on-close
+    Job around the caller where allowed (otherwise, unless
+    ``contained_fallback`` is false, it starts inside it, as it always did),
+    and appends stdout/stderr to :func:`engine_log_path` at the
+    :data:`ENGINE_LOG_LEVEL_ENV` level, whatever engine app version is installed.
+    """
+    root = Path(os.path.abspath(home))
+    root.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env.update(windowless_python_env(python))
+    env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
+    return spawn_daemon(
+        _with_log_level_bootstrap(cmd),
+        cwd=root,
+        log_path=engine_log_path(root),
+        env=env,
+        console_children=True,
+        contained_fallback=contained_fallback,
+        display="agent_index_engine.app",
+    )
 
 
 def engine_command(home: Path | None = None) -> list[str]:
@@ -169,12 +227,17 @@ def engine_command(home: Path | None = None) -> list[str]:
     ]
 
 
-def start(home: Path | None = None, *, wait_timeout: float | None = None) -> str:
+def start(
+    home: Path | None = None, *, wait_timeout: float | None = None, strict: bool = False
+) -> str:
     """Start the persistent engine daemon from the durable venv.
 
     Returns a short status string. Idempotent: a no-op when already healthy.
     Raises :class:`FileNotFoundError` if the durable engine venv is missing (the
     engine runtime hasn't been provisioned -- run the installer / provisioning).
+    With ``strict`` (installers), a caller's Job that forbids breakaway raises
+    :class:`agent_procutil.DaemonSpawnError` instead of starting an engine that
+    would die with that Job.
 
     ``wait_timeout`` defaults to a generous 300s: a cold process import of
     torch + the embedding model (before uvicorn even starts listening) has
@@ -199,14 +262,17 @@ def start(home: Path | None = None, *, wait_timeout: float | None = None) -> str
             f"first (installer, or 'agent-index engine install')"
         )
 
-    proc = _spawn(engine_command(home), python=str(py), home=home)
+    proc = _spawn(
+        engine_command(home), python=str(py), home=home, contained_fallback=not strict
+    )
     _write_pid(proc.pid, home)
 
     deadline = time.monotonic() + wait_timeout
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             raise RuntimeError(
-                f"engine daemon exited early (code {proc.returncode}) at {host}:{port}"
+                f"engine daemon exited early (code {proc.returncode}) at {host}:{port}; "
+                f"see {engine_log_path(home)}"
             )
         if is_healthy(host, port):
             return f"started (pid {proc.pid}) at {host}:{port}"
@@ -244,6 +310,10 @@ def status(home: Path | None = None) -> dict:
     host, port = engine_endpoint()
     pid = _read_pid(home)
     observed = health(host, port)
+    try:
+        python = engine_venv_python(home)
+    except FileNotFoundError:
+        python = None
     return {
         "healthy": observed.get("status") != "unreachable",
         "host": host,
@@ -251,8 +321,8 @@ def status(home: Path | None = None) -> dict:
         "pid": pid,
         "pid_alive": bool(pid and _pid_alive(pid)),
         "engine_home": str(home),
-        "venv_python": str(engine_venv_python(home)),
-        "provisioned": engine_venv_python(home).exists(),
+        "venv_python": str(python) if python is not None else None,
+        "provisioned": python is not None and python.exists(),
         "generation": current_engine_generation(),
         "observed_generation": observed.get("generation"),
         "gpu_deps_installed": observed.get("gpu_deps_installed"),

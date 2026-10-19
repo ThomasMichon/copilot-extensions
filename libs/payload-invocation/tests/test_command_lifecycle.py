@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+import venv
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -718,19 +719,24 @@ def test_command_binding_bootstrap_preserves_off_path_spaced_interpreter_through
         shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/{name}", scripts / name)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     python_root = binding_fixture["home"] / "Python with spaces"
-    python_root.mkdir()
-    python = python_root / "python.exe"
-    shutil.copyfile(sys.executable, python)
-    (python_root / "pyvenv.cfg").write_text(
-        f"home = {sys.base_prefix}\ninclude-system-site-packages = false\n",
-        encoding="utf-8",
-    )
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(python_root)
+    python = python_root / "Scripts" / "python.exe"
     environment = {
         **_catalog_environment(binding_fixture),
         "PATH": str(Path(os.environ["SystemRoot"]) / "System32"),
         "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(binding_fixture["home"] / "absent.json"),
         "COPILOT_PLUGIN_INSTALL_SMOKE": "1", "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "0",
     }
+    probe = subprocess.run(
+        [str(python), "-I", "-c",
+         "import json,sys; print(json.dumps([sys.executable,sys.prefix]))"],
+        env=environment, cwd=binding_fixture["home"], capture_output=True,
+        text=True, encoding="utf-8", timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+    executable, prefix = json.loads(probe.stdout)
+    assert Path(executable) == python and Path(prefix) == python_root
     completed = subprocess.run(
         [POWERSHELL, "-NoProfile", "-File", str(scripts / "bootstrap-check.ps1"),
          "-BootstrapPython", str(python)],

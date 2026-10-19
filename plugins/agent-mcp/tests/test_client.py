@@ -191,19 +191,40 @@ def test_call_verb_requires_bridge_and_tool(tmp_path, capsys):
 SILENT_CHILD = "import sys\nfor _ in sys.stdin:\n    pass\n"
 
 
-async def test_oneshot_times_out_on_silent_upstream():
+@pytest.mark.parametrize("startup_delay", [0.0, 1.0])
+async def test_oneshot_times_out_on_silent_upstream(monkeypatch, startup_delay: float):
     import pytest
 
     from agent_mcp.client import UpstreamError
+    from agent_mcp.transports.stdio import StdioTransport
+
+    real_start = StdioTransport.start
+
+    async def delayed_start(transport: StdioTransport) -> None:
+        await asyncio.sleep(startup_delay)
+        await real_start(transport)
+
+    monkeypatch.setattr(StdioTransport, "start", delayed_start)
 
     cfg = parse_config({
         "server": {"type": "stdio", "command": [sys.executable, "-c", SILENT_CHILD]},
         "auth": {"kind": "none"},
-        "timeout": 0.5,
+        "timeout": 10.0,
     })
-    with pytest.raises(UpstreamError, match="did not respond"):
-        async with OneShotSession(cfg):
+    stages: list[str] = []
+
+    def on_stage(stage: str) -> None:
+        stages.append(stage)
+        if stage == "handshake":
+            # Keep the short response deadline independent of real process startup.
+            cfg.timeout = 0.5
+
+    session = OneShotSession(cfg, on_stage=on_stage)
+    with pytest.raises(UpstreamError, match="initialize: upstream did not respond within 0.5s"):
+        async with session:
             pass  # the initialize handshake itself must time out
+    assert session.stage == "handshake"
+    assert stages == ["auth", "transport-connect", "handshake"]
 
 
 async def test_oneshot_tears_down_transport_when_init_fails():
@@ -298,5 +319,4 @@ async def test_oneshot_bounds_a_transport_start_that_never_returns():
     # scheduling jitter under a loaded test runner.
     assert elapsed < 5.0
     assert stuck.closed  # cleaned up even though it never finished starting
-
 

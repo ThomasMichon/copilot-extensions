@@ -15,12 +15,12 @@ def test_release_cli_needs_no_host_config_or_core(command, tmp_path, monkeypatch
     calls = []
     descriptor = {"schema": "fixture", "source_commit": "a" * 40}
 
-    def build(bundle, *, source_commit):
-        calls.append((bundle, source_commit))
+    def build(bundle, *, source_commit, profile):
+        calls.append((bundle, source_commit, profile))
         return descriptor
 
-    def verify(path, *, expected_source_commit):
-        calls.append((path, expected_source_commit))
+    def verify(path, *, expected_source_commit, profile):
+        calls.append((path, expected_source_commit, profile))
         return descriptor
 
     monkeypatch.setitem(sys.modules, "agent_index_service.release", SimpleNamespace(
@@ -30,7 +30,7 @@ def test_release_cli_needs_no_host_config_or_core(command, tmp_path, monkeypatch
     option = "--bundle" if command == "describe" else "--descriptor"
     commit = "--source-commit" if command == "describe" else "--expected-source-commit"
     assert main(["release", command, option, str(path), commit, "a" * 40]) == 0
-    assert calls == [(path, "a" * 40)]
+    assert calls == [(path, "a" * 40, "native")]
     payload = json.loads(capsys.readouterr().out)
     assert payload == (descriptor if command == "describe" else {
         "valid": True, "release": descriptor,
@@ -39,7 +39,7 @@ def test_release_cli_needs_no_host_config_or_core(command, tmp_path, monkeypatch
 
 
 def test_release_verification_error_is_not_success(tmp_path, monkeypatch, capsys):
-    def verify(path: Path, *, expected_source_commit: str):
+    def verify(path: Path, *, expected_source_commit: str, profile: str):
         raise ValueError("artifact digest mismatch")
 
     monkeypatch.setitem(sys.modules, "agent_index_service.release", SimpleNamespace(

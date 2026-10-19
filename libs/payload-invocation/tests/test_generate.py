@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Callable
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from types import ModuleType
 from pathlib import Path
 
 import pytest
@@ -472,22 +474,16 @@ def _copied_agent_machines_payload(tmp_path: Path) -> Path:
     shutil.copytree(
         REPO / "plugins" / "agent-machines",
         payload,
-        ignore=shutil.ignore_patterns(
-            ".pytest_cache",
-            ".ruff_cache",
-            "__pycache__",
-            "*.pyc",
-            "*.egg-info",
-        ),
+        ignore=_payload_copy_ignore(REPO / "plugins" / "agent-machines"),
     )
+    _stage_payload_dependencies(payload, source_consumer=REPO / "plugins" / "agent-machines")
     return payload
 
 
 def _agent_library_src(payload: Path, name: str) -> Path:
     local = payload / "libs" / name / "src"
-    if local.is_dir():
-        return local
-    return REPO / "libs" / name / "src"
+    assert local.is_dir(), f"the copied payload must contain its own {name} dependency"
+    return local
 
 
 def _agent_machines_import_sources(payload: Path) -> list[str]:
@@ -495,6 +491,47 @@ def _agent_machines_import_sources(payload: Path) -> list[str]:
         str(_agent_library_src(payload, name))
         for name in ("plugin-resolve", "agent-procutil", "machine-transport", "remote-login-shell")
     ]
+def _dependency_materializer() -> ModuleType:
+    helper = (
+        REPO / "worktree-manager" / "src" / "worktree_manager"
+        / "_trusted_pointer_materializer.py"
+    )
+    spec = importlib.util.spec_from_file_location("payload_dependency_materializer", helper)
+    assert spec and spec.loader
+    materializer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(materializer)
+    return materializer
+
+
+def _payload_copy_ignore(source_consumer: Path) -> Callable[[str, list[str]], set[str]]:
+    external_libs = {
+        lib for _name, _path, lib, _editable in
+        _dependency_materializer().find_uv_editable_refs(source_consumer)
+    }
+    ignore_cache = shutil.ignore_patterns(
+        ".pytest_cache", ".ruff_cache", "__pycache__", "*.pyc", "*.egg-info", ".venv", ".test-venvs",
+    )
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        excluded = set(ignore_cache(directory, names))
+        if Path(directory) == source_consumer / "libs":
+            excluded.update(external_libs)
+        return excluded
+
+    return ignore
+
+
+def _stage_payload_dependencies(payload: Path, *, source_consumer: Path) -> None:
+    materializer = _dependency_materializer()
+    result = materializer.materialize_uv_editable_ref_into(
+        source_consumer_dir=source_consumer,
+        dest_consumer_dir=payload,
+        canonical_root=REPO,
+        dest_root=payload,
+    )
+    assert not any(line.startswith("SKIP ") for line in result), result
+    assert (payload / "libs" / "machine-transport" / "src" / "machine_transport").is_dir()
+    assert (payload / "libs" / "remote-login-shell" / "src" / "remote_login_shell").is_dir()
 
 
 def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
@@ -503,14 +540,9 @@ def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
     shutil.copytree(
         REPO / "plugins" / "agent-machines",
         payload,
-        ignore=shutil.ignore_patterns(
-            ".pytest_cache",
-            ".ruff_cache",
-            "__pycache__",
-            "*.pyc",
-            "*.egg-info",
-        ),
+        ignore=_payload_copy_ignore(REPO / "plugins" / "agent-machines"),
     )
+    _stage_payload_dependencies(payload, source_consumer=REPO / "plugins" / "agent-machines")
     write_json = {
         "name": "example",
         "owner": {"name": "Example"},
@@ -600,14 +632,9 @@ def _copied_agent_worktrees_payload(tmp_path: Path) -> Path:
     shutil.copytree(
         REPO / "plugins" / "agent-worktrees",
         payload,
-        ignore=shutil.ignore_patterns(
-            ".pytest_cache",
-            ".ruff_cache",
-            "__pycache__",
-            "*.pyc",
-            "*.egg-info",
-        ),
+        ignore=_payload_copy_ignore(REPO / "plugins" / "agent-worktrees"),
     )
+    _stage_payload_dependencies(payload, source_consumer=REPO / "plugins" / "agent-worktrees")
     return payload
 
 
@@ -731,13 +758,65 @@ def _agent_worktrees_test_environment(
                 [
                     str(payload / "src"),
                     *(str(path) for path in sorted((payload / "libs").glob("*/src"))),
-                    *(str(path) for path in sorted((REPO / "libs").glob("*/src"))),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
         }
     )
     return environment
+
+
+def test_copied_worktrees_ignores_ambient_materialized_dependencies(tmp_path: Path) -> None:
+    source = tmp_path / "plugins" / "agent-worktrees"
+    source.mkdir(parents=True)
+    (source / "pyproject.toml").write_text(
+        '[tool.uv.sources]\n'
+        'external = {path = "../../libs/machine-transport", editable = true}\n'
+        'owned = {path = "libs/owned", editable = true}\n', encoding="utf-8",
+    )
+    ignored = _payload_copy_ignore(source)
+    assert ignored(str(source / "libs"), ["machine-transport", "owned"]) == {"machine-transport"}
+    assert ignored(str(source), [".venv", "src", "libs"]) == {".venv"}
+
+
+def test_copied_worktrees_import_and_version_use_staged_dependencies(tmp_path: Path) -> None:
+    import yaml
+
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    sources = environment["PYTHONPATH"].split(os.pathsep)
+    assert all(Path(source).is_relative_to(payload) for source in sources)
+    script = """
+import importlib.util, json, pathlib, runpy, sys
+# Load only the external YAML dependency, without enabling ambient site-packages.
+yaml_file = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location(
+    "yaml", yaml_file, submodule_search_locations=[str(yaml_file.parent)],
+)
+module = importlib.util.module_from_spec(spec)
+sys.modules["yaml"] = module
+spec.loader.exec_module(module)
+from agent_worktrees import config
+import machine_transport, remote_login_shell
+payload = pathlib.Path(sys.argv[2]).resolve()
+origins = [pathlib.Path(module.__file__).resolve()
+           for module in (config, machine_transport, remote_login_shell)]
+assert all(origin.is_relative_to(payload) for origin in origins), origins
+print(json.dumps([str(origin.relative_to(payload)) for origin in origins]))
+sys.argv = ["agent-worktrees", "--version"]
+runpy.run_module("agent_worktrees", run_name="__main__")
+"""
+    result = subprocess.run(
+        [sys.executable, "-S", "-c", script, str(Path(yaml.__file__)), str(payload)],
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    origins, version = result.stdout.strip().splitlines()
+    assert len(json.loads(origins)) == 3
+    assert version.startswith("agent-worktrees ")
 
 
 @pytest.mark.skipif(

@@ -6,11 +6,10 @@ import argparse
 import os
 import sys
 
-import yaml
-
 from . import activity, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity
 from . import config as cfg, hook_ipc, session_context as session_context_mod
 from . import session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
+from .session_title import capture_session_title as _capture_session_title
 
 
 def _core():
@@ -24,10 +23,6 @@ def _core_helper(name: str, local):
     if callable(candidate) and candidate is not local:
         return candidate
     return local
-
-
-
-
 
 
 def _note_disposition_snapshot(wt_id: str, *, summary: str, kind: str, session_id):
@@ -215,6 +210,10 @@ def add_parsers(sub) -> None:
         "--stdin", action="store_true", help="Read the Copilot sessionEnd JSON payload from stdin"
     )
     sp.add_argument(
+        "--source-bound", action="store_true",
+        help="Require original native source evidence (hook compatibility fence)",
+    )
+    sp.add_argument(
         "--launch-id",
         dest="launch_id",
         default=None,
@@ -376,7 +375,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         _ensure_status_monitor()
 
     if not wt_id:
-        wt_id = _activate_session_binding(session_id)
+        wt_id = _activate_hook_session_binding(
+            session_id, payload, resident=resident_environment,
+        )
 
     if not wt_id and cwd:
         _activate_project_for_path(cwd, force=True)
@@ -428,6 +429,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     candidate_associated = False
     candidate_predecessor = None
     linked_handoff = None
+    from . import native_lifecycle_source
+
+    source_identity = native_lifecycle_source.start_identity(
+        session_id, native_lifecycle_source.witness(payload, resident=resident_environment),
+    )
     try:
         linked_handoff = tracking.register_session(
             wt_id,
@@ -439,6 +445,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             handoff_token=getattr(args, "handoff_token", None),
             candidate_token=candidate_token,
             initial_projection=source == "hook:new",
+            source_identity=source_identity,
         )
         if candidate_token:
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
@@ -647,6 +654,8 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             candidate_before_ack = None
 
     try:
+        from . import native_lifecycle_source
+
         linked_handoff = tracking.register_session(
             wt_id,
             session_id,
@@ -654,6 +663,9 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             pane_id=pane_id,
             source="bind",
             handoff_token=handoff_token,
+            source_identity=native_lifecycle_source.start_identity(
+                session_id, native_lifecycle_source.witness(None, resident=False),
+            ),
         )
         profile_assignment.bind(
             getattr(args, "assignment_token", None)
@@ -860,12 +872,27 @@ def cmd_bind_nudge(args: argparse.Namespace) -> int:
         return _emit({})
 
 
-def _activate_session_binding(session_id: str | None) -> str | None:
+def _activate_hook_session_binding(
+    session_id: str, payload: object, *, resident: bool,
+) -> str | None:
+    if not resident:
+        return _activate_session_binding(session_id)
+    metadata = payload.get("_agentWorktrees") if isinstance(payload, dict) else None
+    environment = metadata.get("environment") if isinstance(metadata, dict) else None
+    return _activate_session_binding(
+        session_id, environment=environment if isinstance(environment, dict) else {},
+    )
+
+
+def _activate_session_binding(
+    session_id: str | None, *, environment: dict | None = None,
+) -> str | None:
     """Activate and return a scoped bare-resume worktree binding."""
-    if not session_id or os.environ.get(_session_bind_session_key()) != session_id:
+    binding_environment = os.environ if environment is None else environment
+    if not session_id or binding_environment.get(_session_bind_session_key()) != session_id:
         return None
-    worktree_id = os.environ.get(_session_bind_worktree_key())
-    project = os.environ.get(_session_bind_project_key())
+    worktree_id = binding_environment.get(_session_bind_worktree_key())
+    project = binding_environment.get(_session_bind_project_key())
     if not worktree_id or not project:
         return None
     try:
@@ -885,21 +912,31 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     cwd = getattr(args, "cwd", None)
     event_at = None
     source = "hook"
+    payload = getattr(args, "hook_payload", None)
+    resident_environment = getattr(args, "resident_environment", False)
     if getattr(args, "stdin", False):
         payload = _read_hook_stdin()
-        if payload:
-            session_id = session_id or payload.get("sessionId")
-            cwd = cwd or payload.get("cwd")
-            event_at = _hook_event_timestamp(payload)
-            hook_source = payload.get("source")
-            if isinstance(hook_source, str) and hook_source.strip():
-                source = f"hook:{hook_source.strip()}"
-    if not session_id:
+    end_reason = None
+    if isinstance(payload, dict) and payload:
+        session_id = session_id or payload.get("sessionId")
+        cwd = cwd or payload.get("cwd")
+        event_at = _hook_event_timestamp(payload)
+        hook_source = payload.get("source")
+        if isinstance(hook_source, str) and hook_source.strip():
+            source = f"hook:{hook_source.strip()}"
+        reason = payload.get("reason")
+        if reason in ("complete", "error", "abort", "timeout", "user_exit"):
+            end_reason = reason
+        elif reason is not None:
+            output.err("Native session end reason is unrecognized; closure cause is unconfirmed.")
+    if not session_id and not resident_environment:
         session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     if not session_id:
         return 0
     if not wt_id:
-        wt_id = _activate_session_binding(session_id)
+        wt_id = _activate_hook_session_binding(
+            session_id, payload, resident=resident_environment,
+        )
     if not wt_id and cwd:
         _activate_project_for_path(cwd)
         try:
@@ -924,75 +961,35 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     if not wt_id:
         return 0
     try:
-        tracking.deregister_session(wt_id, session_id, ended_at=event_at, source=source)
-        _capture_session_title(wt_id, session_id)
+        from . import native_lifecycle_source
+
+        record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
+        source_identity = native_lifecycle_source.end_identity(
+            session_id,
+            native_lifecycle_source.witness(payload, resident=resident_environment),
+            record.session_entry(session_id),
+        )
+        result = tracking.deregister_session(
+            wt_id, session_id, ended_at=event_at, source=source,
+            source_identity=source_identity, end_reason=end_reason,
+        )
+        lifecycle = (result or {}).get("lifecycle")
+        if lifecycle in (None, "ended"):
+            _capture_session_title(
+                wt_id, session_id, ended_activation=(result or {}).get("activation"),
+            )
+        holder = getattr(args, "result_holder", None)
+        if isinstance(holder, list):
+            holder.append(result or {})
     except Exception as e:
         output.err(f"Failed to deregister session: {e}")
         return 1
     activity.log_event(
-        "session_ended",
+        "session_ended" if lifecycle in (None, "ended") else "session_end_observed",
         worktree_id=wt_id,
         session_id=session_id,
-        launch_id=getattr(args, "launch_id", None) or os.environ.get("WORKTREE_LAUNCH_ID"),
+        launch_id=getattr(args, "launch_id", None) or (
+            None if resident_environment else os.environ.get("WORKTREE_LAUNCH_ID")
+        ),
     )
     return 0
-
-
-def _capture_session_title(worktree_id: str, session_id: str) -> bool:
-    """Read summary/name from workspace.yaml and persist it, re-reading and
-    re-authorizing under a required sidecar lock immediately before the
-    write (a race after deregistration's own check could otherwise still
-    make the record foreign before an unlocked write ran)."""
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-    if not yaml_path.exists():
-        return False
-
-    rec = tracking.load_record(yaml_path)
-    if rec.title and rec.title != "null":
-        return False
-
-    session_dir = sessions._session_state_dir() / session_id
-    ws_file = session_dir / "workspace.yaml"
-    if not ws_file.exists():
-        return False
-    if sessions._is_detached_session(session_dir):
-        return False
-
-    try:
-        with open(ws_file, encoding="utf-8") as f:
-            ws_data = yaml.safe_load(f)
-    except Exception:
-        return False
-
-    if not ws_data or not isinstance(ws_data, dict):
-        return False
-
-    _placeholder = ("", "|-", "|", ">-", ">", "null", "Untitled")
-    display_text = ""
-    summary = ws_data.get("summary", "")
-    if isinstance(summary, str) and summary.strip() and summary not in _placeholder:
-        display_text = summary.strip()
-    if not display_text:
-        name = ws_data.get("name", "")
-        if isinstance(name, str) and name.strip() and name not in _placeholder:
-            display_text = name.strip()
-    if not display_text:
-        return False
-
-    from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
-    try:
-        with tracking._RecordLock(yaml_path, require_sidecar=True):
-            fresh = tracking.load_record(yaml_path)
-            try:
-                require_project_record_mutation(fresh)
-            except ExecutionSpaceError as exc:
-                output.err(f"Rejecting session title capture for {worktree_id}: {exc}")
-                return False
-            if fresh.title and fresh.title != "null":
-                return False
-            fresh.title = display_text
-            tracking.save_record(fresh, yaml_path)
-            return True
-    except TimeoutError as exc:
-        output.err(f"Session title capture for {worktree_id} contended: {exc}")
-        return False

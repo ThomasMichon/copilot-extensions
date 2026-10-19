@@ -129,7 +129,9 @@ class LivenessMixin:
           :meth:`resume` it into a fresh session. A ``claimed`` (not yet
           ``started``) CLI-embodied task has no ``suspend`` transition defined
           (see ``task_state_machine.py``), so it keeps the pre-existing
-          requeue/dead-letter behavior too.
+          requeue/dead-letter behavior too. A restricted provider incarnation
+          instead retains its claim and native identity for explicit repair;
+          its immutable physical binding cannot adopt a replacement generation.
         - ``unknown`` -> leave it (resolver couldn't tell, or identity not captured
           yet -- degrade safe; never requeue on ignorance).
 
@@ -273,6 +275,17 @@ class LivenessMixin:
                     (verdict, task_id, generation, Status.CLAIMED, Status.STARTED),
                 )
                 if verdict != self.LIVENESS_GONE:
+                    continue
+                restricted = conn.execute(
+                    "SELECT 1 FROM spawn_reservations s JOIN tasks t ON t.id=s.task_id "
+                    "WHERE s.task_id=? AND t.generation=? AND s.driver='restricted-bridge' "
+                    "AND s.state IN (?,?,?,?) AND t.owner='dispatch-' || s.key "
+                    "AND (s.agent_info IS NULL OR json_extract(s.agent_info,'$.task_generation')=t.generation) "
+                    "LIMIT 1",
+                    (task_id, generation, SpawnState.RESERVING, SpawnState.SPAWNED,
+                     SpawnState.COLD, SpawnState.RELEASING),
+                ).fetchone()
+                if restricted:
                     continue
                 suspend = cli_embodied and status == Status.STARTED
                 if suspend:

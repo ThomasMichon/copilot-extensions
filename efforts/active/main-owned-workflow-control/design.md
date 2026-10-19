@@ -82,6 +82,9 @@ expected suites/platforms, run and attempt. Read authoritative run/job evidence;
 do not accept an arbitrary dispatch payload or candidate-provided success blob.
 PR synthetic-merge tests are not evidence for a different dev snapshot.
 Generated output needs its own contract tests, not only pre-materialization tests.
+The bounded [materialized-candidate validation slice](materialized-candidate-validation.md)
+specifies the proposed pre-merge consumer gate while retaining the existing
+post-merge verification and repair ownership.
 
 Final merge freshness must be enforced. A candidate composed against an older
 main cannot overwrite a later critical repair. Select and prove a provider
@@ -110,6 +113,12 @@ exact PR, rule IDs, before-state, expiry and restoration procedure. Fence releas
 credentials/admissions and drain existing privileged runs first; a pause flag
 alone is insufficient. Restore and prove policy before resuming publication.
 No bypass actor, broader token or direct-main helper implementation is needed.
+
+The supporting [validator-bootstrap independence proposal](validator-bootstrap-independence.md)
+tracks #6865's concrete self-repair deadlock. It preserves the existing
+candidate-gate owner and proposes deny-local bootstrap admission, not another
+installer policy or release writer. Its implementation and activation require
+their own reviewed evidence; an emergency main seed is not its completion.
 
 Keep one release writer. Switch only after old runs settle and one canary proves
 the merged tree and tag, concurrent main repair and rollback. Required statuses

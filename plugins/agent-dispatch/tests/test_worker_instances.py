@@ -30,6 +30,10 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "fixture-host")
     monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DROPINS_DIR", str(tmp_path / "dropins"))
     monkeypatch.setattr("agent_dispatch.workers_catalog._observation", lambda: {"known": False})
+    monkeypatch.setattr(
+        "agent_dispatch.worker_templates.run_agent_worktrees_capture",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"inventory_authority":"complete","repos":[]}', stderr=""),
+    )
 
 
 def fields(name="local-pool", **changes):
@@ -66,6 +70,359 @@ def test_empty_catalog_is_read_only_and_lists_fragments():
     assert all(r["fields"][1]["default"] for r in data["entries"])
     assert not rd.registrar_dir().exists()
     assert templates() == before
+
+
+def test_catalog_version_template_kinds_and_read_time_do_not_claim_activity():
+    before = time.time()
+    data = catalog()
+    assert data["schema_version"] == 1
+    assert before <= data["fetched_at"] <= time.time()
+    assert data["summary"]["activity_updated_at"] is None
+    for row in data["entries"]:
+        assert row["kind"] == templates()[row["title"]]["kind"]
+        assert row["components"] == [] and row["components_basis"] == "template"
+        assert row["activity"] == "not-applicable"
+
+
+def test_source_component_metadata_is_attributable_without_executable_fields(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    document = source / "emitter.json"
+    data = {
+        "name": "incoming", "kind": "emitter",
+        "spec": {
+            "id": "incoming", "command": [sys.executable, "-c", "print('[]')"],
+            "interval_seconds": 60, "env": {"PRIVATE_VALUE": "not-component-metadata"},
+        },
+    }
+    original = json.dumps(data).encode()
+    document.write_bytes(original)
+    rd.add_pointer("source", source, owner="repo:source")
+    row = next(row for row in catalog()["entries"] if row["title"] == "incoming")
+    assert row["kind"] == "emitter" and row["components_basis"] == "source"
+    component, = row["components"]
+    assert component["id"] == row["registration_ids"][0]
+    assert component["name"] == "incoming" and component["owner"] == "repo:source"
+    assert component["declaration_kind"] == component["kind"] == "emitter"
+    assert component["repo_scope"] is None and len(component["revision"]) == 64
+    assert component["repo_scopes"] == []
+    assert component["source_path"] == str(document)
+    assert row["source_path"] == str(document)
+    assert "not-component-metadata" not in json.dumps(component)
+    assert "command" not in component and "env" not in component and "spec" not in component
+    assert "Components (source)" in row["card"]["body"]
+    assert document.read_bytes() == original
+
+
+def test_multiple_components_remain_composite_when_their_kinds_match():
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    result = _component_metadata(tuple(
+        load_declaration({"name": name, "labels": ["work"]})
+        for name in ("first", "second")
+    ), basis="source")
+    assert result["kind"] == "composite"
+    assert len(result["components"]) == 2
+    assert all(component["kind"] == "supervised-lane" for component in result["components"])
+
+def test_component_metadata_preserves_supported_lane_scope_and_authored_label_order():
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    declaration = load_declaration({
+        "name": "scoped", "repos": "example/requests", "labels": ["zeta", "alpha"],
+    })
+    assert isinstance(declaration.repos, str)
+    assert declaration.labels == ("zeta", "alpha")
+    first = _component_metadata((declaration,), basis="source")
+    assert first == _component_metadata((declaration,), basis="source")
+    component, = first["components"]
+    assert component["repo_scope"] == "example/requests"
+    assert component["repo_scopes"] == ["example/requests"]
+    assert component["labels"] == ["zeta", "alpha"]
+    for unsupported in (["example/requests"], ("example/requests",)):
+        with pytest.raises(RegistrarError, match="lane string"):
+            load_declaration({"name": "invalid", "repos": unsupported, "labels": ["work"]})
+
+
+def test_unreadable_publication_never_projects_draft_components():
+    receipt = create(activate=True)
+    (active_dir() / "local-pool.json").write_text("not-json", encoding="utf-8")
+    row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
+    assert row["publication"] == "error" and row["publication_errors"]
+    assert row["kind"] == "unknown" and row["components"] == []
+    assert row["components_basis"] == "unknown"
+
+
+@pytest.mark.parametrize("all_repos", [False, True])
+def test_direct_evaluator_metadata_retains_declared_scope_and_label_order(all_repos):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    declaration = load_declaration({
+        "name": "review", "kind": "evaluator",
+        "spec": {
+            **({"all_repos": True} if all_repos else {"repo": "example/requests"}),
+            "labels": ["zeta", "alpha"], "evaluator_ref": "fixture",
+            "evaluator_spec": {"rules": []},
+        },
+    })
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    assert component["repo_scope"] == ("all" if all_repos else "example/requests")
+    assert component["repo_scopes"] == [component["repo_scope"]]
+    assert component["labels"] == ["zeta", "alpha"]
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_schedule_metadata_reads_bare_or_wrapped_entry_without_source_mutation(wrapped):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    entry = {"id": "tick", "repo": "example/requests", "labels": ["scheduled"], "interval_seconds": 60}
+    spec = {"schedules": [entry]} if wrapped else entry
+    before = copy.deepcopy(spec)
+    declaration = load_declaration({"name": "tick", "kind": "schedule", "spec": spec})
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    assert component["repo_scopes"] == ["example/requests"]
+    assert component["labels"] == ["scheduled"]
+    assert spec == before
+
+
+def test_schedule_metadata_retains_all_scopes_defaults_and_labels_in_declaration_order():
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    declaration = load_declaration({
+        "name": "ticks", "kind": "schedule",
+        "spec": {
+            "default_repo": "example/default",
+            "schedules": [
+                {"id": "first", "repo": "example/first", "labels": ["first", "shared"], "interval_seconds": 60},
+                {"id": "second", "repo": "example/second", "labels": ["shared", "second"], "interval_seconds": 60},
+                {"id": "default", "labels": ["default"], "interval_seconds": 60},
+            ],
+        },
+    })
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    assert component["repo_scope"] == "example/first"
+    assert component["repo_scopes"] == ["example/first", "example/second", "example/default"]
+    assert component["labels"] == ["first", "shared", "second", "default"]
+
+
+@pytest.mark.parametrize("schedules", [[], "not-a-list", {}])
+def test_invalid_schedule_container_remains_a_discovery_error_not_routing_metadata(tmp_path, schedules):
+    from agent_dispatch.registrar import load_declaration
+
+    document = {
+        "name": "invalid-ticks", "kind": "schedule",
+        "spec": {"schedules": schedules, "default_repo": "example/default", "labels": ["not-an-entry"]},
+    }
+    with pytest.raises(RegistrarError, match="non-empty list of objects"):
+        load_declaration(document)
+    source = tmp_path / "source"
+    source.mkdir()
+    path = source / "invalid.json"
+    original = json.dumps(document).encode()
+    path.write_bytes(original)
+    rd.add_pointer("invalid-schedule", source, owner="repo:source")
+    data = catalog()
+    assert any("non-empty list of objects" in error for error in data["summary"]["errors"])
+    assert any(row["group"] == "Discovery errors" for row in data["entries"])
+    assert all(row["title"] != "invalid-ticks" for row in data["entries"])
+    assert any(row["id"] == "template:worker-pool" for row in data["entries"])
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("location", ["source", "draft", "published"])
+@pytest.mark.parametrize("spec", [
+    {"schedules": [{"id": "ok", "repo": "example/project", "interval_seconds": 60}, None]},
+    {"id": "ok", "repo": "example/project", "interval_seconds": 60, "labels": False},
+])
+def test_component_projection_errors_preserve_healthy_catalog_rows_and_source_bytes(tmp_path, location, spec):
+    from agent_dispatch.registrar import load_declaration
+
+    healthy = create("a-healthy", activate=True)
+    document = {"name": "z-bad", "kind": "schedule", "spec": spec}
+    load_declaration(document)  # These shapes currently pass the owning registrar.
+    if location == "source":
+        source = tmp_path / "source"
+        source.mkdir()
+        path = source / "schedule.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        rd.add_pointer("schedule-source", source, owner="repo:source")
+        paths = [path]
+    else:
+        receipt = create("z-bad")
+        save_instance(
+            receipt["id"], receipt["revision"],
+            {"name": "z-bad", "declaration": document, "repo_root": ""},
+            activate=location == "published",
+            consent=ACTIVATION_CONSENT if location == "published" else None,
+        )
+        paths = [instance_dir() / "z-bad.json"]
+        if location == "published":
+            paths.append(active_dir() / "z-bad.json")
+    before = {path: path.read_bytes() for path in paths}
+    data = catalog()
+    bad, = [row for row in data["entries"] if row["title"] == "z-bad"]
+    assert bad["validity"] == "metadata-error"
+    assert bad["kind"] == bad["components_basis"] == "unknown" and bad["components"] == []
+    assert bad["component_errors"] and all(error in data["summary"]["errors"] for error in bad["component_errors"])
+    assert "Component metadata requires repair" in bad["card"]["body"]
+    good = next(row for row in data["entries"] if row["id"] == healthy["id"])
+    assert good["kind"] == "supervised-lane" and good["validity"] == "valid"
+    assert good["pool_toggleable"] == "false", "late projection errors must disable earlier toggle affordances"
+    assert any(row["id"] == "template:worker-pool" for row in data["entries"])
+    assert {path: path.read_bytes() for path in paths} == before
+
+
+@pytest.mark.parametrize("key", ["repository_issue_loop", "effort_driver_loop"])
+def test_composed_emitter_metadata_reads_its_own_nested_routing(key):
+    from agent_dispatch.registrar import ProfileDeclaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    declaration = ProfileDeclaration(name="source", kind="emitter", spec={
+        key: {"repo": "example/requests", "task_label": "routed-work"},
+    })
+    component, = _component_metadata((declaration,), basis="source")["components"]
+    assert component["repo_scopes"] == ["example/requests"]
+    assert component["labels"] == ["routed-work"]
+
+
+@pytest.mark.parametrize("mode", ["command", "repository_issue_loop", "effort_driver_loop"])
+def test_null_emitter_bindings_do_not_mask_the_selected_kind_or_break_catalog(tmp_path, mode):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    create("healthy", activate=True)
+    spec = {
+        "id": "nullable-source", "interval_seconds": 60, "cwd": str(tmp_path),
+        "command": None, "ci_repair": None,
+        "repository_issue_loop": None, "effort_driver_loop": None,
+    }
+    if mode == "command":
+        spec.update(command=[sys.executable, "-c", "print('[]')"], repo="example/project", labels=["routed-work"])
+    else:
+        config = {
+            "kind": mode.replace("_", "-"), "name": "nullable",
+            "repo": "example/project", "source": "fixture-source",
+            "task_label": "routed-work", "cadence_seconds": 60,
+            "pool": {"body": {"type": "headless", "agent": "task-worker"}},
+        }
+        if mode == "repository_issue_loop":
+            config.update(
+                forge={"provider": "github", "producer_login": "fixture-bot"},
+                reservation={"label": "fixture-reserved"},
+            )
+        else:
+            config.update(effort_slugs=["fixture-effort"], state_root=str(tmp_path))
+        spec[mode] = config
+    document = {"name": "nullable-source", "kind": "emitter", "spec": spec}
+    declaration = load_declaration(document)
+    before = declaration_to_registration(declaration, machine=None)
+    source = tmp_path / "source"
+    source.mkdir()
+    path = source / "emitter.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    original = path.read_bytes()
+    rd.add_pointer("nullable-source", source, owner="repo:source")
+    data = catalog()
+    row = next(row for row in data["entries"] if row["title"] == "nullable-source")
+    assert row["validity"] == "valid" and row["component_errors"] == []
+    assert row["components"][0]["repo_scopes"] == ["example/project"]
+    assert row["components"][0]["labels"] == ["routed-work"]
+    assert data["summary"]["errors"] == []
+    assert next(row for row in data["entries"] if row["id"] == "instance:healthy")["pool_toggleable"] == "true"
+    assert declaration_to_registration(declaration, machine=None) == before
+    assert path.read_bytes() == original
+
+
+def test_non_emitter_prerequisites_do_not_select_opaque_emitter_binding_names():
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.worker_instances import _validate_dependencies
+
+    declaration = load_declaration({
+        "name": "review", "kind": "evaluator",
+        "spec": {"all_repos": True, "evaluator_ref": "fixture", "evaluator_spec": {"rules": []},
+                 "repository_issue_loop": False, "effort_driver_loop": False},
+    })
+    _validate_dependencies((declaration,), "", available_declarations=(declaration,))
+
+
+def test_configuration_components_name_the_draft_or_published_file_without_guessing():
+    receipt = create()
+    row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
+    assert row["components"][0]["source_path"] == str(instance_dir() / "local-pool.json")
+    receipt = edit(receipt, activate=True)
+    row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
+    assert row["components"][0]["source_path"] == str(active_dir() / "local-pool.json")
+    assert str(active_dir() / "local-pool.json") in row["card"]["body"]
+
+
+def test_observational_source_path_does_not_change_a_lane_registration(tmp_path):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    document = {"name": "pool", "labels": ["work"], "owner": "fixture"}
+    path = tmp_path / "pool.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    declaration, = rd.read_declaration_file_set(path)
+    assert declaration.source_path == str(path)
+    assert declaration_to_registration(declaration, machine=None) == declaration_to_registration(
+        load_declaration(document), machine=None,
+    )
+
+
+def test_component_cards_keep_literal_backslashes_and_backticks_in_source_paths():
+    from agent_dispatch.registrar import ProfileDeclaration
+    from agent_dispatch.workers_catalog import _cards, _component_metadata
+
+    path = "C:\\source\\.config\\a``b`file.json"
+    row = {"title": "fixture", **_component_metadata((ProfileDeclaration(name="fixture"),), basis="source", source_path=path)}
+    card = _cards(row, "Fixture")["card"]["body"]
+    assert f"Source document: ``` {path} ```" in card
+
+
+def test_ordinary_plugin_components_retain_the_verified_source_document(monkeypatch, tmp_path):
+    from dropin_registry import EntryDecision, ScanAuthority
+    from plugin_activation import ActivationReport, ActivePlugin
+
+    source = "example-producer@example-marketplace"
+    root = tmp_path / "example-producer"
+    directory = root / "registrar"
+    directory.mkdir(parents=True)
+    (root / "plugin.json").write_text(json.dumps({"name": "example-producer", "version": "1.2.3"}), encoding="utf-8")
+    document = directory / "pool.json"
+    document.write_text(json.dumps({"name": "plugin-pool"}), encoding="utf-8")
+    registry = Path(os.environ["AGENT_DISPATCH_REGISTRAR_DROPINS_DIR"])
+    registry.mkdir()
+    (registry / "producer.json").write_text(json.dumps({
+        "schema_version": 1, "plugin": source, "plugin_root": str(root), "registrar": "registrar",
+    }), encoding="utf-8")
+    plugin = ActivePlugin(source=source, name="example-producer", marketplace="example-marketplace",
+                          root=root.resolve(), scopes=("global",))
+    report = ActivationReport(authority=ScanAuthority.COMPLETE, decisions={source: EntryDecision.active(plugin)})
+    monkeypatch.setattr("plugin_activation.resolve_active_plugins", lambda: report)
+    data = catalog()
+    row = next(row for row in data["entries"] if row["title"] == "plugin-pool")
+    assert data["summary"]["errors"] == []
+    assert row["source_path"] == str(document)
+    assert row["components"][0]["source_path"] == str(document)
+
+
+@pytest.mark.parametrize("spec", [
+    {"repo": 42, "labels": ["work"]},
+    {"repo": "example/requests", "labels": "not-a-list"},
+    {"repo": "example/requests", "labels": False},
+    {"repo": "example/requests", "labels": [42]},
+])
+def test_invalid_declared_routing_is_an_explicit_error_not_empty_metadata(spec):
+    from agent_dispatch.registrar import ProfileDeclaration
+    from agent_dispatch.workers_catalog import _component_metadata
+
+    with pytest.raises(RegistrarError, match="declared"):
+        _component_metadata((ProfileDeclaration(name="invalid", kind="evaluator", spec=spec),), basis="source")
 
 
 def test_template_save_edit_and_publish_preserve_identity():
@@ -141,6 +498,8 @@ def test_published_runtime_and_controls_survive_differently_shaped_draft(tmp_pat
     assert row["lanes"] == 1 and row["statistics"]["declarations"] == 1
     assert row["draft_statistics"]["declarations"] == 3
     assert row["enabled"] == "disabled" and row["activity"] == "observed-running"
+    assert row["kind"] == "supervised-lane" and row["components_basis"] == "published"
+    assert len(row["components"]) == 1 and row["components"][0]["id"] == rid
     assert not any(r["group"] == "Source declarations" for r in data["entries"])
 
 
@@ -311,6 +670,13 @@ def test_composed_template_discovers_with_preserved_repo_context(tmp_path):
     assert all(d.owner == OWNER for d in declarations)
     row = next(r for r in catalog()["entries"] if r["id"] == receipt["id"])
     assert row["publication"] == "published" and row["statistics"]["declarations"] == 2
+    assert row["kind"] == "composite" and row["components_basis"] == "published"
+    assert {component["kind"] for component in row["components"]} == {"emitter", "supervised-lane"}
+    assert {component["id"] for component in row["components"]} == set(row["registration_ids"])
+    assert all(component["repo_scopes"] == ["example/project"] for component in row["components"])
+    assert all(component["labels"] == ["issue-work"] for component in row["components"])
+    assert all(component["source_path"] == str(active_dir() / "issue-loop.json") for component in row["components"])
+    assert "example/project" in row["card"]["body"] and "issue-work" in row["card"]["body"]
     assert len(rd.discover()) == 2
 
 
@@ -663,7 +1029,7 @@ def test_existing_daemon_reconciles_saved_activation_without_duplicate_work():
     daemon.shutdown()
 
 
-@pytest.mark.parametrize("stage", ["catalog", "save", "activate", "retry"])
+@pytest.mark.parametrize("stage", ["catalog", "save", "activate", "retry", "published", "degraded"])
 def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stage):
     from agent_dispatch.__main__ import build_parser
 
@@ -682,6 +1048,7 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stag
         assert result.returncode == 0, result.stderr
         return json.loads(result.stdout)
     initial = invoke("catalog") if stage == "catalog" else catalog()
+    assert initial["schema_version"] == 1
     assert initial["summary"]["configured"] == 0
     if stage == "catalog":
         assert not instance_dir().exists() and not rd.pointers_file().exists()
@@ -700,5 +1067,30 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stag
     activated = invoke(*activate) if stage == "activate" else seed(*activate)
     assert activated["id"] == saved["id"] and activated["activation"] == "pending"
     assert len(rd.discover()) == 1
+    if stage == "activate":
+        return
     if stage == "retry":
         assert invoke(*activate)["retry"]
+        return
+    current = invoke("catalog") if stage == "published" else catalog()
+    published = next(row for row in current["entries"] if row["id"] == saved["id"])
+    assert published["kind"] == "supervised-lane" and published["components_basis"] == "published"
+    assert [component["id"] for component in published["components"]] == published["registration_ids"]
+    if stage == "published":
+        return
+    source = tmp_path / "incomplete-routing-source"
+    source.mkdir()
+    path = source / "schedule.json"
+    path.write_text(json.dumps({
+        "name": "bad-routing", "kind": "schedule",
+        "spec": {"id": "bad-routing", "repo": "example/project", "labels": False},
+    }), encoding="utf-8")
+    before = path.read_bytes()
+    rd.add_pointer("incomplete-routing", source, owner="repo:source")
+    degraded = invoke("catalog")
+    bad = next(row for row in degraded["entries"] if row["title"] == "bad-routing")
+    assert bad["validity"] == "metadata-error"
+    assert bad["component_errors"][0] in degraded["summary"]["errors"]
+    assert any(row["id"] == saved["id"] for row in degraded["entries"])
+    assert any(row["id"] == "template:worker-pool" for row in degraded["entries"])
+    assert path.read_bytes() == before

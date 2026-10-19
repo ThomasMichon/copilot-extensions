@@ -64,6 +64,29 @@ rather than as a successful refresh. The existing `auto_fast_forward` policy
 disables opportunistic anchor movement during creation without preventing
 remote-ref-based worktree creation.
 
+### Session worktree names
+
+Seeded and unseeded session creation use the same timestamp and four-character
+hexadecimal suffix. The platform is appended only when the logical machine name
+does not already end in that environment (`example-wsl`, not
+`example-wsl-wsl`). Windows accepts either `-win` or `-windows` as the existing
+environment suffix.
+Platform labels are matched case-insensitively without rewriting the logical
+machine name.
+
+Remote prompt admission keeps its request and seed identities in a durable
+receipt, separate from the generated worktree name. Replaying the same request
+recovers that receipt's original allocation. Short-allocation receipts must
+agree with their recorded worktree ID, timestamp and suffix; inconsistent
+receipts are refused without rewriting the worktree record or staged prompt.
+Existing worktrees and historical
+UUID-suffixed admissions retain their exact names, including during creation
+repair and paired-knowledge recovery.
+When a caller's record is absent, delegate host inference accepts both complete
+allocation formats, not partial machine/environment prefixes. Matches for
+different host identities remain unresolved rather than authorizing finalization
+from an ambiguous host.
+
 ### Replay-safe programmatic creation
 
 `create --creation-key <opaque-key> --json` binds one logical request to its
@@ -490,6 +513,16 @@ claims.) If a PR-mode worktree was already torn down (the `detach`
 disposition), recover it via
 [`references/pr-workflow.md` § Recovering a PR after teardown](../skills/worktree/references/pr-workflow.md).
 When in doubt, just `create` a fresh worktree and continue there.
+
+Historical WSL claim-bundle actors may retain native-host labels. Local
+offer/accept routing requires each complete qualified reference to resolve under
+its receiving project's record, platform and namespace authority; host-label
+similarity alone never authorizes a transfer. Stored bundle/claim references and
+machine/platform fields are preserved while the accepted ownership changes.
+Anchor actors are checked against their receiving repository's configured anchor,
+not a synthetic worktree-root child. Equivalence uses the referenced project's
+topology; an unregistered foreign source uses the fenced remote leg, while invalid
+local authority still refuses the transfer.
 
 ## 5. What's cleanable, and what's never reaped
 

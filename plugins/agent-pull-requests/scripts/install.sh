@@ -14,18 +14,45 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTION="${AGENT_PULL_REQUESTS_ACTION:-install}"
 FORCE="${AGENT_PULL_REQUESTS_FORCE:-0}"
 INSTALL_DIR="${AGENT_PULL_REQUESTS_INSTALL_DIR:-}"
+CELL_ARGS=()
+CELL_REQUESTED=0
+CELL_CONTEXT=0
+CELL_INSTALL_DIR=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         install|update|status|uninstall|stamp|provision) ACTION="$1"; shift ;;
+        snapshot-prepare|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-complete|slot-completion-validate)
+            ACTION="$1"; CELL_REQUESTED=1; shift ;;
+        --context|--durable-home|--expected-marketplace-id|--snapshot-id|--runtime-version|--expected-namespace-generation|--expected-install-generation)
+            [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || { _fail "$1 requires a value"; exit 2; }
+            [[ "$1" != --context ]] || CELL_CONTEXT=1
+            CELL_REQUESTED=1
+            CELL_ARGS+=("$1" "$2")
+            shift 2 ;;
         --force) FORCE=1; shift ;;
         --install-dir)
             [[ $# -ge 2 ]] || { _fail "--install-dir requires a value"; exit 2; }
             INSTALL_DIR="$2"
+            CELL_INSTALL_DIR=1
             shift 2
             ;;
         *) _fail "unknown argument: $1"; exit 2 ;;
     esac
 done
+if [[ "$CELL_REQUESTED" == 1 ]]; then
+    [[ "$CELL_CONTEXT" == 1 ]] || { _fail 'Cell actions require explicit --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization'; exit 2; }
+    [[ "$CELL_INSTALL_DIR" == 0 && -z "$INSTALL_DIR" ]] || { _fail '--context and --install-dir cannot be combined'; exit 2; }
+    [[ "$FORCE" != 1 ]] || { _fail '--force cannot replace an immutable cell slot'; exit 2; }
+    cd "${HOME:?Cell installer requires an existing home working directory}"
+    exec bash "$SCRIPT_DIR/cell-install.sh" "$ACTION" "${CELL_ARGS[@]}"
+fi
+if [[ "$ACTION" != status ]]; then
+    mode="$(bash "$SCRIPT_DIR/payload-mode.sh")"
+    if [[ "$mode" != legacy ]]; then
+        _fail 'Governed installation requires explicit --context; use payload init for first touch'
+        exit 126
+    fi
+fi
 export AGENT_PULL_REQUESTS_ACTION="$ACTION"
 export AGENT_PULL_REQUESTS_FORCE="$FORCE"
 export AGENT_PULL_REQUESTS_INSTALL_DIR="$INSTALL_DIR"
@@ -298,11 +325,14 @@ if [[ -z "$SRC_VERSION" ]]; then
     echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
     exit 1
 fi
+PACKAGE_VERSION="$SRC_VERSION"
+SOURCE_RUNTIME_IDENTITY=""
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 LINK_PYTHON="$VENV_PYTHON"
 
 _versioned_activate() {
+    _source_runtime_unchanged || return 1
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
@@ -315,6 +345,7 @@ _versioned_activate() {
     fi
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    _source_runtime_unchanged || return 1
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
@@ -362,6 +393,46 @@ _bootstrap_python() {
         fi
     fi
     return 1
+}
+
+_source_runtime_identity() {
+    local py
+    py="$(_bootstrap_python)" || return 1
+    "$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+        --payload "${1:-$PLUGIN_DIR}" --package-version "$PACKAGE_VERSION" \
+        --plugin agent-pull-requests --format json "${@:2}"
+}
+
+_initialize_source_runtime() {
+    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
+    if [[ "$SOURCE_RUNTIME_IDENTITY" == '{}' ]]; then
+        _fail 'Source runtime identity disappeared during runtime selection'
+        return 1
+    fi
+    local py
+    py="$(_bootstrap_python)" || return 1
+    SRC_VERSION="$("$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_PYTHON="$VENV_PYTHON"
+}
+
+_source_runtime_unchanged() {
+    [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    local identity expected="${SOURCE_RUNTIME_IDENTITY:-}"
+    [[ -n "$expected" ]] || expected='{}'
+    identity="$(_source_runtime_identity "$PLUGIN_DIR" --expected-runtime-version "$SRC_VERSION")" || return 1
+    if [[ "$identity" != "$expected" ]]; then
+        _fail 'Source runtime identity changed after runtime selection; refusing publication'
+        return 1
+    fi
+}
+
+_source_manifest_fields() {
+    _source_runtime_unchanged || return 1
+    [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]] || return 0
+    printf '%s' "${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2}"
 }
 
 _payload_hash() {
@@ -441,54 +512,35 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || py=""
-    if [[ -z "$py" ]]; then
-        [[ -e "$VENV_DIR" ]] || return 0
-        _fail "Cannot inspect or clean versions/$SRC_VERSION without a bootstrap Python interpreter"
-        return 1
+    _source_runtime_unchanged || return 1
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
     fi
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'
-    local rc=$?
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to clean incomplete runtime slot versions/$SRC_VERSION"
-        return "$rc"
-    fi
-    return 0
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _source_runtime_unchanged
 }
 
 _versioned_mark_complete() {
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    # The freshly built slot's own interpreter: it already passed the health
-    # gate, and an ambient one may be absent or unusable.
-    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
-    if [[ -z "$py" ]]; then
-        _fail "Cannot mark versions/$SRC_VERSION complete without a bootstrap Python interpreter"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    # Reuse the SAME payload hash computed once, before the build, into
-    # $PAYLOAD_HASH -- never recompute it here. A local-checkout install
-    # does not self-stage: the live source tree can change between the
-    # pre-build admission check and this post-build marker write (e.g. an
-    # edit landing mid-install), and `uv pip install` already consumed
-    # whatever bytes were present earlier. Recomputing here would let the
-    # marker describe NEWER content than what was actually built into the
-    # slot, letting a later install wrongly reuse it as if it matched.
-    local ph="$PAYLOAD_HASH"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
-    local rc=$?
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to mark versions/$SRC_VERSION complete"
-        return "$rc"
-    fi
-    return 0
+    _source_runtime_unchanged || return 1
+    _runtime_construction_complete "$actual_hash"
 }
 
 _versioned_is_complete() {
+    _source_runtime_unchanged || return 1
     local expect_hash="${1:-}"
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 1
     local vr="$SCRIPT_DIR/versioned_runtime.py"
@@ -536,26 +588,49 @@ _install_hook_files() {
     _ok "Session-start hook: $bin_hook_dir/bootstrap-check.sh"
 }
 
-if [[ "$ACTION" == "install" || "$ACTION" == "update" || "$ACTION" == "stamp" || "$ACTION" == "provision" ]]; then
+if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision ]]; then
+    _initialize_source_runtime || exit 1
+fi
+if [[ "$ACTION" == "install" || "$ACTION" == "update" || "$ACTION" == "stamp" || "$ACTION" == "provision" || "$ACTION" == "uninstall" ]]; then
     if ! _enter_install_lock; then
         _fail "Timed out waiting for the install transaction lock: $INSTALL_DIR/.install.lock"
         exit 1
     fi
     trap '_exit_install_lock' EXIT INT TERM
 fi
+if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACTION" == provision ]]; then
+    _source_runtime_unchanged || exit 1
+fi
 
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     snap_dir="$INSTALL_DIR/snapshots/$SRC_VERSION"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" && ( -e "$snap_dir" || -L "$snap_dir" ) ]]; then
+        snapshot_identity="$(_source_runtime_identity "$snap_dir" --expected-runtime-version "$SRC_VERSION")" || exit 1
+        [[ "$snapshot_identity" == "$SOURCE_RUNTIME_IDENTITY" ]] || {
+            _fail 'Existing source snapshot identity differs from the selected source; refusing replacement'
+            exit 1
+        }
+    else
     snap_tmp="$snap_dir.tmp-$$"
     rm -rf -- "$snap_tmp"
     mkdir -p "$snap_tmp"
     cp -a "$PLUGIN_DIR/." "$snap_tmp/"
-    rm -rf -- "$snap_tmp/.git" "$snap_tmp/.venv" "$snap_tmp/__pycache__" "$snap_tmp/build" "$snap_tmp/dist" "$snap_tmp/node_modules" "$snap_tmp/tests" "$snap_tmp/.pytest_cache" "$snap_tmp/.mypy_cache"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        snapshot_identity="$(_source_runtime_identity "$snap_tmp" --expected-runtime-version "$SRC_VERSION")" || exit 1
+        [[ "$snapshot_identity" == "$SOURCE_RUNTIME_IDENTITY" ]] || { _fail 'Stamped source snapshot identity changed'; exit 1; }
+    else
+        rm -rf -- "$snap_tmp/.git" "$snap_tmp/.venv" "$snap_tmp/__pycache__" "$snap_tmp/build" "$snap_tmp/dist" "$snap_tmp/node_modules" "$snap_tmp/tests" "$snap_tmp/.pytest_cache" "$snap_tmp/.mypy_cache"
+    fi
+    _source_runtime_unchanged || exit 1
     mkdir -p "$(dirname "$snap_dir")"
     rm -rf -- "$snap_dir"
     mv "$snap_tmp" "$snap_dir"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$snap_dir/.payload-source"
+    if [[ -z "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$snap_dir/.payload-source"
+    fi
+    fi
+    _source_runtime_unchanged || exit 1
     printf '%s\n' "$snap_dir" > "$INSTALL_DIR/payload-dir"
     printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
     _ok "Snapshot: $snap_dir"
@@ -577,8 +652,8 @@ fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
     rm -f "$LOCAL_BIN/agent-pull-requests"
-    rm -rf "$INSTALL_DIR"
-    _ok 'agent-pull-requests runtime removed'
+    remove_install_runtime_content "$INSTALL_DIR" || exit 1
+    _ok 'agent-pull-requests runtime removed (transaction/staging coordination retained)'
     exit 0
 fi
 
@@ -601,7 +676,8 @@ _ok "Directories: $INSTALL_DIR"
 _install_hook_files
 
 PAYLOAD_HASH="$(_payload_hash)" || exit 1
-SLOT_ALREADY_COMPLETE=0
+_versioned_slot_clean || exit 1
+SLOT_ALREADY_COMPLETE="$_RUNTIME_CONSTRUCTION_REUSE"
 if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
     if _versioned_is_complete "$PAYLOAD_HASH"; then
         SLOT_ALREADY_COMPLETE=1
@@ -639,13 +715,12 @@ if [[ "$SLOT_ALREADY_COMPLETE" -eq 0 ]]; then
     _ok 'Package installed: agent-pull-requests'
 fi
 
-if [[ "$SLOT_ALREADY_COMPLETE" -eq 0 ]]; then
-    _versioned_activate || exit 1
-fi
+_versioned_activate || exit 1
 write_simple_binstub \
     "agent-pull-requests" "agent_pull_requests" "$INSTALL_DIR" "$LOCAL_BIN" "$INSTALL_DIR/bin" "scripts/install.sh" "AGENT_PULL_REQUESTS_NO_SELFPROVISION" \
     "$SCRIPT_DIR/resolve-runtime.ps1" "$SCRIPT_DIR/resolve-runtime.sh"
-write_deploy_manifest "agent-pull-requests" "agent-pull-requests" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
+source_fields="$(_source_manifest_fields)" || exit 1
+write_deploy_manifest "agent-pull-requests" "agent-pull-requests" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$source_fields" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$PACKAGE_VERSION"
 
 echo ""
 if "$LINK_PYTHON" -c 'import agent_pull_requests' 2>/dev/null; then

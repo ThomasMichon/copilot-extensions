@@ -1,0 +1,9 @@
+{
+  "comment": "Make update finishing work-count coverage self-contained across platforms and cover first-touch installers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

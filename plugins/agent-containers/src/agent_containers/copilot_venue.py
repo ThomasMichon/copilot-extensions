@@ -12,6 +12,17 @@ import subprocess
 import sys
 from collections.abc import Callable
 
+from plugin_resolve.reflection import selection_spec
+
+
+def add_plugin_selection_arguments(parser) -> None:
+    parser.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
+    parser.add_argument(
+        "--stage-plugin-disabled", dest="stage_plugins", action="append",
+        type=lambda source: selection_spec({"source": source, "enable": False}),
+        help="Prepare a plugin payload without enabling it (repeatable).",
+    )
+
 
 def add_copilot_subparser(sub) -> None:
     """Register the ``copilot`` subcommand on the shared subparsers group."""
@@ -25,6 +36,8 @@ def add_copilot_subparser(sub) -> None:
              "restricted fleet).",
     )
     copilot_p.add_argument("name", help="Container name")
+    add_plugin_selection_arguments(copilot_p)
+    copilot_p.add_argument("--plugin-root", dest="plugin_roots", action="append", default=[])
     copilot_p.add_argument(
         "--worktree-id", dest="worktree_id", default=None,
         help="The worktree id to reserve/attach on the venue side (forwarded "
@@ -189,7 +202,9 @@ def cmd_copilot(
         user = target.user
         reverse_forwards: list[str] = []
         relay_env: dict[str, str] = {}
-        if not args.no_relay:
+        relay_port = None
+        _forward, relay_enabled = config.credentials_for(target.fleet)
+        if not args.no_relay and relay_enabled:
             host_relay_port = require_live_relay_port()
             if not relay_healthy(host_relay_port):
                 raise RuntimeError(
@@ -202,11 +217,15 @@ def cmd_copilot(
                 f"127.0.0.1:{config.relay_port}:127.0.0.1:{host_relay_port}"
             )
             from .relay_provider import token_for
+            from .container_shims import deploy, git_credential_environment
+            deploy(args.name, ado=True)
+            relay_port = config.relay_port
 
             relay_env = {
                 "LC_GIT_CREDENTIAL_RELAY_HOST": "127.0.0.1",
                 "LC_GIT_CREDENTIAL_RELAY": str(config.relay_port),
                 "LC_GIT_CREDENTIAL_RELAY_TOKEN": token_for(args.name),
+                **git_credential_environment(),
             }
         daemon_port = resolve_daemon_port()
         if daemon_port:
@@ -231,19 +250,32 @@ def cmd_copilot(
             inputs_safe_to_cleanup = True
             try:
                 auth_env = auth.prepare_launch(config, target.fleet, args.name, user)
+                values = {**container_environment(args.name, user), **relay_env}
+                forward, _ = config.credentials_for(target.fleet)
+                if forward:
+                    git_token = host_gh_token()
+                    if not git_token:
+                        raise RuntimeError("forward_gh_token requires the independent gh login")
+                    values["GH_TOKEN"] = git_token
+                remote_env = auth.stage_env(
+                    args.name, user, values, write_remote_env,
+                    config=config, fleet=target.fleet,
+                )
+                from .plugin_preparation import attached_launch_command, stage_for_attached_launch
+                prepared_context = {}
+                preparation = stage_for_attached_launch(
+                    args, target, remote_env=remote_env, relay_port=relay_port,
+                    prepared_context=prepared_context,
+                )
+                remote_command = attached_launch_command(
+                    remote_command, prepared_context.get("workspace"),
+                )
                 if auth_env:
-                    values = {**container_environment(args.name, user), **relay_env}
-                    forward, _ = config.credentials_for(target.fleet)
-                    if forward:
-                        git_token = host_gh_token()
-                        if not git_token:
-                            raise RuntimeError("forward_gh_token requires the independent gh login")
-                        values["GH_TOKEN"] = git_token
-                    remote_env = auth.stage_env(
-                        args.name, user, values, write_remote_env,
-                        config=config, fleet=target.fleet,
-                    )
                     remote_command = auth.wrap_manager_shell(remote_command, auth_env, remote_env)
+                elif remote_env:
+                    from .ssh_transport import build_remote_command
+                    remote_command = build_remote_command(remote_command, remote_env)
+                remote_command = preparation + remote_command
                 spawn_cmd = build_ssh_command(
                     ssh_config, remote_command,
                     reverse_forwards=reverse_forwards, pty=True,

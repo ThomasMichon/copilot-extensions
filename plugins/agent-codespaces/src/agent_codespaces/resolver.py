@@ -171,7 +171,7 @@ def _write_remote_cmd_file(codespace_name: str, acp_command: str) -> str:
 
 
 def _build_spawn_command(
-    codespace_name: str, acp_command: str, stage_plugins: list[str] | None = None,
+    codespace_name: str, acp_command: str, stage_plugins: list[str | dict] | None = None,
 ) -> list[str]:
     """Build the spawn command for a codespace agent.
 
@@ -202,7 +202,8 @@ def _build_spawn_command(
         "--force",
     ]
     for source in stage_plugins or []:
-        cmd += ["--stage-plugin", source]
+        from plugin_resolve.reflection import selection_cli_args
+        cmd += selection_cli_args(source)
     cmd += ["--remote-cmd-file", payload_file]
     return cmd
 
@@ -234,7 +235,7 @@ class CodespaceResolver:
         from agent_bridge.transport import SpawnTarget
 
         sources = [
-            p.source for p in (extra_plugins or [])
+            {"source": p.source, "enable": getattr(p, "enable", True)} for p in (extra_plugins or [])
             if getattr(p, "source", None)
         ]
         spec = await self.resolve_spec(
@@ -248,7 +249,7 @@ class CodespaceResolver:
         )
 
     async def resolve_spec(
-        self, name: str, *, extra_plugin_sources: "list[str] | tuple[str, ...]" = (),
+        self, name: str, *, extra_plugin_sources: "list[str | dict] | tuple[str | dict, ...]" = (),
         repo: str | None = None, repo_remote: str | None = None,
     ) -> dict:
         """Resolve a codespace name to a **plain-dict** spawn spec.
@@ -305,6 +306,9 @@ class CodespaceResolver:
         acp_command = config.effective_acp_command_for(
             cs.repository, requested_repo=repo, repo_remote=repo_remote,
         )
+        checkout_command = config.checkout_provision_command_for(
+            cs.repository, requested_repo=repo, repo_remote=repo_remote,
+        )
         spawn_cmd = _build_spawn_command(
             cs.name,
             acp_command,
@@ -316,9 +320,10 @@ class CodespaceResolver:
                 cs.name, repo, repo_remote or "<none>",
             )
         if stage:
+            from plugin_resolve.reflection import selection_spec
             log.info(
                 "codespace:%s -- staging %d related-repo plugin(s): %s",
-                cs.name, len(stage), stage,
+                cs.name, len(stage), [selection_spec(value) for value in stage],
             )
         log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
         workspace_folder = (
@@ -336,6 +341,13 @@ class CodespaceResolver:
                 "repo": repo or cs.repository,
                 "acp_command": acp_command,
                 "workspace_folder": workspace_folder,
+                "provider_command": dispatch_argv(),
+                "plugin_plan": True,
+                "related_plugins": stage,
+                **({
+                    "checkout_provision_command": checkout_command,
+                    "requested_repo": repo, "repo_remote": repo_remote,
+                } if repo is not None else {}),
             },
         }
 
@@ -445,23 +457,10 @@ class CodespaceResolver:
 async def list_specs_tolerant() -> list[dict]:
     """``CodespaceResolver().list_specs()``, but never raises.
 
-    A codespace-listing failure (missing `codespace` OAuth scope, no `gh`
-    auth at all, network unreachable, etc.) must never be a hard requirement
-    for a host to resolve *any* agent -- CodeSpaces are optional, and a host
-    that doesn't use them (confirmed live, Lambda-Core, 2026-10-04) has no
-    reason to carry the `codespace` scope at all. Before this fix,
-    ``agent-codespaces namespace-list`` propagated any such failure as an
-    uncaught exception, crashing with a non-zero exit; agent-bridge's own
-    namespace-resolver consumer (``NamespaceListIncomplete`` on a non-zero
-    exit) then dropped the `codespace:` namespace for that one listing call
-    as designed -- but a confirmed, separate production incident that same
-    day showed bare-name agent resolution (``POST /api/v1/sessions``)
-    returning 404 for completely unrelated, purely-static agents while this
-    failure was live, starving the Intelligence Dampener reviewer-dispatch
-    pool for hours. Reporting zero codespaces here (the host's
-    genuinely-accurate state when it can't query them) instead of crashing
-    removes any chance of that class of failure recurring from this
-    specific subprocess boundary.
+    CodeSpaces are optional: missing OAuth scope, unavailable authentication
+    or a network failure must not prevent unrelated static-agent resolution.
+    Warn and report an empty listing at this subprocess boundary rather than
+    making every agent depend on successful CodeSpace discovery.
     """
     try:
         return await CodespaceResolver().list_specs()
@@ -474,4 +473,3 @@ async def list_specs_tolerant() -> list[dict]:
             file=sys.stderr,
         )
         return []
-

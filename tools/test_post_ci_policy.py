@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -25,7 +26,10 @@ def test_dependency_version_updates_use_the_contribution_branch():
 def test_one_trusted_followup_keeps_jobs_and_credentials_independent():
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     triggers = workflow.get("on", workflow.get(True))
-    assert triggers == {"workflow_run": {"workflows": ["CI"], "types": ["completed"]}}
+    assert triggers == {
+        "workflow_run": {"workflows": ["CI", "Validate and promote dev to main"], "types": ["completed"]},
+        "pull_request_target": {"branches": ["main"], "types": ["closed"]},
+    }
     assert not (WORKFLOW.parent / "identifier-leak-guard.yml").exists()
     assert "concurrency" not in workflow
     assert workflow["permissions"] == {"contents": "read"}
@@ -34,7 +38,9 @@ def test_one_trusted_followup_keeps_jobs_and_credentials_independent():
     assert "needs" not in dispatch and "needs" not in scan
     assert "github.event.workflow_run.conclusion == 'success'" in dispatch["if"]
     assert "github.event.workflow_run.event != 'pull_request'" in dispatch["if"]
-    assert dispatch["permissions"] == {"contents": "write"}
+    assert dispatch["permissions"] == {
+        "contents": "write", "pull-requests": "read", "actions": "read",
+    }
     assert scan["permissions"] == {
         "contents": "read", "pull-requests": "read", "issues": "write", "checks": "write",
     }
@@ -105,6 +111,203 @@ def test_widen_only_keeps_ordinary_ceiling_checks_without_an_exact_baseline_gate
     assert "checks" in workflow["jobs"]["pr-gate"]["needs"]
 
 
+def _boolean_expression(expression: str, context: dict[str, str | bool]) -> bool:
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError("invalid condition syntax") from exc
+    allowed = (
+        ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not,
+        ast.Compare, ast.Eq, ast.NotEq, ast.Name, ast.Load, ast.Constant,
+    )
+    if any(type(value) not in (str, bool) for value in context.values()):
+        raise ValueError("condition context must contain only strings and booleans")
+    # Validate every branch before evaluation, including unreachable operands.
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed):
+            raise ValueError(f"unsupported condition node: {type(node).__name__}")
+        if isinstance(node, ast.Constant) and type(node.value) not in (str, bool):
+            raise ValueError("condition constants must be strings or booleans")
+        if isinstance(node, ast.Name) and node.id not in context:
+            raise ValueError(f"unknown condition name: {node.id}")
+
+    def is_boolean_operand(node: ast.AST) -> bool:
+        if isinstance(node, ast.Name):
+            return type(context[node.id]) is bool
+        if isinstance(node, ast.Constant):
+            return type(node.value) is bool
+        return isinstance(node, (ast.BoolOp, ast.UnaryOp, ast.Compare))
+
+    for node in ast.walk(tree):
+        operands = (
+            node.values if isinstance(node, ast.BoolOp)
+            else [node.operand] if isinstance(node, ast.UnaryOp) else []
+        )
+        if any(not is_boolean_operand(operand) for operand in operands):
+            raise ValueError("condition operand must be boolean")
+
+    def boolean(value: str | bool) -> bool:
+        if type(value) is not bool:
+            raise ValueError("condition operand must be boolean")
+        return value
+
+    def evaluate(node: ast.AST) -> str | bool:
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bool)):
+            return node.value
+        if isinstance(node, ast.Name):
+            return context[node.id]
+        if isinstance(node, ast.UnaryOp):
+            return not boolean(evaluate(node.operand))
+        if isinstance(node, ast.BoolOp):
+            values = (boolean(evaluate(value)) for value in node.values)
+            return all(values) if isinstance(node.op, ast.And) else any(values)
+        if isinstance(node, ast.Compare):
+            values = [evaluate(node.left), *(evaluate(value) for value in node.comparators)]
+            return all(
+                left == right if isinstance(op, ast.Eq) else left != right
+                for left, op, right in zip(values, node.ops, values[1:])
+            )
+        raise ValueError(f"unsupported condition node: {type(node).__name__}")
+
+    return boolean(evaluate(tree))
+
+
+@pytest.mark.parametrize("expression", [
+    "__import__('os')", "event.__class__", "event[0]",
+    "[value for value in event]", "(lambda: True)()", "{'event': event}",
+    "event in 'pull_request'", "1 == 1", "None == None", "'true'",
+    "True or missing", "False and event.__class__", "True or event[0]",
+    "False and __import__('os')", "True or 1", "not event", "False and event",
+])
+def test_condition_evaluator_rejects_unsupported_expressions(expression: str) -> None:
+    with pytest.raises(ValueError):
+        _boolean_expression(expression, {"event": "pull_request"})
+
+
+def test_condition_evaluator_rejects_nonprimitive_context() -> None:
+    with pytest.raises(ValueError, match="context"):
+        _boolean_expression("True", {"event": 1})  # type: ignore[dict-item]
+
+
+@pytest.mark.parametrize("expression,expected,reads", [
+    ("True or flag", True, 1),
+    ("False and flag", False, 1),
+    ("flag or True", True, 2),
+])
+def test_condition_evaluator_short_circuits_after_full_validation(
+    expression: str, expected: bool, reads: int,
+) -> None:
+    class Context(dict[str, str | bool]):
+        lookups = 0
+
+        def __getitem__(self, key: str) -> str | bool:
+            self.lookups += 1
+            return super().__getitem__(key)
+
+    context = Context(flag=False)
+    assert _boolean_expression(expression, context) is expected
+    assert context.lookups == reads
+
+
+def _ci_condition(
+    condition: str, *, event: str, cancelled: bool = False,
+    failed: bool = False, standalone: str = "true", base: str = "dev",
+    promotion_run: str = "123", action: str = "",
+) -> bool:
+    condition = condition.removeprefix("${{").removesuffix("}}").strip()
+    for source, target in [
+        ("github.event.pull_request.base.ref", "base"),
+        ("needs.discover.outputs.standalone_service", "standalone"),
+        ("github.event_name", "event"),
+        ("github.event.action", "action"),
+        ("inputs.promotion_run", "promotion_run"),
+        ("!cancelled()", "not cancelled"),
+        ("cancelled()", "cancelled"),
+        ("always()", "True"),
+        ("success()", "success"),
+        ("failure()", "failed"),
+        ("&&", "and"),
+        ("||", "or"),
+    ]:
+        condition = condition.replace(source, target)
+    return _boolean_expression(condition, {
+        "event": event, "cancelled": cancelled, "failed": failed,
+        "success": not failed, "standalone": standalone, "base": base,
+        "promotion_run": promotion_run, "action": action,
+    })
+
+
+@pytest.mark.parametrize("event,action,expected", [
+    ("pull_request", "synchronize", True),
+    ("pull_request", "edited", False),
+    ("pull_request", "opened", False),
+    ("pull_request", "reopened", False),
+    ("push", "", False),
+    ("workflow_dispatch", "", False),
+])
+def test_only_superseded_pr_ci_is_cancelled(
+    event: str, action: str, expected: bool,
+) -> None:
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    concurrency = ci["concurrency"]
+    assert concurrency["group"] == "ci-${{ github.workflow }}-${{ github.ref }}"
+    condition = concurrency["cancel-in-progress"]
+    assert isinstance(condition, str)
+    assert _ci_condition(condition, event=event, action=action) is expected
+
+
+@pytest.mark.parametrize("job", [
+    "agent-index-service-linux", "agent-index-service-windows",
+])
+@pytest.mark.parametrize("event,cancelled,standalone,expected", [
+    ("pull_request", True, "true", False),
+    ("pull_request", False, "true", True),
+    ("pull_request", False, "false", False),
+    ("push", True, "true", True),
+    ("workflow_dispatch", True, "false", True),
+    ("workflow_dispatch", False, "false", True),
+])
+def test_cancelled_pr_does_not_keep_standalone_ci_alive(
+    job: str, event: str, cancelled: bool, standalone: str, expected: bool,
+) -> None:
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    assert _ci_condition(
+        ci["jobs"][job]["if"], event=event, cancelled=cancelled, standalone=standalone,
+    ) is expected
+
+
+@pytest.mark.parametrize("event,cancelled,failed,base,expected", [
+    ("pull_request", False, False, "dev", True),
+    ("pull_request", False, True, "dev", True),
+    ("pull_request", True, False, "dev", False),
+    ("pull_request", True, True, "dev", False),
+    ("pull_request", False, False, "main", False),
+    ("push", False, False, "dev", False),
+    ("workflow_dispatch", False, False, "dev", False),
+])
+def test_pr_aggregate_reports_failures_but_never_waits_after_cancellation(
+    event: str, cancelled: bool, failed: bool, base: str, expected: bool,
+) -> None:
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    assert _ci_condition(
+        ci["jobs"]["pr-gate"]["if"], event=event,
+        cancelled=cancelled, failed=failed, base=base,
+    ) is expected
+
+
+def test_queue_containment_does_not_change_promotion_aggregate() -> None:
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    condition = ci["jobs"]["promotion-gate"]["if"]
+    assert condition == (
+        "always() && github.event_name == 'workflow_dispatch' && inputs.promotion_run != ''"
+    )
+    assert _ci_condition(condition, event="workflow_dispatch", cancelled=True)
+    assert not _ci_condition(condition, event="workflow_dispatch", promotion_run="")
+    assert not _ci_condition(condition, event="pull_request")
+
+
 def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
     ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
     host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))
@@ -121,7 +324,7 @@ def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
     assert "main-gate" not in ci["jobs"]
     gate = host["jobs"]["main-gate"]
     assert gate["name"] == "main source gate"
-    assert gate["permissions"] == {"contents": "read"}
+    assert gate["permissions"] == {"contents": "read", "actions": "read"}
     assert gate["timeout-minutes"] == 2
     assert "needs" not in gate
     assert gate["steps"][-1]["env"] == {
@@ -131,12 +334,15 @@ def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
         "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
         "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
         "PR_COMMITS": "${{ github.event.pull_request.commits }}",
+        "HEAD_REPOSITORY": "${{ github.event.pull_request.head.repo.full_name }}",
+        "TARGET_REPOSITORY": "${{ github.repository }}",
+        "GH_TOKEN": "${{ github.token }}",
     }
     checkout, fetch = gate["steps"][:2]
     assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0}
-    assert checkout["if"] == fetch["if"]
-    assert "github.event.pull_request.user.login == github.repository_owner" in checkout["if"]
-    assert "!startsWith(github.event.pull_request.head.ref, 'release/promote-')" in checkout["if"]
+    assert checkout["if"] == "github.event.pull_request.user.login == github.repository_owner"
+    assert "github.event.pull_request.user.login == github.repository_owner" in fetch["if"]
+    assert "!startsWith(github.event.pull_request.head.ref, 'release/promote-')" in fetch["if"]
     assert fetch["env"] == {"HEAD_SHA": "${{ github.event.pull_request.head.sha }}"}
     assert 'fetch --no-tags --no-recurse-submodules origin "$HEAD_SHA"' in fetch["run"]
     assert "checkout" not in fetch["run"]
@@ -170,7 +376,7 @@ def test_only_committed_same_repo_dev_ci_can_refresh_baseline(
         ("github.repository", "repo"),
     ]:
         condition = condition.replace(source, target)
-    assert eval(condition.replace("&&", "and").replace("||", "or"), {"__builtins__": {}}, {
+    assert _boolean_expression(condition.replace("&&", "and").replace("||", "or"), {
         "event": event, "branch": branch, "head_repo": "o/r" if same_repo else "fork/r",
         "repo": "o/r", "conclusion": conclusion,
     }) is expected
@@ -181,15 +387,67 @@ def test_only_committed_same_repo_dev_ci_can_refresh_baseline(
     ("pull_request", "failure", False),
     ("push", "success", True),
     ("push", "failure", False),
+    ("push", "cancelled", False),
     ("workflow_dispatch", "success", True),
 ])
 def test_only_committed_or_manual_success_can_enter_the_filter(event, conclusion, expected):
+    assert _filter_can_run(event=event, conclusion=conclusion) is expected
+
+
+@pytest.mark.parametrize("name,event,conclusion,expected", [
+    ("Validate and promote dev to main", "workflow_dispatch", "success", True),
+    ("Validate and promote dev to main", "workflow_dispatch", "failure", True),
+    ("Validate and promote dev to main", "repository_dispatch", "cancelled", True),
+    ("Validate and promote dev to main", "pull_request", "success", False),
+    ("CI", "push", "cancelled", False),
+    ("unrelated", "push", "success", False),
+])
+def test_promoter_completion_can_reconcile_a_merge_after_failed_confirmation(
+    name: str, event: str, conclusion: str, expected: bool,
+) -> None:
+    assert _filter_can_run(workflow_name=name, event=event, conclusion=conclusion) is expected
+
+
+def _filter_can_run(**changes: str) -> bool:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     condition = workflow["jobs"]["filter-and-dispatch"]["if"]
-    executable = condition.replace(
-        "github.event.workflow_run.conclusion", "conclusion",
-    ).replace("github.event.workflow_run.event", "event").replace("&&", "and")
-    assert eval(executable, {"__builtins__": {}}, {"event": event, "conclusion": conclusion}) is expected
+    replacements = {
+        "github.event.workflow_run.conclusion": "conclusion",
+        "github.event.workflow_run.name": "workflow_name",
+        "github.event.workflow_run.event": "event",
+        "github.event.pull_request.head.repo.full_name": "head_repo",
+        "github.event.pull_request.user.login": "author",
+        "github.event.pull_request.base.ref": "base",
+        "github.repository_owner": "owner",
+        "github.event_name": "trigger",
+        "github.event.action": "action",
+        "github.repository": "repo",
+    }
+    for source, target in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        condition = condition.replace(source, target)
+    executable = "(" + condition.replace("&&", "and").replace("||", "or") + ")"
+    context: dict[str, str | bool] = {
+        "trigger": "workflow_run", "event": "", "conclusion": "", "action": "",
+        "workflow_name": "CI",
+        "author": "", "owner": "owner", "base": "", "head_repo": "", "repo": "owner/project",
+        **changes,
+    }
+    return _boolean_expression(executable, context)
+
+
+@pytest.mark.parametrize("changes,expected", [
+    ({}, True), ({"author": "outside"}, False), ({"head_repo": "outside/fork"}, False),
+    ({"base": "dev"}, False), ({"action": "edited"}, False), ({"trigger": "push"}, False),
+])
+def test_only_closed_same_repository_owner_main_prs_can_wake_deferred_source(
+    changes: dict[str, str], expected: bool,
+) -> None:
+    assert _filter_can_run(
+        **{
+            "trigger": "pull_request_target", "action": "closed", "base": "main",
+            "author": "owner", "head_repo": "owner/project", **changes,
+        },
+    ) is expected
 
 
 @pytest.fixture
@@ -316,6 +574,9 @@ def baseline_fixture(tmp_path):
     baseline = candidate / "tools/module-size-baseline.json"
     baseline.parent.mkdir()
     baseline.write_text("{}\n", encoding="utf-8")
+    (baseline.parent / "promotion_control.py").write_bytes(
+        (ROOT / "tools/promotion_control.py").read_bytes(),
+    )
     other = candidate / "source.py"
     other.write_text("value = 1\n", encoding="utf-8")
     git_run("add", ".")
@@ -388,7 +649,7 @@ def test_real_main_gate_rejects_baseline_automation(baseline_fixture, branch):
 
 
 @pytest.mark.parametrize("shape,expected", [
-    ("promotion", True), ("foreign-promotion", False), ("workflow", True),
+    ("unowned-promotion", False), ("foreign-promotion", False), ("workflow", True),
     ("mixed", False), ("state", True), ("state-plus-source", False),
 ])
 def test_trusted_main_gate_preserves_admitted_shapes(baseline_fixture, shape, expected):
@@ -412,8 +673,13 @@ def test_trusted_main_gate_preserves_admitted_shapes(baseline_fixture, shape, ex
         f'cd "{candidate.as_posix()}"\n{host["jobs"]["main-gate"]["steps"][-1]["run"]}',
         HEAD_REF=branch, PR_AUTHOR=author, REPO_OWNER="owner",
         BASE_SHA=base, HEAD_SHA=head, PR_COMMITS="1",
+        HEAD_REPOSITORY="example/project", TARGET_REPOSITORY="example/project",
     )
     assert (result.returncode == 0) is expected, result.stdout + result.stderr
+    if shape == "unowned-promotion":
+        # A prefix alone is no longer authority; authenticated positive owning
+        # runs and actual control-byte comparisons are exercised by the boundary tests.
+        assert "owning run/base" in result.stderr
 
 
 @pytest.mark.parametrize("valid", [True, False])

@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import claim_history, tracking
 
@@ -267,6 +269,7 @@ class TestResolveAnchorOwnerRef:
         assert m._resolve_owner_ref() is None
 
 
+@pytest.mark.guard
 class TestLocalClaimantAlive:
     """_local_claimant_alive resolves same-machine owners and biases to sparing:
     only a positively-resolved gone owner returns False; cross-machine is None."""
@@ -279,7 +282,7 @@ class TestLocalClaimantAlive:
         monkeypatch.setattr("agent_worktrees.config.project_dir",
                             lambda name=None: tmp_path / f".{name}")
 
-    def _make_owner(self, tmp_path, project, wt_id, exists=True):
+    def _make_owner(self, tmp_path, project, wt_id, exists=True, *, platform=None):
         wdir = tmp_path / "trees" / wt_id
         if exists:
             wdir.mkdir(parents=True, exist_ok=True)
@@ -287,7 +290,7 @@ class TestLocalClaimantAlive:
         tdir.mkdir(parents=True, exist_ok=True)
         tracking.create_new_record(
             wt_id, f"worktree/{wt_id}", str(wdir), project,
-            "anomalous-potato", "wsl", tdir,
+            "anomalous-potato", platform or m.cfg.detect_platform(), tdir,
         )
 
     def test_cross_machine_is_unconfirmed(self, tmp_path, monkeypatch):
@@ -309,6 +312,14 @@ class TestLocalClaimantAlive:
         self._wire(tmp_path, monkeypatch)
         self._make_owner(tmp_path, "test-chamber", "wt-A", exists=False)
         assert m._local_claimant_alive("anomalous-potato/test-chamber/wt-A") is False
+
+    @pytest.mark.parametrize(
+        "platform", [p for p in ("windows", "wsl", "linux") if p != m.cfg.detect_platform()],
+    )
+    def test_foreign_platform_is_unconfirmed(self, tmp_path, monkeypatch, platform):
+        self._wire(tmp_path, monkeypatch)
+        self._make_owner(tmp_path, "test-chamber", "wt-A", platform=platform)
+        assert m._local_claimant_alive("anomalous-potato/test-chamber/wt-A") is None
 
     def test_empty_ref_is_none(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch)

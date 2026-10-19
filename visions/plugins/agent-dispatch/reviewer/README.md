@@ -5,7 +5,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-05
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`docs/architecture.md`](../../../../docs/architecture.md) ·
   `plugins/agent-dispatch/` · `plugins/agent-worktrees/`
 
@@ -41,8 +41,10 @@ The task owns one worktree-identified reviewer embodiment and one reviewer
 session lineage, whether the venue is local, containerized, or remote. Active
 work runs there with the full target-repository source available in its
 worktree and through the repository's own review and merge tooling. Waits
-hibernate it; later revisions resume it. Context exhaustion may hand the
-session to a successor, but the task and worktree identity remain the same.
+hibernate it; later revisions resume it. Native current-owner context rollover
+preserves the same mandate, owner, workspace, and task without a retry or
+re-embodiment. When actual ownership transfer is needed, durable recovery and
+succession preserve the task and worktree identity.
 
 ### The PR capability
 
@@ -62,6 +64,27 @@ projection. Repository code is limited to policy or integration that is
 genuinely domain-specific.
 
 ## Features
+
+### portfolio-consultation
+
+For reviewer loops participating in an adopted portfolio charter, every
+materially new PR assessment or revision produces a compact, evidence-backed
+summary and consultation request to the standing
+[portfolio Orchestrator](../../../agent-fabric/agentic-factory/README.md#standing-portfolio-oversight):
+the change's intent, relevant vision and policy context, recommendation, and
+uncertainty or dependencies. Consultation is mandatory; universal synchronous
+permission and an immediate personal reply for every PR are not.
+Standalone reviewer loops remain independent of portfolio orchestration;
+adopting consultation composes the layers rather than making a higher layer
+a prerequisite for review.
+
+The reviewer continues independent investigation, checks, and drafting while
+consultation is pending. Clearly routine work may proceed under applicable
+standing published guidance and already-delegated authority. Only
+policy-defined novelty or scope ambiguity, contradictory guidance, or an
+explicit binding hold blocks the affected consequential decision, not unrelated
+work or other reviews. Independent implementation review and efficient
+parallelism remain intact.
 
 ### one-review-one-lineage
 
@@ -131,8 +154,21 @@ shared blockers.
 
 Suspension, turn completion, service restart, and ordinary worker interruption
 preserve the task's worktree and resumable session. Replacement is reserved for
-confirmed unrecoverable session loss or explicit context handoff, and even then
-stays within the same task/worktree lineage.
+confirmed unrecoverable session loss or explicit ownership transfer, and even
+then stays within the same task/worktree lineage. Context rollover and idle
+waiting are not review completion or failed verdict attempts.
+
+### selective-gates-without-silent-authority
+
+Silence grants no new authority, and elapsed time never silently clears a hold.
+A blocked decision remains visible with the responsible authorized owner and
+needed resolution; consultation latency is not a failed verdict attempt or a
+reason to fabricate a verdict to meet the reliability target. An authorized
+owner can answer or redirect the escalation. Guidance is applied only to the
+still-current review revision under the
+[parent's scoped delivery contract](../README.md#standing-charters-and-linked-consultations).
+If new guidance arrives after an authorized action has completed, it becomes
+follow-up work rather than a retroactive veto.
 
 ### one-state-machine
 

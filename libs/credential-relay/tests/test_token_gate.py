@@ -45,6 +45,26 @@ def test_builder_require_token_wires_server():
     assert srv.token_validator is not None
 
 
+def test_builder_gate_has_explicit_immutable_inputs_and_keeps_denial_order():
+    from credential_relay.server import ScopeDenied
+    from credential_relay.token_gate import RelayTokenGate
+
+    def deny(token, action, fields):
+        if token == "recognized":
+            raise ScopeDenied
+        return False
+
+    builder = RelayBuilder()
+    builder.authorize_token(["get-azure-token"], deny)
+    builder.authorize_token(["get-azure-token"], lambda token, action, fields: token == "recognized")
+    server = builder.build()
+    assert type(server.token_authorizer.__self__) is RelayTokenGate
+    assert server.token_authorizer("recognized", "get-azure-token", {})
+    assert not server.token_authorizer("unknown", "get-azure-token", {})
+    builder._token_authorizers.clear()
+    assert server.token_authorizer("recognized", "get-azure-token", {})
+
+
 def test_builder_set_port_zero_yields_dynamic_server():
     """set_port(0) -- the dynamic default (codespaces relay_port now 0, dotfiles
     #694) -- builds a server carrying port 0, so start() binds an OS-assigned
@@ -216,4 +236,3 @@ def test_allow_azure_enables_nonempty_builder():
     assert b.empty is True
     b.allow_azure_resources(["*"])
     assert b.empty is False
-

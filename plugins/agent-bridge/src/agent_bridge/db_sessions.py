@@ -21,16 +21,19 @@ class _SessionsMixin:
         target_json: str | None = None,
         caller_id: str | None = None,
         caller_session_id: str | None = None,
+        acp_session_id: str | None = None,
+        background_recovery_enabled: bool = True,
     ) -> None:
         self.execute_write(
             "INSERT INTO sessions (id, name, agent_name, caller_id, "
             "caller_session_id, target_dir, "
             "target_type, status, config_json, target_json, "
-            "background_recovery_enabled, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "background_recovery_enabled, created_at, updated_at, acp_session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (session_id, name, agent_name, caller_id, caller_session_id,
              target_dir, target_type,
-             status, config_json, target_json, 1, now, now),
+             status, config_json, target_json, int(background_recovery_enabled),
+             now, now, acp_session_id),
         )
 
     def update_session_status(

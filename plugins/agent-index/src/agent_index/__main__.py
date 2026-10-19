@@ -1024,9 +1024,11 @@ def cmd_engine(args: argparse.Namespace) -> int:
     if action == "status":
         return _emit(daemon.status())
     if action == "start":
+        from agent_procutil import DaemonSpawnError
+
         try:
-            print(daemon.start())
-        except (FileNotFoundError, RuntimeError, TimeoutError) as exc:
+            print(daemon.start(strict=bool(getattr(args, "strict", False))))
+        except (FileNotFoundError, RuntimeError, TimeoutError, DaemonSpawnError) as exc:
             print(f"[FAIL] {exc}", file=sys.stderr)
             return 1
         return 0
@@ -1771,6 +1773,12 @@ def build_parser() -> argparse.ArgumentParser:
         "engine_action",
         choices=["start", "stop", "status", "run"],
         help="start/stop/status the daemon, or run it in the foreground (task entry)",
+    )
+    p_engine.add_argument(
+        "--strict",
+        action="store_true",
+        help="with start: fail rather than start the engine inside a caller's Job that "
+        "forbids breakaway (it would die with that Job)",
     )
     p_engine.set_defaults(func=cmd_engine)
 

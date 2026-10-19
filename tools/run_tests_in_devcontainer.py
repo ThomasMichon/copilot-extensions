@@ -47,6 +47,7 @@ import uuid
 from pathlib import Path
 import _devcontainer_host_admission as _admission
 import _devcontainer_network_scope as _net_scope
+import _devcontainer_selection as _selection
 
 REPO = Path(__file__).resolve().parents[1]
 # A NAMED alternate config (``.devcontainer/<name>/devcontainer.json``),
@@ -350,6 +351,7 @@ _VALUE_CONSUMING_FLAGS = frozenset({
     "--base", "-k", "--admission-wait", "--timeout", "--subsuite-timeout",
     "--plugin-timeout", "--test-timeout", "--max-files-per-sub-suite",
     "--max-processes", "--max-memory-mb", "--max-temp-mb", "--exclude",
+    "--test-file", "--selection-file",
 })
 
 # Every bare (`store_true`) flag -- kept in sync alongside
@@ -933,6 +935,7 @@ def main(argv: list[str] | None = None) -> int:
         # Keep validation even for --list; each invocation's environments live
         # in its own container workspace, so no host-global lease is needed.
         _admission.resolve_admission_wait(passthrough, _canonicalize_flag)
+        selection_data = _selection.read_selection(passthrough, _canonicalize_flag, REPO)
         instance_label = uuid.uuid4().hex[:12]
         config_path, volume_name = _per_instance_config(instance_label)
         container_id: str | None = None
@@ -943,6 +946,9 @@ def main(argv: list[str] | None = None) -> int:
                 _create_bounded_volume(volume_name)
                 container_id = _bring_up(instance_label, config_path)
                 _populate_workspace(container_id, passthrough, include_untracked=ns.include_untracked)
+                if selection_data is not None:
+                    path = _selection.stage_selection(container_id, REMOTE_USER, selection_data)
+                    passthrough, _ = _selection.rewrite_selection(passthrough, _canonicalize_flag, path)
                 # Phase 2 networking split -- skipped for `--list`.
                 if not _net_scope.is_list_only(passthrough, _canonicalize_flag):
                     _net_scope.prepare_dependencies(

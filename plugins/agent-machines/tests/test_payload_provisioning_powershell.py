@@ -7,9 +7,11 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -17,14 +19,47 @@ HOSTS = [
     host for name in ("powershell.exe", "pwsh.exe")
     if (host := shutil.which(name))
 ] if os.name == "nt" else []
+FIRST_USE_CASES = (
+    ("legacy", ("stamp",), "legacy-stamp-failure"),
+    ("legacy", ("provision", ""), "legacy-retry-warm"),
+    ("namespaced", ("cell-provision", ""), "namespaced-retry-warm"),
+)
 
 
 @pytest.mark.skipif(not HOSTS, reason="Windows PowerShell process boundary")
-@pytest.mark.parametrize("host", HOSTS, ids=lambda host: Path(host).stem)
-@pytest.mark.parametrize("mode", ["legacy", "namespaced"])
+@pytest.mark.parametrize(
+    ("host", "mode", "attempts"),
+    [
+        pytest.param(
+            host, mode, attempts,
+            id=f"{Path(host).stem}-{label}",
+            marks=(
+                pytest.mark.timeout(
+                    60 if len(attempts) == 1 else 150
+                )
+                if Path(host).stem.lower() == "powershell"
+                else pytest.mark.timeout(90) if len(attempts) > 1 else ()
+            ),
+        )
+        for host in HOSTS
+        for mode, attempts, label in FIRST_USE_CASES
+    ],
+)
 def test_first_use_preserves_installer_output_and_exit_codes(
-    tmp_path: Path, host: str, mode: str,
+    tmp_path: Path, host: str, mode: str, attempts: tuple[str, ...],
 ) -> None:
+    is_ps5 = Path(host).stem.lower() == "powershell"
+    timeout = (45 if len(attempts) == 1 else 60) if is_ps5 else (
+        20 if len(attempts) == 1 else 30
+    )
+    budget = (45 if len(attempts) == 1 else 120) if is_ps5 else (
+        25 if len(attempts) == 1 else 60
+    )
+    deadline = time.monotonic() + budget
+
+    def remaining() -> float:
+        return max(0.0, min(timeout, deadline - time.monotonic()))
+
     home = tmp_path / "home with spaces"
     payload = tmp_path / "payload with spaces"
     scripts = payload / "scripts"
@@ -134,15 +169,18 @@ def test_first_use_preserves_installer_output_and_exit_codes(
     ]
     actions = ["stamp", "provision"] if mode == "legacy" else ["cell-provision"]
 
-    # Fail each provisioning stage, then retry successfully and take the warm path.
-    for fail_action in [*actions, ""]:
+    for fail_action in attempts:
         calls.unlink(missing_ok=True)
         env["FIXTURE_FAIL_ACTION"] = fail_action
         stderr_lines: list[str] = []
-        with subprocess.Popen(
-            command, env=env, cwd=tmp_path, stdout=subprocess.PIPE,
+        process, job = spawn_sync_in_kill_on_close_job(
+            command, env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, encoding="cp437",
-        ) as process:
+            require_job=True, allow_breakaway=False, **no_window_kwargs(),
+        )
+        reader = None
+        try:
             def read_progress() -> None:
                 assert process.stderr is not None
                 for line in process.stderr:
@@ -153,17 +191,33 @@ def test_first_use_preserves_installer_output_and_exit_codes(
             reader = threading.Thread(target=read_progress, daemon=True)
             reader.start()
             try:
-                process.wait(timeout=20)
+                process.wait(timeout=remaining())
+            except subprocess.TimeoutExpired as error:
+                observed = calls.read_text(encoding="utf-8-sig") if calls.is_file() else ""
+                raise AssertionError(
+                    f"first-use timeout: action={fail_action!r}; calls={observed!r}; "
+                    f"ack={Path(env['FIXTURE_PROGRESS_ACK']).exists()}; "
+                    f"lines={len(stderr_lines)}; tail={[line[:160] for line in stderr_lines[-2:]]}"
+                ) from error
             finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait(timeout=5)
+                assert job is not None
+                job.close()
+                process.wait(timeout=5)
                 reader.join(timeout=5)
             assert not reader.is_alive()
             assert process.stdout is not None
             result = subprocess.CompletedProcess(
                 command, process.returncode, process.stdout.read(), "".join(stderr_lines),
             )
+        finally:
+            assert job is not None
+            job.close()
+            process.wait(timeout=5)
+            if reader is not None:
+                reader.join(timeout=5)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
         assert result.returncode == (37 if fail_action else 0), result.stderr
         assert "ProcessStreamReader_CliXmlError" not in result.stderr
         expected = actions[:actions.index(fail_action) + 1] if fail_action else actions
@@ -185,11 +239,23 @@ def test_first_use_preserves_installer_output_and_exit_codes(
         else:
             assert json.loads(result.stdout) == ["version", "argument with spaces"]
 
-    calls.unlink()
-    warm = subprocess.run(
-        command, env=env, cwd=tmp_path, capture_output=True,
-        encoding="cp437", timeout=20,
-    )
-    assert warm.returncode == 0, warm.stderr
-    assert json.loads(warm.stdout) == ["version", "argument with spaces"]
-    assert not calls.exists()
+    if attempts[-1] == "":
+        calls.unlink()
+        process, job = spawn_sync_in_kill_on_close_job(
+            command, env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="cp437",
+            require_job=True, allow_breakaway=False, **no_window_kwargs(),
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=remaining())
+            warm = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        finally:
+            assert job is not None
+            job.close()
+            process.wait(timeout=5)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+        assert warm.returncode == 0, warm.stderr
+        assert json.loads(warm.stdout) == ["version", "argument with spaces"]
+        assert not calls.exists()

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-plugin-activation"
-version = "0.1.0-dev10"
+version = "0.1.0-dev11"
 description = "Inspect plugin inventory and activation and resolve identity-verified roots"
 readme = "README.md"
 license = "MIT"
@@ -16,11 +16,13 @@ dependencies = [
     "pyyaml>=6.0",
     "agent-dropin-registry",
     "agent-plugin-resolve",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
 agent-dropin-registry = { path = "../dropin-registry" }
 agent-plugin-resolve = { path = "../plugin-resolve" }
+agent-single-instance-lease = { path = "../single-instance-lease" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

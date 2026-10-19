@@ -2,6 +2,9 @@
 requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [project]
 name = "agent-index"
 version = "0.1.0-dev210"
@@ -48,6 +51,7 @@ agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 agent-dropin-registry = { path = "libs/dropin-registry" }
 
 [project.optional-dependencies]
+fleet = ["fleet-manager[auth]>=0.1.0.dev1"]
 store = [
     # The indexing + vector-store stack: reads/writes the LanceDB store and chunks
     # source with tree-sitter (falling back to line-based chunking when a grammar
@@ -98,7 +102,7 @@ dev = [
     # The test suite exercises the store/indexing/search/server modules, so dev
     # pulls all tested extras (self-reference) even though normal installations
     # do not need the legacy stdio adapter.
-    "agent-index[store,server,stdio-mcp]",
+    "agent-index[store,server,stdio-mcp,fleet]",
 ]
 
 [project.scripts]

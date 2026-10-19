@@ -1,0 +1,9 @@
+{
+  "comment": "Extend canonical native machine-record repair with proven removed-checkout history, preserved alias relationships, locked revalidation and audit receipts.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

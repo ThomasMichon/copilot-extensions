@@ -162,3 +162,7 @@ class CoordinatorRendezvous:
 
     def discover_coordinator(self) -> dict | None:
         return self._client.directory_coordinator()
+
+    def fencing_epoch(self) -> int:
+        """Fetch the hosted authority's durable floor before lease takeover."""
+        return self._client.directory_fencing_epoch()

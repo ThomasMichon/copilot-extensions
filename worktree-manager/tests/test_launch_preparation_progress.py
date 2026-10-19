@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -182,3 +185,520 @@ def test_streamed_error_retains_version_skew_detail(monkeypatch, capsys):
     with pytest.raises(ec.EngineFeatureUnavailable, match="predates staged"):
         ec.resolve_launch_plan("demo", new=True, seed="task")
     assert "unrecognized arguments" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("current", [False, True])
+@pytest.mark.parametrize("boundary", ["reconcile", "bootstrap"])
+def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, current, boundary):
+    if shell != "bash" and os.name != "nt":
+        pytest.skip("Windows launcher contract")
+    if shell != "bash" and not shutil.which(shell):
+        pytest.skip("PowerShell unavailable")
+    if shell == "bash" and os.name != "posix":
+        pytest.skip("POSIX shell contract")
+    root = Path(__file__).resolve().parents[1]
+    # The fixture planner/actions need only stdlib, not the runner's site packages.
+    fixture_python = getattr(sys, "_base_executable", sys.executable)
+    canonical = "[12:00:01.120Z] update/nested running preserved detail [elapsed 3.1s]"
+    literal = "space ' ; $ ` &"
+    child = tmp_path / "action.py"
+    child.write_text(
+        "import os,sys,time\nfrom pathlib import Path\n"
+        "assert os.environ['MAINTENANCE_FIXTURE'] == 'child'\n"
+        "assert 'MAINTENANCE_UNSET' not in os.environ\n"
+        f"assert sys.argv[3] == {literal!r}\n"
+        "print('progress-before-completion', flush=True)\n"
+        "gate=Path(sys.argv[1]); deadline=time.monotonic()+10\n"
+        "while not gate.exists() and time.monotonic()<deadline: time.sleep(.02)\n"
+        "assert gate.exists(), 'progress was buffered'\n"
+        "print('action-diagnostic', file=sys.stderr, flush=True)\n"
+        f"print({canonical!r}, flush=True)\n"
+        "print('native-last-line', end='', flush=True)\n"
+        "sys.exit(int(sys.argv[2]))\n"
+    )
+    gate = tmp_path / "progress-seen"
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    state = tmp_path / "passes"
+    (package / "__main__.py").write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        f"state=Path({str(state)!r})\n"
+        "n=int(state.read_text())+1 if state.exists() else 1\n"
+        "state.write_text(str(n))\n"
+        "assert os.environ['MAINTENANCE_FIXTURE'] == 'parent'\n"
+        "assert os.environ['MAINTENANCE_UNSET'] == 'parent'\n"
+        f"argv=[sys.executable,{str(child)!r},{str(gate)!r}]\n"
+        "updates=[dict(service=label,argv=args,environment={'MAINTENANCE_FIXTURE':'child'},"
+        "unset_environment=['MAINTENANCE_UNSET']) for label,args in "
+        f"[('failed',argv+['7',{literal!r}]),"
+        f"('spawn-error',[{str(tmp_path / 'missing-executable')!r}]),('success',argv+['0',{literal!r}])]]\n"
+        f"print(json.dumps(dict(action={('self-update' if boundary == 'bootstrap' else 'reconcile')!r} "
+        f"if n==1 and not {current!r} else 'continue',updates=updates)))\n"
+    )
+    env = dict(
+        os.environ, PYTHONPATH=str(tmp_path), MAINTENANCE_FIXTURE="parent",
+        MAINTENANCE_UNSET="parent",
+    )
+    env.pop("WORKTREE_NO_RECONCILE", None)
+    log = tmp_path / "setup.log"
+    stop_watcher = threading.Event()
+    watcher = None
+    if shell != "bash":
+        text = (root / "bin/launch-session.ps1").read_text()
+        formatter_start = text.index("function Format-SetupLine {")
+        formatter = text[formatter_start:text.index("\n}\n", formatter_start) + 3]
+        helpers = text[text.index("function Push-UpdateEnvironment {"):text.index(
+            "\nfunction Invoke-UpdateApply {")]
+        if boundary == "bootstrap":
+            start = text.index("        # (2) Pre-launch self-update")
+            block = text[start:text.index(
+                "\n    } else {\n        Write-SetupStatus 'Skipping plugin update", start)]
+        else:
+            start = text.index("    # (3) Plugin reconciliation")
+            block = text[start:text.index("\n}\n", start)]
+        script = "\n".join([
+            "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true; $WithReconcile=$true",
+            "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
+            formatter,
+            helpers,
+            f"$VenvPython='{fixture_python}'",
+            f"function Resolve-RuntimePython {{ '{fixture_python}' }}",
+            "function Write-PlanDiagnostics { param($Plan,$Prefix) }",
+            f"function Write-SetupLog {{ param($Message,$Level='INFO',$Seconds=0,$Scope='launch',$State='',[switch]$Completed) if($Message -like '*progress-before-completion*'){{[IO.File]::WriteAllText('{gate}','seen')}}; Format-SetupLine @PSBoundParameters | ForEach-Object {{ [Console]::Error.WriteLine($_) }} }}",
+            "function Write-SetupStatus { param($Message,$Level='INFO',$Seconds=0,$Scope='launch',$State='',[switch]$Completed) Write-SetupLog @PSBoundParameters }",
+            block,
+            "if($env:MAINTENANCE_FIXTURE -ne 'parent' -or $env:MAINTENANCE_UNSET -ne 'parent'){throw 'environment leaked'}",
+            "if($ErrorActionPreference -ne 'Stop'){throw 'error preference leaked'}",
+            "if($PSNativeCommandUseErrorActionPreference -ne $true){throw 'native error preference leaked'}",
+        ])
+        fixture = tmp_path / "maintenance.ps1"
+        fixture.write_text(script)
+        command = [shell, "-NoProfile", "-File", str(fixture)]
+    else:
+        text = (root / "bin/launch-session.sh").read_text()
+        if boundary == "bootstrap":
+            start = text.index("        # (2) Pre-launch self-update")
+            block = text[start:text.index(
+                '\n    else\n        setup_status INFO \'Skipping plugin update', start)]
+            block += "\n_stop_setup_progress"
+        else:
+            start = text.index('    if [[ "$with_reconcile" == "1"')
+            block = text[start:text.index("\n}\n", start)]
+        functions = text[text.index("setup_log() {"):text.index("\n# Write header")]
+        library = root.parent / "libs/update-telemetry/src"
+        env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(library)])
+        spawns = tmp_path / "python-spawns"
+        python_wrapper = tmp_path / "python-fixture"
+        python_wrapper.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$*\" >> {shlex.quote(str(spawns))}\n"
+            f"exec {shlex.quote(fixture_python)} \"$@\"\n"
+        )
+        python_wrapper.chmod(0o700)
+        script = "\n".join([
+            "set -euo pipefail; with_reconcile=1",
+            f"PYTHON={shlex.quote(str(python_wrapper))}",
+            f"resolve_runtime_python() {{ printf '%s\\n' {shlex.quote(str(python_wrapper))}; }}",
+            functions,
+            f"_SETUP_LOG_DIR={shlex.quote(str(tmp_path))}; SETUP_LOG={shlex.quote(str(log))}",
+            "_SETUP_PROGRESS_DIR=''; _SETUP_PROGRESS_PID=''; _SETUP_PROGRESS_FAILED=0; _SETUP_PROGRESS_SEQUENCE=0",
+            "_SHOW_LAUNCH_STATUS=1; _start_setup_progress",
+            "date() { printf 'unexpected per-line date spawn\\n' >&2; return 1; }",
+            "_progress_directory=$_SETUP_PROGRESS_DIR",
+            block,
+            '! kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null',
+            '[[ ! -d "$_progress_directory" ]]',
+            '[[ "$MAINTENANCE_FIXTURE" == parent && "$MAINTENANCE_UNSET" == parent ]]',
+        ])
+        fixture = tmp_path / "maintenance.sh"
+        fixture.write_text(script)
+        command = ["/bin/bash", str(fixture)]
+
+        def observe_progress():
+            while not stop_watcher.wait(.01):
+                if log.exists() and "progress-before-completion" in log.read_text():
+                    gate.write_text("seen")
+                    return
+
+        watcher = threading.Thread(target=observe_progress)
+        watcher.start()
+    try:
+        result = subprocess.run(
+            command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=20,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+    finally:
+        stop_watcher.set()
+        if watcher is not None:
+            watcher.join(timeout=1)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    report = result.stderr + (log.read_text() if log.exists() else "")
+    if shell == "bash":
+        assert sum("-m update_telemetry.shell " in line for line in spawns.read_text().splitlines()) == 1
+        assert "unexpected per-line date spawn" not in report
+    if current:
+        assert state.read_text() == "1"
+        assert not gate.exists()
+        assert ("Checking bootstrap services" if boundary == "bootstrap" else "no executable actions") in report
+        assert ("launch/bootstrap/" if boundary == "bootstrap" else "reconcile/pass-") not in report
+        return
+    assert state.read_text() == "2", "success/failure must not replace fresh replanning"
+    assert gate.exists(), "child progress was not streamed"
+    assert "action-diagnostic" in report
+    assert report.splitlines().count(canonical) == 2
+    assert report.count("native-last-line [elapsed ") == 2
+    assert re.search(r"failed.*exit 7.*continuing.*duration [0-9.]+s", report)
+    assert re.search(r"success.*exit 0.*duration [0-9.]+s", report)
+    assert re.search(r"spawn-error.*(exit 127|spawn failed).*continuing.*duration [0-9.]+s", report)
+    assert "starting" in result.stderr
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, shell, exit_code):
+    if shell == "bash" and os.name != "posix":
+        pytest.skip("POSIX shell contract")
+    if shell != "bash" and (os.name != "nt" or not shutil.which(shell)):
+        pytest.skip("Windows launcher contract")
+    root = Path(__file__).resolve().parents[1]
+    python = getattr(sys, "_base_executable", sys.executable)
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "__main__.py").write_text("print('{\"action\":\"continue\"}')\n")
+    plugin = tmp_path / "installed plugin"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    runtime_root = tmp_path / "runtime root"
+    canonical = "[12:00:01.120Z] update/nested running preserved detail [elapsed 3.1s]"
+    stage = tmp_path / "home" / ".agent-worktrees" / "updater-status.json"
+    stage.parent.mkdir(parents=True)
+    stage.write_text(json.dumps(dict(
+        stage_done=True, plugin_changed=True, plugin_dir=str(plugin),
+        runtime_root=str(runtime_root), environment={"MAINTENANCE_FIXTURE": "child"},
+        unset_environment=["MAINTENANCE_UNSET"],
+    )))
+    env = dict(
+        os.environ, HOME=str(stage.parent.parent), USERPROFILE=str(stage.parent.parent),
+        PYTHONPATH=str(tmp_path), WORKTREE_BLOCKING_INSTALL="1",
+        MAINTENANCE_FIXTURE="parent", MAINTENANCE_UNSET="parent",
+    )
+    log = tmp_path / "setup.log"
+    if shell != "bash":
+        source = (root / "bin/launch-session.ps1").read_text(encoding="utf-8")
+
+        def function(name):
+            start = source.index(f"function {name} {{")
+            return source[start:source.index("\n}\n", start) + 3]
+
+        (scripts / "install.ps1").write_text(
+            "param($Action,$InstallDir,$ProjectName)\n"
+            f"if($Action -ne 'update' -or $InstallDir -ne '{runtime_root}'){{throw 'arguments changed'}}\n"
+            "if($env:MAINTENANCE_FIXTURE -ne 'child' -or $env:MAINTENANCE_UNSET){throw 'environment changed'}\n"
+            "Write-Host 'installer-detail'\n"
+            "[Console]::Error.WriteLine('installer-diagnostic')\n"
+            f"Write-Output '{canonical}'\n"
+            "[Console]::Write('installer-last-line')\n"
+            f"exit {exit_code}\n",
+        )
+        script = "\n".join([
+            "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true",
+            "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
+            f"$script:SetupLog='{log}'; $script:ShowLaunchStatus=$false",
+            "$script:UpdateApplied=$false; $script:LaunchProject=''; $noUpdate=$false",
+            f"$VenvPython='{python}'",
+            function("Format-SetupLine"), function("Write-SetupLog"),
+            function("Write-SetupStatus"), function("Write-PlanDiagnostics"),
+            function("Push-UpdateEnvironment"), function("Pop-UpdateEnvironment"),
+            function("Invoke-SetupAction"), function("Invoke-UpdateApply"),
+            "Invoke-UpdateApply",
+            "if($env:MAINTENANCE_FIXTURE -ne 'parent' -or $env:MAINTENANCE_UNSET -ne 'parent'){throw 'environment leaked'}",
+            "if($ErrorActionPreference -ne 'Stop' -or -not $PSNativeCommandUseErrorActionPreference){throw 'preference leaked'}",
+        ])
+        fixture = tmp_path / "blocking.ps1"
+        fixture.write_text(script, encoding="utf-8-sig")
+        command = [shell, "-NoProfile", "-File", str(fixture)]
+    else:
+        source = (root / "bin/launch-session.sh").read_text()
+        start = source.index("invoke_update_apply() {")
+        apply = source[start:source.index("\n}\n", start) + 3]
+        functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+        (scripts / "install.sh").write_text(
+            "#!/bin/bash\nset -euo pipefail\n"
+            f"[[ \"$1\" == update && \"$2\" == --install-dir && \"$3\" == {shlex.quote(str(runtime_root))} ]]\n"
+            "[[ \"$MAINTENANCE_FIXTURE\" == child && -z \"${MAINTENANCE_UNSET+x}\" ]]\n"
+            "printf '%s\\n' installer-detail\n"
+            "printf '%s\\n' installer-diagnostic >&2\n"
+            f"printf '%s\\n' {shlex.quote(canonical)}\n"
+            "printf '%s' installer-last-line\n"
+            f"exit {exit_code}\n",
+        )
+        env["PYTHONPATH"] = os.pathsep.join([
+            str(tmp_path), str(root.parent / "libs/update-telemetry/src"),
+        ])
+        script = "\n".join([
+            "set -euo pipefail; _NO_UPDATE=0; _UPDATE_APPLIED=''; _STAGE_PID=''; LAUNCH_PROJECT=''",
+            f"PYTHON={shlex.quote(python)}",
+            functions, apply,
+            f"_SETUP_LOG_DIR={shlex.quote(str(tmp_path))}; SETUP_LOG={shlex.quote(str(log))}",
+            "invoke_update_apply 0",
+            '[[ "$MAINTENANCE_FIXTURE" == parent && "$MAINTENANCE_UNSET" == parent ]]',
+        ])
+        fixture = tmp_path / "blocking.sh"
+        fixture.write_text(script)
+        command = ["/bin/bash", str(fixture)]
+    result = subprocess.run(
+        command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    report = log.read_text()
+    assert "installer-detail [elapsed " in report
+    assert "installer-diagnostic [elapsed " in report
+    assert "installer-last-line [elapsed " in report
+    assert report.splitlines().count(canonical) == 1
+    state = "failed" if exit_code else "done"
+    assert re.search(rf"launch/installer {state} Installer update {state} \(exit {exit_code}\).*\[duration [0-9.]+s\]", report)
+    assert "installer: [" not in report
+    assert "Checking bootstrap services" in report
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+@pytest.mark.parametrize("mode", ["quiet", "interactive", "stdio"])
+def test_native_maintenance_status_uses_production_sinks(tmp_path, shell, mode):
+    if os.name != "nt" or not shutil.which(shell):
+        pytest.skip("Windows launcher contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.ps1").read_text()
+
+    def function(name):
+        start = source.index(f"function {name} {{")
+        return source[start:source.index("\n}\n", start) + 3]
+
+    start = source.index("if ($CopilotPassthrough -contains '--stdio') {")
+    stdio = source[start:source.index("\n# Recovery fast-path", start)]
+    log = tmp_path / "setup.log"
+    fixture = tmp_path / "status.ps1"
+    fixture.write_text("\n".join([
+        "$ErrorActionPreference='Stop'",
+        "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
+        f"$script:SetupLog='{log}'",
+        f"$script:ShowLaunchStatus=${str(mode != 'quiet').lower()}",
+        "$CopilotPassthrough=@('--stdio')" if mode == "stdio" else "$CopilotPassthrough=@()",
+        function("Format-SetupLine"),
+        function("Write-SetupLog"),
+        function("Write-SetupStatus"),
+        stdio,
+        "Write-SetupStatus 'Plugin reconcile: fixture starting' -State starting -Seconds 0",
+        "Write-SetupStatus 'Plugin reconcile: fixture failed (exit 7); continuing' 'WARN' -State failed -Seconds 1 -Completed",
+    ]))
+    result = subprocess.run(
+        [shell, "-NoProfile", "-File", str(fixture)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    persisted = log.read_text()
+    assert re.search(r"\[\d\d:\d\d:\d\d\.\d{3}Z\] launch starting Plugin reconcile: fixture starting \[elapsed 0.0s\]", persisted)
+    assert "launch failed Plugin reconcile: fixture failed (exit 7); continuing [duration 1.0s]" in persisted
+    emitted = result.stdout if mode == "interactive" else result.stderr
+    if mode != "quiet":
+        for line in emitted.splitlines():
+            assert line in persisted.splitlines(), "console and persistent log must share exactly one frame"
+    if mode == "interactive":
+        assert "fixture starting" in result.stdout
+        assert "fixture failed" in result.stdout
+        assert not result.stderr
+    else:
+        assert not result.stdout
+        assert ("fixture starting" in result.stderr) is (mode == "stdio")
+        assert ("fixture failed" in result.stderr) is (mode == "stdio")
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+def test_native_setup_formatter_has_independent_clocks_and_physical_lines(tmp_path, shell):
+    if os.name != "nt" or not shutil.which(shell):
+        pytest.skip("Windows launcher contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.ps1").read_text()
+    start = source.index("function Format-SetupLine {")
+    formatter = source[start:source.index("\n}\n", start) + 3]
+    framed = "[01:02:03.004Z] child done ready [duration 2.0s]"
+    fixture = tmp_path / "format.ps1"
+    fixture.write_text("\n".join([
+        "$ErrorActionPreference='Stop'",
+        "[Threading.Thread]::CurrentThread.CurrentCulture='de-DE'",
+        formatter,
+        "$first=[DateTime]::Parse('2026-10-15T12:00:01.234Z').ToUniversalTime()",
+        "$backward=$first.AddHours(-1)",
+        "Format-SetupLine \"first`n`nlast`rnext\" -Timestamp $first -Seconds 1.26",
+        "Format-SetupLine 'finished' -Timestamp $backward -Seconds 3.5 -State done -Completed",
+        f"Format-SetupLine '{framed}' -Timestamp $backward -Seconds 99",
+        "Format-SetupLine '[12:00:00.000Z] not a canonical envelope' -Timestamp $first -Seconds 4",
+        "Format-SetupLine 'problem' 'ERROR' -Timestamp $first -Seconds 5",
+        "Format-SetupLine 'notice' 'WARN' -Timestamp $first -Seconds 6",
+    ]))
+    result = subprocess.run(
+        [shell, "-NoProfile", "-File", str(fixture)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr == ""
+    assert result.stdout.splitlines() == [
+        "[12:00:01.234Z] launch running first [elapsed 1.3s]",
+        "[12:00:01.234Z] launch running  [elapsed 1.3s]",
+        "[12:00:01.234Z] launch running last [elapsed 1.3s]",
+        "[12:00:01.234Z] launch running next [elapsed 1.3s]",
+        "[11:00:01.234Z] launch done finished [duration 3.5s]",
+        framed,
+        "[12:00:01.234Z] launch running [12:00:00.000Z] not a canonical envelope [elapsed 4.0s]",
+        "[12:00:01.234Z] launch failed problem [elapsed 5.0s]",
+        "[12:00:01.234Z] launch warning notice [elapsed 6.0s]",
+    ]
+
+
+@pytest.mark.parametrize("failure", ["missing", "stopped"])
+def test_bash_progress_failure_is_bounded_and_preserves_native_outcome(tmp_path, failure):
+    if os.name != "posix":
+        pytest.skip("POSIX native shell contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.sh").read_text()
+    functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+    library = root.parent / "libs/update-telemetry/src"
+    python = getattr(sys, "_base_executable", sys.executable)
+    fixture = tmp_path / "failure.sh"
+    log = tmp_path / "setup.log"
+    if failure == "missing":
+        missing = tmp_path / "missing-helper"
+        missing.write_text("#!/bin/sh\nexit 3\n")
+        missing.chmod(0o700)
+        python = str(missing)
+    fixture.write_text("\n".join([
+        "set -euo pipefail",
+        functions,
+        f"PYTHON={shlex.quote(python)}; _SETUP_LOG_DIR={shlex.quote(str(tmp_path))}",
+        f"SETUP_LOG={shlex.quote(str(log))}; _SHOW_LAUNCH_STATUS=1",
+        "_SETUP_PROGRESS_DIR=''; _SETUP_PROGRESS_PID=''; _SETUP_PROGRESS_FAILED=0; _SETUP_PROGRESS_SEQUENCE=0",
+        "_start_setup_progress",
+        'kill -STOP "$_SETUP_PROGRESS_PID"' if failure == "stopped" else ":",
+        "setup_status WARN 'native command failed (exit 7); continuing'",
+        "_stop_setup_progress",
+        '! kill -0 "$_SETUP_PROGRESS_PID" 2>/dev/null',
+        "printf '%s\\n' 'native-exit=7 continuation=preserved'",
+    ]))
+    result = subprocess.run(
+        ["/bin/bash", str(fixture)], cwd=tmp_path,
+        env=dict(os.environ, PYTHONPATH=str(library)),
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "native-exit=7 continuation=preserved\n"
+    assert "retained private diagnostics" in result.stderr
+    if failure == "missing":
+        assert "did not become ready" in result.stderr
+        assert "elapsed unavailable" in result.stderr
+        assert "native command failed (exit 7); continuing" in log.read_text()
+
+
+@pytest.mark.parametrize("replacement", ["unrelated-process", "different-job"])
+def test_bash_progress_shutdown_does_not_signal_a_reused_pid(tmp_path, replacement):
+    if os.name != "posix":
+        pytest.skip("POSIX native shell contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.sh").read_text()
+    functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+    spool = tmp_path / "retained-progress"
+    spool.mkdir()
+    fixture = tmp_path / "stale-renderer.sh"
+    fixture.write_text("\n".join([
+        "set -euo pipefail",
+        functions,
+        f"_SETUP_PROGRESS_DIR={shlex.quote(str(spool))}",
+        # A stale renderer PID now names a live non-renderer process. The
+        # fixture itself is disposable; shutdown must not signal it.
+        (
+            "sleep 8 & unrelated=$!; _SETUP_PROGRESS_PID=$unrelated; _SETUP_PROGRESS_JOB=1"
+            if replacement == "different-job"
+            else "_SETUP_PROGRESS_PID=$$; _SETUP_PROGRESS_JOB=''"
+        ),
+        "_SETUP_PROGRESS_FAILED=1",
+        "_stop_setup_progress",
+        (
+            'kill -0 "$unrelated"; kill "$unrelated"; wait "$unrelated" || true'
+            if replacement == "different-job" else ":"
+        ),
+        "printf '%s\\n' 'unrelated process preserved'",
+    ]))
+    result = subprocess.run(
+        ["/bin/bash", str(fixture)], cwd=tmp_path,
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "unrelated process preserved\n"
+    assert "retained private diagnostics" in result.stderr
+    assert spool.exists()
+
+
+def test_bash_spool_initialization_failure_does_not_abort_native_launch(tmp_path):
+    if os.name != "posix":
+        pytest.skip("POSIX native shell contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.sh").read_text()
+    functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+    spool = tmp_path / "unusable-spool"
+    (spool / "events").mkdir(parents=True)
+    fixture = tmp_path / "spool-failure.sh"
+    fixture.write_text("\n".join([
+        "set -euo pipefail",
+        functions,
+        f"mktemp() {{ printf '%s\\n' {shlex.quote(str(spool))}; }}",
+        "_SETUP_LOG_DIR='unused'; _SETUP_PROGRESS_DIR=''; _SETUP_PROGRESS_PID=''; _SETUP_PROGRESS_JOB=''",
+        "_SETUP_PROGRESS_FAILED=0; _SHOW_LAUNCH_STATUS=0",
+        "_start_setup_progress",
+        '[[ "$_SETUP_PROGRESS_FAILED" == 1 && -z "$_SETUP_PROGRESS_PID" ]]',
+        "printf '%s\\n' 'native continuation preserved'",
+    ]))
+    result = subprocess.run(
+        ["/bin/bash", str(fixture)], cwd=tmp_path,
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "native continuation preserved\n"
+    assert "could not initialize launch progress spool" in result.stderr
+
+
+def test_bash_completed_renderer_cleanup_survives_shell_reaping(tmp_path):
+    if os.name != "posix":
+        pytest.skip("POSIX native shell contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.sh").read_text()
+    functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+    finish = '_setup_progress_emit finish "" "" || true'
+    assert functions.count(finish) == 1
+    # Remove the completed job from Bash's table before cleanup inspects it.
+    functions = functions.replace(finish, finish + '\n    wait "$_SETUP_PROGRESS_PID"')
+    fixture = tmp_path / "already-reaped.sh"
+    fixture.write_text("\n".join([
+        "set -euo pipefail",
+        functions,
+        f"PYTHON={shlex.quote(getattr(sys, '_base_executable', sys.executable))}",
+        f"_SETUP_LOG_DIR={shlex.quote(str(tmp_path))}; SETUP_LOG={shlex.quote(str(tmp_path / 'setup.log'))}",
+        "_SHOW_LAUNCH_STATUS=0; _SETUP_PROGRESS_DIR=''; _SETUP_PROGRESS_PID=''; _SETUP_PROGRESS_JOB=''",
+        "_SETUP_PROGRESS_FAILED=0; _SETUP_PROGRESS_SEQUENCE=0",
+        "_start_setup_progress",
+        'spool=$_SETUP_PROGRESS_DIR',
+        "_stop_setup_progress",
+        '[[ ! -d "$spool" ]]',
+    ]))
+    result = subprocess.run(
+        ["/bin/bash", str(fixture)], cwd=tmp_path,
+        env=dict(os.environ, PYTHONPATH=str(root.parent / "libs/update-telemetry/src")),
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == result.stderr == ""

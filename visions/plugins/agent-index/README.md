@@ -8,7 +8,7 @@
 - **Scope:** leaf (per-plugin, under the [visions index](../../README.md); honors
   the [plugin-services](../../plugin-services/README.md) service model)
 - **Status:** Draft
-- **Last revised:** 2026-10-11
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's future `plugins/agent-index/docs/`
 
@@ -62,10 +62,10 @@ as the safety net beneath it.
 
 ### The embedding engine
 The component that turns text into vectors, at both index time and query time.
-It is **acceleration-optional**: it exploits a local accelerator (GPU) when one
-is present for bulk indexing throughput, and falls back to a slower CPU path
-otherwise — but it **never holds search hostage**, so a query is answerable
-whether or not an accelerator is warm.
+It is **acceleration-optional**: the installation authority's capability policy
+selects CPU or a compatible local accelerator (GPU), rather than GPU presence
+automatically selecting acceleration. It **never holds search hostage**, so a
+query is answerable whether or not an accelerator is warm.
 
 The engine is a **durable, persistent, warm runtime kept separate from the
 plugin's versioned service runtime** — the same durable-vs-versioned split the
@@ -437,12 +437,17 @@ not coordination.
 ### capability-matched-engine-runtime
 The indexer's engine is matched to the host's **real capabilities** rather than
 assuming an accelerator. Adoption **detects accelerator (CUDA) compatibility and
-machine specs** (compute, memory) and selects the embedding **device** accordingly:
-a compatible GPU when present, **CPU only when the host has enough compute and
-memory** to serve embeddings acceptably. An underpowered indexer candidate is
+machine specs** (compute, memory) and applies the installation authority's
+capability policy. A harness may supply a CPU-first baseline without operator
+configuration; GPU availability alone never changes that selection or downloads
+an accelerator closure. A policy that deliberately selects acceleration uses a
+compatible device and complete approved dependency profile, not an index-URL
+guess or a post-install package swap. CPU requires enough compute and memory
+to serve embeddings acceptably. An underpowered indexer candidate is
 **flagged** — not silently accepted — so the operator can pick a better host; and
-the engine never wedges by insisting on an accelerator that isn't present, falling
-back within its capability floor. Capability, like role, is resolved into
+an unavailable requested capability leaves the working engine and lightweight
+client usable rather than silently substituting another backend. Updates retain
+explicit capability intent. Capability, like role, is resolved into
 **configuration** at adoption, not hardcoded per machine.
 
 ### engine-stays-generic

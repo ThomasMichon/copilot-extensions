@@ -164,21 +164,27 @@ timestamp is not proof that the provider metadata was refreshed.
 
 ### Phase 5 - Validation, publication, and adoption
 
-- [ ] Add focused tests for arithmetic, source precedence, stale/unavailable
+- [x] Add focused tests for arithmetic, source precedence, stale/unavailable
   adapters, empty provider reports, reset boundaries, config precedence,
   injection size, and routing composition.
 - [ ] Validate Bash and PowerShell paths plus clean-room installation when
-  practical.
+  practical. The credential-free `budget-guidance-solo` Bash scenario now
+  passes fresh install, first-use provisioning, installed identity/offline
+  posture, and the installed extension fixture; native Windows evidence is
+  not inferred from that Linux proof.
 - [ ] Keep marketplace, manifest, package, and runtime versions aligned.
-- [ ] Publish through the repository's normal review and self-merge flow.
+- [x] Publish the implemented slices through the repository's normal review
+  and self-merge flow, through #7065. Release/adoption remain separate gates.
 - [ ] Deploy through the unified update path and verify source/runtime identity.
 
 ### Phase 6 - Agent-owned quota helper and pacing advice
 
 - [x] Add a reusable helper and discoverable on-demand skill for Copilot runtime
   quota acquisition on behalf of the requesting session.
-- [ ] Preserve exact session/account attribution; report missing session context,
+- [x] Preserve exact session/account attribution; report missing session context,
   mismatched account, unsupported RPCs, and cached provider metadata explicitly.
+  The opt-in helper matches credential-free session GitHub status around quota
+  acquisition; its observed identity is explicitly not an atomic quota binding.
 - [ ] Read raw account next-reset metadata separately from normalized category
   snapshots. Reject missing, zero-epoch, or past reset values for current
   forecasting; diagnose disagreements instead of silently selecting a date.
@@ -195,6 +201,16 @@ timestamp is not proof that the provider metadata was refreshed.
 - [ ] Add regressions for changing allowance, selected-account mismatch,
   malformed/missing/stale reset, unit ambiguity, cached metadata, and advice-only
   behavior.
+
+### Phase 6a - Credential-free host integration
+
+- [x] Review and implement the bounded
+  [foreground-session integration contract](host-integration.md), including its
+  isolated validation plan, without creating a new client or accessing
+  credential-bearing internal APIs.
+- [x] Preserve unsupported raw-reset and live-host evidence explicitly; this
+  implementation slice does not authorize extension reload, runtime update,
+  account switching, deployment, or service restart.
 
 ### Phase 7 - Completion
 
@@ -268,6 +284,236 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-16 - Plugin-specific clean-slate check
+
+- Narrowed the baseline refusal to the budget runtime or its specific binstub,
+  including dangling stubs, rather than rejecting an unrelated empty/shared
+  bin directory.
+- Confirmed the shared `envdump` implementation is already an allowlist of
+  tool versions/paths and configuration-file presence; it does not dump
+  environment variables, index URLs, or configuration values. Retained that
+  existing contract rather than adding a redundant redaction mechanism.
+
+### 2026-10-16 - Exact fixture version forms
+
+- Replaced global version-text replacement with a full match of the
+  repository's release/`-devN` forms; unsupported forms fail explicitly.
+  This keeps the isolated version check precise without adding a runtime
+  packaging dependency.
+- Declared the candidate-cleanup `rm` prerequisite and made the shell-side
+  manifest read UTF-8 as well as the installed verifier.
+
+### 2026-10-16 - Verifier cannot pass with assertions disabled
+
+- Added an explicit optimization-mode refusal before installed-package
+  imports, and a negative scenario probe requiring that exact refusal.
+  Assertion stripping therefore cannot turn this validation into a false pass,
+  even if the helper is invoked manually with `-O`.
+- Made manifest decoding explicitly UTF-8. The actual scenario continues to
+  invoke the positive verifier through isolated, non-optimized Python.
+
+### 2026-10-16 - Clean-room candidate lifetime and output contract
+
+- Added exit/failure cleanup for the scenario-owned temporary candidate root,
+  with an explicit diagnostic if temporary-directory creation fails. Report
+  logs remain outside that root.
+- Retained the exact `"680"` balance assertion: posture version 1 intentionally
+  serializes Decimal quantities as strings. Coercing it to a number would hide
+  a real output-schema regression rather than improve compatibility.
+
+### 2026-10-16 - Clean-room prerequisite clarity
+
+- Addressed source-review findings by declaring the scenario's standard Bash
+  utilities and enforcing Python 3.10+/Node.js 20+ before installation. Older
+  toolchains stop with a classified prerequisite diagnostic rather than
+  appearing to fail an otherwise valid plugin contract.
+
+### 2026-10-16 - Credential-free isolated installation proof
+
+- Added the Tier-P/F1 `budget-guidance-solo` scenario using the established
+  no-auth local-snapshot pattern. The candidate mounts read-only; only the
+  budget payload and its local process utility are copied into a fresh
+  disposable machine.
+- All five phases pass: clean environment, self-contained stamp with no early
+  runtime, first-use provision after deleting the container-local original,
+  installed source/version and static/unavailable posture, and the installed
+  extension's isolated fake-SDK contract.
+- The initial scenario incorrectly expected tests inside the installed
+  snapshot. That phase failed visibly; the corrected scenario supplies
+  candidate-owned test fixtures while taking production extension files from
+  the actual snapshot. The installer was not changed to ship tests.
+- The owned container was removed with verified bounded-run cleanup. No host
+  credential was borrowed, live session created, or host runtime updated.
+  This is a Linux installation proof, not native Windows acceptance, live
+  account qualification, release, or rollout. The scenario is ready for
+  normal source review; the effort remains Active.
+
+### 2026-10-16 - Foreground-session integration merged
+
+- PR #7065 merged as `6ba614b9be86639011519d0fdecc4fdd4ce2dff1`
+  after actual current-head approval and all three named managed merge checks,
+  including the aggregate PR gate. No review, CI, or branch-policy bypass was
+  used. The canonical Plan and Validation Plan were re-read after merge.
+- The final focused bridge covers fourteen Node contracts and three Python
+  cases, including actual entry capture, provider compatibility, and explicit
+  rejection of incompatible quantity/observation forms. The earlier isolated
+  core suite passed 443 cases with eighteen explicit platform/environment
+  skips; the fixture runs separately where Node is present.
+- Phase 6a is implemented, not live-qualified. The host API and raw-reset
+  capability limits remain explicit; no extension reload, runtime update,
+  account switch, provider account read, or service change was performed.
+- Next is the remaining practical isolated-install validation gate. Raw-reset
+  acquisition, live requesting-account proof, release, and authorized rollout
+  stay open. Native Windows session-cue acceptance remains transferred to #6644.
+
+### 2026-10-16 - Provider observation contract alignment
+
+- Removed an unsupported `unknown` observation-kind enum identified by the next
+  current-head review. Compared the entire provider enum allowlist with the
+  existing Python reader; the remaining choices match its accepted contract.
+- The provider fixture now rejects that value during acquisition. Its real
+  generated provider capture is also parsed through the Python CLI, which
+  accepts the supported observation and rejects a forged unsupported enum.
+  Neither form grants live forecasting authority.
+
+### 2026-10-16 - Capture serialization resource bounds
+
+- The next current-head review identified allocation-before-check and duplicate
+  success serialization. Replaced whole-object `JSON.stringify` with bounded
+  incremental encoding that counts JSON escapes and UTF-8 bytes, stops early,
+  rejects cycles and excess depth, and returns the already-serialized response.
+- Added exact byte-boundary, escaping, surrogate, early-abort, cycle, and depth
+  regressions. The Python bridge now diagnoses missing/duplicate fixture
+  markers explicitly instead of raising an opaque iterator error.
+- Kept fixture cleanup strict: unexpected removal is a lifecycle defect, not a
+  reason to suppress every cleanup failure with force.
+
+### 2026-10-16 - Capture producer/reader type alignment
+
+- The next current-head review identified that exact string magnitude checks
+  still admitted a form the existing Python normalizer rejects. Narrowed the
+  transport to the incumbent number-only capture contract rather than
+  broadening normalization or converting strings through floating point.
+- The actual entry fixture now rejects a synthetic string quantity, and the
+  Python bridge confirms the same form is rejected by the existing CLI.
+  Numeric captures still remain caller-declared with no live forecasting.
+
+### 2026-10-16 - Foreground capture review corrections
+
+- Addressed current-head review findings in the implementation PR: the Node
+  entry fixture now provisions its own temporary fake SDK and cannot import a
+  live SDK under direct CI discovery; exact string/BigInt magnitude checks
+  reject decimal quantities just above the numeric ceiling; unexpected
+  argument-processing errors have a distinct sanitized diagnostic.
+- The failed PR guard named the direct-discovery missing SDK dependency,
+  confirming the fixture finding. No SDK installation, live reload, or review
+  system remediation is needed.
+
+### 2026-10-16 - Foreground-session integration implemented for review
+
+- Added the optional `budget_guidance_session_quota` extension entry under the
+  reviewed host contract. It joins the foreground session once, performs no
+  startup reads, and uses only the public quota and optional account-status
+  reads. Missing APIs return unavailable; no fallback client or internal
+  credential surface exists.
+- Isolated entry fixtures cover session/account changes, old SDK shapes,
+  shared deadlines, late uncancellable reads, selected provider projection,
+  redaction, and UTF-8 byte bounds. The entry-generated capture passes the
+  existing CLI while remaining unverified and unable to enable forecasting.
+- The bounded devcontainer suite passes (443 passed, 18 skips), with the
+  Node-required fixture separately passing in the bounded local runner.
+  The default Python image lacks Node, so no container qualification is
+  claimed for that fixture. Independent review found no blocker.
+- The adapter source, skill, manifest description, and related reference docs
+  are updated. Live host enablement, quota/raw-reset evidence, release, and
+  rollout remain separate gates; no runtime or account state was changed.
+
+### 2026-10-16 - Foreground-session integration plan reviewed
+
+- PR #7055 merged as `71b2d515fded40ef84601a5ec1b5a2628ec63ab0`
+  after exact-head Copilot approval with no findings and the aggregate PR gate,
+  source-attribution, and workflow-lockdown checks passing.
+- The [host integration contract](host-integration.md) is now reviewed intent.
+  Re-read the canonical Plan/Validation Plan and the focused contract after merge;
+  implementation may proceed without changing its no-rollout boundary.
+- No extension implementation or live host changes preceded this review.
+  Next: the bounded public-SDK adapter and isolated entry-point/capture tests.
+  Raw-reset acquisition, live capability proof, and rollout remain open.
+
+### 2026-10-16 - Foreground-session host integration proposed
+
+- Implementation is authorized through normal review, with rollout explicitly
+  excluded. The [host integration contract](host-integration.md) specifies a
+  plugin-owned, on-demand extension attached to the actual foreground session.
+- The proposal uses only feature-detected public read APIs, bounded filtered
+  capture data, and existing Python normalization. It adds no credential
+  requests, private RPC fallback, subprocess, startup output, or worker control.
+- Safe raw-reset acquisition and live capability proof remain open. An older
+  host without quota get must report unsupported, not inherit an optimistic
+  assumption from newer upstream SDK source.
+- Land this plan before implementation. No live extension or runtime rollout
+  is authorized by this proposal.
+
+### 2026-10-16 - Credential-free requesting-session identity merged
+
+- PR #7043 merged as `4cdaec318c81b9ba0ceb69cf26eb5f0340a58d61`
+  after current-head Copilot approval and successful aggregate PR gate,
+  source-attribution, and workflow-lockdown checks. The initial managed merge
+  refused the pending aggregate gate; the author waited rather than bypassing it.
+- Added opt-in public session authentication-status reads before and after the
+  incumbent quota get, under one total deadline. Missing, unauthenticated,
+  mismatched, unsupported, replaced, timed-out, and failed identities withhold
+  all values. Managed-user logins and explicit enterprise origins are supported.
+- Preserved the evidence limit: two matching status observations are not an
+  atomic account/quota binding or proof of a third-party provider's billing
+  identity. Cached provider freshness remains unknown, and no internal
+  credential-bearing authentication object or new client is used.
+- The bounded full Linux plugin suite passed 429 cases with eighteen explicit
+  platform/opt-in skips. Final identity regressions passed 49 cases with verified
+  cleanup. Review corrections cover missing/disappearing RPC capabilities and
+  documented Enterprise Managed User underscores.
+- Re-read the complete Plan and Validation Plan after merge. The library
+  identity boundary is implemented, but live host adoption, safe raw legacy
+  reset acquisition/reconciliation, remaining platform qualification, release,
+  and authorized rollout keep the effort Active.
+- Next: determine whether the current host exposes an already-held,
+  credential-free session quota/reset surface. Do not create a global-default
+  client, read credential unions, modify another author's PR, or relabel absent
+  host capability as successful live acquisition.
+- Host capability inspection found a supported foreground-session join and
+  public authentication status in the examined bundled SDK, but no public
+  quota-get or raw account-reset surface there. The newer upstream SDK contract
+  is not proof that an older running host exposes it. Live host verification
+  remains open; no private RPC, new client, credential read, or runtime rollout
+  was used to manufacture that evidence.
+
+### 2026-10-14 - Personal provider-report acquisition merged
+
+- PR #6678 merged as `6e319fbb5a4b0c40a35cb441004b2e51df7e159e`
+  after exact-head Copilot approval with zero findings and all three named
+  required checks passing. Closed Phase 2's personal report acquisition slice.
+- The adapter uses a caller-owned authenticated transport, verifies the
+  selected login before the report read, and requires an explicit reporting
+  month. Response, row, quantity, precision, and total-deadline bounds preserve
+  explicit failures without credential acquisition or automatic retries.
+- Report quantities remain distinct from billed currency and current budget
+  entitlement. Personal billing excludes organization-managed licenses; no
+  observation time or authoritative reset is invented. The inert budget
+  reading withholds all numeric values even when report facts are available.
+- The full bounded Linux suite passed 372 cases with eleven explicit skips.
+  Final review-correction coverage passed all 65 report cases with verified
+  cleanup. Corrections enforce size bounds before every status branch, preserve
+  the ambiguity of rate-limited/forbidden 403 responses, and reject unsupported
+  year syntax before network access.
+- Re-read the Plan and Validation Plan after merge. The effort remains Active:
+  requesting-account proof, legacy raw-reset reconciliation, remaining
+  cross-platform validation, release, and authorized rollout are still open.
+- Next: Phase 6's identity/reset boundary. The public SDK offers credential-free
+  session authentication status, but its public quota projection does not expose
+  raw legacy account reset metadata. Do not obtain that metadata by reading an
+  internal credential-bearing authentication union; a safe host projection or
+  an explicitly tracked unsupported boundary is required.
 
 ### 2026-10-14 - Optional routing composition merged; acquisition next
 

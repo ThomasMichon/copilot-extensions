@@ -45,47 +45,71 @@ bridge**, not from the operator at the keyboard. Treat the inside as the request
 treat the attributes as trusted routing metadata (the mesh is single-operator, so
 the transport — not a signature — is the trust boundary).
 
-## Asking a peer and reading the answer (`send` waits by default)
+## Send a receipt, then observe the busy peer
 
-When you `send` to a live session, agent-bridge **waits for the receiver's reply
-turn** and prints its assistant output — the reply is just the receiver's
-*ordinary* next turn, read back off its represented stream, so there is no extra
-protocol to learn:
+Sending to a represented live session returns immediately after durable inbox
+admission. The receipt identifies the message and target; it does not imply that
+the recipient has answered. Read the peer's busy state, pending messages, and
+recent output separately:
 
 ```bash
-<agent-bridge catalog argv[0]> send <worktree-handle> "what's the status of the rebase?"
-# [>] Delivered to live session <id> (message 12, from you)
-# [<] Reply from <id>:
-# rebase is done; tests pass. pushing now.
+<agent-bridge catalog argv[0]> send <worktree-handle> "what's the status of the rebase?" --json
+<agent-bridge catalog argv[0]> read <worktree-handle> --message-id 12 --max-items 5 --max-text-chars 2000 --json
 ```
 
-- `--reply-timeout <seconds>` bounds the wait (default 120). On timeout the
-  message stays queued and is still delivered — you just didn't get the turn.
-- `--no-wait` returns as soon as the message is enqueued (fire-and-forget) — use
-  it for a `notify`-style poke you don't need an answer to.
+- `receipt.stage` distinguishes `admitted` (stored in the bridge inbox),
+  `sdk_accepted` (the extension's SDK send returned), and `consumed` (the
+  recipient recorded the attributed root `user.message`). SDK acceptance is
+  not consumption. Receipt timestamps are durable within the existing inbox's
+  retention lifetime; retirement may remove them. A same-process session rename
+  preserves the message ID through the existing alias mapping.
+- `read` is bounded and does not acknowledge inbox messages or move a delivery
+  cursor. `state.pending_messages` includes both inbox-stored and SDK-accepted
+  messages whose consumption has not been observed. Only metadata is returned,
+  not their bodies; missing consumption evidence is not proof of delivery failure.
+- `--wait-reply` explicitly opts into a post-consumption turn wait.
+  `--reply-timeout <seconds>` bounds it (default 120, maximum 600). Nested output
+  and empty tool-only completions do not settle it. The result names
+  `reply_correlation: post_consumption_turn`: assistant text after consumption
+  is evidence, not semantic proof that it answered this particular message.
+  Timeout does not revoke admission or prove that the message remains queued.
+- `--no-wait` is still available, including for bridge-owned ACP sends.
+- On an old daemon, missing receipt support is explicit: `delivered: null`,
+  and `read --message-id` refuses with an unsupported-protocol error.
+  Current receipt inspection requires HTTP protocol 39. If retention disappears
+  after admission, the response preserves the known admission evidence with
+  `receipt_current: false` and `receipt_error`; an unavailable duplicate's
+  historical receipt is explicitly `null`, never fabricated.
+- Never resend merely because a busy peer has not answered. If transport loss
+  requires a retry, reuse the original `--idempotency-key` and identical request.
 - `--kind` sets intent: `--notify` (informational, no answer expected) or
   `--status-check` (asks the receiver for a terse status ack, not new work), vs
-  the default `prompt` (a work directive). Pair `--status-check` with the default
-  wait to send a ping and read the short answer; pair `--notify` with `--no-wait`.
+  the default `prompt` (a work directive). Prefer readback for observation rather
+  than sending repeated status checks.
 - `--delivery` sets live-session urgency without changing `kind`: `queue`
-  (default) waits until the receiver's current turn ends, `steer` injects at the
+  explicitly waits until the receiver's current turn ends, `steer` (default) injects at the
   running turn's next step without cancelling it, and `interrupt` aborts the
   current turn before sending. Shorthands: `--steer`, `--interrupt`. Aborting
   a running turn also cancels the receiver's background sub-agents; when its
   main turn is idle (only background sub-agents running), `interrupt` sends
   immediately without aborting, so those sub-agents keep running.
 
-This is the everyday way to interrogate a peer: one `send`, read the reply, no
-cold sub-agent and no operator relay.
+Ordinary peer sends use SDK immediate admission without aborting the current
+main turn or its background agents, with explicit `agent-bridge` provenance
+rather than impersonating operator input. Missing delivery fields use steering;
+unknown urgency is logged and left unacknowledged instead of silently queueing.
 
 For another machine, use its qualified address with the same command:
 `send live:host-b:project-a:peer-worktree "status?"`. The existing authenticated
 carrier reaches the hosting bridge; both reply metadata and the waited reply
-turn return through it. Remote waits are bounded to 1-600 seconds.
+turn return through it. Remote waits are bounded to 0-600 seconds; zero
+returns the admission receipt without waiting for a reply, just like a local send.
 Client, HTTP and carrier operation deadlines cover the requested reply wait
 plus transport margin, including when their defaults are used without the CLI.
 Qualified addressing requires HTTP protocol 35 and remote carrier operation
-version 4. An older hosting bridge/carrier refuses explicitly rather than
+version 4. Receipt-backed remote reply waits require HTTP protocol 39 and
+carrier operation version 5; they are opt-in with `--wait-reply`, just like
+local represented sends. An older hosting bridge/carrier refuses explicitly rather than
 silently dropping the reply fields. An unavailable qualified peer is never
 interpreted as an agent to create: restore its registration or resume its
 existing session through the normal owner flow. An offline address does not
@@ -106,9 +130,8 @@ machine/project/worktree tuple even if a legacy exact ID has the same string.
 
 ## Replying over the bridge (asynchronous side-channel)
 
-The waited reply above covers most exchanges. Send an **explicit** reply only for
-an *asynchronous* answer that must not become your operator-facing turn (a
-mid-work status aside). Send back to the `reply-to` address with the **same verb
+An explicit reply can arrive asynchronously while the sender does other work.
+Send back to the `reply-to` address with the **same verb
 you use for any agent** — no special tool:
 
 ```bash

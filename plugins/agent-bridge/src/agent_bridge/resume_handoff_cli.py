@@ -77,6 +77,7 @@ def run_resume(
     match_agents,
     startup_request_timeout,
     strict: bool = False,
+    cli: bool = False,
 ) -> None:
     """Implementation of ``agent-bridge resume`` with singleton fallback.
 
@@ -127,7 +128,7 @@ def run_resume(
             )
         raise SystemExit(1)
 
-    if not reclaim:
+    if not reclaim and not cli:
         try:
             result = client.resume_session(
                 target,
@@ -148,7 +149,7 @@ def run_resume(
     if repo is not None:
         anchor = anchor_session_key(repo.name)
         if anchor != target:
-            attempts.append(("Repo", repo.name, anchor))
+            attempts = [("Repo", repo.name, anchor)]
 
     for noun, label, worktree_id in attempts:
         try:
@@ -156,6 +157,7 @@ def run_resume(
                 worktree_id,
                 reclaim=reclaim,
                 strict=strict,
+                **({"mode": "cli"} if cli else {}),
                 request_timeout=startup_request_timeout(
                     resume=True,
                     fresh_fallback=True,
@@ -170,6 +172,9 @@ def run_resume(
             sid = result.get("session_id", "") or worktree_id
             verb = "took over" if reclaim else "loaded"
             payload = {"session_id": sid, "status": status, "verb": verb}
+            for field in ("acp_session_id", "durable_session_id", "mode"):
+                if result.get(field) is not None:
+                    payload[field] = result[field]
             if noun == "Repo":
                 payload["requested_target"] = target
             payload["worktree_id"] = worktree_id

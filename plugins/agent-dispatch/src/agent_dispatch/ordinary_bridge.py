@@ -11,14 +11,21 @@ from typing import TYPE_CHECKING, Any
 
 from .bridge import BridgeCarriedSessionBusy, BridgeUnavailable
 from .procutil import agent_bridge_launch_prefix, no_window_kwargs
-from .queue_records import SpawnReservation, SpawnState, Status, TaskError
+from .queue_records import SpawnReservation, TaskError
+from .ordinary_agent_facts import (
+    identity, native_conflict, sessionless, validate_created, validate_resumed,
+)
+from .ordinary_agent_storage import record_created_agent, record_resumed_agent
 
 if TYPE_CHECKING:
     from .client import DispatchClient
 
 
-def reserve_for_backend(client: DispatchClient, task: dict, supervisor_id: str, *, ordinary: bool) -> dict:
+def reserve_for_backend(client: DispatchClient, task: dict, supervisor_id: str, *, ordinary: bool, restricted: bool = False) -> dict:
     """Record the selected ordinary backend before its nontransactional create."""
+    if restricted:
+        from .restricted_delivery import DRIVER
+        return client.reserve_spawn(task["id"], reserved_by=supervisor_id, driver=DRIVER)
     if ordinary:
         return client.reserve_spawn(task["id"], reserved_by=supervisor_id, driver="ordinary-bridge",
                                     coordinator_launch=task.get("source") == "ci-repair")
@@ -45,95 +52,39 @@ def _json_result(result: subprocess.CompletedProcess[str]) -> dict:
     raise BridgeCarriedSessionBusy("ordinary bridge returned no complete JSON result")
 
 
-def validate_created(info: dict, *, project: str | None = None) -> dict:
-    """Require positive creation readiness and concrete identity, never a default."""
-    if not isinstance(info, dict):
-        raise TaskError("ordinary bridge creation must be a JSON object")
-    connection = info.get("connection")
-    if (
-        not isinstance(info.get("session_id"), str) or not info["session_id"]
-        or info.get("ready") is not True
-        or info.get("status") != "awaiting_first_prompt"
-        or not isinstance(connection, dict)
-        or any(not isinstance(connection.get(field), str) or not connection[field]
-               for field in ("worktree_id", "native_session_id", "repo"))
-        or (project is not None and connection["repo"] != project)
-    ):
-        raise TaskError("ordinary bridge creation identity/readiness is unproven")
-    return info
-
-
-def record_created_agent(
-    queue: Any, key: str, *, task_generation: int, agent_info: dict,
-) -> SpawnReservation:
-    """Atomically publish a created, unprompted agent behind the reservation fence."""
-    validate_created(agent_info)
-    from .acquisition_receipts import ensure
-    with queue._connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        ensure(conn)
-        row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
-        task = queue._fetch(conn, row["task_id"]) if row else None
-        if (
-            row is None or row["state"] != SpawnState.RESERVING or row["release_requested"]
-            or row["conversation_retired"]
-            or task is None or task.generation != task_generation
-            or task.hold_reason is not None or task.status != Status.QUEUED or task.owner is not None
-            or task.source == "ci-repair"
-        ):
-            raise TaskError("created-agent reservation admission fence changed")
-        if conn.execute(
-            "SELECT 1 FROM acquisition_markers m JOIN spawn_reservations s "
-            "ON s.key=m.reservation_key WHERE s.task_id=? OR s.worktree=? LIMIT 1",
-            (task.id, agent_info["connection"]["worktree_id"]),
-        ).fetchone():
-            raise TaskError("legacy acquisition authority requires explicit migration; no ordinary send permitted")
-        encoded = json.dumps({**agent_info, "task_generation": task_generation}, sort_keys=True)
-        if row["agent_info"] and row["agent_info"] != encoded:
-            raise TaskError("created-agent identity is already bound")
-        worktree = agent_info["connection"]["worktree_id"]
-        project = agent_info["connection"]["repo"]
-        path = agent_info["connection"].get("target_dir")
-        if (
-            row["allocation_project"] and row["allocation_project"] != project
-            or row["worktree_path"] and row["worktree_path"] != path
-            or row["creation_key"] and (not isinstance(path, str) or not path)
-        ):
-            raise TaskError("created agent does not match retained allocation provenance")
-        handle = f"local-body:{agent_info['session_id']}"
-        if (row["worktree"] and row["worktree"] != worktree) or (
-            row["session_handle"] and row["session_handle"] != handle
-        ):
-            raise TaskError("created agent does not match retained reservation identity")
-        if conn.execute(
-            "SELECT 1 FROM spawn_reservations WHERE key<>? AND worktree=? "
-            "AND (state IN ('reserving','spawned','cold','releasing') OR conclusion_state='pending')",
-            (key, worktree),
-        ).fetchone():
-            raise TaskError("created-agent worktree has another active owner or cleanup")
-        conn.execute(
-            "UPDATE spawn_reservations SET worktree=?,session_handle=?,agent_info=?,"
-            "worktree_ownership='targeted',driver='ordinary-bridge',allocation_project=?,"
-            "worktree_path=?,updated_at=? WHERE key=?",
-            (worktree, handle, encoded, project, path, queue._now(None), key),
-        )
-        result = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
-        conn.commit()
-    return SpawnReservation._from_row(result)
-
-
 def register_routes(app: Any, queue: Any, bus: Any) -> None:
     from fastapi import HTTPException
 
     @app.post("/spawn-reservations/{key}/created-agent")
     def record_created(key: str, body: dict[str, Any]) -> dict:
-        if set(body) != {"task_generation", "agent_info"} or type(body["task_generation"]) is not int:
+        if (
+            not {"task_generation", "agent_info"} <= set(body)
+            or set(body) - {"task_generation", "agent_info", "worktree_record"}
+            or type(body["task_generation"]) is not int
+            or ("worktree_record" in body and not isinstance(body["worktree_record"], dict))
+        ):
             raise HTTPException(422, detail="invalid created-agent request")
         try:
             result = asdict(record_created_agent(queue, key, **body))
         except (TaskError, TypeError) as exc:
             raise HTTPException(409, detail=str(exc)) from exc
         bus.publish({"type": "spawn.agent_created", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/resumed-agent")
+    def record_resumed(key: str, body: dict[str, Any]) -> dict:
+        if (
+            set(body) != {"task_generation", "session_info", "worktree_record"}
+            or type(body["task_generation"]) is not int
+            or not isinstance(body["session_info"], dict)
+            or not isinstance(body["worktree_record"], dict)
+        ):
+            raise HTTPException(422, detail="invalid resumed-agent request")
+        try:
+            result = asdict(record_resumed_agent(queue, key, **body))
+        except (TaskError, TypeError) as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        bus.publish({"type": "spawn.agent_resumed", "reservation": result})
         return result
 
 
@@ -160,8 +111,9 @@ def legacy_bound(queue: Any, task_id: str, worktree: str | None) -> bool:
     with queue._connect() as conn:
         return conn.execute(
             "SELECT 1 FROM acquisition_markers m JOIN spawn_reservations s "
-            "ON s.key=m.reservation_key WHERE s.task_id=? OR s.worktree=? LIMIT 1",
-            (task_id, worktree),
+            "ON s.key=m.reservation_key WHERE s.task_id=? AND "
+            "(s.worktree=? OR (s.worktree IS NULL AND ? IS NULL)) LIMIT 1",
+            (task_id, worktree, worktree),
         ).fetchone() is not None
 
 
@@ -191,12 +143,19 @@ def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
     """Recover an ordinary startup using existing reservation/liveness fences."""
     from .client import DispatchError
     log = logging.getLogger(__name__)
-    if reservation.get("reserved_by") != supervisor.supervisor_id or reservation.get("release_requested"):
+    if (
+        reservation.get("reserved_by") != supervisor.supervisor_id
+        or reservation.get("release_requested")
+        or reservation.get("conclusion_state") == "pending"
+    ):
         return 0
     info = reservation.get("agent_info")
     if not info and not (
-        reservation.get("creation_key") and reservation.get("allocation_project")
-        and not reservation.get("worktree") and not reservation.get("session_handle")
+        reservation.get("creation_key")
+        and (
+            reservation.get("worktree")
+            or reservation.get("allocation_project") and not reservation.get("session_handle")
+        )
     ):
         log.error("ordinary reservation %s has unrecorded creation; explicit repair required", reservation["key"])
         return 0
@@ -205,6 +164,8 @@ def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
     if time.time() - reservation["updated_at"] < supervisor.reserving_timeout:
         return 0
     if info:
+        if reservation.get("conversation_retired") is not False:
+            return 0
         session_id = info["session_id"]
         verdict = supervisor.local_body_verdict_fn(session_id)
         if verdict == "unknown":
@@ -247,76 +208,171 @@ def start(
         reservation = client.get_reservation(key)
     except DispatchError as exc:
         raise BridgeUnavailable(f"ordinary startup reservation cannot be read: {exc}") from exc
-    if reservation.get("legacy_acquisition"):
-        raise BridgeUnavailable("legacy acquisition authority requires explicit migration before ordinary creation")
     if reservation.get("state") != "reserving" or reservation.get("release_requested"):
         raise BridgeUnavailable("ordinary startup reservation is not admitted")
     info = reservation.get("agent_info")
+    assigned = bool(reservation.get("worktree") and not info) or bool(
+        info and info.get("fact_kind") == "resumed"
+    )
+    if assigned and reservation.get("ordinary_assignment_error"):
+        raise BridgeCarriedSessionBusy(reservation["ordinary_assignment_error"])
     from .bridge import registered_agent_project
     harness = registered_agent_project(agent, strict=True)
     project = reservation.get("allocation_project") or harness or project
     from .workspace_binding import bind_allocation
     from .spawn_factories import SpawnPreparationRetained
-    try:
-        bind_allocation(client, reservation, project)
-    except SpawnPreparationRetained as exc:
-        raise CreatedAgentUnrecorded(str(exc)) from exc
+    if assigned:
+        if not project:
+            raise BridgeCarriedSessionBusy("assigned execution project is unavailable")
+        # Prove missing historical routing before persisting a candidate namespace.
+        reservation["allocation_project"] = project
+    else:
+        try:
+            bind_allocation(client, reservation, project)
+        except SpawnPreparationRetained as exc:
+            raise CreatedAgentUnrecorded(str(exc)) from exc
 
     def run(argv: list[str], *, prompt_input: str | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run([*prefix, *argv], input=prompt_input, capture_output=True,
                               text=True, check=False, timeout=timeout, **no_window_kwargs())
 
+    def resumed_info(session_id: str) -> dict:
+        result = run(["--json", "status", session_id, "--full"])
+        if result.returncode:
+            raise BridgeCarriedSessionBusy("resumed ordinary agent full identity is unavailable")
+        response = _json_result(result)
+        validate_resumed(response, project=project)
+        if response["session_id"] != session_id:
+            raise TaskError("resumed ordinary agent full identity changed bridge session")
+        return {**response, "fact_kind": "resumed"}
+
+    from .ordinary_assignment import current_task, read_owner
+    def assignment_record() -> dict:
+        current_task(client, task)
+        record = read_owner(reservation, task["id"], timeout=timeout)
+        if reservation.get("worktree_path") is None:
+            reservation["worktree_path"] = record["path"]
+        try:
+            bind_allocation(client, reservation, record["repo"])
+        except SpawnPreparationRetained as exc:
+            raise BridgeCarriedSessionBusy(str(exc)) from exc
+        return record
+
+    def store_info() -> None:
+        record = None
+        if assigned:
+            if reservation.get("ordinary_assignment_error"):
+                raise BridgeCarriedSessionBusy(reservation["ordinary_assignment_error"])
+            record = assignment_record()
+        if info.get("fact_kind") == "resumed":
+            client.record_resumed_agent(
+                key, task_generation=task["generation"], session_info=info,
+                worktree_record=record,
+            )
+        else:
+            facts = {"task_generation": task["generation"], "agent_info": info}
+            if record is not None:
+                facts["worktree_record"] = record
+            client.record_created_agent(key, **facts)
+
     if info:
         try:
-            validate_created(info, project=project)
+            actual = identity(info)
+            if actual.project != project:
+                raise TaskError("retained execution project changed")
         except TaskError as exc:
             raise BridgeUnavailable(f"retained ordinary agent facts are invalid: {exc}") from exc
         session_id = info["session_id"]
         if reservation.get("conversation_retired") is not False:
             raise BridgeUnavailable("retained ordinary agent has retired or unknown conversation authority")
         try:
-            client.record_created_agent(key, task_generation=task["generation"], agent_info=info)
+            store_info()
             status_result = run(["--json", "status", session_id])
             if status_result.returncode:
                 raise BridgeCarriedSessionBusy("retained ordinary agent status is unproven")
             status = _json_result(status_result).get("status")
             if status == "stopped":
                 resumed = run(["--json", "resume", session_id, "--strict"])
-                if resumed.returncode or _json_result(resumed).get("session_id") != session_id:
+                response = _json_result(resumed)
+                if resumed.returncode or response.get("session_id") != session_id:
                     raise BridgeCarriedSessionBusy("strict ordinary resume did not preserve the retained bridge identity")
+                current = resumed_info(session_id)
+                if identity(current) != actual:
+                    raise TaskError("strict ordinary resume changed retained native/workspace identity")
+                if info.get("fact_kind") == "resumed":
+                    info = current
             elif status != "idle":
                 raise BridgeCarriedSessionBusy(f"retained ordinary agent is not idle: {status}")
         except (TaskError, DispatchError, OSError, subprocess.TimeoutExpired) as exc:
             raise BridgeCarriedSessionBusy(f"retained ordinary agent resume failed: {exc}") from exc
     else:
-        if reservation.get("worktree") or reservation.get("session_handle"):
-            raise BridgeUnavailable("retained allocation has no ordinary created-agent metadata; explicit migration required")
+        if reservation.get("conversation_retired") is not False and not (
+            assigned and reservation.get("inherited_retirement_reconcilable") is True
+        ):
+            raise BridgeCarriedSessionBusy("ordinary allocation has retired or unknown native history")
+        if assigned:
+            record = assignment_record()
+            known = reservation.get("known_native_session_ids")
+            retired = reservation.get("retired_native_session_ids")
+            if not isinstance(known, list) or not isinstance(retired, list) or any(
+                not isinstance(native, str) or not native for native in [*known, *retired]
+            ):
+                raise BridgeCarriedSessionBusy("coordinator native bindings are unproven")
+            head = record.get("last_session_id")
+            if head:
+                if native_conflict(head, known, retired):
+                    raise BridgeCarriedSessionBusy("ground head conflicts with known or retired native identity")
+                try:
+                    resumed = run(["--json", "resume", reservation["worktree"], "--strict"])
+                    if resumed.returncode:
+                        raise BridgeCarriedSessionBusy(resumed.stderr or resumed.stdout or "strict worktree resume refused")
+                    response = _json_result(resumed)
+                    resumed_id = response.get("session_id")
+                    if not isinstance(resumed_id, str) or not resumed_id:
+                        raise TaskError("strict worktree resume returned no bridge session identity")
+                    info = resumed_info(resumed_id)
+                    actual = identity(info)
+                    if (actual.native != head or actual.worktree != reservation["worktree"]
+                            or actual.path != reservation["worktree_path"]):
+                        raise TaskError("strict worktree resume changed native/workspace identity")
+                    store_info()
+                except (TaskError, DispatchError, OSError, subprocess.TimeoutExpired) as exc:
+                    raise BridgeCarriedSessionBusy(f"assigned ordinary resume is unproven: {exc}") from exc
+                session_id = info["session_id"]
+            elif not sessionless(record) or known or retired or reservation.get("session_handle"):
+                raise BridgeCarriedSessionBusy("assigned worktree history is unknown; no fresh create permitted")
+        elif reservation.get("session_handle") or reservation.get("legacy_acquisition"):
+            raise BridgeCarriedSessionBusy("legacy allocation has no exact current workspace/native facts")
         # Bridge's existing repo@venue target selects the harness, not the task's lane.
-        target = f"{project}@{agent}" if project and "@" not in agent else agent
-        argv = ["--json", "create", target, "--creation-key", reservation["creation_key"]]
-        if charter:
-            argv += ["--charter", charter]
-        try:
-            created = run(argv)
-            if created.returncode:
-                raise CreatedAgentUnrecorded(created.stderr or created.stdout or "ordinary bridge create failed")
-            info = _json_result(created)
-            validate_created(info, project=project)
-            client.record_created_agent(key, task_generation=task["generation"], agent_info=info)
-        except (TaskError, DispatchError, OSError, subprocess.TimeoutExpired, BridgeCarriedSessionBusy) as exc:
-            raise CreatedAgentUnrecorded(
-                f"created agent {locals().get('info')!r} could not be recorded; no prompt sent: {exc}"
-            ) from exc
-        session_id = info["session_id"]
+        if not info:
+            target = f"{project}@{agent}" if project and "@" not in agent else agent
+            argv = ["--json", "create", target, "--creation-key", reservation["creation_key"]]
+            if assigned:
+                argv += ["--worktree-id", reservation["worktree"]]
+            if charter:
+                argv += ["--charter", charter]
+            try:
+                created = run(argv)
+                if created.returncode:
+                    raise CreatedAgentUnrecorded(created.stderr or created.stdout or "ordinary bridge create failed")
+                info = _json_result(created)
+                validate_created(info, project=project)
+                store_info()
+            except (TaskError, DispatchError, OSError, subprocess.TimeoutExpired, BridgeCarriedSessionBusy) as exc:
+                raise CreatedAgentUnrecorded(
+                    f"created agent {locals().get('info')!r} could not be recorded; no prompt sent: {exc}"
+                ) from exc
+            session_id = info["session_id"]
     try:
-        client.record_created_agent(key, task_generation=task["generation"], agent_info=info)
+        store_info()
+        actual = identity(info)
         prompt = (
-            f"{prompt}\n\nUse `--owner-session-id {info['connection']['native_session_id']}` "
+            f"{prompt}\n\nUse `--owner-session-id {actual.native}` "
             "on the task's owner-gated start command. This is the retained native "
             "conversation identity; claim and lease rules remain unchanged."
         )
         sent = run(["--json", "send", session_id, "--expected-native-session-id",
-                    info["connection"]["native_session_id"], "--prompt-file", "-", "--no-wait"],
+                    actual.native, "--prompt-file", "-", "--no-wait"],
                    prompt_input=prompt)
         if sent.returncode:
             detail = sent.stderr.strip() or sent.stdout.strip() or "no error detail"
@@ -327,14 +383,14 @@ def start(
             detail = sent.stderr.strip() or sent.stdout.strip() or "empty response"
             raise BridgeCarriedSessionBusy(f"ordinary send response is malformed: {detail}") from exc
         if (response.get("session_id") != session_id
-                or response.get("native_session_id") != info["connection"]["native_session_id"]
+                or response.get("native_session_id") != actual.native
                 or response.get("outcome") != "delivered"):
             raise BridgeCarriedSessionBusy(sent.stderr or "ordinary bridge send outcome is unproven")
     except (TaskError, DispatchError, OSError, subprocess.TimeoutExpired) as exc:
         raise BridgeCarriedSessionBusy(f"ordinary send interrupted; retry retained {session_id}: {exc}") from exc
     return {
-        "session": f"local-body:{session_id}", "worktree": info["connection"]["worktree_id"],
-        "native_session_id": info["connection"]["native_session_id"], "mode": "acp",
+        "session": f"local-body:{session_id}", "worktree": actual.worktree,
+        "native_session_id": actual.native, "mode": "acp",
         "session_info": response,
     }
 

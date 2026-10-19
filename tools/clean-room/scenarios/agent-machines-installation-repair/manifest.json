@@ -1,0 +1,30 @@
+{
+  "name": "agent-machines-installation-repair",
+  "description": "Agent-free exact-candidate first-touch installation repair: self-contained candidate payload, installed CLI, ordinary enabled synthetic owner, digest-bound apply, dependency readiness, retry and configuration preservation.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "none", "gh": "none", "ado": "none" },
+  "validates": [
+    "canonical preview materializes all declared runtime libraries without retaining a checkout dependency",
+    "first-use binstub provisions the candidate after its original source copy is removed",
+    "installed CLI observes without installing, then repairs only digest-bound selected closure",
+    "fresh prerequisite readiness unlocks dependent repair, retry preserves unrelated configuration",
+    "payload changes refuse stale apply before invoking an installer",
+    "restart obligations survive separate apply processes until exact operator-confirmed continuation",
+    "wheel packaging includes every runtime-loaded installation-context fragment",
+    "SIGTERM retains the apply lock until actual transient installer descendants are terminated"
+  ],
+  "config": {
+    "CR_HARNESS_MOUNT": "candidate checkout, or a directory containing candidate.tar from the canonical test-isolation writer or an exact staged Git tree archive"
+  },
+  "expected_artifacts": ["cr-report.json", "cr-logs/installed-repair.log"],
+  "stages": [
+    { "n": 0, "title": "fresh environment and exact candidate" },
+    { "n": 1, "title": "stamp self-contained payload and remove original preview" },
+    { "n": 2, "title": "first-use runtime provision" },
+    { "n": 3, "title": "installed native repair contract" },
+    { "n": 4, "title": "native source and packaging regression contracts" }
+  ]
+}

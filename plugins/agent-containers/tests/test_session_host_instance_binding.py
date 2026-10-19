@@ -113,6 +113,10 @@ def test_secret_cleanup_survives_name_replacement_and_uses_bound_user(monkeypatc
     monkeypatch.setattr("agent_containers.lifecycle.inspect_container", inspection)
     cleanup = MagicMock(return_value=removed)
     monkeypatch.setattr(cli, "cleanup_remote_env", cleanup)
+    monkeypatch.setattr(
+        "agent_containers.ssh_transport._run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0),
+    )
     path = "/home/your_user/.agent-containers/launch/" + "0" * 32 + ".env"
     args = SimpleNamespace(
         name="name-now-points-elsewhere", expected_instance=selected,

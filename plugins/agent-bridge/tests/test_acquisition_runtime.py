@@ -599,7 +599,10 @@ async def test_new_live_and_stopped_resume_preserve_native_id(rig, mode):
         assert f"--owner-session-id {created.native_session_id}" in rig.db.execute_read(
             "SELECT body FROM live_messages",
         )[0]["body"]
-        rig.db.execute_write("UPDATE live_messages SET delivered_at=?, outcome='applied'", (time.time(),))
+        rig.db.execute_write(
+            "UPDATE live_messages SET delivered_at=?, consumed_at=?, outcome='applied'",
+            (time.time(), time.time()),
+        )
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
         key="reservation-b", worktree_ownership="reused",
@@ -622,7 +625,10 @@ async def test_new_live_and_stopped_resume_preserve_native_id(rig, mode):
         rig.db.update_session_status(session.session_id, "stopped", time.time())
         rig.db.release_worktree_ownership(worktree_id="worktree-a")
     else:
-        rig.db.execute_write("UPDATE live_messages SET delivered_at=?, outcome='applied'", (time.time(),))
+        rig.db.execute_write(
+            "UPDATE live_messages SET delivered_at=?, consumed_at=?, outcome='applied'",
+            (time.time(), time.time()),
+        )
         rig.db.execute_write("UPDATE live_sessions SET status='expired',updated_at=0")
     rig.source["acquisition_reservation"]["key"] = "reservation-c"
     resumed = await rig.runtime.acquire(follow.model_copy(update={
@@ -720,6 +726,28 @@ async def test_reconciliation_after_delivery_does_not_redeliver(rig):
     assert recovered.native_session_id == "cli-native-new"
     assert rig.db.execute_read("SELECT COUNT(*) AS n FROM live_messages")[0]["n"] == 1
     assert not rig.db.execute_read("SELECT * FROM acquisition_launch_gates")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tracked", [False, True])
+async def test_cli_busy_evidence_does_not_retain_consumed_input_or_legacy_history(rig, tracked):
+    request = req(mode="cli")
+    result = await rig.runtime.acquire(request)
+    native = result.native_session_id
+    message = rig.db.list_pending_live_messages(native)[0]
+    if not tracked:
+        rig.db.execute_write(
+            "UPDATE live_messages SET consumption_tracked=0 WHERE id=?", (message["id"],),
+        )
+    assert rig.runtime._evidence(request, rig.source, native).conversations[0].busy
+    assert rig.db.ack_live_messages(native, [message["id"]], time.time()) == 1
+    assert rig.runtime._evidence(request, rig.source, native).conversations[0].busy is tracked
+    assert rig.db.consume_live_message(native, message["id"], time.time()) == 1
+    evidence = rig.runtime._evidence(request, rig.source, native)
+    assert not evidence.conversations[0].busy
+    assert rig.db.live_message_receipt(native, message["id"])["sdk_accepted_at"] is not None
+    rig.db.enqueue_live_message(native, "peer", "new work", time.time())
+    assert rig.runtime._evidence(request, rig.source, native).conversations[0].busy
 
 
 @pytest.mark.asyncio

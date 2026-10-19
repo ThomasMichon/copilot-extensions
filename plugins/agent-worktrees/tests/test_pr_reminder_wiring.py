@@ -9,6 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import agent_worktrees.__main__ as m
+import pytest
 
 
 def _self_merge_config():
@@ -54,3 +55,32 @@ def test_emit_pr_reminder_human_no_result_mutation():
     r = m._pr_reminder_for(_self_merge_config(), "push-changes")
     # Human mode prints to stderr; must not require/mutate a result dict.
     m._emit_pr_reminder(r, use_json=False, result=None)
+
+
+@pytest.mark.parametrize("state", ["changes-requested", "conflict", "commented"])
+def test_status_review_feedback_is_not_overridden_by_authority_note(state):
+    from agent_worktrees import pr_contract as pc
+
+    flow = pc.classify_pr_flow(
+        enabled=True, required=True, provider="github",
+        merge_actor="submitter-direct", reviewer="copilot", review_blocking=False,
+    )
+    reminder = pc.pr_reminder(
+        flow, "pr-status", state=state,
+        reason="The actor has a repository-authorized review-rule exception.",
+    )
+    assert reminder.state == state
+    assert "pr-merge" not in reminder.next_step
+    assert reminder.headline != "The actor has a repository-authorized review-rule exception."
+
+
+def test_approved_status_does_not_wait_for_the_review_it_already_observed():
+    from agent_worktrees import pr_contract as pc
+
+    flow = pc.classify_pr_flow(
+        enabled=True, provider="github", merge_actor="submitter-direct",
+        reviewer="copilot", review_blocking=False,
+    )
+    reminder = pc.pr_reminder(flow, "pr-status", state=pc.PR_STATE_APPROVED)
+    assert reminder.waiting_on == ()
+    assert "required CI" in reminder.next_step

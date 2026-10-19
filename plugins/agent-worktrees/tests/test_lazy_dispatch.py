@@ -45,14 +45,14 @@ import _core_cluster_scan  # noqa: E402 -- must follow the sys.path insert above
 # which must be this module's own name so the handler-module cross-check
 # below (`handler_module != modname`) matches instead of dropping the entry.
 _ADD_PARSERS_MODULES = [
-    "resolve_cli", "finalize_cli", "attribution_prepare_cli", "pr_state_cli", "status_cli", "status_bar_cli",
+    "resolve_cli", "finalize_cli", "attribution_prepare_cli", "identity_vault_cli", "pr_state_cli", "status_cli", "status_bar_cli",
     "status_updater_cli", "status_monitor_cli", "status_monitor_runtime", "status_monitor_reap_stale",
     "pane_lifecycle", "handoff_cli", "handoff_successor_repair_cli", "handoff_cancel_cli", "list_cli", "claims_cli", "follow_ups_cli",
     "session_metadata_cli", "cleanup_gc_cli", "reap_cli", "reclaim_cli", "resource_producer_cli",
     "worktree_ops_cli", "picker_profiles_cli", "maintenance_cli",
     "installation_cli", "update_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "session_binding_cli",
-    "session_inspection_cli", "session_tracking_cli", "worktree_status_audit",
+    "session_inspection_cli", "session_tracking_cli", "record_cli", "worktree_status_audit",
     "picker_reconcile_cli", "launch_registry",
 ]
 
@@ -249,6 +249,7 @@ def _deferred_only_global_names() -> frozenset[str]:
     "command, argv",
     [
         ("attribution-prepare", ["attribution-prepare", "--json"]),
+        ("identity-vault", ["identity-vault", "status", "--json"]),
         ("status", ["status", "--json"]),
         ("claims", ["claims", "--json"]),
         ("status-context", ["status-context"]),

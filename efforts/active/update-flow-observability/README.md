@@ -1,0 +1,802 @@
+# Update Flow Observability
+
+- **Slug:** `update-flow-observability`
+- **Repo:** copilot-extensions
+- **Branch(es):** independent reviewed plan and implementation slices
+- **Created:** 2026-10-14
+- **Status:** Active
+- **Vision:** `visions/installer` Features/plugin-updating-and-alignment; `visions/plugin-services/runtime-assembly` verified immutable assembly
+- **Umbrella issue:** #6812
+- **Sub-issues:** #6826 (Bridge serving no-op), #6827 (supervisor result framing); existing #6600, #6086, #6046 and #6796 retain their owners and boundaries
+
+## Guiding Intent
+
+An operator should be able to account for every install/update operation:
+what it does, why it is necessary, how long it takes, and what is currently
+waiting. Consistent presentation must expose unnecessary work, not decorate
+it or obscure failures. Speed improvements remove measured repeated work
+while retaining installation, ownership, policy and health contracts.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Coordinator | Owns synthesis, shared contracts, integration, review and completion | The source worktree associated with #6812 |
+| Orchestration evidence reader | Audits unified update and launch-maintenance ordering | Coordinator's bounded read-only delegation |
+| Installer evidence reader | Audits runtime construction, activation and healthy no-op work | Coordinator's bounded read-only delegation |
+| Output evidence reader | Audits existing output helpers, protocols and formatting ownership | Coordinator's bounded read-only delegation |
+| Outcome/framing implementation owner | First two Phase 2 items and their focused regressions; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
+| Human-progress implementation owner | Shared timing/line rendering, actual output adapters and focused proofs; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
+| Bridge serving source implementer | Only #6826 in an independent managed worktree and source PR; no production update or recovery authority | Coordinator's bounded cooperating-session delegation |
+
+## Coordination
+
+- **Topology:** one reviewed proposal followed by independently reviewable,
+  dependency-ordered implementation PRs. Only the coordinator publishes or
+  mutates Git state in the integration worktree.
+- **Host (owns integration/presentation PRs):** Coordinator. The Bridge
+  source implementer owns only its isolated #6826 PR through the normal
+  review/CI flow; that PR must not merge before #6869 is merged and the
+  serving branch is synchronized with regenerated native declarations.
+- **Delegates:** three non-mutating evidence scopes above. Implementation
+  ownership was assigned after proposal review: the outcome/framing slice
+  is merged, and the human-progress owner now owns formatter/clock helpers,
+  directly dependent output adapters, generated consumers and focused tests.
+  Bridge serving-state algorithms remain outside that assignment. The
+  coordinator owns this effort's journal and publication from the shared
+  integration worktree. Its code edits and Git mutations are serialized
+  with any active delegate using that same worktree.
+- **Independent source cooperation:** #6826 implementation/test/PR work is
+  explicitly delegated separately from the shared integration worktree.
+  The coordinator retains overall effort, production rollout, native
+  recovery, seed and held-work custody. No resource lease or administrative,
+  signer, main-branch or private-role authority is transferred.
+- **Handoff:** keep this README and the operation audit authoritative. A
+  completed PR is a slice, not completion of the effort.
+- **Existing owners:** the vendored-installer-engine campaign owns wholesale
+  installer-engine convergence; seasoned-dependencies-and-transactional-installs
+  owns its dependency and transaction changes. Existing open repair PRs are
+  not superseded. Coordinate any necessary overlapping change before editing.
+
+## Context
+
+- #6600 introduced persistent launch-phase accounting; this effort covers the
+  larger install/update path and its mixed human-readable output.
+- #6086 covers process-spawn reduction. Reuse its evidence and contracts rather
+  than claiming that every subprocess can be removed.
+- #6046 already owns the Windows seedless pane receipt defect; it is not a
+  timing-formatter implementation task.
+- #6796 owns the observed command-binding publication refusal.
+- A real launch resolution completed before a long maintenance sequence.
+  Bootstrap update failed, reconciliation continued, runtime construction and
+  cutover took minutes, and the same plugin actions appeared in a second
+  reconciliation pass. These observations motivate measurement; they do not
+  prove which individual operation caused each gap.
+- The [complete normalized line ledger and source operation map](audit.md)
+  cover every reference-run output line without publishing operator state.
+- `docs/install-contract.md` and `docs/patterns/README.md` remain binding:
+  independent installers, attributable immutable runtimes, package and
+  signature policy, publication ownership, health and rollback are preserved.
+- Vision reconciliation: this closes the existing installer's observable,
+  coherent update/alignment intent; it does not introduce another updater,
+  service or policy authority.
+
+## Request
+
+The operator confirmed the slug `update-flow-observability` and requested:
+
+> Audit every line of that update flow and identify why it's needed and figure out how we can speed things up. We likely should prefix every line of the install/update flow with the time, and post-fix with the duration, ideally using some consistent, elegant formatting. There's also mixes of formatting, messaging, and status reporting which need cleanup now that we report more overall update progress.
+
+## Plan
+
+The audit, timing, presentation and speed goals are operator-requested.
+The sequencing, specific repair choices, formatter grammar and validation
+matrix below are _(agent-recommended)_ implementation details.
+
+### Phase 1 - Account for the flow and review the proposal
+
+- [x] Audit every reached logical operation in unified update and normal
+  launch maintenance, with source citations, necessity, conditions,
+  repetitions, observed cost and remaining measurement gaps.
+- [x] Identify existing formatter owners and machine-readable stream
+  contracts; propose one coherent line and progress vocabulary.
+- [x] Rank safe reductions by measured work avoided; explicitly distinguish
+  code-proven causes from hypotheses.
+- [x] Capture the audit in a linked operation inventory, complete this
+  proposal, and land the reviewed plan before implementation.
+
+### Phase 2 - Make timing and status reporting consistent
+
+- [x] Retain per-action exit status and timed start/end/error outcomes in the
+  shell launch-maintenance path while preserving its fresh replanning.
+- [x] Correct the supervisor JSON-framing defect before applying human line
+  formatting (#6827); preserve diagnostic stderr and identity-scoped retirement.
+- [x] Land the Python-owned aggregate and nested-output formatter, declared
+  native encoding boundary and release-materialization contract (#6869).
+- [x] Implement the shared formatter extension for aggregate update,
+  captured plugin installers, nested output and native maintenance's
+  persistent/status sinks (#6869 and #6904).
+- [x] Route synchronous bootstrap and blocking marketplace installer output
+  through the native timing, outcome and persistent-log adapters (#6920).
+- [ ] Finish the remaining detached/standalone installer and early/late Bash
+  output boundaries through their actual output owners.
+- [ ] Prefix every human-readable install/update line with a wall-clock time;
+  suffix it with honestly labeled monotonic elapsed time or completed-step
+  duration. Do not represent arbitrary child-line arrival as execution cost.
+- [ ] Consolidate banners, status names, nesting and error presentation;
+  preserve useful detail without duplicate timestamps, repeated status
+  prefixes or contradictory aggregate success.
+- [ ] Preserve JSON/quiet/protocol output, redaction and Windows/POSIX parity.
+
+### Phase 3 - Remove proven unnecessary work
+
+- [x] Verify existing final-integration deferral with native invocation counts
+  and current/changed/first-touch aggregate ordering (#6933).
+- [x] Verify Codespaces source-level admitted reuse and health/content/schema
+  refusals through real native construction adapters (#6940).
+- [ ] Reconcile Bridge serving-version drift through the admitted runtime's
+  existing cutover path rather than returning a misleading local-content
+  no-op or rebuilding an already current slot (#6826).
+- [ ] Verify #6598's existing Codespaces admitted-construction reuse after
+  promotion instead of reimplementing it; attribute any remaining
+  package/completion/activation failure with the new phase outcomes.
+- [ ] Implement the reviewed, evidence-backed reductions in repeated planning,
+  probing, building or reconciliation, retaining all actual safety gates.
+- [ ] Make unchanged healthy work a genuine no-op; retain fresh, changed,
+  failed and uncertain-state behavior rather than adding success-shaped
+  fallbacks.
+- [ ] Measure before/after execution count and cost for the same scenarios.
+
+### Phase 4 - Land, prove and finish
+
+- [ ] Update source-owned documentation and per-plugin changefiles, then drive
+  each implementation through required review, CI, merge and source-worktree
+  finalization.
+- [ ] Prove the installed promoted release through the authorized update
+  owner; do not infer rollout from a dev merge or marketplace version.
+- [ ] Resolve or explicitly transfer every plan and validation item to a
+  named tracked objective, archive this effort, and release responsibility.
+
+## Validation Plan
+
+- [x] Use deterministic clocks to cover start, progress, completion, no-op,
+  failure, nesting, multiline output, empty output and clock movement.
+- [x] Prove clean JSON/stdout and diagnostic stderr at real subprocess
+  boundaries, including a failed installer and preserved exit status.
+- [ ] Cover Windows and POSIX installer entrypoints and synchronized vendored
+  formatter copies; run the relevant install-contract and formatting guards.
+- [ ] Exercise real unchanged, changed-version and first-touch consumer
+  contracts in isolated fixtures, retaining original limits and safety gates.
+- [ ] Compare operation counts and durations on equivalent before/after flows;
+  show the cost of required work separately from eliminated repetition.
+- [ ] Exercise clean-room provisioning when the changed boundary affects
+  first installation; record an explicit reason for any unavailable lane.
+- [ ] Verify a live authorized update and healthy no-op after promotion without
+  duplicate installation ownership, service instances or prompt delivery.
+- [ ] Record all validation tiers and rollout evidence with the corresponding
+  implementation PRs.
+
+Equivalent before/after measurements use the same source/payload identities,
+policy, declared dependencies and initial installed-state fixture. Record
+operation counts and measured durations separately; a change in network
+availability or payload state is not an equivalent speed comparison.
+
+| Scenario | Required observable result |
+|----------|----------------------------|
+| Unchanged admitted and healthy runtime | No runtime/package reconstruction; retain the required policy, ownership and health checks. |
+| Admitted Bridge slot current, serving version stale | Use the existing owned health/cutover path; no rebuild or disabled-service activation. |
+| Changed Codespaces payload | Attribute construction, package, completion and activation boundaries; do not mistake silence between lines for command execution time. |
+| First touch with no completed runtime | Perform the required construction and admission work; report its real phases and failures rather than claiming no-op savings. |
+| Failed or missing child command | Preserve its exact failure and continuation policy; do not render aggregate success or contaminate JSON stdout. |
+| Payload-to-runtime dependency ordering | Retain fresh second-pass planning and runtime re-resolution; do not suppress work solely because an earlier child exited zero. |
+
+## Proposal
+
+The [audit](audit.md) contains the complete reference-run line ledger,
+measured intervals, source map, concrete defects and proposed presentation.
+The proposal cleared review and merged in #6823. Implementation proceeds
+under the phase and validation gates below; the effort is not complete.
+
+The requested timing suffix needs two distinct meanings: a progress line can
+report elapsed time in its current operation, while a completion line can
+report that operation's measured duration. Both must use monotonic clocks;
+the timestamp prefix is for human wall-clock correlation.
+
+Implementation proceeds in bounded slices: accurate action outcomes and
+machine-result framing first; native in-process formatting and nested-output
+convergence next; then measured work reduction and serving-state
+convergence. No slice introduces a Python subprocess or durable telemetry
+write per output line. A new library, service or lifecycle authority is not
+part of the proposal.
+
+Existing running/deployed state checks remain authoritative. Reconciliation
+already replans between passes; caching an earlier plan or dropping a pass
+because a process returned zero is explicitly rejected. Codespaces'
+unattributed gaps remain an investigation item, not a promised savings
+number.
+
+The source advanced during the audit: #6598 already added Codespaces'
+admitted-construction reuse. This effort verifies that improvement in the
+consumer flow and does not claim or duplicate its implementation. The
+Bridge serving-version gap and supervisor framing defect survived that
+bounded source delta inspection.
+
+## Journal
+
+### 2026-10-16 - Remove unnecessary UV acquisition on admitted reuse
+
+- Moved Codespaces PowerShell UV acquisition after canonical admission and
+  its healthy-reuse return, matching Bash without changing either safety gate.
+  The real acquisition helper now performs zero UV subprocesses on reuse.
+- Added a real first-touch construction-owner witness, required acquisition
+  failure and canonical abort/reclamation regression. It failed before the
+  fix and passes afterward. Current/refused runtime bytes remain unchanged.
+- Final native Windows selection: 11 passed, 10 platform skips; native Linux
+  parity: 10 passed, 11 platform skips. Original bounds remain unchanged.
+  Regenerated only the owning native encoding digest; install-contract,
+  synchronization, lint and diff checks pass.
+- Independently confirmed the cooperating Bridge source slice #6877 merged
+  as `62b5c976a385a904e53b53d55f78ea8b62c14450`. Its rollout and receiving
+  coherence remain separate from source completion. No installed update ran.
+
+### 2026-10-15 - Exercise Codespaces reuse through canonical admission
+
+- Landed #6940 as `298fbd475b2a265e91b3e0d3ff31aedf2da2343e` after
+  current-head approval with no open findings and successful CI. Addressed
+  review by qualifying fresh-venv abort evidence as Bash-only and recording
+  the required documentation-impact statement.
+- Added isolated native coverage of the existing #6598 venv/package reuse
+  path using a real Python venv, real module-launch health and the actual
+  attached canonical construction/retention adapter. Healthy reuse avoids
+  venv creation, package installation and build stamping.
+- Unhealthy entrypoints, conflicting same-version payloads and malformed
+  completion markers retain their precise refusal reasons and preserve the
+  tested runtime files and selector bytes/timestamps. This is not a stubbed
+  admission result or a production activation.
+- The four-state matrix and existing first-construction retry case pass five
+  cases per native host. The audit records validation boundaries and the
+  Linux pytest configuration warning explicitly.
+- Observed one remaining PowerShell-only UV-acquisition helper invocation
+  before the admitted-reuse return; Bash already avoids it. The production
+  scripts remain unchanged pending native-file ownership clearance.
+- Promoted-payload and installed reuse proof, full provisioning, real
+  construction/cutover costs and complete standalone presentation remain open.
+
+### 2026-10-15 - Verify independent final-integration work counts
+
+- Landed the bounded test-and-audit slice in #6933, merge
+  `29259f83217bf82e1c091ebadefc143964a94094`, after current-head Copilot
+  approval with no findings and successful CI. No production implementation
+  change, installed update or service operation is part of this slice.
+- While shared standalone-presentation files remain reserved, verified #6836's
+  existing reduction without editing its implementation or running an updater.
+  The native Windows fixture observes two command-reconciliation callbacks
+  without deferral and zero with it; aggregate update retains exactly one
+  final command pass and one final profile pass.
+- Extended that aggregate count contract to first touch with no deployed
+  version. Current, changed and missing runtimes retain the same late
+  finishing order; only changed/missing runtimes invoke the engine installer.
+- Both complete orchestration/integration modules passed 42 cases on each
+  of Windows and native Linux; six native PowerShell deferral/verified-result
+  cases and two native Bash count cases passed. The audit
+  separates these measured invocation counts from test-run durations:
+  neither is installed end-to-end speed evidence.
+- The Linux run exposed a Windows-simulating test that still discovered a
+  real PowerShell executable despite mocking all child execution. Bound that
+  discovery to a synthetic fixture command; both native suites now pass
+  without requiring PowerShell on Linux.
+- Standalone presentation overlap, real runtime construction/cutover
+  measurements and promoted rollout proof remain open.
+
+### 2026-10-15 - Standalone presentation-owner decision
+
+- The operator selected the existing Python admission parent for remaining
+  standalone human presentation, rather than adding a reporting interpreter.
+  Reuse `HumanOperation` and the existing live native relay with an explicit
+  install/update opt-in and source-owned packaged support.
+- Default lifecycle stdout/stderr identity, parsed protocols, execution policy,
+  exact native argv, admission and child-lifetime behavior remain binding.
+  A runtime package that has not been built yet cannot supply bootstrap
+  presentation support.
+- Structured-context native installers bypass legacy command admission.
+  Their actual output owner must be addressed separately; a legacy-parent
+  change alone cannot establish every-line standalone coverage.
+- Requested the exact reserved-file overlap from the existing source owner
+  before changing shared lifecycle, generation or native installer support.
+  No such implementation change is included in this journal entry.
+
+### 2026-10-15 - Attribute the next normal-release blocker without a waiver
+
+- The latest inspected normal promotion, run `38841372088`, validated
+  `aaace382f7b9b45ee0a9c47ee2da9f72b7348b30`. Only
+  `full - agent-worktrees` failed, job `116782077335`.
+  Fourteen test groups passed before the plugin's existing aggregate budget
+  expired in group 15, which had only `17.9934s` remaining. This is not one
+  of the earlier assertion failures repaired by #6910.
+- The deterministic suite contains 402 files in 17 groups. The inspected run
+  spent approximately 122s, 162s and 120s in groups 6, 7 and 10 respectively.
+  Those are whole-group observations, not proof of which individual tests
+  caused the excess. Public coordination is recorded on #6812.
+- Local runtime profiling is not yet evidence: the existing interpreter
+  lacked `machine_transport`; canonical dependency preparation on the
+  mounted checkout exceeded a bounded wait. No surviving owned preparation
+  child was found afterward.
+- A fresh exact-source Linux filesystem fixture exercised the preferred
+  hardened devcontainer wrapper with already-provisioned tooling. Its normal
+  dependency-preparation pass failed fetching package metadata with TLS
+  `HandshakeFailure`; the network-disconnected test pass never started.
+  No verification, seasoning, network or resource control was disabled.
+- No test was removed, timeout raised, pipeline retried/cancelled or updater
+  started. Promotion and the installed proof remain blocked; source-group
+  runtime attribution remains open rather than being called a known flake.
+
+### 2026-10-15 - Synchronous output slice merged; retain the parent gates
+
+- #6920 actually merged as `bf3d5a03792ccfb4fe4e92b98d7e894de4b83119`
+  at `2026-10-16T03:38:42Z`, after Copilot approval of exact head
+  `a21d89aa1e1d074c3042c157089d82c6579e0e86`, zero findings and
+  successful observed checks including the required aggregate gate.
+- Native PR state now reports merged, and supported worktree synchronization
+  advanced to that merged commit without conflicts. Recovery refs remain.
+- Re-read the Plan and Validation Plan after merge. Only the synchronous
+  bootstrap/blocking marketplace output item closes here. This is not a
+  standalone-installer guarantee, runtime speed proof, promoted release
+  receipt, installed verification or effort completion.
+- Continue at the remaining output owner's native entrypoint/admission
+  boundary. Preserve independent installer lifetime, execution policy, exact
+  command and ownership behavior; do not invent a second updater to obtain
+  timing. The effort remains Active and the source worktree remains retained.
+
+### 2026-10-15 - Synchronous bootstrap and marketplace boundary
+
+- Traced the actual pre-launch producer to direct native installer argv.
+  Its admission subprocess inherits streams and is not a Python human-output
+  owner, so the launcher is the smallest missing presentation boundary.
+- Reused native reconciliation's PowerShell runner for bootstrap updates and
+  the blocking marketplace installer: exact argv, scoped environment,
+  Stopwatch duration, streamed diagnostics, explicit spawn/exit outcomes and
+  restored native-error preferences. No per-line subprocess was introduced.
+- Bash uses its existing maintenance renderer for the same actions, preserves
+  final unterminated output and canonical nested frames, and records the
+  installer's own pipeline exit status instead of the logger's.
+- A fresh complete blocking fixture exposed empty optional stage fields
+  shifting Bash's tab-delimited metadata. Replaced that handoff with NUL-delimited
+  fields in the same existing producer call; the fixture validates the real
+  decoded installer path and runtime-root arguments.
+- Before the fix, both Windows bootstrap hosts leaked raw child output and
+  failed the streaming gate; native-error policy could abort the launcher.
+  Updated fixtures cover failed, missing, successful and unchanged actions,
+  metacharacter argv, both streams, nested frames, final lines, environment
+  restoration and fresh second-pass planning.
+- Targeted Windows native bootstrap/reconcile: eight passed, four POSIX skips.
+  Blocking marketplace: four passed, two POSIX skips. Native Linux changed
+  boundaries: six passed, twelve Windows skips. Existing 30-second item,
+  20-second child and 300-second contained-suite bounds are unchanged.
+- This source slice is not yet published. Detached/standalone output, early/
+  late Bash diagnostics, speed reductions and promoted installed proof remain
+  open; this is not effort completion or production rollout evidence.
+
+### 2026-10-15 - Native maintenance slice merged; continue remaining streams
+
+- #6904 actually merged as `aaace382f7b9b45ee0a9c47ee2da9f72b7348b30`
+  after fresh approval of exact head
+  `20c6573798425bdcb5f1cd0fe956f78af1c0948d`, no unresolved review
+  threads and all observed CI successful. The source review's lifecycle
+  and timing findings were reproduced and repaired, not bypassed.
+- This closes the native maintenance formatter/sink extension. It does not
+  close inherited bootstrap output, detached/standalone installer output,
+  early/late Bash diagnostics, banner consolidation, Bridge serving drift
+  or any promoted installed proof. The next slice traces those streams at
+  their existing output owners rather than adding per-line interpreters
+  or another executor.
+- Native worktree status reconciliation encountered a busy publication
+  lock after the confirmed merge. No lock or tracking record was forced.
+  Preserve source history and journal, then retry the supported status/sync
+  path after publication finishes; this active effort must not be finalized.
+  The later status retry confirmed merged state. Whole-branch sync safely
+  aborted on the already-squashed history; after retaining backups and
+  verifying the native payload was byte-identical upstream, replayed only
+  the unpublished journal. The supported sync then completed successfully.
+- Separately attributed the normal release's three Agent Worktrees
+  failures to existing #6907, #6208 and #6209. Their existing owner already
+  landed #6910 (`f9093a58fffe088f232746c9f028c41ce5c2976a`), independently
+  confirmed merged. Do not duplicate that fix or treat its dev merge as a
+  containing full release. No updater or new production activation ran.
+
+### 2026-10-15 - Native maintenance acceptance and isolated Windows blocker
+
+- Further review found successful jobs could already be reaped before
+  cleanup, and a blocked terminal could keep an orphaned renderer alive.
+  Both were reproduced before their repairs. Final cleanup now requires
+  an explicit drained/closed receipt and absence of a live owned job,
+  rather than relying on retained Bash exit status. The parent monitor
+  starts before output, checks liveness during admission, remains active
+  through final drain and can terminate only its dedicated CLI process
+  without waiting for sink locks. A private failure reason survives.
+  Native regressions keep a pipe open and unread while the actual parent
+  exits, covering both a blocked start and final status/drain. Both now
+  exit; Linux pidfds constrain fixture cleanup to its exact grandchild.
+  Final complete-file acceptance passed 113 telemetry and 22 preparation
+  cases on Linux (12 Windows-only skips); canonical Windows telemetry
+  passed 111 cases (two Linux-only skips). The equivalent final 256-line
+  comparison measured medians of 3.724s before and 2.154s after, with
+  256 versus zero `date` processes, one formatter and all messages retained.
+  These replace all earlier overhead figures, not runtime/update cost proof.
+- A subsequent review identified queued output inflating native action
+  durations. A blocked-sink regression failed before the repair: completion
+  could not be sampled until that sink was released. One in-process clock
+  reader now observes end records independently; action admission starts
+  its clock after prior output drains. Only boundary timestamps are queued
+  in memory, while diagnostics retain the existing private spool.
+  The repaired regression distinguishes a two-second action from an
+  additional 88 seconds of simulated drain delay. Spool initialization
+  failure is also explicitly reported without aborting native continuation.
+  Windows shared renderer coverage passed 30 cases; complete native Linux
+  telemetry and preparation files passed 111 and 21 cases respectively
+  (12 Windows-only skips), retaining the original limits.
+  Repeated the equivalent 256-line comparison at that clock-repair stage,
+  including clock-reader and job-shutdown costs: before 3.435s median,
+  after 1.900s, still 256 `date` processes versus none and one formatter.
+  All diagnostics remain; these supersede the pre-review overhead figures.
+- Review of #6904 identified cached-PID shutdown targeting. A contained
+  pre-fix regression reproduced signalling a disposable unrelated process.
+  Shutdown now verifies the parent shell's renderer job, command and PID
+  before signalling or waiting, including completed-job cleanup. A separate
+  regression preserves a different job even when its numeric identity is
+  supplied as the stale renderer handle. The complete native Linux
+  preparation file passed 20 cases with 12 Windows-only skips afterward;
+  stopped/missing helpers and normal spool cleanup remain covered.
+- Native PowerShell 5.1/7 progress and real output-sink fixtures passed on
+  Windows: 26 cases with two POSIX skips. Native Linux engine/library and
+  Manager coverage passed 128 cases with 12 Windows-only skips, including
+  helper death, bounded shutdown, unchanged planning and streamed failure.
+  Focused Windows shared-renderer coverage passed 29 cases.
+- Equivalent 256-line synthetic presentation trials, including helper
+  startup/shutdown, retained every diagnostic. The median fell from
+  3.784s with 256 `date` processes to 1.252s with one bounded renderer and
+  no per-line clock process. These measure presentation overhead only,
+  not installer or end-to-end update savings.
+- Broader Windows pane coverage exposed a separate unchanged error-output
+  boundary. Instrumentation attributed about 13.272s to `Write-Error`,
+  not the roughly 29ms exclusive-file failure. A minimal unrelated
+  `pwsh -File` script also exceeded its existing 15s deadline under
+  ConciseView; its NormalView counterpart completed in 2.453s. Track
+  the actual PowerShell error-rendering cause in #6900; do not weaken
+  deadlines, change global ErrorView or claim that the broader lane passed.
+- A prior broader run also detected persistent OneDrive environment drift.
+  Causality is unestablished on the shared host; no rollback or production
+  repair was attempted. Subsequent isolated timing probes detected no drift.
+- Fresh synthetic native consumers exercise the changed boundary.
+  Full fresh-machine bootstrap and an actual macOS Bash 3.2 host were not
+  available; Linux Bash execution does not substitute for that platform.
+  No live rollout was attempted: promoted artifacts and sole-owner update
+  authorization remain required. Required PR review and CI remain gates.
+
+### 2026-10-15 - Formatter merged; continue native presentation and speed proof
+
+- #6869 merged as `85eb63693a071f22f607a16063fd4be3044d75d4`
+  after current-head approval with zero findings and all observed CI
+  checks successful, including the required PR gate. This lands only the
+  bounded Python-owned presentation slice, not this whole effort.
+- Its source was pulled forward onto the contribution branch without
+  dropping unmerged changes or bypassing publication checks. The original
+  PR rebase and final accepted tree remain recoverable through local refs.
+- Notified the retained #6826 source owner that the actual-merge dependency
+  is satisfied. #6877 still owes synchronization, owner-tool declaration
+  regeneration, resulting-head review and all CI; production rollout and
+  native-recovery custody remain separate.
+
+### 2026-10-15 - Portable native maintenance clock decision
+
+- The operator selected one bounded formatter helper per Bash maintenance
+  phase rather than removing Bash 3.2 support or pretending its `SECONDS`
+  variable is monotonic. The helper is stopped before Copilot handoff; no
+  per-line Python/date spawn, daemon or lifecycle authority is introduced.
+- The native slice reuses the shared formatter, continuation redactor and
+  human output grammar. PowerShell renders natively with UTC and Stopwatch;
+  Bash retains command execution and delegates presentation only.
+- Standalone/detached and inherited bootstrap installer streams, plus
+  early/late Bash launcher diagnostics, remain explicit follow-on scope.
+  Native-shell tests and
+  measured overhead must clear before publication; this is not a rollout
+  or whole-effort completion.
+- Next: finish native shell/standalone and persistent-log timing through
+  their actual output owners, starting with
+  `worktree-manager/bin/launch-session.{ps1,sh}`. Preserve Bash 3.2,
+  monotonic-duration honesty, machine streams, native argv/exit behavior
+  and the absence of per-line subprocess or telemetry-write overhead.
+  Do not re-audit the already-accounted 249-line reference or rebuild the
+  already-merged Python formatter.
+- No installed update has been run on this evidence. Promotion, sole-owner
+  rollout, equivalent before/after cost measurements, Codespaces reuse
+  verification and the parent launch's acceptance gates remain open.
+
+### 2026-10-15 - Preserve in-place promotion and receipt-owned execution
+
+- Current-head #6869 review reproduced a same-root promotion failure:
+  rewriting an installer invalidated the original declaration before its
+  validation. Materialization now validates all original contracts before
+  any owner mutates the tree, then regenerates digests after all owners
+  finish. Separate-tree and same-root whole-payload tests cover all nine
+  producers; invalid original script, declaration and helper inputs fail
+  before any rewrite.
+- Reconciled the newer process-tree/receipt installer owner rather than
+  restoring exit-code-only execution. Its live output descriptor retains
+  the existing kill-on-close job/session, deadline and receipt judgment.
+  Native PowerShell `-File` arguments, policy refusal and exit behavior
+  are exercised with both raw and receipt-owned execution.
+- Windows focused validation: 282 passed, six platform skips across the
+  six Agent Worktrees files; 110 materializer/generator tests; 46 Manager
+  update tests; 93 headless-guard tests. Install contract, actual headless
+  adopter scan and PR-scoped module-size guard pass without changing caps.
+  The exact committed native Linux candidate passed 264 Agent Worktrees
+  tests (24 platform skips), 46 Manager tests, 93 headless-guard tests and
+  110 materializer/generator tests. Both OS runs retain the original
+  item/suite limits; real native tests opt out of the subprocess stand-in,
+  while fake installer tests forward the same output-descriptor argument.
+  Current-head review and CI remain merge gates.
+- The separately owned Bridge serving-state slice is held draft #6877.
+  Its merge remains dependent on #6869's actual merge, synchronization,
+  declaration regeneration and its own resulting-head review and CI.
+  This transfers no production rollout or recovery responsibility.
+
+### 2026-10-15 - Fix the review's privacy and completion fault class
+
+- Current-head review of #6869 identified multiline credential exposure
+  caused by splitting before redaction, and a failed phase's transient
+  completion-write error being retried as `done` during cleanup.
+  Reproduced both before editing production logic; the same false-success
+  cleanup also occurred in Manager after two transient writes.
+- Redact whole logical messages before splitting or adding state labels,
+  preserving canonical envelopes only through already-redacted text.
+  Native streaming now retains incomplete credential prefixes according
+  to the existing redactor so framing cannot separate a scheme from its
+  following credential. Cover plain/state/completion, LF/CRLF, canonical
+  records and real native pipe input.
+- Propagate active completion exceptions into both phase and Manager
+  cleanup, reset phase state before sink I/O, and retain explicit failure.
+  Adopt the existing `agent_procutil` windowless flag helper rather than
+  hand-rolling flags; no guard exemption is introduced.
+- Targeted regressions passed after the fix. Full current-candidate
+  acceptance and fresh review remain required; the prior approval is not
+  treated as approval of this new head.
+- Full acceptance of `a8e6332dbe54763567f1633765b2f3d71c4ded1d`
+  then passed: canonical Windows engine/deadline coverage 264 cases
+  (one platform skip), Manager 46, and headless guard contracts 93.
+  An exact-source native Linux consumer passed 250 engine/deadline cases
+  (15 platform skips), 46 Manager cases, 93 headless contracts and all
+  38 generator cases. Original limits and all existing checks remain.
+- Rebuilt the corrected stdlib wheel using the declared backend and
+  seven-day cutoff. A new credential-free clean-room consumer verified
+  its installed bytes and exercised both direct and real native-stream
+  multiline redaction, Unicode output, timing and exit 23: three stages
+  passed. That owned container was removed; the distinct source-feed TLS
+  obstruction and full Windows bootstrap limitation remain documented.
+
+### 2026-10-15 - Presentation review and bounded serving-source cooperation
+
+- Opened #6869 for the bounded presentation slice. Its first required
+  guard correctly rejected `update_runtime.py` at 1,051 lines against the
+  unchanged 1,000-line cap.
+- Extracted the cohesive installer process/deadline helpers into
+  `update_installer_process.py`, retaining the runtime aliases and test
+  seams. The three function bodies are AST-identical; the original module
+  is now 968 lines. Canonical focused Windows coverage, including deadline
+  and alias regressions, passed 248 cases (one platform skip). No cap,
+  baseline, required check or behavior was waived.
+- A cooperating controller requested the still-reserved #6826 source
+  slice before allocation or edits. Authorized only its isolated source
+  implementation, tests and PR, with the explicit dependency on #6869
+  above. The reservation is recorded on #6826; #5754 and all production,
+  native recovery, held-work and release-acceptance boundaries remain
+  separate and unchanged.
+
+### 2026-10-15 - Synchronized presentation candidate and fresh wheel proof
+
+- Synchronized the candidate with the contribution branch and refreshed
+  the three encoding declarations affected by merged installer changes.
+  The synchronized code is bound by
+  `7c947e4d970401db02913cc8f5fa573a618883c8`. Existing merged #6836
+  owns the single final local-integration pass; #6862 owns refusal to
+  mutate runtimes after required payload acquisition fails. Neither is
+  reimplemented or claimed as this effort's new speedup.
+- Canonical Windows preparation now succeeds after #6845. The complete
+  four-file engine/library selection passed 220 cases (one platform
+  skip), and canonical Manager preparation passed all 45 update cases.
+  A fresh exact-source native Linux consumer passed all 38 generator
+  cases, 207 engine/library cases (14 Windows-only skips) and 45 Manager
+  cases, without deselections or changed limits.
+- An agent-free Linux clean-room source-build attempt stopped at an
+  external build-backend TLS `HandshakeFailure`; it is not reported as
+  passing. The existing Docker engine is Linux, so a full fresh Windows
+  PowerShell machine was unavailable; native PS5.1/7 contracts were
+  exercised in contained fixtures.
+- Separately built the exact pure-stdlib library wheel with its declared
+  backend and an explicit seven-day dependency cutoff. A fresh,
+  unauthenticated clean-room container installed that local wheel
+  offline, verified its source/module hashes and installed-prefix origin,
+  then preserved a real Unicode child's exit 23 and timed framing.
+  All three packaging/renderer stages passed. This does not establish
+  source-feed bootstrap, production artifact admission or host rollout.
+- Both owned containers were removed. Native-shell/standalone timing,
+  equivalent update-cost measurements, serving-state convergence and
+  authorized promoted installation remain open.
+
+### 2026-10-15 - Exact-candidate native-storage proof
+
+- Bound the candidate as local commit
+  `062bc917b2f785e90fa95332c47b0220cfda0d60`, tree
+  `1d5addb17928a67eb6aa8bb854264dcf4b31ae9c`; no publication or
+  installation was inferred from that commit.
+- Independent Windows runs passed all four focused engine/library files
+  (215 passes, one platform skip), the Manager update file (45 passes)
+  and the complete generator file (38 passes). Whole-payload producer
+  validation completed in 3.93s.
+- Repeated the complete selection against an exact-HEAD/tree local-only
+  shallow consumer on native Linux storage, with private native temporary
+  state and current-source import assertions. All 38 generator cases
+  passed, including the whole-payload/all-nine-producer case in 0.23s.
+  The four engine/library files passed 202 cases (14 Windows-only skips);
+  Manager update passed 45. There were no deselections.
+- The formerly blocked two-process append case passed in 0.59s. This
+  resolves the storage-dependent validation obstruction without changing
+  source ownership checks or the existing 30-second item / 300-second
+  suite limits. The consumer source remained clean.
+- These measurements explain validation filesystem cost, not installer
+  speedup. This remains a bounded Python-owned presentation slice:
+  standalone/native-shell clock coverage, real work reductions and
+  promoted installed proof remain outstanding.
+
+### 2026-10-15 - Human-output implementation started
+
+- Assigned the next bounded implementation to the existing update phase,
+  telemetry and output ownership, including actual launch-maintenance and
+  nested child streams. There is no separately verified central human
+  update renderer to preserve by name; structured update status remains
+  authoritative, and launch preparation is a distinct progress owner.
+- The implementation must establish an honest portable clock strategy,
+  not assume Bash 3.2 has PowerShell's Stopwatch equivalent. One admitted
+  existing interpreter/stream owner per outer operation may be considered;
+  a reporting process, telemetry write or lock per line remains forbidden.
+- Added explicit equivalent-state measurement scenarios above. These are
+  validation oracles, not measured update savings or installed proof.
+- Release inspection found normal promotion run `38722957706` blocked in
+  metadata-validator tooling preparation by the literal refusal
+  `dependency-seasoning: canonical local graph lacks library attribution`.
+  This is the existing materialized-release admission portfolio tracked by
+  #6806 and #6844, not a new framing failure or a reason to bypass policy.
+  The normal queued promoter retains release ownership; no competing
+  repair, pipeline retry, installed-copy patch or local updater was started.
+  A dev merge is still not promoted or installed proof for this effort.
+- The first contained formatter run exercised 189 engine/library cases
+  (one platform skip) and 43 Manager cases successfully. A subsequent
+  native Unicode regression failed on both Windows PowerShell hosts:
+  redirected producers used IBM437, losing unrepresentable characters
+  before the UTF-8 relay could decode them. The candidate is not green
+  or published; changing the decoder alone cannot repair that loss.
+- The next repair must initialize encoding inside the captured producer
+  process, preserving native invocation, argument, exit, trust and
+  packaging contracts. It must not change a shared console, machine
+  locale, execution policy or global environment to make output pass.
+- Producer-owned initialization now replaces only redirected text writers;
+  native-command decoding and pipeline stdin retain their original
+  encodings. Nine generated producers declare this contract. Native host
+  invocation, arguments and exit handling remain unchanged; unsupported
+  producers keep inherited streams with one scoped presentation notice.
+- Worker coverage reached 305 Windows passes (one platform skip) and
+  290 POSIX passes (14 Windows-only skips). The POSIX run is not fully
+  green: an unchanged bulk-append stress case exhausted the broader
+  selection, and the whole-payload/all-nine-producer proof hit its existing
+  30-second limit on DrvFS. No deadline or ownership check was weakened.
+  Re-execute the complete selection on native Linux storage before
+  classifying this as a code defect or filesystem-specific cost.
+- Coordinator review also corrected completion timing across multiline
+  output and failure reporting when update finalization raises. Two
+  independent contained regressions passed; sink latency must not inflate
+  a completed operation's duration or turn an exception into `done`.
+- A local candidate commit will bind the exact input for a disposable,
+  native-Linux validation consumer. This is not publication, a new work
+  venue, a release or installed proof; no PR proceeds on the blocked
+  selection alone.
+
+### 2026-10-15 - First implementation merged; formatting continues
+
+- Merged #6846 as `6abfb1d7d566474f653417f83c2a7ad8680074d3`
+  after a fresh exact-head approval with zero findings and successful
+  required CI. Dispatch completed in 11m8s under its unchanged 12-minute
+  deadline; the required aggregate passed.
+- This resolves the first two Phase 2 items. It does not resolve the
+  monotonic POSIX formatter-clock obligation, the remaining presentation
+  items, serving-state convergence or installed rollout.
+- Preserved the pre-sync source history, reconciled the merged PR through
+  the native worktree flow and synchronized onto the merged contribution
+  branch. The effort remains Active in its existing worktree.
+- The next slice must extend the actual aggregate **update** presentation
+  owner, not mistake launch preparation progress for that owner. Confirm
+  the native POSIX clock/streaming seam before committing a formatter
+  design; no per-line reporting process or telemetry write is permitted.
+
+### 2026-10-15 - Retain framing coverage within the existing CI budget
+
+- Opened #6846 and received an exact-head approving review. Its required
+  Dispatch job then exceeded the unchanged 12-minute job deadline despite
+  every test sub-suite passing; the required aggregate correctly failed.
+  This is the passing-suite/job-budget class already tracked by #6052,
+  not permission to bypass the gate or retry an unchanged candidate.
+- Reduced the new framing matrix's redundant shell-host startups from
+  22 to two. Each host still executes all 11 distinct Python producer
+  subprocesses and validates their stream framing, exit status and
+  diagnostics; shell cold startup itself is not the changed contract.
+  No case, subprocess boundary, timeout or required check was removed.
+- The same focused retirement selection now passes seven pytest items
+  containing the original matrix: Windows fell from 68.02s to 30.15s;
+  Linux fell from 130.74s to 58.48s. These are local measurements of
+  equivalent test coverage, not claimed installer/update savings.
+- The revised source still requires a fresh review and successful
+  required CI. No merge, deadline increase or pipeline retry substitutes
+  for that result.
+
+### 2026-10-15 - First implementation slice prepared
+
+- Retained native reconciliation exit codes, timed action outcomes and
+  explicit continued-failure reporting in both shell launchers. Fresh
+  replanning, streamed child output and environment restoration remain.
+- Corrected #6827's complete-stdout JSON framing while preserving native
+  stderr diagnostics, typed failure results and the existing scoped
+  fallback. This removes JSON properties being expanded into warnings;
+  it does not authorize broader process retirement.
+- Independent Windows containment runs passed 27 retirement cases and
+  10 maintenance/status cases (two POSIX-only cases skipped). The latter
+  includes the real setup-log, quiet, interactive and stdio output helpers
+  plus inherited native-error-preference restoration.
+- The canonical Linux retirement lane passed 27 cases; isolated Linux
+  maintenance passed two cases (10 Windows-only cases skipped). Touched
+  Python lint, native PowerShell parsing and the install contract passed.
+- Managed Windows dependency preparation failed before test collection,
+  first on a temporary-file sharing violation and then during editable
+  package construction. Windows code verification used an existing
+  prepared interpreter under the same environment lease and containment
+  APIs, with this worktree's source selected explicitly; preparation is
+  not reported as passing.
+- Fresh isolated child fixtures cover the changed process boundary.
+  A full clean-room installation and live external rollout were not run:
+  this slice changes result interpretation, not runtime construction or
+  activation, and its promoted release does not yet exist.
+- Bash currently reports whole-second native-counter durations. Clock
+  adjustment and actual macOS Bash 3.2 proof remain open with the shared
+  formatter phase; these tests do not prove monotonic clock behavior.
+- No source PR or rollout is complete at this journal entry. Shared
+  formatting, every-line time prefixes/suffixes, Bridge serving-state
+  convergence and equivalent before/after measurements remain open.
+
+### 2026-10-15 - Reviewed plan and implementation transition
+
+- Merged #6823 as `657714e16ee08c957f55c35c5644daea83e860a3` after
+  exact-head approval and successful required CI. This completed Phase 1,
+  not the install/update implementation or rollout.
+- Preserved the pre-sync local history, reconciled the merged PR through the
+  native status flow, and completed native synchronization onto the current
+  contribution branch.
+- Coordinator continues with **Phase 2 - Make timing and status reporting
+  consistent**, starting with per-action outcomes and supervisor
+  machine-result framing before broad human-output normalization.
+
+### 2026-10-14 - Kickoff
+
+- Captured the operator's request verbatim and confirmed the effort slug.
+- Claimed #6812 and established an isolated source worktree.
+- Started three read-only evidence tracks before broad source inspection.
+- The source worktree allocation completed, but its optional instruction
+  projection reported an unavailable enabled payload. That warning is not
+  treated as successful guidance publication or fixed by editing runtime files.
+- Completed the three evidence tracks and a normalized ledger covering all
+  249 reference-run log lines exactly once. Identified discarded action
+  outcomes, Bridge's serving-version/no-op gap, unconditional post-venv
+  package work, and the supervisor multiline-JSON framing defect.
+- A later read-only reconcile plan still selected Bridge running drift and
+  Codespaces version drift; Dispatch and Index were no longer selected.
+  No further updater was launched to inspect that state.
+- Revalidated the installer delta after #6598 merged: its Codespaces reuse
+  short-circuit supersedes the baseline's unconditional package work.
+  Preserved that implementation owner's scope and retained only verification
+  and any remaining failure attribution here.

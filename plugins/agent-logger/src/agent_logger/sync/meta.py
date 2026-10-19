@@ -28,6 +28,18 @@ SYNC_VERSION = "1.0.0"
 MAX_EXCLUDED_ROOT_SAMPLES = 10
 MAX_META_FIELD_CHARS = 256
 MAX_SYNC_META_BYTES = 64 * 1024
+MAX_STATUS_SCAN_CHARS = 4096
+
+
+def status_text(value: object, default: str = "(unknown)", limit: int = 512) -> str:
+    """Render bounded printable scalar status evidence."""
+    if not isinstance(value, (str, int, float, bool)):
+        return default
+    if isinstance(value, int) and value.bit_length() > MAX_STATUS_SCAN_CHARS:
+        return default
+    text = value if isinstance(value, str) else str(value)
+    cleaned = "".join(char for char in text[:MAX_STATUS_SCAN_CHARS] if char.isprintable())
+    return cleaned[:limit] or default
 
 
 def _bounded_text(value: str) -> str:

@@ -57,9 +57,15 @@ ordinary local-machine sync path (opt-in, filesystem targets only; see the
 doc's "Sync publication" section), with independently recoverable transfer-leg
 health and sustained-partial reporting. Source enumeration, direct reads and
 sync transfers pin canonical ancestors through the same directory boundary
-used by additive ZIP snapshots. Destination containment, source reclamation,
-SSH/ingest target support, repo-scoped admission fencing, and accounting
-ingestion remain outstanding.
+used by additive ZIP snapshots. Process-log payload destinations separately pin
+lexical ancestors before directory creation and retain that boundary through
+incremental inspection, atomic publication and cleanup. Session-state and
+health-metadata containment, POSIX source reclamation, SSH/ingest target support,
+repo-scoped admission fencing, and accounting ingestion remain outstanding.
+Native Windows source reclamation is a separate machine-only, explicit-age,
+all-target opt-in under the existing sync lock; ordinary/manual snapshots remain
+additive. See the process-log evidence doc's "Machine-only scheduled reclamation"
+section for supported invocation, provenance and unsupported contexts.
 
 ### Segmenter (`agent_logger.segmenter`)
 
@@ -93,6 +99,13 @@ All machine/path/voice coupling is configuration — there is no
 deployment-specific hostname, shared-folder path, or persona baked in.
 
 ### Session sync (`agent_logger.sync`)
+
+The scheduled producer preserves content-free, source-qualified accounting
+before signatures and cold compaction; see [session-local usage evidence](usage-evidence.md)
+for coverage, replay, limits and failure semantics.
+The read-only `agent-logger usage` library/CLI separately extracts count-only
+features, calibrates session-held-out relationships and reports historical token
+estimates with empirical uncertainty; see [transcript estimation](usage-estimation.md).
 
 A transport-blind engine that pushes raw Copilot session data to a configurable
 **target**, under a `{machine}/` subpath. It archives only `session-state/` and,

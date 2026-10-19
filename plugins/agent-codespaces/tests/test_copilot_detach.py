@@ -121,6 +121,38 @@ _CREATED = json.dumps({
 }, indent=2)
 
 
+@pytest.mark.parametrize("child_alive", [False, True])
+@pytest.mark.parametrize("failure", [None, "copy", "install"])
+def test_detached_live_ledger_requires_preparation_before_remote_decision(
+    seams, monkeypatch, capsys, child_alive, failure,
+):
+    seams.live_rows["anchor-example-web@cs-1"]["status"] = "live"
+    monkeypatch.setattr("agent_codespaces.launch_policy.refused_exit_code", lambda *a: None)
+    events = []
+    result = json.dumps({"ok": True, "created": not child_alive, "resumed": child_alive})
+    remote = _ssh(seams, stdout=result)
+
+    def ssh(args, **kwargs):
+        if not args.skip_plugin_preparation:
+            events.append("prepare")
+            assert args.stage_plugins == [{"source": "sample@synthetic", "enable": False}]
+            if failure:
+                raise RuntimeError(f"plugin {failure} failed")
+        events.append("reuse" if child_alive else "create")
+        return remote(args, **kwargs)
+
+    assert detach.cmd_detach(
+        _args(seed=None, stage_plugins=[{"source": "sample@synthetic", "enable": False}]),
+        ssh_session=ssh,
+    ) == (1 if failure else 0)
+    assert events == (["prepare"] if failure else ["prepare", "reuse" if child_alive else "create"])
+    if not failure:
+        out = json.loads(capsys.readouterr().out)
+        assert out["created"] is not child_alive and out["resumed"] is child_alive
+    if child_alive:
+        assert not any("tmux kill-session" in command for command in seams.remote)
+
+
 def test_detach_success_reports_exact_session_and_keeps_forwards(seams, capsys):
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout="noise\n" + _CREATED))
 
@@ -153,7 +185,7 @@ def test_detach_success_reports_exact_session_and_keeps_forwards(seams, capsys):
     argv = shlex.split("agent-worktrees embody" + remote.split(" && agent-worktrees embody", 1)[1])
     assert argv[:3] == ["agent-worktrees", "embody", "--anchor"]
     assert argv[argv.index("--bridge-scope-id") + 1] == "anchor-example-web@cs-1"
-    assert "--copilot-arg=--plugin-dir=/stage/example-agent" in argv
+    assert "--copilot-arg=--plugin-dir=/stage/example-agent" not in argv
     assert "--copilot-arg=--no-ask-user" in argv
     assert argv[argv.index("--seed") + 1] == "do the task"
     assert argv[argv.index("--seed-ready-timeout") + 1] == "180.0"
@@ -617,6 +649,11 @@ def test_venue_tooling_prefix_is_valid_bash(tmp_path):
     import subprocess
 
     bash = shutil.which("bash")
+    if bash and "system32" in bash.lower():
+        from pathlib import Path
+        git = shutil.which("git")
+        native = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+        bash = str(native) if native and native.is_file() else None
     if not bash or "WindowsApps" in bash:
         pytest.skip("no POSIX bash")
     result = subprocess.run([bash, "-n", "-c", detach._VENUE_TOOLING], capture_output=True, text=True)

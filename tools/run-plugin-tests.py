@@ -47,6 +47,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -54,6 +55,12 @@ import time
 import tomllib
 from pathlib import Path
 
+from seasoned_uv import run_uv_install
+# Preserve the runner's existing public map as an explicit re-export.
+from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
+from plugin_test_selection import (
+    TestSelection, load_selection, resolve_plugin_root, validate_test_file,
+)
 from plugin_test_containment import (
     ContainmentError,
     Limits,
@@ -67,6 +74,10 @@ PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
+EXTERNAL_TEST_DEPENDENCIES = {
+    "payload-invocation": ("pyyaml>=6.0.3",),
+    "runtime-source": ("pyyaml>=6.0.3",),
+}
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
 
@@ -74,7 +85,11 @@ TOOLS_DIR = REPO / "tools"
 # repo-wide contract, not something scoped to their own diff) -- see
 # ``changed_plugins``'s own docstring for why these must always be scheduled
 # alongside any change, not merely when their own files are touched.
-_CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
+_CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness", "customizing-copilot"}
+
+# The PR owner's complete watch contracts outgrew a single 300-second group.
+# Use smaller sequential groups, not a wider item, group, or plugin deadline.
+_FILES_PER_SUBSUITE_OVERRIDES = {"agent-pull-requests": 10}
 
 # Per-plugin wall-clock budget overrides, applied only when the caller does
 # NOT pass an explicit --timeout/--plugin-timeout (so a deliberate manual
@@ -108,6 +123,13 @@ _PLUGIN_TIMEOUT_OVERRIDES: dict[str, float] = {
     "agent-index": 2700.0,
     "agent-machines": 2700.0,
 }
+if sys.platform == "win32":
+    # Real receipt/slot/journal validation at every owner action measured
+    # 850.50s for 348 passing tests (2026-10-14). Keep native test-item
+    # deadlines and other plugins unchanged; allow this aggregate I/O cost.
+    _SUBSUITE_TIMEOUT_OVERRIDES["agent-pull-requests"] = 1200.0
+    _PLUGIN_TIMEOUT_OVERRIDES["agent-pull-requests"] = 1800.0
+
 # Several agent-index installer tests genuinely need real PowerShell/venv
 # subprocess work that can exceed the global blanket 30s-per-test
 # pytest-timeout default under real full-matrix host load (Phase 3.5,
@@ -140,7 +162,7 @@ from _admission_protocol import acquire as _acquire_admission  # noqa: E402
 
 
 def _plugin_dir(name: str) -> Path:
-    return PLUGINS / name
+    return resolve_plugin_root(REPO, name, plugins_root=PLUGINS)
 
 
 def _has_suite(name: str) -> bool:
@@ -236,11 +258,13 @@ def _dep_fingerprint(name: str) -> str:
     import hashlib
     pdir = _plugin_dir(name)
     parts = [pdir / "pyproject.toml"]
+    if name == "agent-index":
+        parts.append(REPO / "fleet-manager" / "pyproject.toml")
     libs = pdir / "libs"
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
     h = hashlib.sha256()
-    for dependency in RUNNER_DEPENDENCIES:
+    for dependency in (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())):
         h.update(f"runner:{dependency}\n".encode())
     for p in parts:
         try:
@@ -276,7 +300,12 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         for child in venv.iterdir():
             if child.is_symlink():
                 child.unlink()
-            elif callable(getattr(child, "is_junction", None)) and child.is_junction():
+            elif (
+                callable(getattr(child, "is_junction", None)) and child.is_junction()
+            ) or (
+                os.name == "nt"
+                and getattr(child.lstat(), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+            ):
                 child.rmdir()
             elif child.is_dir():
                 shutil.rmtree(child)
@@ -299,26 +328,29 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # deps).
             spec = ".[dev]" if _has_dev_extra(name) else "."
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
+            if name == "agent-index":
+                cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
+            if reinstall:
+                # A new venv can still consume uv's stale local-path wheels.
+                cmd.append("--reinstall")
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
-            cmd.extend(RUNNER_DEPENDENCIES)
-            subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
+            cmd.extend((*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())))
+            run_uv_install(
+                uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                retained_resource_roots=(
+                    (REPO / "libs" / "versioned-runtime",) if name == "agent-index" else ()
+                ),
+            )
         else:
             # A pyproject-less plugin (e.g. a skill-script plugin like
             # harness-knowledge): there is nothing to install editable -- its
             # tests import the scripts directly (importlib). Just ensure a
             # pytest runner is present in the venv.
-            subprocess.run(
-                [
-                    uv,
-                    "pip",
-                    "install",
-                    "--python",
-                    str(py),
-                    "pytest",
-                    *RUNNER_DEPENDENCIES,
-                ],
-                cwd=str(_plugin_dir(name)), check=True,
+            run_uv_install(
+                uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
+                     *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
+                cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")
     return py
@@ -326,21 +358,18 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
 
 def _test_file_groups(
     name: str, max_files: int, *, filtered: bool = False,
-    test_files: list[str] | None = None,
+    test_files: tuple[str, ...] = (),
 ) -> list[list[Path]]:
     tests = _plugin_dir(name) / "tests"
-    files = sorted(tests.rglob("test_*.py"))
     if test_files:
-        available = {path.relative_to(tests): path for path in files}
-        requested = {Path(path) for path in test_files}
-        for path in requested:
-            candidate = available.get(path)
-            if (
-                candidate is None or not candidate.is_file()
-                or not candidate.resolve().is_relative_to(tests.resolve())
-            ):
-                raise ValueError(f"test file must name an owned file beneath tests: {path}")
-        files = [path for path in files if path.relative_to(tests) in requested]
+        files = []
+        for value in test_files:
+            candidate = validate_test_file(_plugin_dir(name), Path(value).as_posix())
+            if candidate not in files:
+                files.append(candidate)
+        files.sort()
+    else:
+        files = sorted(tests.rglob("test_*.py"))
     if filtered and files:
         return [files]
     return partition(files, max_files) or [[]]
@@ -361,9 +390,26 @@ def run_plugin(
     prepare_only: bool = False,
     allow_explicit_tiers: bool = False,
     allow_host_state: bool = False,
-    test_files: list[str] | None = None,
+    test_files: tuple[str, ...] = (),
+    selection_file: Path | None = None,
 ) -> int:
-    if not _has_suite(name):
+    selection: TestSelection | None = None
+    if selection_file is not None:
+        if test_files or prepare_only or guards or kexpr or collect_only:
+            raise ValueError("--selection-file cannot be combined with other selection modes")
+        selection = load_selection(selection_file, name, _plugin_dir(name))
+        if not selection.include_guards:
+            test_files = tuple(
+                str(path.relative_to(_plugin_dir(name)))
+                for path in selection.collection_files(_plugin_dir(name))
+            )
+    if test_files and prepare_only:
+        raise ValueError("--test-file cannot be combined with --prepare-only")
+    groups = _test_file_groups(
+        name, max_files_per_subsuite, filtered=bool(guards or kexpr or selection),
+        test_files=test_files,
+    )
+    if not _has_suite(name) and selection is None:
         print(f"[SKIP] {name}: no test suite")
         return 0
     if prepare_only:
@@ -379,9 +425,6 @@ def run_plugin(
         return 0
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
-    groups = _test_file_groups(
-        name, max_files_per_subsuite, filtered=bool(guards or kexpr), test_files=test_files,
-    )
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
@@ -408,6 +451,10 @@ def run_plugin(
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
+        if selection is not None:
+            env.pop("PYTEST_ADDOPTS", None)
+            snapshot = sandbox / "selection.json"
+            snapshot.write_text(json.dumps(selection.as_dict()), encoding="utf-8")
         plugin_started = time.monotonic()
         for index, group in enumerate(groups, start=1):
             remaining = plugin_timeout - (time.monotonic() - plugin_started)
@@ -439,6 +486,12 @@ def run_plugin(
             ]
             if collect_only:
                 cmd.append("--collect-only")
+            if selection is not None:
+                cmd += [
+                    "-p", "pytest_test_selection",
+                    "-o", "addopts=",
+                    f"--exact-selection={snapshot}", f"--selection-plugin={name}",
+                ]
             if guards:
                 cmd += ["-m", "guard"]
             if kexpr:
@@ -456,13 +509,13 @@ def run_plugin(
                 sandbox=sandbox,
                 limits=group_limits,
             )
-            if returncode == 5 and (guards or kexpr):
+            if returncode == 5 and (guards or kexpr) and not test_files:
                 continue
             if returncode != 0:
                 break
     # pytest exit code 5 == "no tests collected"; in --guards mode that just
     # means the plugin declares no guard-marked tests -- not a failure.
-    if guards and returncode == 5:
+    if guards and returncode == 5 and not test_files:
         print(f"[SKIP] {name}: no guard-marked tests")
         return 0
     status = "PASS" if returncode == 0 else "FAIL"
@@ -478,8 +531,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", default="origin/main", help="diff base for --changed")
     ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
-    ap.add_argument("--test-file", action="append", default=[], metavar="PATH",
-                    help="collect only this file relative to the plugin tests directory (repeatable)")
+    ap.add_argument(
+        "--selection-file", type=Path, help="validated exact-node JSON selection; "
+        "union whole test files and guards (requires exactly one named plugin)",
+    )
+    ap.add_argument(
+        "--test-file", action="append", default=[], metavar="PATH",
+        help="collect only this plugin-relative tests/test_*.py file (repeatable; "
+             "requires exactly one named plugin)",
+    )
     ap.add_argument("--guards", action="store_true",
                     help="run only @pytest.mark.guard tests (fast structural/contract checks)")
     ap.add_argument("--collect-only", dest="collect_only", action="store_true",
@@ -523,9 +583,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="timeout for each individual pytest item (default: 30, higher "
                          "for certain plugins -- see _TEST_TIMEOUT_OVERRIDES; an "
                          "explicit value here always wins)")
-    ap.add_argument("--max-files-per-sub-suite", type=int, default=25,
+    ap.add_argument("--max-files-per-sub-suite", type=int, default=None,
                     metavar="COUNT",
-                    help="maximum test files per sequential sub-suite (default: 25)")
+                    help="maximum test files per sequential sub-suite "
+                         "(default: 25, or 10 for agent-pull-requests)")
     ap.add_argument("--max-processes", type=int, default=128, metavar="COUNT",
                     help="maximum contained processes per suite (default: 128)")
     ap.add_argument("--max-memory-mb", type=int, default=4096, metavar="MIB",
@@ -535,6 +596,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    if args.selection_file is not None and (
+        len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
+        or args.test_file or args.guards or args.kexpr or args.collect_only
+        or args.list_only or args.exclude or args.pre_push
+    ):
+        ap.error("--selection-file requires one named plugin and no other selection mode")
+    if args.test_file and (
+        len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
+    ):
+        ap.error("--test-file requires one named plugin and cannot use --all, --changed or --prepare-only")
     limits = Limits(
         wall_seconds=(
             args.subsuite_timeout if args.subsuite_timeout is not None else 300.0
@@ -551,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("plugin_timeout must be positive")
         if args.test_timeout is not None and args.test_timeout <= 0:
             raise ValueError("test_timeout must be positive")
-        if args.max_files_per_sub_suite <= 0:
+        if args.max_files_per_sub_suite is not None and args.max_files_per_sub_suite <= 0:
             raise ValueError("max_files_per_sub_suite must be positive")
         if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
             raise ValueError("admission_wait must be a non-negative, finite number")
@@ -580,8 +651,6 @@ def main(argv: list[str] | None = None) -> int:
     if not targets:
         print("No plugin suites to run.")
         return 0
-    if args.test_file and (len(targets) != 1 or args.prepare_only):
-        ap.error("--test-file requires exactly one plugin and cannot be used with --prepare-only")
 
     uv = shutil.which("uv")
     if not uv:
@@ -641,13 +710,18 @@ def main(argv: list[str] | None = None) -> int:
                     limits=plugin_limits,
                     plugin_timeout=effective_plugin_timeout,
                     test_timeout=effective_test_timeout,
-                    max_files_per_subsuite=args.max_files_per_sub_suite,
+                    max_files_per_subsuite=(
+                        args.max_files_per_sub_suite
+                        if args.max_files_per_sub_suite is not None
+                        else _FILES_PER_SUBSUITE_OVERRIDES.get(name, 25)
+                    ),
                     guards=args.guards,
                     collect_only=args.collect_only,
                     prepare_only=args.prepare_only,
                     allow_explicit_tiers=args.allow_explicit_tiers,
                     allow_host_state=args.allow_host_state,
-                    test_files=args.test_file,
+                    test_files=tuple(args.test_file),
+                    selection_file=args.selection_file,
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)

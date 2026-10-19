@@ -7,6 +7,7 @@ This document describes the implementation as it exists today. It intentionally 
 | Component | Source | Responsibility |
 |-----------|--------|----------------|
 | CLI | `src/agent_vault/cli.py` | Parses `agent-vault` commands, resolves the active vault on each call, cold-starts the service, performs persistent-cache tier-0 reads, and sends newline-framed JSON requests to the daemon. |
+| Credential reader | `src/agent_vault/credential_reads.py` | Owns the cache-first `get` handler, pinned read-only behavior and authoritative cache reconciliation; the CLI retains its existing handler export and IPC/lifecycle seams. |
 | Service | `src/agent_vault/service.py` | Owns the in-memory KeePass master-password cache and credential-value cache, verifies/unlocks databases, handles entry operations, GCM delegation, KEK operations, endpoint advertisement, and shutdown. |
 | KeePassXC backend | `src/agent_vault/keepassxc.py` | Locates `keepassxc-cli` and maps service actions to `keepassxc-cli` commands. KeePassXC is the only secret-store backend today. |
 | Config resolver | `src/agent_vault/config.py` | Resolves database, group, vault name, port, runtime paths, and config files from env, repo config, extension config, global named vaults, and defaults. |
@@ -14,6 +15,15 @@ This document describes the implementation as it exists today. It intentionally 
 | Extensions | `src/agent_vault/extensions.py`, `src/agent_vault/core_ext.py` | Provides opt-in hooks for unlock providers, daemon actions, transports, config/cache sources, CLI commands, startup hooks, and optional core delegation. |
 
 ## Runtime layout and install modes
+
+Identity pins cross the actual payload dispatchers through shared pure
+`identity_context.py` validation, invoked by
+`scripts/validate_identity_cache_context.py` after the existing installation
+primitive selects the owning cell. Gates preserve only the exact database/cell
+identity cache scope and reject foreign or malformed pins. Delegated
+`identity-key setup --require-running` checks an existing service without
+activation; gates also refuse first-use provisioning for that option.
+Independent provisioning/start remains outside the contained consumer lifetime.
 
 Default runtime home is `~/.agent-vault` (`%USERPROFILE%\.agent-vault` on Windows). Binstubs are written under `~/.local/bin`:
 
@@ -87,6 +97,8 @@ The daemon supports the actions registered in `VaultService.handle_request`:
 - Extension actions registered with `register_action`.
 
 `remove` and `move` are scoped to the resolved vault group unless the caller passes `--force`.
+The unchanged pure group-boundary predicate lives beside entry normalization
+in `config.py`; the service retains its compatibility alias.
 
 ## Persistent cache and KEK storage
 
@@ -113,6 +125,45 @@ KeePass when possible and otherwise remains fail-closed until a later live read.
 A mutation that waits more than 30 seconds for the daemon credential lock
 expires before touching KeePass, so a caller timeout cannot leave a queued write
 that commits later without an observer.
+
+Shared owner-key provisioning is implemented in `identity_key.py`, exposed by
+`identity-key context` and `identity-key setup` in the CLI and
+`identity-key-setup` in the service. It uses the same credential RLock and
+caller replacement lock, but only strict recursive-root listing and live
+password reads establish existence; ordinary best-effort `has`/`list` helpers
+are not used. First-owner consent enables create-only `add`, with the random
+32-byte canonical-base64 value passed exclusively on stdin. Every attempted
+add is authoritatively reread before returning. `identity_key_lock.py` uses
+the existing `SingleInstance` OS lease for a stable sidecar beside the
+canonical database pathname, not an installation/cache-scoped lock. The
+backend rechecks absence inside that lease and keeps parent-group creation
+and the single add under it, preventing two independent identity initializers
+from racing KeePass snapshot writes. Contention is bounded and fail-closed;
+the persistent non-secret sidecar is not unlinked. This does not fence
+noncooperating GUI/CLI writers or independent synchronized copies.
+CLI cache reconciliation
+persists only the selected password; service key responses remain on the
+credential IPC boundary and CLI JSON never carries the key. The read-only
+context returns versioned, explicit pinned selection metadata, including empty
+name/group values. A single validated `AGENT_VAULT_PINNED_CONTEXT` JSON value
+owns database/group/vault/port selection independently of conflicting legacy
+environment variables, and is honored by normal cache-only `get` readers.
+Pinned reads fail closed on malformed metadata or missing selected cache
+entries instead of performing legacy entry migration into a different group.
+The persistent cache's readonly mode also disables legacy wrapping-key
+rewrites and refuses corrupt protected stores rather than reporting them as
+misses; absent caches never provision files on a read. Setup preflights the
+existing cache through that strict read path before any vault contact and
+reports cache-read versus cache-population failures separately.
+Identity context allocates a separate protected-cache directory under the
+selected cache root's `identity/<digest>` namespace. The digest includes
+canonical database path, runtime home and installation ID because ordinary
+cache records identify only entry/field, not database. Explicit cache roots
+are scoped too; already-pinned callers reuse their exact emitted directory.
+The identity CLI instantiates that selected cache directly for population,
+while legacy global-cache selection and contents are unchanged.
+See [shared owner-key setup](../README.md#shared-owner-key-setup) for exact
+flags, synchronization constraints and result shapes.
 
 `seal`/`unseal` use named 32-byte KEKs stored beside the config (`AGENT_VAULT_KEK_DIR` overrides). They require `cryptography` for AES-256-GCM. KEKs are independent of KeePass master passwords, so these commands work while the vault is locked.
 

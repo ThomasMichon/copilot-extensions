@@ -3,7 +3,7 @@
 - **Subject:** Operator-steerable composition of agents, durable work, and planning
 - **Scope:** branch (links focused capability children)
 - **Status:** Active
-- **Last revised:** 2026-10-10
+- **Last revised:** 2026-10-18
 
 ## Purpose & Intent
 
@@ -13,6 +13,11 @@ reactive work while keeping authorization, responsibility, evidence, and human
 control legible. Independent capabilities compose; adopting the factory does not
 require one central stack.
 
+The operator can work through one primary conversational agent, or a small set
+of planning agents, instead of personally managing every implementor's console.
+Conversation develops intent; explicit handover makes accepted execution the
+fleet's durable responsibility.
+
 ## Concepts & Components
 
 These four layers describe responsibilities, not new stores or deployment units.
@@ -21,7 +26,7 @@ These four layers describe responsibilities, not new stores or deployment units.
 |-------|----------------|
 | Base | Portable agents use tools and resources through isolated identity, claims, authorization, bounded capacity, and reliable venue launch and resume. |
 | Task | Durable goals represent issues, efforts, maintenance, incidents, and reviews, with priorities, dependencies, restrictions, acceptance, and one rightful execution owner. |
-| Orchestrator | Specialized agents derive reviewed efforts, issues, and tasks from visions, reality evidence, and operator intent; prioritize within delegated authority and watch and recover the fleet. |
+| Orchestrator | Specialized agents hold standing portfolio charters, synthesize cross-contribution intent and guidance, derive reviewed work, prioritize within delegated authority, and watch and recover the fleet. |
 | Planner | Quick ephemeral operator conversations develop visions, metrics, docs, decisions, and reports; accepted durable intent graduates into the appropriate owning construct. |
 
 The children refine independently meaningful subjects:
@@ -57,13 +62,58 @@ proposals, and derive reviewable work through the existing effort, issue, and
 task owners. They schedule only within delegated priorities and capacity, and
 recover or fence failed execution without inventing a parallel lifecycle.
 
+### standing-portfolio-oversight
+
+A portfolio Orchestrator oversees the full contribution corpus without replacing
+dedicated per-change reviewers. It synthesizes themes and goals across
+contributions, publishes shared guidance, identifies dependencies and conflicting
+scope, and prioritizes within its delegated charter without asking the operator
+about every routine decision. It proposes and drives vision revisions through
+their existing reviewed publication and owner-authorization paths; neither
+oversight nor a vision proposal expands its own authority.
+
+The [reviewer consultation contract](../../plugins/agent-dispatch/reviewer/README.md#portfolio-consultation)
+connects independent reviews to this shared judgment without making the
+Orchestrator an omniscient super-worker or granting it each reviewer's execution
+authority. Dispatch carries durable charter relationships and scoped steering;
+bridge hosts and messages agents, while worktrees retains durable agency.
+
 ### lightweight-planning
 
 Planning conversations can remain ephemeral. Not every question, exploration,
 report, or draft becomes a task. Accepted standing intent belongs in visions or
 decisions; accepted execution belongs in durable goals with explicit acceptance.
 
+### conversational-operator-front-door
+
+A planning agent can develop an idea over several rounds, inspect existing work,
+or receive a bug report, then arrange explicit handover through
+[worktree stewardship](worktree-stewardship/README.md#explicit-conversation-handover).
+It can report health, relay questions and steering, and reprioritize within
+delegated authority without requiring the operator to visit each worker console.
+The planner and portfolio Orchestrator are distinct responsibilities even when
+one agent performs both; conversation alone grants neither a standing charter
+nor broader execution authority.
+
+### durable-portfolio-handles
+
+Accepted work remains discoverable from its originating conversation through
+qualified objective, task, effort, worktree, session and contribution
+relationships. Conversational, CLI and visual clients consume the same
+[fleet observation and control surface](../../machine-fleet/README.md#shared-operator-surfaces).
+The front door retains decisions and durable references rather than becoming
+the sole repository of worker transcripts or progress. A new planning session
+can recover truthful status without reconstructing every execution leg.
+
 ## Behaviors
+
+### reconcile-the-corpus
+
+The Orchestrator coalesces consultations, prioritizes actual blockers and shared
+themes, and avoids repeated unchanged assessments or replies. It periodically
+reconciles the full corpus: summaries and event delivery are useful evidence,
+not the sole truth. Missing or stale evidence remains explicit rather than
+becoming an invented complete picture.
 
 ### inspect-steer-and-return
 
@@ -72,6 +122,12 @@ eligible agents and venues. They can take over and directly drive the same agent
 then explicitly return its agreed charter or withdraw it. Control ownership and
 its revision fence autonomous wakes and reassignment: no silent autonomous
 resumption while the operator owns control.
+
+The primary conversational agent can mediate this interaction or direct the
+operator to the exact worker when hands-on control is useful. Reaching that
+worker does not require browsing unrelated consoles. Routine execution and
+dependency waits stay with their owners; decisions requiring operator judgment
+return as bounded, evidence-backed proposals.
 
 ### canonical-authority-through-partitions
 

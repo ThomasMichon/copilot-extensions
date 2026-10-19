@@ -11,36 +11,30 @@ import asyncio
 import json
 import logging
 import os
-import shlex
 import signal
+import threading
 import time
-from dataclasses import dataclass, replace
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 
 from ..agent_registry import AgentConfig, AgentResolver
-from ..acquisition_gates import AcquisitionGateHeld
 from ..loop_governance import LoopGovernance
-from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
+from ..models import SessionInfo, WorktreeHandoffRequest
 from ..session_manager import (
     DaemonDrainingError,
-    ProviderTargetRefreshError,
     SessionManager,
 )
-from ..worktree_charter import _apply_bound_charter
 from .worktree_binstub import resolve_local_binstub as _resolve_local_binstub
-from .worktree_holders import (
-    chosen_holder_id as _chosen_holder_id,
-    reservation_conflict_detail as _reservation_conflict_detail,
-)
+from .worktree_entry import WorktreeEntry as _WorktreeEntry
+from .worktree_refresh import DiscoveryReadError, ObservedRows, WorktreeRefreshOwner, is_option_unsupported, validate_inventory
+from .worktree_refresh import is_classify_unsupported as _is_classify_unsupported
 from .worktree_probe import (
-    find_worktree_entry as _find_cached_worktree_entry,
+    find_worktree_entry as _find_cached_worktree_entry,  # noqa: F401 -- native resume shares this owner boundary
     owning_agent as _owning_agent,
     probe_archived_owner as _probe_archived_owner,
     probe_live_worktree as _probe_live_worktree,
-    reassign_worktree_ownership as _reassign_worktree_ownership,
-    resolve_already_live as _resolve_already_live,
+    resolve_already_live as _resolve_already_live,  # noqa: F401 -- native resume shares this liveness boundary
 )
 
 log = logging.getLogger("agent-bridge")
@@ -60,103 +54,6 @@ _GOVERNANCE_BACKOFF_SECONDS = 10.0
 _fresh_start_locks: dict[str, asyncio.Lock] = {}
 
 
-@dataclass
-class _WorktreeEntry:
-    """A discovered worktree on a machine."""
-
-    id: str
-    agent_name: str
-    machine: str
-    path: str
-    branch: str
-    status: str
-    title: str | None = None
-    started_at: str | None = None
-    resume_count: int = 0
-    session_count: int = 0
-    turn_count: int = 0
-    # Interactive-mux (wt-<id> tmux/psmux) liveness on the owning machine --
-    # the *second ownership* NF must see (#1883), distinct from a bridge
-    # ACP session.
-    mux_session: bool = False
-    mux_clients: int | None = None
-    mux_attached: bool | None = None
-    # #2668 two-axis taxonomy, surfaced from ``agent-worktrees list --json``.
-    # ``interface`` is cli|acp, ``origin`` is user|system|delegate,
-    # ``picker_hidden`` is the Picker's own visibility verdict. All default
-    # to "unknown/shown" for an older agent-worktrees runtime.
-    interface: str | None = None
-    origin: str | None = None
-    picker_hidden: bool = False
-    # worktree-status-core (#2917/#2956): the agent-asserted disposition
-    # (follow_up + summary) and the derived live-intent pulse. ``summary``
-    # is also what ``agent-dispatch focus`` writes (derive-don't-
-    # duplicate). Freshness is computed at render time, not cached.
-    follow_up: bool = False
-    summary: str | None = None
-    status_note_at: str | None = None
-    live_intent: str | None = None
-    live_intent_at: str | None = None
-    live_intent_idle: bool = False
-    # worktree-finality-and-obligations (Phase 5): the canonical closure
-    # descriptor, surfaced raw/opaque from ``agent-worktrees list --json
-    # --classify``. Only the consumer that knows the current
-    # ``DESCRIPTOR_VERSION`` may treat it as authoritative. Absent on an
-    # older runtime or when git classification wasn't run.
-    closure: dict[str, Any] | None = None
-    # agent-bridge-worktree-native-agents: the charter (spawn profile name)
-    # bound to this worktree at create/embody time, surfaced from
-    # ``agent-worktrees list --json`` as ``bound_agent``. None = unbound
-    # (the venue's default agent drives, today's behavior).
-    bound_agent: str | None = None
-
-    def interactive_cli_state(self) -> str:
-        """Classify interactive-CLI ownership from mux liveness.
-
-        - ``held``    -- a mux session exists, terminal attached (or
-          unknown): a live interactive CLI owns it. Do-not-disturb.
-        - ``at-rest`` -- a mux session exists but detached: still a live
-          process -- reclaim via take-over.
-        - ``none``    -- no interactive mux session holds the worktree.
-        """
-        if not self.mux_session:
-            return "none"
-        if self.mux_attached is False:
-            return "at-rest"
-        return "held"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "agent_name": self.agent_name,
-            "machine": self.machine,
-            "path": self.path,
-            "branch": self.branch,
-            "status": self.status,
-            "title": self.title,
-            "started_at": self.started_at,
-            "resume_count": self.resume_count,
-            "session_count": self.session_count,
-            "turn_count": self.turn_count,
-            "mux_session": self.mux_session,
-            "mux_clients": self.mux_clients,
-            "mux_attached": self.mux_attached,
-            "interactive_cli": self.interactive_cli_state(),
-            "interface": self.interface,
-            "origin": self.origin,
-            "picker_hidden": self.picker_hidden,
-            # worktree-status-core (#2956): disposition + derived live pulse.
-            "follow_up": self.follow_up,
-            "summary": self.summary,
-            "status_note_at": self.status_note_at,
-            "live_intent": self.live_intent,
-            "live_intent_at": self.live_intent_at,
-            "live_intent_idle": self.live_intent_idle,
-            "closure": self.closure,
-            "bound_agent": self.bound_agent,
-        }
-
-
 class WorktreeDiscoveryCache:
     """In-memory cache for discovered worktrees.
 
@@ -170,8 +67,14 @@ class WorktreeDiscoveryCache:
         self._interval = interval
         self._task: asyncio.Task[None] | None = None
         self._resolver: AgentResolver | None = None
-        self._crawl_lock = asyncio.Lock()
+        self._refresh = WorktreeRefreshOwner()
         self._governance: LoopGovernance | None = None
+        self._owner_thread: threading.Thread | None = None
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
+        # Python 3.10 has no Task.cancelling(); track cancellation
+        # requests ourselves so worktree_runtime.capture_worktrees() can
+        # detect an in-progress cancel without that 3.11-only API.
+        self._cancel_requested = False
         # worktree-finality-and-obligations (Phase 5): the classify-backfill
         # tasks crawl_if_empty() spawns must obey the same daemon lifecycle as
         # the periodic loop -- retained here so stop() can cancel/await them
@@ -185,6 +88,7 @@ class WorktreeDiscoveryCache:
         # classify probe on every periodic sweep. Mirrors the Picker's own
         # per-source `use_classify` caching (picker_tui.data_ssh).
         self._classify_unsupported: set[str] = set()
+        self._fresh_unsupported: set[str] = set()
         # Coalesce concurrent same-id archived probes onto one in-flight
         # task instead of an N-agent stampede per call.
         self._archive_probe_inflight: dict[
@@ -209,9 +113,18 @@ class WorktreeDiscoveryCache:
         governance: LoopGovernance | None = None,
     ) -> None:
         """Start periodic discovery in the background (if interval > 0)."""
+        if self._refresh.closed:
+            if self._refresh.pending:
+                raise RuntimeError("Worktree discovery still owns a shutdown refresh")
+            self._refresh = WorktreeRefreshOwner()
+            self._cache = {}
+        self._sync_sources(resolver)
         self._resolver = resolver
         self._governance = governance
+        self._owner_thread = threading.current_thread()
+        self._owner_loop = asyncio.get_running_loop()
         if self._interval > 0:
+            self._cancel_requested = False
             self._task = asyncio.create_task(
                 self._loop(resolver), name="worktree-discovery",
             )
@@ -220,19 +133,24 @@ class WorktreeDiscoveryCache:
                 self._interval,
             )
         else:
+            # A completed (possibly cancelled) task from a prior
+            # periodic run must not linger: capture_worktrees() refuses
+            # any retained completed task regardless of the cancel flag.
+            self._task = None
+            self._cancel_requested = False
             log.info("Worktree periodic discovery disabled (on-demand only)")
 
     async def stop(self) -> None:
+        await self._refresh.close()
         if self._task and not self._task.done():
+            self._cancel_requested = True
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        # Same shutdown discipline for classify backfills
-        # (#discussion_r4004943069) and in-flight archived-owner / live
-        # probes: cancel/await so none outlives the rest of application
-        # shutdown.
+        # Cancel scheduling/joining wrappers, not the refresh they observe.
+        # Exact-ID probes retain their existing cancellation policy.
         for pending in (
             [t for t in self._backfill_tasks if not t.done()],
             [t for t in self._archive_probe_inflight.values() if not t.done()],
@@ -250,6 +168,34 @@ class WorktreeDiscoveryCache:
 
     def get_all(self) -> dict[str, list[_WorktreeEntry]]:
         return dict(self._cache)
+
+    def _sync_sources(self, resolver: AgentResolver | None) -> None:
+        self._cache = self._refresh.sync_sources(
+            resolver, self._cache, self._classify_unsupported, self._fresh_unsupported,
+        )
+
+    def render_snapshot(self) -> dict[str, Any]:
+        self._sync_sources(self._resolver)
+        if self._refresh.needs_refresh(max_age=max(30.0, self._interval)):
+            self._ensure_warm()
+        return self._refresh.metadata(max_age=max(30.0, self._interval))
+
+    def _ensure_warm(self) -> asyncio.Task[None] | None:
+        resolver = self._resolver
+        if resolver is None:
+            return None
+        return self._refresh.warm(
+            lambda epoch: self._do_crawl(resolver, classify=False, epoch=epoch),
+            lambda: self._backfill_classify(resolver), self._backfill_tasks,
+        )
+
+    async def refresh_live(self) -> dict[str, Any]:
+        self._sync_sources(self._resolver)
+        task = self._refresh.ensure(
+            lambda epoch: self._do_crawl(self._resolver, classify=True, fresh=True, epoch=epoch),
+            live=True,
+        )
+        return await self._refresh.wait(task)
 
     async def probe_archived(
         self, worktree_id: str, resolver: AgentResolver,
@@ -298,28 +244,17 @@ class WorktreeDiscoveryCache:
     async def crawl_if_empty(self) -> None:
         """Trigger a crawl only if the cache has no data yet.
 
-        Uses the crawl lock to prevent concurrent callers from stampeding
-        multiple crawls simultaneously.
-
-        worktree-finality-and-obligations (Phase 5): this FIRST, blocking
-        crawl never attempts ``--classify`` -- it mirrors the Picker's own
-        fast-then-classify two-phase pattern so a slow/old target never
-        turns "no cache yet" into an ~90s stall for whichever request
-        arrives first. A classify pass is kicked off as a fire-and-forget
-        background backfill immediately after, tracked in
-        ``_backfill_tasks`` so :meth:`stop` can cancel/await it.
+        Legacy cold requests wait for the fast, unclassified first pass.
+        Both it and its classify backfill use the retained refresh owner;
+        abandoning this wait cannot cancel a source's work.
         """
         if self._cache or not self._resolver:
             return
-        async with self._crawl_lock:
-            if self._cache:
-                return
-            await self._do_crawl(self._resolver, classify=False)
-        task = asyncio.create_task(
-            self._backfill_classify(self._resolver), name="worktree-classify-backfill",
-        )
-        self._backfill_tasks.add(task)
-        task.add_done_callback(self._backfill_tasks.discard)
+        self._sync_sources(self._resolver)
+        task = self._ensure_warm()
+        if task is None:
+            return
+        await asyncio.shield(task)
 
     async def _backfill_classify(self, resolver: AgentResolver) -> None:
         """Fire-and-forget classify backfill after the fast first paint.
@@ -328,49 +263,39 @@ class WorktreeDiscoveryCache:
         (no ``closure``) state until the next successful crawl.
         """
         try:
-            if self._crawl_lock.locked():
+            if self._refresh.pending or self._refresh.closed:
                 return
-            async with self._crawl_lock:
-                await self._do_crawl(resolver, classify=True)
+            await self.crawl(resolver)
         except Exception:
             log.exception("Worktree classify backfill failed")
 
     async def crawl(self, resolver: AgentResolver) -> None:
-        """Crawl all eligible agents -- **single-flight**.
+        """Join the retained discovery holder, shielded from caller cancellation."""
+        self._sync_sources(resolver)
+        task = self._refresh.ensure(
+            lambda epoch: self._do_crawl(resolver, classify=True, epoch=epoch),
+        )
+        if task is not None:
+            await asyncio.shield(task)
 
-        Only one crawl runs at a time; an overlapping caller (a slow
-        periodic tick, an on-demand request) coalesces onto the running
-        crawl instead of spawning a second, duplicate set of
-        ``agent-worktrees list`` subprocesses (the owner-tethered spawn
-        discipline -- see the ``process-slot-ownership`` effort). Each
-        individual ``list`` is still bounded by ``_CMD_TIMEOUT``; this
-        bounds their **concurrency** to one.
-        """
-        if self._crawl_lock.locked():
-            # A crawl is in flight -- wait for it and reuse its result
-            # rather than starting an overlapping one.
-            async with self._crawl_lock:
-                return
-        async with self._crawl_lock:
-            await self._do_crawl(resolver, classify=True)
-
-    async def _do_crawl(self, resolver: AgentResolver, *, classify: bool = True) -> None:
+    async def _do_crawl(
+        self, resolver: AgentResolver | None, *, epoch: int,
+        classify: bool = True, fresh: bool = False,
+    ) -> None:
         """Crawl all eligible agents concurrently (the actual work).
 
-        Callers hold ``_crawl_lock`` around this, so at most one crawl's
-        worth of ``list`` subprocesses is ever in flight. ``classify=False``
-        is the fast, bounded first-paint pass (:meth:`crawl_if_empty`);
-        ``classify=True`` is the periodic loop and the background backfill.
+        Only the refresh owner starts this operation. Publication is atomic
+        and fenced against source replacement or shutdown.
         """
+        self._sync_sources(self._resolver if self._resolver is not None else resolver)
+        if resolver is None or not self._refresh.current(epoch):
+            return
         eligible = [
             (name, cfg) for name, cfg in resolver.agents.items()
             if cfg.project and cfg.worktree_discovery
         ]
-        if not eligible:
-            return
-
         results = await asyncio.gather(
-            *(self._crawl_agent(name, cfg, resolver, classify=classify)
+            *(self._crawl_agent(name, cfg, resolver, epoch=epoch, classify=classify, **({"fresh": True} if fresh else {}))
               for name, cfg in eligible),
             return_exceptions=True,
         )
@@ -381,11 +306,26 @@ class WorktreeDiscoveryCache:
                 f"{result.get('reason')}"
             )
 
+        self._sync_sources(self._resolver if self._resolver is not None else resolver)
+        if not self._refresh.current(epoch):
+            return
+        updated = dict(self._cache)
+        errors: dict[str, str | None] = {}
+        observations: dict[str, float] = {}
         for (name, _), result in zip(eligible, results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 log.warning("Worktree discovery failed for %s: %s", name, result)
+                errors[name] = (
+                    str(result) if isinstance(result, DiscoveryReadError) else "source-read-failed"
+                )
             else:
-                self._cache[name] = result
+                updated[name] = result
+                errors[name] = None
+                observed = getattr(result, "observed", None)
+                if observed is not None:
+                    observations[name] = observed
+        self._cache = updated
+        self._refresh.published(epoch, errors, observed=observations)
 
     async def _crawl_agent(
         self,
@@ -393,7 +333,9 @@ class WorktreeDiscoveryCache:
         config: AgentConfig,
         resolver: AgentResolver,
         *,
+        epoch: int | None = None,
         classify: bool = True,
+        fresh: bool = False,
     ) -> list[_WorktreeEntry]:
         """List worktrees for a single agent via subprocess or SSH.
 
@@ -402,8 +344,13 @@ class WorktreeDiscoveryCache:
         first-paint crawl so a synchronous caller is never exposed to the
         longer classify budget.
         """
-        if not config.project:
+        project = config.project
+        if epoch is None:
+            epoch = self._refresh.epoch
+        if not project:
             return []
+        if fresh and agent_name in self._fresh_unsupported:
+            raise DiscoveryReadError("source-refresh-unsupported")
 
         is_local = not config.host
         host: str | None = None
@@ -414,7 +361,7 @@ class WorktreeDiscoveryCache:
                 target = resolver.resolve(agent_name)
             except (KeyError, ValueError) as exc:
                 log.warning("Cannot resolve agent %s for discovery: %s", agent_name, exc)
-                return []
+                raise DiscoveryReadError("source-unavailable") from exc
             # If the resolved target is the local machine, run locally
             # instead of SSH (avoids loopback SSH failures)
             if _is_local_target(target.host, resolver, target.execution_space_key):
@@ -425,18 +372,23 @@ class WorktreeDiscoveryCache:
 
         async def _run(args: list[str], *, timeout: float | None = None):
             if is_local:
-                return await _run_local_ex(config.project, args, timeout=timeout)
+                return await _run_local_ex(project, args, timeout=timeout)
             return await _run_ssh_ex(
-                host=host, user=user, project=config.project, args=args,
+                host=host, user=user, project=project, args=args,
                 timeout=timeout,
             )
 
-        legacy_args = ["list", "--json", "--mux-details"]
+        legacy_args = ["list", "--json", "--mux-details", *(["--fresh"] if fresh else [])]
         if not classify or agent_name in self._classify_unsupported:
-            raw, _stderr = await _run(legacy_args)
+            raw, stderr = await _run(legacy_args)
             if raw is None:
-                return []
-            return _parse_worktree_list(raw, agent_name)
+                if fresh and is_option_unsupported(stderr, "--fresh"):
+                    if self._refresh.current(epoch):
+                        self._fresh_unsupported.add(agent_name)
+                    raise DiscoveryReadError("source-refresh-unsupported")
+                raise DiscoveryReadError("source-read-failed")
+            observed = validate_inventory(raw, fresh=fresh)
+            return ObservedRows(_parse_worktree_list(raw, agent_name), observed)
 
         # worktree-finality-and-obligations (Phase 5): --classify is included
         # so the crawl carries the canonical closure descriptor through to
@@ -452,28 +404,38 @@ class WorktreeDiscoveryCache:
         #      older agent-worktrees runtime falls back the same way. The
         #      verdict is cached per agent (``_classify_unsupported``) so a
         #      long-lived daemon probes a permanently-old runtime once.
-        classify_args = ["list", "--json", "--mux-details", "--classify"]
+        classify_args = [*legacy_args, "--classify"]
 
         raw, stderr = await _run(classify_args, timeout=_CLASSIFY_CMD_TIMEOUT)
         if raw is None:
+            if fresh and is_option_unsupported(stderr, "--fresh"):
+                if self._refresh.current(epoch):
+                    self._fresh_unsupported.add(agent_name)
+                raise DiscoveryReadError("source-refresh-unsupported")
             if stderr and _is_classify_unsupported(stderr):
                 log.info(
                     "agent %s: --classify unsupported by remote agent-worktrees; "
-                    "falling back to unclassified list (cached for future crawls)",
+                    "falling back to unclassified list",
                     agent_name,
                 )
-                self._classify_unsupported.add(agent_name)
+                if self._refresh.current(epoch):
+                    self._classify_unsupported.add(agent_name)
             else:
                 log.warning(
                     "agent %s: classified worktree list failed/timed out; "
                     "falling back to unclassified list", agent_name,
                 )
-            raw, _stderr = await _run(legacy_args)
+            raw, stderr = await _run(legacy_args)
 
         if raw is None:
-            return []
+            if fresh and is_option_unsupported(stderr, "--fresh"):
+                if self._refresh.current(epoch):
+                    self._fresh_unsupported.add(agent_name)
+                raise DiscoveryReadError("source-refresh-unsupported")
+            raise DiscoveryReadError("source-read-failed")
 
-        return _parse_worktree_list(raw, agent_name)
+        observed = validate_inventory(raw, fresh=fresh)
+        return ObservedRows(_parse_worktree_list(raw, agent_name), observed)
 
     async def _loop(self, resolver: AgentResolver) -> None:
         first_pass = True
@@ -529,41 +491,42 @@ def _is_local_target(
 
 async def _run_ssh(
     host: str, user: str | None, project: str, args: list[str] | None = None,
-    *, timeout: float | None = None,
+    *, timeout: float | None = None, ssh_shell: str | None = None,
 ) -> str | None:
     """Run ``<project> <args>`` on a remote machine via SSH."""
     stdout, _stderr = await _run_ssh_ex(
         host=host, user=user, project=project, args=args, timeout=timeout,
+        **({"ssh_shell": ssh_shell} if ssh_shell is not None else {}),
     )
     return stdout
 
 
 async def _run_ssh_ex(
     host: str | None, user: str | None, project: str,
-    args: list[str] | None = None, *, timeout: float | None = None,
+    args: list[str] | None = None, *, timeout: float | None = None, ssh_shell: str | None = None,
 ) -> tuple[str | None, str]:
-    """Like :func:`_run_ssh`, also returning stderr (empty on success)."""
-    ssh_target = f"{user}@{host}" if user else host
-    sub = " ".join(shlex.quote(a) for a in (args if args is not None else ["list", "--json"]))
-    remote_cmd = f"{shlex.quote(project)} {sub}"
+    """Run the profile and return stdout/stderr.
+
+    The legacy ``user`` keyword stays accepted for caller compatibility but
+    never overrides the SSH profile's login user.
+    """
+    if not host:
+        raise ValueError("SSH target requires a host (SSH alias)")
+    from ..worktree_owner_operation import owner_ssh_command
+
+    remote_cmd = owner_ssh_command(
+        project, args if args is not None else ["list", "--json"], ssh_shell,
+    )
 
     cmd = [
         "ssh",
         "-o", "ConnectTimeout=10",
         "-o", "BatchMode=yes",
         "-T",
-        ssh_target,
+        host,
         remote_cmd,
     ]
     return await _exec_ex(cmd, timeout=timeout)
-
-
-def _is_classify_unsupported(stderr: str) -> bool:
-    """True if *stderr* is agent-worktrees rejecting an unrecognized
-    ``--classify`` flag (an older agent-worktrees runtime). Mirrors
-    ``picker_tui.data_ssh._is_classify_unsupported``."""
-    s = stderr or ""
-    return "unrecognized arguments" in s and "--classify" in s
 
 
 async def _exec(cmd: list[str], *, timeout: float | None = None) -> str | None:
@@ -664,8 +627,11 @@ def _parse_worktree_list(raw: str, agent_name: str) -> list[_WorktreeEntry]:
 
     entries: list[_WorktreeEntry] = []
     for w in items:
+        if not isinstance(w, dict):
+            log.warning("Invalid worktree row from %s", agent_name)
+            continue
         wt_id = w.get("id") or w.get("name", "")
-        if not wt_id:
+        if not isinstance(wt_id, str) or not wt_id:
             continue
         entries.append(_WorktreeEntry(
             id=wt_id,
@@ -709,11 +675,25 @@ def get_cache() -> WorktreeDiscoveryCache:
     return _discovery_cache
 
 
+def cache_for_app(app: FastAPI) -> WorktreeDiscoveryCache:
+    """Use the lifespan's retained cache, with legacy lookup for detached apps."""
+    if hasattr(app.state, "worktree_discovery_cache"):
+        cache = app.state.worktree_discovery_cache
+        if not isinstance(cache, WorktreeDiscoveryCache):
+            raise RuntimeError("Application worktree cache ownership is invalid")
+        return cache
+    return get_cache()
+
+
 # -- Route handlers -----------------------------------------------------------
 
 
 @router.get("/api/v1/worktrees")
-async def list_worktrees(request: Request) -> dict[str, Any]:
+async def list_worktrees(
+    request: Request,
+    render: bool = Query(False),
+    refresh: bool = Query(False),
+) -> dict[str, Any]:
     """List discovered worktrees across all agents, grouped by agent name.
 
     Returns all worktrees reported by each machine's binstub.  Worktrees
@@ -747,11 +727,18 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
       (detached but running), or ``none`` -- so a consumer can render a
       do-not-disturb badge and route to take-over instead of a blind connect
 
-    First request triggers an on-demand crawl when periodic discovery is
-    disabled (subsequent requests return cached results).
+    ``render=true`` opts into prompt cache-only rendering with warming/stale
+    evidence. Unversioned cold requests retain the blocking first crawl.
+    ``refresh=true`` joins one owned refresh for at most ten wall seconds;
+    expiry never releases or cancels that holder.
     """
-    cache = get_cache()
-    await cache.crawl_if_empty()
+    cache = cache_for_app(request.app)
+    refresh_result = None
+    if refresh:
+        refresh_result = await cache.refresh_live()
+    elif not render:
+        await cache.crawl_if_empty()
+    metadata = cache.render_snapshot() if render and not refresh else cache._refresh.metadata()
     groups = cache.get_all()
 
     # Build worktree_id -> latest bridge session map for linkage. A worktree
@@ -793,6 +780,8 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
             name: [_decorate(wt) for wt in worktrees]
             for name, worktrees in groups.items()
         },
+        "discovery": metadata,
+        **({"refresh": refresh_result} if refresh_result is not None else {}),
     }
 
 def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
@@ -805,323 +794,14 @@ def _latest_session_for_worktree(mgr: Any, worktree_id: str) -> Any:
     return None
 
 
-async def _start_fresh_worktree_session(
-    worktree_id: str, request: Request, mgr: Any, reclaim: bool
-) -> Any:
-    """Start a *fresh* owned ACP session in an existing worktree that has no
-    prior bridge session (#1683), or None if it can't be resolved/started.
-
-    Resolves the worktree's owning agent + on-disk path from the discovery
-    cache and spawns a target scoped to that worktree directory -- keeps
-    "take over a worktree whose interactive Copilot never persisted a
-    session" working instead of 404-ing after the mux Copilot was killed.
-
-    Serialized on a per-worktree lock (local/SSH targets aren't
-    hard-guarded by the SessionManager) so two concurrent resumes can't
-    each spawn a second owned controller. Returns the new (or raced-in)
-    ``Session``, or None when unresolvable (caller then 404s). Raises 409
-    on a raced-in live CLI and 502/503 on spawn failure.
-    """
-    if mgr is None:
-        return None
-    resolver = getattr(request.app.state, "resolver", None)
-    if resolver is None:
-        return None
-
-    owner_agent, entry = await _find_cached_worktree_entry(worktree_id, resolver)
-    if entry is None or owner_agent is None:
-        return None
-    if not entry.path:
-        # Defense in depth alongside the live probe's own exclusion of
-        # reaped/tombstoned records (review #3121): even a cache-sourced
-        # entry must carry a usable on-disk path before we spawn a fresh
-        # session into it.
-        log.warning(
-            "resume_worktree %s: resolved entry has no on-disk path; "
-            "refusing fresh-session fallback", worktree_id,
-        )
-        return None
-
-    lock = _fresh_start_locks.setdefault(worktree_id, asyncio.Lock())
-    async with lock:
-        # Re-check under the lock (we awaited on the crawl above): a concurrent
-        # resume may have already created the session, or a live interactive CLI
-        # may have registered -- either way, do not spawn a second controller.
-        raced = _latest_session_for_worktree(mgr, worktree_id)
-        if raced is not None:
-            # A concurrent fresh-start that connect-failed leaves a FAILED
-            # session registered -- surface that as a 502 too, not a healthy 200.
-            if getattr(raced, "status", None) == SessionStatus.FAILED:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        f"Fresh session for worktree {worktree_id} failed to "
-                        "start (connect/spawn error)"
-                    ),
-                )
-            return raced
-        if not reclaim:
-            db = getattr(request.app.state, "db", None)
-            if db is not None:
-                holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
-                if holders:
-                    # A live CLI registered during discovery -- return the same
-                    # structured 409 the top-of-resume guard uses (consumers map
-                    # it to "represent read-only"), not a misleading 404.
-                    raise HTTPException(
-                        status_code=409,
-                        detail={
-                            "reason": "live_cli_holds_worktree",
-                            "worktree_id": worktree_id,
-                            "session_id": _chosen_holder_id(holders),
-                        },
-                    )
-
-        try:
-            target = resolver.resolve(owner_agent)
-        except (KeyError, ValueError) as exc:
-            log.warning(
-                "resume_worktree %s: cannot resolve owning agent %s for a fresh "
-                "session: %s", worktree_id, owner_agent, exc,
-            )
-            return None
-        target = _apply_bound_charter(target, resolver, entry, worktree_id)
-
-        # Scope the agent's spawn target to this worktree's directory + id (the
-        # same augmentation a session roll / new-owned-chat applies), so the
-        # fresh ACP session lands in the right worktree and is discoverable by
-        # worktree id.
-        target = replace(target, worktree_id=worktree_id, cwd=entry.path)
-        try:
-            fresh = await mgr.start_session(
-                target, agent_name=owner_agent, caller_id=worktree_id,
-            )
-        except DaemonDrainingError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except Exception as exc:
-            log.warning(
-                "resume_worktree %s: fresh session start failed: %s",
-                worktree_id, exc,
-            )
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"Could not start a fresh session for worktree "
-                    f"{worktree_id}: {exc}"
-                ),
-            ) from exc
-        # start_session catches spawn/connection failures and returns a FAILED
-        # session rather than raising -- surface that as a 502, not a healthy 200.
-        if getattr(fresh, "status", None) == SessionStatus.FAILED:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"Fresh session for worktree {worktree_id} failed to start "
-                    "(connect/spawn error)"
-                ),
-            )
-        # Claim the per-worktree ownership reservation for the fresh owned
-        # session (#2912). The pre-spawn live-holder recheck above doesn't
-        # cover mgr.start_session's own (slow, awaited) window, so this
-        # result must be checked, not assumed.
-        db = getattr(request.app.state, "db", None)
-        if db is not None and not db.reserve_worktree_ownership(
-            worktree_id, fresh.session_id, now=time.time(), reclaim=reclaim
-        ):
-            try:  # 'fresh' already started -- best-effort cleanup, don't leak it.
-                await mgr.end_session(fresh.session_id, force=True)
-            except Exception:
-                log.warning("resume_worktree %s: fresh cleanup failed", worktree_id, exc_info=True)
-            raise HTTPException(
-                status_code=409, detail=_reservation_conflict_detail(db, worktree_id)
-            )
-        return fresh
-
-
 @router.post("/api/v1/worktrees/{worktree_id}/resume", response_model=SessionInfo)
 async def resume_worktree(
     worktree_id: str, request: Request, reclaim: bool = False, strict: bool = False
 ) -> SessionInfo:
-    """Resume a worktree by ensuring it has a live session.
+    """Keep the original HTTP shape while always preserving the native head."""
+    from ..worktree_native_resume import resume_native_worktree
 
-    Worktree-level convenience verb: finds the current (most recent) session
-    for the worktree and ensures it is live.
-
-    - An already-live session is returned as-is.
-    - A stopped session is resumed (ACP load_session reuses the same acp
-      session id).
-    - If that session can no longer be resumed (e.g. old/finalized
-      worktrees), fall back to starting a fresh session in the same
-      worktree directory, since it still exists on disk.
-
-    **Atomic ownership guard (#2879).** If a *fresh* live interactive
-    Copilot CLI already holds this worktree, refuse to resume it as an
-    OWNED ACP session and return **409** (``reason: live_cli_holds_
-    worktree``) -- owning it would spawn a second ``copilot`` child on the
-    same worktree and the two would contend. This is race-free, unlike a
-    consumer's best-effort represent-if-live preflight. ``reclaim=true``
-    bypasses the guard: the caller has just terminated the interactive CLI.
-
-    ``strict=true`` is the **identity-preserving contract**: a caller that
-    needs the GUARANTEE it gets back the exact existing conversation (or a
-    clear refusal), never a silent replacement. It disables BOTH fresh-
-    session fallbacks below -- a missing bridge record and a failed resume
-    each raise **409** (``reason: resume_requires_existing_session``)
-    instead of starting a new session under this worktree. Default False
-    preserves today's behavior (a taken-over or resume-exhausted worktree
-    stays usable via a fresh session).
-
-    Returns 404 if the worktree has no session at all and ``strict`` is
-    False. Under ``strict=true`` that same case returns **409**
-    (``reason: resume_requires_existing_session``), never 404 -- the
-    identity-preserving contract's refusal status, not the non-strict
-    not-found status.
-    """
-    from .sessions import _session_info
-
-    db = getattr(request.app.state, "db", None)
-    if not reclaim and db is not None:
-        holders = db.list_fresh_live_sessions(worktree_id, now=time.time())
-        if holders:
-            chosen_id = _chosen_holder_id(holders)
-            log.info(
-                "resume_worktree %s refused: fresh live CLI %s holds it "
-                "(represent read-only)",
-                worktree_id, chosen_id,
-            )
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason": "live_cli_holds_worktree",
-                    "worktree_id": worktree_id,
-                    "session_id": chosen_id,
-                },
-            )
-
-    def _strict_refusal(reason_detail: str) -> HTTPException:
-        return HTTPException(
-            status_code=409, detail={"reason": "resume_requires_existing_session",
-                                    "worktree_id": worktree_id, "detail": reason_detail},
-        )
-
-    mgr = getattr(request.app.state, "session_manager", None)
-    session = _latest_session_for_worktree(mgr, worktree_id)
-    if session is None:
-        # No bridge session has ever existed for this worktree (e.g. a bare
-        # interactive Copilot that took no turn, or a just-taken-over worktree
-        # whose interactive CLI never persisted an ACP session). The worktree
-        # still exists on disk, so -- rather than 404 and leave a taken-over
-        # worktree unusable (#1683) -- start a *fresh* owned session in it,
-        # UNLESS the caller asked for the strict identity-preserving contract.
-        if strict:
-            raise _strict_refusal(f"no existing session for worktree {worktree_id}")
-        fresh = await _start_fresh_worktree_session(
-            worktree_id, request, mgr, reclaim
-        )
-        if fresh is not None:
-            return _session_info(fresh)
-        raise HTTPException(
-            status_code=404,
-            detail=f"No session found for worktree {worktree_id}",
-        )
-
-    # Ownership reservation (#2912): take the per-worktree ACP-ownership
-    # reservation before resuming, so a live-CLI registration must respect
-    # it. Atomic across processes; ``reclaim`` force-takes it. A False
-    # result means either a fresh live CLI raced it, or another active ACP
-    # reservation owns it -- see worktree_holders.reservation_conflict_detail.
-    if db is not None:
-        reserved = db.reserve_worktree_ownership(
-            worktree_id, session.session_id, now=time.time(), reclaim=reclaim
-        )
-        if not reserved:
-            detail = _reservation_conflict_detail(db, worktree_id)
-            log.info(
-                "resume_worktree %s refused: %s (session %s)",
-                worktree_id, detail["reason"], detail["session_id"],
-            )
-            raise HTTPException(status_code=409, detail=detail)
-
-    if await _resolve_already_live(mgr, worktree_id, session):  # live-checked, #6744
-        return _session_info(session)
-
-    try:
-        resumed = await mgr.resume_session(session.session_id)
-        return _session_info(resumed)
-    except KeyError as exc:
-        # A concurrent removal between the `_latest_session_for_worktree`
-        # lookup above and this resume call (e.g. a racing cleanup) -- under
-        # the strict identity-preserving contract this is the exact same
-        # "resume failed" case the generic ``Exception`` branch below
-        # refuses for, not a 404 a non-strict caller's singleton fallback
-        # would otherwise treat as license to spawn a fresh replacement.
-        if strict:
-            raise _strict_refusal(
-                f"resume of session {session.session_id} failed: {exc}"
-            ) from exc
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session {session.session_id} not found",
-        ) from exc
-    except ValueError as exc:
-        if isinstance(exc, AcquisitionGateHeld):
-            raise HTTPException(409, detail={"reason": "acquisition_launch_gate_held"}) from exc
-        log.info("resume_worktree %s: %s; returning current state", worktree_id, exc)
-        return _session_info(session)
-    except ProviderTargetRefreshError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=ProviderTargetRefreshError.public_message,
-        ) from exc
-    except Exception as exc:
-        # Resume failed (e.g. ACP session gone). Fall back to a fresh session
-        # in the same worktree so the worktree remains usable -- UNLESS the
-        # caller asked for the strict identity-preserving contract, in which
-        # case a failed resume must be a clear refusal, never a silent
-        # replacement conversation.
-        if strict:
-            raise _strict_refusal(
-                f"resume of session {session.session_id} failed: {exc}"
-            ) from exc
-        log.warning(
-            "resume_worktree %s: resume of %s failed (%s); starting fresh session",
-            worktree_id, session.session_id, exc,
-        )
-        restart_target = session.target
-        resolver = getattr(request.app.state, "resolver", None)
-        if resolver is not None:
-            owner_agent, cached_entry = await _find_cached_worktree_entry(
-                worktree_id, resolver,
-            )
-            if cached_entry is not None and owner_agent is not None:
-                # Re-resolve a CLEAN venue target rather than layering onto
-                # ``session.target`` -- a session created through the fresh-
-                # spawn path already carries the charter's copilot_args, so
-                # re-applying the charter on top would append them a second
-                # time on every resume-failed restart (review #3163).
-                try:
-                    restart_target = replace(
-                        resolver.resolve(owner_agent),
-                        worktree_id=worktree_id, cwd=cached_entry.path,
-                    )
-                except (KeyError, ValueError):
-                    restart_target = session.target
-                restart_target = _apply_bound_charter(
-                    restart_target, resolver, cached_entry, worktree_id,
-                )
-        try:
-            fresh = await mgr.start_session(
-                restart_target,
-                agent_name=session.agent_name, caller_id=session.caller_id,
-                caller_session_id=getattr(session, "caller_session_id", None),
-            )
-        except Exception as start_exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Could not resume or restart worktree {worktree_id}: {start_exc}",
-            ) from start_exc
-        _reassign_worktree_ownership(db, worktree_id, fresh.session_id)  # #3142
-        return _session_info(fresh)
+    return await resume_native_worktree(worktree_id, request, "acp", reclaim=reclaim, strict=strict)
 
 
 @router.post("/api/v1/worktrees/{worktree_id}/handoff", response_model=SessionInfo)
@@ -1270,6 +950,7 @@ async def _run_for_agent(
         user=target.user or config.ssh_user,
         project=config.project,
         args=args,
+        **({"ssh_shell": target.ssh_shell} if target.ssh_shell in {"pwsh", "powershell", "cmd"} else {}),
     )
 
 
@@ -1287,7 +968,7 @@ async def list_worktree_sessions(
     For the worktree's full head-succession/fork-lineage graph, see
     ``GET /api/v1/worktrees/{id}/lineage`` instead.
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     await cache.crawl_if_empty()
 
     owner = await _owning_agent(worktree_id, request)
@@ -1341,7 +1022,7 @@ async def get_worktree_lineage(
     to ``<project> worktree-lineage --worktree <id> --json`` on the
     machine that owns the worktree.
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     await cache.crawl_if_empty()
 
     owner = await _owning_agent(worktree_id, request)
@@ -1392,7 +1073,7 @@ async def get_worktree_session_transcript(
     nothing for this session (mirrors ``get_session``'s bare-lookup
     fallback).
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     await cache.crawl_if_empty()
 
     owner = await _owning_agent(worktree_id, request)
@@ -1470,7 +1151,7 @@ async def restart_worktree_copilot(
     ``{worktree_id, had_session, method, ok}`` (``method``: none | graceful |
     hard | failed).
     """
-    cache = get_cache()
+    cache = cache_for_app(request.app)
     await cache.crawl_if_empty()
 
     owner = await _owning_agent(worktree_id, request)

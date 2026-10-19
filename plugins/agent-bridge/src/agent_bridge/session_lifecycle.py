@@ -61,14 +61,23 @@ class _SessionLifecycleMixin:
             with contextlib.suppress(BaseException):
                 await task
         if session.client:
+            client = session.client
+            accepted_sid = client.acp_session_id if session.target.type == "remote-acp" else None
             try:
-                await session.client.shutdown()
+                await client.shutdown()
             except Exception:
                 log.warning(
                     "ACP client shutdown failed while tearing down session %s",
                     session.session_id, exc_info=True,
                 )
-            session.client = None
+            if session.client is client:
+                if session.target.type == "remote-acp":
+                    accepted_sid = client.acp_session_id or accepted_sid
+                    if accepted_sid:
+                        session.acp_session_id = accepted_sid
+                        self._db.update_session_acp_id(session.session_id, accepted_sid)
+                        session.event_log.set_telemetry_identity(acp_session_id=accepted_sid)
+                session.client = None
         # Clean up unused worktrees (0-turn sessions from crash-loops)
         try:
             await _cleanup_worktree(session.target, session.turn_count)
@@ -134,6 +143,7 @@ class _SessionLifecycleMixin:
         content: dict[str, Any] | None,
         *,
         action: str = "accept",
+        request_id: str | None = None,
     ) -> bool:
         """Answer a parked ``ask_user`` elicitation on a live session.
 
@@ -152,6 +162,7 @@ class _SessionLifecycleMixin:
             raise ValueError(f"Session {session_id} has no live ACP client")
         return session.client.resolve_elicitation(
             tool_call_id, content, action=action,
+            **({"request_id": request_id} if request_id is not None else {}),
         )
 
     async def answer_permission(
@@ -498,4 +509,3 @@ class _SessionLifecycleMixin:
         log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
 
     # -- Context-aware in-place handoff --------------------------------------
-

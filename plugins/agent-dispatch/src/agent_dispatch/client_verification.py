@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from .coordinator_auth import scoped_control_token
-
-
 class VerificationClientMixin:
     """Coordinator calls for whole-goal verification and detached run waiters."""
 
@@ -15,6 +12,8 @@ class VerificationClientMixin:
     def append_event_note(self, task_id: str, *, sender: str, note: str) -> dict:
         headers = dict(self._control_headers())
         if self._control_token:
+            from .control_token import scoped_control_token
+
             headers["X-Agent-Dispatch-Sender-Proof"] = scoped_control_token(
                 self._control_token,
                 f"event-note:{sender}",

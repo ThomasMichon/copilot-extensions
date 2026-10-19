@@ -69,6 +69,99 @@ actions) and per-machine data stay in the consuming repo.
 
 For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 
+## Explicit installation repair
+
+`installation-repair` is separate from requirement-package restore. It discovers
+enabled, attributable plugin-owned `installer-readiness.json` contracts for the
+current project and global settings. Discovery never invokes an installer;
+selecting qualified modules observes their transitive same-source prerequisite
+closure in read-only/no-self-provision mode:
+
+```text
+agent-machines installation-repair --project-root <project>
+agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module>
+```
+
+Review the returned closure and `planDigest`, then apply that exact selection:
+
+```text
+agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module> --apply --expected-plan-digest <digest>
+```
+
+Repeat `--module` for independent branches. Apply reconstructs host admission,
+checks the bound payload/source/graph/activation inputs and revalidates before
+each installer. A digest is a stale-input check, **not** permission or signed
+release verification. Only the manifest's native owner actions execute, with
+bounded deadlines/output and caller-owned transient descendants. Declared
+installer-owned durable services keep their own supervision contract.
+CLI `SIGINT`, and POSIX `SIGTERM`, follow the cancellation cleanup path: transient
+installer descendants exit before the apply lock is released, and the caller's
+previous signal handlers and ignored child dispositions are preserved.
+Every selected identity, including
+transitive prerequisites, must fit the 256-character bound before any probe.
+Unreadable or oversized executables remain unavailable outcomes and cannot run
+probes or installers. Each invocation must match its admitted argv, executable
+and content digest, even if a previously unavailable executable becomes usable.
+Apply re-admits initially-ready outcomes too; readiness
+observed while ownership or payload inputs change cannot satisfy a stale plan.
+Binding refusal stops further execution but still propagates dependency blockers
+through the remaining closure; it cannot report required readiness from stale outcomes.
+`--readiness-timeout` and `--installer-timeout` are seconds (positive, at most
+3600); defaults are 15 and 300.
+
+After an earlier installer runs, apply refreshes each unblocked module's
+readiness before deciding whether to skip or repair it, preserving its initial
+observation. Each attempted installer also gets an independent readiness probe.
+Zero exit alone is not readiness. Failed/unknown/unsupported, unsatisfied configuration-empty
+and restart-required prerequisites block dependents; independent branches may
+continue. JSON includes before/after states, installer outcome, blockers and
+restart boundaries, never raw subprocess output. Exit 0 means discovery,
+observation, or a ready selected apply; exit 2 means incomplete apply (including
+optional failure), and exit 1 means invalid/refused admission or stale inputs.
+Interrupted execution, including owner revalidation and hashing, retains
+completed partial outcomes, exits 130 and does not replay.
+
+Restart obligations accumulate across independent selected steps and subsequent
+invocations in the machine home's `.agent-machines/installation-repair` journal.
+They are recorded **before** a restart-declaring action starts, so cancellation,
+failure or a process crash cannot silently discard a possibly required restart.
+Pending modules are not reinstalled and their dependents remain blocked, even
+if readiness reports ready. Read-only discovery/observation creates no journal;
+apply and confirmation are serialized, and corrupt state refuses execution.
+
+Use `restarts.pending` to present one combined restart opportunity to the
+operator rather than restarting between independent steps. No restart is
+automatic. After the operator has completed **every** listed shell, session or
+machine restart, explicitly confirm the exact batch:
+
+```text
+agent-machines installation-repair --confirm-restart <restarts.pendingDigest>
+```
+
+This is an operator attestation, not automatically observed restart evidence.
+A changed batch refuses confirmation; confirmation neither runs installers nor
+declares readiness. Then observe/replan and explicitly apply again. A new CLI
+process, changed payload, successful readiness probe or repeated apply is not
+restart confirmation. Inspect interrupted/failed actions before attesting;
+their conservatively retained obligations must not be dismissed as a retry.
+
+Ordinary downstream owners need declared no-self-provision and legacy-root
+protocols; inherited core-cell control variables are cleared. Linked/reparse
+targets, ambiguous owners and migration/deactivation/maintenance states refuse
+repair rather than guessing an installer. A legacy runtime root must have one
+qualified plugin owner, even when the competing plugins share a marketplace.
+All enabled runtimes contribute ownership claims independently of readiness or
+repair eligibility; an unverifiable runtime declaration blocks ordinary repair.
+Enabled peers with ambiguous roots or unavailable provenance also make that
+census incomplete; unrelated selected owners cannot install past the uncertainty.
+Existing runtime roots and ancestors must be ordinary, unlinked directories;
+a missing ordinary root remains eligible for first installation.
+Validated active-core cells may be
+observed, but **unready core-cell repair is not yet supported**: ordinary `init`
+actions are not cell-lifecycle permission. This command never creates cells,
+changes mode policy, enrolls machines, acquires capacity, or removes durable
+data. It is on-demand only; enabling the plugin does not apply a repair.
+
 ## Install / update
 
 Enable the plugin in Copilot settings. Its session-start hook runs from the
@@ -527,10 +620,28 @@ Multi-machine packages belong in `all/` with an explicit `gate`.
 `<machine>` is the canonical topology key when an adopted repository provides a
 matching `machines.yaml` entry. The raw `platform.node()` host name (Windows
 `%COMPUTERNAME%`) is matched case-insensitively against the entry key plus its
-`hostname`, `alias`, and `display_name`; all four remain accepted for package
+`hostname` and `alias`; these remain accepted for package
 gates, `per-machine` overlays, nested module/resource gates, and machine
-directory selection. Ambiguous cross-entry matches fail before reconciliation.
-Without usable topology, the raw host name remains the standalone fallback.
+directory selection. Actual identity-field conflicts fail before reconciliation.
+`display_name` is metadata and may be duplicated, including between a host and
+its guest. Unique legacy display-name selectors/gates remain compatible unless
+they shadow an identity field; duplicated display names are not accepted as
+gates and cannot select a machine. Use a key, hostname, or alias instead.
+Native Windows and Linux retain the host identity. WSL defaults to `<host>-wsl`
+(never double-suffixed), with guest topology resolved separately even when its
+`hostname` is the Windows host name. Guest gates never accept the host's raw
+hostname or host-only labels. Without a guest topology entry the qualified
+identity remains usable, with a diagnostic instead of a host fallback.
+`--machine` is an explicit target selector and is not reinterpreted as the
+caller's local guest. SSH environment aliases remain independently configured
+transport labels. Existing durable ownership references are not rewritten.
+
+`discover.current_machine()` is the execution identity used by package discovery,
+not physical hardware inventory. Default library discovery and the standalone
+discovery module use the same resolver and accepted topology labels as the main
+CLI; their platform path-key comes from that resolver too. A diagnostic
+`raw: ...` label names the OS hostname only and does not grant it guest package
+scope. Explicit discovery target selectors remain unchanged.
 
 Machine identity uses the shared `machine_transport` owner model. Its read-only
 logical projection expands legacy Windows/WSL topology into `<base>` and
@@ -543,6 +654,12 @@ multiple eligible siblings. WSL gates accept its own logical key/profile aliases
 not the native key or shared physical hostname. No package, persisted registration,
 or repository topology is rewritten; move any WSL-specific package gates to the
 logical WSL key through normal repository maintenance.
+
+Across adopted repositories, duplicate logical keys must agree on execution
+platform and physical host. SSH connection details such as port, user and shell
+do not define machine identity; profile aliases are combined and still checked
+for cross-machine ambiguity. Legacy and explicit logical declarations can
+therefore coexist without requiring identical transport configuration.
 
 The canonical root is `.copilot-extensions/agent-machines/`. Legacy
 `.agent-machines/` and `.github/machine-state/` remain bounded fallbacks only

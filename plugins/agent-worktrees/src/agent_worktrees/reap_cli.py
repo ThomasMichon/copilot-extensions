@@ -11,7 +11,7 @@ from . import activity, disposition_history, finalize as fin, git_ops, handoff_t
 from . import output
 from . import claimant as claimant_mod
 from . import config as cfg
-from . import managed_worktree_guard
+from . import managed_worktree_guard, terminal_pair_progress
 
 
 def _core():
@@ -233,6 +233,9 @@ def _remove_managed_worktree(
     Returns ``(removed, warnings)``. The tracking record is retained whenever
     Git removal fails so a later managed sweep can retry."""
     warns: list[str] = []
+    yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
+    if reason := terminal_pair_progress.gc_preservation_reason(yaml_path):
+        return False, [reason]
     if force:
         try:
             sessions.kill_tmux_session(rec.worktree_id)
@@ -420,6 +423,11 @@ def sweep_managed_worktrees(
     active_paths = _build_active_paths(managed, session_ctx)
 
     for rec in managed:
+        if reason := terminal_pair_progress.gc_preservation_reason(
+            tracking_path / f"{rec.worktree_id}.yaml",
+        ):
+            result["skipped"].append({"id": rec.worktree_id, "reason": reason})
+            continue
         repo = _repo_for_record(config, rec)
         if repo is None:
             result["skipped"].append({"id": rec.worktree_id, "reason": "repo-unresolved"})
@@ -587,6 +595,9 @@ def sweep_managed_worktrees(
                     require_sidecar=True,
                 ):
                     latest = tracking.load_record(yaml_path)
+                    if reason := terminal_pair_progress.gc_preservation_reason(yaml_path):
+                        result["skipped"].append({"id": latest.worktree_id, "reason": reason})
+                        continue
                     fresh_owner_blocker = managed_worktree_guard.owner_ref_blocker(
                         latest,
                         content_confirmed_merged=(

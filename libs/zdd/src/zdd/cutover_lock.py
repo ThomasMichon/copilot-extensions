@@ -208,6 +208,19 @@ class CutoverLock:
         fh = self._fh
         return fh is not None and not fh.closed
 
+    def require_owned(self) -> None:
+        """Validate custody without borrowing again inside an orchestrator callback."""
+        owner = self._owner
+        if owner is None:
+            raise CutoverBorrowError("cutover guard has no acquiring execution")
+        if owner[0] != os.getpid():
+            raise CutoverBorrowError("cutover guard belongs to another process")
+        if owner[1] is not threading.current_thread():
+            raise CutoverBorrowError("cutover guard belongs to another thread")
+        with self._state_lock:
+            if self._owner is not owner or self._fh is None or self._fh.closed:
+                raise CutoverBorrowError("cutover guard ownership changed")
+
     @contextmanager
     def borrow(self) -> Iterator[CutoverLock]:
         pid = os.getpid()

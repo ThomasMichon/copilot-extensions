@@ -661,6 +661,33 @@ mechanism CLI mode binds through.
 
 ### Phase 6 — Unified dispatch session acquisition
 
+**Operator clarification (2026-10-15):**
+
+> We expect it at this point to be able to cold-resume any worktree, into
+> either a headless ACP or headed/muxed CLI session.
+
+The ordinary, task-independent resume repair is tracked by
+[#6934](https://github.com/ThomasMichon/copilot-extensions/issues/6934).
+It closes the retained-conversation part of the existing acquisition contract;
+it does not expand Dispatch's authority or replace its task reservations.
+
+- [x] Resume an owner-asserted dormant native head even when no bridge session
+      record exists, preserving its exact conversation in explicit ACP or
+      headed/muxed CLI mode.
+- [x] Compose the worktree owner's head/holder facts, existing ACP session load,
+      and existing CLI/mux embodiment across local and SSH targets. Missing
+      native history, conflicting holders, changed heads and failed resume must
+      refuse without creating a replacement conversation.
+- [x] Cover both modes, exact native identity, absent bridge records,
+      concurrency and protocol skew; document the ordinary CLI/HTTP boundary.
+      Native process-exit verification must remain distinct from simulated
+      provider tests.
+
+These three implementation items landed in PR #7002. Native process-exit
+continuity is verified on Windows; SSH argument/profile checks are separate
+from hosted Linux execution, which remains open under #6934 and the broader
+#6076 validation matrix.
+
 - [x] Review and land the [scoped acquisition contract](dispatch-session-acquisition.md)
       before runtime changes; coordinate through #6076 with the adjacent
       durable CLI worker tracker #4038. Plan PR #6078 merged.
@@ -776,6 +803,130 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-10-16 - Remote ACP integration and native backend evidence
+
+Concurrent remote ACP support landed in #6997 at HTTP generation 38. Native
+worktree recovery now uses generation 39 and preserves the remote target's
+serialized connection/capability metadata, prior capability floor, and immutable
+generation-38 corpus. Resolver reconciliation also preserves the upstream
+read-only preview boundary instead of allocating profiles during previews.
+
+A native Windows backend exercise recovered one exited CLI conversation through
+ACP, retained its exact native identity and remembered context, then recovered
+that same conversation through a headed CLI with a fresh response marker.
+The headed fixture uses the existing Worktrees trusted-folder helper against
+its isolated configuration before launch. These are backend continuity facts,
+not passing managed-owner HTTP acceptance: the manual terminal-exit sequence
+did not confirm shutdown and required explicitly approved, identity-pinned
+fixture cleanup. Full owner-discovery integration remains gated on #6704.
+No installed plugin or shared service was changed for these experiments.
+
+### 2026-10-16 - Ordinary native-head recovery implementation
+
+Following merged plan #6936, implemented #6934's ordinary worktree resume
+boundary for explicit ACP and headed/muxed CLI. Both paths retain the owner's
+exact native conversation, require exact owner metadata and fenced process
+admission, reject uncertain/live holders, and retain launch fences after
+uncertain outcomes. Imported native affinity survives frontend restart;
+ordinary provider sessions and singleton first initialization retain their
+separate contracts. Saved profile replay covers local and SSH ACP as well as
+headed native recovery without allocating a replacement assignment.
+
+Bounded targeted Bridge runs passed 473 tests (6 skipped) and 16 tests
+(1 skipped); owner admission/record coverage passed 244 tests, and combined
+profile/embodiment/resolver coverage passed 254. Independent review identified
+two profile-replay gaps, now corrected and rechecked. Ruff F/E9, scoped module
+size, and the 13-plugin install contract pass. These are simulated provider
+tests plus real cross-process exclusion coverage, not live native conversation
+acceptance. Native process-exit continuity, hosted Linux execution, dependency
+integration, PR review/merge, and the remaining Phase 6 gates stay open.
+
+### 2026-10-16 - Managed native continuity acceptance
+
+The ordinary owner lookup now reads an exact record without warming a resident
+roster. Real owner/HTTP acceptance passed on Windows for both ACP and muxed CLI:
+the predecessor exited, a previously empty Bridge imported the owner's exact
+native conversation, a Bridge-controlled turn recalled a fresh marker, and the
+turn reached actual idle without replacement history. The isolated owner uses
+normal creation trust, unchanged source launch assets and vendor-managed login;
+no shared daemon or installed runtime was changed.
+
+Acceptance exposed a parser bug that made the native-admission modifier
+mutually exclusive with its launch intent, and a post-launch confirmation
+inconsistency: an exact fresh Bridge registration was accepted before launch
+but ignored afterward. Both are corrected, with foreign/stale/absent-runtime
+refusal controls. Bounded native/HTTP regressions passed 210 tests; owner/parser
+and launch-fixture coverage passed 18. The HTTP unit fixture no longer starts
+an unrelated credential relay. Python 3.10 timeout compatibility is retained.
+PR #7002 still requires current review, required CI and merge. Hosted Linux
+execution and the broader Phase 6 acquisition matrix remain open.
+
+### 2026-10-16 - Native recovery review regressions
+
+PR #7002's first review identified four recovery defects. Singleton and worktree
+resume now reconcile authoritative local host liveness before trusting retained
+client readiness, including missing/disconnected clients and CLI requests.
+Confirmed CLI success/replay compare-deletes only its own reservation; uncertain,
+foreign-claimed and newer reservations remain intact. Native ACP execution and
+mux admission reject `finalizing`, including a transition after planning.
+
+The bounded native/HTTP selection passed 212 tests; owner admission passed 27.
+The real isolated Windows CLI acceptance passed again with an additional
+assertion that confirmed execution leaves no CLI reservation. The earlier ACP
+owner/HTTP continuity proof remains distinct from these simulated failure cases.
+Current-head review, required CI and merge remain outstanding; no broader
+Phase 6 completion or installed rollout is claimed.
+
+The next current-head review confirmed those liveness/reservation corrections
+and found two additional regressions. Recognized singleton aliases now
+canonicalize before native HTTP ID validation; the CLI regression crosses the
+actual validation route. The `fresh` acquisition sentinel no longer selects
+native profile replay, preserving armed allocation on launch and no allocation
+in preview. Finalizing refusal is additionally exercised through the actual
+`embody` command before preflight and after its locked record re-read.
+The complete owner profile/embodiment/admission selection passed 182 tests;
+the resume CLI selection passed 12. Review and required CI remain open.
+
+Base integration subsequently introduced the independent message-receipt
+capability at HTTP generation 39. Native recovery therefore advances to 40,
+retaining receipt capability 39, remote ACP capability 38 and the supported
+minimum of 1. Official generation-39 receipt vectors stay byte-for-byte intact;
+colliding, previously published native-draft vectors are retained under a
+separate historical namespace rather than overwritten. New generation-40
+evidence must attest the combined committed producers before publication.
+
+The next base advance corrected configured SSH-profile identity. Recovery now
+retains that correction for discovery and captured owner launches without
+losing encoded PowerShell argument transport. Legacy topology user fields no
+longer override the profile login. The real `ssh -G` fixture verifies user,
+port, identity files, proxy and host-key alias without connecting to a host;
+the profile/native selection passed 103 tests. The two previously published
+receipt captures updated by the base are retained separately, and changed
+combined producers require new generation-40 attestations rather than edits
+to existing generation-40 vectors. The prior head's CI passed, but the rebase
+requires fresh current-head CI and review.
+
+### 2026-10-17 - Ordinary native recovery merged
+
+PR #7002 merged to `dev` as
+[`143620e4dc`](https://github.com/ThomasMichon/copilot-extensions/commit/143620e4dc2c7a26c0af39a7dc8a126bfc9d6e86)
+after current-head CI passed, including the required PR gate. The current-head
+Copilot Lite fallback `Comment` reported zero open findings. The full agentic
+review never started before its timeout, so that result does not establish a
+completed full review or rule out additional findings. The two addressed
+alias/profile threads were resolved with their implementation and regression
+evidence.
+
+The three ordinary native-recovery implementation items above are complete.
+The 224-vector compatibility ledger preserves previously published bodies;
+combined Bridge HTTP/transport/profile/wire coverage passed 422 tests
+(2 skipped), owner remote-option coverage passed 48, and SSH/profile/native
+coverage passed 103. Real isolated Windows ACP and CLI process-exit continuity
+remains distinct from simulated-provider and nonconnecting `ssh -G` checks.
+Hosted Linux execution and the broader dispatch acquisition matrix remain
+open under #6934 and #6076. This merge does not claim release promotion,
+installed adoption, or deployment.
 
 ### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
 

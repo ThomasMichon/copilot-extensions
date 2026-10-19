@@ -190,20 +190,17 @@ installer. Know which kind you are changing.
    yields a real verdict.
    The submitting agent remains responsible until the PR is merged and its
    worktree is finalized:
-   - **Wait for `Approve` on a contributor's PR; a clean `Comment` is the
-     passing verdict on this repo's own owner-authored PRs.** Copilot code
+   - **Wait for `Approve` on a contributor's PR; `Approve` or a clean
+     `Comment` satisfies this repo's owner-authored PR verdict gate.** Copilot code
      review can only ever render `Approve` or `Comment` (no "Request
      changes" capability exists in the product -- see CONTRIBUTING.md §
      "Waiting for a verdict" for the current GitHub-docs citation);
      Approvals are enabled in
      this repo, so a genuinely ready **contributor** PR should come back
-     `Approve`. **This repo's own owner-authored PRs are a documented,
-     empirically confirmed exception**
-     (`plugins/agent-worktrees/src/agent_worktrees/pr_contract.py`'s
-     `NONBLOCKING_VERDICT_STATES`; every merged owner-authored PR in this
-     repo's history has been `Comment`-only, never `Approve`) -- there, a
-     `Comment` review with zero Medium/High findings open *is* the passing
-     verdict; do not keep chasing an `Approve` that cannot land. On a
+     `Approve`. Owner-authored PRs can receive approval too; do not infer
+     impossible outcomes from historical service behavior. A `Comment`
+     review with zero Medium/High findings open is also a passing owner
+     verdict under the repository's policy. On a
      **contributor** PR, actively strive for a genuine `Approve` across up
      to 3 rounds (each open/push/re-request + wait counts as one round)
      before a maintainer may short-circuit on a stubborn/overly-cautious
@@ -234,8 +231,9 @@ installer. Know which kind you are changing.
      re-review rather than being a no-op)
      and wait up to 10 minutes again -- there's nothing to address or push yet,
      so don't invent a commit just to have something to push. On a
-     contributor PR's `Approve`, or an owner-authored PR's `Comment` with
-     zero Medium/High findings open, merge. Otherwise: address genuinely
+     PR's `Approve` (either author type), or an owner-authored PR's `Comment`
+     with zero Medium/High findings open, merge once required CI and the
+     separate Contributor acceptance gate pass. Otherwise: address genuinely
      valuable findings; if that requires a real change, push it and wait
      up to another 10 minutes for the automatic post-push review. **If every
      finding is dismissed/explained with no actual change needed,** skip
@@ -251,14 +249,16 @@ installer. Know which kind you are changing.
      all Low severity, self-merge is permitted (state what was dismissed
      and why); any Medium/High finding blocks self-merge regardless of who
      authored the PR.
-   - **This is agent discipline, not yet tool-enforced.** `pr-merge --now`
-     itself does not check Copilot's verdict before merging --
-     `.agent-worktrees/config.yaml`'s `review_blocking: false` makes every
-     `pr-merge` call pass `--admin` (bypassing GitHub's own review-gate
-     check unconditionally), so nothing currently stops a driving agent
-     from merging before this loop is actually satisfied. Follow the loop
-     above deliberately; do not rely on the tooling to refuse a premature
-     merge on your behalf.
+   - **Authorized completion is the expected workflow, not another permission
+     ceremony.** After the accepted review, required CI and resolution of
+     blocking feedback, use the managed completion path. Its GitHub provider
+     tries a normal head-pinned merge first; a configured fallback verifies
+     required checks before an administrative attempt. A live-confirmed
+     exception to an additional CODEOWNER vote does not require another
+     operator prompt, but never permits ignoring a change request or CI.
+     Review assessment remains agent responsibility until the complete
+     mutation-boundary review contract is implemented; do not mistake
+     permission to invoke the command for proof all review obligations passed.
    - Keep the branch current and mergeable. If `dev` moves or conflicts appear,
      reconcile with the supported worktree PR verbs, re-run the required gates,
      and update the PR with `push-changes`.
@@ -342,9 +342,9 @@ file-an-issue fallback:
 
 `copilot-extensions` is **public** and may be driven from **more than one
 private control repo at once** (for example a personal control repo and a work
-control repo). Everyone lands through the same PR-required `dev`. Two
-disciplines keep them from colliding — and keep private context off the public
-face.
+control repo). Everyone lands through the same PR-required `dev`. Coordinate
+overlapping work and keep private context off the public face; independent
+pull requests do not need a shared merge queue.
 
 ### Claim work with a public GitHub issue
 
@@ -409,12 +409,12 @@ reconcile or yield before publishing. The temporary downstream claim prevents a
 blocked identity from duplicating work within its control plane; the required
 pre-publication search closes the cross-control-repo gap.
 
-### Serial, single-writer merges
+### Independent PR merges
 
-Treat `dev` as a single-writer lane:
+Independent PRs may be reviewed and merged concurrently once each satisfies
+its own review, CI and mergeability gates. Do not require a repository-wide
+merge slot, single-writer lane or coordinator permission.
 
-- Land one coherent change, then the next — avoid parallel in-flight PR merges from
-  different worktrees or drivers.
 - **Changefiles make concurrent merges safe by design** — unlike a hand-picked
   version, a changefile just accumulates; the promotion pipeline computes the
   real version once, at promotion time, from whatever's pending. You do not
@@ -423,6 +423,8 @@ Treat `dev` as a single-writer lane:
   reconcile the actual conflict before updating/merging your PR rather than
   force-landing — that's a real collision the changefile mechanism doesn't
   paper over.
+- Sequence changes only when they have an actual dependency or content conflict,
+  not merely because another driver's PR is in flight.
 
 ### Sanitization — keep private context off the public face
 

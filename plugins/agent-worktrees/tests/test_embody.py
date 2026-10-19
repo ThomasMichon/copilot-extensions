@@ -796,6 +796,173 @@ class TestCmdEmbody:
         assert out["resume_session"] == resumed
         assert out["cmd"] == (["copilot", "--resume=head-1"] if resumed else ["copilot"])
 
+    @pytest.mark.parametrize("state", ["live", "unknown"])
+    def test_native_dry_run_checks_real_liveness_before_reporting_admission(
+        self, monkeypatch, capfd, tmp_path, state,
+    ):
+        from agent_worktrees import bridge_acquisition_launch
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda _: type("Rec", (), {
+                "worktree_path": "/w/wtR", "resolved_head_session": "native-original",
+            })(),
+        )
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: state)
+        rc = m.cmd_embody(_ns(
+            worktree_id="wtR", dry_run=True, bridge_acquisition="native-original",
+            copilot_args=[],
+        ))
+        assert rc == 3
+        assert "stopped" in capfd.readouterr().out
+
+    def test_native_dry_run_advertises_the_verified_owner_contract(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from agent_worktrees import bridge_acquisition_launch
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda _: type("Rec", (), {
+                "worktree_path": "/w/wtR", "resolved_head_session": "native-original",
+            })(),
+        )
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: "dead")
+        rc = m.cmd_embody(_ns(
+            worktree_id="wtR", dry_run=True, bridge_acquisition="native-original",
+            require_native_admission=True, copilot_args=[],
+        ))
+        assert rc == 0
+        result = json.loads(capfd.readouterr().out)
+        assert type(result["native_admission_version"]) is int
+        assert result["native_admission_version"] == 1
+        assert result["resume_session"] == "native-original"
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    def test_native_embody_replays_profile_without_new_allocation(
+        self, monkeypatch, capfd, tmp_path, dry_run,
+    ):
+        from agent_worktrees import bridge_acquisition_launch, profile_assignment
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda _: type("Rec", (), {
+                "worktree_path": "/w/wtR", "resolved_head_session": "native-original",
+            })(),
+        )
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: "dead")
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda _: "dead")
+        seen = []
+
+        def select(*args, **kwargs):
+            seen.append(kwargs)
+            return profile_assignment.LaunchProfileSelection(profile=None)
+
+        monkeypatch.setattr(m, "_launch_profile_selection", select)
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **kw: {
+            "ok": True, "session": "wt-wtR", "new_pane": "%5",
+        })
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", dry_run=dry_run, bridge_acquisition="native-original",
+            require_native_admission=True, copilot_args=[],
+        )) == 0
+        assert seen[0]["resume_session"] == "native-original"
+        assert seen[0]["allocate_new"] is False
+        assert json.loads(capfd.readouterr().out)["resume_session"] == "native-original"
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    def test_fresh_bridge_embody_uses_armed_allocation_not_native_replay(
+        self, monkeypatch, capfd, tmp_path, dry_run,
+    ):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from agent_worktrees import bridge_acquisition_launch, config, profile_assignment
+
+        self._stub_existing(monkeypatch, tmp_path)
+        cfg = m.cfg.load_config()
+        profile = config.CopilotProfile(name="fixture-selected", label="Fixture")
+        cfg.copilot_profiles = [profile]
+        cfg.profile_assignment = config.ProfileAssignmentPolicy(
+            name="fixture-policy", mode="balanced-random", armed=True,
+            profiles=(profile.name,), eligible_lanes=("new",),
+        )
+        cfg.default_repo.worktree_root = str(tmp_path / "worktrees")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: cfg)
+        monkeypatch.setattr(m.tracking, "load_record", lambda _: SimpleNamespace(
+            worktree_path="/w/wtR", resolved_head_session="native-original", status="active",
+        ))
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: "dead")
+        replay = Mock(side_effect=AssertionError("fresh must not replay a conversation profile"))
+        allocate = Mock(return_value=profile_assignment.LaunchProfileSelection(profile=profile))
+        monkeypatch.setattr(profile_assignment, "replay", replay)
+        monkeypatch.setattr(profile_assignment, "allocate_best_effort", allocate)
+        selected = []
+
+        def build(_config, _args, _cwd, *, profile, **kwargs):
+            selected.append(profile)
+            return ["copilot"]
+
+        monkeypatch.setattr(m, "_build_launch_cmd", build)
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **kw: {
+            "ok": True, "session": "wt-wtR", "new_pane": "%5",
+        })
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", dry_run=dry_run, bridge_acquisition="fresh", copilot_args=[],
+        )) == 0
+        replay.assert_not_called()
+        assert allocate.call_count == (0 if dry_run else 1)
+        assert selected == [None if dry_run else profile]
+        assert json.loads(capfd.readouterr().out)["resume_session"] is None
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    def test_native_embody_refuses_finalizing_at_actual_admission(
+        self, monkeypatch, capfd, tmp_path, dry_run,
+    ):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from agent_worktrees import bridge_acquisition_launch
+
+        self._stub_existing(monkeypatch, tmp_path)
+        record = SimpleNamespace(
+            worktree_path="/w/wtR", resolved_head_session="native-original", status="active",
+        )
+        reads = 0
+
+        def load(_path):
+            nonlocal reads
+            reads += 1
+            if reads >= (2 if dry_run else 3):
+                record.status = "finalizing"
+            return record
+
+        monkeypatch.setattr(m.tracking, "load_record", load)
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: "dead")
+        spawn = Mock(side_effect=AssertionError("finalizing worktree must not spawn"))
+        monkeypatch.setattr(sessions, "mux_new_session", spawn)
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", dry_run=dry_run, bridge_acquisition="native-original",
+            require_native_admission=True, copilot_args=[],
+        )) == 3
+        assert "finalizing" in capfd.readouterr().out
+        spawn.assert_not_called()
+
+    def test_actual_mux_launch_respects_an_acp_owner_admission_fence(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from agent_worktrees import launch_admission
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            sessions, "mux_new_session", lambda *a, **k: pytest.fail("ACP owner still holds admission"),
+        )
+        with launch_admission.guard(tmp_path / "wtR.yaml"):
+            rc = m.cmd_embody(_ns(worktree_id="wtR"))
+        assert rc == 3
+        assert "admission is busy" in capfd.readouterr().out
+
     def test_create_resumes_the_head_conversation(self, monkeypatch, capfd, tmp_path):
         self._stub_existing(monkeypatch, tmp_path)
         monkeypatch.setattr(embody_resume, "session_liveness", lambda sid: "dead")

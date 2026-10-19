@@ -333,6 +333,14 @@ class AzureDevOpsProvider:
             draft=bool(data.get("isDraft", False)),
         )
 
+    def get_configured_snapshot(self, repo, number, *, api_base="", token=None, observation=None):
+        from .azure_observation import get_snapshot
+        return get_snapshot(self, repo, number, api_base=api_base, token=token, observation=observation)
+
+    def get_thread_report(self, repo, number, *, api_base="", token=None):
+        from .azure_discussions import get_report
+        return get_report(self, repo, number, api_base=api_base, token=token)
+
     @staticmethod
     def _reviews_from_show(data: dict) -> tuple:
         """Map ``az repos pr show`` reviewer votes onto contract ``Review``s."""

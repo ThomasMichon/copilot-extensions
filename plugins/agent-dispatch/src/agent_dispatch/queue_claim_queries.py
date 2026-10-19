@@ -26,7 +26,8 @@ from .queue_common import (
     machine_matches,
     worker_id_for,
 )
-from .queue_records import SpawnReservation, Status
+from .queue_records import SpawnReservation, Status, TaskError
+from .queue_dedup import find_live_dedup_task
 
 
 class QueueClaimQueriesMixin:
@@ -314,6 +315,18 @@ class QueueClaimQueriesMixin:
                 params,
             ).fetchall()
         return [Task._from_row(r) for r in rows]
+
+    def lookup_dedup(self, dedup_key: str, *, repo: str | None) -> Task | None:
+        """Read the exact repo/key's create-dedup occupant, without mutating it."""
+        if not isinstance(repo, str) or not repo.strip():
+            raise TaskError("dedup lookup requires a non-empty repo lane")
+        if not isinstance(dedup_key, str) or not dedup_key.strip():
+            raise TaskError("dedup lookup requires a non-empty dedup_key")
+        canonical_repo = self._canonical_repo(repo)
+        if canonical_repo is None:
+            raise TaskError("dedup lookup requires a non-empty repo lane")
+        with self._connect() as conn:
+            return find_live_dedup_task(conn, canonical_repo, dedup_key)
 
     def find(self, text: str, *, repo: str | None = None, limit: int = 50,
              category: str | None = None) -> list[Task]:

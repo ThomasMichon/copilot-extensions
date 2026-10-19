@@ -215,6 +215,7 @@ class QueueBackedClient:
         conclusion_detail,
         detail=None,
         claim_token=None,
+        claimant_machine=None,
     ):
         return asdict(
             self._q.record_spawn_conclusion(
@@ -223,12 +224,13 @@ class QueueBackedClient:
                 conclusion_detail=conclusion_detail,
                 detail=detail,
                 claim_token=claim_token,
+                claimant_machine=claimant_machine,
             )
         )
 
-    def claim_spawn_conclusion_retry(self, key):
+    def claim_spawn_conclusion_retry(self, key, *, claimant_machine=None):
         reservation, claimed, claim_token = (
-            self._q.claim_spawn_conclusion_retry(key)
+            self._q.claim_spawn_conclusion_retry(key, claimant_machine=claimant_machine)
         )
         return {
             "claimed": claimed,
@@ -236,9 +238,9 @@ class QueueBackedClient:
             "reservation": asdict(reservation),
         }
 
-    def validate_spawn_conclusion_claim(self, key, claim_token):
+    def validate_spawn_conclusion_claim(self, key, claim_token, *, claimant_machine=None):
         return asdict(
-            self._q.validate_spawn_conclusion_claim(key, claim_token)
+            self._q.validate_spawn_conclusion_claim(key, claim_token, claimant_machine=claimant_machine)
         )
 
     def heartbeat(self, task_id, worker_id):
@@ -4983,6 +4985,152 @@ def test_yielded_created_worktree_is_concluded_before_respawn(q, client):
         )
     ]
     assert q.latest_reservation(task.id).attempt == 2
+
+
+def test_yielded_attempt_checkpoints_identity_before_bridge_end_and_restart(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key, "wt-created", ownership="created",
+        creating_host="host-a", driver="agent-dispatch",
+    )
+    q.record_spawn(
+        reservation.key, session_handle="local-body:bridge-1", worktree="wt-created",
+    )
+    q.claim_one("host-a/wt-created", task_id=task.id)
+    q.start(task.id, "host-a/wt-created", owner_session_id="session-exact")
+    q.yield_task(task.id, "host-a/wt-created")
+
+    def end_then_exit(_session):
+        checkpoint = json.loads(q.get_reservation(reservation.key).conclusion_detail or "{}")
+        assert checkpoint["acp_session_id"] == "session-exact"
+        raise SystemExit("supervisor exited after bridge teardown")
+
+    first = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO, machine="host-a",
+        local_body_verdict_fn=lambda _sid: tracking.LIVE,
+        local_acp_session_fn=lambda _sid: "session-exact",
+        local_end_fn=end_then_exit, nudge=False,
+    )
+    with pytest.raises(SystemExit, match="after bridge teardown"):
+        first.release_requested_bodies()
+
+    assert q.get(task.id).owner_session_id is None
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+    conclusions = []
+    second = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO, machine="host-a",
+        local_body_verdict_fn=lambda _sid: tracking.GONE,
+        local_acp_session_fn=lambda _sid: pytest.fail(
+            "persisted identity must survive the bridge record disappearing"
+        ),
+        local_end_fn=lambda _sid: True,
+        attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
+            "action": "primed", "reason": "managed-gc-candidate",
+        },
+        nudge=False,
+    )
+    assert second.release_requested_bodies() == 1
+    assert conclusions == [
+        ("wt-created", "session-exact", reservation.key, "agent-dispatch"),
+    ]
+    assert q.get_reservation(reservation.key).conclusion_state == "complete"
+
+
+def test_native_released_attempt_identity_survives_process_exit(tmp_path):
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent("""
+        import json
+        import os
+        import sys
+        from pathlib import Path
+        from agent_dispatch.supervisor import Supervisor
+        from tests.test_supervisor import OwnerResultQueue, QueueBackedClient, _ok_spawn
+        from tests._helpers import TEST_REPO
+
+        q = OwnerResultQueue(Path(sys.argv[1]))
+        phase = sys.argv[2]
+        if phase == "retire":
+            task = q.create("work")
+            reservation, _ = q.reserve_spawn(task.id)
+            q.record_spawn_worktree(
+                reservation.key, "wt-created", ownership="created",
+                creating_host="host-a", driver="agent-dispatch",
+            )
+            q.record_spawn(
+                reservation.key, session_handle="local-body:bridge-1",
+                worktree="wt-created",
+            )
+            q.claim_one("host-a/wt-created", task_id=task.id)
+            q.start(task.id, "host-a/wt-created", owner_session_id="session-exact")
+            q.yield_task(task.id, "host-a/wt-created")
+        else:
+            task = q.list(repo=TEST_REPO)[0]
+            reservation = q.latest_reservation(task.id)
+
+        def end(_session):
+            if phase == "retire":
+                checkpoint = json.loads(q.get_reservation(reservation.key).conclusion_detail)
+                assert checkpoint["acp_session_id"] == "session-exact"
+                os._exit(23)
+            return True
+
+        def conclude(worktree, session, key, driver):
+            assert (worktree, session, key, driver) == (
+                "wt-created", "session-exact", reservation.key, "agent-dispatch",
+            )
+            return {"action": "primed", "reason": "managed-gc-candidate"}
+
+        sup = Supervisor(
+            QueueBackedClient(q), spawn_fn=_ok_spawn(), repo=TEST_REPO, machine="host-a",
+            local_body_verdict_fn=lambda _sid: "live" if phase == "retire" else "gone",
+            local_acp_session_fn=lambda _sid: "session-exact" if phase == "retire" else None,
+            local_end_fn=end, attempt_conclusion_fn=conclude, nudge=False,
+        )
+        assert sup.release_requested_bodies() == 1
+        assert phase == "recover"
+        assert q.get_reservation(reservation.key).conclusion_state == "complete"
+    """)
+    for phase, expected in (("retire", 23), ("recover", 0)):
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(tmp_path / "queue.db"), phase],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == expected, result.stdout + result.stderr
+
+
+def test_yielded_attempt_does_not_end_bridge_when_identity_checkpoint_fails(
+    q, client, monkeypatch,
+):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key, "wt-created", ownership="created",
+        creating_host="host-a", driver="agent-dispatch",
+    )
+    q.record_spawn(
+        reservation.key, session_handle="local-body:bridge-1", worktree="wt-created",
+    )
+    q.request_spawn_release(reservation.key, disposition="settled")
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO, machine="host-a",
+        local_body_verdict_fn=lambda _sid: tracking.LIVE,
+        local_acp_session_fn=lambda _sid: "session-exact",
+        local_end_fn=lambda _sid: pytest.fail("checkpoint must precede bridge teardown"),
+        nudge=False,
+    )
+
+    def refuse_checkpoint(*_args, **_kwargs):
+        raise DispatchError(503, "checkpoint unavailable")
+
+    monkeypatch.setattr(sup._conclusion_client, "record_spawn_conclusion", refuse_checkpoint)
+    assert sup.release_requested_bodies() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
 
 
 def test_failed_attempt_cleanup_retries_after_body_release(q, client):

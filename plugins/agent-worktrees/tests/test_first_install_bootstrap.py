@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
+import shlex
 import shutil
 import stat
 import subprocess
@@ -16,6 +18,112 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.guard
 _SH = shutil.which("sh")
+_UV_SETTINGS = """PipInstallSettings { settings: PipSettings {
+    index_locations: IndexLocations {
+        flat_index: [],
+    },
+    exclude_newer: ExcludeNewer {
+        global: None,
+        package: ExcludeNewerPackage({}),
+    },
+}, }
+"""
+
+
+def _fake_uv_policy_preflight() -> str:
+    """Settings queries are read-only; only admitted calls reach fake installs."""
+    return f"""
+if [[ "${{1:-}}" == pip && "${{2:-}}" == install ]]; then
+    for argument in "$@"; do
+        if [[ "$argument" == --show-settings ]]; then
+            printf '%s\\n' {shlex.quote(_UV_SETTINGS)}
+            exit 0
+        fi
+    done
+    saw_cutoff=0
+    saw_reinstall=0
+    saw_config=0
+    pending=''
+    for argument in "$@"; do
+        if [[ "$pending" == cutoff ]]; then
+            [[ "$argument" == *Z ]] || exit 2
+            saw_cutoff=1
+        elif [[ "$pending" == config ]]; then
+            [[ -f "$argument" && "$argument" == */inputs/uv.toml ]] || exit 2
+            saw_config=1
+        fi
+        pending=''
+        case "$argument" in
+            --exclude-newer) pending=cutoff ;;
+            --config-file) pending=config ;;
+            --reinstall) saw_reinstall=1 ;;
+        esac
+    done
+    [[ "$saw_cutoff$saw_reinstall$saw_config" == 111 ]] || exit 2
+fi
+"""
+
+
+def test_fake_uv_preflight_settings_are_accepted_by_canonical_policy() -> None:
+    policy = runpy.run_path(str(PLUGIN / "scripts" / "installer_dependency_policy.py"))
+    admitted = policy["cutoff_arguments"](_UV_SETTINGS)
+    assert admitted[0] == "--exclude-newer"
+    assert admitted[1].endswith("Z")
+    assert admitted[2] == "--reinstall"
+    preflight = _fake_uv_policy_preflight()
+    assert preflight.index("--show-settings") < preflight.index("exit 0")
+
+
+def _materialize_installed_payload(payload: Path) -> None:
+    """Stage the release-owned source graph without granting caller trust."""
+    policy = runpy.run_path(str(payload / "scripts" / "installer_dependency_policy.py"))
+    source = policy["_toml"](PLUGIN / "pyproject.toml")
+    for declaration in source["tool"]["uv"]["sources"].values():
+        local = (PLUGIN / declaration["path"]).resolve()
+        if local.is_relative_to(PLUGIN.resolve()):
+            destination = payload / declaration["path"]
+            if not destination.exists():
+                shutil.copytree(
+                    local, destination,
+                    ignore=shutil.ignore_patterns(
+                        "__pycache__", "*.pyc", ".pytest_cache", "build", "dist", "*.egg-info",
+                    ),
+                )
+    previous_path = sys.path[:]
+    try:
+        release = runpy.run_path(str(PLUGIN.parents[1] / "tools" / "materialize_main.py"))
+        materialized = release["materialize_uv_editable_ref_into"](
+            source_consumer_dir=PLUGIN,
+            dest_consumer_dir=payload,
+            canonical_root=PLUGIN.parents[1],
+        )
+    finally:
+        sys.path[:] = previous_path
+    assert not any(message.startswith("SKIP ") for message in materialized), materialized
+    project = policy["_toml"](payload / "pyproject.toml")
+    manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
+    assert project["project"]["name"] == manifest["name"] == "agent-worktrees"
+    assert project["project"]["version"] == manifest["version"]
+    owner_roots = policy["_anchor_roots"]()
+    assert owner_roots == (payload.resolve(),)
+    for name, declaration in project["tool"]["uv"]["sources"].items():
+        assert not declaration.get("editable", False)
+        library = (payload / declaration["path"]).resolve()
+        assert library.is_relative_to(payload.resolve())
+        assert (library / "pyproject.toml").is_file(), name
+    policy["_check_project"](payload, owner_roots, set())
+
+
+def test_installed_bootstrap_payload_has_release_owned_sources(tmp_path: Path) -> None:
+    payload = tmp_path / "agent-worktrees"
+    for relative in (
+        "plugin.json", "pyproject.toml",
+        "scripts/installer_dependency_policy.py", "scripts/installer_dependency_config.py",
+    ):
+        destination = payload / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(PLUGIN / relative, destination)
+    _materialize_installed_payload(payload)
 
 
 def test_session_start_prefers_payload_lifecycle_client_with_installed_fallback() -> None:
@@ -367,7 +475,7 @@ def test_installers_preserve_activation_during_inventory_bootstrap() -> None:
     assert "copilot plugin install agent-worktrees@copilot-extensions" not in ps1
 
 
-def test_generated_project_binstubs_use_payload_dispatchers() -> None:
+def test_generated_project_binstubs_use_installed_user_commands() -> None:
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh_binstub = sh.split("deploy_binstub() {", 1)[1].split(
@@ -377,9 +485,11 @@ def test_generated_project_binstubs_use_payload_dispatchers() -> None:
         "function Deploy-GlobalBinstub {", 1
     )[0]
 
-    assert "bin/payload/agent-worktrees" in sh_binstub
+    assert '"$LOCAL_BIN/agent-worktrees"' in sh_binstub
+    assert "bin/payload/agent-worktrees" not in sh_binstub
     assert "resolve-runtime.sh" not in sh_binstub
-    assert "bin\\payload\\agent-worktrees" in ps1_binstub
+    assert "Join-Path $LocalBin 'agent-worktrees" in ps1_binstub
+    assert "bin\\payload\\agent-worktrees" not in ps1_binstub
     assert "resolve-runtime.ps1" not in ps1_binstub
     assert "last-known-good" not in sh_binstub
 
@@ -465,7 +575,13 @@ def _posix_installer_payload(home: Path) -> Path:
     )
     # Do not fingerprint the growing runtime sources for a fake package install.
     assert not (payload / "src").exists()
-    assert not (payload / "libs").exists()
+    _materialize_installed_payload(payload)
+    for library in (payload / "libs").iterdir():
+        source = library / "src"
+        if source.is_dir():
+            shutil.rmtree(source)
+            source.mkdir()
+            (source / "fixture.py").write_text("", encoding="utf-8")
     return payload
 
 
@@ -483,9 +599,7 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
     fake_bin.mkdir()
     fake_uv = fake_bin / "uv"
     fake_uv.write_text(
-        """#!/usr/bin/env bash
-set -eu
-case "${1:-}" in
+        "#!/usr/bin/env bash\nset -eu\n" + _fake_uv_policy_preflight() + """case "${1:-}" in
   venv)
     target="$2"
     mkdir -p "$target/bin" "$target/fake-site/agent_worktrees"
@@ -537,7 +651,6 @@ esac
         ["bash", str(payload / "scripts" / "install.sh"), "provision"],
         cwd=home,
         env=env,
-        capture_output=True,
         text=True,
     )
     assert provision.returncode == 0, provision.stdout + provision.stderr
@@ -591,9 +704,7 @@ def _assert_posix_namespace_slot_rejected(
     fake_bin.mkdir()
     fake_uv = fake_bin / "uv"
     fake_uv.write_text(
-        """#!/usr/bin/env bash
-set -eu
-case "${1:-}" in
+        "#!/usr/bin/env bash\nset -eu\n" + _fake_uv_policy_preflight() + """case "${1:-}" in
   venv)
     target="$2"
     # Simulate the partial install: the package directory exists (so it is
@@ -623,6 +734,9 @@ fi
 exec "$REAL_PYTHON" "$@"
 PY
     chmod +x "$target/bin/python"
+    "$target/bin/python" -I -c \
+      "import agent_worktrees; assert agent_worktrees.__file__ is None"
+    printf 'namespace-importable\\n' > "$NAMESPACE_PROOF"
     ;;
   pip) ;;
   *) exit 2 ;;
@@ -640,6 +754,7 @@ esac
             "REAL_PYTHON": sys.executable,
             "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "10",
             "NAMESPACE_HEALTH_STALL": "1" if stall_health_gate else "0",
+            "NAMESPACE_PROOF": str(tmp_path / "namespace-proof"),
         }
     )
     provision = subprocess.run(
@@ -664,7 +779,13 @@ esac
     install_dir = home / ".agent-worktrees"
     assert not (install_dir / "current-version").exists()
     assert not (install_dir / "last-known-good").exists()
+    assert (tmp_path / "namespace-proof").read_text().strip() == "namespace-importable"
     slots = list((install_dir / "versions").iterdir())
+    if not stall_health_gate:
+        # Normal abort reclaims the owned incomplete candidate. Prove the
+        # namespace import above while the constructor still owns that slot.
+        assert slots == []
+        return
     assert len(slots) == 1
     slot = slots[0]
     assert not (slot / ".install-complete.json").exists()

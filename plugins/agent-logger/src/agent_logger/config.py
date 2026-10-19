@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover - pyyaml is a hard dependency
 
 from .repo_trust import has_symlink_ancestor, path_traverses_symlink, repo_config_is_trusted
 from .config_process_logs import ProcessLogArchiveConfig
+from .config_origin import MachineConfigOrigin, machine_config_origin
 
 #: Neutral, personality- and multi-machine system-free defaults.
 DEFAULTS: dict[str, Any] = {
@@ -80,6 +81,7 @@ DEFAULTS: dict[str, Any] = {
         # session-sync) coordinate on the same lock; a tenant with a distinct
         # source sets its own name to run in parallel.
         "lock_name": "session-sync.lock",
+        "usage_capture": True,
         # Target-independent post-push notify. After any successful push the
         # engine fires a best-effort HTTP POST to `url` (JSON body
         # {"machine": <machine>}; `{machine}` in the url is also substituted),
@@ -645,11 +647,15 @@ class Config(ProcessLogArchiveConfig):
         home: Path,
         repo_config_path: Path | None = None,
         repo_root: Path | None = None,
+        *,
+        _machine_origin: MachineConfigOrigin | None = None,
     ) -> None:
         self._data = data
         self.home = home
         self.repo_config_path = repo_config_path
         self.repo_root = repo_root
+        self._machine_origin = _machine_origin
+        _ = self.process_log_reclamation
 
     # -- resolved convenience accessors ---------------------------------
 
@@ -986,4 +992,6 @@ def load_config(
                 raise
             data["sync"]["targets"]["local"]["path"] = pre_repo_local_path
 
-    return Config(data, resolved_home, repo_config_path, repo_root)
+    origin = machine_config_origin(data, resolved_home, include_repo=include_repo)
+    return Config(data, origin.home if origin else resolved_home,
+                  repo_config_path, repo_root, _machine_origin=origin)

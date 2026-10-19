@@ -66,6 +66,19 @@ clear_endpoint(run_dir)
 The write is **atomic** (temp file + `os.replace`), so a reader never sees a
 half-written record. Call it on every bind — newest bind wins.
 
+Publication and owner-checked cleanup also share an OS-backed mutation lock
+inside that runtime directory. A predecessor cannot remove a successor's
+advertisement between its final ownership check and unlink. The lock file
+`.endpoint.lock` remains after cleanup so concurrent callers never lock different
+file identities. Readers do not acquire it.
+
+Lock acquisition is bounded at five seconds. Publication raises on failure;
+best-effort cleanup logs the failure without proceeding to unlink. Cleaning an
+absent runtime directory remains a no-op. This guarantee requires cooperating
+writers/cleaners using the repaired implementation; an older process that does
+not acquire the lock is not made safe merely by updating another consumer.
+The endpoint record format and client resolution contract are unchanged.
+
 ## Client side — resolve with a backwards-compatible fallback ladder
 
 ```python
@@ -100,3 +113,9 @@ Pure standard library — no runtime dependencies.
 ```
 pytest        # from this directory
 ```
+
+The ownership concurrency contracts exercise the canonical implementation and
+the in-package dispatch, index and vault consumers with real files, threads and
+independent publisher processes. They cover final-check/unlink exclusion,
+bounded contention, stable lock identity and missing-runtime cleanup on native
+Windows and POSIX.

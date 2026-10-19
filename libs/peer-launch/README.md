@@ -2,12 +2,13 @@
 
 `peer_launch.py` is the canonical, dependency-free native process boundary for
 Agent Bridge, Agent Dispatch, Agent CodeSpaces, Agent Containers, Agent
-Logger, Agent Index, and Agent Machines. `tools/sync-peer-launch.py` packages
+Logger, Agent Index, Agent Machines, Agent Worktrees, and Agent Pull Requests.
+`tools/sync-peer-launch.py` packages
 byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
 Supported peers are `agent-worktrees`, `agent-bridge`, `agent-codespaces`,
-`agent-containers`, `agent-dispatch`, and `agent-ssh` -- each a canonical
+`agent-containers`, `agent-dispatch`, `agent-ssh`, and `agent-pull-requests` -- each a canonical
 `libs/installation-context` adopter in its own right. Adding a peer requires
 three coordinated steps, not just a `PEERS` mapping entry: (1) the mapping
 entry itself; (2) target-specific environment rebinding in
@@ -20,6 +21,13 @@ and (3) registering the new peer as a `tools/sync-installation-context.py`
 destination (and, if it owns a caller-side `_peer_launch.py` copy of its own,
 a `tools/sync-peer-launch.py` destination too) so its packaged validator
 bytes and boundary module stay in sync with the canonical source.
+
+PR-owner calls load their bootstrap from the completed runtime's validated
+immutable snapshot, not a replaceable management payload. In-process loading
+does not emit bytecode, and its standalone prefix adds Python's `-B` so validator
+imports cannot mutate the snapshot either. The PR owner is both a caller and a
+peer; its inherited override namespace is scrubbed, then
+`AGENT_PULL_REQUESTS_HOME` is rebound to that peer receipt's exact `stateRoot`.
 
 `launch_prefix(owner, own_root, raw_context, peer)` returns a composable native
 Python argv prefix. At execution the boundary validates active owner, namespace,

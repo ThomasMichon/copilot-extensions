@@ -4,15 +4,47 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tracking import WorktreeRecord
 
 from .worktrees_projection import MAX_TEXT_BYTES
 
 MAX_CURRENT_CLAIM_LINKS = 8
 
 
-def populate_claims(row: dict, record, active_pr, *, current_only: bool) -> None:
-    from . import claim_kinds_registry, claims_rank
+def populate_claims(
+    row: dict, record, active_pr, *, current_only: bool,
+    claim_records: dict[tuple[str, str, str], WorktreeRecord] | None = None,
+) -> None:
+    from . import claim_kinds_registry, claims_rank, claims_transitive_cli
 
+    resources = claims_rank.claims_with_pr_backfill(record.resources, active_pr)
+    unresolved = []
+    if any(claim.kind == "worktree" and claim.is_unsettled for claim in record.resources):
+        if record.machine:
+            found, unresolved = claims_transitive_cli.transitive_obligations(
+                record.worktree_id, record.repo, machine=record.machine,
+                _record=record, _records=claim_records,
+            )
+        else:
+            found, unresolved = [], [{"reason": "root machine identity unavailable"}]
+        refs = claims_rank.live_pr_claim_identities(resources)
+        inherited = []
+        for claim in found:
+            if claim["kind"] != "pr" or len(claim["path"]) <= 1:
+                continue
+            identity = claims_rank.claim_url("pr", claim["ref"]) or claim["ref"]
+            if identity not in refs:
+                refs.add(identity)
+                inherited.append(claim)
+        resources.extend(inherited)
+        row["claims_projection"] = {
+            "inherited_pr_count": len(inherited),
+            "unresolved_count": len(unresolved),
+            "complete": not unresolved,
+        }
     try:
         pecking_order = claim_kinds_registry.effective_pecking_order()
         label_overrides = claim_kinds_registry.effective_label_overrides()
@@ -23,7 +55,7 @@ def populate_claims(row: dict, record, active_pr, *, current_only: bool) -> None
         label_overrides = None
     try:
         entries = claims_rank.claim_entries_for_worktree(
-            record.resources, active_pr, own_repo=record.repo,
+            resources, own_repo=record.repo, limit=None if current_only else 2,
             pecking_order=pecking_order, label_overrides=label_overrides,
         )
     except Exception:
@@ -31,6 +63,8 @@ def populate_claims(row: dict, record, active_pr, *, current_only: bool) -> None
             raise
         entries = []
     add_claims(row, record, entries, current_only=current_only)
+    if current_only and unresolved:
+        row["claims_links_complete"] = False
 
 
 def add_claims(row: dict, record, entries: list[dict], *, current_only: bool) -> None:
@@ -74,12 +108,19 @@ def materialize(
     never by resident or advisory reads.
     """
     rows = []
+    records = list(records)
+    claim_records: dict[tuple[str, str, str], WorktreeRecord] = {
+        (record.machine, record.repo, record.worktree_id): record
+        for record in records
+        if hasattr(record, "machine") and hasattr(record, "repo")
+    }
     for record in records:
         wid = record.worktree_id
         row = serialize(
             record, current_only=True, state_info=state_map.get(wid),
             mux_info=mux_map.get(wid), session_ctx=session_ctx,
             bare_orphan_wts=bare_orphan_wts, bridge_live_wts=bridge_live_wts,
+            claim_records=claim_records,
         )
         path = Path(record.worktree_path) if record.worktree_path else None
         row["checkout_present"] = bool(path and path.exists() and (path / ".git").exists())

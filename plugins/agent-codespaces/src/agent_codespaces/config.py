@@ -27,6 +27,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
+from agent_procutil import no_window_kwargs
 from dropin_registry import (
     EntryDecision,
     EntryStatus,
@@ -731,11 +732,13 @@ def _active_plugin_config_decision(
 def scan_active_plugin_config_registry(
     *,
     previous: dict[str, ConfigDropin] | None = None,
+    activation: ActivationReport | None = None,
 ) -> ConfigDropinRegistryReport:
     """Resolve supplementary configs declared by currently active plugins."""
     global _PLUGIN_CONFIG_LAST_KNOWN
 
-    activation = resolve_active_plugins()
+    if activation is None:
+        activation = resolve_active_plugins()
     decisions: dict[str, EntryDecision[ConfigDropin]] = {}
     entry_classes: dict[str, str] = {}
     findings: list[Finding] = []
@@ -1069,12 +1072,12 @@ def _withdraw_confirmed_disappearances(
 def scan_config_dropin_registry(
     *,
     previous: dict[str, ConfigDropin] | None = None,
+    activation: ActivationReport | None = None,
 ) -> ConfigDropinRegistryReport:
     """Scan, classify, and reconcile config.d without silent stale authority."""
     global _CONFIG_D_LAST_KNOWN, _CONFIG_D_LAST_KNOWN_ROOT
 
     entry_classes: dict[str, str] = {}
-    activation: ActivationReport | None = None
     directory = config_d_dir()
 
     def activation_report() -> ActivationReport:
@@ -1277,15 +1280,13 @@ def _shadow_config_d_with_active_plugins(
 
 def scan_config_providers() -> ConfigProviderReports:
     """Scan active plugin declarations and compatibility config.d entries."""
-    active_plugins = scan_active_plugin_config_registry()
+    activation = resolve_active_plugins()
+    active_plugins = scan_active_plugin_config_registry(activation=activation)
     config_d = _shadow_config_d_with_active_plugins(
-        scan_config_dropin_registry(),
+        scan_config_dropin_registry(activation=activation),
         active_plugins,
     )
-    return ConfigProviderReports(
-        active_plugins=active_plugins,
-        config_d=config_d,
-    )
+    return ConfigProviderReports(active_plugins=active_plugins, config_d=config_d)
 
 
 def _warn_active_plugin_config_findings(
@@ -1400,6 +1401,7 @@ def cwd_repo_root() -> Path | None:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             cwd=Path.cwd(), capture_output=True, text=True,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -1799,6 +1801,16 @@ class CodespacesConfig:
         folder = f"/workspaces/{basename}" if basename else None
         return folder, is_own
 
+    def checkout_provision_command_for(
+        self, repo: str | None, *, requested_repo: str | None = None,
+        repo_remote: str | None = None,
+    ) -> str:
+        """Provider-owned, idempotent clone step, independent of the ACP child."""
+        from .plugin_preparation import checkout_provision_command
+        return checkout_provision_command(
+            self, repo, requested_repo=requested_repo, repo_remote=repo_remote,
+        )
+
     def effective_acp_command_for(
         self, repo: str | None, *,
         requested_repo: str | None = None,
@@ -1825,9 +1837,10 @@ class CodespacesConfig:
         - a **pre-populated** folder (own product / dotfiles) -> plain
           ``cd <folder> && copilot ...`` (no clone; the bootstrap owns it).
         - **any other** folder with a known ``repo_remote`` ->
-          ``[ -d <folder>/.git ] || git clone <remote> <folder>; cd <folder> &&
+          ``[ -e <folder>/.git ] || git clone -- <remote> <folder> && cd <folder> &&
           copilot ...`` (clone-if-missing over the credential relay the
-          ``--stdio`` login shell already set up).
+          ``--stdio`` login shell already set up). Session Hosts also receive
+          this provider-owned clone step separately to run before preparation.
         - any other folder with **no** remote -> plain ``cd <folder> && ...``;
           the ``cd`` fails loudly if the checkout is absent, surfacing the
           missing-remote misconfiguration rather than silently launching in the
@@ -1837,25 +1850,10 @@ class CodespacesConfig:
         there is no human to answer interactive tool-permission prompts, and
         SDK extensions do not load without ``--experimental``.
         """
-        copilot = "copilot --acp --stdio --allow-all --experimental"
-
-        if requested_repo is not None:
-            folder, prepopulated = self.workspace_folder_for_request(
-                repo, requested_repo
-            )
-            if folder is None:
-                return f"{_WORKSPACE_CD} && {copilot}"
-            if prepopulated or not repo_remote:
-                return f"cd {folder} && {copilot}"
-            clone = f"[ -d {folder}/.git ] || git clone {repo_remote} {folder}"
-            return f"{clone}; cd {folder} && {copilot}"
-
-        if self.acp_command:
-            return self.acp_command
-        workspace_folder = self.workspace_folder_for(repo)
-        if workspace_folder:
-            return f"cd {workspace_folder} && {copilot}"
-        return f"{_WORKSPACE_CD} && {copilot}"
+        from .plugin_preparation import checkout_acp_command
+        return checkout_acp_command(
+            self, repo, requested_repo=requested_repo, repo_remote=repo_remote,
+        )
 
     def provision_for_repo(self, repo: str | None) -> ProvisionConfig:
         """Collect provisioning hooks that apply to a CodeSpace.
@@ -1973,6 +1971,7 @@ def _git_origin_remote(repo_path: Path) -> str | None:
             capture_output=True,
             text=True,
             check=False,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -2279,6 +2278,7 @@ def _state_root_config_dir(repo_path: Path) -> Path | None:
             proc = subprocess.run(
                 [exe, "state-root", "--json"], cwd=str(repo_path),
                 capture_output=True, text=True, timeout=20,
+                **no_window_kwargs(),
             )
         except (OSError, subprocess.SubprocessError):
             return None

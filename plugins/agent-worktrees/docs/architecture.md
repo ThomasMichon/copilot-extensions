@@ -2,6 +2,30 @@
 
 ## Concurrent PR publication
 
+### Unpublished creation retries
+
+A failed pre-publication rebase retains one `creating` PR entry. Retrying the
+same branch, provider and repository reuses that entry, including its stable
+ID and frozen attribution decision, even with `create-pr --new`. Interleaved
+attempts search the full owning record for a unique same-head association.
+A successful resumed publication refreshes that entry's opening timestamp so
+subsequent no-selector updates target it, without changing unrelated attempts.
+Only an entry
+without any provider identity, publication lease, destination or observed-head
+evidence qualifies. It still follows fresh-publication rebase and absent-ref
+checks; this is not authority to rewrite an existing remote head.
+
+Different requested branches retain separate entries. Published or partially
+published attempts retain the existing lease and ambiguity guards. If an older
+version already left a duplicate, inspect `pr-status --all --no-live --json`
+before correction. `set-pr --select-branch <branch> --state closed` selects the
+first matching entry: use it only after confirming that entry is the empty,
+unnumbered failed attempt, then verify the numbered PR remains open. It closes
+tracking for the failed attempt, not the provider PR. Never edit the ledger or
+close a numbered association merely to satisfy publication ownership.
+
+### Transport boundaries
+
 The clone-wide `agent-worktrees-publish.lock` protects shared remote
 configuration and destination verification, not the duration of a push.
 Publication captures the expanded, verified push URL under that lock, then
@@ -1173,6 +1197,12 @@ discloses the underlying worktree identity in plaintext (encrypting it alongside
 would add ciphertext with no additional privacy value), and `false` (the
 anonymous opt-out) continues to emit no marker of any kind, encrypted or
 not -- an operator who explicitly chose full anonymity gets it, full stop.
+The [local identity-vault setup flow](identity-vault.md) pins the configured
+vault and protected cache in installation-scoped non-secret machine state.
+Setup delegates all KeePass/key/cache operations through the owning vault CLI;
+read-only status and fresh-process verification never unlock or create keys.
+First-owner initialization is separately confirmed, create-only and never the
+response to a cache miss or unavailable database.
 Key custody uses one portable owner-level 32-byte key, never a per-machine
 PR key. An explicit nonempty `AGENT_WORKTREES_IDENTITY_KEY` path overrides
 the optional `AGENT_WORKTREES_IDENTITY_VAULT_ARGV` source, whose JSON argv
@@ -1181,7 +1211,8 @@ names the absolute vault payload command. That source reads the common
 with `--cache-only`; the synced vault holds the shared key, while each local
 protected cache serves routine lookup without vault unlock.
 Configured vault failure never silently falls back to a different key.
-Without an explicit source, the legacy OneDrive file location remains
+Absent an explicit override, persisted setup supplies the selected vault
+source. Without either source, the legacy OneDrive file location remains
 compatible. File generation is only for file-key adopters and is refused
 when vault sourcing is configured. Vault provisioning and cache population
 are explicit; normal publish/decode never creates keys or unlocks the vault.
@@ -1310,6 +1341,12 @@ and `--stdio`/`--json` callers stay quiet (in `--stdio` mode the launcher's
 `Write-Host` is already routed to stderr, off the ACP channel). Every step is
 still written to the per-PID setup log under `$TMPDIR/worktree-setup-logs`
 regardless.
+Synchronous marketplace installers, bootstrap-service updates and reconciliation
+actions share UTC line prefixes, monotonic elapsed/completion suffixes and the
+same setup-log sink for both child streams. Already-framed nested lines are
+retained unchanged. Failed or missing commands report their outcome and continue;
+they do not suppress fresh planning or runtime re-resolution. Detached installers
+retain their independent lifetime and are not covered by that synchronous sink.
 
 ### "Update available" -> the full update (picker refresh)
 
@@ -1356,6 +1393,10 @@ stale runtime is never left behind. Pass `--force` to re-deploy every runtime
 unconditionally.
 
 ### Version-cutover reap and live-launcher protection
+
+For the installer handover's exact admission, lock, busy-oracle and rollback
+sequence, and its bounded structural logs, see the
+[status-monitor drain audit](status-monitor-drain.md).
 
 A version bump publishes a fresh `~/.agent-worktrees/versions/<v>` slot and
 calls `status-monitor-restart` (`_restart_status_monitor`) from that new

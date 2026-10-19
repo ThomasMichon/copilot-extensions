@@ -268,6 +268,55 @@ def _is_safe_lib_name(lib: str) -> bool:
     return bool(lib) and lib not in (".", "..") and Path(lib).name == lib
 
 
+def _has_canonical_python_sources(root: Path) -> bool:
+    if (root / "src").is_dir():
+        return True
+    project = root / "pyproject.toml"
+    if project.is_symlink():
+        return False
+    try:
+        data = tomllib.loads(project.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        return False
+    tool = data.get("tool")
+    setuptools = tool.get("setuptools") if isinstance(tool, dict) else None
+    modules = setuptools.get("py-modules") if isinstance(setuptools, dict) else None
+    if not isinstance(modules, list) or not modules or any(
+        not isinstance(module, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", module)
+        for module in modules
+    ) or len(set(modules)) != len(modules):
+        return False
+    for module in modules:
+        path = root / (module + ".py")
+        try:
+            attributes = path.lstat()
+        except OSError:
+            return False
+        if (
+            path.is_symlink() or not path.is_file()
+            or getattr(attributes, "st_file_attributes", 0) & 0x400
+        ):
+            return False
+    return True
+
+
+def _is_retained_flat_ref(consumer_dir: Path, name: str, canonical: Path) -> bool:
+    if canonical.is_symlink() or (canonical / "src").exists():
+        return False
+    manifest = consumer_dir / "pyproject.toml"
+    if manifest.is_symlink():
+        return False
+    try:
+        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        entry = data["tool"]["uv"]["sources"][name]
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError):
+        return False
+    return (
+        isinstance(entry, dict) and entry.get("editable") is False
+        and _has_canonical_python_sources(canonical)
+    )
+
+
 def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]]:
     """Every ``[tool.uv.sources]`` entry in ``consumer_dir/pyproject.toml``
     whose ``path`` escapes ``consumer_dir``'s own root -- mirrors
@@ -331,8 +380,8 @@ def _uv_source_entry_pattern(name: str, raw_path: str) -> re.Pattern[str]:
     path_value = r'(?:"' + escaped_path + r'"|\'' + escaped_path + r"')"
     return re.compile(
         r'^([ \t]*' + key + r'\s*=\s*)\{\s*(?:'
-        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*true'
-        r'|editable\s*=\s*true\s*,\s*path\s*=\s*' + path_value +
+        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*(?:true|false)'
+        r'|editable\s*=\s*(?:true|false)\s*,\s*path\s*=\s*' + path_value +
         r')\s*\}[ \t]*(?:#.*)?$',
         re.MULTILINE,
     )
@@ -403,7 +452,7 @@ def _materialize_one_uv_editable_ref(
 ) -> str:
     """Mirrors ``materialize_main.py``'s identically-named helper -- see
     its docstring for the preflight-then-copy-then-rewrite contract."""
-    if not (canonical / "src").is_dir():
+    if not _has_canonical_python_sources(canonical):
         return f"SKIP {dest_lib_dir}: {canonical}/src not found -- refusing (canonical lib source must exist)"
     if not (canonical / "pyproject.toml").is_file():
         return f"SKIP {dest_lib_dir}: {canonical}/pyproject.toml missing -- refusing"
@@ -488,7 +537,12 @@ def _materialize_nested_uv_editable_refs(
     # nested_raw_path so a crafted raw_path can never redirect the copy.
     dest_consumer_dir = dest_lib_dir.parent.parent.resolve()
     for nested_name, nested_raw_path, nested_lib, nested_editable in nested_refs:
-        if not nested_editable:
+        if not nested_editable and not (
+            _is_safe_lib_name(nested_lib)
+            and _is_retained_flat_ref(
+                dest_lib_dir, nested_name, canonical_root_r / "libs" / nested_lib,
+            )
+        ):
             log.append(
                 f"SKIP {dest_pyproject}: {nested_name} references {nested_raw_path} "
                 "outside its own root but is missing editable = true -- "
@@ -560,7 +614,7 @@ def _materialize_nested_uv_editable_refs(
                 )
                 continue
         else:
-            if not (nested_canonical / "src").is_dir():
+            if not _has_canonical_python_sources(nested_canonical):
                 log.append(
                     f"SKIP {nested_dest}: {nested_canonical}/src not found "
                     "-- refusing (canonical lib source must exist)"
@@ -617,7 +671,10 @@ def materialize_uv_editable_ref_into(
     except ManifestUnreadable as exc:
         return [f"SKIP {dest_consumer_dir}: {exc}"]
     for name, raw_path, lib, editable in refs:
-        if not editable:
+        if not editable and not (
+            _is_safe_lib_name(lib)
+            and _is_retained_flat_ref(source_consumer_dir, name, canonical_root_r / "libs" / lib)
+        ):
             log.append(
                 f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
                 "outside its own root but is missing editable = true -- "

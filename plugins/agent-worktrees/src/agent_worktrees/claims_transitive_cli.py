@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 
 from . import config as cfg, output, tracking
+from .claims_rank import claim_url
 
 
 def _is_safe_path_component(value: str) -> bool:
@@ -37,10 +38,13 @@ def _is_safe_path_component(value: str) -> bool:
 def transitive_obligations(
     worktree_id: str,
     project: str,
-    config: cfg.Config,
+    config: cfg.Config | None = None,
     *,
+    machine: str | None = None,
     _visited: set[tuple[str, str, str]] | None = None,
     _path: tuple[str, ...] = (),
+    _record: tracking.WorktreeRecord | None = None,
+    _records: dict[tuple[str, str, str], tracking.WorktreeRecord] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Recursively collect every unsettled, non-``session``-kind resource
     claim anywhere in ``worktree_id``'s subtree (itself + every worktree it
@@ -69,20 +73,32 @@ def transitive_obligations(
     ``worktree``-kind claim) -- so an empty ``obligations`` list always
     implies an empty ``unresolved`` list too; there is no path to reporting
     "settled" while something is genuinely still unresolved underneath.
+
+    Producers may supply the snapshot's ``machine`` and root ``_record``
+    without loading unrelated configuration. ``_records`` is shared only
+    within one publication; subsequent publications reread descendant records.
     """
+    machine = config.machine if config is not None else machine
+    if not machine:
+        raise ValueError("transitive obligations require a machine identity")
     if _visited is None:
         _visited = set()
-    key = (config.machine, project, worktree_id)
+    key = (machine, project, worktree_id)
     here = _path + (worktree_id,)
     if key in _visited:
         return [], [{"path": here, "ref": "", "reason": "cycle detected"}]
     _visited.add(key)
 
+    if _records is None:
+        _records = {}
     try:
-        rec_path = cfg.project_dir(project) / "worktrees" / f"{worktree_id}.yaml"
-        if not rec_path.exists():
-            return [], [{"path": here, "ref": "", "reason": "record not found"}]
-        rec = tracking.load_record(rec_path)
+        rec = _record or _records.get(key)
+        if rec is None:
+            rec_path = cfg.project_dir(project) / "worktrees" / f"{worktree_id}.yaml"
+            if not rec_path.exists():
+                return [], [{"path": here, "ref": "", "reason": "record not found"}]
+            rec = tracking.load_record(rec_path)
+        _records[key] = rec
     except Exception as exc:
         # Covers both an unreadable/corrupt record AND `project_dir` itself
         # raising -- e.g. a same-machine child naming an unavailable/
@@ -140,7 +156,7 @@ def transitive_obligations(
                 "reason": "unsafe child ref (rejected, not resolved)",
             })
             continue
-        if parsed.machine != config.machine:
+        if parsed.machine != machine:
             unresolved.append({
                 "path": here, "ref": c.ref,
                 "reason": "cross-machine child (see lease mirror / claims sweep)",
@@ -148,7 +164,7 @@ def transitive_obligations(
             continue
         child_found, child_unresolved = transitive_obligations(
             parsed.worktree_id, parsed.project or project, config,
-            _visited=_visited, _path=here,
+            machine=machine, _visited=_visited, _path=here, _records=_records,
         )
         found.extend(child_found)
         unresolved.extend(child_unresolved)
@@ -191,7 +207,10 @@ def cmd_claims_transitive(
     if args.json:
         json_output({
             "worktree_id": wt_id,
-            "obligations": [{**o, "path": list(o["path"])} for o in found],
+            "obligations": [
+                {**o, "path": list(o["path"]), "url": claim_url(o["kind"], o["ref"])}
+                for o in found
+            ],
             "unresolved": [{**u, "path": list(u["path"])} for u in unresolved],
         })
         return 0

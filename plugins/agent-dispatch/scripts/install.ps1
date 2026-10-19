@@ -77,6 +77,13 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {
+        throw 'Required installer human-output initializer is unavailable.'
+    }
+    . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
 # Raise the shared self-stage watchdog's deadline for THIS plugin specifically,
 # via the exact per-plugin override hook the byte-identical
 # install-contract:v4 self-stage block already reads
@@ -737,43 +744,28 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
-       --allow-existing` over a corpse (#935); the current/active slot is never
-       tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
+    }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so "marker present" == "healthy, complete build". A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. Returns $false (after reporting why) when the
-       marker could not be published; callers must not activate the slot. #>
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) {
-        Write-Fail "Cannot publish the completion marker for versions/$SrcVersion without a bootstrap Python interpreter -- not activating"
-        return $false
+    param([string]$PayloadHash = '')
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
-    if (-not $ph) {
-        Write-Fail "Runtime input fingerprint unavailable -- not publishing versions/$SrcVersion"
-        return $false
-    }
-    $mcArgs += @('--payload-hash', $ph)
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to publish the completion marker for versions/$SrcVersion (exit $LASTEXITCODE) -- not activating"
-        return $false
-    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
@@ -1627,8 +1619,17 @@ function Install-Runtime {
     # still runs this `finally`, confirmed: PowerShell unwinds pending
     # `finally` blocks before an `exit` actually terminates the process.
     $buildMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -Version $SrcVersion -TimeoutSeconds 180
+    $originalDependencyPolicy = $script:InstallerDependencyPolicy
     try {
     $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -BestEffort
+    if ($BuildSrcDir -ne $PluginDir) {
+        # Attribute the copied sources through their own standalone helper,
+        # not the original payload's unrelated source root.
+        $script:InstallerDependencyPolicy = Join-Path $BuildSrcDir 'scripts\installer_dependency_policy.py'
+        if (-not (Test-Path -LiteralPath $script:InstallerDependencyPolicy -PathType Leaf)) {
+            throw "Build snapshot dependency policy is unavailable: $script:InstallerDependencyPolicy"
+        }
+    }
 
     # Find a Python interpreter (skip Windows Store aliases that aren't real)
     $pythonCmd = $null
@@ -1657,6 +1658,8 @@ function Install-Runtime {
     }
     Write-Ok "Directories: $InstallDir"
 
+    [void](Invoke-VersionedSlotClean)
+    if (-not $script:RuntimeConstructionReuse) {
     # -- venv (SAC-trusted signed base python preferred; then uv; then venv) --
     if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
         $prevEAP = $ErrorActionPreference
@@ -1673,10 +1676,9 @@ function Install-Runtime {
         if ($signedBase) {
             $signedResult = Invoke-NativeCapture { & $signedBase -m venv --copies $VenvDir }
             if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-                Write-Warn "Signed Python venv failed validation (exit $($signedResult.ExitCode)) -- falling back"
-                if (Test-Path -LiteralPath $VenvDir) {
-                    Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction Stop
-                }
+                $ErrorActionPreference = $prevEAP
+                Write-Fail "Signed Python venv failed validation (exit $($signedResult.ExitCode)); construction aborted"
+                exit 1
             } elseif ($signedResult.ExitCode -ne 0) {
                 Write-Warn "Signed Python exited $($signedResult.ExitCode) after producing a usable venv"
             }
@@ -1705,14 +1707,7 @@ function Install-Runtime {
         Write-Skip 'Venv already exists'
     }
 
-    # -- install package (uv pip install; [mcp] extra with graceful fallback) --
-    # The [mcp] extra pulls `mcp` -> `pyjwt[crypto]` -> `cryptography`, which has
-    # no prebuilt wheel on some platforms (notably win-arm64) and needs a Rust +
-    # MSVC toolchain to build from source. Per the plugin-services vision's
-    # `degrade-gracefully` behavior, a build failure of the OPTIONAL MCP server
-    # surface must not abort the whole install: fall back to the base package so
-    # the coordinator CLI still deploys; only `agent-dispatch mcp` stays dark
-    # until the toolchain is present.
+    # The selected MCP extra is part of this candidate's required closure.
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     Remove-ConsoleTrampolines -VenvDir $VenvDir
@@ -1736,7 +1731,7 @@ function Install-Runtime {
             $zddOut = $zddResult.Output
             $zddCode = $zddResult.ExitCode
         } else {
-            $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
+            $zddOut = & $VenvPython -I $script:InstallerDependencyPolicy --uv uv -- --python $VenvPython "$ZddDir" 2>&1
             $zddCode = $LASTEXITCODE
         }
         Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $ZddDir
@@ -1782,7 +1777,7 @@ function Install-Runtime {
             $libOut = $libResult.Output
             $libCode = $libResult.ExitCode
         } else {
-            $libOut = & $VenvPython -m pip install "$libDir" 2>&1
+            $libOut = & $VenvPython -I $script:InstallerDependencyPolicy --uv uv -- --python $VenvPython "$libDir" 2>&1
             $libCode = $LASTEXITCODE
         }
         Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $libDir
@@ -1863,7 +1858,7 @@ function Install-Runtime {
                 # install: if it fails, letting the plain install below run
                 # anyway could silently succeed from a cached/existing wheel,
                 # defeating the whole stale-wheel guard.
-                $preOut = & $VenvPython -m pip install --force-reinstall --no-deps $Spec 2>&1 | Out-String
+                $preOut = & $VenvPython -I $script:InstallerDependencyPolicy --uv uv -- --python $VenvPython --force-reinstall $Spec 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) {
                     return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $preOut }
                 }
@@ -1872,7 +1867,7 @@ function Install-Runtime {
                 # re-scrub between the two calls so that build isn't shadowed
                 # by residue the pre-pass just left behind.
                 & $scrubArtifacts
-                $out = & $VenvPython -m pip install $Spec 2>&1 | Out-String
+                $out = & $VenvPython -I $script:InstallerDependencyPolicy --uv uv -- --python $VenvPython $Spec 2>&1 | Out-String
             }
             [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
         } finally {
@@ -1884,15 +1879,10 @@ function Install-Runtime {
     if ($mcpResult.Code -eq 0) {
         Write-Ok 'Package installed: agent-dispatch [mcp]'
     } else {
-        Write-Warn 'Could not install the [mcp] extra (its native deps may not build on this platform) -- falling back to a base install without the MCP server surface'
-        $baseResult = & $installPkg "$BuildSrcDir"
-        if ($baseResult.Code -ne 0) {
-            Write-Fail 'Failed to install agent-dispatch package into venv'
-            Write-Host $baseResult.Output
-            $ErrorActionPreference = $prevEAP
-            exit 1
-        }
-        Write-Ok 'Package installed: agent-dispatch (base -- `agent-dispatch mcp` server unavailable on this platform)'
+        Write-Fail 'Selected agent-dispatch [mcp] dependency installation failed'
+        Write-Host $mcpResult.Output
+        $ErrorActionPreference = $prevEAP
+        exit 1
     }
     $ErrorActionPreference = $prevEAP
     Remove-ConsoleTrampolines -VenvDir $VenvDir
@@ -1919,6 +1909,8 @@ function Install-Runtime {
     # shared binstub/resolver surface over whatever a newer, already-active
     # build already published there -- same reasoning as the manifest/
     # verify/PATH/pivot steps this guard already protects.
+
+    }
 
     # Versioned layout (#581): health-gate the freshly-built slot in isolation,
     # then swap the stable `.venv` link onto it. Everything below (manifest, task
@@ -2029,6 +2021,7 @@ function Install-Runtime {
         Register-PickerPivot
     }
     } finally {
+        $script:InstallerDependencyPolicy = $originalDependencyPolicy
         # Held through the health gate, completion marker, AND activation
         # above (not just the package build/install): a second same-version
         # installer that only waited out the earlier, narrower release
@@ -2253,7 +2246,7 @@ function Retire-SupervisorProcesses {
     }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $raw = & $py -m agent_dispatch _retire-supervisors --install-dir $InstallDir 2>&1 | Out-String
+    $raw = @(& $py -m agent_dispatch _retire-supervisors --install-dir $InstallDir 2>&1)
     $rc = $LASTEXITCODE
     Invoke-SupervisorAudit -Event retire -Reason windows-generation-inventory -Outcome $(if ($rc -eq 0) { 'ok' } else { 'fail' }) -ExitCode $rc
     $ErrorActionPreference = $prevEAP
@@ -2270,7 +2263,9 @@ function Retire-SupervisorProcesses {
         # Python helper. Do not run a second, broader classifier over a changed
         # process inventory; report the errors and keep its retired count.
         if ($rc -eq 0 -or -not $enumerationFailed) { return $retired }
-    } catch { }
+    } catch {
+        Write-Warn "Supervisor retirement result rejected: $($_.Exception.Message)"
+    }
     Write-Warn 'Full supervisor generation inventory failed; using native CIM supervisor-tree retirement'
     return (Retire-SupervisorProcessesFallback)
 }
@@ -4164,6 +4159,7 @@ function Invoke-Uninstall {
     if ($DryRun) { Write-Host 'agent-dispatch uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
 }
 
+try {
 switch ($Action) {
     'install'   { Invoke-Install }
     'update'    { Invoke-Update }
@@ -4175,3 +4171,9 @@ switch ($Action) {
     'provision' { Invoke-Install }
 }
 exit 0
+
+} finally {
+    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        Stop-RuntimeConstruction
+    }
+}

@@ -187,17 +187,22 @@ if (-not $AwPy) {
 
 # Tier 3: true first-run -> newest complete installed slot.
 if (-not $AwPy) {
-  $AwPy = Get-ChildItem (Join-Path $_awr 'versions') -Directory -ErrorAction SilentlyContinue |
-    Sort-Object { _Aw-VersionKey $_.Name } |
-    ForEach-Object {
-      $resolved = _Aw-TrySlot $_.Name
-      if ($resolved) {
-        $_awTraceSource = 'newest'
-        $_awTraceVersion = $_.Name
-      }
-      $resolved
-    } |
-    Where-Object { $_ } | Select-Object -Last 1
+  $_awSlots = @(Get-ChildItem (Join-Path $_awr 'versions') -Directory -ErrorAction SilentlyContinue)
+  if (@($_awSlots | Where-Object { $_.Name -cmatch '[+.]source\.' }).Count) {
+    [Console]::Error.WriteLine('Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback')
+  } else {
+    $AwPy = $_awSlots |
+      Sort-Object { _Aw-VersionKey $_.Name } |
+      ForEach-Object {
+        $resolved = _Aw-TrySlot $_.Name
+        if ($resolved) {
+          $_awTraceSource = 'newest'
+          $_awTraceVersion = $_.Name
+        }
+        $resolved
+      } |
+      Where-Object { $_ } | Select-Object -Last 1
+  }
 }
 if ($AwPy) {
   _Aw-WriteBootTrace 'resolver-slot-result' 'resolver' $_awTraceSource 'resolved' $_awTraceVersion

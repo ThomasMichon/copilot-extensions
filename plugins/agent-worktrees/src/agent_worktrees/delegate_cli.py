@@ -26,13 +26,9 @@ from agent_procutil import no_window_kwargs
 from . import config as cfg
 from . import list_views_cli
 from . import tracking
+from .worktree_naming import parse_session_worktree_id, session_worktree_prefix
 
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
-
-
-def _platform_token(platform: str) -> str:
-    """Map a stored platform name to its worktree-id token."""
-    return "win" if platform == "windows" else platform
 
 
 def _parse_json_object(raw: str) -> dict[str, Any] | None:
@@ -69,16 +65,18 @@ def _expected_host_key(
     reachable_hosts: dict[tuple[str, str], bool],
 ) -> tuple[str, str] | None:
     """Infer the host machine/environment from a machine-stamped worktree id."""
-    matches: list[tuple[int, tuple[str, str]]] = []
-    for machine, platform in reachable_hosts:
-        token = _platform_token(platform)
-        prefix = f"{machine}-{token}-" if token else f"{machine}-"
-        if worktree_id.startswith(prefix):
-            matches.append((len(prefix), (machine, platform)))
-    if not matches:
+    allocation = parse_session_worktree_id(worktree_id.removesuffix("-k"))
+    if allocation is None:
         return None
-    matches.sort(key=lambda item: item[0], reverse=True)
-    return matches[0][1]
+    matches = [
+        (machine, platform)
+        for machine, platform in reachable_hosts
+        if allocation[0] in (
+            session_worktree_prefix(machine, platform),
+            session_worktree_prefix(machine, platform, legacy=True),
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def annotate_delegate_graph(

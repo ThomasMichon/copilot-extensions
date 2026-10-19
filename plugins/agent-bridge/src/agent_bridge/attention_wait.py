@@ -214,6 +214,17 @@ def _event_reason(row: dict[str, Any]) -> AttentionReason | None:
     return None
 
 
+def _input_correlation(data: dict[str, Any]) -> tuple[str, str]:
+    key = "request_id" if data.get("request_id") else "tool_call_id"
+    return key, str(data.get(key) or "")
+
+
+def _input_is_live(client: Any, key: str, correlation_id: str) -> bool:
+    name = "has_pending_elicitation_request" if key == "request_id" else "has_pending_elicitation"
+    reader = getattr(client, name, None)
+    return bool(correlation_id and callable(reader) and reader(correlation_id))
+
+
 def _event_reference(
     session: Session,
     row: dict[str, Any],
@@ -236,20 +247,19 @@ def _event_reference(
     }.get(reason, "terminal")
 
     if reason == AttentionReason.INPUT_REQUIRED:
-        correlation_id = str(data.get("tool_call_id") or "")
-        value = {"tool_call_id": correlation_id}
+        correlation_key, correlation_id = _input_correlation(data)
+        value = {"tool_call_id": str(data.get("tool_call_id") or "")}
+        if correlation_key == "request_id":
+            value["request_id"] = correlation_id
+            for key in ("native_request_id", "decision_id"):
+                if data.get(key) is not None:
+                    value[key] = data[key]
         client = session.client
-        live = bool(
-            correlation_id
-            and client
-            and getattr(client, "has_pending_elicitation", lambda _value: False)(
-                correlation_id
-            )
-        )
+        live = _input_is_live(client, correlation_key, correlation_id)
         availability = _request_availability(
             all_rows,
             request_event_id=event_id,
-            correlation_key="tool_call_id",
+            correlation_key=correlation_key,
             correlation_id=correlation_id,
             resolved_event="ask_user_resolved",
             withdrawn_event="ask_user_withdrawn",
@@ -261,7 +271,7 @@ def _event_reference(
         for option in data.get("options") or []:
             if not isinstance(option, dict):
                 continue
-            option_id = str(option.get("optionId") or "")[:160]
+            option_id = str(option.get("optionId") or "")
             if not option_id:
                 continue
             options.append(

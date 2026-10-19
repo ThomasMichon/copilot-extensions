@@ -1,14 +1,9 @@
-"""Guard for init.ps1's non-uv (bare-pip) preinstall loop covering the
-uv-editable canonical-reference libs (vendor-pointer-generalization effort):
-dropin-registry, plugin-resolve, agent-procutil, remote-login-shell,
-machine-transport, plugin-activation.
-Exercises the loop via real pwsh execution for both the uv path and the
-bare-pip fallback path,
-confirming plugin-local/repo-root-canonical resolution and the required
-dropin-registry/plugin-resolve-before-plugin-activation install order -- a
-regression here would still pass every other installer guard while
-silently reintroducing the bare-pip dependency failure Copilot's review
-caught on PR #4420."""
+"""Source-resolution guard for the canonical dependency-policy preinstall loop.
+
+Both resolver-discovery branches must use the policy adapter and preserve
+plugin-local/canonical resolution and activation-library install ordering.
+The adapter spy does not exercise dependency-age admission.
+"""
 
 from __future__ import annotations
 
@@ -35,17 +30,35 @@ def _extract_loop() -> str:
 
 def _run(pwsh: str, plugin_dir: Path, have_uv: bool) -> subprocess.CompletedProcess[str]:
     loop = _extract_loop()
-    uv_stub = """
-function uv {
-    [Console]::Out.Write("UV_INSTALL:" + $args[-2] + "|")
-    $global:LASTEXITCODE = 0
-}
-""" if have_uv else "function uv { throw 'uv must not be invoked when haveUv is false' }"
+    assert "--uv uv -- --python $VenvPython" in loop
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True)
+    policy = scripts / "installer_dependency_policy.py"
+    shutil.copyfile(INSTALLER.parent / policy.name, policy)
+    shutil.copyfile(
+        INSTALLER.parent / "installer_dependency_config.py",
+        scripts / "installer_dependency_config.py",
+    )
     script = f"""
+$ErrorActionPreference = 'Stop'
 function Write-Fail {{ param([string]$Message) }}
 function Write-Ok {{ param([string]$Message) [Console]::Out.Write($Message + "|") }}
-{uv_stub}
-function Invoke-StubVenvPython {{ [Console]::Out.Write("PIP_INSTALL:" + $args[-1] + "|"); $global:LASTEXITCODE = 0 }}
+function Invoke-StubVenvPython {{
+    if ($args[0] -ne '-I' -or $args[1] -ne '{policy}' -or
+        -not (Test-Path -LiteralPath $args[1]) -or
+        $args[2] -ne '--uv' -or $args[3] -ne 'uv' -or
+        $args[4] -ne '--python' -or $args[5] -ne 'Invoke-StubVenvPython') {{
+        throw 'Preinstall bypassed canonical dependency policy'
+    }}
+    # PowerShell consumes the standalone separator when binding a function spy.
+    $pathIndex = if ($haveUv) {{ 8 }} else {{ 7 }}
+    if ($haveUv -and $args[6] -ne '--reinstall-package') {{
+        throw 'Preinstall omitted package reinstall'
+    }}
+    [Console]::Out.Write("POLICY_INSTALL:" + $args[$pathIndex] + "|")
+    $global:LASTEXITCODE = 0
+}}
+$PSScriptRoot = '{scripts}'
 $VenvPython = 'Invoke-StubVenvPython'
 $PluginDir = '{plugin_dir}'
 $haveUv = ${str(have_uv).lower()}
@@ -65,6 +78,7 @@ def _make_libs(root: Path) -> None:
     for lib in (
         "dropin-registry", "plugin-resolve", "agent-procutil",
         "remote-login-shell", "machine-transport", "plugin-activation",
+        "installation-context", "installer-readiness",
     ):
         lib_dir = root / lib
         lib_dir.mkdir(parents=True)
@@ -85,15 +99,18 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
     proc = _run(pwsh, plugin_dir, have_uv)
     assert proc.returncode == 0, proc.stderr
 
-    marker = "UV_INSTALL:" if have_uv else "PIP_INSTALL:"
+    marker = "POLICY_INSTALL:"
     installs = [
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
-    assert len(installs) == 6
+    assert len(installs) == 8
     order = [Path(p).name for p in installs]
+    assert "machine-transport" in order
+    assert order.index("remote-login-shell") < order.index("machine-transport")
     assert order.index("plugin-activation") > order.index("dropin-registry")
     assert order.index("plugin-activation") > order.index("plugin-resolve")
     assert order.index("machine-transport") > order.index("remote-login-shell")
+    assert order.index("installer-readiness") > order.index("installation-context")
 
 
 @pytest.mark.parametrize("have_uv", [True, False])
@@ -112,10 +129,13 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
     proc = _run(pwsh, plugin_dir, have_uv)
     assert proc.returncode == 0, proc.stderr
 
-    marker = "UV_INSTALL:" if have_uv else "PIP_INSTALL:"
+    marker = "POLICY_INSTALL:"
     installs = [
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
-    assert len(installs) == 6
+    assert len(installs) == 8
+    order = [Path(p).name for p in installs]
+    assert order.index("remote-login-shell") < order.index("machine-transport")
+    assert order.index("installation-context") < order.index("installer-readiness")
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

@@ -84,6 +84,19 @@ an inline ``# daemon-spawn: allow <why>`` comment on the ``Popen`` line, or a
 covers exactly one launch in its function, an entry with no matching launch
 is itself reported, and every entry needs a reason.
 
+**A sixth rule: an installer never starts a daemon with a contained
+PowerShell launch.** In ``plugins/*/scripts/install*.ps1`` and
+``plugins/*/transports/*/scripts/install*.ps1``, a ``Start-Process`` of
+``conhost`` (the windowless host every PowerShell start-now uses) is
+reported: the child stays inside the installer's Job and dies with the SSH
+session or updater that ran it. Start a daemon now through the service's
+user-mode ensure path (``agent_procutil.spawn_daemon``), or WMI
+``Win32_Process.Create`` for a PowerShell-only daemon. A child the caller
+deliberately owns (a foreground supervisor that waits on it, or a warned
+last resort) carries ``# daemon-spawn: allow <why>`` on the statement or the
+comment line directly above it. Scheduled-task and Run-key registrations
+hand the lifetime to Windows and are not launches.
+
 Usage::
 
     python tools/check-headless-launch.py          # verify (CI / pre-push)
@@ -424,6 +437,68 @@ def _load_path_allowlist() -> set[str]:
             continue
         entries.add(stripped.split(None, 1)[0])
     return entries
+
+
+# Rule 6: an installer's start-now PowerShell process launch of a daemon.
+_PS_INSTALLER_GLOBS = (
+    "plugins/*/scripts/install*.ps1",
+    "plugins/*/transports/*/scripts/install*.ps1",
+)
+_PS_START_PROCESS_RE = re.compile(r"(?<![\w-])Start-Process(?![\w-])", re.IGNORECASE)
+# conhost as any token of the statement (quoted, path-qualified or a variable
+# such as $conhost), wherever Start-Process's named or positional parameters
+# put it.
+_PS_CONHOST_TOKEN_RE = re.compile(
+    r"(?<![\w.-])['\"]?(?:[^\s'\"(),]*[\\/$])?conhost(?:\.exe)?['\"]?(?![\w.-])",
+    re.IGNORECASE,
+)
+_PS_DAEMON_ALLOW_RE = re.compile(r"#\s*" + re.escape(_DAEMON_ALLOW) + r"[ :]+\S")
+
+
+def _find_ps_conhost_launches(text: str) -> list[int]:
+    """1-based lines of unmarked ``Start-Process ... conhost`` statements.
+
+    A statement continues across trailing-backtick lines. It is allowed by a
+    ``# daemon-spawn: allow <why>`` comment on one of its lines or on the
+    comment line directly above it. Comments (including ``<# ... #>`` blocks)
+    and here-string bodies are not statements and are skipped.
+    """
+    lines = text.splitlines()
+    hits: list[int] = []
+    in_here_string = False
+    in_block_comment = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if in_block_comment:
+            in_block_comment = "#>" not in line
+            i += 1
+            continue
+        if stripped.startswith("<#"):
+            in_block_comment = "#>" not in stripped[2:]
+            i += 1
+            continue
+        if in_here_string:
+            in_here_string = not stripped.startswith(('"@', "'@"))
+            i += 1
+            continue
+        if stripped.endswith(('@"', "@'")):
+            in_here_string = True
+            i += 1
+            continue
+        end = i
+        while lines[end].rstrip().endswith("`") and end + 1 < len(lines):
+            end += 1
+        statement = " ".join(part.rstrip().rstrip("`") for part in lines[i:end + 1])
+        code = statement.split("#", 1)[0] if not stripped.startswith("#") else ""
+        if code and _PS_START_PROCESS_RE.search(code) and _PS_CONHOST_TOKEN_RE.search(code):
+            marked = any(_PS_DAEMON_ALLOW_RE.search(part) for part in lines[i:end + 1])
+            above = lines[i - 1].strip() if i else ""
+            if not marked and not (above.startswith("#") and _PS_DAEMON_ALLOW_RE.search(above)):
+                hits.append(i + 1)
+        i = end + 1
+    return hits
 
 
 # YAML-only heuristic: an unquoted or quoted scalar in VALUE position (after
@@ -780,6 +855,21 @@ def verify() -> list[str]:
             "many detached Popen calls; remove one entry per migrated launch"
             for _ in range(count)
         )
+
+    # Rule 6: an installer starts a daemon now through the service's user-mode
+    # ensure path (or an escape such as WMI), never a contained Start-Process.
+    for pattern in _PS_INSTALLER_GLOBS:
+        for f in sorted(REPO.glob(pattern)):
+            rel = f.relative_to(REPO).as_posix()
+            text = f.read_text(encoding="utf-8-sig")
+            for lineno in _find_ps_conhost_launches(text):
+                problems.append(
+                    f"{rel}:{lineno}: installer starts a process through Start-Process conhost "
+                    "-- the child stays in the installer's Job and dies with an SSH session or "
+                    "updater; start a daemon through its user-mode ensure path "
+                    "(agent_procutil.spawn_daemon) or WMI Win32_Process.Create, or mark a "
+                    f"child the caller owns '# {_DAEMON_ALLOW} <why>'"
+                )
     return problems
 
 

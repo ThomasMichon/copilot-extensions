@@ -16,6 +16,7 @@ from . import output, permissions, repos, sessions, state_root, tracking
 from . import worktree_creation
 from .launch_progress import step
 from .resume_seed import cold_start_error
+from .worktree_naming import session_worktree_allocation
 
 
 def _same_repository(anchor: str, checkout: str, *, branch: str | None = None) -> None:
@@ -106,14 +107,12 @@ def _prepare_permissions(anchor: str, worktree_path: str) -> None:
 
 def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
     platform = "win" if record.platform == "windows" else record.platform
-    match = re.fullmatch(
-        rf"{re.escape(record.machine)}-{re.escape(platform)}-"
-        r"(\d{8}-\d{6})-([0-9a-f]{4}|[0-9a-f]{32})",
-        record.worktree_id,
+    allocation = session_worktree_allocation(
+        record.worktree_id, record.machine, record.platform,
     )
-    if match is None:
+    if allocation is None:
         raise ValueError("retained New has no verifiable native creation allocation")
-    return match[1], match[2], platform
+    return allocation[0], allocation[1], platform
 
 
 def _existing_pair(config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot):
@@ -135,7 +134,7 @@ def _retained_sibling(
     config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot,
     timestamp: str, suffix: str, platform: str,
 ):
-    knowledge_id = f"{record.machine}-{platform}-{timestamp}-{suffix}-k"
+    knowledge_id = f"{record.worktree_id}-k"
     harness_ref = tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)
     projects = installer.read_projects_registry(strict=True).get("projects", {})
     if not isinstance(projects, dict):
@@ -202,10 +201,7 @@ def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord):
             if error:
                 raise ValueError(f"retained companion is not stopped: {error}")
         elif existing is None and repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
-            timestamp, suffix, platform = allocation
-            target = Path(cfg.derive_worktree_root(root.path)) / (
-                f"{record.machine}-{platform}-{timestamp}-{suffix}-k"
-            )
+            target = Path(cfg.derive_worktree_root(root.path)) / f"{record.worktree_id}-k"
             if target.exists():
                 raise ValueError("untracked paired checkout exists; do not allocate another")
     return root, existing, allocation, child
@@ -236,7 +232,7 @@ def _prepare_pair(
             entry = repos.find_repo(root.repo)
             if entry is None:
                 raise ValueError("knowledge repository registration is missing")
-            knowledge_id = f"{record.machine}-{platform}-{timestamp}-{suffix}-k"
+            knowledge_id = f"{record.worktree_id}-k"
             if repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
                 target = Path(cfg.derive_worktree_root(root.path)) / knowledge_id
                 if target.exists():
@@ -348,8 +344,7 @@ def targeted_doctor(args) -> int:
                     if entry is None:
                         raise ValueError("knowledge repository registration is missing")
                     if repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
-                        timestamp, suffix, platform = allocation
-                        child_id = f"{record.machine}-{platform}-{timestamp}-{suffix}-k"
+                        child_id = f"{record.worktree_id}-k"
                         child_path = cfg.tracking_dir(root.repo) / f"{child_id}.yaml"
                         admission.enter_context(launch_admission.guard(child_path))
                         plan = _pair_plan(config, record)

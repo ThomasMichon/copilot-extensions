@@ -138,8 +138,9 @@ def load_identity_key() -> bytes | None:
     Without explicit sources, legacy shared-file discovery remains available.
     """
     from .identity_vault import ARGV_ENV, load_cached_vault_key
+    from .identity_vault_settings import configured
 
-    if ARGV_ENV in os.environ and not os.environ.get(KEY_ENV_VAR):
+    if not os.environ.get(KEY_ENV_VAR) and (ARGV_ENV in os.environ or configured()):
         return load_cached_vault_key()
     path = identity_key_path()
     if path is None:
@@ -171,8 +172,9 @@ def generate_identity_key(path: Path | None = None, *, force: bool = False) -> P
     under the old key (they would stop decrypting, with no warning).
     """
     from .identity_vault import ARGV_ENV
+    from .identity_vault_settings import configured
 
-    if ARGV_ENV in os.environ:
+    if ARGV_ENV in os.environ or configured():
         raise IdentityMarkerError(
             "vault-backed identity uses one shared owner key; provision it in the vault, "
             "not as a new machine file"
@@ -259,16 +261,18 @@ def build_identity_payload(
     return payload
 
 
-def encrypt_identity_payload(payload: dict) -> str | None:
+def encrypt_identity_payload(payload: dict, key: bytes | None = None) -> str | None:
     """Encrypt *payload* (a JSON-serializable dict) under the resolved
-    identity key; returns base64 of ``MAGIC || nonce || ciphertext+tag``.
+    identity key (or the explicit candidate key); returns base64 of
+    ``MAGIC || nonce || ciphertext+tag``. Explicit keys support a readiness
+    probe before publishing new source configuration.
 
     Returns ``None`` (never raises) when no key is configured or
     ``cryptography`` is unavailable -- this sits on the PR-publish hot path
     and must degrade to "omit this optional layer", exactly like a
     codename-resolution failure already does for the ``root=`` field.
     """
-    key = load_identity_key()
+    key = key if key is not None else load_identity_key()
     if key is None:
         return None
     try:
@@ -301,8 +305,14 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
     resolved_key = key if key is not None else load_identity_key()
     if resolved_key is None:
         from .identity_vault import ARGV_ENV
+        from .identity_vault_settings import configured
 
-        if not os.environ.get(KEY_ENV_VAR) and ARGV_ENV in os.environ:
+        if not os.environ.get(KEY_ENV_VAR) and (ARGV_ENV in os.environ or configured()):
+            if ARGV_ENV not in os.environ:
+                raise IdentityMarkerError(
+                    "configured shared vault key unavailable -- run agent-worktrees "
+                    "identity-vault setup to refresh its selected protected cache"
+                )
             raise IdentityMarkerError(
                 "configured shared vault key unavailable -- explicitly populate or "
                 "refresh its protected cache with agent-vault cache-populate --entry "

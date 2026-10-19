@@ -9,6 +9,43 @@ and reactive automation this repo runs. `CONTRIBUTING.md` owns contributor
 requirements); this doc owns the *infrastructure* those steps run on top
 of — link here rather than restating any of it.
 
+## Standalone PR job admission
+
+The existing CI discovery job runs `tools/ci_job_admission.py` against explicit
+PR base/head commits before allocating fleet's twelve partition runners and
+the standalone Manager/Dispatch/Chat runners. Shared libraries, repository tooling
+and workflow changes widen admission conservatively; unknown inputs run all
+four families. Missing/malformed Git evidence fails discovery instead of
+claiming an empty selection.
+
+Manager also consumes engine sources and plugin-owned pivot data. Plugin changes
+therefore conservatively admit Manager; Dispatch plugin changes admit its
+standalone service too. This first slice does not assume those distribution
+boundaries isolate their source dependencies.
+
+Chat source changes select separate, statically routed Linux and Windows jobs
+for the bounded conversation-core contracts. No dynamic runner route or policy
+exception is used. This does not qualify hosted transport or managed service lifecycle.
+Materialized-consumer qualification includes both Chat platforms when the
+validated standalone roster registers `services/chat`; the supported older
+roster remains usable without it. Each row runs the same bounded standalone
+recipe. Trusted Main-owned validator support must be delivered through the
+existing release owner's qualified tooling path before promoting the expanded
+roster; a Dev source merge alone does not activate that trusted support.
+
+An effort/document-only selection can skip those jobs without omitting the
+fixed `PR gate (required check)`. That aggregate requires successful discovery,
+validated boolean outputs and success from every selected standalone family;
+missing discovery or an unexpectedly skipped selected job fails.
+Non-PR push, full manual and promotion invocations retain their prior full
+standalone coverage, including manual runs where discovery deliberately skips.
+Required-context identity, cancellation controls, permissions and promotion
+gates are unchanged. This does not alter the other native/platform job lanes.
+
+See [the testing guide](../TESTING.md#the-turn-key-runner) for the contract
+selectors. A dev source merge does not activate governed main-owned control;
+its owner must review rollout and inspect actual job admission separately.
+
 ## Python artifact-builder toolchain policy
 
 `tools/build_python_artifacts.py` can run standalone and is also invoked by
@@ -22,8 +59,17 @@ is the default). This exception applies only to the build toolchain:
 dependency resolution or published third-party wheels.
 
 Hosted validator provisioning also hash-pins `packaging`; its binary-only,
-no-dependency install accepts `ARTIFACT_VALIDATION_INDEX_URL` as an explicit
+hash-checked install accepts `ARTIFACT_VALIDATION_INDEX_URL` as an explicit
 feed override, defaulting to the public tooling index on public runners.
+
+The canonical seasoning CLI's explicit `--registry-only` mode admits such
+registry toolchains without discovering product project/library roots. It
+denies local source projects and retains the existing cutoff, selected index,
+hash and retained-input checks; it is not a public-feed fallback or a second
+installer policy. The build, attestation, promotion and publication validator
+provisioning steps opt in explicitly. A source-support merge alone does not
+activate a main-owned caller; reviewed control activation and exact
+materialized bootstrap qualification remain separate requirements.
 
 Public mode selects exact non-yanked stable pins from PyPI metadata, measures
 age from the newest file, and installs binary distributions only from one
@@ -52,6 +98,71 @@ contain no `validated_index_identity` claim.
 Path-scoped CI runs a fresh public toolchain plus real first-party wheel
 builds on a public hosted runner. Managed machines should retain governed
 mode when exercising the builder locally.
+
+### Materialized candidate consumer gate
+
+Ordinary guard CI also exercises installer human-output declarations with
+explicit canonical and already-materialized source fixtures. Both use the real
+producer, materializer and runtime admission checker, including complete local
+engine/support assets, byte-stable reapplication and tamper refusal. A
+materialized installer correctly needs no second reference rewrite; a canonical
+installer must still demonstrate that rewrite and declaration rebinding.
+
+Before the checkout-free merger can advance `main`, the exact pushed candidate
+has a separate consumer gate. `materialized-candidate-plan` validates its
+immutable candidate/dev/main identities and builds the consumer matrix from
+the actual generated tree, rejecting missing or empty suites against a third
+credential-free checkout of the pinned, validated development input.
+`materialized-candidate-consumers` executes the
+existing plugin recipes (collection plus guards for Worktrees), Manager and
+standalone Dispatch/Index/Fleet on a statically routed Linux host.
+`materialized-candidate-windows` retains Index and Fleet's statically routed
+native Windows lanes; both platforms also require validator bootstrap. No
+matrix input can select a runner label. The supported
+recipes must cover the validated development input's canonical standalone
+roster. Fleet's canonical literal partition selectors from the immutable
+candidate's CI definition become independent matrix rows on both platforms.
+Each portfolio invocation retains its own 120-second deadline and existing
+exhaustive-test exclusions; selectors do not filter the prerequisite coverage
+guard. Missing, duplicate, nonliteral or platform-divergent partition metadata
+refuses qualification instead of collapsing the portfolio under one deadline.
+The canonical smoke portfolio similarly derives every plugin partition from
+`tools/ci_plugin_partitions.py`'s literal scheduling map without importing
+candidate code. Qualification requires each executed partition, and its
+workflow digest binds normalized bytes from both the workflow and that helper.
+The PR-owner suite uses two partitions so its existing 25-file process groups
+run independently within the unchanged eight-minute smoke-job deadline.
+Partitioning preserves every test file and the runner's containment limits.
+
+Validator bootstrap starts with a fresh venv and private empty UV cache. It
+runs the candidate's actual `seasoned_uv.py --registry-only` with the same
+configured index, binary-only/hash restrictions and pinned requirement file as
+all four trusted workflow callers, then imports the installed validator in
+isolated Python. A broken product graph grants no local-source authority;
+unsupported helper modes, failed installation or missing bootstrap inputs fail
+the gate before merge.
+
+Plugin recipe deadlines derive from the runner's own literal aggregate timeout
+policy, plus three minutes for preparation and verification. Each enclosing job
+allows all recipe invocations plus five minutes for checkout/tool setup.
+Unknown or invalid timeout metadata refuses qualification rather than silently
+substituting a deadline shorter than the established suite budget.
+
+Each consumer gets a fresh public-hosted runner, `contents: read`, no release
+environment or API/release authority, and credential-free checkouts of both
+the pinned trusted validator and the candidate. Candidate test code executes
+only in this unprivileged lane, never the signer, writer or merger. The
+validator checks the candidate checkout, single main parent, composition state
+and unchanged tracked inputs before and after execution. A failed, missing,
+skipped or cancelled consumer cannot authorize merge. The existing expected-head
+freshness, artifact readiness and post-merge verification remain in force.
+
+This intentionally validates a different, materialized input from the earlier
+development-layout suites. Initially it reuses actual consumer recipes rather
+than an unproved reduced selector. The temporary post-merge overlap is not
+silently retired: later consolidation needs the existing exact-input,
+recipe/platform and authoritative-execution equivalence proof. Package
+attestation is not test-suite evidence.
 
 ### Promotion artifact transfer, signing and publication
 
@@ -188,13 +299,72 @@ relaxing artifact evidence.
 A no-content-change or paused run builds and
 publishes nothing.
 
-Only after the exact candidate PR really merges does publication recheck its
-actual parent/content tree and project set and revalidate archive contents.
+The source-owned helper interface uses an immutable
+`python-artifacts-<dev-commit>` prerelease for schema-version-2 indexes. Its
+signed composition and exact toolchain lock are reused across equivalent Git
+containers, not rebuilt under a new Main identity. Historical version-1 indexes
+retain the original `python-artifacts-<candidate-commit>` lookup and parent
+binding. See [source-owned release qualification](pipelines/source-owned-release-identity.md)
+for the helper interfaces and their independently reviewed control activation.
+
+Before creating or merging the candidate PR, readiness publishes
+the attested transfer index and every bundle. It validates the candidate's actual
+parent/content tree, complete project set and archive contents first. The
+prerelease is never marked latest and is not a source-release or dependency-policy
+approval. A failed candidate may leave immutable inputs there, but never claims
+an installed source release. Clients still have to independently verify their
+selected source and the pinned artifact attestation; the prerelease's existence
+is not installation authority.
+
+The readiness gate pages through all remote assets, requires uploaded state
+and matching SHA-256 metadata, and downloads the index and every bundle using
+the **read-only** workflow token to verify their actual bytes. An upload result
+or a release-writer-only view is not availability proof. Authentication,
+publication, incomplete-set and byte-integrity failures fail the promotion job
+before any PR merge is attempted. A retry may fill missing assets but cannot replace
+existing bytes. The generated PR links its ready set, and merge authorization
+and the merge waiter retain the SHA appended directly by the trusted promoter
+to the step's GitHub output file. A remote branch lookup never selects that
+identity: both the lookup and fetched ref must equal the promoter's SHA before
+any readiness publication. A separate checkout-free merge job polls
+required checks and issues a direct squash merge with an atomic expected-head
+condition using its non-admin Actions token, which has contents and pull-request
+write permissions. That job never receives the owner release PAT and executes
+no checkout, setup actions or repository code. It never arms auto-merge:
+GitHub's auto-merge request can survive a moved
+head, so checking a head only when enabling it is not durable candidate binding.
+An existing matching PR can be resumed; a different head, cross-repository PR,
+closed-unmerged PR or ambiguous match fails rather than creating a replacement.
+Both pre-merge readiness failures and final-publication failures enter the
+shared failure reporter, including when final publication is skipped because
+the promotion job failed before merge.
+Promotion reads its platform-assigned immutable workflow `created_at` (not a
+rerun's start time) with read-only authority. `--promotion-time` fixes both state
+timestamps and Git author/committer dates; the workflow commit identity, UTF-8
+encoding and unsigned commit construction are fixed too. Re-running the failed
+job therefore recomputes the identical complete candidate SHA and tag stem.
+An existing branch is accepted only when that exact recomputed SHA matches;
+normalized source/state comparison, altered timestamps or pre-seeded refs never
+establish provenance. Changed inputs fail rather than force-pushing a replacement.
+Post-merge workflow discovery uses that same immutable creation time as its
+inclusive lower bound, excluding unrelated retained history while reusing
+earlier dispatches within the same run-attempt identity and still refusing
+duplicate matching runs. An Actions rerun changes `github.run_attempt` and
+dispatches new consumers for that attempt; its original `created_at` remains
+the discovery bound, not the later rerun start time.
+
+After the exact candidate PR really merges, the final publisher fetches the
+candidate commit explicitly (squash does not preserve its ancestry), repeats
+read-only availability verification without repairing the ready set, and
+requires exact complete-tree equality with that ready candidate (including
+release state and coverage pointers), rechecks the actual merge's parent/content
+tree and project set and revalidates
+archive contents. This final binding is not the first availability check.
 Content-tree filtering removes only release state and coverage pointers from a
 throwaway index loaded from the supplied candidate tree. Its index-only removal
 does not require those entries to match the publisher's older trusted checkout;
 the real index, working files and candidate payload remain unchanged.
-Assets live under the deterministic
+Final version aliases also publish assets under the deterministic
 `<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
 manifest's content-addressed `artifact_id`, permitting independently attested
 rebuilds without replacing a prior asset. Outer ZIP members have fixed
@@ -215,11 +385,13 @@ plugin/vendored closure, distributions/versions and payload hash still match.
 Unrelated promotions must not move unchanged plugins' stable version tags,
 and a toolchain-only rebuild may add a new content-addressed asset to that
 same version. An unshipped or different-payload tag is rejected.
-Its release PAT and verification token are scoped to the final
-publisher step, not exposed to checkout, Python setup or artifact-download
-actions. Publication is its own job so a partial upload can be retried with
+The release PAT and verification token are scoped to their readiness/final
+publisher shell steps, not exposed to checkout, Python setup or transfer-artifact
+actions. Final version publication remains its own job so a partial upload can be retried with
 **Re-run failed jobs**, reusing the successful signer and exact merge
-outputs rather than repeating promotion. It also enters the failure reporter.
+outputs rather than repeating promotion. Such a failure does not erase the
+complete pre-merge candidate set, but the overall pipeline remains failed until
+final publication is green. It also enters the failure reporter.
 Transfer artifacts expire after two days; durable release-asset
 retention remains a separately tracked policy.
 
@@ -227,7 +399,10 @@ These first-party sets are **not yet an installer fast path**. Third-party
 closure/admission, verified shared-installer consumption and retention remain
 open in `efforts/active/governed-python-artifact-promotion/README.md`. No
 published bundle contains third-party runtime dependency bytes or certifies a
-consumer's governed feed.
+consumer's governed feed. Artifact consumption during install/update remains
+optional: an authorized independently verified source/local-venv path must not
+wait for artifact publication or rollout proof. This does not permit bypassing
+source integrity, dependency governance or an invalid artifact's security refusal.
 
 For manual runs, dispatch this workflow on the default branch. The gate
 resolves its live dev tip and applies the same ancestor proof as automated
@@ -321,9 +496,13 @@ The automatic fallback gives native/manual review **five minutes from the
 triggering PR event's `updated_at` timestamp**, without API polling. Queue time
 counts toward that grace: a run queued for five minutes does not occupy a runner
 for another five. Invalid/future event timestamps fail before requesting review.
-After any remaining grace, it checks the live PR once. It skips closed/draft/retargeted PRs,
-pending Copilot reviews, completed reviews of the current diff, and requests
-still inside their five-minute grace period. Completed reviews must be newer
+It first checks live eligibility, without waiting when the PR is already
+closed/draft/retargeted/superseded, pending Copilot review, or reviewed for the
+current diff. Only an unresolved request holds a runner for the remaining grace;
+read time also counts toward that interval. After a wait it refreshes the entire
+eligibility snapshot before any write. A run that arrives after the grace needs
+only one snapshot, not a second read or a delay. Requests still inside their own
+five-minute grace period also suppress a nudge. Completed reviews must be newer
 than the latest base-retarget/reopen event. Identity checks accept the observed
 `Copilot` and `copilot-pull-request-reviewer[bot]` aliases only for API users
 typed `Bot`; the review write retains the canonical app login. A run superseded by a newer push
@@ -547,14 +726,28 @@ CONTRIBUTING.md and failure output publish the accepted codename, workflow and
 native gh-aw origin forms and concrete manual repair steps. Encryption remains
 optional, and syntax validation is not proof of actual source ownership.
 
-`source-attribution-departures.yml` reevaluates remaining dev PRs on a head
-that another PR leaves by pushing, closing, or retargeting away from dev.
-Its trusted, checks-writing job has a distinct non-required name and publishes
-the actual source context only for current dev peers. It is not branch-filtered,
-so a retarget away from dev is observable; it never creates a skipped
+The source declarations coalesce Dev synchronize departure refresh into the
+existing `workflow-lockdown-guard.yml` invocation. Its isolated
+`refresh-departed-source-attribution` job reuses `.departed` to repair current
+Dev peers on the old `before` head; native enforcement independently validates
+the moving PR's new head. The departure-refresh job retains its own checks-write
+grant; native required-check jobs remain read-only. Existing review and Main
+push/manual refresh jobs retain their permissions and behavior.
+
+`source-attribution-departures.yml` retains closed and edited events, including
+retargeting away from Dev. Its trusted, checks-writing job has a distinct
+non-required name and publishes the actual source context only for current
+Dev peers. It is not branch-filtered, so retarget-away remains observable; the
+route never creates a skipped
 `source-attribution` or `workflow-lockdown-guard` result that could bless a peer.
 This clears collision failures without requiring an unrelated edit to the
 remaining PR. It uses the same validator, freshness checks and request budget.
+
+These source declarations become active only through qualified delivery to the
+trusted default branch. A Dev merge is not evidence of changed live routing.
+Sharing the synchronize invocation removes a workflow admission, not an
+allocated refresh job; non-synchronize events can gain a skipped non-required
+job record. Measure workflow runs, jobs and check records separately.
 
 Pushes to the default release branch and trusted manual dispatches refresh the
 distinct context on current open dev PR heads without editing their descriptions
@@ -619,13 +812,43 @@ GitHub cannot filter this activity to base edits alone at workflow admission,
 so other PR edits also run CI; excluding main still prevents its redundant
 release-candidate invocation.
 
+Within each PR ref, a new head's `synchronize` event supersedes the older head's
+executing CI. Metadata-only edits still trigger CI, but do not cancel and
+restart an in-progress run. Standalone Index predicates deliberately preserve
+their prior non-PR `always()` semantics; the cancellation exclusion is PR-only.
+Cancelled PRs do not continue standalone Index jobs or allocate the final PR
+aggregate; an uncancelled dependency failure still reaches that required
+aggregate and reports failure. Dev pushes and manual qualification keep rolling
+queue semantics, so frequent contributions do not restart an executing release
+validation. This policy changes no required inventory for the current head.
+
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | `pull_request` (all bases except `main`), `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) and `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. The base-branch exclusion prevents the whole redundant main-PR invocation, not just its jobs; main/dev push and manual validation remain unchanged. |
-| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, the separate `source-attribution` metadata check, and the Maintainer-only review fallback. Default-branch push/manual runs refresh source-attribution checks for already-open `dev` PRs; job-scoped permissions/concurrency preserve the review boundary. No PR code executes. |
-| `source-attribution-departures.yml` | `pull_request_target` (`synchronize`, `closed`, `edited`) | Trusted metadata-only refresh of remaining dev PRs on a departed shared head, including retargets away from dev. Publishes no required-context skipped jobs and never executes PR content. |
+| `copilot-code-review.yml` | `workflow_dispatch`; official Copilot Code Review setup after default-branch publication | The `copilot-setup-steps` job preserves hosted review capacity with literal `ubuntu-latest`, with no checkout or dependency setup; Copilot supplies its own checkout afterward. It does not change the coding-agent fallback. The independently guarded `copilot-extensions-review` ARC role remains available only for an explicit reviewed route change, not additive overflow. A default-branch selector change requires an activation decision and an observed managed-review canary. |
+| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, separate `source-attribution`, Maintainer-only review fallback, and synchronize-only departed-head refresh. Default-branch push/manual runs retain existing source refresh for open `dev` PRs; job-scoped permissions/concurrency preserve their boundaries. Source changes need qualified trusted-default delivery. No PR code executes. |
+| `source-attribution-departures.yml` | `pull_request_target` (`closed`, `edited`) | Trusted metadata-only refresh for closed dev PRs and retargets away from dev, without a new-base filter. Synchronize refresh shares the existing trusted Dev entrypoint. Publishes no required-context skipped jobs and never executes PR content. |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate`, the existing one-time retarget reminder, and identifier reporting for owner-authored PRs that pass admission. Gate permissions are contents-read only; any checkout is pinned trusted main, and PR commits are fetched only as Git data. No PR code executes. This replaces main-PR CI admission and post-CI scanning. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
+
+The dedicated review setup is independently guarded: only its exact filename,
+official job identity, minimal permissions and setup step may select literal
+`ubuntu-latest` or the named `copilot-extensions-review` ARC scale set. This
+exception does not authorize that label in another workflow or relax the
+validator lane. GitHub documents one runner selection for a repository's managed
+review lane, not automatic hosted/ARC overflow. Label arrays require every
+label; they are not alternatives or failover. Selecting ARC replaces this
+lane's hosted routing, so it must not be described as additive capacity.
+Keep hosted review primary unless a separate supported routing decision is
+explicitly approved. See [Copilot runner configuration](https://docs.github.com/en/copilot/how-tos/copilot-on-github/set-up-copilot/configure-runners)
+and [cumulative runner labels](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/use-in-a-workflow).
+The committed setup remains hosted; accepting the alternative label
+in policy is not a capacity-readiness signal or a selector activation. Main
+preservation requires its own owner-coordinated named-allowlist update before
+the later canonical manifest transaction. The generic preservation helper
+already supports a fourth workflow path and needs no change solely for that
+addition. Guard source and tests still require qualified default-branch delivery
+before a custom ARC selector is enabled.
 
 **Reactive, post-CI (triggered by `ci.yml` completing):**
 
@@ -637,7 +860,7 @@ release-candidate invocation.
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (open a generated `release/promote-<run id>` PR against `main`, auto-merge via `APERTURE_RELEASE_TOKEN`). See [Promotion: dev → main](#promotion-dev--main). |
+| `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (publish/read back candidate inputs and open a generated `release/promote-<run id>` PR against `main` using `APERTURE_RELEASE_TOKEN`) → a separate checkout-free `merge-promotion` job (wait for required checks and squash-merge that exact head using the non-admin Actions token) → final publication and explicit post-merge workflow verification. See [Promotion: dev → main](#promotion-dev--main). |
 | `purge-consumed-changefiles.yml` | `schedule` (daily), `repository_dispatch: [purge-changefiles-requested]` | Standalone daily (or on-demand) companion to the promotion pipeline: opens the "clear consumed changefiles on dev" housekeeping PR for whatever changefiles a promotion has already consumed by then -- pure housekeeping, not per-promotion and never load-bearing for promotion correctness. |
 
 **Scheduled sweeps and watchdogs** (`stale-branch-sweep.yml` acts on
@@ -710,21 +933,35 @@ accumulated on `dev` so far. Treat a red `dev` build as the first
 priority: land a forward fix immediately, or revert the breaking merge,
 rather than leaving it red at leisure.
 
-### Expect roughly 10-20 minutes, and know what to watch
+### Delivery targets and what to watch
 
-Budget on the order of **10-20 minutes** from a green `dev` merge to a real
-`main` release: `CI` on `dev` (a few minutes) → `Validation Gate` →
-`Promote` opens a generated `release/promote-<run id>` candidate PR
-against `main` → that candidate PR's own fast `main source gate` check →
-auto-merge (via the pipeline's own `APERTURE_RELEASE_TOKEN` — a personal
-fine-grained PAT minted under the maintainer's own account, not the
-default `GITHUB_TOKEN`/Actions-bot identity). To confirm a change actually shipped rather than
+Target **thirty minutes** for validate-and-promote, not an assumed ten-to-twenty
+minute guarantee. Ordinary PR event-to-required-gate completion targets under
+ten minutes including queueing; a one-hour promotion allowance requires separate
+acceptance of the local-Dev workflow. Actual timing and release acceptance
+remain campaign gates.
+
+The [source-owned controller contract](pipelines/source-owned-release-identity.md)
+owns qualification-before-PR ordering, single active promotion admission and
+job-only recovery without duplicate full qualification. Both controller profiles
+retain exact-head squash merge in a separate, checkout-free job using the
+non-admin `GITHUB_TOKEN`/Actions identity. The owner `APERTURE_RELEASE_TOKEN` creates
+the candidate PR and publishes artifacts, but never authorizes this routine
+merge. To confirm a change actually shipped rather than
 assuming the `dev` merge itself was the release:
 
 The promotion job retains the workflow's exclusive concurrency slot while
-waiting for its exact generated PR to merge. Enabling auto-merge alone is not
-delivery: the waiter verifies the PR identity and reports a bounded timeout,
-closed-unmerged state or provider error as a failure. The release tag uses that
+waiting for required checks and its exact generated PR to merge. It does not
+arm a head-independent auto-merge request. The waiter verifies the PR identity
+before the atomic expected-head merge, requires strict server-enforced
+base freshness on the existing main source gate, and reports a bounded timeout,
+closed-unmerged state or provider error as a failure.
+
+#### Legacy timestamp tags and post-merge verification
+
+The following timestamp-tag/postmerge-dispatch details apply to the legacy Dev
+controller and historical receipts, not the source-owned Main generation's
+premerge publication boundary. The release tag uses that
 PR's actual merge commit, even if `main` advances again before tagging.
 `tools/tag_promotion.py` provides the intended naming for that tag:
 `<stem>-<merge sha8>`, where the stem (`promote-<UTC timestamp>`) is the
@@ -732,8 +969,40 @@ PR's actual merge commit, even if `main` advances again before tagging.
 `.github/release-pipeline-state.json`, so a tag and the state it releases
 agree. It refuses to tag when that state names a different promoted `dev`
 commit or the tag already points elsewhere, and a re-run on the same commit is
-a no-op. Until the workflow's tag step calls it, that step still names the tag
-from a fresh `date -u` timestamp plus the merge sha.
+a no-op. Only a successfully verified tag is emitted as a workflow receipt.
+
+An Actions-token merge does not trigger push workflows. The promotion flow
+therefore explicitly dispatches CI at that promotion tag, and the privileged
+Workflow lockdown guard from trusted main, with the exact expected merged SHA
+and owning run-attempt identity. The guard independently verifies that target
+SHA is on its immutable main control snapshot before checking out the release
+implementation; matching caller-supplied tag/SHA fields are not authority.
+Its control snapshot may be newer than the release, and verification records
+both identities. CI's promotion dispatch retains all main-push discovery, plugin,
+native Windows and standalone-service coverage, without selecting the separate
+manual exhaustive tiers or repeating the full validation matrix. Its promotion
+aggregate rejects any skipped required job. The verifier waits for both exact
+runs, checks all job results and specifically requires the source-attribution
+refresh; accepting a dispatch request is not completion.
+
+Native Windows command-binding and lifecycle contracts run in a separate,
+required, change-scoped CI job. Real installer admission, teardown, and hidden
+child stream tests retain their complete selection and individual deadlines;
+they do not share the read-only provenance lane's two-minute step budget.
+The lifecycle job preserves the catalog, read-only lifecycle and native
+first-touch partitions, each bounded at two minutes, with eight minutes overall
+based on a 316-second native run of the former combined selection. Each pytest
+step first provisions through the canonical seasoning adapter; duration output
+identifies future growth without hiding timeouts or weakening the required
+aggregate.
+CI-selection contracts and payload-source attribution also have their own
+two-minute steps, so native PowerShell checks of workflow failure propagation
+and source graphs cannot consume the read-only diagnostic API tests' budget.
+
+The human administrator escape remains available for independently
+shape-validated workflow/control repair, never arbitrary source. Such a repair
+may advance main beyond its latest published release. Snapshot checks require
+that release to remain on main, not that it remain main's current control tip.
 
 ```bash
 gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:release/promote-" --limit 5

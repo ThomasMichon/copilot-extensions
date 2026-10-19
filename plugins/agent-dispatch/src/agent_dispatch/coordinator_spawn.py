@@ -91,6 +91,10 @@ class FailSpawnBody(ReservationDetailBody):
     confirmed_absent: bool = False
 
 
+class DeferSpawnBody(ReservationDetailBody):
+    expected_generation: int | None = Field(default=None, ge=0, le=2**63 - 1, strict=True)
+
+
 class RecordColdBody(BaseModel):
     release_exclusive: bool = False
 
@@ -107,7 +111,22 @@ class RetireSpawnBody(ReservationDetailBody):
 
 
 class ValidateConclusionClaimBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     claim_token: str
+    claimant_machine: str | None = None
+
+
+class ClaimConclusionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    claimant_machine: str | None = None
+
+
+class RecordConclusionBody(ReservationDetailBody):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    claimant_machine: str | None = None
 
 
 class RearmSpawnBody(BaseModel):
@@ -135,12 +154,16 @@ def register_spawn_routes(
     queue: TaskQueue,
     bus: EventBus,
     control_token: str | None = None,
+    *,
+    restricted_ingress_authenticated: bool = False,
 ) -> None:
     from .coordinator_auth import _make_control_auth
 
     def rejected(event: str, detail: dict[str, object]) -> None:
         logging.getLogger("agent-dispatch").warning("%s: %s", event, detail)
     control_auth = _make_control_auth(control_token, rejected)
+    from .coordinator_cleanup_recovery import register as register_cleanup_recovery
+    register_cleanup_recovery(app, queue, bus, control_auth)
 
     @app.post(
         "/spawn-reservations/tasks/{task_id}/authorize-fresh",
@@ -356,6 +379,10 @@ def register_spawn_routes(
 
     from .ordinary_bridge import register_routes
     register_routes(app, queue, bus)
+    from .restricted_delivery import register_routes as register_restricted_routes
+    register_restricted_routes(
+        app, queue, bus, control_token, authenticated_ingress=restricted_ingress_authenticated,
+    )
     @app.post("/spawn-reservations/{key}/allocation")
     def record_spawn_allocation(key: str, body: RecordSpawnAllocationBody) -> dict:
         result = _reservation_guard(lambda: queue.record_spawn_allocation(key, body.project))
@@ -418,8 +445,12 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/defer")
-    def defer_spawn(key: str, body: ReservationDetailBody) -> dict:
-        result = _reservation_guard(lambda: queue.defer_spawn(key, detail=body.detail))
+    def defer_spawn(key: str, body: DeferSpawnBody) -> dict:
+        result = _reservation_guard(lambda: queue.defer_spawn(
+            key, detail=body.detail,
+            **({"expected_generation": body.expected_generation}
+               if body.expected_generation is not None else {}),
+        ))
         bus.publish({"type": "spawn.deferred", "reservation": result})
         return result
 
@@ -447,7 +478,7 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion")
-    def record_spawn_conclusion(key: str, body: ReservationDetailBody) -> dict:
+    def record_spawn_conclusion(key: str, body: RecordConclusionBody) -> dict:
         if not body.conclusion_state or body.conclusion_detail is None:
             raise HTTPException(
                 status_code=400,
@@ -460,16 +491,18 @@ def register_spawn_routes(
                 conclusion_detail=body.conclusion_detail or "",
                 detail=body.detail,
                 claim_token=body.claim_token,
+                claimant_machine=body.claimant_machine,
             )
         )
         bus.publish({"type": "spawn.conclusion", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion/claim")
-    def claim_spawn_conclusion_retry(key: str) -> dict:
+    def claim_spawn_conclusion_retry(key: str, body: ClaimConclusionBody | None = None) -> dict:
+        body = body if body is not None else ClaimConclusionBody()
         try:
             reservation, claimed, claim_token = (
-                queue.claim_spawn_conclusion_retry(key)
+                queue.claim_spawn_conclusion_retry(key, claimant_machine=body.claimant_machine)
             )
         except TaskError as exc:
             msg = str(exc)
@@ -492,6 +525,7 @@ def register_spawn_routes(
             lambda: queue.validate_spawn_conclusion_claim(
                 key,
                 body.claim_token,
+                claimant_machine=body.claimant_machine,
             )
         )
         return result
@@ -553,4 +587,9 @@ def register_spawn_routes(
         if reservation is None:
             raise HTTPException(status_code=404, detail="no such reservation")
         from .ordinary_bridge import legacy_bound
-        return {**_reservation_dict(reservation), "legacy_acquisition": legacy_bound(queue, reservation.task_id, reservation.worktree)}
+        from .ordinary_agent_storage import reservation_native_facts
+        return {
+            **_reservation_dict(reservation),
+            "legacy_acquisition": legacy_bound(queue, reservation.task_id, reservation.worktree),
+            **reservation_native_facts(queue, key),
+        }

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from dataclasses import replace
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -98,6 +99,12 @@ def _env(tmp_path: Path, monkeypatch):
         srcroot=str(tmp_path), machine=MACHINE, platform="linux",
         repo_name=PROJECT, repos={PROJECT: repo_cfg},
     )
+    def receiving_config(project, **_kwargs):
+        if project != PROJECT:
+            raise ValueError(f"unregistered fixture project: {project}")
+        return config
+
+    monkeypatch.setattr(cfg, "load_project_config", receiving_config)
     return tmp_path, tracking_d, config
 
 
@@ -117,7 +124,7 @@ def _save_worktree(
     rec = tracking.WorktreeRecord(
         worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
         worktree_path=str(tracking_d.parent.parent / f"gone-{worktree_id}"),
-        repo="o/r", machine=MACHINE, platform="linux",
+        repo=PROJECT, machine=MACHINE, platform="linux",
         started_at="2026-10-01T00:00:00", last_resumed_at="2026-10-01T00:00:00",
         resume_count=0, title=None, status="active", completed_at=None,
         owner_ref=owner_ref, resources=list(resources or []),
@@ -176,6 +183,51 @@ class TestSingleHopAToB:
 
         # Now Worktree A can finalize.
         assert finalize.validate_and_finalize("wt-A", config) is True
+
+
+@pytest.mark.parametrize("parent_label", ["native-alias", "example-host-wsl"])
+def test_legacy_wsl_finalize_removes_checkout_then_settles_exact_historical_child_claim(
+    _env, monkeypatch, parent_label,
+):
+    from agent_worktrees import claimant
+
+    root, directory, original = _env
+    anchor = Path(original.default_repo.anchor)
+    (anchor / "machines.yaml").write_text(
+        "machines:\n  example-host:\n    hostname: generated-host\n    alias: native-alias\n"
+        "    ssh:\n      environments:\n"
+        "      - {name: windows, alias: native-ssh}\n"
+        "      - {name: wsl, alias: guest-ssh}\n", encoding="utf-8",
+    )
+    config = replace(original, machine="example-host-wsl", platform="wsl")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_project_config", lambda _project, **_kwargs: config)
+    monkeypatch.setattr(cfg, "load_config", lambda **_kwargs: config)
+    child_id, parent_id = "wt-legacy-child", "wt-legacy-parent"
+    checkout = root / child_id
+    _git("worktree", "add", "-b", f"worktree/{child_id}", str(checkout), "origin/base", cwd=anchor)
+    (root / parent_id).mkdir()
+    historical_child_ref = tracking.format_claim_ref("example-host", PROJECT, child_id)
+    parent_ref = tracking.format_claim_ref(parent_label, PROJECT, parent_id)
+    parent = tracking.create_new_record(
+        parent_id, f"worktree/{parent_id}", str(root / parent_id), PROJECT,
+        parent_label, "wsl", directory,
+    )
+    parent.resources = [tracking.ResourceClaim(kind="worktree", ref=historical_child_ref)]
+    parent_path = directory / f"{parent_id}.yaml"
+    tracking.save_record(parent, parent_path)
+    tracking.create_new_record(
+        child_id, f"worktree/{child_id}", str(checkout), PROJECT, "generated-host",
+        "wsl", directory, owner_ref=parent_ref,
+    )
+    assert checkout.is_dir()
+    assert finalize.validate_and_finalize(child_id, config)
+    assert not checkout.exists()
+    child = tracking.load_record(directory / f"{child_id}.yaml")
+    assert (child.machine, child.platform, child.status) == ("generated-host", "wsl", "finalized")
+    claim, = tracking.load_record(parent_path).resources
+    assert (claim.ref, claim.state) == (historical_child_ref, ob.AT_REST)
+    assert claimant.local_claimant_alive(historical_child_ref) is False
 
 
 @pytest.mark.parametrize("transaction", [2, 3])

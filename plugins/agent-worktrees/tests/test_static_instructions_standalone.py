@@ -7,8 +7,60 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+
+
+def _copy_runtime_package(source, destination):
+    pending = []
+    with ThreadPoolExecutor(max_workers=16) as copies:
+        def queue_copy(source, destination):
+            pending.append(copies.submit(shutil.copy2, source, destination))
+            return destination
+
+        shutil.copytree(
+            source, destination, copy_function=queue_copy,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+        for future in pending:
+            future.result()
+
+
+@pytest.mark.guard
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+def test_runtime_fixture_copy_preserves_source_and_staged_bytes(tmp_path):
+    source, destination = tmp_path / "source", tmp_path / "standalone"
+    (source / "nested").mkdir(parents=True)
+    contents = {"module.py": b"opaque\xff\r\n", "nested/data.bin": b"\x00\x01\r\n"}
+    for name, content in contents.items():
+        (source / name).write_bytes(content)
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "ignored.pyc").write_bytes(b"stale")
+
+    _copy_runtime_package(source, destination)
+
+    for name, content in contents.items():
+        assert (source / name).read_bytes() == content
+        assert (destination / name).read_bytes() == content
+    assert not (destination / "__pycache__").exists()
+
+
+@pytest.mark.guard
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+def test_runtime_fixture_copy_propagates_worker_failure(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "module.py").write_bytes(b"fixture")
+
+    def fail_copy(*args, **kwargs):
+        raise OSError("fixture copy refused")
+
+    monkeypatch.setattr(shutil, "copy2", fail_copy)
+    with pytest.raises(OSError, match="fixture copy refused"):
+        _copy_runtime_package(source, tmp_path / "standalone")
 
 
 @pytest.fixture
@@ -17,7 +69,7 @@ def standalone_workspace(tmp_path):
 
     package = Path(static_instructions.__file__).parent
     standalone = tmp_path / "standalone"
-    shutil.copytree(package, standalone / "agent_worktrees", ignore=shutil.ignore_patterns("__pycache__"))
+    _copy_runtime_package(package, standalone / "agent_worktrees")
     home = tmp_path / "home"
     plugin = home / ".copilot" / "installed-plugins" / "example" / "guidance"
     plugin.mkdir(parents=True)
@@ -287,8 +339,8 @@ def test_native_final_preflight_copies_knowledge_only_provider(
         command = [executable, "-c", script]
     result = run_headless(command, cwd=standalone, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert "Preparing instruction projections: starting" in result.stderr
-    assert "Copying declared instructions: finished" in result.stderr
+    assert "launch/Preparing-instruction-projections starting [elapsed " in result.stderr
+    assert "launch/Copying-declared-instructions done [duration " in result.stderr
     summary = json.loads(report.read_text(encoding="utf-8-sig"))
     assert summary["projections"]["status"] == "ready"
     assert summary["projections"]["changed"] == 1

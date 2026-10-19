@@ -25,6 +25,7 @@ import typing
 import pytest
 
 from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_spawn_deferral import SpawnDeferralMixin
 from agent_dispatch.queue_spawn_reservations import (
     SpawnReservationMixin,
     _newer_worktree_reservation,
@@ -36,6 +37,8 @@ from agent_dispatch.queue_spawn_reservations import (
 @pytest.mark.guard
 def test_task_queue_inherits_the_spawn_reservation_mixin():
     assert SpawnReservationMixin in TaskQueue.__mro__
+    assert SpawnDeferralMixin in SpawnReservationMixin.__mro__
+    assert TaskQueue.defer_spawn is SpawnDeferralMixin.defer_spawn
 
 
 @pytest.mark.guard

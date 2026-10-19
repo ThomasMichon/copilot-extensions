@@ -17,6 +17,9 @@ RUNTIME_RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
 INSTALLER="$SCRIPT_DIR/install.sh"
 LEGACY_ROOT="${AGENT_VAULT_HOME:-$HOME/.agent-vault}" # marketplace-isolation: allow legacy compatibility root
 SEP=$'\034'
+IDENTITY_SOURCE_HOME="${AGENT_VAULT_HOME:-}"
+IDENTITY_SOURCE_ID="${AGENT_VAULT_INSTALLATION_ID:-}"
+IDENTITY_CACHE_DIR="${AGENT_VAULT_CACHE_DIR:-}"
 
 json_path() {
     local result="" component
@@ -55,6 +58,7 @@ scoped_identity_suffix() {
 
 apply_runtime_env() {
     export AGENT_VAULT_HOME="$RUNTIME_ROOT"
+    export AGENT_VAULT_VALIDATED_CONTEXT="$CONTEXT"
     if [[ -n "$CONTEXT" ]]; then
         export COPILOT_EXTENSIONS_CONTEXT="$CONTEXT"
     else
@@ -82,6 +86,16 @@ apply_runtime_env() {
 
 run_runtime() {
     apply_runtime_env
+    if [[ -n "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
+        local validated_cache
+        validated_cache="$(
+            "$AGENT_RT_PY" -I "$SCRIPT_DIR/validate_identity_cache_context.py" \
+                "--runtime-root=$RUNTIME_ROOT" "--installation-id=$INSTALLATION_ID" \
+                "--source-home=$IDENTITY_SOURCE_HOME" "--source-id=$IDENTITY_SOURCE_ID" \
+                "--cache-dir=$IDENTITY_CACHE_DIR"
+        )" || exit 126
+        export AGENT_VAULT_CACHE_DIR="$validated_cache"
+    fi
     exec "$AGENT_RT_PY" -m agent_vault "$@"
 }
 
@@ -184,6 +198,18 @@ fi
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"
+fi
+if [[ "${1:-}" == identity-key && "${2:-}" == setup ]]; then
+    for argument in "$@"; do
+        if [[ "$argument" == --require-running ]]; then
+            printf '%s\n' '{"version":1,"error":"service_unavailable","message":"Provision and start the selected vault independently before delegated setup."}'
+            exit 1
+        fi
+    done
+fi
+if [[ -n "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
+    printf '[agent-vault] pinned identity reads require a prepared owning runtime; provision independently.\n' >&2
+    exit 126
 fi
 
 if [[ -n "${AGENT_VAULT_NO_SELFPROVISION:-}" ]]; then

@@ -57,7 +57,7 @@
       "body_from": "card.body",
       "run": [
         "agent-dispatch", "steer", "submit", "{task_id}", "{fields}",
-        "--expected-status", "{status}"
+        "--expected-status", "{status}", "--expected-revision", "{steering_revision}"
       ],
       "when": {"group": "Blocked"},
       "description": "Read the card prose and answer its form, then wake the worker. The agent acts on your answer only — including casting a PR verdict solely when a card's form asks for one and you pick it (review cards), never autonomously."

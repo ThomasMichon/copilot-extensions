@@ -43,6 +43,7 @@ class TestTranslateSdkEvent:
             "content": "Message from D:\\repos\\h.worktrees\\w1 (via agent-bridge)",
             "relay_body": "Operator: please re-check the Playwright run.",
             "relay_from": "D:\\repos\\h.worktrees\\w1", "relay_kind": "prompt",
+            "relay_message_id": 156,
         })]
         # Only the bridge's own deliveries are read; anything else is unchanged.
         assert translate_sdk_event("user.message", {

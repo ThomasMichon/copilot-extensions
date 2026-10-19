@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-13
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -47,6 +47,14 @@ originating conversation. It also carries **routing** (required capabilities,
 soft affinities) and **targeting** (an optional machine/worktree/repo it is
 addressed to). A task is the atom the whole layer moves through its lifecycle.
 
+The task or its selected worker charter owns the **workflow and sub-stage
+logic**. A task may direct its worker to acquire instructions from another
+capability and follow that capability's CLI or execution process until its
+goal is met. Dispatch allocates an eligible agent and records its lifecycle,
+progress and outcome; it need not understand the process's internal stages or
+make them dispatch task states. The selected worker role or charter does not
+replace the worktree identity that owns the claim.
+
 For work that is **pursued** rather than performed in one shot, the record is
 richer than a fire-once prompt: it can carry a **durable goal** — an objective
 plus the criteria for *done* — and an **accumulated progress log** that grows as
@@ -75,6 +83,36 @@ notification. It does **not** run agents, decide priority policy, or embody a
 worker; those belong to the layers around it. Its transport posture matches the
 rest of the fabric's control plane: it is reached **over the fabric's secured
 mesh**, never a raw public listener (see the parent vision's transport rule).
+
+### Standing charters and linked consultations
+
+Dispatch preserves the relationship between a standing portfolio charter and
+its independently owned contribution tasks. It mediates permission-scoped
+consultation and steer delivery, coalesced wakes, observation, and recovery
+through its existing authorities, not a second queue, daemon, or lease store.
+Authority over one task alone never permits writing to an arbitrary other
+task. Guidance reaches the rightful owner of the still-current review revision;
+changed heads cannot inherit stale steer as an applicable decision.
+
+The [factory Orchestrator](../../agent-fabric/agentic-factory/README.md#standing-portfolio-oversight)
+owns conceptual synthesis and judgment. The deterministic coordinator and
+supervisor carry and supervise that work without acquiring those judgments.
+The [reviewer vision](reviewer/README.md#portfolio-consultation) owns when
+consultation gates a consequential review decision.
+
+### Charter lifetime and continuity
+
+A standing charter remains active across sweeps, child contributions, agent
+turns, context windows, and idle waits; none alone is its completion condition.
+Its owner-authorized completion or withdrawal criteria govern settlement.
+Native current-owner context rollover preserves the mandate, owner, workspace,
+and task. It is neither task completion nor a retry or re-embodiment.
+
+That continuity does not recover a crashed process or unavailable host, nor
+authorize ownership transfer. Those events still require durable supervision,
+recovery, and identity fencing through the existing task, hosting, and worktree
+owners. A true escalation waits visibly for an authorized owner to answer or
+redirect it; capacity pressure never forces completion to free a slot.
 
 ### The supervisor — the singleton that runs registered work
 Where the coordinator is the single-writer **store**, the **supervisor** is the
@@ -228,7 +266,8 @@ those shipped bases whenever the shared loop contract already fits.
 A consumer **selects and parameterizes** a recipe rather than hand-rolling a loop,
 and may **extend** one where its domain needs more. An instantiated pair knows how
 to **author its own tasks** — deriving the goal and payload, stamping the filters,
-wiring its evaluator, defining the intermediary steps, and owning suspend/resume —
+wiring its evaluator and supplying the task or worker charter that owns the
+workflow and intermediary steps — and handles lifecycle follow-through,
 whether it fires on its own event or is **side-loaded** on demand (see
 *side-load-through-an-emitter*). One reviewer template serves an automated review
 service, an on-demand review of a single check-in, and a batch of target pull
@@ -480,6 +519,22 @@ provides its **own full emitter and evaluator** directly (a direct
 `kind:`-only declaration, no extension at all) — the same no-template path
 that exists today. Extension is the preferred route *when* a close-enough
 base exists, never the only route.
+
+### discoverable-extension-templates
+
+Reusable emitter, evaluator and worker-pool templates have consistent,
+owner-declared homes and a common discovery surface across enabled plugin
+contributions, repository sources and local configuration. A consumer can
+inspect a template's identity, provenance, inputs and prerequisites, understand
+the effective selection and overrides, and instantiate it without searching
+embedded examples or reverse-engineering setup scripts. Discovery never
+implicitly activates work.
+
+Templates, saved configurations, published declarations, operator overrides and
+observed execution remain distinguishable. Human-facing clients and automation
+consume the same owning catalog and configuration lifecycle rather than
+copying templates into competing registries. Concrete paths, formats and
+commands belong in the capability's specifications and reality documentation.
 
 ### concise-event-then-charter-pull
 The seed handed to a freshly embodied worker is a **short, event-classified
@@ -766,6 +821,16 @@ way a coordination-layer caller drives a peer. "Drive or converse with a live
 agent" is the coordination layer; "file work you won't wait on and let a worker
 claim it" is this layer. Both may cross machines — the distinguishing axis is
 **ownership, not location**.
+
+### task-or-charter-owns-the-workflow
+
+Consumer-defined processes plug in through task payloads, worker charters,
+emitters and evaluators with explicit input, result and completion contracts.
+Those injection points let a worker acquire and follow another capability's
+instructions without teaching dispatch that capability's workflow or sub-stage
+model. A manual task can select the same execution procedure without a standing
+producer. Domain-specific judgments remain with their owning evaluator or
+caller; dispatch preserves its common allocation, lifecycle and review rules.
 
 ### liveness-not-lease
 A claimed or started task has **no wall-clock expiration** while the worker that
@@ -1117,6 +1182,10 @@ parallel contract.
 
 ## Non-Goals / Boundaries
 
+- **Not a domain workflow engine.** Dispatch does not interpret consumer
+  process graphs or promote their internal stages into its task lifecycle.
+  The task or worker charter owns that logic; consumers supply execution
+  procedures and domain policies through the layer's injection points.
 - **Not the live-conversation layer.** Driving or messaging a running agent
   turn-by-turn is the **coordination layer** (agent-bridge). This layer carries
   *async, recorded, claimable* work, not a live dialogue.

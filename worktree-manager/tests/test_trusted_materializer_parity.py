@@ -42,6 +42,49 @@ def canonical():
     return _load_canonical_materialize_main()
 
 
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("editable", [False, True])
+def test_declared_flat_reference_materialization_parity(tmp_path, canonical, nested, editable):
+    for name, materializer in (("trusted", trusted), ("canonical", canonical)):
+        root = tmp_path / name / "repo"
+        flat = root / "libs" / "flat"
+        flat.mkdir(parents=True)
+        (flat / "pyproject.toml").write_text(
+            '[project]\nname = "flat"\nversion = "1"\n'
+            '[tool.setuptools]\npy-modules = ["flat_module"]\n',
+        )
+        (flat / "flat_module.py").write_text("value = 1\n")
+        owner = root / "libs" / "owner" if nested else root / "consumer"
+        owner.mkdir(parents=True)
+        if nested:
+            (owner / "src").mkdir()
+        path = "../flat" if nested else "../libs/flat"
+        (owner / "pyproject.toml").write_text(
+            '[project]\nname = "owner"\nversion = "1"\n'
+            '[tool.uv.sources]\nagent-flat = { path = "' + path
+            + '", editable = ' + str(editable).lower() + " }\n",
+        )
+        consumer = root / "consumer"
+        if nested:
+            consumer.mkdir()
+            (consumer / "pyproject.toml").write_text(
+                '[tool.uv.sources]\nagent-owner = { path = "../libs/owner", editable = true }\n',
+            )
+        destination = tmp_path / name / "payload"
+        shutil.copytree(consumer, destination)
+        result = materializer.materialize_uv_editable_ref_into(
+            source_consumer_dir=consumer, dest_consumer_dir=destination,
+            canonical_root=root, dest_root=destination,
+        )
+        assert not any(row.startswith("SKIP") for row in result), result
+        assert (destination / "libs" / "flat" / "flat_module.py").read_bytes() == (
+            flat / "flat_module.py"
+        ).read_bytes()
+        assert not (destination / "libs" / "flat" / "src").exists()
+        rewritten = destination / "libs" / "owner" if nested else destination
+        assert "editable" not in (rewritten / "pyproject.toml").read_text()
+
+
 def _symlink_to_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
     """Create ``link -> target``, skipping the test if this machine's account
     lacks symlink-creation privilege (``SeCreateSymbolicLinkPrivilege`` absent

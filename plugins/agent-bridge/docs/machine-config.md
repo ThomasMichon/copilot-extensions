@@ -56,6 +56,21 @@ context leaves that session intact; a known non-machine restart skips irrelevant
 owner preference checks. The target-bound prepared result is reused during
 startup, with no roster lookup or sender revalidation after termination.
 
+### SSH profile authority
+
+For named-machine ACP connections, remote carriers, worktree discovery and
+session reads, Bridge selects the declared SSH alias and leaves connection
+identity to its existing OpenSSH profile. `HostName`, `User`, `Port`,
+`IdentityFile`, proxy configuration and host-key settings come from that profile.
+Topology `ssh.environments[].user` / `port` and legacy agent `ssh_user` metadata
+do not override it, including an explicit topology port or the default port 22.
+Change the SSH profile itself when its connection settings need to change.
+
+Bridge's noninteractive/protocol options and explicit application-authentication
+forwarding remain in effect. Provider-returned connection configurations retain
+their separate provider contract; this rule does not rewrite those configurations
+or generate, edit or repair SSH profiles.
+
 ## Quick Setup
 
 ### Auto-adopt from a repo
@@ -89,6 +104,47 @@ reports the missing file.
 back up the profile stanza in `~/.agent-bridge/config.yaml`, including any
 `default_copilot_args` and `default_env`, then restore those spawn defaults
 after re-adoption.
+
+### Paired harness and knowledge repositories
+
+An adopter that separates executable agency from companion knowledge declares
+both roles together:
+
+```yaml
+control_plane:
+  project: example-harness
+  harness: example-harness
+  knowledge: example-knowledge
+```
+
+`harness` is the machine-agent launch project. `knowledge` is companion state,
+not a second agent target. `project` is the matching scalar compatibility
+projection for older daemons; it must equal `harness`. Do not put an object or
+tuple into `project`: older readers convert that value into a project string.
+New readers reject incomplete roles, malformed names and conflicting projections
+instead of falling back to a different executable repository.
+
+Legacy `control_plane: example-control` and
+`control_plane: {project: example-control}` remain self-hosted declarations.
+They do not imply a knowledge companion. A pair without `project` is readable
+by a new consumer but is explicitly not reported legacy-compatible.
+
+Topology adoption only projects the Bridge profile. It does not establish the
+machine-local knowledge binding, register or clone repositories, or install
+another plugin. For paired first-touch setup, use the optional
+`harness-knowledge` binding owner and its `--control-plane <machines.yaml>`
+front door, with the exact native Worktrees command. Its native read-only
+`knowledge control-plane --path <machines.yaml> --json` reader works before a
+machine-local harness configuration exists. Canonical registrations and the
+normal binding writer still own path/account validation and local state.
+An unsupported old binding reader is an explicit setup gate, not evidence that
+ignored knowledge metadata was applied.
+
+For outreach, select existing matching agents in the caller's own harness
+unless explicitly directed to a qualified repository target. Preserve those
+explicit targets. The declared pair supplies the selected setup/default
+relationship; it does not replace caller/parent routing under #6300 or grant
+knowledge-repository dispatch.
 
 ### Verify
 
@@ -144,17 +200,51 @@ Each space owns its project/worktree registrations and settings independently.
 space key, not that group or the transport alias. Derived agent names preserve
 the registered keys, including the native Windows entry.
 
-For a topology using explicit spaces, set the daemon's own independent
-selection in its local `~/.agent-bridge/config.yaml`:
+For a topology using explicit spaces, start or adopt bridge from the registered
+source worktree. Bridge derives the daemon's key from that project's existing
+machine configuration through Worktrees' versioned `get execution-identity`
+read, using the same-installation peer launcher. There is no second bridge
+machine setting to maintain. Direct daemon launch captures the stable source
+repository before detach and working-directory changes. Adoption records that
+source repository automatically as `topologies.<profile>.source_repo`, so a
+supervised restart can recompute the identity without the caller's cwd.
+The private detach argument is passed only through the current/installed
+Python module launcher. Unverified legacy PATH launchers retain their original
+arguments; they do not certify support for the new source-context contract.
+An adopted `source_repo` selects that source project's configuration ahead of
+the topology's legacy control-plane fallback, even when both locators exist.
+For older profiles without `source_repo`, the declared control-plane project precedes the repository
+that happens to store shared topology; an in-repository topology source is the
+fallback when no control-plane project is declared. These are configuration
+locators, not identity authority.
+An originating registered source project takes precedence over profile locators;
+profiles supply context for a supervised or neutral-directory start. Without an
+originating project binding, all applicable profile bindings must agree.
 
-```yaml
-local_execution_space: workstation-windows
-```
+Source configuration is read again for each resolver build; a derived key is
+never written into `local_execution_space`. The key must be canonical, exist
+in the adopted topology and match the actual daemon platform. Contradictory
+adopted sources, missing bindings, authority-command errors and platform
+mismatches fail explicitly. Hostnames, display labels, physical-host grouping,
+SSH aliases and ambient owner-reference variables do not select a local space.
+Only the recognized versioned contract with explicit configured-machine
+provenance can supply a derived key. An older scalar `get machine` result is
+never sufficient, even when a detected hostname happens to equal a registry key.
 
-The selected key must exist in the topology and match the daemon's execution
-platform. Missing, ambiguous or invalid selection fails visibly; matching the
-hostname never supplies a fallback. The worktrees runtime likewise uses its
-explicit `machine` setting as the registered execution-space key.
+Standalone bridge operation does not require Worktrees. Unscoped/legacy topology
+retains its existing behavior, and an existing `local_execution_space` selector
+remains supported when no project authority is available. When authority is
+available, that legacy selector must agree with it; it never overrides a
+refusal or contradiction. A standalone explicit-space topology with neither an
+authoritative project binding nor an existing selector reports the missing
+binding instead of guessing a space.
+Local-agent/provider-only configurations with no machine inventory do not select
+an execution space at all: a residual legacy selector is inert in that mode,
+and no registered-space authority is inferred from it.
+An optional Worktrees installation that has not registered the source project
+or cannot offer the versioned binding does not supersede an existing valid
+standalone selector. A compatible machine-authority refusal is an error, never
+a legacy fallback.
 Keys cannot contain whitespace, path separators or reference delimiters, and
 must be unique without regard to case.
 
@@ -427,7 +517,7 @@ invalidate either profile.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `host` | No | Machine key from `machines.yaml`. **Omit for local agents.** |
-| `ssh_user` | No | SSH username override (defaults to the SSH env's `user`) |
+| `ssh_user` | No | Legacy user metadata; profile-backed connections use the SSH profile's user |
 | `ssh_environment` | No | Which SSH environment to use (e.g., `wsl`, `windows`, `linux`) |
 | `cwd` | No | Working directory on the remote machine |
 | `copilot_path` | No | Path to the `copilot` binary (default: `copilot` on PATH) |

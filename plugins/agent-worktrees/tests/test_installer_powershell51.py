@@ -343,7 +343,10 @@ def test_venv_install_invokes_resolved_uv_path():
     )[0]
 
     assert "$uvPath = Get-ApplicationPath -Name @('uv')" in body
-    assert "& $uvPath pip install" in body
+    assert "& $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py')" in body
+    assert "--uv $uvPath -- --python $VenvPython" in body
+    assert "--reinstall-package $PkgName" in body
+    assert "& $uvPath pip install" not in body
     assert "& uv pip install" not in body
 
 
@@ -352,8 +355,8 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
     another process may genuinely own (or still be building into) $VenvDir
     right now, so `Deploy-Venv` must refuse to build ANYTHING into it --
     signed or unsigned -- rather than racing that writer.
-    `Invoke-VersionedSlotClean` must surface success/failure via its exit
-    code, `Deploy-Venv` must retry before giving up, and must hard-fail
+    `Invoke-VersionedSlotClean` must acquire canonical construction ownership
+    or throw, `Deploy-Venv` must retry reported refusal before giving up, and must hard-fail
     (return $false, loud error) instead of falling through to any venv
     build when the slot is still dirty after retries."""
     installer = INSTALLER.read_text(encoding="utf-8")
@@ -364,9 +367,13 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
         "function Deploy-Wrappers", 1
     )[0]
 
-    # The clean helper must propagate the underlying python call's exit code
-    # instead of implicitly returning nothing (falsy $null) unconditionally.
-    assert "return ($LASTEXITCODE -eq 0)" in clean_fn
+    assert "construction-shell --shell ps1" in clean_fn
+    assert "if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }" in clean_fn
+    assert "$script:RuntimeConstructionReuse = Start-RuntimeConstruction" in clean_fn
+    assert "-Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion" in clean_fn
+    assert "-PayloadHash (Get-PayloadHash)" in clean_fn
+    assert clean_fn.index("Start-RuntimeConstruction `") < clean_fn.index("return $true")
+    assert "catch" not in clean_fn
 
     # Deploy-Venv must capture that result and retry before giving up.
     assert "$slotClean = Invoke-VersionedSlotClean" in deploy_fn
@@ -391,10 +398,9 @@ def test_slot_clean_uses_an_interpreter_outside_the_target_slot():
     run the census would make the helper process itself show up as such a
     process, permanently self-reporting an incomplete slot with a stale
     python.exe as still in use on every retry. Must resolve its interpreter
-    via `Get-BootstrapPython -ExcludeVenvDir`, and must fail CLOSED (not
-    silently report clean) for an EXISTING slot when no such interpreter
-    can be found at all -- an ABSENT slot needs no validation and is
-    trivially, correctly clean."""
+    via `Get-BootstrapPython -ExcludeVenvDir`, and must fail CLOSED for both
+    existing and absent candidates when no interpreter can be found: even a
+    fresh candidate requires construction ownership before its first write."""
     installer = INSTALLER.read_text(encoding="utf-8")
     clean_fn = installer.split("function Invoke-VersionedSlotClean", 1)[1].split(
         "function Invoke-VersionedMarkComplete", 1
@@ -404,7 +410,8 @@ def test_slot_clean_uses_an_interpreter_outside_the_target_slot():
     )[0]
 
     assert "$py = Get-BootstrapPython -ExcludeVenvDir" in clean_fn
-    assert "if (-not $py) { return -not (Test-Path $VenvDir) }" in clean_fn
+    assert "if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }" in clean_fn
+    assert clean_fn.index("if (-not $py)") < clean_fn.index("Start-RuntimeConstruction `")
 
     assert "[switch]$ExcludeVenvDir" in bootstrap_fn
     assert "[switch]$ExcludeRuntimeRoot" in bootstrap_fn

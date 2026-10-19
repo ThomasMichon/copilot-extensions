@@ -9,6 +9,7 @@ Run:  python -m pytest tools/test_check_version_bump.py
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -92,6 +93,61 @@ def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.fixture
+def guard_module():
+    spec = importlib.util.spec_from_file_location("version_bump_diff_contract", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_revision_diff_is_unambiguously_separated_from_paths(guard_module, monkeypatch):
+    calls = []
+
+    def git(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "plugins/alpha/feature.py\n", "")
+
+    monkeypatch.setattr(guard_module, "_git", git)
+    assert guard_module._changed_files("a" * 40, "b" * 40) == ["plugins/alpha/feature.py"]
+    assert calls == [("diff", "--name-only", "a" * 40 + ".." + "b" * 40, "--")]
+
+
+def test_revision_blob_reads_are_unambiguously_separated_from_paths(guard_module, monkeypatch):
+    calls = []
+
+    def git(*args):
+        calls.append(args)
+        text = '{"version":"1.0.0"}' if args[1].endswith(".json") else (
+            '[project]\nversion="2.0.0"\n'
+        )
+        return subprocess.CompletedProcess(args, 0, text, "")
+
+    monkeypatch.setattr(guard_module, "_git", git)
+    ref = "a" * 40
+    assert guard_module._plugin_json_version_at(ref, "alpha") == "1.0.0"
+    assert guard_module._pyproject_project_version_at(ref, "worktree-manager/pyproject.toml") == "2.0.0"
+    assert calls == [
+        ("show", ref + ":plugins/alpha/plugin.json", "--"),
+        ("show", ref + ":worktree-manager/pyproject.toml", "--"),
+    ]
+
+
+def test_diff_failure_is_not_reported_as_no_changes(guard_module, monkeypatch, capsys):
+    monkeypatch.setattr(guard_module, "_rev_parse", lambda ref: ref)
+    monkeypatch.setattr(guard_module, "_merge_base", lambda base, _head: base)
+    monkeypatch.setattr(
+        guard_module, "_git",
+        lambda *args: subprocess.CompletedProcess(args, 128, "", "fixture diff refused"),
+    )
+    monkeypatch.setattr(sys, "argv", ["check-version-bump.py"])
+    assert guard_module.main() == 1
+    captured = capsys.readouterr()
+    assert "fixture diff refused" in captured.err
+    assert "no changes" not in captured.out
+
+
 @pytest.fixture()
 def repo(tmp_path: Path) -> Path:
     """A git repo with a simulated ``origin/main`` base carrying two plugins
@@ -158,6 +214,26 @@ def test_packaged_canonical_change_requires_consumer_bump(repo: Path):
     _set_plugin_version(repo, "beta", "2.0.0-dev2")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "bump packaged consumer")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-pull-requests"])
+def test_peer_boundary_change_charges_registered_owner(repo: Path, plugin: str):
+    _plugin(repo, plugin, "1.0.0-dev1")
+    _write(repo, "libs/peer-launch/peer_launch.py", "before = True\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "declare packaged peer owner")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "libs/peer-launch/peer_launch.py", "after = True\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "change canonical peer boundary")
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert plugin in result.stdout + result.stderr
+    _set_plugin_version(repo, plugin, "1.0.0-dev2")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "declare peer owner release")
     result = _run(repo)
     assert result.returncode == 0, result.stdout + result.stderr
 

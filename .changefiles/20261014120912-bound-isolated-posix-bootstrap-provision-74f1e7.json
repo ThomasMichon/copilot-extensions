@@ -1,9 +1,0 @@
-{
-  "comment": "Share source-free POSIX installer fixtures and bound healthy-provision failure diagnostics",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -521,15 +521,17 @@ def test_submit_steer_idempotency_key_dedups_a_retry(q):
         t.id, fields={"f": "value"}, sender="operator", idempotency_key="key-1"
     )
     second = q.submit_steer(
-        t.id, fields={"f": "a different value"}, sender="operator", idempotency_key="key-1"
+        t.id, fields={"f": "value"}, sender="operator", idempotency_key="key-1"
     )
 
     assert first.awaiting_steer is False
     assert second.awaiting_steer is False
     log = q.steer_log(t.id)
     assert len(log) == 1
-    # The retry's (different) field value is never applied -- only the
-    # original, already-committed submission's fields are recorded.
+    with pytest.raises(TaskError, match="request key conflicts"):
+        q.submit_steer(
+            t.id, fields={"f": "a different value"}, sender="operator", idempotency_key="key-1",
+        )
     assert log[0]["fields"] == {"f": "value"}
 
 
@@ -724,7 +726,7 @@ def test_card_and_steer_roundtrip_over_http(api, monkeypatch):
     assert r.status_code == 200
     assert r.json()["awaiting_steer"] is False
     assert r.json()["steer_woken"] is None
-    assert r.json()["steer_wake_status"] == "pending"
+    assert r.json()["steer_receipt"]["acceptance"]["wake_status"] == "pending"
     _wait_for_wake_status(api, tid, "delivered")
     assert len(wake_calls) == 1
     assert wake_calls[0][:2] == ("w1", tid)
@@ -845,7 +847,7 @@ def test_steer_wake_failure_keeps_answer_durable(api, monkeypatch):
 
     assert r.status_code == 200
     assert r.json()["steer_woken"] is None
-    assert r.json()["steer_wake_status"] == "pending"
+    assert r.json()["steer_receipt"]["acceptance"]["wake_status"] == "pending"
     _wait_for_wake_status(api, tid, "failed")
     log = api.get(f"/tasks/{tid}/steer-log").json()
     assert log[0]["fields"] == {"decision": "revise"}
@@ -989,7 +991,7 @@ def test_steer_atomically_resumes_suspended_task_before_wake(api, monkeypatch):
     assert response.json()["status"] == Status.STARTED
     assert response.json()["owner"] == "w1"
     assert response.json()["steer_woken"] is None
-    assert response.json()["steer_wake_status"] == "pending"
+    assert response.json()["steer_receipt"]["acceptance"]["wake_status"] == "pending"
     assert wake_called.wait(1)
     _wait_for_wake_status(api, tid, "failed")
     assert api.get(f"/tasks/{tid}/steer-log").json()[0]["taken"] is False
@@ -1041,7 +1043,7 @@ def test_slow_wake_never_blocks_durable_steer_response(api, monkeypatch):
 
     assert response.status_code == 200
     assert elapsed < 1.0
-    assert response.json()["steer_wake_status"] == "pending"
+    assert response.json()["steer_receipt"]["acceptance"]["wake_status"] == "pending"
     assert entered.wait(1)
     log = api.get(f"/tasks/{tid}/steer-log").json()
     assert log[0]["fields"] == {"decision": "continue"}

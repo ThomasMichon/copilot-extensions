@@ -32,8 +32,38 @@ def is_bare(path: str | os.PathLike[str]) -> bool:
     return probe.returncode == 0 and probe.stdout.strip() == "true"
 
 
+def _branch_selection(
+    anchor: str | os.PathLike[str], default_branch: str | None, *, bare: bool,
+) -> tuple[str, str | None]:
+    args = ("branch", "--show-current") if bare else ("rev-parse", "--abbrev-ref", "HEAD")
+    probe = git_ops.git(*args, cwd=anchor, check=False, isolated_repository=True)
+    current = probe.stdout.strip() if probe.returncode == 0 else ""
+    if not current or current == "HEAD":
+        return "", "detached HEAD"
+    target = default_branch or current
+    if current != target:
+        if bare:
+            return target, (
+                f"HEAD is on '{current}', not declared default '{target}' "
+                "(bare anchor); switch it explicitly with: "
+                + _display_command(
+                    ["git", "-C", str(anchor), "symbolic-ref", "HEAD", f"refs/heads/{target}"]
+                )
+            )
+        return target, f"on '{current}', not '{target}'"
+    return target, None
+
+
+def branch_skip_reason(
+    anchor: str | os.PathLike[str], default_branch: str | None, *, bare: bool = False,
+) -> str | None:
+    """The same isolated branch eligibility used by auth discovery and sync."""
+    _, reason = _branch_selection(anchor, default_branch, bare=bare)
+    return reason + " -- skipped" if reason and not bare else reason
+
+
 def sync_bare_anchor(
-    path: str, declared_branch: str | None, *, remote: str = "origin",
+    path: str, declared_branch: str | None, *, remote: str = "origin", no_hooks: bool = False,
 ) -> tuple[str, str]:
     """Fast-forward a bare worktree-class anchor's branch ref directly.
 
@@ -67,29 +97,27 @@ def sync_bare_anchor(
     (:mod:`bare_anchor_files`): a stale index, local edits, or an untracked or
     ignored path in the way refuse BEFORE the ref moves. The detail always
     ends with ``; files=<status>`` once the ref is known to be current.
+
+    ``no_hooks``, opt-in and ``False`` by default (an interactive/manual
+    ``repos sync`` still wants a repo's own client-side hooks to run), is set
+    by :func:`agent_worktrees.service_sources.ensure_current` for deployment:
+    a configured ``reference-transaction`` hook must not be able to run, and
+    reject, a service-source deployment sync -- #7088. It is threaded through
+    every ref write here AND into :mod:`bare_anchor_files`'s own index/work-tree
+    operations (``update-index --refresh``, ``read-tree``) for a converted-bare
+    anchor, so a configured ``post-index-change`` hook is equally suppressed.
     """
 
     # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE must never redirect the
     # ref move or the fetch to another repository: always act on `path`.
     def _git(*args: str):
-        return git_ops.git(*args, cwd=path, check=False, isolated_repository=True)
-
-    current = _git("branch", "--show-current").stdout.strip()
-    if not current:
-        return ("skipped", "detached HEAD")
-    target = declared_branch or current
-    if target != current:
-        # A bare repo has no index/work tree for `git checkout` to act on;
-        # moving HEAD to a different declared branch is a structural change
-        # best left to an explicit operator action, not an unattended sync.
-        return (
-            "skipped",
-            f"HEAD is on '{current}', not declared default '{target}' "
-            "(bare anchor); switch it explicitly with: "
-            + _display_command(
-                ["git", "-C", str(path), "symbolic-ref", "HEAD", f"refs/heads/{target}"]
-            ),
+        return git_ops.git(
+            *args, cwd=path, check=False, isolated_repository=True, no_hooks=no_hooks,
         )
+
+    target, skip = _branch_selection(path, declared_branch, bare=True)
+    if skip:
+        return ("skipped", skip)
     old_sha = _git("rev-parse", "--verify", f"refs/heads/{target}").stdout.strip()
     if not old_sha:
         return ("error", f"could not resolve '{target}'")
@@ -118,6 +146,7 @@ def sync_bare_anchor(
             "fetch", "--quiet", "--no-tags", remote,
             f"+refs/heads/{target}:{scratch_ref}",
             cwd=path, check=False, timeout=180, isolated_repository=True,
+            auth_acquisition=True, no_hooks=no_hooks,
         )
     finally:
         for refspec in saved_refspecs:
@@ -132,12 +161,15 @@ def sync_bare_anchor(
         return ("skipped", f"{remote}/{target} not found after fetch")
     if new_sha == old_sha:
         _cleanup_scratch()
-        return ("synced", f"{target}; files={bare_anchor_files.current_status(path, old_sha)}")
+        return (
+            "synced",
+            f"{target}; files={bare_anchor_files.current_status(path, old_sha, no_hooks=no_hooks)}",
+        )
     ancestry = _git("merge-base", "--is-ancestor", old_sha, new_sha)
     if ancestry.returncode != 0:
         _cleanup_scratch()
         return ("skipped", "not fast-forwardable (diverged)")
-    refusal = bare_anchor_files.precheck(path, old_sha, new_sha)
+    refusal = bare_anchor_files.precheck(path, old_sha, new_sha, no_hooks=no_hooks)
     if refusal:
         _cleanup_scratch()
         return (
@@ -148,7 +180,7 @@ def sync_bare_anchor(
     _cleanup_scratch()
     if updated.returncode != 0:
         return ("error", updated.stderr.strip() or "git update-ref failed")
-    files = bare_anchor_files.refresh(path, old_sha, new_sha)
+    files = bare_anchor_files.refresh(path, old_sha, new_sha, no_hooks=no_hooks)
     if files.startswith(bare_anchor_files.REFRESH_FAILED):
         # The ref already moved; the CLI reports the stale files as a warning.
         return (

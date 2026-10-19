@@ -35,8 +35,27 @@ Once, to install the Node dependency and cache the font:
 
 ```bash
 cd worktree-manager/scripts/picker-snapshot
-npm install
+python install.py
 ```
+
+This checks every locked dependency's seven-day age and artifact integrity
+through npm's configured registry before installation. Do not substitute plain
+`npm install`/`npm ci` or a different registry when admission fails.
+
+The same entry point admits other locked tooling projects. From the repository
+root, workflow helpers use:
+
+```bash
+python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions --health-module commonmark --health-module parse5
+```
+
+An explicit project requires explicit health modules; success means each
+module imported after the complete locked closure passed age and strong SRI
+admission. Missing or SHA-1-only registry integrity is bound to the lock's
+strong digest through npm's script-disabled tarball verification.
+The installer runs npm against a private snapshot of the admitted manifests
+and local npm configuration, then publishes only health-checked dependencies.
+Failures or concurrent input changes preserve an existing dependency tree.
 
 Then, end-to-end (needs a Python env with `textual` / `rich` / `pyyaml`):
 
@@ -83,4 +102,5 @@ revisions and the single regeneration command for its committed PNG assets.
 - `svg2png.mjs` — the SVG→PNG rasterizer (Fira Code, 3×). Reusable for any
   Rich/Textual capture SVG.
 - `package.json` — the `@resvg/resvg-js` dependency.
+- `install.py` — configured-registry age/integrity admission and locked install.
 - `.fonts/`, `node_modules/`, and rendered `*.png` / `*.svg` are gitignored.

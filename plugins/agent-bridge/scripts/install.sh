@@ -270,6 +270,11 @@ if [[ -z "$PORT" ]]; then
 fi
 RELAY_PORT=9857   # integrated credential relay (in-process with the bridge)
 SYSTEMD_UNIT="agent-bridge.service"
+# `python -I -c "$_NEW_SESSION_PY" <python> <args...>` runs `<python> <args...>`
+# in a new session (setsid, then exec in place, so $! stays the service's pid;
+# not under COPILOT_EXTENSIONS_TEST_CONTAINED=1, whose runner owns the tree).
+# It needs only the runtime interpreter, so it also works without setsid(1).
+_NEW_SESSION_PY=$'import os, sys\nif os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":\n    try:\n        os.setsid()\n    except (AttributeError, OSError):\n        pass\nos.execv(sys.argv[1], sys.argv[1:])'
 
 # === install-contract:v3 versioned-venv (agent-bridge: venv-as-symlink) ===
 # Immutable per-version runtime (#581): build the venv into versions/<version>
@@ -292,6 +297,7 @@ if [[ -z "$SRC_VERSION" ]]; then
     echo "[FAIL] Cannot determine plugin version from pyproject.toml (required for the versioned runtime)." >&2
     exit 1
 fi
+PACKAGE_VERSION="$SRC_VERSION"
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 # === end install-contract:v3 versioned-venv ===
 
@@ -469,28 +475,18 @@ _scrub_payload_build_artifacts() {
 
 _uv_pip_install_resilient() {
     local scrub_dir="$1"; shift
-    local out delay
-    _scrub_payload_build_artifacts "$scrub_dir"
-    if out="$(uv pip install "$@" 2>&1)"; then
+    local INSTALLER_ENGINE_BEFORE_ATTEMPT=_scrub_payload_build_artifacts
+    local INSTALLER_ENGINE_BEFORE_ATTEMPT_ARGUMENT="$scrub_dir"
+    local out rc=0
+    if out="$(invoke_uv_pip_install_resilient uv "$@" 2>&1)"; then
         _scrub_payload_build_artifacts "$scrub_dir"
         printf '%s\n' "$out"
         return 0
+    else
+        rc=$?
     fi
-    for delay in 3 6 10; do
-        if ! test_is_sre_module_mismatch "$out"; then
-            break
-        fi
-        _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        sleep "$delay"
-        _scrub_payload_build_artifacts "$scrub_dir"
-        if out="$(uv pip install "$@" 2>&1)"; then
-            _scrub_payload_build_artifacts "$scrub_dir"
-            printf '%s\n' "$out"
-            return 0
-        fi
-    done
     printf '%s\n' "$out" >&2
-    return 1
+    return "$rc"
 }
 
 # A venv is only healthy when BOTH its python binary and pyvenv.cfg exist --
@@ -602,6 +598,19 @@ _bootstrap_python() {
     return 1
 }
 
+_initialize_source_runtime() {
+    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    local py
+    py="$(_bootstrap_python)" || {
+        _fail "Source runtime selection requires a bootstrap Python interpreter"
+        return 1
+    }
+    SOURCE_RUNTIME_IDENTITY="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+        --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-bridge --format json)" || return 1
+    SRC_VERSION="$("$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+}
+
 _uv_source_paths() {
     # The [tool.uv.sources] `path = "..."` dependencies one pyproject.toml ($1)
     # declares, resolved relative to that project's own directory (as uv
@@ -708,6 +717,7 @@ _compute_payload_hash() {
             [[ -f pyproject.toml ]] && sha256sum pyproject.toml 2>/dev/null
             # The declared project `readme`, embedded in installed metadata.
             [[ -f README.md ]] && sha256sum README.md 2>/dev/null
+            [[ -f runtime-source.json ]] && sha256sum runtime-source.json
             _payload_tree_digests "$PLUGIN_DIR/src" src
             _payload_tree_digests "$PLUGIN_DIR/libs" libs lib
             local __lib
@@ -744,6 +754,18 @@ _payload_unchanged_since_admission() {
     # when it differs; the caller must then fail without publishing the
     # marker or manifest, or activating. Nothing to verify when no slot was
     # built (reuse) or no hash was admitted.
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+        local py identity
+        py="$(_bootstrap_python)" || return 1
+        identity="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-bridge \
+            --expected-runtime-version "$SRC_VERSION" --format json)" || return 1
+        if [[ "$identity" != "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _fail "Source runtime identity changed after runtime selection; refusing publication"
+            return 1
+        fi
+    fi
+    [[ "${1:-}" != source-only ]] || return 0
     [[ "${SLOT_ADMISSION:-}" != reuse ]] || return 0
     [[ "${PAYLOAD_HASH_FIXED:-0}" == 1 && -n "${PAYLOAD_HASH:-}" ]] || return 0
     local fresh
@@ -754,68 +776,29 @@ _payload_unchanged_since_admission() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). Returns
-    # non-zero when the primitive REFUSES (e.g. the incomplete slot is selected
-    # or still in use): building over it would mutate a live/selected slot in
-    # place, so the caller must not proceed (#5472). No-op in legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    local out rc=0
-    out="$("$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1)" || rc=$?
-    if [[ -n "$out" ]]; then printf '%s\n' "$out" | sed 's/^/  ...    /'; fi
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Runtime slot versions/$SRC_VERSION could not be safely prepared (exit $rc); refusing to build over it in place"
-        return 1
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
     fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then SLOT_ADMISSION=reuse; else SLOT_ADMISSION=construct; fi
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via the slot's own python (or any bootstrap python).
-    # A refused publication fails the caller (#5472).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    # Prefer the freshly built slot's own interpreter: it already passed the
-    # health gate, and an ambient one may be absent or unusable.
-    local py=""
-    if [[ -x "$VENV_DIR/bin/python" ]]; then
-        py="$VENV_DIR/bin/python"
-    else
-        py="$(_bootstrap_python)" || py=""
-    fi
-    if [[ -z "$py" ]]; then
-        _fail "No python available to publish the completion marker for runtime slot versions/$SRC_VERSION"
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    # The transaction's payload fingerprint fixed before admission (see
-    # _payload_hash) -- never recomputed here; callers that built the slot
-    # first confirm the sources still hash to it
-    # (_payload_unchanged_since_admission).
-    local ph
-    if ! ph="$(_payload_hash)"; then
-        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
-        return 1
-    fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    # A refused publication (e.g. conflicting completion evidence for this
-    # numbered version) must fail the install, never be swallowed (#5472).
-    local out rc=0
-    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
-    if [[ -n "$out" ]]; then printf '%s\n' "$out" | sed 's/^/  ...    /'; fi
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to publish the completion marker for runtime slot versions/$SRC_VERSION (exit $rc)"
-        return 1
-    fi
+    _runtime_construction_complete "$actual_hash"
 }
 
 _slot_admission() {
@@ -884,7 +867,7 @@ _guard_published_slot() {
         construct) return 1 ;;
         reuse)
             if [[ "$(_versioned_current)" == "$SRC_VERSION" ]]; then
-                _ok "agent-bridge $SRC_VERSION already installed and healthy (content match) -- no-op (no stop, no rebuild)."
+                _ok "agent-bridge $SRC_VERSION content matched -- reusing the immutable runtime slot."
                 return 0
             fi
             return 1 ;;
@@ -1338,7 +1321,16 @@ _source_kind() {
 
 _write_deploy_manifest() {
     local source_path="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-    write_deploy_manifest "agent-bridge" "agent-bridge" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "$source_path" "$SRC_VERSION"
+    local fields="" py
+    if [[ "$SRC_VERSION" != "$PACKAGE_VERSION" ||
+        -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+        py="$(_bootstrap_python)" || return 1
+        fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" \
+            --plugin agent-bridge \
+            --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || return 1
+    fi
+    write_deploy_manifest "agent-bridge" "agent-bridge" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "$source_path" "$PACKAGE_VERSION"
 }
 
 _install_systemd_unit() {
@@ -1462,6 +1454,11 @@ deploy_binstub() {
     # interpreter the ONE uniform way (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+    done
+    # Native service callers use the Python resolver without a payload or PATH.
+    mkdir -p "$INSTALL_DIR/scripts"
+    for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py; do
+        cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/scripts/$r" || return 1
     done
     if ! $PUBLISH_GLOBAL_BINSTUBS; then
         _ok "Scoped install keeps the global compatibility binstub unchanged"
@@ -1724,8 +1721,6 @@ _install_slot_build() {
     # #935: toss an INCOMPLETE prior slot first so we never `uv venv
     # --allow-existing` over a half-built corpse (the current/active slot is
     # never tossed). No-op in legacy mode.
-    _versioned_slot_clean || exit 1
-
     # Create venv via uv
     if ! _venv_healthy "$VENV_DIR"; then
         if [[ -x "$VENV_DIR/bin/python" ]]; then
@@ -1870,6 +1865,7 @@ do_install() {
     # Serialize concurrent installers (ce#776/#777 follow-up): wait for any
     # in-flight install; on timeout defer -- it lands the version.
     _require_install_lock
+    _payload_unchanged_since_admission source-only || exit 1
 
     # Immutable-slot admission (#5472, ce#776/#777): a published same-version
     # slot whose content matches and is already active is a no-op; one whose
@@ -1880,6 +1876,7 @@ do_install() {
         _write_deploy_manifest
         return 0
     fi
+    _versioned_slot_clean || exit 1
 
     mkdir -p "$INSTALL_DIR"
     if $PUBLISH_GLOBAL_BINSTUBS; then
@@ -1909,6 +1906,7 @@ do_install() {
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
+        _payload_unchanged_since_admission source-only || exit 1
         _versioned_mark_complete || exit 1
         _versioned_activate || exit 1
     fi
@@ -2105,10 +2103,12 @@ do_start() {
         _warn "systemd start did not activate the service (rc=$systemd_start_rc) -- falling back to direct start"
     fi
 
-    # Direct start -- launch the resolved slot interpreter. Close fd 8 (8>&-) so
-    # a daemon launched during do_install/do_update never inherits and holds the
-    # install lock (ce#802).
-    nohup "$rt_py" -m agent_bridge start > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
+    # Direct start -- launch the resolved slot interpreter in a session of its
+    # own, so an installer deadline that kills the installer's session never
+    # takes the service with it. Close fd 8 (8>&-) so a daemon launched during
+    # do_install/do_update never inherits and holds the install lock (ce#802).
+    nohup "$rt_py" -I -c "$_NEW_SESSION_PY" "$rt_py" -m agent_bridge start \
+        > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     sleep 2
@@ -2361,7 +2361,6 @@ _update_core() {
         fi
         if ! _venv_healthy "$VENV_DIR"; then
             _step "Building runtime slot versions/$SRC_VERSION..."
-            _versioned_slot_clean || return 1
             if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
                 _uv_venv_resilient "$VENV_DIR" --allow-existing || { _fail "Venv build failed (versions/$SRC_VERSION)"; return 1; }
             fi
@@ -2494,6 +2493,25 @@ _update_core() {
     return 0
 }
 
+_reconcile_serving_runtime() {
+    local rc=0
+    "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --probe-serving --health-timeout 180 || rc=$?
+    [[ "$rc" != 0 ]] || return 0
+    if [[ "$rc" != 10 ]]; then
+        _fail "Serving runtime reconcile failed (probe exit $rc); completed slot left unchanged."
+        return 1
+    fi
+    trap '_clear_update_marker; _exit_install_lock' EXIT
+    _write_update_marker
+    rc=0
+    "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --health-timeout 180 || rc=$?
+    _clear_update_marker
+    if [[ "$rc" != 0 ]]; then
+        _fail "Serving runtime reconcile failed; completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
+        return 1
+    fi
+}
+
 do_update() {
     echo ""
     echo "=== agent-bridge update ==="
@@ -2510,11 +2528,13 @@ do_update() {
     # Serialize concurrent installers (see do_install): don't rebuild the venv
     # over an in-flight install/update. Defer on timeout.
     _require_install_lock
+    _payload_unchanged_since_admission source-only || exit 1
 
     # Immutable-slot admission (#5472) -- BEFORE the update marker, the drain,
     # or any stop, so a no-op or a refused update never disturbs the live
     # daemon. See do_install.
     if _guard_published_slot; then
+        _reconcile_serving_runtime || return 1
         _write_deploy_manifest
         return 0
     fi
@@ -2599,10 +2619,12 @@ do_update() {
         cutover=true
     fi
 
+    _versioned_slot_clean || exit 1
+
     # Stop the running instance before the in-place reinstall, UNLESS we are
     # doing a cutover (which keeps the old daemon up and retires it afterward).
     # Either way, drain first so in-flight turns get a chance to settle.
-    if [[ "$was_running" == true && "$cutover" == false ]]; then
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 && "$was_running" == true && "$cutover" == false ]]; then
         if ! _update_lifecycle_drain_stop "$predecessor_signature" "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"; then
             was_running=false
         fi
@@ -2612,18 +2634,22 @@ do_update() {
     # build whose sources changed after PAYLOAD_HASH was fixed is a failure
     # too: the never-published slot is discarded before marker, manifest or
     # activation.
-    if ! _update_core || ! _payload_unchanged_since_admission; then
+    # Keep the final identity check and completion inside this failure handler
+    # so even a late failure restarts a predecessor stopped above.
+    _update_complete_candidate() {
+        [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+        _payload_unchanged_since_admission source-only || return $?
+        _versioned_mark_complete || return $?
+    }
+    if ! _update_core || ! _payload_unchanged_since_admission || ! _update_complete_candidate; then
         _fail "Update failed"
         if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
             # The `venv` link was never swapped (activate runs only after a healthy
             # build), so the previous slot is still active. Discard the half-built
-            # new slot -- only one this run constructed: a reused slot was already
-            # published (create-once, #5472) and is never deleted here -- and
-            # restart the previous version if the classic path stopped it.
-            if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "$prev_version" \
-                  && "${SLOT_ADMISSION:-construct}" == construct ]]; then
-                rm -rf "$INSTALL_DIR/versions/$SRC_VERSION"
-            fi
+            # new slot (unless it IS the active one) and restart the previous
+            # version if the classic path stopped it.
+            # The attached construction owner reclaims the failed candidate
+            # after rollback, under the canonical cleanup and selector guards.
             if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
                 _update_lifecycle_start "$predecessor_signature" "Restarting the previous version..." || was_running=false
             fi
@@ -2650,7 +2676,6 @@ do_update() {
     # stable `venv` symlink onto it. In cutover mode the old daemon keeps serving
     # from its own immutable slot until drained. No-op in legacy mode.
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        _versioned_mark_complete || { _fail "Versioned completion publication failed"; exit 1; }
         _versioned_activate || { _fail "Versioned activate failed"; exit 1; }
     fi
 
@@ -2694,6 +2719,8 @@ do_update() {
 }
 
 # -- Dispatch ----------------------------------------------------------------
+
+_initialize_source_runtime || exit 1
 
 case "$ACTION" in
     install)   do_install ;;

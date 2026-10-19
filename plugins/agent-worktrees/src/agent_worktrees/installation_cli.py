@@ -866,7 +866,7 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
-        picker_profiles_cli._refresh_terminal_profiles()
+        picker_profiles_cli._refresh_terminal_profiles(project, machine=machine)
 
     output.ok(f"Project '{project}' registered")
     print(f"  Config:  {config_path}")

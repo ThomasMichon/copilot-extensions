@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import runpy
+import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +16,37 @@ from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import worktrees_client as client
 from agent_worktrees import worktrees_projection as projection
 from agent_worktrees import worktrees_runtime as runtime
+
+
+def test_fresh_current_dispatch_cannot_acknowledge_bridge_live_refresh(
+    tmp_path, monkeypatch, capfd, no_caller_compute,
+) -> None:
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    owner.publish("project", [{"id": "one"}], observed_at=time.time())
+    monkeypatch.setattr(client, "read_current", owner.handle)
+    monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **kw: None)
+    monkeypatch.setattr(list_cli.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cli.cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
+    bridge_source = (
+        Path(__file__).resolve().parents[2] / "agent-bridge" / "src"
+        / "agent_bridge" / "routes" / "worktree_refresh.py"
+    )
+    contract = runpy.run_path(str(bridge_source))
+    try:
+        assert list_cli.cmd_list(argparse.Namespace(
+            json=True, fresh=True, tracking_status="all", all=True,
+            include_other_platforms=True,
+        )) == 0
+        raw = capfd.readouterr().out
+        assert contract["validate_inventory"](raw) is not None
+        with pytest.raises(
+            contract["DiscoveryReadError"], match="source-refresh-unsupported",
+        ):
+            contract["validate_inventory"](raw, fresh=True)
+    finally:
+        owner.shutdown()
 
 
 def request(**extra):

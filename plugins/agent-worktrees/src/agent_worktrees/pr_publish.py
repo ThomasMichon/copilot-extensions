@@ -430,7 +430,8 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                  force_with_lease: bool = False,
                  force_with_lease_expect: str | None = None,
                  timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT,
-                 allow_history_rewrite: bool = False, repo=None) -> git_ops.PushResult:
+                 allow_history_rewrite: bool = False, repo=None,
+                 strict_lease: bool = False) -> git_ops.PushResult:
     """Verify the destination under the short configuration lock, then push a
     pinned URL without holding the clone-wide lock through hooks/network I/O.
     When it goes to
@@ -438,6 +439,17 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
     (``head_repo``) at push time -- another worktree's fork setup could have
     repointed it since it was chosen."""
     timeout = publication_deadline.validate(timeout)
+    checked_policy = getattr(getattr(repo, "pr", None), "publication_checks", None)
+    if checked_policy is not None:
+        from . import pr_publication_checks
+        source = refspec.partition(":")[0]
+        publication = pr_publication_checks.enforce(cwd, repo, head=source)
+        if not publication["ok"]:
+            return git_ops.PushResult(ok=False, stderr=pr_publication_checks.failure_detail(publication))
+        try:
+            refspec = pr_publication_checks.pin_refspec(cwd, refspec, publication["head"])
+        except pr_publication_checks.CheckError as exc:
+            return git_ops.PushResult(ok=False, stderr=str(exc))
     pr = _pr_for(record, refspec.rpartition(":")[2].removeprefix("refs/heads/"))
     want = (expected_head_repo or getattr(pr, "head_repo", "") or "").lower()
     # The full host/owner/name, read when the target was chosen (or recorded at
@@ -491,7 +503,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
                                   force_with_lease_expect=force_with_lease_expect, timeout=timeout, **rewrite_args)
             if (
-                not result and force_with_lease_expect and "stale info" in result.stderr
+                not strict_lease and not result and force_with_lease_expect and "stale info" in result.stderr
             ):
                 # A timed-out push may have succeeded without recording its head.
                 # Normal fast-forward publication cannot overwrite a racing update.
@@ -500,7 +512,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 tip = _tip(remote, destination.removeprefix("refs/heads/"), cwd)
                 if tip and git_ops.is_commit_ancestor(tip, source, cwd=cwd):
                     result = git_ops.push(remote, refspec, cwd=cwd, timeout=timeout)
-                elif tip and repo is not None:
+                elif tip and repo is not None and checked_policy is None:
                     from . import pr_rebase
                     recovery_result = pr_rebase.push(
                         record, repo, remote, refspec, force_with_lease_expect,
@@ -511,7 +523,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                     else:
                         result.stdout += "\n" + recovery_result.stdout
                         result.stderr += "\n" + recovery_result.stderr
-            if repo is not None and force_with_lease_expect and result.stderr == (
+            if not strict_lease and repo is not None and checked_policy is None and force_with_lease_expect and result.stderr == (
                 f"Refusing: {force_with_lease_expect} not an ancestor."
             ):
                 from . import pr_rebase
@@ -521,6 +533,8 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
             if result:
                 result.head_repo = got
                 result.head_identity = identity
+                if checked_policy is not None:
+                    result.published_head_sha = publication["head"]
             return result
     except PublishLockTimeout as exc:
         return git_ops.PushResult(ok=False, stderr=str(exc))
@@ -584,14 +598,11 @@ def push_history_message(pushed, feature: str, source: str) -> str:
     )
 
 
-def record_pushed_head(
-    config, record: tracking.WorktreeRecord, worktree_id: str, pushed_pr, head_sha: str,
+def _persist_head(
+    config: Config, record: tracking.WorktreeRecord, pushed_pr: tracking.PRRecord | None, head_sha: str,
     *, remote: str = "", head_repo: str = "", head_identity: str = "", rebase_base_sha: str = "",
 ) -> None:
-    """After a successful head push to *remote*: record the new head (and the
-    remote, when it isn't the repo's own -- an older record's fork, found by
-    :func:`push_remote`), save, then refresh the provider's head observation and
-    the source attribution, warning on either failure."""
+    """Persist an established publication without provider-side effects."""
     if pushed_pr is not None:
         expected = replace(pushed_pr)
         if rebase_base_sha:
@@ -608,6 +619,25 @@ def record_pushed_head(
             record_remote_identity(pushed_pr, remote, config.default_repo.remote, head_repo, head_identity)
     if pushed_pr is not None:
         persist_publication(config, record, pushed_pr, expected=expected)
+
+
+def record_reconciled_head(
+    config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord, head_sha: str,
+    *, rebase_base_sha: str = "",
+) -> None:
+    """Settle a proven existing publication, never push or refresh PR metadata."""
+    _persist_head(config, record, pr, head_sha, rebase_base_sha=rebase_base_sha)
+
+
+def record_pushed_head(
+    config, record: tracking.WorktreeRecord, worktree_id: str, pushed_pr, head_sha: str,
+    *, remote: str = "", head_repo: str = "", head_identity: str = "", rebase_base_sha: str = "",
+) -> None:
+    """Record a successful push, then refresh provider observation and attribution."""
+    _persist_head(
+        config, record, pushed_pr, head_sha, remote=remote,
+        head_repo=head_repo, head_identity=head_identity, rebase_base_sha=rebase_base_sha,
+    )
     from . import pr_ops
 
     observation_error = pr_ops.refresh_head_observation(config, record, pushed_pr, head_sha)
@@ -633,7 +663,7 @@ def persist_publication(config: Config, record: tracking.WorktreeRecord, pr: tra
 
     path = cfg.tracking_dir(config.repo_name) / f"{record.worktree_id}.yaml"
     fields = ("state", "base_sha", "head_sha", "patch_id", "remote", "head_repo",
-              "head_identity", "head_owner", "head_observed_at", "head_observed_api_base", "provider")
+              "head_identity", "head_owner", "head_observed_at", "head_observed_api_base", "provider", "opened_at")
     with metadata_lock(record.worktree_id, project=config.repo_name), tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)
         current = _publication_pr(fresh, pr)
@@ -667,9 +697,10 @@ def prepare_existing_publication(
     """Persist a fresh association before a legacy feature-branch push starts."""
     if record is None or existing is not None:
         return existing
+    from . import pr_publication_state
     target = tracking.PRRecord(
         branch=branch, provider=prcfg.provider, repo=record.repo or "",
-        state="creating", opened_at=tracking._now_iso(),
+        state="creating", opened_at=pr_publication_state.monotonic_opened_at(record),
     )
     previous = next((p for p in reversed(record.prs)
                      if p.branch == branch and tracking._pr_is_terminal(p) and p.head_sha), None)

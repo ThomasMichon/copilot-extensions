@@ -286,7 +286,7 @@ class _LiveSessionsMixin:
         n = cur.rowcount
         if n:
             self.execute_write(
-                "DELETE FROM live_messages WHERE delivered_at IS NULL "
+                "DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
                 "AND session_id IN ("
                 "SELECT session_id FROM live_sessions "
                 "WHERE worktree_id=? AND status='taken-over')",
@@ -381,7 +381,7 @@ class _LiveSessionsMixin:
             )
             demoted += cur.rowcount
             self.execute_write(
-                f"DELETE FROM live_messages WHERE delivered_at IS NULL "
+                f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
                 f"AND session_id IN ({_in(expire_from_live)})",
                 tuple(expire_from_live),
             )
@@ -404,7 +404,7 @@ class _LiveSessionsMixin:
                 (now, *expire_from_wedged),
             )
             self.execute_write(
-                f"DELETE FROM live_messages WHERE delivered_at IS NULL "
+                f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
                 f"AND session_id IN ({_in(expire_from_wedged)})",
                 tuple(expire_from_wedged),
             )
@@ -735,8 +735,8 @@ class _LiveSessionsMixin:
         delivery = _validate_live_message_delivery(delivery)
         cur = self.execute_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
-            "kind, delivery, idempotency_key, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "kind, delivery, idempotency_key, created_at, consumption_tracked) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
             (session_id, sender, body, reply_to, kind, delivery, idempotency_key, now),
         )
         return int(cur.lastrowid or 0)
@@ -787,8 +787,8 @@ class _LiveSessionsMixin:
         cur = self.execute_write(
             "INSERT OR IGNORE INTO live_messages "
             "(session_id, sender, body, reply_to, kind, delivery, "
-            "idempotency_key, created_at) "
-            f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ? "
+            "idempotency_key, created_at, consumption_tracked) "
+            f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ?, 1 "
             "WHERE EXISTS ("
             "  SELECT 1 FROM live_sessions ls "
             f"  WHERE ls.session_id = {_CANON} AND ls.status = 'live' "
@@ -806,7 +806,8 @@ class _LiveSessionsMixin:
             f"    AND (? IS NULL OR {_CANON} = ls.session_id)"
             "    AND (? = 0 OR (ls.turn_state IN ('idle','completed') "
             "      AND NOT EXISTS (SELECT 1 FROM live_messages pending "
-            "        WHERE pending.session_id=ls.session_id AND pending.delivered_at IS NULL "
+            "        WHERE pending.session_id=ls.session_id AND pending.consumed_at IS NULL "
+            "        AND (pending.delivered_at IS NULL OR pending.consumption_tracked=1) "
             "        AND pending.kind NOT LIKE 'control:%')))"
             ")",
             (
@@ -876,16 +877,17 @@ class _LiveSessionsMixin:
         return None, "session_busy" if require_idle else "stale"
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
-        """Undelivered messages for a session, oldest-first (delivery order).
+        """Unacknowledged, unconsumed messages, oldest-first (delivery order).
 
         Session controls (``kind`` starting with ``control:``, e.g. a mode
         change) are excluded: they are claimed apart (:meth:`claim_live_controls`),
         so an extension that predates controls never delivers one as a prompt.
+        Consumption prevents replay even when the separate SDK ACK is lost.
         """
         rows = self.execute_read(
             "SELECT * FROM live_messages "
             f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
-            "ORDER BY id ASC",
+            "AND consumed_at IS NULL ORDER BY id ASC",
             (session_id, session_id),
         )
         return [dict(r) for r in rows]

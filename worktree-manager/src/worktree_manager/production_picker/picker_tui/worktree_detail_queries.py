@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 
+def claims_argv(machine, env, worktree_id, *, transitive=False, **source_identity):
+    """Explicit full claim inspection through the selected remote source."""
+    return remote_argv(
+        machine, env, worktree_id, command="claims transitive" if transitive else "claims",
+        capability="claims", **source_identity,
+    )
+
+
 def remote_argv(
     machine, env, worktree_id, *, command, capability, source_id=None,
     expected_instance_id=None, expected_assignment=None, expected_transport_fingerprint=None,
@@ -51,25 +59,32 @@ def load_claims(engine, rec):
 
     from .. import context
     from . import data_ssh, maintenance
-    from .worktree_assets import claim_details
+    from .worktree_assets import claim_details, descendant_details, needs_descendant_details
 
     wid = (rec.get("raw") or {}).get("id")
     if not isinstance(wid, str) or not wid:
         raise ValueError("no worktree id for claim inspection")
     machine, env = rec.get("machine"), rec.get("env")
-    if (machine, env) == getattr(engine.src, "LOCAL", None):
-        payload = engine_client.run_json(
-            context.project(), ["claims", wid, "--json"], runner=engine._provider_runner(),
-        )
-    else:
+
+    def query(*, transitive: bool = False) -> dict:
+        if (machine, env) == getattr(engine.src, "LOCAL", None):
+            args = ["claims", *(["transitive"] if transitive else []), wid, "--json"]
+            return engine_client.run_json(
+                context.project(), args, runner=engine._provider_runner(),
+            )
         source = rec.get("source") or {}
         argv = data_ssh.claims_argv(
             machine, env, wid, source_id=rec.get("source_id"),
+            **({"transitive": True} if transitive else {}),
             expected_instance_id=source.get("instance_id"),
             expected_assignment=source.get("venue", {}).get("assignment"),
             expected_transport_fingerprint=source.get("transport_fingerprint"),
         )
         if argv is None:
             raise ValueError(f"no claim-inspection route to {machine} {env}")
-        payload = maintenance._ssh_json(argv)
-    return claim_details(payload)
+        return maintenance._ssh_json(argv)
+
+    details = claim_details(query())
+    if needs_descendant_details(rec.get("raw") or rec):
+        details.extend(descendant_details(query(transitive=True)))
+    return details

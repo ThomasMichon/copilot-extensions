@@ -144,6 +144,18 @@ Its row-action `{machine}` context is empty rather than inheriting a hidden
 operational target. Legacy `config_sections` receive the local identity in
 their compatibility context; they never inherit a previously selected peer.
 
+Configuration `list` argv may explicitly request `{repo}` (the Manager's bound
+selected project) and `{configuration_workspace}` (its explicit bootstrap
+`workspace`, or empty when unavailable). The engine resolves this tracked
+worktree root separately from bootstrap `cwd`, which is only an optional anchor
+switch destination. The Manager never substitutes that destination or ambient
+CWD when the workspace field is absent. An unbound requested project is a
+visible section error before the provider runs. Legacy lists that request
+neither placeholder keep their existing context. Providers must pass these
+bindings explicitly to their owner APIs, treat an absent workspace as
+unsupported inspection, and return exact resource bindings in action rows;
+they must not substitute an inherited process CWD or hidden operational machine.
+
 Configuration row forms use the existing `kind: "form"`, `fields_from`,
 `title_from`, `body_from`, `{field.<name>}` and `{fields}` contract. The selected
 row supplies fields, initial values, and effects prose through those paths.

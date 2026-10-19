@@ -27,7 +27,7 @@ replay; the delivery-ID journal described here remains task acquisition authorit
 owner's `create --creation-key` allocation with ACP embodiment. Protocol **34**
 and `POST /api/v1/sessions/workspace-creations` are required; an older daemon
 cannot silently ignore the key through the legacy sessions endpoint. Unkeyed
-creation keeps its existing fresh-create behavior. Keyed creation currently
+creation keeps its existing fresh-create behavior. The default keyed path
 supports local worktree-backed agents only; SSH, provider and CLI-mode venues
 refuse explicitly rather than dropping the key or changing execution mode.
 
@@ -81,6 +81,48 @@ An established cold native conversation is strictly resumed only to admit
 its still-unadmitted original prompt, with recreation disabled.
 The journal composes the existing per-worktree async lock and OS executor lease;
 it introduces no resident service or independent session host.
+
+### Exact provider-instance creation
+
+Protocol **36** adds an explicit `--provider-instance` option alongside
+`--creation-key` (`provider_instance: true` on the same keyed HTTP request).
+It supports a provider-returned command target with a ready, exact
+`provider-instance` identity, `provider-exec` transport and explicit
+`capabilities.instance_pinned_exec: true`. The provider must enforce that
+physical identity at execution, not merely report a name's observed instance.
+Name-only wrappers without this guarantee refuse before native creation.
+It does not allocate
+a worktree or infer a project. Ordinary keyed callers retain the local-only
+contract; older clients never receive a provider receipt in place of a workspace.
+The newer client refuses an older daemon before sending this option.
+
+The separate provider embodiment journal binds the key to the full provider
+target and execution options, and persists the reserved bridge identity before
+launch. Concurrent or lost-response replay returns only that original native
+conversation. Changed physical identity, command or options conflicts; missing,
+retired or ambiguous native history refuses without a second start. A typed
+pre-effect drain refusal alone permits retrying that same start. A cold result
+remains the same stopped session; creation replay does not resume it implicitly.
+
+The receipt contains `venue` and `native_session_id`, not a fabricated
+`worktree`. This path deliberately accepts no creation prompt: an external
+coordinator may need the real native identity before granting a task. Separate
+native-bound delivery still owns the first prompt. Provider creation grants no
+task, token or claim authority, and the provider's ordinary launch restrictions
+and process-lifetime admission continue to apply.
+Provider-keyed sessions never use native recreation, including an ordinary
+send's automatic resume after an interrupted creation acknowledgement.
+A failed load or missing original native ID remains a refusal, not a new
+conversation under the old bridge handle. Caller handoff changes only the
+caller session fragment: valid owner references are compared by their
+machine/project/worktree scope while the full original reference still
+reaches launch. Invalid provider requests without a creation key are rejected
+by the request model before caller-affinity reuse.
+Cold resume compares the refreshed provider's effective placement with the
+retained target before persisting or spawning it. Changed instance, command,
+workspace or user refuses. ACP load uses the provider's guest workspace just
+as initial creation does; that guest path is never assigned to the host
+subprocess `target.cwd`.
 
 ## Task acquisition request and result
 

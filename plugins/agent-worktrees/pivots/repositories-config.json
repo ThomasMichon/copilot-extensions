@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "label": "Repositories",
+  "placement": "config",
+  "scope": "global",
+  "list": ["agent-worktrees", "repos", "configuration", "catalog", "--context-project", "{repo}", "--workspace", "{configuration_workspace}"],
+  "summary": "{repositories} repositories",
+  "entry": {"id": "id", "title": "title", "subtitle": "effective", "badges": ["registration", "participation"]},
+  "columns": [
+    {"key": "title", "header": "REPOSITORY", "width": 24, "priority": 1},
+    {"key": "registration", "header": "REGISTRATION", "width": 14, "priority": 2},
+    {"key": "participation", "header": "PARTICIPATION", "width": 16, "priority": 3},
+    {"key": "effective", "header": "COPILOT PREFERENCE", "width": 24, "priority": 1},
+    {"key": "provenance", "header": "SOURCE", "width": 16, "priority": 4}
+  ],
+  "empty_hint": "No native repository configuration is available.",
+  "actions": [
+    {"key": "details", "label": "Inspect effective state / sources / owner boundaries", "kind": "card", "title_from": "card.title", "body_from": "card.body"},
+    {
+      "key": "set", "label": "Set future-launch Copilot preference", "kind": "form",
+      "when": {"editable": "true"}, "fields_from": "fields", "body_from": "card.body", "confirm": true,
+      "preview": ["agent-worktrees", "repos", "configuration", "preview", "--context-project", "{context_project}", "--repository", "{repository}", "--operation", "set", "--login={field.login}"],
+      "run": ["agent-worktrees", "repos", "configuration", "apply", "--context-project", "{context_project}", "--repository", "{repository}", "--operation", "set", "--login={field.login}", "--preview-token", "{configuration_preview}"]
+    },
+    {
+      "key": "reset", "label": "Reset local preference / resume inheritance", "kind": "form",
+      "when": {"resettable": "true"}, "fields_from": "reset_fields", "body_from": "card.body", "confirm": true,
+      "preview": ["agent-worktrees", "repos", "configuration", "preview", "--context-project", "{context_project}", "--repository", "{repository}", "--operation", "reset"],
+      "run": ["agent-worktrees", "repos", "configuration", "apply", "--context-project", "{context_project}", "--repository", "{repository}", "--operation", "reset", "--preview-token", "{configuration_preview}"]
+    }
+  ]
+}

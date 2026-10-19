@@ -289,6 +289,30 @@ enforcement before migrating the complete contributor stack.
 
 ## Journal
 
+### 2026-10-16 - Native hook composition exploration preserved
+
+- Request: "Perhaps wrap this into artfifacts in a checked-in effort journal
+  as an exploration" rather than publishing an active or draft scenario.
+- Preserved five historical, unvalidated work-in-progress source snapshots in
+  [`explorations/native-hook-composition/`](explorations/native-hook-composition/README.md),
+  packaged as [non-executable ZIP data](explorations/native-hook-composition/source-snapshots.zip)
+  outside clean-room scenario discovery. No standalone Python, shell, or
+  scenario manifest files remain in the exploration. The index records the
+  design, original and sanitized member hashes, necessary publication
+  sanitization, and limitations.
+- Packaging removes accidental source invocation exposure without changing
+  historical behavior. The archive has no entry point and all five members have
+  non-executable modes. Any re-execution requires deliberate extraction into a
+  disposable environment plus separate safety and validation work.
+- No artifact was executed or behaviorally repaired. In particular, invocation
+  completeness is recorded but absent from the archived PASS predicate, and
+  three fresh ACP sessions are not the supported launch-boundary matrix.
+- This below-altitude archival slice does not prove native composition or a
+  released runtime's behavior. Status remains Active; no Plan or Validation Plan
+  item is completed. The Phase 5 native-host seam and its supported-version
+  matrix remain open under #1612; the exploration index details the future
+  review and evidence gates without activating a new scenario.
+
 ### 2026-09-01 - Kickoff
 
 - Filed #1612 as the public coordination token.

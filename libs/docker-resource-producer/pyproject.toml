@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[project]
+name = "agent-docker-resource-producer"
+version = "0.1.0-dev1"
+description = "Independent identity verification for disposable Docker resources"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]

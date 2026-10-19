@@ -4,9 +4,52 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 import pytest
+
+
+@contextmanager
+def _native_file_writer(path: Path) -> Iterator[int]:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+    from agent_logger.sync.provenance import windows_extended_path
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    # Share READ/WRITE/DELETE: only the handle under test may deny this writer.
+    handle = create(
+        windows_extended_path(path), 0x80000000 | 0x40000000,
+        7, None, 3, 0x00200080, None,
+    )
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    fd: int | None = None
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDWR | os.O_BINARY)
+        yield fd
+    finally:
+        if fd is not None:
+            os.close(fd)
+        elif not close(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
+@pytest.fixture
+def native_file_writer() -> Callable[[Path], AbstractContextManager[int]]:
+    """A native writable handle, available under pytest's importlib mode."""
+    return _native_file_writer
 
 
 _GIT_TIMEOUT_SECONDS = 20

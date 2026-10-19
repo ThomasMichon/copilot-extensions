@@ -84,6 +84,23 @@ On `dev`, `uv` resolves imports live from canonical. Promotion then:
 agent-lazy-cli-dispatch = { path = "libs/lazy-cli-dispatch" }
 ```
 
+Canonical Python source may use the normal `src/` layout or explicitly declare
+flat setuptools `py-modules`, as `installation-context` does. Flat declarations
+must name unique plain module identifiers whose ordinary files all exist;
+missing/linked modules and malformed declarations refuse materialization. The
+same source-layout admission applies to direct and nested references. Nested
+editable references are rewritten to noneditable sibling paths in the released
+consumer, avoiding conflicting editable/noneditable resolution for one library.
+The governed installer retains editable metadata only for the static
+setuptools `src/` layout. Consumers of a flat-module library therefore use
+`editable = false` consistently in direct and transitive canonical references;
+materialization still copies that same canonical source into the shipped
+payload. Rebuild the consumer environment after changing such a library rather
+than weakening retained-input admission or adding a fake `src/` tree.
+The installed trusted materializer maintains the same admission/rewrite rules
+as an explicit static copy, never by loading fetched tooling as executable code.
+Its parity suite covers direct and nested flat references independently.
+
 ### Shared installer engine: direct source reference
 
 For installer wrappers, the live reference is the source line itself. On `dev`,

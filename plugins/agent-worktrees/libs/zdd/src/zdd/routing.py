@@ -626,6 +626,46 @@ def validate_active(
             raise ActivePublicationRefused(refusal)
 
 
+def withdraw_active_guarded(
+    config_dir: str | os.PathLike[str],
+    *,
+    expected_active: Endpoint,
+    refuse_current: Callable[[dict | None], str | None],
+    lock_deadline: float,
+) -> dict:
+    """Withdraw an exact owner under CAS, retaining publication and generation custody.
+
+    The caller supplies lifecycle authority (including original process exit),
+    not merely a PID. Retaining the withdrawn row as ``previous`` ensures the
+    next publication advances generation rather than restarting at one.
+    """
+    if not callable(refuse_current):
+        raise TypeError("exact withdrawal requires an authority validator")
+    if (
+        not isinstance(expected_active, Endpoint) or type(expected_active.pid) is not int
+        or expected_active.pid <= 0 or not isinstance(expected_active.process_start_time, str)
+        or not expected_active.process_start_time.isascii()
+        or not expected_active.process_start_time.isdecimal()
+        or Endpoint.from_dict(expected_active.to_dict()) != expected_active
+    ):
+        raise ActivePublicationRefused("exact withdrawal requires native process identity")
+    with _routing_lock(config_dir, deadline=lock_deadline):
+        current = _read_mutation_table(config_dir)
+        raw = current.get("active")
+        refusal = _refuse_or_changed(
+            raw if isinstance(raw, dict) else None,
+            expected_active=expected_active,
+            refuse_current=refuse_current,
+            require_expected_active=True,
+        )
+        if refusal:
+            raise ActivePublicationRefused(refusal)
+        following = {key: value for key, value in current.items() if key != "active"}
+        following["previous"] = expected_active.to_dict()
+        _atomic_write(routing_table_path(config_dir), following)
+        return _read_mutation_table(config_dir)
+
+
 def restore_previous_if_owner(
     config_dir: str | os.PathLike[str],
     *,

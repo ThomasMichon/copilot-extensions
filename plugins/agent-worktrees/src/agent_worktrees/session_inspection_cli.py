@@ -46,6 +46,10 @@ def add_parsers(sub) -> None:
         default=10.0,
         help="Bound the combined lifecycle before the outer hook deadline",
     )
+    sp.add_argument(
+        "--source-bound", action="store_true",
+        help="Require source-aware lifecycle support (hook compatibility fence)",
+    )
 
     sp = sub.add_parser(
         "session-binding",

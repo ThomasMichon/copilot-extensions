@@ -59,7 +59,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import terminal_profiles as profiles
-from .harness_state import RosterMachine, SshEnvironment
+from .harness_state import ProfileInputRoots, RosterMachine, SshEnvironment
+from .terminal_deploy_inputs import TerminalInputs, read_optional_json as _read_json
 
 __all__ = [
     "COLOR_SCHEME_NAME",
@@ -560,40 +561,40 @@ def _display_from_slug(slug: str) -> str:
     return " ".join(w.capitalize() for w in slug.replace("-", " ").split())
 
 
-def _resolve_icon(project_dir_fn, name: str) -> tuple[str, str]:
+def _resolve_icon(project_dir_fn, name: str, *, absolute_paths: bool = False) -> tuple[str, str]:
     """Resolve (icon, wsl_icon) with install.ps1's project-then-default fallback."""
     proj_root = project_dir_fn(name)
     aw_root = project_dir_fn("agent-worktrees")
 
-    icon = rf"%USERPROFILE%\.{name}\aperture-science.ico"
+    default_icon = str(aw_root / "aperture-science.ico") if absolute_paths else DEFAULT_ICON
+    icon = (str(proj_root / "aperture-science.ico") if absolute_paths
+            else rf"%USERPROFILE%\.{name}\aperture-science.ico")
     if not (proj_root / "aperture-science.ico").exists():
-        icon = DEFAULT_ICON
+        icon = default_icon
 
-    wsl_icon = rf"%USERPROFILE%\.{name}\aperture-science-wsl.ico"
+    wsl_icon = (str(proj_root / "aperture-science-wsl.ico") if absolute_paths
+                else rf"%USERPROFILE%\.{name}\aperture-science-wsl.ico")
     if not (proj_root / "aperture-science-wsl.ico").exists():
-        wsl_icon = r"%USERPROFILE%\.agent-worktrees\aperture-science-wsl.ico"
+        wsl_icon = (str(aw_root / "aperture-science-wsl.ico") if absolute_paths
+                    else r"%USERPROFILE%\.agent-worktrees\aperture-science-wsl.ico")
         if not (aw_root / "aperture-science-wsl.ico").exists():
             wsl_icon = icon
     return icon, wsl_icon
 
 
 def collect_local_projects(
-    current_project: str | None = None, *, home_dir=None
+    current_project: str | None = None, *, home_dir=None, strict: bool = False,
+    input_roots: ProfileInputRoots | None = None,
 ) -> list[ProjectInput]:
-    """Build :class:`ProjectInput` rows from this machine's on-disk config.
-
-    Reads ``repos.yaml``/``projects.yaml``/per-project ``machines.yaml``
-    roster via ``harness_state.build_projects()`` (Phase 3e Step 2's
-    direct-file-read boundary), plus each project's own
-    ``~/.<name>/config.yaml`` terminal-profile selection -- exactly the
-    sources ``Build-TerminalFragment`` consults. The ``current_project`` (if
-    any) is placed first, matching the installer's ordering (so GUID de-dup
-    resolves identically).
-    """
+    """Collect registry, roster and selection inputs, with the current project
+    first. Publishing uses strict parsing instead of tolerant view defaults."""
     from .harness_state import build_projects as hs_build_projects
     from .harness_state import home as hs_home
+    from .harness_state import _read_yaml
 
-    projects = hs_build_projects(home_dir)
+    root_kwargs = {"input_roots": input_roots} if input_roots else {}
+    projects = (hs_build_projects(home_dir, strict_rosters=True, **root_kwargs)
+                if strict else hs_build_projects(home_dir, **root_kwargs))
     by_name = {p.name: p for p in projects}
 
     ordered: list[str] = []
@@ -608,7 +609,8 @@ def collect_local_projects(
     ordered = [n for n in ordered if n not in _RESERVED_BINSTUB_NAMES]
 
     def project_dir(name: str):
-        return (home_dir or hs_home()) / f".{name}"
+        return (input_roots.project_dir(name) if input_roots
+                else (home_dir or hs_home()) / f".{name}")
 
     out: list[ProjectInput] = []
     for name in ordered:
@@ -620,7 +622,12 @@ def collect_local_projects(
         wsl_state = info.wsl_state if info else None
 
         cfg_path = project_dir(name) / "config.yaml"
-        if profiles.has_selection(cfg_path):
+        if strict:
+            config = _read_yaml(cfg_path, strict=True)
+            sel = (frozenset(f"{s.machine}|{s.env}|{s.kind}" for s in
+                             profiles._coerce(config[profiles.CONFIG_KEY], strict=True))
+                   if profiles.CONFIG_KEY in config else None)
+        elif profiles.has_selection(cfg_path):
             sel = frozenset(
                 f"{s.machine}|{s.env}|{s.kind}"
                 for s in profiles.load_selection(cfg_path)
@@ -628,7 +635,14 @@ def collect_local_projects(
         else:
             sel = None
 
-        icon, wsl_icon = _resolve_icon(project_dir, name)
+        if input_roots:
+            def icon_dir(project_name: str):
+                return (input_roots.registry if project_name == "agent-worktrees"
+                        else project_dir(project_name))
+
+            icon, wsl_icon = _resolve_icon(icon_dir, name, absolute_paths=True)
+        else:
+            icon, wsl_icon = _resolve_icon(project_dir, name)
 
         out.append(ProjectInput(
             name=name,
@@ -649,9 +663,11 @@ def preview_local(
     *,
     current_project: str | None = None,
     self_env: str = "Win",
+    strict: bool = False,
 ) -> FragmentResult:
     """Collect this machine's inputs and build the fragment (no disk write)."""
-    projects = collect_local_projects(current_project=current_project)
+    projects = (collect_local_projects(current_project=current_project, strict=True)
+                if strict else collect_local_projects(current_project=current_project))
     return build_fragment(projects, self_machine, self_env=self_env)
 
 
@@ -894,19 +910,6 @@ class WtStateDiagnosis:
         return not self.hidden and not self.duplicate_names
 
 
-def _read_json(path):
-    import json
-    from pathlib import Path
-
-    p = Path(path)
-    if not p.exists():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        return None
-
-
 def _wt_local_state_dir():
     from pathlib import Path
 
@@ -1024,8 +1027,9 @@ class FragmentDeployPlan:
         )
 
 
-def _settings_profile_list(local_state_dir) -> list[dict]:
-    data = _read_json(Path(local_state_dir) / "settings.json") or {}
+def _settings_profile_list(local_state_dir, inputs: TerminalInputs | None = None) -> list[dict]:
+    read = inputs.read if inputs is not None else _read_json
+    data = read(Path(local_state_dir) / "settings.json", kind="settings") or {}
     lst = (((data.get("profiles") or {}).get("list"))
            if isinstance(data, dict) else None)
     return [p for p in (lst or []) if isinstance(p, dict)]
@@ -1058,22 +1062,13 @@ def deploy_fragment(
     *,
     current_project: str | None = None,
     apply: bool = False,
+    projects: list[ProjectInput] | None = None,
 ) -> FragmentDeployPlan:
-    """Compute (and, when ``apply=True``, perform) this machine's Step 5 deploy.
+    """Plan local WT reconciliation; publishing requires strict roster inputs.
 
-    Mirrors ``install.ps1``'s ``Deploy-Shortcuts``/``Sync-TerminalState``/
-    ``Get-SettingsProfileGuids``/``Clean-TerminalSettingsJson`` for the
-    fragment-write half only -- ``.lnk`` shortcut creation stays in
-    ``install.ps1``, out of this relocation's scope.
-
-    ``apply=False`` (the default) computes the **full** plan -- the new
-    fragment JSON, which GUIDs are stale/changed, and the resulting
-    ``generatedProfiles``/``settings.json`` reconciliation -- without
-    touching disk at all: a caller can always preview exactly what a real
-    deploy would do. Only ``apply=True`` performs the writes, in the same
-    order the PowerShell installer uses (reconcile ``state.json`` /
-    ``settings.json`` BEFORE writing the new fragment file, to avoid a race
-    where WT reads the new fragment while stale GUIDs are still present).
+    Read-only preview remains tolerant. Publishing reconciles state/settings
+    before the fragment. Supplied projects are already collected and validated
+    by the caller; ``local_profiles.refresh`` also reconciles shortcuts.
     """
     frag_dir = _wt_fragments_dir()
     local_state = _wt_local_state_dir()
@@ -1081,7 +1076,9 @@ def deploy_fragment(
         (frag_dir / "AgentWorktrees" / "agent-worktrees.json") if frag_dir else None
     )
 
-    old_frag = _read_json(fragment_dst) if fragment_dst is not None else None
+    inputs = TerminalInputs() if apply else None
+    read = inputs.read if inputs is not None else _read_json
+    old_frag = read(fragment_dst) if fragment_dst is not None else None
     old_profiles = [
         p for p in ((old_frag or {}).get("profiles") or []) if isinstance(p, dict)
     ]
@@ -1089,7 +1086,10 @@ def deploy_fragment(
         str(p["guid"]).lower() for p in old_profiles if p.get("guid")
     ]
 
-    result = preview_local(machine, current_project=current_project)
+    result = (
+        preview_local(machine, current_project=current_project, strict=apply)
+        if projects is None else build_fragment(projects, machine)
+    )
     new_fragment = result.fragment()
     new_profiles = [p for p in new_fragment.get("profiles", []) if isinstance(p, dict)]
     new_guids = [str(p["guid"]).lower() for p in new_profiles if p.get("guid")]
@@ -1115,11 +1115,11 @@ def deploy_fragment(
     notes: list[str] = []
 
     if local_state is not None and Path(local_state).exists():
-        settings_profiles = _settings_profile_list(local_state)
+        settings_profiles = _settings_profile_list(local_state, inputs)
         settings_guids = {
             str(p["guid"]).lower() for p in settings_profiles if p.get("guid")
         }
-        state = _read_json(Path(local_state) / "state.json") or {}
+        state = read(Path(local_state) / "state.json", kind="state") or {}
         generated = list(
             (state.get("generatedProfiles") or []) if isinstance(state, dict) else []
         )
@@ -1128,9 +1128,10 @@ def deploy_fragment(
         # -- plus any other extension's on-disk fragment), so orphan reclaim
         # never prunes a GUID a foreign fragment still emits.
         all_fragment_guids = set(new_guids)
-        if frag_dir is not None and Path(frag_dir).exists():
-            for jf in Path(frag_dir).rglob("*.json"):
-                data = _read_json(jf)
+        if frag_dir is not None:
+            for jf in (inputs.fragments(Path(frag_dir)) if inputs is not None
+                       else Path(frag_dir).rglob("*.json")):
+                data = read(jf)
                 if isinstance(data, dict):
                     for p in (data.get("profiles") or []):
                         if isinstance(p, dict) and p.get("guid"):
@@ -1181,35 +1182,33 @@ def deploy_fragment(
     )
 
     if apply:
-        _apply_deploy_plan(plan, local_state)
+        _apply_deploy_plan(plan, local_state, inputs)
         plan.applied = plan.fragment_path is not None  # only if it wrote
 
     return plan
 
 
-def _apply_deploy_plan(plan: FragmentDeployPlan, local_state) -> None:
-    """Write ``state.json``/``settings.json``/the fragment file to disk.
-
-    Only ever called from :func:`deploy_fragment` when explicitly asked to
-    ``apply`` -- never invoked implicitly, and never called by any read-only
-    preview/doctor path. Mirrors ``install.ps1``'s write order: reconcile
-    live WT state BEFORE writing the new fragment (the race the PowerShell
-    installer's own comment calls out: writing the fragment first risks WT
-    reading it while stale GUIDs are still present in ``state.json``).
-    """
+def _apply_deploy_plan(
+    plan: FragmentDeployPlan, local_state, inputs: TerminalInputs | None = None,
+) -> None:
+    """Reconcile WT state before publishing changed fragment content."""
     import json
 
+    inputs = inputs if inputs is not None else TerminalInputs()
+    state = inputs.read(Path(local_state) / "state.json", kind="state") if local_state is not None else None
+    settings = inputs.read(Path(local_state) / "settings.json", kind="settings") if local_state is not None else None
+    if plan.fragment_path is not None:
+        inputs.read(plan.fragment_path)
+    inputs.verify()
     if local_state is not None and Path(local_state).exists():
         if plan.generated_plan is not None and plan.generated_plan.changed:
             state_path = Path(local_state) / "state.json"
-            state = _read_json(state_path)
             if isinstance(state, dict):
                 state["generatedProfiles"] = plan.generated_plan.keep
-                state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                inputs.write(state_path, json.dumps(state, indent=2))
 
         if plan.stale_guids or plan.changed_guids or plan.settings_stale_count:
             settings_path = Path(local_state) / "settings.json"
-            settings = _read_json(settings_path)
             if isinstance(settings, dict):
                 prof = settings.get("profiles")
                 if isinstance(prof, dict) and isinstance(prof.get("list"), list):
@@ -1241,16 +1240,10 @@ def _apply_deploy_plan(plan: FragmentDeployPlan, local_state) -> None:
                             + ".wt-backup-"
                             + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
                         )
-                        backup.write_text(
-                            settings_path.read_text(encoding="utf-8"),
-                            encoding="utf-8",
-                        )
-                        settings_path.write_text(
-                            json.dumps(settings, indent=2), encoding="utf-8"
-                        )
+                        inputs.backup(settings_path, backup)
+                        inputs.write(settings_path, json.dumps(settings, indent=2))
 
-    if plan.fragment_path is not None:
+    if plan.fragment_path is not None and inputs.read(plan.fragment_path) != plan.fragment:
         plan.fragment_path.parent.mkdir(parents=True, exist_ok=True)
-        plan.fragment_path.write_text(
-            json.dumps(plan.fragment, indent=2), encoding="utf-8"
-        )
+        inputs.write(plan.fragment_path, json.dumps(plan.fragment, indent=2))
+    inputs.verify()

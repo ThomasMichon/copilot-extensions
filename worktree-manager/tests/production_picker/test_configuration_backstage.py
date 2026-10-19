@@ -51,6 +51,41 @@ def test_workers_table_keeps_status_statistics_description_and_source_at_standar
     assert {column.key for column in fitted} == {
         "title", "enabled", "activity", "lanes", "provenance", "description",
     }
+    wide = TasksView(None)._fitted_columns(reg, 150)
+    assert {column.key for column in wide} == {
+        "title", "kind", "enabled", "activity", "lanes", "provenance", "description",
+    }
+
+
+@pytest.mark.parametrize("error", [False, True])
+def test_inert_provider_template_catalog_records_offer_only_details(error):
+    manifest_path = Path(__file__).resolve().parents[3] / "plugins" / "agent-dispatch" / "pivots" / "workers-config.json"
+    contribution = pivots.parse_manifest(
+        json.loads(manifest_path.read_text()), name="workers", source_path=str(manifest_path),
+    )
+    row = {
+        "id": "template:provider:0123456789abcdef0123456789abcdef:record-source",
+        "title": "Record source", "group": "Available templates", "kind": "emitter",
+        "validity": "fragment", "enabled": "not-instantiated", "activity": "not-applicable",
+        "editable": "false", "instantiable": "false", "resolution": "discovered-only",
+        "unsupported_reason": "Safe local instantiation is not supported.",
+        "card": {"title": "Record source", "body": "Declared requirements and provider provenance."},
+    }
+    if error:
+        row.update(
+            id="template-error:0", group="Discovery errors", kind="error",
+            finding_scope="templates", validity="error", enabled="unknown",
+        )
+    records, summary = pivots.parse_list_payload({
+        "entries": [row], "summary": {
+            "errors": [], "template_discovery": {"state": "partial" if error else "complete"},
+        },
+    })
+    assert records == [row] and summary["errors"] == []
+    assert [
+        action.key for action in contribution.actions if pivots.entry_matches(action.when, records[0])
+    ] == ["details"]
+    assert records[0]["card"] == row["card"]
 
 
 def test_configuration_placement_is_additive_and_strict():

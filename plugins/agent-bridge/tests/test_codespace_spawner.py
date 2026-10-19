@@ -149,6 +149,384 @@ def _patch_common(monkeypatch):
     monkeypatch.setattr("ssh_manager.LocalForward", _FakeForward)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("session_id", ["fresh-hook", "replacement-hook"])
+@pytest.mark.parametrize("relay_ready", [True, False])
+async def test_cold_checkout_hook_runs_after_relay_with_launch_environment(
+    monkeypatch, tmp_path, session_id, relay_ready,
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    _patch_common(monkeypatch)
+    checkout = tmp_path / "absent-checkout"
+    events = []
+    serving = False
+
+    class Relay:
+        async def start(self):
+            events.append("relay-start")
+
+        async def stop(self):
+            events.append("relay-stop")
+
+    async def ready(*a, **kw):
+        nonlocal serving
+        if not relay_ready:
+            raise endpoints_mod.CredentialRelayReadinessError("not serving")
+        serving = True
+        events.append("relay-ready")
+
+    async def run(command, **kw):
+        return 0, "", ""
+
+    async def script(command, **kw):
+        if "HELPERS" in command:
+            events.append("helpers")
+        if "HOOKS" in command:
+            if not serving:
+                events.append("hook-without-relay")
+                return 1, "", "credential relay unavailable"
+            assert "SYNTHETIC_LAUNCH_ENV" in command
+            (checkout / ".git").mkdir(parents=True)
+            events.append("authenticated-hook")
+        return 0, "", ""
+
+    def provision(name="", phase="all"):
+        return {"helpers": "HELPERS", "hooks": "HOOKS", "all": "HELPERS; HOOKS"}[phase]
+
+    transport = SimpleNamespace(
+        boundary="codespace", codespace_name="synthetic", path_exists=AsyncMock(return_value=True),
+        run=run, run_script=script, ssh_config=lambda: SSHConfig(host_alias="synthetic"),
+        reverse_forwards=lambda: ["12001:127.0.0.1:12002"],
+    )
+    relay = Relay()
+    monkeypatch.setattr(sp, "_resolve_provision_command", provision)
+    monkeypatch.setattr(endpoints_mod, "relay_forwards_from_ssh_config", lambda *a, **kw: [relay])
+    monkeypatch.setattr(endpoints_mod, "wait_for_relay_serving", ready)
+    monkeypatch.setattr(sp, "build_remote_launch", lambda *a, **kw: events.append("child") or "LAUNCH")
+    owner = sp.CodeSpaceSpawner(transport, provision_prelude="export SYNTHETIC_LAUNCH_ENV=ready;\n")
+    monkeypatch.setattr(owner, "_authority_path", AsyncMock(return_value="/state/host.json"))
+    monkeypatch.setattr(owner, "_poll_state", AsyncMock(return_value={
+        "port": 22001, "pid": 101, "child_pid": 102,
+    }))
+
+    async def prepare(argv):
+        assert (checkout / ".git").is_dir(), "checkout hook ran before authenticated relay"
+        events.append("prepare")
+        return argv
+
+    owner.prepare_child = prepare
+    if not relay_ready:
+        with pytest.raises(endpoints_mod.CredentialRelayReadinessError, match="not serving"):
+            await owner.spawn(["copilot", "--acp"], session_id=session_id)
+        assert events == ["helpers", "relay-start", "relay-stop"]
+        assert not checkout.exists()
+        return
+    spawned = await owner.spawn(["copilot", "--acp"], session_id=session_id)
+    assert events == ["helpers", "relay-start", "relay-ready", "authenticated-hook", "prepare", "child"]
+    await spawned.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["fresh", "replacement"])
+@pytest.mark.parametrize("hook_creates_checkout", [True, False])
+@pytest.mark.parametrize("workspace_kind", ["dynamic", "literal"])
+async def test_dynamic_hook_created_checkout_full_start_sequence(
+    session_manager, monkeypatch, tmp_path, mode, hook_creates_checkout, workspace_kind,
+):
+    import os
+    import shlex
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from agent_procutil import no_window_flags
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.transport import SpawnTarget
+
+    _patch_common(monkeypatch)
+    checkout = tmp_path / "hook-created"
+    events = []
+    relay_ready = False
+
+    async def run(command, **kwargs):
+        if command.startswith("bash -lc "):
+            script = shlex.split(command)[2]
+            if script.startswith(("export ", "python3 -c ")):
+                events.append("intended-path")
+                _exports, _separator, reader = script.partition(" && ")
+                if not _separator:
+                    reader = script
+                argv = shlex.split(reader)
+                env = {**os.environ, "CODESPACE_VSCODE_FOLDER": str(checkout)}
+                result = subprocess.run(
+                    [sys.executable, *argv[1:]], env=env, capture_output=True,
+                    text=True, timeout=10, creationflags=no_window_flags(),
+                )
+                return result.returncode, "/runtime/hook-created\n" if not result.returncode else "", result.stderr
+            if "git -C" in script:
+                events.append("checkout-validation")
+                result = subprocess.run(
+                    ["git", "-C", str(checkout), "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True, timeout=10, creationflags=no_window_flags(),
+                )
+                return result.returncode, result.stdout, result.stderr
+        return 0, "", ""
+
+    async def provision(command, **kwargs):
+        if command == "HELPERS":
+            events.append("helpers")
+        else:
+            assert relay_ready and "SYNTHETIC_PRELUDE;" in command
+            events.append("authenticated-hook")
+            if hook_creates_checkout:
+                subprocess.run(
+                    ["git", "init", "--quiet", str(checkout)], check=True,
+                    timeout=10, creationflags=no_window_flags(),
+                )
+        return 0, "", ""
+
+    class Relay:
+        async def start(self):
+            events.append("relay-start")
+
+        async def stop(self):
+            events.append("relay-stop")
+
+    async def ready(*a, **kwargs):
+        nonlocal relay_ready
+        relay_ready = True
+        events.append("relay-ready")
+
+    async def prepare(target, transport, workspace, **kwargs):
+        assert checkout.is_dir()
+        assert workspace == "/runtime/hook-created"
+        events.append("prepare")
+        return []
+
+    def launch(bundle, state, log, argv, **kwargs):
+        assert kwargs["cwd"] == "/runtime/hook-created"
+        assert argv[-1] == "SYNTHETIC_PRELUDE;cd /runtime/hook-created && copilot --acp"
+        events.append("child")
+        return "LAUNCH"
+
+    transport = SimpleNamespace(
+        boundary="codespace", codespace_name="synthetic", path_exists=AsyncMock(return_value=True),
+        run=run, run_script=provision, ssh_config=lambda: SSHConfig(host_alias="synthetic"),
+        reverse_forwards=lambda: ["12001:127.0.0.1:12002"],
+    )
+    owner = sp.CodeSpaceSpawner(transport, provision_prelude="SYNTHETIC_PRELUDE;")
+    monkeypatch.setattr(sp, "_resolve_provision_command",
+                        lambda name="", phase="all": "HELPERS" if phase == "helpers" else "HOOKS")
+    monkeypatch.setattr(sp, "build_remote_launch", launch)
+    monkeypatch.setattr(owner, "_authority_path", AsyncMock(return_value="/state/host.json"))
+    monkeypatch.setattr(owner, "_poll_state", AsyncMock(return_value={
+        "port": 22001, "pid": 101, "child_pid": 102,
+    }))
+    monkeypatch.setattr(endpoints_mod, "relay_forwards_from_ssh_config", lambda *a, **kw: [Relay()])
+    monkeypatch.setattr(endpoints_mod, "wait_for_relay_serving", ready)
+    monkeypatch.setattr("agent_bridge.venue_plugins.resolve_controller_cwd", AsyncMock(return_value=None))
+    monkeypatch.setattr("agent_bridge.venue_plugins.prepare_venue_plugins", prepare)
+    monkeypatch.setattr("agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+                        lambda *a, **kw: owner)
+    monkeypatch.setattr("agent_bridge.session_manager._claim_codespace", lambda *a, **kw: ("ok", ""))
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", lambda *a: True)
+    monkeypatch.setattr("agent_bridge.session_manager._resolve_relay_launch_env",
+                        lambda *a: ("SYNTHETIC_PRELUDE;", 12001))
+    locks = tmp_path / "locks"
+    locks.mkdir()
+    monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: locks)
+
+    async def connect(target, *, spawner, remote_child_argv, remote_cwd, session_id, **kwargs):
+        assert target.cwd == remote_cwd == "/runtime/hook-created"
+        spawned = await spawner.spawn(remote_child_argv, cwd=remote_cwd, session_id=session_id)
+        await spawned.aclose()
+        return SimpleNamespace(is_running=False), "acp"
+
+    monkeypatch.setattr(session_manager, "_connect_via_session_host", connect)
+    target = SpawnTarget(type="command", codespace={
+        "name": "synthetic", "repo": "example/project", "workspace_folder": "/workspaces/conventional",
+        "acp_command": (
+            'cd "${CODESPACE_VSCODE_FOLDER:-.}" && copilot --acp'
+            if workspace_kind == "dynamic" else "cd /runtime/hook-created && copilot --acp"
+        ),
+    })
+    try:
+        if mode == "fresh":
+            session = await session_manager.start_session(target)
+            assert session.status == (SessionStatus.IDLE if hook_creates_checkout else SessionStatus.FAILED)
+        else:
+            session = SimpleNamespace(
+                session_id="replacement", target=target, event_log=SimpleNamespace(append=lambda *a: None),
+                mcp_servers=[], acp_session_id="old-acp", model_override=None, effort_override=None,
+            )
+            operation = session_manager._resume_via_new_remote_host(
+                session, on_acp_event=lambda *a: None, permission_callback=None,
+            )
+            if hook_creates_checkout:
+                assert await operation
+            else:
+                with pytest.raises(RuntimeError, match="checkout"):
+                    await operation
+        assert events[:5] == ["intended-path", "helpers", "relay-start", "relay-ready", "authenticated-hook"]
+        assert "checkout-validation" in events
+        assert ("child" in events) == hook_creates_checkout
+        assert ("prepare" in events) == hook_creates_checkout
+        if not hook_creates_checkout:
+            assert not session_manager._codespace_lock_sessions
+    finally:
+        for session_id in list(session_manager._codespace_lock_sessions):
+            session_manager._release_codespace_lock(session_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["prelaunch", "submission", "poll", "forward", "relay"])
+@pytest.mark.parametrize("receipt", ["__REAPED__", "__ABSENT__", "__UNCERTAIN__"])
+@pytest.mark.parametrize("retain_on_error", [False, True])
+async def test_cancellation_after_submission_requires_confirmed_identity_cleanup(
+    session_manager, monkeypatch, tmp_path, stage, receipt, retain_on_error,
+):
+    import asyncio
+    import contextlib
+    import shlex
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+    from ssh_manager import TargetLock
+    from agent_bridge.session_host.codespace_transport import codespace_launch_ownership
+
+    _patch_common(monkeypatch)
+    entered = asyncio.Event()
+    never = asyncio.Event()
+    events = []
+    locks = tmp_path / "locks"
+    locks.mkdir()
+    monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: locks)
+    core = SimpleNamespace(_claim_codespace=Mock(return_value=("ok", "")),
+                           _release_codespace_claim=Mock(return_value=True))
+
+    class Transport(_FakeTransport):
+        async def run(self, command, **kwargs):
+            if command == "SUBMIT":
+                events.append("submitted")
+                if stage == "submission":
+                    entered.set()
+                    await never.wait()
+                return 0, "", ""
+            if command.startswith("python3 -c "):
+                script = shlex.split(command)[2]
+                assert "start_ticks" in script and 'state.get("session_id")' in script
+                assert "expected_nonce" in script and "test-nonce" in script
+                events.append("identity-cleanup")
+                return 0, receipt, ""
+            return await super().run(command, **kwargs)
+
+    transport = Transport({}, exists=True, reverse_forwards=["12001:127.0.0.1:12002"])
+    owner = sp.CodeSpaceSpawner(transport, require_relay_ready=stage == "relay")
+    monkeypatch.setattr(owner, "_authority_path", AsyncMock(return_value="/state/host.json"))
+    monkeypatch.setattr(sp, "_resolve_provision_command", lambda *a: None)
+    monkeypatch.setattr(sp, "build_remote_launch", lambda *a, **kw: "SUBMIT")
+
+    class Relay(_FakeRelay):
+        async def stop(self):
+            await super().stop()
+            if stage == "relay" and receipt == "__UNCERTAIN__":
+                raise asyncio.CancelledError
+
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", Relay)
+    readiness_calls = []
+
+    async def ready(*a, **kwargs):
+        readiness_calls.append(True)
+        if stage == "relay" and len(readiness_calls) > 1:
+            entered.set()
+            await never.wait()
+
+    class Forward(_FakeForward):
+        async def establish(self):
+            if stage == "forward":
+                entered.set()
+                await never.wait()
+            return await super().establish()
+
+    monkeypatch.setattr("ssh_manager.LocalForward", Forward)
+    monkeypatch.setattr(endpoints_mod, "wait_for_relay_serving", ready)
+
+    async def prepare(argv):
+        if stage == "prelaunch":
+            entered.set()
+            await never.wait()
+        return argv
+
+    async def poll(*a, **kw):
+        events.append("poll")
+        if stage == "poll":
+            entered.set()
+            await never.wait()
+        return {"port": 22001, "pid": 101, "child_pid": 102}
+
+    owner.prepare_child = prepare
+    monkeypatch.setattr(owner, "_poll_state", poll)
+
+    async def start():
+        with codespace_launch_ownership(
+            session_manager, "cancelled", {"name": "synthetic"}, "/task/owner", core,
+            retain_on_error=retain_on_error,
+        ) as enter_connect:
+            enter_connect()
+            await owner.spawn(["copilot"], session_id="cancelled")
+
+    task = asyncio.create_task(start())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        task.cancel()
+        unconfirmed = stage != "prelaunch" and receipt != "__REAPED__"
+        expected = sp.RemoteSpawnCleanupPendingError if unconfirmed else asyncio.CancelledError
+        with pytest.raises(expected) as captured:
+            await task
+        assert events.count("identity-cleanup") == int(stage != "prelaunch")
+        assert bool(session_manager._codespace_lock_sessions) == unconfirmed
+        assert (TargetLock("synthetic", directory=locks).read_holder() is not None) == unconfirmed
+        assert core._release_codespace_claim.call_count == int(not unconfirmed)
+        if unconfirmed:
+            assert isinstance(captured.value.__cause__, asyncio.CancelledError)
+        assert all(not relay.is_alive for relay in _FakeRelay.instances)
+        if _FakeForward.instances:
+            assert _FakeForward.instances[-1].cancelled
+    finally:
+        if not task.done():
+            task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+        session_manager._release_codespace_lock("cancelled")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state_kind", ["missing", "wrong-nonce"])
+async def test_submitted_launch_cleanup_refuses_absent_or_different_identity(tmp_path, state_kind):
+    import shlex
+    from types import SimpleNamespace
+    from agent_procutil import no_window_flags
+
+    authority = tmp_path / "authority.json"
+    if state_kind == "wrong-nonce":
+        authority.write_text(json.dumps({"session_id": "expected", "nonce": "different"}))
+    codes = []
+
+    async def run(command, **kwargs):
+        script = shlex.split(command)[2]
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=10,
+            creationflags=no_window_flags(),
+        )
+        codes.append(result.returncode)
+        return result.returncode, result.stdout, result.stderr
+
+    owner = sp.CodeSpaceSpawner(SimpleNamespace(run=run))
+    assert not await owner._abort_remote_launch(
+        str(authority), "expected", expected_nonce="this-launch",
+    )
+    assert codes == [48 if state_kind == "missing" else 43]
+
+
 class _FakeRelay:
     """Stand-in for ssh_manager.SupervisedRelayForward."""
 
@@ -904,40 +1282,31 @@ def test_relay_ping_probe_command_round_trips_against_real_listener():
             capture_output=True, text=True, timeout=10,
         )
 
-    def _serve_ping_pong(port: int) -> None:
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("127.0.0.1", port))
-        srv.listen(1)
-        conn, _ = srv.accept()
-        conn.recv(4096)
-        conn.sendall(b"pong\n\n")
-        conn.close()
-        srv.close()
+    def _probe_listener(*, reply: bool) -> subprocess.CompletedProcess:
+        with socket.create_server(("127.0.0.1", 0)) as srv:
+            srv.settimeout(5)
 
-    def _serve_accept_only(port: int) -> None:
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("127.0.0.1", port))
-        srv.listen(1)
-        conn, _ = srv.accept()
-        conn.recv(4096)
-        conn.close()  # accepts the TCP connection but never answers
-        srv.close()
+            def serve() -> None:
+                conn, _ = srv.accept()
+                with conn:
+                    conn.settimeout(5)
+                    conn.recv(4096)
+                    if reply:
+                        conn.sendall(b"pong\n\n")
 
-    live_port, stale_port = 50711, 50712
+            thread = threading.Thread(target=serve)
+            thread.start()
+            try:
+                return _run_probe(srv.getsockname()[1])
+            finally:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
 
-    live_thread = threading.Thread(target=_serve_ping_pong, args=(live_port,))
-    live_thread.start()
-    live_result = _run_probe(live_port)
-    live_thread.join(timeout=5)
+    live_result = _probe_listener(reply=True)
     assert live_result.returncode == 0
     assert "OK" in live_result.stdout
 
-    stale_thread = threading.Thread(target=_serve_accept_only, args=(stale_port,))
-    stale_thread.start()
-    stale_result = _run_probe(stale_port)
-    stale_thread.join(timeout=5)
+    stale_result = _probe_listener(reply=False)
     assert stale_result.returncode != 0
     assert "OK" not in stale_result.stdout
 
@@ -1036,9 +1405,13 @@ async def test_codespace_dispatch_sends_large_provision_script_over_stdin(monkey
     await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
         ["copilot", "--acp", "--stdio"], session_id="s3",
     )
-    assert scripts == [big] and len(big) > 30_000
+    import shlex
+    assert scripts == [big, f"bash -lc {shlex.quote(big)}"] and len(big) > 30_000
     assert big not in t.runs
-    assert seen[0][1:] == ["provision-command", "--codespace", "cs-foo"]
+    assert [argv[1:] for argv in seen] == [
+        ["provision-command"],
+        ["provision-command", "--codespace", "cs-foo", "--phase", "hooks"],
+    ]
 
 
 @pytest.mark.asyncio

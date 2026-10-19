@@ -20,6 +20,38 @@ The registry is repository-side evidence; no runtime component reads it.
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
+## Re-attesting the current preference-authority vectors
+
+After committing the authority source, run from the repository root:
+
+```text
+python tools/capture_bridge_current_authority.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_current_authority.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py
+```
+
+The capture verifies that every authority-closure source still matches the
+selected commit. It runs the real terminal settings reader and receipt emitter
+with deterministic synthetic settings, namespace, PID and channel inputs; no
+real child is executed. It verifies the resulting receipt, every existing
+negative vector, terminal consent/refusal, and the real Host's
+verify-before-consent and refusal/reaping order. It refuses changes to receipt
+semantics, authority closure, binding environment or wire generation rather than
+silently broadening this capture.
+
+Only the three current `wrapper-authority-v1`, `wrapper-exec` and
+`wrapper-consent` fixtures and their registry hashes/provenance are written.
+Historical fixtures remain unchanged. Review these four outputs; do not replace
+the captured commit with a guessed future publication commit. A squash may make
+the genuine capture commit unavailable: the checker treats historical commit
+lookup as opportunistic, verifies a resolvable blob against its SHA-256, and
+always validates tracked source/fixture hashes. A wrong resolvable blob/hash
+still fails. Re-running without `--write` verifies reproducibility; unexpected
+dirty source or output bytes are refused. Before any output is written, all
+four approved files and their parent chains must remain inside the resolved
+repository root, without symlinks, reparse points or file aliases. Any invalid
+output refuses the whole write pass.
+
 Externally owned contracts remain references until their owner promotes them.
 Do not copy or reinterpret another protocol's normative corpus here.
 

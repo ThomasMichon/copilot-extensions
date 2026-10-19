@@ -1,0 +1,9 @@
+{
+  "comment": "Separate cache-only worktree rendering from coalesced live refresh with truthful freshness, bounded wall waits and retained holder ownership.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

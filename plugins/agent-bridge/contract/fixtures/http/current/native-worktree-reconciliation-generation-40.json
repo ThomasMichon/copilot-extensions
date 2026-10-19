@@ -1,0 +1,36 @@
+{
+  "captured_from": {
+    "commit": "ee591b72e932696b43e16334de8b95999901c258",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 40,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+    "source_git_blob": "72bc966647f1b5a9714e63dd031dfaa0f58f4154",
+    "source_sha256": "fb3baabb8bf28585dcb3597e69ed9fa65fda4909925900af163f4a8b34502660"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example-worktree/resume/{mode}",
+    "modes": [
+      "acp",
+      "cli"
+    ]
+  },
+  "retained_execution": {
+    "reconcile_host_before_client_readiness": true,
+    "dead_host_with_connected_client": "resume-same-native",
+    "dead_host_with_disconnected_client": "resume-same-native",
+    "dead_host_with_missing_client": "resume-same-native"
+  },
+  "cli_reservation": {
+    "confirmed_launch": "release-exact-owned-reservation",
+    "confirmed_replay": "release-exact-native-claimed-reservation",
+    "uncertain_launch": "retain",
+    "foreign_claim": "retain",
+    "newer_reservation": "retain"
+  },
+  "finalizing": {
+    "status": 409,
+    "reason": "workspace_identity_changed",
+    "native_history_replacement": false
+  }
+}

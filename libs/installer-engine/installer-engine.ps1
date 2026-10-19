@@ -14,6 +14,135 @@
     source this file across plugin boundaries.
 #>
 
+# Packaged human-output initialization: installer-human-output.ps1
+$script:InstallerDependencyPolicy = Join-Path $PSScriptRoot 'installer_dependency_policy.py'
+
+function Remove-InstallRuntimeEntry {
+    param([Parameter(Mandatory)][System.IO.FileSystemInfo]$Entry)
+
+    if ($Entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        if ($Entry.Attributes -band [System.IO.FileAttributes]::Directory) {
+            [System.IO.Directory]::Delete($Entry.FullName)
+        } else {
+            [System.IO.File]::Delete($Entry.FullName)
+        }
+        return
+    }
+    if ($Entry.Attributes -band [System.IO.FileAttributes]::Directory) {
+        foreach ($child in @(Get-ChildItem -LiteralPath $Entry.FullName -Force -ErrorAction Stop)) {
+            Remove-InstallRuntimeEntry -Entry $child
+        }
+    }
+    if ($Entry.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+        $Entry.Attributes = $Entry.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+    }
+    if ($Entry.Attributes -band [System.IO.FileAttributes]::Directory) {
+        [System.IO.Directory]::Delete($Entry.FullName)
+    } else {
+        [System.IO.File]::Delete($Entry.FullName)
+    }
+}
+
+function Get-InstallDirectoryIdentity {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not ('CeInstallerDirectoryIdentity' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class CeInstallerDirectoryIdentity {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DirectoryInformation {
+        public uint Attributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint SizeHigh;
+        public uint SizeLow;
+        public uint Links;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(
+        string path, uint access, uint share, IntPtr security,
+        uint creation, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle handle, out DirectoryInformation information);
+
+    [DllImport("libc", EntryPoint = "realpath", SetLastError = true)]
+    private static extern IntPtr RealPath(string path, IntPtr buffer);
+
+    [DllImport("libc", EntryPoint = "free")]
+    private static extern void Free(IntPtr pointer);
+
+    public static string Read(string path) {
+        if (Environment.OSVersion.Platform != PlatformID.Win32NT) {
+            IntPtr resolved = RealPath(path, IntPtr.Zero);
+            if (resolved == IntPtr.Zero) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            try { return Marshal.PtrToStringAnsi(resolved); }
+            finally { Free(resolved); }
+        }
+        using (SafeFileHandle handle = CreateFile(
+            path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+            if (handle.IsInvalid) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            DirectoryInformation information;
+            if (!GetFileInformationByHandle(handle, out information)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return string.Format(
+                "{0:x8}:{1:x8}{2:x8}", information.VolumeSerialNumber,
+                information.FileIndexHigh, information.FileIndexLow);
+        }
+    }
+}
+'@
+    }
+    return [CeInstallerDirectoryIdentity]::Read($Path)
+}
+
+function Remove-InstallRuntimeContent {
+    <# The caller holds the install transaction lock. Never unlink that lock or
+       another invocation's staged source while removing runtime/config data. #>
+    param([Parameter(Mandatory)][string]$InstallRoot)
+
+    $full = [System.IO.Path]::GetFullPath($InstallRoot)
+    $root = $full.TrimEnd([char[]]@('\', '/'))
+    if ($root -eq ([System.IO.Path]::GetPathRoot($full)).TrimEnd([char[]]@('\', '/'))) {
+        throw 'Refusing to purge a filesystem root'
+    }
+    $directory = Get-Item -LiteralPath $full -Force -ErrorAction Stop
+    if (-not $directory.PSIsContainer -or
+        ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        throw 'Runtime purge requires a real install directory, not a link'
+    }
+    $identity = Get-InstallDirectoryIdentity -Path $full
+    foreach ($homePath in @($HOME, $env:USERPROFILE, $env:HOME)) {
+        if ($homePath -and (Test-Path -LiteralPath $homePath -PathType Container -ErrorAction Stop) -and
+            $identity -ceq (Get-InstallDirectoryIdentity -Path ([IO.Path]::GetFullPath($homePath)))) {
+            throw 'Refusing to purge a user home'
+        }
+    }
+    foreach ($entry in @(Get-ChildItem -LiteralPath $full -Force -ErrorAction Stop)) {
+        if ($entry.Name -in @('.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')) {
+            continue
+        }
+        Remove-InstallRuntimeEntry -Entry $entry
+    }
+}
+
 function Invoke-NativeCapture {
     param([Parameter(Mandatory)][scriptblock]$Command)
 
@@ -46,18 +175,43 @@ function Invoke-UvPipInstallResilient {
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
         [string]$UvCommand = 'uv',
-        [string]$PayloadDirToScrub
+        [string]$PayloadDirToScrub,
+        [scriptblock]$BeforeAttempt
     )
 
+    $policyPython = $null
+    for ($i = 0; $i -lt $Arguments.Count - 1; $i++) {
+        if ($Arguments[$i] -eq '--python' -and (Test-Path -LiteralPath $Arguments[$i + 1] -PathType Leaf)) {
+            $policyPython = $Arguments[$i + 1]
+            break
+        }
+    }
+    if (-not $policyPython) {
+        $candidate = Get-Command python3, python -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
+        if ($candidate) { $policyPython = $candidate.Source }
+    }
+    if (-not $policyPython -or -not (Test-Path -LiteralPath $script:InstallerDependencyPolicy -PathType Leaf)) {
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output = 'dependency-seasoning: bootstrap Python or canonical policy helper is unavailable'
+        }
+    }
     $delays = @(3, 6, 10)
-    $result = Invoke-NativeCapture { & $UvCommand pip install @Arguments }
+    if ($BeforeAttempt) { & $BeforeAttempt | Out-Null }
+    $result = Invoke-NativeCapture {
+        & $policyPython -I $script:InstallerDependencyPolicy --uv $UvCommand -- @Arguments
+    }
     foreach ($delay in $delays) {
         if ($result.ExitCode -eq 0 -or -not (Test-IsSreModuleMismatch ($result.Output | Out-String))) {
             break
         }
         Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
         Start-Sleep -Seconds $delay
-        $result = Invoke-NativeCapture { & $UvCommand pip install @Arguments }
+        if ($BeforeAttempt) { & $BeforeAttempt | Out-Null }
+        $result = Invoke-NativeCapture {
+            & $policyPython -I $script:InstallerDependencyPolicy --uv $UvCommand -- @Arguments
+        }
     }
 
     if ($result.ExitCode -eq 0 -and $PayloadDirToScrub) {
@@ -108,7 +262,8 @@ function Ensure-Uv {
         [string]$BootstrapVersion = '0.12.6'
     )
 
-    $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+    $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     if ($existing) {
         $result = Invoke-NativeCapture { & $existing.Source --version }
         if ($result.ExitCode -eq 0) {

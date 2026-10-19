@@ -41,6 +41,7 @@ import re
 import time
 from bisect import bisect_right
 from collections import deque
+from functools import wraps
 from threading import Event, Lock
 from typing import Any
 
@@ -99,6 +100,8 @@ def _relayed(d: dict[str, Any]) -> dict[str, Any]:
         out["relay_from"] = attrs["from"]
     # The extension omits ``kind`` for an ordinary prompt.
     out["relay_kind"] = attrs.get("kind") or "prompt"
+    if attrs.get("msg-id", "").isdigit():
+        out["relay_message_id"] = int(attrs["msg-id"])
     return out
 
 
@@ -482,6 +485,19 @@ class MergePendingError(RuntimeError):
     the caller should retry rather than validate references against it."""
 
 
+def _store_operation(method):
+    @wraps(method)
+    def owned(self, *args, **kwargs):
+        with self._operation_lock:
+            self._operations += 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            with self._operation_lock:
+                self._operations -= 1
+    return owned
+
+
 class LiveEventStore:
     """In-memory registry of represented ``EventLog``s, keyed by session id.
 
@@ -505,6 +521,9 @@ class LiveEventStore:
         # until each is done, that log's merge map is incomplete (``snapshot``).
         self._merging: dict[int, list[Event]] = {}
         self._lock = Lock()
+        # Covers the gaps between deduplication, append and merge-map publication.
+        self._operation_lock = Lock()
+        self._operations = 0
 
     def get(self, session_id: str) -> EventLog | None:
         """Return the represented log for ``session_id``, or None if none yet."""
@@ -536,6 +555,7 @@ class LiveEventStore:
             for done in pending:
                 done.wait(max(0.0, deadline - time.monotonic()))
 
+    @_store_operation
     def get_or_create(
         self, session_id: str, *, worktree_id: str | None = None
     ) -> EventLog:
@@ -553,6 +573,7 @@ class LiveEventStore:
                 log.set_telemetry_identity(worktree_id=worktree_id)
             return log
 
+    @_store_operation
     def alias(self, old_id: str, new_id: str) -> None:
         """Serve ``old_id`` and ``new_id`` from one log after a session-id
         change: the predecessor's log (its history, waited sends and readers)
@@ -655,6 +676,7 @@ class LiveEventStore:
             log = self._logs.get(session_id)
             return [k for k, v in self._logs.items() if log is not None and v is log]
 
+    @_store_operation
     def drop(self, session_id: str) -> None:
         """Forget a session's represented log (on deregister) to free memory;
         once no alias still serves that log, its merge mappings go too."""
@@ -701,6 +723,7 @@ class LiveEventStore:
             if sdk_id in self._seen_ids.get(session_id, ()):
                 self._sdk_events.setdefault(session_id, {}).setdefault(sdk_id, []).append(log_event_id)
 
+    @_store_operation
     def ingest(
         self,
         session_id: str,
@@ -895,7 +918,7 @@ def translate_reconnect_cursor(
 
 
 async def await_turn_reply(
-    log: EventLog, *, after: int, timeout: float
+    log: EventLog, *, after: int, timeout: float, message_id: int | None = None
 ) -> TurnReply:
     """Wait for the represented session's next reply turn, after event ``after``.
 
@@ -908,18 +931,18 @@ async def await_turn_reply(
 
     Returns ``{"replied": bool, "reply": str | None, "stop_reason": str | None,
     "last_id": int}``. On timeout ``replied`` is False and ``reply`` is whatever
-    partial assistant text (if any) had arrived -- the message still sits in the
-    durable queue regardless.
+    partial assistant text (if any) had arrived. Reply timeout says nothing
+    about inbox admission, SDK acceptance, or consumption.
 
-    Honest limit (single-operator, deliberate use): this reads the *next* turn
-    to complete after ``after``. If an unrelated turn was already in flight when
-    the caller sent, that turn's completion is what returns first; correlating a
-    specific reply to a specific ``msg-id`` is a later refinement (the envelope
-    ``msg-id`` is the seed).
+    With ``message_id``, observe that attributed root input first, then require
+    root assistant text before settling. Empty tool-only completions and nested
+    turns do not constitute a reply. This is post-consumption turn evidence, not
+    semantic proof that the assistant answered this specific message.
     """
     deadline = time.monotonic() + timeout
     cursor = after
     texts: list[str] = []
+    consumed = message_id is None
     while True:
         # A session-id change merged this log into another, maybe more than
         # once (C -> B -> A) while we slept: follow every completed merge, with
@@ -938,11 +961,19 @@ async def await_turn_reply(
             break  # timed out with no new events
         for e in events:
             cursor = e.id
+            if e.data.get("agent_id") or e.data.get("parent_tool_call_id"):
+                continue
+            if e.event == "user_message" and e.data.get("relay_message_id") == message_id:
+                consumed = True
+                texts.clear()
+                continue
+            if not consumed:
+                continue
             if e.event == "agent_message":
                 text = e.data.get("text")
                 if text:
                     texts.append(str(text))
-            elif e.event == "turn_complete":
+            elif e.event == "turn_complete" and (message_id is None or texts):
                 return {
                     "replied": True,
                     "reply": "".join(texts) or None,

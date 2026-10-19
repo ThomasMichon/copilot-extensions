@@ -11,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from test_install_engine_adoption import stage_index_installer
+
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
@@ -69,21 +71,27 @@ def test_read_only_and_cell_actions_never_allocate_legacy_stage(
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 @pytest.mark.parametrize("action", ["cell-provision", "cell-recover", "slot-cutover"])
+@pytest.mark.parametrize("materialized", [False, True], ids=["dev", "materialized"])
 def test_cell_coordinator_does_not_reenter_payload(
-    tmp_path: Path, extension: str, action: str,
+    tmp_path: Path, extension: str, action: str, materialized: bool,
+) -> None:
+    _assert_cell_coordinator_does_not_reenter_payload(
+        tmp_path, extension=extension, action=action, materialized=materialized,
+    )
+
+
+def _assert_cell_coordinator_does_not_reenter_payload(
+    tmp_path: Path, *, extension: str, action: str, materialized: bool,
 ) -> None:
     interpreter = _interpreter(extension)
     home = tmp_path / "home"
     home.mkdir()
     payload = tmp_path / ".copilot" / "installed-plugins" / "example" / "agent-index"
+    stage_index_installer(payload, materialized=materialized)
     scripts = payload / "scripts"
-    scripts.mkdir(parents=True)
     entry = scripts / f"install.{extension}"
-    shutil.copyfile(PLUGIN / "scripts" / entry.name, entry)
-    shutil.copytree(
-        PLUGIN.parents[1] / "libs" / "installer-engine",
-        payload.parents[1] / "libs" / "installer-engine",
-    )
+    if extension == "sh":
+        assert b"\r" not in entry.read_bytes()
     (payload / "plugin.json").write_text('{"name":"agent-index"}\n', encoding="utf-8")
     (payload / "pyproject.toml").write_text('version = "0.1.0"\n', encoding="utf-8")
     receipt = home / "cwd.json"
@@ -151,6 +159,36 @@ def test_cell_coordinator_does_not_reenter_payload(
         if process.poll() is None:
             process.kill()
             process.communicate(timeout=10)
+
+
+@pytest.mark.parametrize("materialized", [False, True], ids=["dev", "materialized"])
+def test_staged_bash_coordinator_survives_crlf_text_rewrites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, materialized: bool,
+) -> None:
+    write_text = Path.write_text
+    translated: list[Path] = []
+
+    def write_crlf(
+        path: Path, data: str, encoding: str | None = None,
+        errors: str | None = None, newline: str | None = None,
+    ) -> int:
+        if path.name != "install.sh":
+            return write_text(path, data, encoding=encoding, errors=errors, newline=newline)
+        data = data.replace("\r\n", "\n").replace("\n", "\r\n")
+        # Suppress the host's own translation so this simulates exactly CRLF
+        # on Linux as well as Windows, even if a caller requests LF explicitly.
+        written = write_text(path, data, encoding=encoding, errors=errors, newline="")
+        assert b"\r\n" in path.read_bytes()
+        translated.append(path)
+        return written
+
+    monkeypatch.setattr(Path, "write_text", write_crlf)
+    _assert_cell_coordinator_does_not_reenter_payload(
+        tmp_path, extension="sh", action="cell-provision", materialized=materialized,
+    )
+    # The materialized case must include the real canonical-to-local rewrite,
+    # so an initial-write-only newline fix cannot satisfy this regression.
+    assert len(translated) == (2 if materialized else 1)
 
 
 def test_context_helper_child_uses_home_not_payload(tmp_path: Path, monkeypatch) -> None:

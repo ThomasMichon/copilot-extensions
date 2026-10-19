@@ -129,6 +129,15 @@ class OwnerSessionBody(BaseModel):
     expected_generation: int | None = None
 
 
+class TaskGrantBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    worker_id: str = Field(min_length=1)
+    owner_session_id: str = Field(min_length=1)
+    expected_generation: StrictInt = Field(ge=0)
+    expected_epoch: StrictInt = Field(ge=0)
+
+
 class YieldBody(BaseModel):
     worker_id: str
     note: str | None = None
@@ -190,6 +199,7 @@ class SteerBody(BaseModel):
     wake: bool = True
     message: str | None = None
     expected_status: str | None = None
+    expected_revision: str | None = None
     idempotency_key: str | None = None
 
 

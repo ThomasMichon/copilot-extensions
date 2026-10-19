@@ -5,28 +5,44 @@
 - **Branch(es):** Separate proposal, notification-contract, and integration PRs against `dev`
 - **Created:** 2026-10-09
 - **Status:** Active
-- **Vision:** `visions/plugins/agent-dispatch/README.md` / `hibernate-the-wait`; `visions/plugins/agent-worktrees/pull-requests/README.md` / `durable-shared-pr-transition-subscriptions`
+- **Vision:** `visions/plugins/agent-dispatch/README.md` / `hibernate-the-wait`; `visions/plugins/agent-worktrees/pull-requests/README.md` / `durable-shared-pr-transition-subscriptions`; `visions/plugins/agent-pull-requests/README.md`; `visions/machine-fleet/README.md` / `single-operator-fleet`
 - **Umbrella issue:** #6007
-- **Sub-issues:** #6286 (PR-owner installation-cell adoption)
+- **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment)
 
 ## Guiding Intent
 
 Resume the deferred PR-watch delegation work without trading away wake
 reliability. Eligible suspended dispatch tasks should share the existing PR
 watch owner's observation stream rather than retain one operating-system
-wait process per task. Ordinary process waiters remain a working fallback.
+wait process per task. Build out `agent-pull-requests` as the first-class PR
+plugin and independently operable service, including a centralized watcher and
+subscription registrar deployable in containers through fleet-manager on
+explicitly assigned fleet machines. A fleet belongs to exactly one operator;
+it never hosts another operator's state or credentials. Ordinary process
+waiters and supported native PR operation remain working alternatives.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Delegation driver | Proposal, implementation, validation, PR stewardship, deployment | This effort's source worktree and linked issue |
+| PR-service plan steward | First-class plugin/service and fleet-consumer scope amendment, review and integration | Separate managed planning worktree; #7188 |
 
 ## Coordination
 
 - **Topology:** Serial, independently reviewable PRs against `dev`.
 - **Host (owns PRs):** Delegation driver.
 - **Delegates:** Any bounded implementation delegate receives an exclusive slice; the driver owns integration and completion.
+- **Fleet expansion:** The PR-service plan steward owns the
+  `Fleet-hosted PR service expansion` slice. #5789, #6030/#5861,
+  #6236/#6240/#6241 and #7051 retain routing, deployment, integrated lifecycle
+  and PR-conformance ownership. This effort consumes their contracts rather
+  than taking over those campaigns.
+- **Review sequencing:** Land the fleet vision/plan amendment before its runtime
+  implementation. Keep the fleet scope separate from the installer prerequisite.
+  The later operator disposition accepts reader residual #7208 and stops its
+  investigation; it does not relax canonical installation validation, current
+  checks or review.
 - **Handoff:** Continue from this README, its next unchecked item, and the current PR state. Do not replay the preserved branch wholesale.
 
 ## Context
@@ -48,10 +64,17 @@ uses generation-fenced arm/finish operations. Delegation must compose with
 those contracts rather than invent a second task lifecycle or a sentinel
 machine identity.
 
-This work closes the two named vision items. It follows the patterns'
+The [fleet service plan](fleet-pr-service.md) extends this campaign beyond
+dispatch's optional wait optimization. The centralized registrar owns PR
+subscriptions, not a second dispatch task registry or fleet enrollment store.
+Services supply independently usable artifacts and consume fleet-owned role
+placement, routing, authentication and lifecycle.
+
+This work closes the named PR, dispatch and fleet vision items. It follows the patterns'
 independent-installation, optional-composition, attributable-command,
-cross-platform, and graceful-cutover invariants. It adds no new resident
-service.
+cross-platform, and graceful-cutover invariants. It extends and packages the
+existing PR-watch service; it does not introduce a parallel watch owner,
+fleet controller or credential issuer.
 
 ## Request
 
@@ -85,6 +108,29 @@ This selects the offered option to add and review canonical graceful cutover,
 then continue adoption. It does not waive the installation-cell lifecycle
 contract or authorize a stop/start exemption.
 
+Lease-only ownership boundary selection, verbatim:
+
+> refuse-unprovable-owner
+
+An owner without verifiable same-cell ownership must remain untouched. This
+replaces first-upgrade success for that legacy owner with explicit refusal;
+it does not waive governed upgrades or state preservation.
+
+Fleet-service scope expansion, verbatim:
+
+> Got it, nice. So this effort should also roll in building out `agent-pull-requests`, the first-class PR-focused plugin and associated service daemon. We'll need to expand the scope a little bit: we want services to become compatible with the fleet-manager, deployable into containers on the assigned fleet machines. A centralized PR-watcher and registrar makes a ton of since, as we can have one centralized watcher that's mostly IO-based.
+
+The operator selected `single-operator` when asked about service tenancy, then
+clarified the standing fleet boundary verbatim:
+
+> The intent of the fleet is that it all belongs to one single operator. If we ever introduce multiplayer, it will be by having one operator's fleet talk to another operator's fleet, never holding another operator's state or credentials in the same fleet.
+
+This is an invariant of the entire fleet, not merely an initial service
+default. Future collaboration means federation between separately owned fleets,
+not shared tenancy. Federation implementation and concrete live deployment are
+not authorized by this plan amendment. The implementation sequencing and
+validation details below and in the linked plan are **agent-recommended**.
+
 ## Plan
 
 ### Governed watch-owner cutover prerequisite
@@ -94,20 +140,21 @@ _Agent-recommended design and validation, explicitly selected for review._
 - [x] Review and merge the [watch-owner lifecycle plan](watch-owner-cutover.md) before implementing the service transaction (confirmed by #6291).
 - [x] Land the canonical pre-adoption drain, full-transaction borrowed authority and custody-preserving rollback prerequisite before the owner adapter (confirmed by #6396).
 - [x] Land inactive watch-state construction, final read-ready reload and bounded complete quiescence as internal groundwork, without enabling a production service or installation-cell adapter (confirmed by #6714).
-- [ ] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery.
-- [ ] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery.
-- [ ] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and first upgrade from a lease-only owner on Windows and Linux before landing the cutover prerequisite.
-- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation.
+- [x] Land non-signaling native process-exit references captured before graceful control, without granting receipt, installation or retirement authority (confirmed by #6720).
+- [x] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery (source landed in #7160).
+- [x] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery (source landed in #7160).
+- [x] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and refusal of lease-only owners without verifiable same-cell ownership on Windows and Linux before landing the cutover prerequisite (exact-head native acceptance `39226209682`).
+- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation. Source landed in #7160; release and authorized deployment remain pending.
 
 ### Installation-cell prerequisite
 
 _Agent-recommended prerequisite, explicitly selected by the operator._
 
 - [x] Review and merge the installation-cell plan amendment before adoption implementation (confirmed by #6146; the lifecycle amendment above remains a separate review gate).
-- [ ] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback.
-- [ ] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer.
-- [ ] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract.
-- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Keep the saved dispatch integration resumable while this prerequisite clears.
+- [x] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback (source landed in #7160).
+- [x] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer (source landed in #7160).
+- [x] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract (exact-head native acceptance `39226209682`).
+- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Source landed in #7160; keep the saved dispatch integration resumable and inactive until release and authorized deployment clear.
 
 ### Phase 1 - Review the recovery contract
 
@@ -125,6 +172,32 @@ _Agent-recommended implementation requirements._
 - [x] Validate notification specifications and timeout inputs explicitly. Report delivery failures and pending retry state without logging credentials.
 - [x] Land and verify the notification-contract PR before enabling dispatch delegation.
 
+### Fleet-hosted PR service expansion
+
+_Operator-required scope; agent-recommended implementation and validation._
+
+- [x] Review and land the first-class PR plugin/service vision, single-operator
+  fleet invariant and [fleet service plan](fleet-pr-service.md) before building
+  its new runtime paths (confirmed by #7189).
+- [ ] Agree the [PR-service consumer contract](pr-service-contract.md) with the
+  retained Gateway, credential, dispatch and placement owners before wiring
+  unsupported routes or treating an isolated admission API as service authority.
+- [ ] Build out the existing PR plugin as the PR-domain client/service surface;
+  preserve supported worktree publication policy and provider behavior through
+  shared contracts rather than another forge implementation.
+- [ ] Supply an independently installable PR service and container role for
+  fleet-manager's declared placement and lifecycle, without requiring a Copilot
+  session, host-side plugin supervisor or parallel fleet controller.
+- [ ] Implement centralized, authorization-scoped observation and durable
+  registration with transport-appropriate replay/ACK delivery; do not execute a
+  remote subscriber's local callback argv in the service container.
+- [ ] Integrate scoped, renewable forge credentials and typed client/dispatch
+  access through the fleet-owned Gateway contracts, without hosting any other
+  operator's state or credentials.
+- [ ] Prove standalone/container lifecycle, restart and upgrade continuity,
+  account/fleet isolation, observation sharing, disconnection recovery and the
+  real client/Gateway/service path before treating fleet deployment as complete.
+
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
 - [ ] Recognize only supported PR-watch invocations and discover the optional watch owner through its attributable installation boundary, never ambient `PATH`.
@@ -140,6 +213,9 @@ _Agent-recommended implementation requirements._
 
 - [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface.
 - [ ] Exercise the deployed contract in isolated state without interrupting shared coordinators, watch subscriptions, or peer sessions.
+- [ ] Complete the fleet service acceptance in the linked plan on explicitly
+  approved capacity, including persistent registration/delivery and the actual
+  Gateway path. Local delegation alone does not complete the expanded effort.
 - [ ] Synchronize consumer guidance when changed payload provenance requires it, through the consumer's own PR flow.
 - [ ] Record outcomes, resolve every validation item or transfer it to a named tracked objective, archive this effort, release its binding, and finalize owned worktrees.
 
@@ -158,6 +234,10 @@ All items below are **agent-recommended** acceptance checks.
 - [ ] Source gates: touched-plugin tests, fatal Python lint, module-size, headless-launch, install-contract, and required CI pass; add a changefile for each runtime plugin changed.
 - [ ] Live deployment: exercise an existing, authorized PR target with isolated subscriber/coordinator state when available; otherwise record the exact unavailable lane and a named follow-up before closure.
 - [ ] Documentation: review the final diff's impact on plugin behavior, failure/retry semantics, fallback, configuration, CLI help, and source-of-truth docs.
+- [ ] Fleet service: resolve every acceptance item in
+  [the fleet plan](fleet-pr-service.md#validation-plan-agent-recommended),
+  including the single-operator ownership boundary, without substituting mocks
+  or a healthy container for the requested deployed path.
 
 ## Proposal
 
@@ -175,6 +255,597 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-19 - Add the required live Windows launch regression
+
+- The bootstrap repair is published as #7240 at `d1ae5e7e`.
+  Required CI `39243373833` succeeds, including the previously missing
+  customization consumer, and native acceptance `39243565444` passes all
+  fifteen selected jobs. These functional gates do not satisfy the separate
+  live window/focus requirement for the new native child-launch path.
+- Actual review `5570850298` identifies that missing proof as a Medium
+  finding. Add the opt-in live Windows flow required by the existing launch
+  pattern; do not treat mocked flags or output assertions as a substitute.
+- For both Windows PowerShell and PowerShell 7, the flow launches the actual
+  wrapper from a real windowless `pythonw.exe` parent, runs a real local
+  console descendant across two complete invocations, and reuses the canonical
+  Win32 observer. Additional sampling records every new visible window and
+  every foreground transition, including baseline windows, without recording
+  titles or user content. The observer must stay alive and sample both cycles.
+- A separate forced timeout captures all four native participants, verifies
+  each is in the caller's non-breakaway Job, terminates that Job with
+  zero-active-process confirmation, and requires each captured native handle
+  to signal exit. No daemon-survival or remote-routing behavior is introduced.
+- This flow runs only in the already opt-in disposable Windows hosted-account
+  normal-upgrade scenario. Local checks compile both fixture programs and
+  explicitly skip the two live cases on the shared host; current-head native
+  execution remains required before resolving the finding or merging.
+  The parent remains Active with no install or rollout authorized.
+
+### 2026-10-19 - Fix the post-merge native bootstrap composition regression
+
+- Post-merge Dev CI `39232925741` blocks release of #7160. Its only failing
+  root job is `customizing-copilot`: the actual whole-suite session-start
+  contract sees the new admission wrapper as a possible context producer.
+  Reproduce the same assertion through the contained consumer suite before
+  editing; this is not a transient or permission to retry promotion.
+- The wrapper now follows the existing `bootstrap-check.*` naming and native
+  exit/finally JSON-finalizer contract. It emits one empty JSON value for
+  cell, legacy and refused admission, suppresses only delegated stdout, and
+  preserves stderr and failure status. Hook registrations and packaged-payload
+  coverage follow the renamed internal entry. The generic scanner, trust
+  markers and assertion remain unchanged.
+- Add the existing whole-suite consumer to changed-plugin CI selection so
+  future cross-plugin hook regressions cannot first appear after merge.
+  Native wrapper controls cover both shells, cold/legacy/refused/unknown
+  admission and a failing legacy delegate. They catch direct PowerShell
+  `Console.Out` bypassing pipeline suppression; the wrapper now drains a
+  contained same-host child's stdout without a console window, inheriting
+  stderr and retaining the actual exit code.
+- Preserve the post-merge journal tail while pulling forward: managed sync
+  safely aborts a squash-history conflict; after verifying that only the
+  single journal commit follows the merged PR head, replay that tail onto
+  current `origin/dev`. No reset, stash, force-push or foreign work is used.
+- Complete invocation coverage passes 78 cases with one explicit-tier cold-build
+  skip in 209.49 seconds; the unchanged complete customization consumer passes
+  515 cases in 78.20 seconds. Runner/partition/native-scope contracts pass
+  250 cases with two explicit skips in 29.52 seconds. The actual CI foundation
+  recipe passes all 15 packaged-hook/stamp cases in 144.56 seconds, retaining
+  each native child's original 60-second deadline; a first local probe's extra
+  30-second wrapper limit was not the consumer's CI contract. No production,
+  test-source or CI deadline is increased.
+- Existing fifteen-job native acceptance also selects the new wrapper/error
+  controls and actual disposable-account governance checks. Current-head native
+  proof, ordinary PR review/CI, merge and release remain owed. No install,
+  update, rollout or dispatch activation is authorized; the parent remains
+  Active.
+
+### 2026-10-19 - Merge the reviewed installation-cell adoption source
+
+- #7160 actually merges at `3c62c9442c5944640d2c13385d7ff00db614c1aa`
+  after exact tested head `30df6e50c1410b2689ae1e6d375b6657815f8aa5`
+  clears actual automated review `5569218963`, all three resolved review
+  threads, required CI `39226193526` and native acceptance `39226209682`.
+  The managed source-owner merge uses the resolved `pr-self-merge` flow;
+  no CI bypass, review waiver or hold dismissal is used.
+- All fifteen selected native jobs pass; only the two unselected diagnostics
+  skip. The actual hosted PR-owner partitions execute all assigned cases:
+  first partition 99/136/152 passes in 26.04/105.25/92.44-second groups;
+  second partition 188/121 passes in 106.20/160.83-second groups.
+  Their explicit skips remain visible and every group is below the unchanged
+  300-second cap. The index suite successfully sets up and executes
+  320/366/420/118 passing cases; no setup retry exception or test omission
+  substitutes for required green CI.
+- Re-read the parent plan after merge and close only the implemented and
+  proven source-adoption/cutover items. Combined land-and-deploy, release,
+  installed proof, dispatch delegation and the expanded fleet service remain
+  unchecked. The accepted reader residual #7208 remains tracked, not
+  cause-fixed.
+- Next stretch is release qualification and coordination with the retained
+  unified-updater owner, without installing, updating, replacing a shared
+  owner or activating dispatch. Fleet Gateway/credential/placement agreement
+  remains with its existing owners. The effort stays Active; this component
+  merge is not whole-adoption completion.
+
+### 2026-10-19 - Retain strict CI limits with smaller PR-owner test groups
+
+- Final-runtime candidate `d494201e2` receives actual automated review
+  `5568632217` with no open findings; all three review threads are resolved.
+  Native acceptance `39219867964` succeeds on that exact head with all fifteen
+  selected jobs, including cold and running-owner restart responses.
+- Required CI `39219690896` nevertheless fails. Its PR-owner second partition
+  reaches the strict 300-second process-group limit at 88% of the selected
+  cases. Its separate index job fails before any test starts: the setup-uv
+  action's remote latest-version manifest request times out after five seconds.
+  The required aggregate correctly remains red; neither is bypassed.
+- The PR owner's default file-group size is tightened to ten through the
+  existing contained runner's per-plugin profile. Both job assignments and
+  all test files remain complete and disjoint, explicit group limits still
+  win, and unrelated plugins retain twenty-five-file defaults. Item, group,
+  aggregate-plugin and CI-job deadlines are unchanged. Native filtered
+  acceptance retains its existing grouping and budgets.
+- Complete runner/partition/native-scope contracts pass 250 cases with two
+  explicit skips in 30.23 seconds. The exact runner selection proves every
+  assigned file survives subgrouping once and in order. This changes no
+  qualification recipe, controller routing or test-selection filter.
+- A new-head CI run must exercise the smaller Linux groups within the actual
+  hosted deadline and run the index suite after successful setup. The
+  diagnosed remote bootstrap timeout does not authorize skipping index tests,
+  mutating its runtime or merging past a non-green gate. Review, exact-head
+  native acceptance and actual merge remain owed.
+
+### 2026-10-19 - Preserve the governed restart response contract
+
+- Published the staged-origin repair at `97b995eac` on #7160.
+  Native acceptance `39217236601` passes all fifteen selected jobs at that
+  exact head, including the expanded native-account Linux/Windows legacy
+  staging cases. Only the two unselected diagnostic jobs skip.
+- Another completed actual review, submitted against the preceding
+  `e944d348` head, identifies a separate Medium compatibility regression:
+  governed `restart --json` returns success without the legacy JSON body.
+- The existing guarded `ensure()` now reports whether incumbent discovery
+  found an owner, only after ready/complete success. Governed restart emits
+  the unchanged `restarted`/`was_running` JSON shape or the ordinary success
+  message. Refusal and rollback still propagate without a success response.
+- Response-shape and failure controls cover both incumbent states. Existing
+  native incumbent coverage checks the actual `ensure()` result, and normal
+  shipped-payload acceptance now starts cold through `restart --json`, then
+  restarts its upgraded live owner while preserving pending subscriptions.
+  All operations consume the original scenario budget; no deadline is
+  increased. Both complete affected modules pass all 18 contained cases in
+  814.79 seconds, including actual cold restart, full-payload live upgrade,
+  warm restart and existing native incumbent/refusal coverage.
+- Required CI, a subsequent actual review and fresh native acceptance remain
+  binding for the final repaired head. No merge, deployment, shared-owner
+  replacement or receipt investigation is performed.
+
+### 2026-10-19 - Revalidate marketplace admission after legacy self-staging
+
+- The actual completed review of #7160 identifies one additional Medium
+  finding in its body despite the overview's no-open-issues banner: the
+  staged child loses the original marketplace locator, so a valid nonempty
+  per-marketplace legacy policy can refuse the normal installer.
+- Both native mode helpers now recognize only the installer's canonical
+  per-profile staging layout. They require an existing canonical installed
+  origin and equal, link-free payload trees before asking the unchanged
+  native installation-context validator to resolve that original source
+  against current governance. Environment staging flags alone never waive
+  admission, and origin replacement or disappearance refuses safely.
+  The shared thirteen-plugin self-staging blocks remain unchanged.
+- Initial contained coverage passes 33 selected cases in 136.02 seconds,
+  including actual PowerShell staging for all five mutating installer
+  actions and refused modified payloads, missing/forged origins, changed
+  governance, lost marketplace declarations and ordinary payload hints.
+  Final complete invocation coverage passes 68 cases with one explicit-tier
+  cold-build skip in 203.40 seconds, including both scoped policy forms and
+  native link refusal. An initially malformed unrelated-marketplace fixture
+  is corrected to the canonical source-derived ID shape; validation is not
+  relaxed. The partition/native-scope contracts pass all 187 cases in 17.57
+  seconds with short runner-owned Windows paths; exact fixture cleanup
+  removes its read-only Git objects afterward. Fatal lint, module-size and
+  all thirteen install-contract gates pass.
+  The existing native-account normal-upgrade scenario also selects these
+  contracts on Linux and Windows without adding jobs or widening deadlines.
+- This is a supported legacy-compatibility fix, not renewed reader/receipt
+  investigation or a deployment. Current-head review, required CI and native
+  acceptance remain owed; #7160 is not merged and the parent remains Active.
+
+### 2026-10-19 - Preserve native acceptance while reconciling current-base CI
+
+- Published bounded recovery at `e9e9f37ad` on the existing #7160, replied to
+  and resolved the two proven admission findings, and updated the reviewable
+  rationale. Native acceptance `39208728241` succeeds on that exact head:
+  all 15 selected Linux/Windows/macOS jobs pass; only the two unselected
+  diagnostic jobs skip. macOS remains refusal evidence, not positive operation.
+- The scoped review wait reaches its genuine 600-second deadline without a
+  new review event. Its conflict report is confirmed by Git's non-mutating
+  merge calculation: upstream's preserved-controller compatibility branch and
+  this PR's additional smoke partition overlap in one test assertion.
+  Supported synchronization aborts safely with the old head retained; the
+  documented owned-PR rebase then replays all four commits, preserving upstream
+  controller/fixture changes and counting three extra partitions only for the
+  modern matrix. The reconciled partition/native-scope contracts pass all
+  187 cases in 20.23 seconds. No runtime bytes change in the rebase.
+- The shared workflow reference is aligned to the existing four effective
+  profiles and explicit self-merge versus consent verbs. It recognizes genuine
+  current-head approval without a categorical owner-authorship assumption;
+  documented clean-comment acceptance remains conditional on the target repo.
+  Caller role, actual review, ownership, holds, conflict and required-CI vetoes
+  remain binding. This documentation does not change another campaign's
+  classifier, consent automation or repository configuration.
+- Current-base publication still owes a subsequent actual review and new-head
+  required CI/native acceptance. Historical green native jobs do not authorize
+  merging a different head. No CI bypass, shared-owner replacement or rollout
+  is performed; the effort remains Active.
+
+### 2026-10-19 - Implement the selected bounded installer reconciliation
+
+- The completed-target installer now retains one original 300-second activation
+  envelope, including physical target binding. The first owner attempt and
+  canonical reconciliation each retain an at-most-120-second operation limit.
+  Only a timeout captured under the initial attempt's own held guard, after
+  commit with an exact successor, admits one status/reconciliation attempt.
+  Unscoped timeouts and identity, governance, rollback or other failures do not.
+- The recovery path reports the original timeout, holds a fresh same-installation
+  native guard, checks the exact transaction/installation/target/successor and
+  coherent selection, and obtains authenticated native-bracketed writer health.
+  Normal journal recovery additionally compares the complete just-verified
+  document before rotating controller custody. Changed status evidence cannot
+  rotate another transaction. No recovery branch begins a journal, spawns an
+  owner or advances a route generation.
+- Canonical reconciliation must finish and archive the same transaction, prove
+  original predecessor exit, clear its breadcrumb and retain final exact-owner
+  health within the original envelope. Both reconciliation archive-return paths
+  now check the unchanged operation deadline. The whole native upgrade CLI uses
+  the remaining original 900-second scenario budget rather than treating its
+  earlier 300-second build-plus-activation proxy as the owner deadline; owner,
+  native-exit, scenario, group and plugin limits are not increased.
+- The initial focused run passes 36 cases, including actual completed-prefix,
+  private IPC and native same-owner reconciliation at committed and complete
+  phases, and unchanged-journal refusal for foreign comparison evidence and
+  governance. Its one failure is a test cleanup attempting a prohibited
+  terminal retire, corrected to its existing test-owned graceful stdin cleanup.
+  Current full affected contracts, the post-status change refusal, actual
+  normal full-payload upgrade, current-head CI/native acceptance and fresh
+  review remain owed. Injected lost-result controls are not evidence that an
+  actual production timeout has recovered. The effort remains Active.
+- The corrected affected owner/runtime admission batch passes 154 cases with
+  two explicit skips in 1,176.91 seconds. After adding the final complete-document
+  fence, all 44 journal/fence cases pass in 322.60 seconds, including a real
+  completed-prefix owner whose journal changes after authenticated status:
+  recovery refuses before controller rotation and preserves the changed bytes.
+  Fatal Python lint, the 961-line journal module cap and all 13 install contracts
+  pass. The actual normal full-payload upgrade is now running separately; those
+  unit/native-boundary controls do not substitute for that consumer.
+- The actual normal full-payload cold install and live-owner upgrade now pass
+  in 533.09 seconds through the shipped native installer and completed runtime.
+  The scenario requires the original predecessor's native exit, complete
+  same-successor journal/archive, coherent metadata/native route and unchanged
+  pending subscription state; no timeout waiver or conditional success was
+  added. This passing run does not by itself identify whether the initial
+  attempt needed reconciliation. The injected interruption cases separately
+  prove that recovery path. Publication, fresh review/current-head CI/native
+  acceptance, merge, release and authorized rollout remain open.
+
+### 2026-10-19 - Address actual admission review findings
+
+- The operator subsequently selects `bounded-status-reconcile`: after a
+  post-commit activation timeout, verify the exact committed owner and permit
+  one bounded reconciliation of that same journal through the normal installer.
+  The original timeout remains visible. Unknown ownership, a changed
+  transaction, other errors or a failed reconciliation still fail; no second
+  daemon or relaxed validation is allowed. This implementation is the next
+  slice, not yet a completed defense or a waiver of current-head gates.
+- Exact candidate `2f6805616` passes required CI `39191708109` and native
+  acceptance `39191823054`: all 15 selected native jobs succeed, with only the
+  two unselected default diagnostic jobs skipped. Copilot review `5566485611`
+  nevertheless reports two concrete admission defects; those findings remain
+  merge gates independently of the green runs.
+- Reproduced the POSIX wrapper rejecting an absent optional marketplace map
+  while accepting invalid scalar/null maps, and physical completed-module
+  entry accepting missing current selection or a mismatched manifest.
+  Corrected the shell's missing-path return code and extracted the existing
+  owner selection check into one stdlib-only helper shared by payload dispatch
+  and completed peer entry. Ordinary handlers require coherent selected
+  metadata; journal-authorized reserved passive startup remains distinct.
+- The focused real-shell/JSON-query, physical-module entry and actual reserved
+  passive startup checks pass all ten selected cases in 48.51 seconds.
+  The shell branch fixture substitutes only native status, not its JSON query;
+  full native-account policy admission and the actual same-cell peer path
+  remain separate current-head acceptance obligations. Canonical receipt
+  validation and all lifecycle/CI deadlines are unchanged.
+- Full local peer rejection and real native-policy preflight pass, but the
+  normal live-upgrade composite reaches a separate post-commit timeout. Caller
+  CLI admission was also incorrectly timed against the owner's 120-second
+  cutover allowance: startup now consumes only the remaining existing
+  900/1,140-second scenario budget, never a reset window. The actual driver now
+  checks its unchanged deadline after terminal archival too; a real-child
+  late-archive control failed before that correction. Shared entry selection
+  uses its already-validated completion result rather than adding duplicate
+  full validation. These corrections do not make the remaining upgrade
+  timeout a successful operation; bounded status/reconciliation still needs
+  implementation and real proof.
+
+### 2026-10-18 - Resume canonical installation adoption; stop receipt investigation
+
+- The operator explicitly selects `tracked-residual-with-defenses` for the
+  unexplained Windows in-handle reader observation, superseding the earlier
+  cause-investigation merge hold. #7208 records the residual, missing original
+  metadata and distinction from the cross-API report #1423. Passing reruns are
+  not a claimed fix. No further recording investigation is requested.
+- Follow-up direction, verbatim: "The installation-receipt stuff can just be
+  improved by aligned install to be consistent with all other plugins; I'd move
+  on from trying to investigate the receipt thing". Keep the canonical shared
+  installer, generated validators and strict ownership checks; do not add a
+  PR-specific receipt workaround.
+- The caller recovery defense is a fresh scoped `pr-status` read after an
+  interrupted wait, followed by re-arming only an unmet condition with the
+  original cursor/remaining deadline and no duplicate wait owner. Actual
+  transitions and consent updates still need handling; auth, usage,
+  cancellation and installation-identity failures are not spurious wakes.
+  The owning Worktrees PR workflow now states this discipline.
+- Reconciled the adopter with current `dev`, preserving the reviewed fleet
+  scope/consumer-contract intake and upstream CI backend-selection policy.
+  Adoption still requires canonical-copy/install-contract checks, current-head
+  CI/native acceptance and actual review before merge. Release, authorized
+  rollout, saved dispatch integration and fleet-owner agreement remain open.
+- Canonical generation now confirms all 12 plugin and one standalone-payload
+  installation-context adopters, every peer vendor and the 13-plugin install
+  contract. No canonical reader or PR-specific validator change was needed.
+- The selected native installer check exposed a separate fixture timeout:
+  synthetic legacy-source tests copied and repeatedly fingerprinted the entire
+  newly expanded cell-bootstrap payload. Retained the real complete canonical
+  `versioned_runtime*` family while excluding unrelated cell inputs from that
+  synthetic fixture; the full-payload cell acceptance remains separate and
+  unchanged. A byte-for-byte family regression and both native PowerShell
+  construction/reuse cases pass, together with a real pipe-inheriting-child
+  timeout cleanup case: four passes and one explicit POSIX-layout skip in
+  49.28 seconds. Native query, item and suite budgets are unchanged. Fixture
+  subprocesses now use owned Job/process-group teardown rather than leaving
+  descendants holding capture pipes after timeout.
+- The complete selected installer wiring, native source-transaction and real
+  completed-slot construction slice now passes 103 cases with one explicit
+  Windows/POSIX-layout skip in 318.69 seconds. Rebased partition/admission
+  contracts pass 186 cases. Their accompanying version-guard tests exposed Git
+  treating a long SHA range/blob expression as a Windows path and silently
+  reporting a failed diff as no changes. Explicit revision/path separators and
+  a visible failed-diff result correct that guard; its complete 30-case suite
+  and 52 changefile/accumulation consumer cases pass. No test or CI deadline
+  was increased.
+
+### 2026-10-18 - Concrete PR-service contract intake
+
+- Reconciled the fleet-service worktree with newly merged #7099. Its isolated
+  admission library validates existing observation/operation shapes; it is not
+  a PR registration route, durable delivery transport or serving policy owner.
+- Grounded the consumer proposal in the actual PR registry and callback
+  implementation: pending registration/event identities already exist, but
+  replace-by-subscriber-ID is not idempotent registration retry, local callback
+  argv is not a remote transport, and callback return success is not a remote
+  coordinator ACK protocol. The proposed shared consumer flow retains PR-owned
+  durable state and dispatch's existing generation fences.
+- Live owner-routing coordination has not established Gateway authority. An
+  attempted coordination channel returned `carrier_unavailable` (HTTP 503,
+  handshake `IncompleteReadError`); preserved that evidence without restart,
+  replacement or repair. The contract proposal and owner-agreement checklist
+  permit specific review while keeping those owners and the original reader
+  blocker intact; no runtime or live deployment changes are claimed.
+
+### 2026-10-18 - Fleet PR-service amendment reviewed and merged
+
+- #7189 merged into `dev` at `34c49cf34ec34bcddfa607eb0acc95526a6ce0ec`
+  after exact-head Copilot approval `5564926445`, no review threads and successful
+  required CI `39165380566`. The standing single-operator fleet boundary and
+  first-class PR-service implementation/validation plan have cleared review.
+- Reconciled the planning worktree onto the merged intent and retained the
+  Active parent and distinct fleet-service slice. Next resolve the retained
+  fleet owners' supported role, routing, credential and remote delivery
+  contracts. No runtime, service deployment or live authority changed.
+- Read the current `fleet-manager/docs/gateway-runtime.md` at the merged
+  source: its executable backend contract is index-specific, its enrolled roles
+  do not include a PR-service consumer, and its credential broker is explicitly
+  in-memory with restart uncertainty rather than a durable event queue.
+  #7188 therefore depends on the retained #6236/#5789 owners agreeing PR service
+  routing/enrollment and transport-appropriate durable delivery. Do not disguise
+  PRs as index corpora or use the credential broker as the subscription registrar.
+- The existing Windows receipt-read diagnosis remains open; its frozen repro
+  candidate and operator-run capture procedure are preserved. The scope
+  amendment neither clears that blocker nor completes installation-cell
+  adoption, saved dispatch integration, release or authorized deployment.
+
+### 2026-10-18 - First-class PR service and single-operator fleet scope
+
+- The operator expands this same effort to build out the PR-focused plugin and
+  service, with a centralized IO-oriented watcher and registrar deployable into
+  containers on assigned fleet machines. #7188 owns the service-consumer slice;
+  existing routing, fleet, lifecycle and PR-conformance owners retain their work.
+- The operator clarifies that one operator owns the entire fleet, permanently
+  excluding other operators' state and credentials from that fleet. Future
+  multiplayer would connect separate fleets, not add tenants to this one.
+- This amendment proposes implementation and validation before runtime changes.
+  The existing installation-cell prerequisite, unresolved Windows stable-read
+  observation, saved dispatch integration, release and authorized deployment
+  gates remain open. A plan merge will not complete the parent effort.
+
+### 2026-10-18 - Bound receipt diagnostics and preserve the smoke deadline
+
+- The next required-CI run, `39114847088` at `1635df762`, passes the workflow trust guard and every other executed job but cancels PR-owner smoke at its unchanged eight-minute limit. The first contained group passes 369 cases with 56 intentional skips in 293.50 seconds; the second is still running when the job deadline expires. Use the existing scheduling map to run the suite's two original file groups as independent required partitions. Complete/disjoint file coverage, unchanged runner process groups and exact candidate-qualification inventory pass all 82 targeted tool contracts; no test selector, job deadline or containment limit is weakened.
+- Expand the opt-in receipt diagnostic to a real active installed owner with concurrent completed-runtime revalidation, authenticated health requests and raw receipt readers. The initial bounded case passes in 26.17 seconds; the sustained 75-second consumer window passes in 83.40 seconds, still under the existing 180-second item bound. Neither supplies the original refusal's missing cause or clears the merge blocker.
+- Test-only refusal tracing now captures the exact path, both Python stat records and Windows basic-information/file-ID snapshots around the open descriptor before cleanup. A real metadata-change control proves the diagnostic records a refusal and captures the changed native timestamp without modifying production validation. That control, the raw parallel-reader case and the instrumented passive crash boundary pass together in 52.64 seconds. Production reader behavior remains unchanged; #7160 stays draft pending a justified resolution, current-head native acceptance, CI and review.
+
+### 2026-10-18 - Complete native acceptance; strict reader investigation retained
+
+- Native acceptance run `39108195693` passes all 15 effective jobs at exact candidate `7db1ea808`: all ten fresh Linux/Windows account scenarios, four contained controller-death/concurrent-upgrade jobs and native macOS refusal. The default diagnostics are the two intentionally skipped jobs in this opt-in run; no selected acceptance job is skipped or waived.
+- Required CI later rejects the acceptance workflow's dynamic runner expressions under the repository's existing trust policy. Split the Linux/Windows native and contained jobs onto literal hosted labels, using the repository's existing shared-step YAML-anchor pattern. Scenario matrices, commands, account admission, bounds and the 15-job effective inventory stay unchanged; the trust guard itself is not weakened. The real trusted-CI guard and all 157 trusted-routing/scope tests pass.
+- The unexplained earlier in-handle Windows receipt read remains a merge blocker, and investigation continues rather than accepting an intermittent gap. A bounded synthetic native probe covers 2,000 atomic-replacement/read pairs, both normal and aged access timestamps, with real Windows basic-information snapshots under Python 3.14.7; it observes no stable-field change. This rules out that probe's simple access-update path, not the original failure. The separate upstream stat-versus-fstat compatibility mismatch in python/cpython#157671 does not by itself explain a change between two fstat calls on one open descriptor.
+
+### 2026-10-18 - Native deadline preservation and POSIX vendor mode
+
+- The corrected exact-head native run `39106966491` passes 14 of 15 effective jobs, including all ten fresh-account Linux/Windows scenarios, native macOS refusal and the Linux/Windows controller-death matrices. The remaining Windows concurrent-upgrade check measures an acknowledged subscription deadline drifting by 14.385 milliseconds; its existing ten-millisecond assertion correctly fails.
+- Reproduced the defect deterministically with a coarse wall clock and independently advancing monotonic clock: every persisted snapshot recomputed the absolute deadline, producing a 14.625-millisecond shift without any registration change. The registry now captures that durable deadline once at registration and retains the original value on reload, while live expiry continues to use its monotonic deadline. The new regression and all 142 delivery/registry/quiescence/actual-concurrent-upgrade cases pass. Tightened the native integration assertion to exact deadline equality rather than increasing its tolerance.
+- Required Linux CI also detects the new generated installation-context shell copy's Git executable mode differing from canonical. Windows byte synchronization cannot infer that index bit; matched the new copy's index mode to the canonical `100755` without modifying its content or relaxing the POSIX guard.
+- Four additional instrumented passive-recovery attempts on the local Windows interpreter do not reproduce the original in-handle stable-read refusal. They provide no missing metadata evidence and do not clear the blocker. Native/current-head CI and review still must pass after these fixes; the draft remains unmerged and the parent effort remains Active.
+
+### 2026-10-18 - First native hosted-account acceptance and fix-forward
+
+- Published draft #7160 at candidate `0ca337ecae` through the managed flow after reconciling the newest immutable-source installer; that source's native transaction/materialization/normal-peer checks pass 77 cases with one explicit skip. Dispatched native acceptance run `39105260993` at the exact candidate: six of the 15 effective jobs pass, including macOS refusal, Linux peer roundtrip, both Linux lease-only refusals and both contained Linux owner-boundary jobs. Nine fail; all seven Windows jobs reject newly created private custody as belonging to another OS account, while Linux upgrade/isolation fixtures try a nonexistent extension-suffixed binstub.
+- New Windows secret-bearing temporary files now assign the current token user explicitly alongside the protected DACL before publishing bytes; ordinary read/replacement still rejects foreign custody without changing it. Native assertions verify owner-setting flags and real privacy checks, plus a wrong-owner no-repair control. Corrected the POSIX fixture to call the actual extensionless shipped binstub instead of inventing a `.sh` name. The real full-payload peer/build/private-file group passes all 32 selected cases locally.
+- Required CI also found the shared hook-roster assertion still requiring a direct bootstrap reconciler instead of the PR owner's admission wrapper, and three metadata adapter tests consulting the real POSIX account policy instead of their synthetic fixture policy. The roster now requires the actual attributable wrapper and both native wrapper files while retaining the shared reconciler requirements. Only the in-process metadata fixture substitutes its explicit profile observation; canonical policy/activation parsing remains real, and fresh-account acceptance still prohibits substitutions. Current-head CI and the complete external matrix must pass again before readiness.
+- The original Windows in-handle stable-read refusal remains unresolved and is not cleared by these independent failures or passing lanes. The draft is not a merge verdict, release or authorized rollout, and parent delegation gates stay open.
+
+### 2026-10-18 - Current-base integration and restored-owner withdrawal
+
+- Consolidated the unpublished adopter and reconciled it with the current contribution branch. Kept the shared legacy daemon-spawn primitive, native human-output initializer, seasoned dependency installation and newly split guest-environment validators. Canonical installation-context, peer-launch and library copies remain generated from their owning sources.
+- Real normal-install checks exposed the new dependency policy attributing packages to the immutable helper's snapshot while the builder installed a disposable copy. Construction now loads that copy's own helper and uses its directory as cwd. Its policy-retained inputs use the inherited temporary root rather than a nested version-slot temporary root, avoiding native Windows subprocess path overflow. The real package-build/completed-replay lane and all 25 installer-slice cases pass; the normal full-payload peer roundtrip and passive controller-death/parallel-read lanes pass separately in 149.05 seconds. The shared native-exit/custody/deadline lane passes 236 cases with eight explicit platform skips.
+- Independent source review found normal stop comparing a restored predecessor against the rollback intent's pre-restoration route. Withdrawal now derives the restored generation/history using the same canonical restoration calculation. Two real rollover failures, before and after native route publication, complete rollback and then stop the exact restored original through normal invocation, preserving publication history. These regressions pass in 194.87 seconds.
+- The complete withdrawal/interrupted-stop/restart suite passes all 14 cases in 701.22 seconds. The current-base shared peer, release-impact, runner and packaging pass accounted for 167 passes and two explicit skips, with one stale workflow-shape assertion failing on the newly authored opt-in input. Updated that owning contract to retain the default diagnostics and assert the separate five-scenario/two-platform native matrix, two-scenario/two-platform contained matrix and native macOS refusal; all 65 scope tests pass. No required CI lane or production deadline was expanded.
+- Fresh hosted-account Linux/Windows acceptance and native macOS refusal remain unrun until candidate publication. The earlier in-handle stable-read refusal remains unresolved: neither the successful instrumented passive rerun nor the parallel-reader probe establishes its cause or an accepted flake disposition. No merge, release, rollout, parent completion or saved-delegation gate is waived.
+
+### 2026-10-18 - Final same-cell PR-owner peer integration
+
+- Registered the PR owner in the canonical caller and target-peer rosters, synchronized all nine packaged boundaries, and added the PR package to the generator. The boundary scrubs the PR override namespace and rebinds only the exact target receipt's state root. Existing changefile coverage now includes Logger and Machines as additional generated consumers; the shared release-impact map explicitly charges Worktrees and the PR owner too.
+- The PR CLI now loads that boundary and its packaged validator from its completed runtime's validated immutable snapshot, not the replaceable management payload. A physical-prefix regression exposed import machinery writing `__pycache__` into the snapshot and breaking its completion digest. The in-process loader now compiles the already-validated owned source without emitting bytecode; its standalone prefix adds `-B` so subsequent validator imports are likewise read-only. Pre/post physical runtime validation and canonical helper authorization remain intact.
+- Physical invocation/runtime/peer regressions pass all 51 selected cases, including same and advanced management receipts, refusal of a missing snapshot helper without management/PATH fallback, and execution of a reserved bootstrap that leaves the snapshot untouched. The shared packaging/environment/release-impact contracts pass 43 cases; the actual dispatch peer-boundary lane passes 72 cases with 10 explicit platform/role skips, including the PR caller across two source-qualified cells. Module size, headless launch, installer and canonical vendor guards pass.
+- A separate normal full-payload roundtrip passes in 107.58 seconds: the actual PR interpreter constructs its immutable prefix and calls a test-owned same-cell Worktrees echo backend, preserving Unicode stdin/stdout, stderr and exit 7 while discarding inherited tokens and PR routing overrides. The reverse canonical boundary enters the actual PR module and reports the explicit installation-local absent-owner health result, without starting an owner or mutating selection/journal/state. Full completion validation still passes afterward. Earlier harness timeouts reached the echo backend in roughly seven seconds but awaited EOF through an extra wrapper's implicit Windows standard-handle inheritance; explicitly binding that wrapper's Python stdin/stdout/stderr, as the canonical boundary itself does, fixes the fixture without a production deadline or stdio change.
+- Added that roundtrip as a fifth fresh-account scenario per platform, making ten Linux/Windows native-account jobs plus four contained owner-boundary jobs and one native macOS refusal job. All remain unrun externally until the candidate is published. Peer integration is still local and unpublished; current-head review, native evidence, the unresolved stable-read observation, release/authorized deployment and the saved dispatch integration remain parent gates.
+
+### 2026-10-18 - Native-account refusal and macOS fail-closed acceptance lanes
+
+- Extended the existing fresh hosted-account Linux/Windows jobs with separate reachable/unreachable lease-only cases. Each performs normal full-payload init before starting the actual unproven legacy owner in the selected cell's state root, then invokes the completed target's real installer activation. Assertions retain pending state, original native liveness, selected marker/manifest/route and terminal journal custody, with no shutdown or duplicate spawn. Legitimate controller/capability rotation of an existing metadata-only terminal journal is not confused with owner/selection mutation.
+- Exercised the same normal-installer refusal path locally for both rendezvous cases in disposable Windows profiles, plus the unsupported-native-evidence unit contract: all three pass in 193.18 seconds. The two original small-prefix Windows refusal cases also pass. The full-payload local profiles are not actual native-account evidence; the new hosted-account jobs remain unrun.
+- Added a separate native macOS completed-interpreter job for explicit startup/instance refusal, bounded absent-owner stop, and cleanup/original-exit refusal without health control, signaling, spawning or selected-state mutation. An ordinary unit test injects unavailable native primitives to exercise the higher-level no-effects contract on this host; it passes, but is not macOS evidence. Native macOS governed operation remains unsupported until shared birth/exit primitives exist. Its fail-closed lane and the named macOS identity/recovery follow-up under #6286 remain open pending the actual native job; no platform exemption or positive macOS cutover claim has been taken.
+- The opt-in workflow now has eight fresh-account Linux/Windows scenario jobs, four contained owner-boundary jobs and one native macOS refusal job. Its default eight derived diagnostics remain unchanged. All parent publication, review, release, authorized rollout and saved-dispatch gates remain open; the unresolved stable-read observation recorded below is still not waived.
+
+### 2026-10-18 - Actual controller death and concurrent installer upgrade
+
+- A completed-slot controller now exits abruptly, after its real `bind_successor()` persists passive custody but before endpoint binding. A separately captured native reference proves that original controller exited before a new guard holder recovers. This reproduced an endpoint-custody gap: reconciliation left the exact reserved passive child stranded despite its private launch receipt. Recovery now revalidates that receipt and live authenticated instance before binding the missing endpoint, without discovery fallback or new retirement authority.
+- The expanded process matrix passes all 12 boundaries: reserved launch, passive binding, endpoint binding, writer release, read-ready adoption, completed-slot marker CAS before manifest publication, native route publication before custody capture, captured route, a committed journal write before its return, returned commit, activation before retirement, and committed recovery with unavailable predecessor health. The unavailable-health case stays committed with both native processes accounted for, then converges after a second guarded retry. Each case preserves the pending event/registration and retry payload, coherent selection, native publication history, exact obsolete-process exit and archived terminal custody.
+- Three missing/foreign launch-receipt cases refuse before lifecycle control, with no selection mutation or claimed exit. The 12-boundary matrix plus these three cases passes in 752.47 seconds under the unchanged 1,200-second group bound. The existing and new recovery contracts separately pass all 11 cases. These are owned Windows process tests in disposable profiles, not native-account or shipped-full-payload evidence.
+- The actual completed-target installer activation also passes with a pre-existing committed owner while two admitted register/unregister handlers, an accepted poll result, a real slow acknowledged callback subprocess and three queued legacy callbacks overlap the upgrade. Drain keeps predecessor writer custody and successor passivity; late mutations refuse. After release, final adoption retains the accepted registration, cancellation, poll event identity, unrelated subscriber, pending retry and wall-clock deadline (under 10 milliseconds of conversion drift), without overlapping callback generations. Original native exit and coherent target routing are verified. This composite passes in 93.22 seconds; production callback/cutover deadlines remain 30/120 seconds.
+- Two earlier concurrency harness attempts failed and are not counted as product passes: one started its 25-second test gates before slow passive construction, and one incorrectly required a persisted remaining-time value to stay constant as time elapsed. The fixture now admits blocked work after actual passive readiness and checks stable identities plus the measurable wall-clock deadline instead. It does not extend any production or fixture gate.
+- The passive-bind crash stays in the ordinary smoke portfolio. Other crash boundaries and the concurrent composite are explicit T3 cases with separate Linux/Windows jobs in the existing opt-in acceptance workflow; default diagnostic jobs remain unchanged. Those external jobs remain unrun. Native account/platform coverage, final peer integration, publication/review, release, authorized deployment and the parent effort's remaining gates are still open.
+- A final two-case explicitly admitted run passes the concurrent upgrade again but refuses the passive crash recovery at the canonical JSON reader's stable-read guard during final predecessor attestation (`JSON document changed while it was being read`). This is an unresolved acceptance failure, not a waived flake or a passing combined run. Added test-owned, metadata-only diagnostics around that reader's existing refusal without changing its validation, plus an explicit-tier 4,096-read/eight-thread immutable receipt probe. The instrumented passive case passes in 45.42 seconds and the concurrent-read probe passes in 7.16 seconds, but neither reproduces or explains the prior refusal. Preserve this open Windows native-read observation under #6286 until exact evidence supplies a fix or an explicit tracked disposition; these reruns do not independently clear publication.
+
+### 2026-10-17 - Normal same-path payload refresh and live-owner upgrade
+
+- Added an explicit-tier Windows check using a private released directory-marketplace payload. Normal native init creates the first cell, the generated command starts a real governed owner, then a same-path management version refresh goes through normal init without direct receipt stamping, activation edits, manual snapshots or runtime edits. Assertions retain the original native exit reference, historical completion/archive, pending event identity, coherent target selection and native route history.
+- Its first run built both complete payloads and refreshed the receipt, but exhausted the existing 120-second lifecycle deadline at final successor verification after original retirement. This is a failed full-payload upgrade, not covered by the earlier tiny-incumbent fixture's passing result. Fixed its cleanup command to use the supported top-level stop.
+- Journal readiness now validates the actual health RPC inside its own runtime/native bracket rather than nesting a fully validating client followed by another bracket around a cached response. Ordinary client health still validates fully; the journal-only transport callback conveys no authority. Native exit capture opens the non-signaling exact-process reference before one bracketed health exchange and closes it on refusal. Production deadlines, pre/post governance/runtime/native checks and original-exit requirements are unchanged.
+- Focused driver, recovery, journal, runtime and control/deadline verification passed 108 cases and exposed two fixture defects: an endpoint token shorter than the existing custody contract, and an error-message assertion that did not allow the earlier native reference refusal. After fixing only those expectations, the four affected post-RPC mutation/stale-token cases pass. The actual normal full-payload upgrade then passes in 464.09 seconds, including its governed cleanup. Fatal lint, module size, headless launch, installer and diff contracts pass. This is contained Windows process evidence, not an isolated OS-account/native Linux or two-independent-shipped-cell claim; the complete matrix and all parent gates remain open.
+- The base CLI, notification, drain and writer group passes 220 cases. The larger combined owner-boundary group exceeds the unchanged 1,200-second runner limit without an assertion failure; partial progress is not counted as a suite pass. Its remaining accounting is being split into smaller named groups under the same limits, not waived or retried as a presumed flake.
+- The actual two-shipped-cell check passes in 681.01 seconds. Two full normal installs and generated starts in one disposable Windows profile produce distinct source-qualified cells, native owners and endpoints. Each sees only its pending registration, cannot cancel the other's registration, and refuses crossed context for health, stop, restart/recovery and init. Direct control at the other real endpoint refuses foreign transaction authority even with that endpoint's own token and exact target instance. State, route and journal stay unchanged; stopping the first proves the second remains the same live effectful writer. Both test-owned original processes exit through governed cleanup.
+- Added opt-in fresh native-account jobs to the existing manual installation-context acceptance workflow, separate from its unchanged default diagnostics. Linux and Windows run normal full-payload upgrade and two-shipped-cell isolation in independently discarded hosted accounts without HOME/USERPROFILE substitution. The fixture rejects non-hosted runners, substituted profiles and pre-existing config/installation state. Workflow syntax and fatal lint pass; these native jobs have not yet run, so contained-profile results do not close that platform/account gate.
+- The complete current contained Windows inventory is now accounted for: 597 passing cases and two platform skips across disjoint bounded selections, including explicitly admitted real construction. The focused runtime/journal/driver/recovery/deadline group accounts for 110 cases; base behavior accounts for 220; smaller owner-boundary groups pass 50, 81 and 40; normal full-payload upgrade and two-cell isolation pass one each; the final complement passes 94 with two skips. An explicit skip-report run identifies both as the POSIX-only stale-install-lock/reaper cases (`POSIX bash not available`), not disabled construction or an unexercised owner gate. The timed-out combined batch is superseded by those fully accounted smaller groups, not reported as passing. Actual controller-death and concurrent-upgrade evidence, native account/platform lanes, final peer integration, review, release and authorized deployment remain open.
+
+### 2026-10-17 - Operator-selected lease-only ownership refusal
+
+- The pre-cutover daemon's rendezvous records contain a PID, token and wall-clock start time; health does not attest installation, native process-start identity or completed-slot ownership. The singleton library explicitly labels its PID record diagnostic, not lock ownership. Native exit references prove exit, not permission to control that process.
+- The operator selected `refuse-unprovable-owner`: retain fail-closed activation and revise the reviewed first-upgrade prerequisite instead of adding an exact-owner authorization/configuration surface. The revised plan requires a real reachable/unreachable lease holder to remain running with pending state unchanged, without installer shutdown, signaling, selection mutation, route publication or a second owner.
+- Two real Windows process regressions pass for reachable and unreachable legacy rendezvous records. They run the actual legacy CLI/daemon with its OS singleton lease and pending acknowledged event, then execute installer activation in the actual completed target. The installer refuses without shutdown or spawn, and pending bytes, legacy endpoint and absent target selection/route stay unchanged. Test-owned cleanup alone requests graceful shutdown and waits on the original daemon's pre-captured native exit reference. The initial fixture mistakenly captured the Windows venv redirector PID; it now binds the actual original daemon's native identity announced by its test-owned process before installer control. This is contained process evidence, not an isolated-OS-account or native Linux claim.
+- This decision does not relax any attributable governed-upgrade, concurrency/crash, shipped-cell, native-platform/account, review, release, deployment or parent close-out gate. No Plan or Validation checkbox is closed by this scope revision.
+
+### 2026-10-16 - Native payload bootstrap and attributable command dispatch
+
+- Added native governance admission before Python selection, legacy installer writes and session-start reconciliation. Missing/false policy preserves legacy first-touch bootstrap without Python. Governed requests, scoped overrides without source provenance, invalid receipts and maintenance/refusal states never fall back to the legacy root. The shared legacy bootstrap-check files remain unchanged; a narrow admission wrapper keeps them out of governed cells without creating another background reconciler.
+- Generated version-2 required-context payload commands now dispatch only through this payload. Fresh policy-enabled cells with genuinely absent legacy state use canonical receipt stamping and generation-pinned activation; existing unactivated receipts and migration-required state demand an explicit decision. Explicit bootstrap refreshes only its already-active source's management version through canonical stamp/activation CAS, then uses the normal immutable snapshot/build/activation installer.
+- Runtime dispatch requires coherent current/LKG markers, schema-3 manifest, canonical slot ownership, immutable snapshot and build completion. It never scans for a newest slot or repairs partial metadata. Older owned completed selection remains usable until installer-driven replacement. Caller arguments, outside-payload CWD, streams and native exit status are preserved.
+- The real native first-touch check initially exposed a test-fixture build CWD longer than Windows' native 260-character limit (271 characters, versus 190 for the ordinary account profile). A short factory fixture keeps the native lane below that limit without changing production behavior. The next run exposed genuinely lost stdout in the hidden follow-on subprocess: explicit native standard handles now preserve stdout/stderr, rather than relying on implicit inheritance with `CREATE_NO_WINDOW`.
+- Focused installer/bootstrap validation passes 62 tests with explicit T3 execution, including real normal init, canonical activation, real package construction, cold selection without an owner, generated command output and nonzero target status, native no-Python admission, source/generation refresh, missing/foreign receipt refusal, corrupt selection refusal and legacy-root isolation. This is contained Windows fixture evidence, not a native isolated-OS-account or two-shipped-cell claim. Full owner, lease-only transition, concurrency/crash matrix, platform/account lanes, peer-roster integration, review, release, authorized rollout, saved dispatch integration and parent close-out remain open.
+
+### 2026-10-16 - Native target status and actual-control attestation follow-up
+
+- Follow-up verification found that Windows `os.execv` does not preserve the executed target's nonzero status. The previous entry's replacement-based implementation is therefore superseded, not accepted as a complete activation contract. The installer now waits for the real completed target's own bounded journaled lifecycle through structured native subprocess arguments, with no extra construction job around that controller. Build helpers keep their existing deadline and job containment. Outer test containment and canonical daemon breakaway suppression remain unchanged.
+- Actual target subprocess tests reject exit 7 even when stdout contains success-shaped activation JSON, and reject incomplete or malformed completion output. A subsequent combined run passed those three cases and normal cold installation but again exhausted the real upgrade's existing 120-second cutover under load; it is not classified as a waived flake.
+- Nonterminal lifecycle calls now bracket their actual authenticated control acknowledgement with immutable runtime and native-instance validation, instead of fully attesting a separate preliminary health RPC and then sending an unbracketed control. The exact acknowledged post-transition snapshot confirms drain without another redundant RPC; older acknowledgement shapes still require a fresh health response. Terminal shutdown retains its separate preflight and pre-captured original-exit proof. Authority, receipt/native rechecks and the same caller deadline remain required; no proof cache or larger production budget was introduced.
+- The final actual different-runtime normal-installer upgrade passes in 323.83 seconds, including real package construction, native predecessor retirement, durable successor survival after installer return, unchanged pending event identity and governed cleanup. All affected physical-invocation, writer, control/deadline, policy-off cleanup and installer-refusal cases then pass: 110 cases with one explicit-tier construction skip in 539.24 seconds. These include post-control native-change/deadline refusal, lifecycle-lock authority and same-response drain confirmation. Fatal lint, module-size, headless launch, thirteen installer contracts and staged/unstaged diff checks pass.
+- Normal bootstrap/dispatcher work is still next. The shipped two-cell, real OS-account/native-platform, remaining crash/concurrency, complete-suite, exact-head review, release and authorized deployment gates remain open. No Plan or Validation checkbox is closed, and this remains the same unpublished adopter, not a separate groundwork PR.
+
+### 2026-10-16 - Real different-runtime installer upgrade and durable activation
+
+- Continued the same unpublished adopter with an actual different-version target, built through normal snapshot preparation and the shared engine rather than a preassembled target slot. The predecessor is a physically attested, archived governed owner; the current management receipt advances canonically while the historical runtime, native instance and original archive remain immutable. A future-retry acknowledged event proves registration, event and payload identity survive the handoff without contacting a real PR or callback target.
+- The first combined fixture exceeded its newly authored 180-second test allowance before exposing a result. Timing showed approximately 44 seconds of native fixture setup, approximately 96 seconds of previously measured package construction, and the existing 120-second cutover plus graceful stop. The composite test now budgets those separate bounded operations explicitly; no production cutover/native-exit, Windows group or aggregate deadline changed. Diagnostic runs then exposed real cutover exhaustion, not an accepted flake. Profiling identified repeated complete canonical runtime validation nested within the same transition. The adapter no longer duplicates the proof already performed by physical invocation capture or authoritative control validation. Writer authority still runs under its lifecycle lock and is rechecked after quiescence before release; no authority cache, test-admission bypass or permissive validation flag was added.
+- After that correction, installer activation committed successfully but its nested construction job killed the new owner on exit in contained tests. The normal installer now replaces its management entry with the actual completed target. Construction subprocesses remain bounded and job-owned, and the outer supervisor still contains the target and honors canonical breakaway suppression. The fix does not disable containment or add an alternate daemon launcher.
+- The explicitly admitted real normal cold-install and different-runtime-upgrade cases pass together: two cases in 414.11 seconds. Upgrade assertions verify original native exit, live exact successor after installer completion, writer/read/effect readiness, coherent markers and manifest, preserved native generation/history/previous route, unchanged historical archive, and the same pending registration/event payload. Governed cleanup succeeds. The subsequent authority/physical-invocation/writer/policy-off-cleanup/installer-refusal group passes 99 cases with one explicit-tier construction skip in 471.66 seconds. Fifteen final deadline/control-routing cases pass, including direct proof that adoption refusal and post-drain release refusal occur under the writer lifecycle lock and preserve the required native lease. Earlier timeout and live-upgrade failures are not counted as passes. Fatal lint, module-size, headless-launch, thirteen installer contracts and diff checks pass.
+- This remains contained Windows fixture evidence, not two shipped independent cells or a fresh OS-account/native Linux proof. Normal payload bootstrap/dispatcher integration, lease-only transition, remaining crash/concurrency and platform matrices, complete current-owner suites, exact-head review, promotion, authorized deployment and saved dispatch integration remain open. No Plan or Validation checkbox is closed.
+
+### 2026-10-16 - Canonical snapshot preparation and normal cold installer
+
+- Continued the same unpublished adopter after saving exact stop/restart custody. The owning cell installer can now prepare its immutable input rather than requiring a test to preassemble it. Development-tree input composes the canonical release materializer's existing per-consumer library, installer-engine and launcher-asset functions. Published standalone payloads must already be self-contained. No independent materializer, Index service coordinator or alternative deployment framework was copied.
+- Snapshot preparation rechecks source content and receipt identity, derives a content-addressed name, claims a new directory exclusively, checks final bytes, and publishes canonical provenance last. Existing incomplete, changed or unattributed snapshots refuse without overwrite; an interrupted exposed candidate stays explicit repair custody. Only the invocation's unexposed staging tree is disposable. Installer `install`, `update` and `provision` retain explicit prepared input support and otherwise derive their version and snapshot from the management payload.
+- The metadata/installer group passes 24 cases in 85.42 seconds, with two explicit-tier construction cases skipped rather than credited. Explicit admission then passed the prior real package-build case but exposed Windows access denial while renaming a just-copied snapshot tree. Snapshot publication now uses exclusive directory production and provenance-last visibility instead; it does not retry past a failed ownership check or replace an existing snapshot. The subsequent explicitly admitted normal prepare/build/cold-activation case passes in 95.95 seconds, starting no owner and touching no legacy runtime or global binstub.
+- The combined explicitly admitted installer/snapshot/activation regression group passes all 73 cases in 548.19 seconds. Subsequent receipt/package-version refusal hardening and the complete snapshot group, including interrupted-copy refusal and real automatic cold activation, pass all seven cases in 135.67 seconds. Fatal lint, module-size, headless-launch and install-contract checks pass. Payload-launcher bootstrap, actual different-runtime live upgrade, the lease-only transition and full shipped-cell/native-platform acceptance remain open; no Plan or Validation checkbox is closed.
+
+### 2026-10-16 - Exact governed stop and retained-generation restart
+
+- The same unpublished adopter now routes explicit-context stop through private withdrawal custody referencing the exact archived terminal owner. It keeps the whole native cutover guard, captures the original native exit reference before authenticated control, and requires original exit plus actual writer availability before exact native route withdrawal. The owner revalidates governance after quiescence and before releasing the writer. No legacy shutdown, PID-only cleanup, synthetic successor, parallel owner or shared live service was used.
+- Withdrawal preserves sticky publication history and a stopped-generation witness. Only a completed archived withdrawal permits later cold selection to reuse that route. The shared pre-adoption orchestrator now distinguishes an adapter-selected incumbent from a retained `previous` witness; it still drains a previous endpoint when the adapter actually selects it. Actual stop/restart advances generation without erasing history.
+- Stop, restart, protected publication, interrupted shutdown, lost acknowledgement, replay, entry and recovery cases pass together: 25 cases in 1008.51 seconds, within the unchanged 1200-second group/1800-second aggregate bounds. An initial restart failure exposed the shared selection bug and was fixed. A newly authored lost-ACK fixture initially asserted immediate exit instead of waiting on its pre-captured native reference; a subsequent indentation error prevented collection. Both were corrected before the passing run. These failed attempts are not counted as passes.
+- The complete canonical ZDD suite passes 633 cases with 28 platform skips in 46.48 seconds. The subsequent final withdrawal group passes all 12 cases in 648.52 seconds, including compare-before-replace custody and refusal of another installation's native guard before writing. Headless-launch, module-size, install-contract, fatal Python lint, canonical installation-context, vendor-consistency and diff checks pass. Existing complete private archives are durably reconfirmed rather than silently trusted after an uncertain write.
+- Actual different-target installer upgrade, normal bootstrap and snapshot preparation, first lease-only transition, complete concurrency/crash and shipped two-cell matrices, native Linux/account evidence, review, promotion and authorized deployment remain open. No Plan or Validation checkbox is closed, and saved dispatch delegation remains gated.
+
+### 2026-10-16 - Receipt-advance discovery and explicit installer integration
+
+- Continued the same unpublished adopter. Entry and discovery now compose current custody with the established archived-terminal reader: a fresh management receipt can retain only an already-archived, same-cell terminal incumbent. Pending or unarchived historical custody still refuses unchanged. Three actual installed-subprocess cases prove retained endpoint/no replacement and both refusal shapes.
+- First-publication recovery now retries only an exact reserved, effect-free read-ready successor whose conservative native history matches its durable intent. It keeps the original generation and routing-owned promotion epoch; foreign history remains pending and untouched. Five actual-process recovery cases pass, including protected-write interruption and foreign-history refusal. An earlier interrupted run emitted two results and did not complete; it is not counted as a pass.
+- Added explicit PowerShell/Bash installer cell dispatch before legacy side effects, canonical metadata adapter actions and immutable completed-slot construction through the shared installer engine. Actual activation executes in the completed target, checks physical running identity and uses the existing whole-transaction owner guard before metadata locks. Cold activation selects target markers/manifest only; known-target replay retains its owner, and an unattributed real writer blocks cold selection. No shared live instance was stopped or replaced.
+- Real package construction found an uncached build backend and then a PEP 440 normalization mismatch in the initial metadata-version comparison. Restored the missing backend through the package manager into a contained build cache and made the operative check use the loaded package version, matching physical runtime attestation. The newly authored T3 construction case initially inherited the fast 30-second default and exceeded it; it now explicitly uses the existing 180-second native-lifecycle test budget. Existing operative deadlines, the 1200-second Windows group bound and 1800-second aggregate bound are unchanged. This is not a clean-room/no-cache proof.
+- The integrated explicit-tier entry/recovery/installer group passes all 82 cases in 499.39 seconds, including real signed-venv package construction, immutable completed replay, native installer entry and governance refusal. A subsequent contained fresh-cache package construction/replay case passes in 38.33 seconds without the explicit warm-cache override; it still is not a fresh-OS-account or full shipped-cell proof. Fatal Python lint, module-size, headless-launch, install-contract and canonical installation-context/vendor consistency checks pass. A test-fixture argument error in an earlier run was corrected; that red run is not represented as green.
+- Normal bootstrap/snapshot preparation and installer upgrade integration, governed stop, first lease-only transition, the full crash/concurrency matrix, actual shipped independent cells, native Linux/macOS disposition, full current-owner suites, review, promotion and authorized deployment remain open. The saved dispatch integration remains blocked behind those gates. No Plan or Validation checkbox is closed by this unpublished slice.
+
+### 2026-10-14 - Operative owner integration, still unpublished
+
+- The same full adopter now wires the public shared cutover orchestrator to reserved actual-child custody, private authenticated TCP controls, canonical runtime selection, exact native exit and the owner's independent commit/archive gate. Cold on-demand startup and live rollover use the same held whole-transaction guard. The shared result, best-effort activation and cleared breadcrumb are not completion evidence.
+- The explicit-context CLI captures its actual completed running slot before discovery. Its passive process publishes only the exact reserved private launch receipt; ordinary no-context CLI behavior remains unchanged. Pending reconciliation never spawns a replacement: it finishes a committed target forward or proves the known successor's exit before restoring selection and resuming a predecessor. An unresolved reservation and an actual writer without discovery both block cold selection.
+- Native publication intent retains exact generation and existing promotion history. The first routing-owned epoch is captured through public guarded endpoint validation, not predicted or rewritten. Reserved successors cannot commit without captured native promotion history. Recovery can capture the exact intended first publication after a lost acknowledgement, while foreign history remains pending and untouched.
+- Early native runs exposed an exit-wait API bound mismatch, redundant activation and deadline failures in compound fixtures and combined runs. Exit waits now honor the native 30-second maximum. Health attestation brackets the actual authenticated wire exchange and rechecks native birth afterward; native exit capture similarly validates around the real exchange instead of nesting a second complete health attestation. Passive publication retains its native/runtime/governance checks without repeating physical invocation capture at every nested helper. Receipt absence is only a cheap readiness hint before full custody validation. No test or operation deadline was raised, and no authority cache, permissive validation flag or admission bypass was added.
+- The current combined operative/legacy CLI/deadline group passes all 50 contained Windows cases in 615.69 seconds with unchanged bounds, including real cold start, rollover, rollback cleanup, native reassertion, the actual module's private passive entry, no-spawn recovery, live-writer absence refusal and foreign-history refusal. The subsequent journal/custody regression group plus lost-publication recovery passes 65 cases in 1149.78 seconds, including refusal to recover a committed reserved successor after its captured native history is removed. An earlier focused 15-case run also passed. Earlier combined red runs remain recorded observations, not known flakes or waived gates; the remaining affected suites and full current acceptance matrix still need accounted results.
+- The existing authenticated TCP lifecycle group passes 11 cases in 178.93 seconds; disabled-governance passive cleanup passes 16 in 595.41 seconds. A subsequent real native commit-forward case passes in 111.63 seconds with an explicit assertion that the shared recovery breadcrumb is cleared only after the owner's terminal proof and archive. Leaving that committed shared breadcrumb behind would block the next otherwise-valid upgrade.
+- Installer provisioning/activation, governed stop and first lease-only transition, the complete crash/concurrency matrix, actual shipped independent cells, native Linux proof, current-head review, release promotion, authorized deployment and the saved dispatch integration remain open. No Plan or Validation item is closed by this unpublished integration.
+
+### 2026-10-14 - Recoverable canonical cold-selection metadata
+
+- Continuing the same unpublished full adopter. `WatchSelection` now composes the journal's whole native transaction guard with canonical completed-slot marker CAS and nested genesis/install metadata locks. The target manifest is an exact-byte, atomic durable nonsecret write; native routing remains exclusively routing-owned. No separate service coordinator or deployment framework is introduced.
+- Precommit interruption at either marker or the manifest can recover to captured prior or target metadata. Rollback preserves exact original bytes rather than normalizing a prior marker, while committed cold metadata repairs only the known target forward. Unknown metadata and disabled governance refuse. The installer still owes actual incumbent-absence proof before selecting this path; this helper is not a discovery or native-writer probe.
+- Twelve contained Windows cases pass against real canonical completed slots, including cold no-spawn/no-route/no-state assertions, every marker/manifest interruption in both recovery directions, committed repair, foreign metadata/governance refusal and a concurrent metadata replacement that must not be overwritten. An initial pair of test failures named `current` rather than the actual `current-version` file, so did not inject their intended fault; correcting that selector makes the interruption exercise the real canonical boundary. No product validation was relaxed.
+- Production driver/CLI/installer wiring, serialized on-demand startup, lease-only upgrade, the complete live crash/concurrency matrix, actual shipped independent cells, native platform lanes, current-head review, release promotion, authorized deployment and the saved dispatch integration remain open. No Plan or Validation item is completed by this internal selection seam.
+
+### 2026-10-14 - Attributable native rollback-route restoration
+
+- Continuing the same unpublished full adopter, without a separate groundwork PR or operative entry-point/installer claim. The owner journal now captures restoration intent inside the public native routing CAS before publication. Restoring the predecessor retains ZDD's monotonically newer generation and sticky publication history, rather than overwriting the original raw snapshot. Original prior bytes remain immutable recovery evidence.
+- Recovery can recognize only that exact attributable restored route, or retry the exact conservative-history intermediate write. Successor native exit precedes restoration intent and predecessor resumption. A matching owner reannouncement without intent, displaced CAS, changed generation/history/previous row, or changed prior manifest cannot authorize resumption or terminal completion. Terminal archive and subsequent transaction checks use the same route custody.
+- Eleven native Windows routing/process regressions pass, including before/after-flip restoration, interruption before route persistence, conservative-history persistence, lost final-publication acknowledgement, archive/next-transaction custody and route drift. This is actual shared public routing integration, not synthetic generation equality; it is not a complete operative driver or shipped-cell acceptance claim.
+- Added shared read-only original-exit observation for controller loss. Windows distinguishes native OpenProcess nonexistence from query errors or access denial and requests no termination rights. Linux composes a pidfd with strict bounded birth evidence; missing or malformed evidence never becomes tolerant-diagnostics absence. Unsupported platforms refuse. Captured graceful-exit references retain their existing contract. The changed canonical shared selection passes 57 tests with three native-Linux-only skips on Windows.
+- Six actual owner recovery cases pass: a live original blocks observation, an already-exited original needs no lost handle, native writer reacquisition still refuses an occupied lease, unknown/denied/unsupported evidence cannot write exit custody, and policy-off cleanup can reconcile the exact already-gone private reserved child before ordinary binding without authorizing resumption or terminal completion.
+- The first combined journal/custody/rollback selection exceeded the unchanged 1,200-second aggregate wall-clock bound after 64 completed items and has no suite-completion result. Validation was partitioned by those existing test modules rather than increasing budgets or bypassing admission: 40 ordinary journal, 24 terminal/launch custody, 14 final deadline-aware native restoration, and 16 policy-off cleanup cases pass. The complete changed shared ZDD suite passes 623 tests with 28 platform skips on Windows. Fatal lint, module-size, headless launch, thirteen installer contracts, canonical generation and vendor checks pass. Production wiring, shipped platform lanes and all parent completion gates remain open.
+
+### 2026-10-14 - Private launch custody and explicit terminal history
+
+- Continuing the same unpublished full adopter, without advertising peer/owner readiness or enabling the production entry point. A physically attested passive child can publish its exact pre-reserved native instance and authenticated endpoint into an exclusive, private, crash-durable launch receipt before controller binding. Recovery reads only that known transaction/cell receipt, rotates controller capability, and still requires authenticated exact passive health before binding or cleanup. Reusing the reserved UUID for another real child does not authorize cleanup of that different native instance.
+- Journal, launch and archive files require current-account ownership and private permissions: POSIX `0600`, or a protected owner/SYSTEM-only Windows DACL. Temporary files are protected before writing capability bytes. Permission/link failures refuse, not repair or follow foreign custody. Endpoint tokens remain outside public health and routing evidence. Launch/history publication never replaces existing custody.
+- A reserved but unbound child blocks both predecessor resumption and terminal rollback. Terminal phases also require the obsolete instance's recorded native exit. Explicit archival retains immutable completed custody before a next transaction can replace the live journal; pending, malformed, unarchived, foreign-root or future-generation records refuse. After a canonical management-receipt update, only already-archived terminal history in the same known cell can seed a fresh governed transaction. Pending recovery and controls retain strict pinned-generation checks. The next transaction preserves its exact surviving owner and private endpoint.
+- Lifecycle preflight, capability lookup, control and confirmation now consume one caller budget. The existing coalescing client gains an optional monotonic whole-transport completion budget, without changing ordinary calls' server-deadline grace. All 43 shared coalescing tests pass, including real partial-TCP-response deadline proof; the existing deliberate early-serve failure test still emits its expected thread-exception warning.
+- Current contained Windows proofs: 47 custody/privacy/budget/physical-invocation cases, 27 real TCP/control and policy-off cleanup cases, 110 ordinary journal/runtime/installation cases, then 37 final custody/privacy/budget cases after the additional exact-exit, predecessor-route and duplicate-native-child fences. Fatal Python lint, module-size, headless launch, thirteen installer contracts, canonical installation generation and vendor agreement pass. These are targeted internal-seam proofs, not a current full-suite or actual shipped-cell acceptance claim.
+- One earlier focused run had 29 passes and a fixture-setup refusal, `invalid (activation-invalid)`, before spawning its cleanup child. The isolated case and subsequent larger selections pass, but the original refusal is not classified or silently waived. The disposable installed-slot fixture now preserves the canonical refusal cause without retrying, suppressing it or changing production validation. Retain this observation under #6286's outstanding native/full acceptance until resolved or explicitly transferred.
+- Before operative integration, reconcile the shared native CAS rollback's new route generation with owner recovery custody; do not overwrite native publication history merely to restore byte-identical prior routing. Actual driver/CLI/installer selection, cold/on-demand startup, lease-only upgrade, complete interruption matrix, shipped independent cells, native platform lanes, current-head review, release promotion, authorized deployment, saved dispatch integration and parent closeout remain open. No Plan or Validation box is completed by this internal continuation.
+
+### 2026-10-14 - Restricted policy-off passive cleanup
+
+- Continuing the same unpublished full adopter. Canonical receipt/build identity reads are now distinct from normal lifecycle authority; ordinary mutation still requires authoritative enabled governance. A cleanup-only transaction holds the same native cutover guard and refuses malformed policy, maintenance, missing activation and changed identity.
+- The controller reserves the exact random child identity before spawning. Authenticated cleanup can recover that child after a pre-bind crash, or stop an already-bound passive, only with the exact journal capability, live native controller custody, unchanged prior selection and actual no-writer/no-effects health. Close revalidates authority, and native exit is separately captured before control and recorded afterward.
+- Missing/default-off and explicitly disabled policy have real native subprocess/TCP proofs for both bound and pre-bind cases. The contained cleanup/governance selection passes 21 tests. An initial run's four failures occurred only at the final post-exit assertion: a genuinely closed socket reports the existing `DaemonUnavailable` boundary rather than a remote refusal; the assertion was corrected without changing product behavior. Cleanup after writer adoption/publication/commit, stale capability/instance/birth, changed selection/receipt, missing native guard and unreserved discovery all refuse.
+- Recorded cleanup preserves the pending transaction phase and prior selection, including drain/release intent. It does not fabricate active predecessor health, terminal rollback, promotion or effect resumption. This is internal groundwork within the full adopter, not operative main/installer or shipped two-cell acceptance. Durable endpoint custody, production wiring, full interruption/upgrade proof, native platform lanes, review/release/deployment and the saved dispatch integration remain open.
+- The ordinary-boundary regression selection passed 160 tests and exposed one exit-reference sequencing defect: the new wrapper queried health twice before native capture. It now preserves exactly health-before/open/health-after and closes the reference on later refusal. The final exact-edit runtime/cleanup selection passes 35 tests, including changed ownership after native capture and refusal to advance a cleaned-up successor even when policy is re-enabled. Fatal lint, canonical installation/vendor checks, module-size, headless launch and all thirteen installer contracts pass. This is not a new full-suite or shipped-cell acceptance claim.
+
+### 2026-10-14 - Physical invocation and authenticated lifecycle transport
+
+- Continuing the same unpublished full adopter, without a new groundwork PR, peer-roster advertisement or production CLI/installer activation. Physical invocation checks require the actual completed venv/interpreter, loaded owner/shared-runtime library placement and package version. The Windows factory binds actual invocation roots and composes the canonical same-cell authentication prefix without registering or bypassing the peer roster. A current action refreshes management receipts in its known cell while preserving historical incumbent runtime evidence.
+- Added an internal owner/client adapter over the existing authenticated loopback TCP protocol. Exact-instance, transaction capability, permitted phase and native controller custody authorize every writer transition. Coalescing uses the entire authority-bearing payload, not an untrusted caller key; tests independently vary each authority dimension. Refusals and unexpected owner failures produce explicit sanitized wire errors. Quiescence does not terminate the listener, and retirement acknowledgement is not captured native exit evidence. Final read-ready adoption stays separate from durable-commit-gated effect activation.
+- The final contained Windows invocation/transport selection passes 26 tests. Disposable non-editable native venvs prove actual interpreter/module placement and reject base interpreters, linked slots, foreign loaded modules, missing completion, wrong package versions, root relocation and disabled governance. Real authenticated TCP/child-process tests prove effect-free adoption, commit-gated activation, wrong-capability and ordinary-shutdown refusal, and graceful rollback successor exit. Non-finite control payloads receive explicit refusals before coalescing. The rollback fixture correctly refuses terminal completion without a verified active predecessor; it does not fabricate that proof.
+- One complete multi-step TCP transaction exceeded the original 90-second per-test budget under Windows I/O load after first passing; only that test now has a measured 180-second bound. Other new tests retain 90 seconds, and caller control deadlines remain finite. Fatal Python lint, module-size, headless launch and all thirteen installer-contract checks pass. The separate existing daemon/quiescence/native-writer regression selection passes 93 tests.
+- Actual production entry-point selection/control, durable endpoint custody, default-off passive cleanup, cold/upgrade and crash recovery, installer/shipped two-cell integration, native Linux/macOS lanes, current-head review, release and authorized deployment remain open. No Plan or Validation item is completed by this internal slice; saved dispatch integration and parent closeout remain blocked on the full adopter.
+
+### 2026-10-14 - Completed-runtime evidence and durable owner control journal
+
+- Continuing the same unpublished adopter work, without enabling a production listener, installer or peer. Completed-slot evidence composes the canonical snapshot, ownership and build receipts with current installation governance, including a historical owned incumbent after canonical activation revalidation. Exact instance evidence binds that runtime, the native PID/birth token and a random instance ID; native exit references are captured before graceful control and grant no signaling authority.
+- Added an independently durable owner journal binding current receipt generations, prior marker/manifest/route bytes, completed target, exact instances, controller identity and random transaction authorization. Recorded phases are control intent, not successful writer-transfer evidence. Commit requires coherent selection and an exact effect-free read-ready writer; durable commit precedes effects and permits only forward recovery. Rollback resumption requires captured exact successor exit and restored prior selection.
+- Receiver validation requires current governance, exact instance/process/runtime, the permitted phase and transaction capability, plus native controller guard custody. Recovery rotates the capability under that guard before new control. A held caller guard is revalidated without nesting a borrow inside an orchestrator callback through the shared read-only `require_owned()` seam. All eleven affected ZDD consumers declare their patch release impact.
+- The stable contained Windows owner suite passes 348 tests with two existing shell-availability skips. Real test-owned subprocesses prove receiver PID binding, native controller contention/refusal after release, capability fencing and captured graceful successor exit before rollback resumption. Dedicated tests refuse wrong completed-runtime/instance evidence, incoherent selection, governance changes, linked or oversized journals and ambiguous commit acknowledgement. These are internal boundary and IPC proofs, not actual shipped owner/cell or full interruption-matrix acceptance.
+- Full validation exposed Windows' distinct `lstat` creation-time versus `fstat` change-time semantics. Bounded journal reads now compare each API's complete metadata with itself while retaining cross-API file identity, size and modification-time checks; regressions accept the stable API difference and reject actual metadata change. The measured Windows suite takes 850.50 seconds, so only this plugin's Windows aggregate budgets are raised to 1,200/1,800 seconds; individual deadlines, Linux and unrelated plugins remain unchanged, and explicit limits still win.
+- Fatal Python lint, canonical installation-context generation, vendor agreement, headless launch, installer contracts and module-size checks pass. The real materialized ZDD vendor passes 152 guard/pre-adoption tests with five platform skips; two runner tests confirm the narrow budget and override precedence. Actual invocation-root validation, lifecycle transport, selection reconciliation, default-off passive cleanup, installer integration, native Linux/macOS lanes, shipped cells, review/release/authorized deployment and saved dispatch integration remain open.
+
+### 2026-10-14 - Canonical owner binding continues within the adopter work
+
+- The unpublished adopter now packages the canonical installation-context bootstrap and Python fragments through both generator rosters, with byte-identical generated copies. Its ZDD dependency resolves from the canonical shared library, not a plugin-private vendor. This does not enable cell invocation, advertise the PR owner as a peer or change ordinary legacy startup.
+- The internal installation binding pins exact plugin/cell/payload identity, generations and roots. It refuses changed receipts and requires current authoritative default-off governance, active installation/namespace and same-environment activation. The full-operation transaction uses the canonical run-root cutover guard, with validation before and after native acquisition; the shared orchestrator must borrow it. Completed-runtime, exact-instance and durable transaction authorization remain separate obligations.
+- The focused contained Windows contracts pass 29 tests. Canonical stamping and activation APIs establish the disposable fixtures; tests cover foreign identity, disabled/missing/malformed policy, receipt/root changes, governance reversal during acquisition, body failure, inherited-binding refusal and two independent cell roots. A real test-owned subprocess contends for the same native transaction lock, then acquires after release. These are binding/exclusion proofs, not actual shipped two-cell owner or crash-recovery acceptance.
+- The complete contained Windows owner suite passes 277 tests with two existing shell-availability skips, including 34 receipt-binding contracts after maintenance and linked-receipt coverage was added. Fatal Python lint, canonical generation, headless launch, the installer contract and the 1,000-line module cap pass. No service was deployed, and the native Linux/shipped owner lanes remain outstanding.
+
+### 2026-10-14 - Native exit proof merged; owner writer adapter continues
+
+- #6720 merged into `dev` at `ebd31b613c44b2068335043b8c956aeb545a8838` after exact-head approval `5520975016` with no open findings, resolved documentation feedback and successful current-head CI `38594827798`. Its native Ubuntu canonical ZDD lane passed 620 tests with four stress-lane skips, including real graceful-exit, high-descriptor and inherited-parent-lock cases. The shared reference has no signaling capability and no production service opt-in. Receipt/governance, exact-instance authorization, owner recovery and deployment remain open.
+- The owner adapter now has local, unpublished writer-handoff work. An inactive owner must acquire the real installation-scoped lease before final-state reload, remains read-ready without effects until separately authorized, and rechecks authorization after complete drain before releasing the writer. An incomplete drain retains the lease and original registry; rollback after transfer reacquires and reloads rather than resuming a stale snapshot. Failed state reads or incomplete close retain accountable native ownership. This is not yet the receipt/journal/control/installer integration and does not complete the adoption prerequisite.
+- Sixteen initial contracts failed against the missing adapter. The coupled contained Windows watch-core selection passes 170 tests. Two fixture assertions initially sampled an actively polling snapshot: final-state comparison now occurs after predecessor quiescence and before resumption starts effects, preserving the actual handoff contract rather than treating a legitimate later baseline observation as corruption. Explicit state roots do not mutate the ambient legacy override or permit cross-root writes. Full-suite validation, native subprocess proofs, exact transaction authorization, coherent recovery and shipped-payload adoption remain gates.
+- The complete contained Windows owner suite passes 243 tests with two existing shell-availability skips; fatal Python lint passes. A real test-owned subprocess keeps its lifecycle alive after releasing the writer while the successor acquires and reloads its final state, without touching shared services. Four inherited-process guards reject before parent object access, and four incomplete authority-result cases refuse native acquisition. This proves the local writer boundary, not receipt-proven rollback, native Linux adoption, installer activation or the complete governed cell transaction.
 
 ### 2026-10-14 - Watch-state core merged; exact exit proof continues
 

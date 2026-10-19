@@ -19,7 +19,6 @@ import shutil
 import signal
 import sys
 import time
-from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from agent_procutil import no_window_flags
@@ -33,6 +32,11 @@ from .resolver_diagnostics import (
     resolver_failure_detail,
     structured_resolver_error,
 )
+from .session_lifecycle_cli import (
+    _agent_worktrees_environment,
+    _agent_worktrees_launch_prefix,
+)
+from .spawn_target import PluginRef as PluginRef, SpawnTarget as SpawnTarget
 
 log = logging.getLogger("agent-bridge")
 
@@ -74,81 +78,6 @@ def _creation_flags() -> int:
     executables from a headless background service like agent-bridge.
     """
     return no_window_flags()
-
-
-@dataclass
-class PluginRef:
-    """A CLI plugin to inject into a dispatched agent's launch.
-
-    Neutral, transport-agnostic reference shared between agent-bridge (which
-    *decides* a related-repo plugin set) and namespace resolvers (which *stage*
-    the payload onto their target and fold ``--plugin-dir`` into the launch
-    command). ``source`` is any ``copilot plugin install`` source
-    (``plugin@marketplace`` | ``owner/repo`` | ``owner/repo:path`` | git URL).
-    ``enable`` mirrors the CodeSpace-plugin manifest semantics (install-and-
-    enable vs install-only); resolvers that only do ``--plugin-dir`` may ignore
-    it.
-    """
-
-    source: str
-    enable: bool = True
-
-
-@dataclass
-class SpawnTarget:
-    """Where and how to spawn an agent process."""
-
-    type: str = "local"  # "local", "ssh", or "command"
-    cwd: str | None = None
-    host: str | None = None  # SSH alias (from machines.yaml)
-    execution_space_key: str | None = None
-    user: str | None = None
-    copilot_path: str | None = None
-    copilot_args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
-    project: str | None = None  # agent-worktrees project (binstub name)
-    explicit_cwd: bool = False  # caller supplied cwd; do not resolve/create a
-    #                              second checkout through the project transport
-    ssh_shell: str | None = None  # remote shell (e.g. "pwsh", "bash")
-    worktree_id: str | None = None  # resume a specific worktree
-    caller_worktree: str | None = None  # #2178: caller worktree that requested a
-    #                                     bridge spawn (recorded on the new worktree)
-    caller_owner_ref: str | None = None  # resource-obligation-settlement Ph3c: the
-    #                                      caller's qualified ClaimRef, stamped as
-    #                                      the bridge worktree's owner_ref so its
-    #                                      finalize settles the caller's obligation
-    elevated: bool = False  # process executes with administrator/root privileges
-    spawn_command: list[str] | None = None  # raw command for provider agents
-    codespace: dict | None = None  # structured CodeSpace metadata (#177): {name,
-    #                                repo, acp_command, workspace_folder} -- lets
-    #                                the daemon route a CS agent through the
-    #                                CodeSpaceSpawner without parsing spawn_command
-    container: dict | None = None  # structured trusted-container transport:
-    #                                {name, workspace_folder, security_profile,
-    #                                 user, ssh, provider_command,
-    #                                 relay_remote_port}
-    venue: dict | None = None  # versioned provider-owned venue metadata.
-    #                            At minimum, compatibility consumers use
-    #                            {workspace_folder, security_profile}; richer
-    #                            providers may add stable target/instance ids,
-    #                            readiness, transport, and capability posture.
-    #                            Persisted unchanged so the bridge never invents
-    #                            a parallel venue identity.
-    auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
-    mcp_servers: list[dict[str, Any]] = field(default_factory=list)
-    #   Copied from the resolved AgentConfig.mcp_servers (see agent_registry.py)
-    #   at resolve time. A per-session request-level ``mcp_servers`` still
-    #   overrides this -- see routes/sessions.py's ``start_session``.
-
-    def to_json(self) -> str:
-        """Serialize for DB persistence."""
-        return json.dumps({key: value for key, value in asdict(self).items() if key != "execution_space_key" or value is not None})
-
-    @classmethod
-    def from_json(cls, raw: str) -> SpawnTarget:
-        """Deserialize from DB."""
-        data: dict[str, Any] = json.loads(raw)
-        return cls(**data)
 
 
 class AgentProcess:
@@ -308,114 +237,31 @@ def _wrap_batch_for_windows(
     return args
 
 
-def _agent_worktrees_root() -> str:
-    """The agent-worktrees runtime root, honoring ``AGENT_RT_ROOT``.
-
-    The standard cross-plugin resolution override every plugin's own
-    ``resolve-runtime.ps1``/``resolve-runtime.sh`` honors; defaulting here too
-    keeps every consumer of the runtime root (the interpreter resolver below,
-    and the legacy ``lib/`` PYTHONPATH compatibility shim) consistent with an
-    active override instead of only the interpreter lookup respecting it.
-    """
-    return os.environ.get("AGENT_RT_ROOT") or os.path.join(
-        os.path.expanduser("~"), ".agent-worktrees"
-    )
-
-
-def _agent_worktrees_python() -> str:
-    """Absolute path to the agent-worktrees runtime interpreter.
-
-    Resolves the junction-free ``current-version`` marker
-    (``~/.agent-worktrees/current-version`` -> ``versions/<ver>/``), exactly as
-    the agent-worktrees binstub does. The ``.venv`` junction is retired (marker
-    model, #581/#1085/#1106) and nothing may traverse that reparse point. Falls
-    back to the newest ``versions/`` slot, then -- best-effort, for un-migrated
-    hosts -- the legacy ``.venv``. Raises ``RuntimeError`` when no interpreter is
-    found.
-
-    Honors ``AGENT_RT_ROOT`` as the runtime-root override (see
-    :func:`_agent_worktrees_root`), exactly as ``resolve-runtime.ps1``/
-    ``resolve-runtime.sh`` do -- the standard cross-plugin resolution signal,
-    so a machine using a non-default agent-worktrees install location resolves
-    consistently everywhere, rather than only via a hardcoded
-    ``~/.agent-worktrees`` default.
-    """
-    root = _agent_worktrees_root()
-    rel = ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
-
-    # Preferred: the current-version marker.
-    ver = ""
-    try:
-        with open(os.path.join(root, "current-version"), encoding="utf-8") as fh:
-            ver = fh.read().strip()
-    except OSError:
-        ver = ""
-    if ver:
-        cand = os.path.join(root, "versions", ver, *rel)
-        if os.path.exists(cand):
-            return cand
-
-    # Fallback: the newest versions/ slot (lexical order, matching the binstub).
-    try:
-        slots = sorted(os.listdir(os.path.join(root, "versions")))
-    except OSError:
-        slots = []
-    for name in reversed(slots):
-        cand = os.path.join(root, "versions", name, *rel)
-        if os.path.exists(cand):
-            return cand
-
-    # Legacy fallback: the retired .venv junction (un-migrated hosts only).
-    legacy = os.path.join(root, ".venv", *rel)
-    if os.path.exists(legacy):
-        return legacy
-
-    raise RuntimeError(
-        "agent-worktrees runtime interpreter not found under "
-        f"{os.path.join(root, 'versions')} (current-version={ver or 'unset'}); "
-        "is agent-worktrees installed?"
-    )
-
-
 async def _resolve_worktree(
     target: SpawnTarget, env: dict[str, str],
 ) -> dict:
     """Run ``agent-worktrees resolve --json`` to get a launch plan.
 
-    Calls the agent-worktrees Python module directly (bypassing the
-    .cmd binstub and cmd.exe) to avoid console allocation issues when
-    running from a headless background service on Windows.
-
-    Returns the parsed JSON plan dict.
+    The owner boundary selects its own completed runtime and installation
+    context; bridge routing variables never select a sibling interpreter.
     """
-    # Resolve the agent-worktrees runtime interpreter via the junction-free
-    # current-version marker (the .venv junction is retired; see
-    # _agent_worktrees_python). Calls the module directly (not the .cmd binstub)
-    # to avoid console-allocation issues in a headless background service.
-    python = _agent_worktrees_python()
-
-    # Clear VIRTUAL_ENV/PYTHONHOME so the bridge's own venv doesn't pollute the
-    # agent-worktrees subprocess (they may use different Python versions). The
-    # versioned runtime bundles its own site-packages, so no PYTHONPATH is needed;
-    # a legacy host that still carries ~/.agent-worktrees/lib gets it for
-    # compatibility.
-    env = dict(env)
-    _aw_lib = os.path.join(_agent_worktrees_root(), "lib")
-    if os.path.isdir(_aw_lib):
-        env["PYTHONPATH"] = _aw_lib
+    prefix = _agent_worktrees_launch_prefix()
+    if not prefix:
+        raise RuntimeError("worktree owner capability is unavailable; cannot resolve managed workspace")
+    env = _agent_worktrees_environment(env)
     env["PYTHONUTF8"] = "1"
-    env.pop("VIRTUAL_ENV", None)
-    env.pop("PYTHONHOME", None)
     # Pass the project as the global --project flag (before the subcommand).
     # agent-worktrees resolves the project from cwd or --project ONLY -- the
     # ambient $WORKTREE_PROJECT identity fallback was retired (cwd-resolution
     # Phase 3). A bridge resolve runs from a neutral daemon cwd that is not
     # inside the target repo, so without --project it fails "could not resolve a
     # project".
-    base_args = [python, "-m", "agent_worktrees"]
-    if target.project and not target.explicit_cwd:
+    base_args = list(prefix)
+    if target.project and (not target.explicit_cwd or target.native_resume_id):
         base_args += ["--project", target.project]
     base_args += ["resolve", "--json", "--no-resume"]
+    if target.native_resume_id:
+        base_args += ["--native-resume-session", target.native_resume_id]
     creating_new = not target.worktree_id
     if target.worktree_id:
         base_args.extend(["--worktree-id", target.worktree_id])
@@ -581,6 +427,8 @@ async def _resolve_worktree_remote(
     if not target.project:
         raise RuntimeError("remote resolve requires target.project")
     base_args = [target.project, "resolve", "--json", "--no-resume"]
+    if target.native_resume_id:
+        base_args += ["--native-resume-session", target.native_resume_id]
     creating_new = not target.worktree_id
     if target.worktree_id:
         base_args.extend(["--worktree-id", target.worktree_id])
@@ -707,7 +555,7 @@ async def resolve_local_launch(
     env.pop("PYTHONHOME", None)
     env.update(target.env)
 
-    if target.project and not target.explicit_cwd:
+    if target.project and (not target.explicit_cwd or target.native_resume_id):
         # Stage 6: create/resume the worktree. Failures propagate (no retry).
         with tracker.stage(ConnectStage.WORKTREE, f"project={target.project}"):
             plan = await _resolve_worktree(target, env)
@@ -815,7 +663,7 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     copilot = target.copilot_path or "copilot"
     breadcrumb = _breadcrumb_prelude(session_id)
 
-    if target.project and not target.explicit_cwd:
+    if target.project and (not target.explicit_cwd or target.native_resume_id):
         # ``--json`` marks the launch as non-interactive: it forces the
         # binstub's ``resolve`` step to skip the TTY picker and resolve the
         # worktree deterministically (by ``--worktree-id`` or ``--new``).
@@ -830,6 +678,8 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
                 "--no-mux", "--no-update", "--no-resume",
                 "--", "--acp", "--stdio", "--no-auto-update",
             ]
+            if target.native_resume_id:
+                binstub_args[2:2] = ["--native-resume-session", target.native_resume_id]
         else:
             binstub_args = [
                 target.project, "--json", "--new", "--no-mux", "--no-update",
@@ -856,7 +706,7 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
         # the binstub runs (#985). For a non-POSIX shell, skip the
         # best-effort breadcrumb and emit any env vars in the shell's syntax.
         shell = (target.ssh_shell or "bash").lower()
-        if shell in ("pwsh", "powershell"):
+        if shell in ("pwsh", "powershell", "cmd"):
             if target.env:
                 prefix = "".join(
                     f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'; "
@@ -882,7 +732,7 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
             # a *visible* console window for it -- so every inbound dispatch pops
             # a pwsh window on the target box (dotfiles#403). Hidden costs nothing
             # for a stdio-piped ACP agent (stdio is inherited, not the window).
-            exe = "powershell" if shell == "powershell" else "pwsh"
+            exe = "pwsh" if shell == "pwsh" else "powershell"
             encoded = base64.b64encode(
                 pwsh_script.encode("utf-16-le")
             ).decode("ascii")
@@ -1044,7 +894,7 @@ async def spawn_ssh(
         target.env = merged
 
     manager = get_default_manager()
-    source = SSHProfileSource(host_alias=target.host, user=target.user)
+    source = SSHProfileSource(host_alias=target.host)
 
     # Stage 3: establish the SSH connection -- patient (retry to deadline) when
     # connect_timeout is set, else a single fast attempt.
@@ -1106,7 +956,7 @@ async def spawn_ssh(
     # just-resolved worktree checkout.
     if (
         target.project
-        and not target.explicit_cwd
+        and (not target.explicit_cwd or target.native_resume_id)
         and (not target.worktree_id or not target.cwd)
     ):
         tracker.started(ConnectStage.WORKTREE, f"resolve project={target.project}")
@@ -1185,6 +1035,8 @@ async def spawn(
     session_id: str = "",
 ) -> AgentProcess:
     """Spawn an ACP agent process (local, SSH, or command)."""
+    if target.type == "remote-acp":
+        raise ValueError("Remote ACP endpoints are connections, not spawn targets")
     from .venue_launch_policy import gate_raw_codespace_spawn  # a resync / host-less resume asks too
 
     await gate_raw_codespace_spawn(target)

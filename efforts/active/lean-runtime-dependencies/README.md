@@ -80,6 +80,26 @@ The operator confirmed the slug `lean-runtime-dependencies`.
 The additional package/profile priorities below originate in the audit and are
 marked agent-recommended; exploratory backend replacements are not commitments.
 
+### 2026-10-16 - Operator-approved zero-configuration default
+
+Follow-up direction, with only the private adopter name abstracted:
+
+> We need to make an executive decision on [the adopting harness], on the
+> assumption that most users will never adjust local config for themselves.
+>
+> Great. Update and drive the vision and effort for this
+
+**Approved decision summary:** the adopting harness owns a complete baseline,
+not a requirement for personal approval configuration. Prefer verified
+release-approved exact profiles; automatically select a distinct governed
+source lock when artifact availability/admission prevents that mode. CPU is
+the fresh engine default; retain explicit accelerator intent and explicit
+unprofiled migration. Reuse admitted unchanged inputs. Existing feed,
+seasoning, integrity and provenance restrictions remain authoritative.
+Optional local/knowledge overlays are not prerequisites. This authorizes
+driving source implementation, not production rollout, model/corpus mutation or
+new package feeds.
+
 ## Plan
 
 ### Phase 1 - Reviewed intent and dependency baseline
@@ -108,7 +128,12 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 ### Phase 4 - Largest optional installation costs
 - [ ] Govern explicit compatible CPU/GPU engine wheel profiles; eliminate
   accidental accelerator downloads and unsafe install-then-swap assumptions.
-  _(agent-recommended; coordinate artifact ownership with #4876)_
+  _(operator-approved default; coordinate artifact ownership with #4876)_
+- [ ] Implement the reviewed [zero-configuration default](zero-configuration-defaults.md)
+  through the existing installation authority: authentic release profiles first,
+  automatically authorized governed source fallback, optional overrides only.
+  Do not require users to assemble an approval map or wait for artifact
+  publication before source installation.
 - [x] Make restricted-SSH Paramiko provisioning genuinely opt-in.
   _(agent-recommended)_
 - [x] Replace full-table pandas statistics materialization with projected
@@ -149,6 +174,10 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   two installers and two independent marketplace installations.
 - [ ] Index integration preserves authenticated routing, HTTP/SSE/MCP contracts,
   background jobs, retrieval semantics and durable state across upgrades.
+- [ ] Fresh adoption with no runtime-profile overrides proves the shared
+  baseline, CPU closure and automatic governed fallback; unchanged warm reuse
+  makes no resolver/feed call. Exercise stricter policy, supplied revocation,
+  retained accelerators, unprofiled migration and all-modes-blocked retention.
 - [x] Every slice records applicable unit, integration, clean-room and available
   live-venue evidence, or a specific reason a tier is unavailable.
 - [x] Measurement separates compressed downloads, unpacked logical files,
@@ -167,17 +196,33 @@ shared mutable venv is presumed acceptable.
 The delivered dependency reductions, helper investigation and compatibility
 boundary have cleared review. This is not approval to enable a production
 artifact fast path. The remaining engine-profile application (#6737) depends on
-#4876's still-open Phase 2 item to design and publish authority-approved exact
-profiles and their selection/feed-compatibility contract. Its Phase 3 consumer
-admission is also unimplemented; do not invent a substitute resolver here.
-The overlapping held-construction change (#6598) remains open.
+#4876's authenticated authority integration and actual permitted exact closures.
+Release-profile publication is required for artifact-mode acceptance, not a
+prerequisite for the independently verified source mode approved in #7066.
+The selection contract's design merged in #6795; actual approval adapters,
+feed-compatible closures and Phase 3 consumer admission remain open. Do not
+invent a substitute resolver here. Held construction merged in #6598; that is
+not profile admission or proof of this campaign's remaining native acceptance.
 
 The existing owners have the concrete acceptance requests; no reply or accepted
-transfer is assumed. Native/standalone queue, schema, canary, warm-engine and
-Darwin acceptance remain with #5768. The next implementation step is to apply
-the approved profile contract under #6737 once available, composing the owning
-construction path. Until then preserve current runtime/state and the open
-effort binding rather than declaring the campaign Done.
+transfer is assumed. To drive rather than merely wait on that prerequisite,
+this campaign contributes the bounded
+[exact-profile contract](../governed-python-artifact-promotion/exact-profile-contract.md)
+to #4876's existing authority design. The inert exact record and pure selection
+API merged in #7044, not approval-source integration, a loader, publication or
+acquisition. #6941 retains the separate contributor-owned
+candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
+Darwin acceptance remain with #5768. Apply the reviewed profile contract under
+#6737, composing #6598 construction and #6707 admission rather than overlapping
+their open implementations. The effort and retained runtime/state stay open.
+
+The next stretch follows the operator-approved
+[zero-configuration default](zero-configuration-defaults.md). A harness-supplied
+policy reaches the same authority seam for release and source modes; hand-built
+adopter approval files are not the default integration. The amended intent and
+plan merged in #7066. The next implementation boundary is the authenticated
+adopting-policy/source adapter and its actual governed closure, not another
+profile-record API or a competing admission constructor.
 
 ## Journal
 
@@ -535,3 +580,105 @@ effort binding rather than declaring the campaign Done.
   are still unchecked. Requested its selected-contract/acceptance response
   before applying CPU/accelerator profiles under #6737; no response is
   presumed. The campaign remains Active at that explicit external gate.
+
+### 2026-10-15 - Driving the authority-profile prerequisite
+- Resumed upstream work after explicit direction to drive blockers. The source
+  worktree advanced to current `dev`; #6697 is now merged, while its new-trusted-
+  workflow publication proof is blocked by the existing #6551 PID-admission
+  repair. Preserve that original repair rather than creating a competing PR.
+- Reserved a proposal-only contribution to #4876's unchecked exact-profile
+  contract and inspected its schema-3 manifest/build-toolchain prior art.
+  Prepared the linked authority/selection/closure/fallback and engine-consumer
+  contract for review. It names concrete acceptance and composes the still-open
+  #6598 construction and #6707 admission owners.
+- Native context management preserves this session's responsibility. No manual
+  handoff, profile implementation, engine/model download or rollout is part of
+  this proposal.
+
+### 2026-10-16 - Reviewed exact-profile prerequisite and bounded implementation
+- #6795 merged to `dev` as `40084a99c` after current-head Copilot approval
+  `5527977396` and successful required CI `38680105914`. The review corrected
+  the blocked-artifact case: authority-selected source fallback may use a
+  distinct admissible closure, never bypass a blocked dependency or an
+  integrity/provenance failure.
+- Re-read both owning efforts and advanced this retained worktree through
+  managed post-merge reconciliation. #6598 has since merged; #6707 and #6551
+  retain their open scopes. #6941's candidate-input contribution is separate
+  and is neither modified nor superseded here.
+- Implemented the reviewed inert record/selection slice under #4876. Full wheel
+  graph, extras, markers, targets and whole-record approval references are
+  validated without downloading or installing dependencies. Actual authority
+  adapters, inspected-wheel admission and native engine application remain
+  open. No production rollout, model or corpus mutation occurred.
+- The existing wired installation-contract suite passed 171 cases with 14
+  unavailable native-POSIX skips on Windows. The final 53 exact-profile cases include
+  an actual fresh Python process using the API without creating a runtime.
+  The focused cases also run under optimized Python with explicit production
+  refusal checks, not removable production assertions.
+  This is not a released lock, fresh installer or acquisition/admission proof.
+  Hosted current-head checks and normal review remain required.
+- Review corrected optional Requires-Python handling: an absent wheel header
+  has an empty specifier, not an invented minimum. Empty values now remain
+  representable while malformed or untrimmed metadata still refuses.
+
+### 2026-10-16 - Inert exact-profile record merged
+- #7044 merged to `dev` as `8f144844d` after current-head approval
+  `5554395793`, successful CI `38974962162` and all 45 actual check contexts
+  completed. Linux/Windows service and native Windows/macOS construction
+  contexts passed; these regression checks do not prove a profile integration
+  that this inert slice does not enable.
+- The post-push review wait timed out after the full 600-second window.
+  Explicit re-request produced the approving review without a dummy commit or
+  merge bypass. The optional Requires-Python finding is fixed and resolved.
+- Re-read the canonical completion gates and reconciled the retained worktree.
+  Closed only the inert record/selection item. Authority-source adapters,
+  real permitted exact CPU/accelerator closures, inspected-byte admission,
+  engine constructors and this campaign's remaining native/service acceptance
+  are still open; the effort remains Active. No production rollout occurred.
+
+### 2026-10-16 - Complete baseline rather than per-user approval setup
+- The operator approved a complete harness-owned default on the assumption
+  that most users never edit runtime configuration, then directed updating and
+  driving the vision and effort. Captured the literal direction above and the
+  approved decision separately; no new rollout or package-feed permission is
+  inferred.
+- Amended Runtime Assembly and engine intent plus the linked authority,
+  resolution, integration and fresh-adopter validation plan. Keep one canonical
+  campaign and the existing construction/admission/input-generator owners.
+  The inert API's caller-provided approval map is not an implemented default;
+  ordinary users must not have to construct that map themselves.
+
+### 2026-10-17 - Zero-configuration plan reviewed and merged
+- #7066 merged to `dev` as `1d18d3a05` after reduced current-head Copilot review and
+  successful CI `38986244874`; all 42 actual check contexts completed without
+  failures. The earlier approving review found a conflicting automatic-GPU
+  definition; that definition now consistently follows authority capability
+  policy. The final automated review could not run its full analysis because a
+  runner was unavailable before its timeout. Its reduced review completed with
+  only optional wording suggestions, considered and explained on their resolved
+  threads; there were no unresolved blocking findings.
+- Re-read the canonical effort and default sub-plan after merge. Closed only
+  the ordered review gate and transitioned this retained worktree from Phase 5
+  (helper investigation) back to the still-open Phase 4 engine-profile work.
+  This does not reopen completed helper investigation. The parent campaign
+  remains Active; no implementation, platform
+  acceptance, accepted owner transfer or production rollout is inferred.
+- Continued the authority integration trace: the existing shared
+  `installer_dependency_policy.py` owns configured UV resolution, stronger
+  seasoning and private retained input/configuration comparison, but has no
+  exact-profile approval-source adapter. The record API remains repository-only.
+  Existing promotion validators bind first-party source/manifest/wheel content;
+  they do not by themselves authorize a consumer runtime closure.
+- Keep #6941's contributor-owned candidate inputs and #6707's constructor/
+  admission work intact. Establish a disjoint authenticated-policy and
+  exact-closure integration contract with those existing owners before native
+  application under #6737. Do not turn the missing contract into a self-approved
+  JSON loader, replace the original drafts, or make source mode wait for
+  artifact publication.
+- The operator selected "Keep coordinating with the existing owner; leave its
+  admission implementation untouched" rather than taking over #6707. Requested
+  the explicit adapter handoff on the original PR. Its published source
+  codename did not resolve through the available managed-worktree lookup;
+  that is not evidence of abandonment or permission to create a replacement.
+  Native integration remains blocked on an accepted owner contract, with
+  responsibility retained here and no completed transfer claimed.

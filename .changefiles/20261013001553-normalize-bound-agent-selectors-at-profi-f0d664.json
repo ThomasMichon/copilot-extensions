@@ -1,9 +1,0 @@
-{
-  "comment": "Normalize bound-agent selectors at profile lookup while preserving exact worktree JSON text.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

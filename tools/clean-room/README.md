@@ -132,6 +132,12 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 
 ## Scenarios & the scenario contract
 
+The [restricted-dispatch proof](restricted-dispatch/README.md) is an opt-in,
+host-driven Tier-P lane with separate fresh central and restricted worker
+containers. It uses no privileged containers, mounted Docker socket or live
+cloud login, and proves both completion and permitted abandonment with
+task-only credentials. It is not selected through `-Scenario`.
+
 The [Komodo role-fleet proof](komodo-role-fleet/README.md) is a separate opt-in,
 host-driven multi-container integration lane. It requires explicit privileged
 nested-Docker approval and uses no host Docker socket or published ports.
@@ -155,6 +161,56 @@ scenarios/<name>/
 (the Sec.7 diagnostic taxonomy) · `cr_meta <key> <value>` · `cr_finalize`. The
 report shape (`cr-report.json`) keeps its historical top-level keys and adds an
 `env{}` snapshot and a classified `jams[]` array.
+
+### Merged-development source installation
+
+`merged-dev-runtime` is a credential-free Tier-P source scenario. It defaults to
+Agent Bridge and also accepts `CR_SOURCE_PLUGIN` selecting Agent Codespaces,
+Containers, MCP, SSH, Machines, Pull Requests or Budget Guidance. It pins a
+clean merged dev commit, prepares its canonical vendor
+closure outside the checkout, invokes the real installer, and checks the
+source-qualified completed generation and installed command. It then makes
+the checkout unavailable and verifies installed imports and command use.
+For Bridge, the final stage confirms the qualified build is actually serving
+through authenticated health, routed PID/start-time identity and its running
+marker. For CLI adopters it reruns the real installer, checks exact selection
+and unchanged completion bytes, and invokes the installed command again.
+The selected commit must contain the source preparation/installer support.
+
+```bash
+CR_SOURCE_COMMIT=<full-merged-commit> ./run.sh --scenario merged-dev-runtime \
+  --name-suffix source-proof --pass-env CR_SOURCE_COMMIT run
+
+CR_SOURCE_COMMIT=<full-merged-commit> CR_SOURCE_PLUGIN=agent-containers \
+  ./run.sh --scenario merged-dev-runtime --name-suffix source-containers \
+  --pass-env CR_SOURCE_COMMIT --pass-env CR_SOURCE_PLUGIN run
+```
+
+Use a fresh name suffix for an independent fresh-machine witness. The
+manifest's `auth.copilot: none` prevents host-token lookup or injection.
+The report records the actual source commit and runtime generation; a
+successful preparation or installer exit alone is not the acceptance result.
+
+### Credential-free budget-guidance snapshot
+
+The Tier-P/F1 `budget-guidance-solo` scenario requires no Copilot or forge
+authentication. It requires Python 3.10+, Node.js 20+, and the standard Bash
+utilities declared in its manifest; version gates run before installation.
+From the candidate repository root:
+
+```bash
+bash tools/clean-room/run.sh --scenario budget-guidance-solo \
+  --harness-mount "$PWD" --name-suffix budget-candidate --then down run
+```
+
+Use a unique suffix when another run may be active. The candidate is mounted
+read-only and copied into disposable container storage. The scenario stamps
+the payload, removes only that container-local original source copy, proves
+first-use installation, checks installed identity/static/unavailable posture,
+and exercises the installed snapshot's extension with candidate-owned fake-SDK
+fixtures (tests are intentionally not installed). It does not create
+a live Copilot session, acquire account data, or update a host runtime.
+Its Bash proof does not replace native Windows acceptance.
 
 ### Windows arm — `run.ps1 -Os windows`
 

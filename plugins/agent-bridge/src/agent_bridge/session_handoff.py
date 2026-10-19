@@ -24,6 +24,8 @@ class _SessionHandoffMixin:
         guard in ``handoff_session``)."""
         if not self._auto_handoff.enabled:
             return False
+        if session.target.type == "remote-acp":
+            return False
         if _workspace_key(session.agent_name, session.target, session.caller_id):
             return False
         return True
@@ -445,4 +447,3 @@ class _SessionHandoffMixin:
             session_id, successor.session_id, session.caller_id,
         )
         return successor
-

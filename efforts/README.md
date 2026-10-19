@@ -10,16 +10,30 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
+| [Remote ACP Provider Contributions](active/remote-acp-provider-contributions/README.md) | Draft; URL/name/plugin targets and approved scoped-auth proposal before implementation | #7218; existing transport and dispatch-catalog owners retained |
+| [Maintenance-Safe Module Opt-In](active/maintenance-safe-module-optin/README.md) | Draft; explicit default-off module consent, proposal review before implementation | #7213 |
+| [ADO PR Stewardship](active/ado-pr-stewardship/README.md) | Draft; centralized provider/configuration/observation proposal before implementation | #7203; preserves #7051/#6007/#6818 owners |
+| [Conventional Fleet Connectivity](active/conventional-fleet-connectivity/README.md) | Active; plan reviewed, conventional source discovery first; direct refresh and Bridge derivation pending | #7206 under #63; preserves identity, profile and listing owners |
+| [Dispatch Extension Catalog](active/dispatch-extension-catalog/README.md) | Active; execution authorized, amended-plan review precedes templates, mapped sources and client semantic parity | #7091; preserves #6379/#4959/#6283 owners |
+| [Trusted Linux CI Offload](active/trusted-linux-ci-offload/README.md) | Active; pure existing-row backend selector/tests implemented; CI integration after #7164 and qualification/activation pending | #7122; preserves #6237/#3336/#1303 owners |
+| [Bridge Derived Execution Identity](active/bridge-derived-execution-identity/README.md) | Draft; reviewed derivation contract before implementation | #7069; preserves #6987/#5839/#7057 owners |
+| [Venue Plugin Staging and Registration Parity](active/venue-plugin-staging-parity/README.md) | Active; trusted-provider registration merged, static local/SSH/privileged parity and release acceptance open | #5286, #5072; sub-effort of #954 |
+| [Source-Managed Runtime Installs](active/source-managed-runtime-installs/README.md) | Active; clean-room merged-dev proof before native Windows runtime-only pilot | #7028; #3905, #7029, #7030; future plugin-source switch #7031 |
+| [PR Lifecycle Conformance](active/pr-lifecycle-conformance/README.md) | Active; Phase 1 evidence and contract proposed, adapter implementation and acceptance open | #7051; existing #2357 lifecycle ownership retained |
+| [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; alias/locality repair, empty-mux readiness and installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
 | [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Draft; follow-up gated on primary repairs and hosted publication | #6639; #6535/#6632 owners retained |
 | [Continuous Worktree Reclamation](active/continuous-worktree-reclamation/README.md) | Draft; vision and implementation/performance plan only, execution separately authorized | #6620; preserves #1488/#1918/#3114, #6060 and #6471 |
+| [Installer Transaction Admission Repair](active/installer-transaction-admission-repair/README.md) | Active; local repair validated, review/landing/released-source proof pending | #6463 |
 | [Seasoned Dependencies and Transactional Installs](active/seasoned-dependencies-and-transactional-installs/README.md) | Draft; seven-day declarations/resolution and failed-build cleanup | #6476 |
 | [Dispatch Fleet Reliability and Recovery](active/dispatch-fleet-reliability-recovery/README.md) | Active; maintenance categories, bounded supervision and registry-rooted recovery | #6466, #6467, #6470, #6471; existing #6407/#6421 repair owner retained |
 | [Runtime Operational Contracts](active/review-pipeline-operational-contracts/README.md) | Draft; proposal review before implementation | #6274; existing Windows regression #6266 |
 | [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Active; proposal reviewed, section and instance contracts | #6379 |
-| [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; first wave live, validation consolidation open | #6237; run/check consolidation primary, ownership enabling |
-| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; runtime auth interface proposed, isolated storage merged; integration/lifecycle open | #6236, #6240, #6241, #6443, #5862; existing #3761/#352/#5789/#6030/#6424 owners retained |
+| [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; shared consolidation roadmap and owner-only local-provider review rescue proposed, gated implementation open | #6237; canonical audit/coordination lead, existing release/runner/portfolio owners retained |
+| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; identity/admission prerequisites merged; provider/enrollment/integration/lifecycle open | #6236, #6240, #6241, #6443, #5862; existing #3761/#352/#5789/#6030/#6424 owners retained |
 | [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Active; proposal reviewed, dependency reduction | #6234 |
+| [Resilient Update Sequencing](active/resilient-update-sequencing/README.md) | Active; reviewed, historical command migration and cheap finishing first | #6820; complementary to #6812 |
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Active; reader-lifetime continuation | #3963; registry presentation separately #5559 |
 | [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Active | #6086 |
 | [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Active; originating identity slice | #6068 |
@@ -27,7 +41,8 @@ that pattern to this repository.
 | [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; audit capability released/installed, live pilot gated | #6060 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
-| [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; proposal reviewed | #6007 |
+| [Gateway and SSH Fleet Onboarding](active/gateway-ssh-fleet-onboarding/README.md) | Active; pure policy/runtime leaves, ordered setup integration pending | #6681 / #5861; existing lifecycle/auth/ledger owners retained |
+| [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; first-class PR service/fleet plan reviewed; runtime, owner and dispatch gates retained | #6007, #6286, #7188 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
 | [Status-monitor singleton correctness](active/status-monitor-singleton-correctness/README.md) | Draft; planning only, cold-start prerequisite satisfied | #5512 (restart), then #5453 (replacement and promotion/cutover) |
 | [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Active; primary documentation slice complete, preview/reference work unassigned | #5799 |
@@ -54,7 +69,7 @@ that pattern to this repository.
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
-| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phases 7 and 8) | #3336 |
+| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phases 7 and 9) | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
 | [Agent-Process Self-Report Registry](active/agent-process-self-report-registry/README.md) | Draft | #5559 |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
@@ -102,12 +117,16 @@ that pattern to this repository.
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
+| [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
+| [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Draft; native Windows/Linux execution proof before preference inheritance | #5708; preserves #7069/#6987/#5839/#7057 owners |
 
 
 ## Completed effort index
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Remote ACP Client Transport](2026/10/16%20remote-acp-client-transport/README.md) | Done; runtime merged to dev, pending release, no rollout | #6908; runtime #6997 |
+| [Bridge Workspace Owner Boundary](2026/10/16%20bridge-workspace-owner-boundary/README.md) | Done; released owner-process repair and preserved managed-session resume verified | #6757; #6776 |
 | [Workspace Acquisition Continuity](2026/10/13%20workspace-acquisition-continuity/README.md) | Done; runtime merged to dev, main publication unconfirmed, no host rollout | #6440; automatic promotion remains #3336 |
 | [agent-bridge Attention Waits](2026/09/03%20agent-bridge-attention-waits/README.md) | Done; archived | #1450 |
 | [Plugin Process Hygiene](2026/09/13%20plugin-process-hygiene/README.md) | Done; archived | #736 |

@@ -37,12 +37,42 @@ $env:WORKTREE_SETUP_LOG = $script:SetupLog
 # ---------------------------------------------------------------------------
 $script:LaunchId = ([guid]::NewGuid().ToString('N').Substring(0, 12))
 $env:WORKTREE_LAUNCH_ID = $script:LaunchId
+$script:LaunchTimer = [Diagnostics.Stopwatch]::StartNew()
+
+function Format-SetupLine {
+    param(
+        [string]$Message, [string]$Level = 'INFO',
+        [double]$Seconds = $script:LaunchTimer.Elapsed.TotalSeconds,
+        [DateTime]$Timestamp = [DateTime]::UtcNow,
+        [string]$Scope = 'launch',
+        [ValidateSet('', 'starting', 'running', 'done', 'current', 'skipped', 'disabled', 'warning', 'failed')]
+        [string]$State = '',
+        [switch]$Completed
+    )
+    if (-not $State) {
+        $State = switch ($Level) { 'WARN' { 'warning' } 'ERROR' { 'failed' } default { 'running' } }
+    }
+    $stamp = $Timestamp.ToUniversalTime().ToString('HH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+    $kind = if ($Completed) { 'duration' } else { 'elapsed' }
+    $secondsText = $Seconds.ToString('F1', [Globalization.CultureInfo]::InvariantCulture)
+    foreach ($line in [regex]::Split($Message, "\r\n|\n|\r")) {
+        # Already-framed nested output retains its own clock and scope.
+        if ($line -cmatch '^\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] .+ \[(?:elapsed|duration) \d+\.\d+s\]$') {
+            $line
+        } else {
+            "[$stamp] $Scope $State $line [$kind ${secondsText}s]"
+        }
+    }
+}
 
 function Write-SetupLog {
-    param([string]$Message, [string]$Level = 'INFO')
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
-    $line = "[$ts] [$Level] $Message"
-    try { Add-Content -Path $script:SetupLog -Value $line -ErrorAction SilentlyContinue } catch {}
+    param(
+        [string]$Message, [string]$Level = 'INFO',
+        [double]$Seconds = $script:LaunchTimer.Elapsed.TotalSeconds,
+        [string]$Scope = 'launch', [string]$State = '', [switch]$Completed
+    )
+    $lines = @(Format-SetupLine $Message $Level -Seconds $Seconds -Scope $Scope -State $State -Completed:$Completed)
+    try { Add-Content -Path $script:SetupLog -Value $lines -ErrorAction SilentlyContinue } catch {}
 }
 
 function Write-LaunchTrace {
@@ -74,11 +104,17 @@ function Write-LaunchTrace {
 # UTF-8 console context).
 $script:ShowLaunchStatus = $false
 function Write-SetupStatus {
-    param([string]$Message, [string]$Level = 'INFO')
-    Write-SetupLog $Message $Level
-    if ($script:ShowLaunchStatus) {
-        $color = if ($Level -eq 'WARN') { 'Yellow' } else { 'DarkGray' }
-        Write-Host "  $Message" -ForegroundColor $color
+    param(
+        [string]$Message, [string]$Level = 'INFO',
+        [double]$Seconds = $script:LaunchTimer.Elapsed.TotalSeconds,
+        [string]$Scope = 'launch', [string]$State = '', [switch]$Completed
+    )
+    foreach ($line in @(Format-SetupLine $Message $Level -Seconds $Seconds -Scope $Scope -State $State -Completed:$Completed)) {
+        Write-SetupLog $line $Level
+        if ($script:ShowLaunchStatus) {
+            $color = if ($Level -eq 'ERROR') { 'Red' } elseif ($Level -eq 'WARN') { 'Yellow' } else { 'DarkGray' }
+            Write-Host $line -ForegroundColor $color
+        }
     }
 }
 
@@ -537,6 +573,49 @@ function Pop-UpdateEnvironment {
     }
 }
 
+function Invoke-SetupAction {
+    param(
+        [string[]]$CommandArgv, [object]$Update,
+        [string]$Scope, [string]$Label
+    )
+    $exe = $CommandArgv[0]
+    $rest = if ($CommandArgv.Count -gt 1) { $CommandArgv[1..($CommandArgv.Count - 1)] } else { @() }
+    $actionTimer = [Diagnostics.Stopwatch]::StartNew()
+    $actionExitCode = $null
+    $actionSpawnError = $null
+    Write-SetupStatus "$Label starting" -Seconds 0 -Scope $Scope -State starting
+    $savedEnvironment = Push-UpdateEnvironment $Update
+    $actionErrorPreference = $ErrorActionPreference
+    $actionNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    try {
+        Get-Command $exe -ErrorAction Stop | Out-Null
+        # Windows PowerShell surfaces native stderr as ErrorRecords.
+        # Drain those as progress, not terminating spawn failures.
+        $ErrorActionPreference = 'Continue'
+        $PSNativeCommandUseErrorActionPreference = $false
+        & $exe @rest 2>&1 | ForEach-Object {
+            Write-SetupLog ([string]$_) -Seconds $actionTimer.Elapsed.TotalSeconds -Scope $Scope
+        }
+        $actionExitCode = $LASTEXITCODE
+    } catch {
+        $actionSpawnError = $_.Exception.Message
+    } finally {
+        $ErrorActionPreference = $actionErrorPreference
+        $PSNativeCommandUseErrorActionPreference = $actionNativeErrorPreference
+        $actionTimer.Stop()
+        Pop-UpdateEnvironment $savedEnvironment
+    }
+    $duration = $actionTimer.Elapsed.TotalSeconds
+    if ($actionSpawnError) {
+        Write-SetupStatus "$Label spawn failed; continuing" 'WARN' -Seconds $duration -Scope $Scope -State failed -Completed
+        Write-SetupLog "$Label error: $actionSpawnError" 'WARN'
+    } elseif ($actionExitCode -ne 0) {
+        Write-SetupStatus "$Label failed (exit $actionExitCode); continuing" 'WARN' -Seconds $duration -Scope $Scope -State failed -Completed
+    } else {
+        Write-SetupStatus "$Label done (exit 0)" -Seconds $duration -Scope $Scope -State done -Completed
+    }
+}
+
 function Invoke-UpdateApply {
     # Join the background stage and apply any pending update. Idempotent: runs
     # its body at most once per launch.
@@ -596,13 +675,9 @@ function Invoke-UpdateApply {
                     )
                     if ($script:LaunchProject) { $installerArgs += @('-ProjectName', $script:LaunchProject) }
                     try {
-                        & pwsh.exe -NoProfile -File $pluginInstaller @installerArgs 2>&1 |
-                            ForEach-Object { Write-SetupLog "installer: $_" }
-                        if ($LASTEXITCODE -eq 0) {
-                            Write-SetupLog 'Installer update succeeded (launcher change, if any, applies next launch)'
-                        } else {
-                            Write-SetupLog "Installer update failed (exit $LASTEXITCODE) — continuing with existing version" 'WARN'
-                        }
+                        Invoke-SetupAction -CommandArgv (@('pwsh.exe', '-NoProfile', '-File', $pluginInstaller) + $installerArgs) `
+                            -Scope 'launch/installer' -Label 'Installer update'
+                        Write-SetupLog 'Launcher changes, if any, apply on the next launch'
                     } finally {
                         Pop-UpdateEnvironment $savedEnvironment
                     }
@@ -655,23 +730,11 @@ function Invoke-UpdateApply {
             if ($prePlan -and $prePlan.action -eq 'self-update') {
                 Write-SetupStatus 'Bootstrap services are stale; updating them...'
                 foreach ($update in $prePlan.updates) {
-                    Write-SetupStatus "Updating $($update.service)..."
                     Write-SetupLog "  command: $($update.command)"
                     $argv = @($update.argv)
                     if ($argv.Count -gt 0) {
-                        $exe = $argv[0]
-                        $rest = if ($argv.Count -gt 1) { $argv[1..($argv.Count - 1)] } else { @() }
-                        $savedEnvironment = Push-UpdateEnvironment $update
-                        try {
-                            & $exe @rest
-                            if ($LASTEXITCODE -ne 0) {
-                                Write-SetupLog "Update failed for $($update.service) (exit $LASTEXITCODE)" 'WARN'
-                            } else {
-                                Write-SetupLog "Updated $($update.service) successfully"
-                            }
-                        } finally {
-                            Pop-UpdateEnvironment $savedEnvironment
-                        }
+                        Invoke-SetupAction -CommandArgv $argv -Update $update `
+                            -Scope "launch/bootstrap/$($update.service)" -Label "Bootstrap update: $($update.service)"
                     }
                 }
                 # Re-resolve before the re-check: one of the updates just
@@ -724,36 +787,9 @@ function Invoke-UpdateApply {
                     Write-SetupLog "Plugin reconcile: skipping $($u.service) (copilot not on PATH)" 'WARN'
                     continue
                 }
-                $exe = $rargv[0]
-                $rest = @()
-                if ($rargv.Count -gt 1) { $rest = $rargv[1..($rargv.Count - 1)] }
                 Write-SetupLog "Plugin reconcile: $($u.service) -> $($rargv -join ' ')"
-                $savedEnvironment = @{}
-                if ($u.PSObject.Properties['unset_environment']) {
-                    foreach ($key in @($u.unset_environment | Where-Object { $_ })) {
-                        $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-                        [Environment]::SetEnvironmentVariable($key, $null, 'Process')
-                    }
-                }
-                if ($u.PSObject.Properties['environment'] -and $u.environment) {
-                    foreach ($property in @($u.environment.PSObject.Properties)) {
-                        if (-not $savedEnvironment.ContainsKey($property.Name)) {
-                            $savedEnvironment[$property.Name] = [Environment]::GetEnvironmentVariable($property.Name, 'Process')
-                        }
-                        [Environment]::SetEnvironmentVariable(
-                            $property.Name, [string]$property.Value, 'Process'
-                        )
-                    }
-                }
-                try {
-                    & $exe @rest 2>&1 | ForEach-Object { Write-SetupLog "reconcile: $_" }
-                } finally {
-                    foreach ($entry in $savedEnvironment.GetEnumerator()) {
-                        [Environment]::SetEnvironmentVariable(
-                            $entry.Key, $entry.Value, 'Process'
-                        )
-                    }
-                }
+                Invoke-SetupAction -CommandArgv $rargv -Update $u `
+                    -Scope "launch/reconcile/pass-$rpass/$($u.service)" -Label "Plugin reconcile: $($u.service)"
             }
             # Re-resolve before the next pass: this pass's reconcile actions
             # (the runtime-gated pass in particular) may have swapped the

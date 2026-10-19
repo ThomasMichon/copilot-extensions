@@ -203,8 +203,8 @@ records exist (tracked as a follow-up, not blocking this slice).
    assertions where they test protocol behavior, not location).
 
 Each step lands as its own PR through this repo's normal `create-pr` →
-Copilot review → `pr-merge --now` flow, consistent with the "serial,
-single-writer" merge norm for this public repo.
+Copilot review → `pr-merge --now` flow. Sequence this migration's actual
+dependencies; independent PRs do not require a repository-wide merge slot.
 
 ## Validation
 

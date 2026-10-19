@@ -161,12 +161,12 @@ class ReaderCpuObservation:
         elif not holder.done() and not final:
             return previous, CpuIssue(root.pid, "sample_pending")
         try:
-            observation = await asyncio.wait_for(
-                asyncio.shield(holder),
-                timeout=_SAMPLE_JOIN_SECONDS,
-            )
-        except (TimeoutError, asyncio.TimeoutError):
-            return previous, CpuIssue(root.pid, "sample_pending")
+            done, _ = await asyncio.wait({holder}, timeout=_SAMPLE_JOIN_SECONDS)
+            if not done:
+                return previous, CpuIssue(root.pid, "sample_pending")
+            if holder.cancelled():
+                return previous, CpuIssue(root.pid, "sampling_failed")
+            observation = holder.result()
         except Exception:
             log.warning("Namespace reader CPU observation failed", exc_info=True)
             return previous, CpuIssue(root.pid, "sampling_failed")
@@ -216,7 +216,8 @@ class ReaderCpuObservation:
                 except Exception:
                     log.warning("Namespace reader CPU observation setup failed", exc_info=True)
                     issue = CpuIssue(root.pid, "sampling_failed")
-            return await asyncio.shield(command)
+            await asyncio.wait({command})
+            return command.result()
         finally:
             issues = list(observation.issues) if observation is not None else []
             if issue is not None:

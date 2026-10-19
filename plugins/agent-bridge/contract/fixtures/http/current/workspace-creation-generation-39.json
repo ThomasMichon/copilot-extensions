@@ -1,0 +1,48 @@
+{
+  "captured_from": {
+    "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 39,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "3b751ac95114ed2aaaf32f2b41856c9676993b96",
+    "source_sha256": "9232ecccd116704648768e33e053606f86af3ccb1bae5faae1b7845259ca25a0"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions/workspace-creations",
+    "json": {
+      "agent": "example@local",
+      "creation_key": "logical-work"
+    }
+  },
+  "response": {
+    "session_id": "bridge-a",
+    "name": "example-session",
+    "status": "idle",
+    "creation": {
+      "version": 1,
+      "status": "complete",
+      "worktree": {
+        "id": "worktree-a",
+        "repo": "example",
+        "path": "synthetic-worktree-path",
+        "creation_nonce": "allocation-a"
+      },
+      "native_session_id": "native-a",
+      "turn_index": null,
+      "replayed": false
+    }
+  },
+  "health": {
+    "protocol_version": 39,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "owner_qualified_acquisition": 34,
+    "workspace_creation": 34,
+    "native_bound_prompt": 33,
+    "older_route_status": 404,
+    "client_floor_refusal_status": 426,
+    "required_protocol_version": 34
+  }
+}

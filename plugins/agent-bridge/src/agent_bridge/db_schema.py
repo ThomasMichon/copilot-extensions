@@ -57,7 +57,10 @@ class _SchemaMixin:
                     "ALTER TABLE live_messages ADD COLUMN idempotency_key TEXT"
                 )
                 live_columns.add("idempotency_key")
-            for col in ("claimed_at REAL", "outcome TEXT"):
+            for col in (
+                "claimed_at REAL", "outcome TEXT", "consumed_at REAL",
+                "consumption_tracked INTEGER NOT NULL DEFAULT 0",
+            ):
                 if col.split()[0] not in live_columns:
                     conn.execute(f"ALTER TABLE live_messages ADD COLUMN {col}")
                     live_columns.add(col.split()[0])
@@ -640,3 +643,15 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (25,))
             conn.commit()
             log.info("Schema migrated to version 25: sessions.caller_session_id")
+
+        if from_version < 26:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(live_messages)")}
+            if "consumed_at" not in cols:
+                conn.execute("ALTER TABLE live_messages ADD COLUMN consumed_at REAL")
+            if "consumption_tracked" not in cols:
+                conn.execute(
+                    "ALTER TABLE live_messages ADD COLUMN consumption_tracked INTEGER NOT NULL DEFAULT 0"
+                )
+            conn.execute("UPDATE schema_version SET version=?", (26,))
+            conn.commit()
+            log.info("Schema migrated to version 26: live-message consumption receipts")

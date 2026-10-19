@@ -335,6 +335,7 @@ class CliNamespaceResolver(NamespaceResolver):
         repo_remote: str | None = None,
     ) -> SpawnTarget:
         from . import agent_registry as compat
+        from plugin_resolve.reflection import selection_cli_args
 
         argv = ["namespace-resolve", name]
         if repo:
@@ -344,7 +345,9 @@ class CliNamespaceResolver(NamespaceResolver):
         for plugin in extra_plugins or ():
             source = getattr(plugin, "source", None)
             if source:
-                argv += ["--stage-plugin", source]
+                argv += selection_cli_args({
+                    "source": source, "enable": getattr(plugin, "enable", True),
+                })
         res = await self._run(argv)
         if res is not None:
             rc, out, err = res

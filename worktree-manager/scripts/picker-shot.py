@@ -201,7 +201,7 @@ def svg_to_png(
 
     if not browser:
         raise RuntimeError(
-            "PNG rendering requires `npm install` in scripts/picker-snapshot "
+            "PNG rendering requires `python install.py` in scripts/picker-snapshot "
             "or a Chromium-family browser"
         )
     sized = svg.replace('<svg class="rich-terminal"',
@@ -418,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
             source, steps, view=args.view, size=args.size, settle=settle,
             update_state="current"))
         if not rasterizer_ready:
-            print("! No PNG rasterizer found; run npm install in "
+            print("! No PNG rasterizer found; run python install.py in "
                   "scripts/picker-snapshot or install a Chromium-family browser.",
                   file=sys.stderr)
             return 3

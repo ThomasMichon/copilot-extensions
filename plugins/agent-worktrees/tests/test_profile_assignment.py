@@ -311,6 +311,46 @@ def test_binding_and_ordinary_resume_replay_the_same_profile(
     assert replayed.assignment.disposition == "bound"
 
 
+@pytest.mark.parametrize("copilot_args", [[], ["--acp", "--stdio"]])
+@pytest.mark.parametrize("interface", ["cli", "acp"])
+def test_exact_native_resume_replays_saved_profile_across_transports(
+    assignment_home, tmp_path, monkeypatch, copilot_args, interface,
+):
+    _, tracking_dir = assignment_home
+    profiles = _profiles(2)
+    policy = _policy(profiles)
+    record = _record(tmp_path, worktree_id="wt-native", interface=interface)
+    path = tracking_dir / "wt-native.yaml"
+    tracking.save_record(record, path)
+    selected = assignment.allocate(
+        policy, profiles, worktree_id=record.worktree_id, lane="new",
+        generation_key="new:wt-native", seed="native-seed", token="native-token",
+    )
+    assert assignment.bind("native-token", "native-original", record.worktree_id) is not None
+    record = tracking.load_record(path)
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test-machine", platform="linux",
+        repo_name="test-project", copilot_profiles=profiles, profile_assignment=policy,
+    )
+    state_before = assignment.state_path().read_bytes()
+    monkeypatch.setattr(
+        assignment, "allocate_best_effort",
+        lambda *a, **kw: pytest.fail("native replay must not allocate a new assignment"),
+    )
+    replayed = m._launch_profile_selection(
+        config, argparse.Namespace(
+            profile=None, recovery=False, copilot_args=copilot_args,
+            native_resume_session="native-original",
+        ),
+        record, lane="new", generation_key="new:wt-native",
+        resume_session="native-original", allocate_new=False,
+    )
+    assert replayed.profile == selected.profile
+    assert replayed.assignment is not None and replayed.assignment.disposition == "bound"
+    assert assignment.state_path().read_bytes() == state_before
+    _assert_profile_launch_effects(tmp_path, replayed.profile)
+
+
 def test_stale_pending_record_sync_cannot_overwrite_bound_assignment(
     assignment_home,
     tmp_path: Path,

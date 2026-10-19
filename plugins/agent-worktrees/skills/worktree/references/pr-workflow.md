@@ -77,44 +77,52 @@ Different repos land work differently, and the `pr-*` verbs apply to different
 subsets. Query the repo's **flow profile** up front:
 
 ```
-<agent-worktrees catalog argv[0]> get pr-profile      # direct | pr-human-merge | pr-agent-merge
+<agent-worktrees catalog argv[0]> get pr-profile      # direct | pr-human-merge | pr-agent-merge | pr-self-merge
 <agent-worktrees catalog argv[0]> get pr-enabled      # "true" or "false"
 <agent-worktrees catalog argv[0]> get pr-required     # "true" -> direct-to-default-branch is blocked
 <agent-worktrees catalog argv[0]> get pr-provider     # gitea | github | azure-devops (empty in direct mode)
 ```
 
-The three profiles (derived purely from config -- provider-generic, no network):
+The four configured profiles are provider-generic. A caller's effective flow
+also applies its resolved role and live permissions; a configured self-merge
+profile alone does not grant merge authority.
 
 | Profile | Config shape | How work lands | Verbs that apply |
 |---------|--------------|----------------|------------------|
 | **`direct`** | `pr.enabled: false` | `finalize` lands to the default branch | *(none -- no PR flow)* |
-| **`pr-human-merge`** | enabled, **no** `automerge_label` | PR-gated; a **human** approves + merges | `create-pr`, `pr-watch`, `pr-status`, `pr-nudge`, `pr-complete` -- **not `pr-merge`** |
+| **`pr-human-merge`** | enabled, no `automerge_label`, no submitter-direct selection | PR-gated; a **human** approves + merges | `create-pr`, `pr-watch`, `pr-status`, `pr-nudge`, `pr-complete` -- **not `pr-merge`** |
 | **`pr-agent-merge`** | enabled + an `automerge_label` bound | PR-gated; the author **signals merge consent** after approval; the review gate merges | the full `pr-*` family, including `pr-merge` |
+| **`pr-self-merge`** | enabled, no `automerge_label`, and `self_approve` or `merge_actor: submitter-direct` | The authorized submitter merges once the repo's checks/review gates permit | the full `pr-*` family; explicit `pr-merge <repo> <PR> --now` |
 
 **Applicability is self-describing.** `pr-status` prints the profile (`flow:`
-line + a `flow` block in `--json`), and `pr-merge` **refuses** on a repo whose
-profile is not `pr-agent-merge`, naming the reason and pointing at the right
-process (human merge vs a stale anchor). So when a verb reports it does not
-apply, believe it and follow its pointer -- do **not** hand-merge, escalate to
-an admin, or invent a flow.
+line + a `flow` block in `--json`). Bare `pr-merge` applies consent only for
+`pr-agent-merge`; `pr-self-merge` requires explicit `--now`, and
+`pr-human-merge` does not support either merge action. A refusal names the
+applicable process. Follow it -- do **not** hand-merge, escalate to an admin,
+or invent a flow.
 
 - On a **`pr-human-merge`** repo: open the PR (`create-pr`), address review with
   `pr-watch`, then **a human approves and merges** -- consult the repo's
   `CONTRIBUTING` / related narrative for who merges. `pr-merge` does not apply.
 - On a **`pr-agent-merge`** repo (e.g. an auto-reviewer + auto-merge repo where
   review typically lands in minutes): after approval, `pr-merge` signals consent
-  and the gate merges. This is the flow the sections below assume.
+  and the gate merges.
+- On a **`pr-self-merge`** repo: satisfy its actual review and required-check
+  policy, then use `pr-merge <repo> <PR> --now` if the caller's resolved role
+  authorizes it. Bare `pr-merge` deliberately refuses rather than applying
+  consent. A human-review or ownership veto is not waived by this profile.
 - If `pr-merge` reports "no automerge_label" on a repo you **expected** to be
-  `pr-agent-merge`, suspect a **stale anchor** first (the binding landed on the
-  default branch but this checkout hasn't pulled it): refresh the anchor
-  (`git sync` on the anchor / the project's update command) and retry -- do not
-  fall back to a hand-merge.
+  `pr-agent-merge`, inspect its effective profile and resolved configuration.
+  A stale binding is one possible cause; refresh it through the project's
+  authorized synchronization flow when needed. Do not treat missing consent
+  configuration as self-merge authority or fall back to a hand-merge.
 
 ### "Request auto-complete" -- the same shape across providers (incl. Azure DevOps)
 
-`pr-merge` is **"request auto-complete of this PR"**. *How* the provider honors
-that is an implementation detail, so ADO is the **same `pr-agent-merge` shape**
-as gitea/github -- not a special case:
+For **`pr-agent-merge`**, bare `pr-merge` requests consent/auto-complete, not
+direct self-merge. *How* the provider honors that is an implementation detail,
+so ADO is the **same `pr-agent-merge` shape** as gitea/github -- not a special
+case. The separate self-merge `pr-merge --now` path above is not this consent action:
 
 | Provider | How `pr-merge` requests auto-complete | Consent marker in a snapshot |
 |----------|----------------------------------------|-------------------------------|
@@ -244,6 +252,25 @@ proof of merge. Both text and `--json` expose the same result; text also prints
 the follow-up command. Timeout remains **124**, provider/auth failure **3**, and
 usage failure **2**. The native hibernation waiter composing this command wakes
 on exit 0 without needing to reinterpret a review transition.
+
+An interrupted or unexpectedly completed wait is a wake-up to reconcile, not
+evidence that its requested condition or the PR's completion gate passed. Run
+`pr-status` for that exact repository and PR, inspect any returned events and
+consent update, and re-arm only if the intended condition remains unmet and the
+previous wait has exited. Preserve the original review cursor after an
+interruption with no usable result; use a returned cursor only after handling
+its events/update. Do not fetch a new cursor merely to restart, which can skip a
+transition during the interruption.
+
+Keep the original finite deadline: a re-arm gets only its remaining timeout,
+not a fresh full window. An elapsed deadline is a timeout, not a spurious wake.
+Transient failures may use bounded backoff; repeated immediate exits need
+diagnosis rather than a tight restart loop. Explicit cancellation, usage/auth
+failures and installation-identity refusals remain visible failures, not
+permission to restart a daemon or create a second subscription. This is
+caller-side recovery discipline; it does not change valid transition/consent
+wakes, the existing transient-provider retry, or supported unbounded waits.
+
 `pr-merge` applies consent by default through its existing checked provider
 path; `--dry-run` instead reports `merge.needs_consent`,
 `merge.consent_action`, and `merge.consent_command`, without waiting or labeling.
@@ -368,30 +395,20 @@ not the end state; **merged** is. Apply whichever waiting policy actually
 fits the target repo's configured flow — they are not interchangeable:
 
 - **Self-merge repos** (`merge_actor: submitter-direct` / `pr-self-merge`):
-  wait briefly for CI and any non-blocking automated review, check real
-  status rather than assuming, rebase if the head goes stale, then merge
-  once the repo's own gates allow it. **`pr-status`/`pr-watch`'s raw
-  `eligible: false` / `reason: "not yet approved"` pair is not necessarily
-  a live blocker on this profile** — it often reflects only a
-  human-approval/codeowner gate that is a documented, separate concern from
-  Copilot's own (non-blocking) review verdict, and the acting identity may
-  hold a live bypass right on that gate the raw fields don't represent
-  (`self_merge_note`, when present in the same JSON, surfaces exactly this
-  — read it before treating `eligible`/`reason` as authoritative). **Before
-  trusting either field at face value, check the target repo's own
-  CONTRIBUTING-equivalent doc for its documented verdict-shape and merge
-  rules** — many self-merge repos (e.g. a repo whose Copilot review
-  structurally never renders `Approve` on the owner's own PRs) define a
-  different passing condition than "wait for Approve," and a generic
-  `pr-watch`/`pr-status` field can misreport (see
-  `ThomasMichon/copilot-extensions#3638`, filed after exactly this
-  confusion drove a 12-round review-fix loop before an agent noticed the
-  target repo's own docs already said not to wait. A later, separate
-  25-round loop on a different PR was actually caused by carried-over
-  review findings not clearing after being fixed — see #5183 — but this
-  same verdict/bypass confusion is what then stalled *merging* that PR for
-  roughly 90 minutes once the findings themselves were resolved; keep the
-  two causes distinct when reasoning about either).
+  obtain the actual current-head review required by the target repo and pass
+  its required checks, rebase if needed, then use the role-authorized managed
+  merge. A genuine current-head `Approve` is review evidence; do not discard
+  it because of an assumption about owner-authored PRs. Some repos also accept
+  a clean `Comment` verdict under their documented policy. An author's own
+  review is not independent approval, and agents must not approve their own
+  PRs. Read the actual reviewer, head, body and open findings rather than
+  inferring a verdict from a watcher exit or a historical product limitation.
+  `eligible`, `reason` and `self_merge_note` describe tooling/provider state,
+  not an override of repository policy or permission to ignore a veto. When
+  the only outstanding gate is a separate human/code-owner approval and the
+  repo explicitly grants this caller role-scoped self-merge authority, use
+  the managed `--now` boundary. Unresolved blocking findings, holds, failed or
+  missing required CI, conflicts and unknown ownership remain blockers.
 - **Human-review repos**: poll for review state and comments (the
   end-to-end loop below); address feedback in the same worktree and
   re-request review; repeat until approved and merged.
@@ -996,6 +1013,14 @@ SHA** as an exact remote lease. It never fetches a new lease to overwrite
 someone else's newer work. A moved/deleted remote head requires inspection
 and reconciliation, not blind retry.
 
+If a verified rebased publication reached the remote before its transport
+acknowledgement was recorded, a later update can recover without rewriting
+that remote again. The source-owned replay proof and unchanged open PR,
+repository and head association must still verify. When the independently
+confirmed remote head is already an ancestor of the pinned source commit,
+recovery uses normal non-forcing transport, with the usual hooks and deadline.
+Unknown provider evidence or an unrelated concurrent update remains a refusal.
+
 The opt-in requires the owning `worktree/{id}` checkout, persisted successful
 `create-pr` publication ownership, and an open, exclusively tracked private
 head ending in that worktree's canonical creation suffix. Ownership also binds
@@ -1069,6 +1094,14 @@ destination evidence still requires explicit reconciliation. An inconsistent
 PR identity or branch correction remains refused; a matching-looking suffix is
 never proof by itself.
 
+#### Routine backed publication reconciliation
+
+An intact backed-sync result already accepted by the provider/ref can be
+reconciled automatically by normal `push-changes` or `git sync`, with ordinary
+exclusive ownership and no override. See
+[routine publication reconciliation](../../../docs/cli-reference.md#routine-publication-reconciliation)
+for the admission, retention, non-forcing transport and refusal contract.
+
 #### Operator-confirmed break glass
 
 Prefer source-owning CWD when available. If the original context or historical
@@ -1080,14 +1113,31 @@ and project configuration explicitly:
 ```
 
 The unconfirmed invocation refuses and previews the exact existing PR,
-destination fingerprint, immutable source commit and saved expected remote
-commit, without changing Git refs, tracking or the remote. **Stop for real
+destination fingerprint, immutable source commit, original saved head and
+current provider/ref-agreed expected remote commit, without changing Git refs,
+tracking, audits or the remote. Saved publication authority, action and any
+validated backed-sync proof are also fingerprint-bound. **Stop for real
 per-PR operator sign-off** on that previewed operation. A reason, discovered
 flag, broad policy approval or previous refusal does not authorize the push.
 Only then repeat with the same inputs and
 `--confirm-break-glass <preview-fingerprint>`. Agents must not generate consent
-on their own. A changed source (including an amend), destination, reason or
-expected head requires a new preview and sign-off.
+on their own. A changed source (including an amend), destination, reason,
+saved publication, expected head, action or evidence requires a new preview
+and sign-off.
+
+The preview prefers `settle-publication` when an existing completed backed-sync
+checkpoint independently proves its exact result is already the current
+provider/ref-agreed head. Confirmation then settles only local bookkeeping:
+no push, PR attribution edit or publication of later local work. Equal SHAs or
+patches without that checkpoint are not proof. Otherwise `rewrite` requires
+explicit confirmation of the exact source and agreed live CAS lease. The
+original saved lease is retained as evidence, never silently replaced before
+approval in this override flow; outside routine backed reconciliation, normal
+publication and ordinary `--rewrite-pr` still refuse it.
+Corrupt, unreadable or dangling optional checkpoints mark settlement evidence
+`unusable` in the preview and audit. They disable settlement, not an explicit
+rewrite preview; their bytes/available file identity and referenced-ref state
+remain bound to confirmation and are never silently repaired.
 
 The exception waives historical original-owner, suffix and replay proof, not
 provider authentication, exact source/destination validation, an unchanged
@@ -1099,7 +1149,7 @@ the preview and private audit, never silently treated as ownership evidence.
 The approved commit object is pinned through transport even if its local branch
 moves later; no opportunistic lease refresh or implicit exception exists.
 
-Before pushing, the command retains the approved source and previous published
+Before either action, the command retains the approved source and actual agreed published
 tip at reported worktree-scoped `refs/agent-worktrees/recovery/...` refs. They
 survive reflog expiry and garbage collection while the refs and repository
 exist; do not remove them or clean up the worktree until the recovery is
@@ -1111,11 +1161,13 @@ does **not** restore the provider head: any remote rollback needs its own new
 preview, current exact lease and per-operation approval. No plain force push.
 
 Private `agent-worktrees-pr-break-glass-<id>.json` audits live in the selected
-worktree's Git metadata, with confirmation basis, reason, retained refs and
+worktree's Git metadata, with original saved publication evidence,
+confirmation basis, reason, retained refs and
 available observed invoker/session attribution. Unknown provenance is recorded
 honestly; the data is not proof of authenticated identity and is not
-automatically published. `succeeded` means transport succeeded, not that the
-PR merged. If tracking or audit persistence fails after transport, the command
+automatically published. `succeeded` means transport or the explicitly named
+bookkeeping settlement succeeded, not that the PR merged. If tracking or audit
+persistence fails after transport, the command
 reports the published remote head and reconciliation need, not success or a
 safe retry. Read provider/remote evidence before repairing bookkeeping.
 

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a test hang on Python 3.12+ where the connect-retry test's server never closed its accepted connection",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "dev"
-    }
-  ]
-}

@@ -1,0 +1,62 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions/workspace-creations",
+    "json": {
+      "agent": "container:prepared-original",
+      "creation_key": "logical-work",
+      "provider_instance": true
+    }
+  },
+  "response": {
+    "preference_source": "caller-settings",
+    "session_id": "bridge-a",
+    "name": "example-session",
+    "status": "idle",
+    "protocol_version": 39,
+    "min_protocol_version": 1,
+    "creation": {
+      "version": 1,
+      "status": "complete",
+      "venue": {
+        "provider": "fixture-provider",
+        "kind": "container",
+        "target_id": "container:prepared-original",
+        "instance_id": "original-instance",
+        "scope": "provider-instance",
+        "transport": "provider-exec",
+        "ready": true,
+        "capabilities": {
+          "instance_pinned_exec": true
+        }
+      },
+      "native_session_id": "native-a",
+      "turn_index": null,
+      "replayed": false
+    }
+  },
+  "capability": {
+    "provider_creation": 36,
+    "workspace_creation": 34,
+    "client_floor_refusal_status": 426,
+    "ordinary_provider_instance_default": false,
+    "creation_prompt_supported": false,
+    "required_provider_capability": "instance_pinned_exec"
+  },
+  "captured_from": {
+    "commit": "237170c95a65a16f0893a86b40623c971e75adfb",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 39,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+    "source_git_blob": "00fad21adb39873dd52f44123a0e11daf75e5a74",
+    "source_sha256": "39a8ed46121e1fc543f4e6b06942858704ff6cbb61cb4ecaaf5a36fe956daae8"
+  },
+  "compatibility": {
+    "caller_handoff_retains_worktree_scope": true,
+    "provider_key_required_before_reuse": true,
+    "provider_native_recreation": false,
+    "name_only_provider_refused": true,
+    "cold_resume_placement_drift_refused_before_spawn": true,
+    "guest_workspace_preserved_on_load": true
+  }
+}

@@ -32,6 +32,7 @@ from .config import (
 from .config import (
     tcp_port as configured_tcp_port,
 )
+from .config import within_group as _within_group
 from .extensions import ActionContext, StartupContext, UnlockContext, get_registry
 from .gcm import git_credential_action
 from .keepassxc import KeePassXCBackend, PasswordMutationAmbiguous
@@ -64,24 +65,10 @@ PASSWORD_MUTATION_MAX_QUEUE_SECONDS = 30.0
 UNLOCK_REQUIRED_ACTIONS = frozenset({
     "get", "has", "search", "add", "set-password", "set-username",
     "import-key", "export-key", "list", "ls", "show", "remove", "rm",
-    "move", "mv",
+    "move", "mv", "identity-key-setup",
 })
 
 log = logging.getLogger("agent-vault.service")  # marketplace-isolation: allow logger-namespace
-
-
-def _within_group(entry: str, group: str | None) -> bool:
-    """Whether a normalized entry falls within the resolved vault group.
-
-    When no group is configured there is nothing to scope to, so every entry is
-    considered in-scope. Used to gate destructive operations (remove/move) so a
-    caller cannot delete or move an entry outside the active vault's group
-    without an explicit ``force``.
-    """
-    if not group:
-        return True
-    root = group.rstrip("/")
-    return entry == root or entry.startswith(root + "/")
 
 
 class VaultService:
@@ -575,6 +562,18 @@ class VaultService:
             # password(s) -- never log it, never serve it over loopback TCP.
             from .cutover import handoff_export_response
             return handoff_export_response(self, transport=transport)
+
+        if action == "identity-key-setup":
+            from .identity_key import IdentityKeyError, provision
+
+            try:
+                return provision(
+                    self, kpdb, normalize_entry(request.get("entry", ""), group),
+                    request.get("initialize_owner") is True,
+                    request.get("confirm_first_owner") is True,
+                )
+            except IdentityKeyError as exc:
+                return {"ok": False, "code": exc.code, "error": str(exc)}
 
         if action == "get":
             entry = request.get("entry", "")

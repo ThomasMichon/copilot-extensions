@@ -9,6 +9,8 @@ Copilot CLI plugin or multi-machine service reuses one implementation:
   acquire it stands down instead of racing an incumbent. The kernel frees the
   lock when the holder dies, so a dead owner's lease is immediately reclaimable
   and a stale lock never wedges startup.
+- ``operation`` -- :class:`OperationLock`: process/thread-owned, crash-releasing
+  custody for a single operation, separate from daemon-lifetime ownership.
 - ``supersession`` -- :func:`is_superseded`: the pure, fail-safe decision a
   demoted daemon uses to self-retire once a live, strictly-newer generation has
   taken over (operates on a plain routing-table ``dict``; no routing-lib
@@ -27,6 +29,7 @@ from .lease import (
     SingleInstance,
     read_owner_pid,
 )
+from .operation import OperationLock, OperationLockedError, OperationOwnershipError
 from .reaper import (
     ReapResult,
     reconcile_set_reap,
@@ -40,6 +43,9 @@ from .supersession import (
 
 __all__ = [
     "AlreadyRunningError",
+    "OperationLock",
+    "OperationLockedError",
+    "OperationOwnershipError",
     "ReapResult",
     "SingleInstance",
     "is_listening",

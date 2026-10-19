@@ -1708,6 +1708,8 @@ def test_ingest_target_doctor_reports_wsl_rsync(monkeypatch) -> None:
 
 def _cfg(home: Path, source: Path, dest: Path) -> Config:
     data = dict(load_config(home=home).as_dict())
+    # Transport fixtures intentionally have no accounting store; tested separately.
+    data["sync"]["usage_capture"] = False
     data["sync"]["source"] = str(source)
     data["sync"]["targets"]["local"]["path"] = str(dest)
     return Config(data, home)
@@ -1927,6 +1929,23 @@ def test_status_handles_malformed_and_control_metadata(
     assert "\u001b" not in output
     assert "sessions:       (unknown)" in output
     assert "(invalid deferred_files metadata)" in output
+
+
+def test_status_text_bounds_input_before_printable_filtering() -> None:
+    from agent_logger.sync.meta import MAX_STATUS_SCAN_CHARS, status_text
+
+    slices = []
+
+    class LargeText(str):
+        def __getitem__(self, key):
+            slices.append(key)
+            return super().__getitem__(key)
+
+    assert status_text(LargeText("x" * 1_000_000)) == "x" * 512
+    assert slices == [slice(None, MAX_STATUS_SCAN_CHARS)]
+    assert status_text(10**10000) == "(unknown)"
+    assert status_text("\x00" * 1_000_000) == "(unknown)"
+    assert status_text("a\nb", limit=1) == "a"
 
 
 def test_status_sanitizes_unreadable_metadata_error(
@@ -2667,6 +2686,7 @@ def test_repo_allowlist_filters_sessions(tmp_path: Path) -> None:
     data = dict(load_config(home=tmp_path / "home").as_dict())
     data["sync"]["source"] = str(src)
     data["sync"]["repo_allowlist"] = ["dotfiles"]
+    data["sync"]["usage_capture"] = False  # raw transport fixture contains a dummy DB
     data["sync"]["targets"]["local"]["path"] = str(dest)
     cfg = Config(data, tmp_path / "home")
 
@@ -3213,14 +3233,14 @@ def test_copy_process_logs_skips_file_rotated_away_mid_pass(
 
         monkeypatch.setattr(filesystem.ArchiveDirectory, "open", flaky_open)
     else:
-        real_needs_copy = filesystem._needs_copy
+        real_needs_copy = filesystem._needs_copy_from_stat
 
-        def flaky_needs_copy(src, dst):
-            if src.name == victim.name:
+        def flaky_needs_copy(before, dst, destination):
+            if dst.name == victim.name:
                 victim.unlink()
-            return real_needs_copy(src, dst)
+            return real_needs_copy(before, dst, destination)
 
-        monkeypatch.setattr(filesystem, "_needs_copy", flaky_needs_copy)
+        monkeypatch.setattr(filesystem, "_needs_copy_from_stat", flaky_needs_copy)
 
     copied, _nbytes, locked = _copy_process_logs(logs, dest)
 

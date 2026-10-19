@@ -128,7 +128,7 @@ def test_annotate_delegate_graph_marks_missing_reachable_host_gone():
         machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="atlas-core-wsl-20260101-host",
+        caller_worktree="atlas-core-wsl-20260101-000000-abcd",
     )
 
     delegate_cli.annotate_delegate_graph(
@@ -141,7 +141,7 @@ def test_annotate_delegate_graph_marks_missing_reachable_host_gone():
 
     assert delegate["caller_state"] == {
         "state": "gone",
-        "worktree_id": "atlas-core-wsl-20260101-host",
+        "worktree_id": "atlas-core-wsl-20260101-000000-abcd",
         "machine": "atlas-core",
         "platform": "wsl",
         "repo": "example",
@@ -156,7 +156,7 @@ def test_annotate_delegate_graph_normalizes_windows_platform_token():
         machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="atlas-core-win-20260101-host",
+        caller_worktree="atlas-core-win-20260101-000000-abcd",
     )
 
     delegate_cli.annotate_delegate_graph(
@@ -171,6 +171,102 @@ def test_annotate_delegate_graph_normalizes_windows_platform_token():
     assert delegate["caller_state"]["machine"] == "atlas-core"
     assert delegate["caller_state"]["platform"] == "windows"
     assert delegate["delegate_finalizable"] is True
+
+
+@pytest.mark.parametrize("machine,platform,prefix", [
+    ("host-wsl", "wsl", "host-wsl"),
+    ("host-wsl", "wsl", "host-wsl-wsl"),
+    ("host-win", "windows", "host-win"),
+    ("host-windows", "windows", "host-windows"),
+    ("host-linux", "linux", "host-linux"),
+    ("host", "", "host"),
+])
+@pytest.mark.parametrize("reachable", [False, True])
+def test_missing_environment_named_caller_preserves_reachability_gate(
+    machine: str, platform: str, prefix: str, reachable: bool,
+) -> None:
+    identity = f"{prefix}-20261013-100000-abcd"
+    delegate = _row(
+        "worker-linux-20261013-100001-abcd",
+        machine="worker", platform="linux", status="active", caller_worktree=identity,
+    )
+
+    delegate_cli.annotate_delegate_graph(
+        [delegate], reachable_hosts={(machine, platform): reachable},
+    )
+
+    assert delegate["caller_state"]["machine"] == machine
+    assert delegate["caller_state"].get("platform", "") == platform
+    assert delegate["caller_state"]["state"] == ("gone" if reachable else "unreachable")
+    assert delegate["delegate_finalizable"] is reachable
+    assert delegate["delegate_finalizable_reason"] == (
+        "host-gone" if reachable else "host-unreachable"
+    )
+
+
+def test_normalized_caller_does_not_choose_between_colliding_host_prefixes() -> None:
+    delegate = _row(
+        "worker-linux-20261013-100001-abcd",
+        machine="worker", platform="linux", status="active",
+        caller_worktree="host-wsl-20261013-100000-abcd",
+    )
+    delegate_cli.annotate_delegate_graph(
+        [delegate], reachable_hosts={("host", "wsl"): True, ("host-wsl", "wsl"): False},
+    )
+    assert delegate["delegate_finalizable"] is False
+    assert delegate["delegate_finalizable_reason"] == "host-unresolved"
+
+
+def test_legacy_caller_keeps_the_longest_matching_machine_prefix() -> None:
+    hosts = {("host", "wsl"): False, ("host-wsl", "wsl"): True}
+    assert delegate_cli._expected_host_key(
+        "host-wsl-wsl-20261013-100000-abcd", hosts,
+    ) == ("host-wsl", "wsl")
+
+
+@pytest.mark.parametrize("caller", [
+    "host-wsl-win-20261013-100000-abcd",
+    "host-wsl-worker-wsl-20261013-100000-abcd",
+    "host-wsl-20261013-worker-wsl-20261013-100000-abcd",
+    "host-wsl-linux-20261013-100000-abcd",
+    "host-wsl-20261013-100000-not-an-allocation",
+])
+def test_partial_machine_or_environment_match_never_authorizes_finalization(caller: str) -> None:
+    delegate = _row(
+        "worker-linux-20261013-100001-abcd",
+        machine="worker", platform="linux", status="active", caller_worktree=caller,
+    )
+    delegate_cli.annotate_delegate_graph(
+        [delegate], reachable_hosts={("host-wsl", "wsl"): True},
+    )
+    assert delegate["caller_state"]["state"] == "unresolved"
+    assert delegate["delegate_finalizable"] is False
+    assert delegate["delegate_finalizable_reason"] == "host-unresolved"
+
+
+@pytest.mark.parametrize("prefix", ["host-wsl", "host-wsl-wsl"])
+@pytest.mark.parametrize("suffix", ["abcd", "a" * 32])
+def test_missing_paired_caller_retains_exact_host_inference(prefix: str, suffix: str) -> None:
+    caller = f"{prefix}-20261013-100000-{suffix}-k"
+    assert delegate_cli._expected_host_key(caller, {("host-wsl", "wsl"): True}) == (
+        "host-wsl", "wsl",
+    )
+
+
+def test_host_inference_parses_the_allocation_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    parse = delegate_cli.parse_session_worktree_id
+    calls: list[str] = []
+
+    def counted(identity: str) -> tuple[str, str, str] | None:
+        calls.append(identity)
+        return parse(identity)
+
+    monkeypatch.setattr(delegate_cli, "parse_session_worktree_id", counted)
+    caller = "host-wsl-20261013-100000-abcd"
+    hosts = {(f"host-{number}-wsl", "wsl"): True for number in range(50)}
+    hosts[("host-wsl", "wsl")] = True
+    assert delegate_cli._expected_host_key(caller, hosts) == ("host-wsl", "wsl")
+    assert calls == [caller]
 
 
 def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):

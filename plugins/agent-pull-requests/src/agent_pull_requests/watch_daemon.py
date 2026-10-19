@@ -20,10 +20,11 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 from work_coalescing_singleton import CoalescingServer
 
-from .watch_contract import ALL_TRANSITIONS, DEFAULT_UNTIL, PRSnapshot
+from .watch_contract import ALL_TRANSITIONS, DEFAULT_UNTIL, Baseline, PRSnapshot
 from .watch_delivery import Deliveries
 from .watch_notification import (
     ACKNOWLEDGED_NOTIFICATIONS, CALLBACK_TIMEOUT, default_notify, positive_seconds, validate_notify,
@@ -77,6 +78,7 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
 
 #: ``fetch(repo, number) -> PRSnapshot``.
 Fetch = Callable[[str, int], PRSnapshot]
+NativeFetch = Callable[[str, int, str], PRSnapshot]
 Notify = Callable[[FiredEvent], int | None]
 
 
@@ -101,14 +103,19 @@ class WatchDaemon:
         idle_exit: float = _POLLER_IDLE_EXIT_S,
         persist: bool = True,
         active: bool = True,
+        state_root: Path | None = None,
+        native_fetch: NativeFetch | None = None,
     ) -> None:
         self._registry = WatchRegistry()
         self._fetch = fetch
+        self._native_fetch = native_fetch
         self._notify = notify
         self._poll_interval = poll_interval
         self._idle_exit = idle_exit
         self._persist_enabled = persist
+        self._state_root = state_root
         self._persistence_error: str | None = None
+        self._observation_errors: dict[str, str] = {}
         self._persist_lock = threading.RLock()
         self._pollers: dict[WatchKey, threading.Thread] = {}
         self._pollers_lock = threading.Lock()
@@ -132,13 +139,19 @@ class WatchDaemon:
         """Reload every subscriber a prior generation persisted, and
         immediately resume polling each restored key -- no caller needs to
         re-``subscribe``; the reattach is transparent to them."""
-        entries = read_subscriptions_state()
+        entries = self._read_state()
         if not entries:
             return
         self._registry.restore_state(entries)
         self._deliveries.resume()
         for key in self._registry.active_keys():
             self._ensure_poller(key)
+
+    def _read_state(self) -> list[dict]:
+        return (
+            read_subscriptions_state() if self._state_root is None
+            else read_subscriptions_state(self._state_root)
+        )
 
     def _persist(self, entries: list[dict] | None = None) -> None:
         """Serialize every persist call against every other -- multiple
@@ -153,9 +166,11 @@ class WatchDaemon:
             return
         with self._persist_lock:
             try:
-                write_subscriptions_state(
-                    self._registry.snapshot_state() if entries is None else entries,
-                )
+                snapshot = self._registry.snapshot_state() if entries is None else entries
+                if self._state_root is None:
+                    write_subscriptions_state(snapshot)
+                else:
+                    write_subscriptions_state(snapshot, self._state_root)
             except OSError:
                 self._persistence_error = "state_write_failed"
                 raise
@@ -187,9 +202,13 @@ class WatchDaemon:
                     not isinstance(payload.get(field), str) or not payload[field].strip()
                     for field in ("repo", "subscriber_id")
                 )
+                or not isinstance(payload.get("worktrees_command", ""), str)
             ):
                 return {"error": "invalid cancellation target"}
-            key = WatchKey(repo=str(payload.get("repo", "")), number=int(payload.get("number", 0)))
+            key = WatchKey(
+                repo=str(payload.get("repo", "")), number=int(payload.get("number", 0)),
+                worktrees_command=payload.get("worktrees_command", ""),
+            )
             with self._persist_lock:
                 identity = str(payload.get("subscriber_id", ""))
                 sub = self._registry.subscriber(key, identity)
@@ -202,8 +221,9 @@ class WatchDaemon:
                     return {"unregistered": False}
                 entries = [
                     entry for entry in self._registry.snapshot_state()
-                    if (entry["repo"], entry["number"], entry["subscriber_id"])
-                    != (key.repo, key.number, identity)
+                    if (entry["repo"], entry["number"], entry["subscriber_id"],
+                        entry.get("worktrees_command", ""))
+                    != (key.repo, key.number, identity, key.worktrees_command)
                 ]
                 try:
                     self._persist(entries)
@@ -214,6 +234,11 @@ class WatchDaemon:
                     key, identity, registration_id=sub.registration_id,
                 )
             result = {"unregistered": ok}
+            if key.worktrees_command:
+                result["in_flight"] = any(
+                    item["registration_id"] == sub.registration_id
+                    for item in self._deliveries.running()
+                )
             if "registration_id" in payload:
                 result.update(registration_id=sub.registration_id,
                               notification_protocol=ACKNOWLEDGED_NOTIFICATIONS)
@@ -225,7 +250,7 @@ class WatchDaemon:
                 "pid": os.getpid(),
                 "subscriber_count": sum(len(v) for v in self._registry.status().values()),
                 "active_keys": len(self._registry.active_keys()),
-                "capabilities": [ACKNOWLEDGED_NOTIFICATIONS],
+                "capabilities": self._capabilities(),
                 "pending_delivery_count": len(self._registry.pending_events()),
                 "persistence_error": self._persistence_error,
                 "delivery_error": self._deliveries.start_error,
@@ -239,6 +264,8 @@ class WatchDaemon:
         return {"error": f"unknown kind {kind!r}"}
 
     def _handle_register(self, payload: dict) -> dict:
+        from .watch_provider import command_path, target_id
+
         try:
             protocol = payload.get("notification_protocol")
             if "notification_protocol" in payload and protocol != ACKNOWLEDGED_NOTIFICATIONS:
@@ -254,27 +281,90 @@ class WatchDaemon:
                 or not isinstance(identity, str) or not identity.strip()
             ):
                 raise ValueError("repo, positive number and subscriber_id are required")
-            key = WatchKey(repo=repo, number=number)
+            command = payload.get("worktrees_command", "")
+            if not isinstance(command, str):
+                raise ValueError("invalid native command")
+            native_target = ""
+            if command:
+                command = command_path(command)
+                if self._native_fetch is None:
+                    raise ValueError("watch owner lacks native snapshot support")
+                if not acknowledged:
+                    raise ValueError("native observation requires acknowledged notifications")
+            continuous = payload.get("continuous", False)
+            if type(continuous) is not bool or continuous and not (acknowledged and command):
+                raise ValueError("continuous notifications require native acknowledged snapshots")
+            key = WatchKey(repo=repo, number=number, worktrees_command=command)
             if acknowledged and payload.get("until") == []:
                 raise ValueError("until must not be empty")
             until = payload.get("until") or DEFAULT_UNTIL
             if not isinstance(until, (list, tuple)) or any(t not in ALL_TRANSITIONS for t in until):
                 raise ValueError("until must contain supported transitions")
+            if continuous and not {"merged", "closed"} <= set(until):
+                raise ValueError("continuous notifications must observe both terminal states")
             notify = validate_notify(payload.get("notify", {}), acknowledged)
             timeout = payload.get("timeout")
             if timeout is not None:
                 timeout = positive_seconds(timeout)
         except (ValueError, TypeError, OverflowError):
             return {"error": "invalid watch registration or notification specification"}
+        if command:
+            try:
+                snap = self._native_fetch(repo, number, command)
+                if snap.provider != "azure-devops" or (
+                    snap.observation is None and not (snap.merged or snap.closed_unmerged)
+                ):
+                    return {"error": "native ADO observation capability is unavailable"}
+                native_target = target_id(snap)
+            except Exception:
+                return {"error": "native snapshot capability is unavailable"}
         with self._persist_lock:
+            if command and not self._registry.target_matches(key, native_target):
+                return {"error": "native target changed; cancel the prior binding explicitly"}
             previous = self._registry.subscriber(key, identity)
+            if continuous and previous is not None:
+                if (
+                    not previous.continuous or previous.until != tuple(until)
+                    or previous.notify != notify or timeout is not None
+                ):
+                    return {"error": "existing continuous subscription differs; cancel it explicitly"}
+                before = (previous.pending, previous.queued, previous.terminal_observed)
+                terminal_event = self._registry.admit_terminal(key, identity, snap)
+                if terminal_event is not None:
+                    try:
+                        self._persist()
+                    except StateCommitUncertain:
+                        self._deliveries.resume()
+                        return {
+                            "error": "registration durability is uncertain",
+                            "ambiguous_registration": True,
+                            "registration_id": previous.registration_id,
+                        }
+                    except OSError:
+                        self._registry.restore_admission(key, previous, *before)
+                        raise
+                    self._deliveries.resume()
+                return {
+                    "registered": True, "registration_id": previous.registration_id,
+                    "notification_protocol": ACKNOWLEDGED_NOTIFICATIONS,
+                    "snapshot_protocol": "agent-worktrees.pr-snapshot/v1", "continuous": True,
+                }
             sub = self._registry.register(
                 key, identity, until=tuple(until), notify=notify,
                 timeout=timeout, acknowledged=acknowledged,
+                continuous=continuous,
+                target_id=native_target,
+                baseline=(
+                    Baseline.from_snapshot(snap)
+                    if command and not (snap.merged or snap.closed_unmerged) else None
+                ),
             )
+            terminal_event = self._registry.admit_terminal(key, identity, snap) if command else None
             try:
                 self._persist()
             except StateCommitUncertain:
+                if terminal_event is not None:
+                    self._deliveries.resume()
                 self._ensure_poller(key)
                 return {
                     "error": "registration durability is uncertain",
@@ -283,12 +373,24 @@ class WatchDaemon:
             except OSError:
                 self._registry.restore_registration(key, sub, previous)
                 raise
+        if terminal_event is not None:
+            self._deliveries.resume()
         self._ensure_poller(key)
         return (
             {"registered": True, "registration_id": sub.registration_id,
-             "notification_protocol": ACKNOWLEDGED_NOTIFICATIONS}
+             "notification_protocol": ACKNOWLEDGED_NOTIFICATIONS,
+             **({"snapshot_protocol": "agent-worktrees.pr-snapshot/v1",
+                 "continuous": continuous} if command else {})}
             if acknowledged else {"registered": True}
         )
+
+    def _capabilities(self) -> list[str]:
+        from .watch_provider import CONTINUOUS_NOTIFICATIONS, NATIVE_SNAPSHOTS
+
+        return [
+            ACKNOWLEDGED_NOTIFICATIONS,
+            *([NATIVE_SNAPSHOTS, CONTINUOUS_NOTIFICATIONS] if self._native_fetch else []),
+        ]
 
     def wait_for_shutdown(self, poll_interval: float = 1.0) -> None:
         """Block the caller (``serve``'s own foreground loop) until a
@@ -300,6 +402,11 @@ class WatchDaemon:
     @property
     def quiescent(self) -> bool:
         return self._quiescent
+
+    @property
+    def effects_enabled(self) -> bool:
+        with self._admission:
+            return self._accepting_mutations and not self._shutdown_event.is_set()
 
     @contextmanager
     def _lifecycle_operation(self, timeout: float) -> Iterator[float]:
@@ -351,7 +458,7 @@ class WatchDaemon:
                 raise RuntimeError("PR watch state adoption requires durable persistence")
             self._state_loaded = False
             registry = WatchRegistry()
-            registry.restore_state(read_subscriptions_state(), strict=True)
+            registry.restore_state(self._read_state(), strict=True)
             self._check_lifecycle_deadline(deadline)
             self._registry = registry
             self._deliveries = Deliveries(
@@ -444,10 +551,27 @@ class WatchDaemon:
             if not self._registry.watching_count(key):
                 self._deliveries.resume()
                 break
+            fetch_revision = self._registry.revision()
             try:
-                snap = self._fetch(key.repo, key.number) if self._registry.watching_count(key) else None
+                if key.worktrees_command:
+                    if self._native_fetch is None:
+                        raise ValueError("native snapshot capability is unavailable")
+                    snap = self._native_fetch(key.repo, key.number, key.worktrees_command)
+                    from .watch_provider import target_id
+
+                    if (
+                        snap.provider != "azure-devops"
+                        or snap.observation is None and not (snap.merged or snap.closed_unmerged)
+                        or not self._registry.target_matches(key, target_id(snap))
+                    ):
+                        raise ValueError("native target no longer matches its registration")
+                else:
+                    snap = self._fetch(key.repo, key.number)
+                self._observation_errors.pop(str(key), None)
             except Exception:
                 snap = None
+                if key.worktrees_command:
+                    self._observation_errors[str(key)] = "native_snapshot_unavailable"
             if self._shutdown_event.is_set():
                 break
             try:
@@ -455,7 +579,9 @@ class WatchDaemon:
                     before = self._registry.revision()
                     previous = self._registry.snapshot_state()
                     fired = (
-                        self._registry.apply_snapshot(key, snap) if snap is not None
+                        self._registry.apply_snapshot(
+                            key, snap, fetch_revision=fetch_revision,
+                        ) if snap is not None
                         else self._registry.sweep_timeouts((key,))
                     )
                     if self._registry.revision() != before or self._persistence_error is not None:
@@ -470,7 +596,10 @@ class WatchDaemon:
                             self._registry.restore_state([
                                 entry for entry in previous
                                 if self._registry.subscriber(
-                                    WatchKey(entry["repo"], entry["number"]), entry["subscriber_id"],
+                                    WatchKey(
+                                        entry["repo"], entry["number"],
+                                        entry.get("worktrees_command", ""),
+                                    ), entry["subscriber_id"],
                                 ) is None
                             ])
                             raise
@@ -499,6 +628,19 @@ class WatchDaemon:
             "pending_deliveries": self._deliveries.status(),
             "persistence_error": self._persistence_error,
             "delivery_error": self._deliveries.start_error,
+            "capabilities": self._capabilities(),
+            "registrations": [
+                {
+                    "repo": entry["repo"], "number": entry["number"],
+                    "subscriber_id": entry["subscriber_id"],
+                    "registration_id": entry.get("registration_id"),
+                    "worktrees_command": entry.get("worktrees_command", ""),
+                    "continuous": entry.get("continuous", False),
+                }
+                for entry in self._registry.snapshot_state()
+            ],
+            "in_flight": self._deliveries.running(),
+            "observation_errors": dict(self._observation_errors),
         }
 
 

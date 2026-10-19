@@ -124,6 +124,16 @@ Historical-estimate policy selected by the operator: `best-effort-with-uncertain
 (report best-effort estimates with measured error ranges and explicit
 extrapolation warnings, rather than require a fixed held-out accuracy threshold).
 
+Follow-up, 2026-10-16: the operator selected `verified-all-targets-opt-in`
+from the reclamation-policy form:
+
+> Opt-in: also require verified ZIP publication to every configured target;
+> require an explicit retention age
+
+The form explicitly authorized source-code work only, not live deletion,
+configuration changes or rollout. The bounded implementation proposal and its
+validation gates are in [process-log reclamation](process-log-reclamation.md).
+
 ## Plan
 
 ### Phase 0 - Reviewed intent and contracts
@@ -132,7 +142,7 @@ extrapolation warnings, rather than require a fixed held-out accuracy threshold)
   accounting, catalog, daily-output, and consumer compatibility contracts.
 
 ### Phase 1 - Complete evidence preservation
-- [ ] Preserve bounded, content-free session-local accounting observations before
+- [x] Preserve bounded, content-free session-local accounting observations before
   sync and compaction; retain prior evidence after store rebuild or corruption
   (#6439; [slice contract](usage-evidence-and-estimation.md)).
 - [ ] Extend configured sync to preserve process logs alongside session-state.
@@ -141,7 +151,9 @@ extrapolation warnings, rather than require a fixed held-out accuracy threshold)
 - [x] Integrate the reserved `session-sync push --source-identity-file` interface
   with the merged canonical source-publication helper (#6027).
 - [ ] Add scheduled settled-log zip compaction, archive-transparent reads, and
-  safe handling of active, rotated, resumed, or truncated files.
+  safe handling of active, rotated, resumed, or truncated files; implement
+  source retirement only under the selected
+  [all-target verification contract](process-log-reclamation.md).
 - [ ] Unify discovery of machine roots, CodeSpace namespaces, host-merged rescue
   sessions, verified container captures, and existing cold session archives.
 
@@ -225,6 +237,331 @@ extrapolation warnings, rather than require a fixed held-out accuracy threshold)
 Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
+
+### 2026-10-17 - Historical-estimation review corrections
+- Reproduced all four Medium findings from #7137 with eight failing synthetic
+  regressions, then corrected each bug class: invalid/truncated TAR headers can
+  no longer be swallowed as EOF; preserved and SQLite scalar batches join once;
+  child ownership filters all root state updates; successful compaction without
+  a textual summary discards stale context and reports the coverage gap.
+- The combined native estimation, bounded-reader, ZIP, session and cold-store
+  selection passed 384 tests with 23 platform skips. The corrected private
+  count-only production comparison also completed with explicit refusals and
+  uncertainty, without weakening stable-read checks or publishing its corpus.
+- Lint, install-contract, docs consistency and unchanged module ceilings pass.
+  Updated-head review and required CI remain pre-merge gates; this does not
+  close #6439, the parent effort or its runtime-adoption obligations.
+
+### 2026-10-17 - Transcript estimation implementation and bounded validation
+- Implemented the remaining #6439 estimation slice: content-free root-call
+  features, optional preserved/store measurement pairing, session-disjoint
+  model calibration, empirical uncertainty and an explicit read-only JSON CLI.
+  Standard live/tar.gz/ZIP inputs share preallocation limits and stable reads;
+  custom codecs explicitly decline unsupported bounded access.
+- Native focused feature/calibration/reader/ZIP selection passed 287 tests
+  with 19 platform skips; legacy session and cold-store consumers passed 90
+  tests with four skips. Install-contract, touched F/E9 lint, documentation
+  consistency and independent read-only correctness review passed.
+- A bounded private count-only production comparison exercised measured
+  coverage, session-aggregate held-out errors, explicit oversize refusals,
+  extrapolation warnings and zero-feature abstentions. Poor accuracy remained
+  visible in best-effort mode. No corpus, identifiers, coefficients or consumer
+  rates were published; this is not historical ground-truth proof.
+- Restored a stale session-owned test environment through the runner's explicit
+  reinstall path after confirming missing transitive dependency metadata.
+  Canonical shared-library manifest invalidation is tracked separately in
+  #7136; test leases, containment and time limits were unchanged.
+- The estimation source still owes its reviewed PR and required-CI merge.
+  Phase 3's historical-estimate checkbox and #6439 remain open until that
+  gate lands. The parent effort remains Active for catalog, exact accounting,
+  daily products, consumer parity and authorized runtime adoption.
+
+### 2026-10-17 - Session-local accounting preservation merged
+- #7072 merged as `85b16a25d1d17fef907ca1d4b7c4a5220c197e0b` after the
+  current-head review findings were fixed or explained and resolved. The
+  maintainer accepted the existing Lite review and the normal managed merge
+  gate; required CI enforcement was not bypassed.
+- Scheduled capture now preserves bounded, source-qualified SQLite/WAL and
+  modern transcript observations before signatures and compaction. Prior
+  artifacts survive rebuilds, corrupt inputs and publication failures. Missing
+  evidence is explicit, and raw sessions and existing archives remain
+  transferable when accounting prevents compaction.
+- Review regressions cover embedded-NUL text bounds, overflowing numeric
+  metrics, original timestamp admission, producer-lock signature churn and
+  archive delivery across accounting gaps. The final focused native selection
+  passed 106 tests with six platform skips; earlier broader selections remain
+  evidence for their own revisions, not invented final-head execution.
+- Re-read both completion gates after the merge. The preservation portion of
+  #6439 is complete; calibrated historical estimates are the next owned slice.
+  #6439, release-backed adoption and the parent effort remain open. No live
+  runtime or machine configuration was changed.
+
+### 2026-10-16 - Machine-only scheduled integration
+- Added an explicit machine-only configuration origin and scheduled run mode.
+  Default repository-layered loads and ad-hoc/tenant configurations provide no
+  retirement authority; ordinary config consumers remain usable. Filtered or
+  namespaced contexts, unsupported transports and detached execution cannot
+  authorize retirement. Disabled defaults and manual additive snapshots stay
+  unchanged; no rollout or live configuration changes are part of this slice.
+- The existing sync lock now spans source/target preparation, sidecar marking,
+  snapshots, active-target log publication and all-target exact-ZIP retirement.
+  Positive process-log publication completeness distinguishes locked deferrals
+  from an ordinary successful transfer/no-op.
+- Bound source identity before publication and revalidate effective source and
+  target paths, machine identity, automation and original machine-file policy
+  after final raw hashing. Native protected policy-file and ancestor handles
+  span disposition but do not prevent an operator disabling policy during
+  long publication.
+- Synthetic tests cover actual scheduled two-target retirement, idempotence,
+  file and memory policy changes during publication/final hashing, configuration
+  writer/rename exclusion, dry-run zero effects and excluded contexts.
+  Full isolated Linux validation passed 1,477 tests with 114 skips and verified
+  cleanup. Native scheduled-path execution, current-head review and complete
+  CI remain acceptance gates; neither parent effort is complete.
+- Addressed review findings at the actual consumer boundaries: ordinary
+  configuration loads retain repository settings but cannot authorize a retiring
+  run; initially absent logs skip reclamation without blocking session sync or
+  adopting a later-created directory. Native writable-handle probes now use a
+  shared pytest fixture rather than a cross-test-module import.
+
+### 2026-10-16 - Internal retirement sequence reviewed and merged
+- #7047 actually merged at `2026-10-16T23:57:27Z` as
+  `40f3f51dac6b0e69124d51215a2b4371571394c1`, from final head
+  `fade814a315c05c0fb51948c3d834b4d89675b39`. Current-head Copilot
+  `COMMENTED` review `5554507289` reported no open issues; the owner-authored
+  clean-Comment policy applied. Exact-head native validation and all required
+  checks passed before normal author merge.
+- Complete final-head CI `38976318218` passed, followed by the latest
+  required same-head CI `38978649397` and workflow guard `38978650098`.
+  Native archive job `117243474723` executed the real Windows sequence:
+  541 passed, 38 skipped. Final isolated Linux validation passed 1,442 tests
+  with 102 skips and verified cleanup; native success was not inferred from
+  those skips.
+- Additional source-root tests bind the initial canonical directory identity
+  before target validation and opening. Valid-clone directory replacement and
+  retargeted configured ancestry are rejected before inspection, not adopted
+  as a fresh source mid-pass.
+- Both canonical Plan/Validation Plans were re-read after actual merge.
+  The internal mechanism has no scheduled caller and runtime reclamation is
+  still refused. Correct machine-local configuration provenance, final policy
+  pinning and existing-lock engine integration are next. Broad preservation,
+  catalog/accounting, daily output and adoption gates remain open.
+
+### 2026-10-16 - Internal all-target retirement sequence
+- Composed the prepared exact-ZIP publisher, full readback and native exclusive
+  original-file boundary in an internal post-publication routine. It requires
+  an existing exact local ZIP, pins every target root before publication, and
+  holds fully verified local/target replacement ZIP handles through commit.
+- Extended the retirement primitive with a caller-owned commit guard entered
+  after the final bounded raw hash. Source-root identity, age/quiet eligibility
+  and producer exit are checked within that final policy boundary. Post-commit
+  acknowledgement failures remain explicitly unconfirmed, not false rollback.
+- Reused complete-target validation and retained explicit POSIX non-support.
+  Dry run makes no publication or retirement changes. Synthetic native cases
+  exercise both required copies, corrupt/missing/offline evidence, late raw
+  revisions, final cancellation, protected replacement handles and committed
+  acknowledgement failure; Linux-only execution cannot establish native proof.
+- This is internal mechanism validation, not an operational feature. Runtime
+  enabled settings remain refused until correct machine-local policy provenance
+  and scheduling integration exist. Both parent completion gates remain open.
+
+### 2026-10-16 - Exact-ZIP publisher reviewed and merged
+- #7038 actually merged at `2026-10-16T22:02:39Z` as
+  `7169d091b1a35be36292eee7f58015f4e9ccaed6`, from final head
+  `76fa1c19e5fb5f04c2d94cba539017fce0169345`. Fresh Copilot approval
+  `5554095832` reported no open issues after the ancestry correction.
+  Complete same-head CI `38970751480` and workflow guard `38970752067`
+  passed before the normal author merge.
+- The corrected publisher keeps a read-only guard bound to the original target
+  root across publication and fresh readback. Valid-ZIP replacement directories
+  and replacement between the original and guard pins are rejected, not accepted
+  as successful publication. The addressed review thread is resolved.
+- Complete isolated Linux validation passed 1,418 tests with 86 skips and verified
+  cleanup. Native Windows archive CI executed 504 tests with 35 skips on the
+  exact final-head merge candidate, including real handle-sharing coverage.
+- Both canonical Plan/Validation Plans were re-read after actual merge. This
+  internal helper enables no runtime reclamation. Post-publication orchestration,
+  final source/policy revalidation, catalog/accounting, daily outputs and
+  release-backed adoption remain open; the effort stays Active.
+
+### 2026-10-16 - Observed-check reporting detour landed
+- #6504 merged as `09bcfec52a69077f29ba3d0fdf60f768886d594d` after exact-head
+  Copilot approval and configured required CI. #6495 is closed.
+- Failure diagnostics now retain bounded names, conclusions, links and available
+  summaries, with explicit incomplete evidence rather than false green rollups.
+  Required CI enforcement and maintainer review policy remain unchanged.
+- The accounting contributor resumes #6439: source-qualified session-local
+  preservation first, then calibrated transcript estimates. Neither capability
+  is complete; this parent effort and its validation obligations remain Active.
+
+### 2026-10-16 - Exact-ZIP additional-target publication preparation
+- Added a bounded internal publisher for one content-addressed ZIP revision to
+  explicitly resolved filesystem targets. It reuses the pinned directory,
+  kernel-owned claim and full ZIP verifier; no mixed process-log or session-state
+  transfer is invoked. Existing archives are verified without replacement.
+- The publisher holds and revalidates the exact source ZIP, checks copied
+  compressed bytes and member content, closes its publication claim and then
+  requires fresh configured-target readback. Per-target failures remain visible;
+  later targets are still attempted. Dry run has no publication effects.
+- Synthetic coverage exercises two-target exact-only copying, idempotence,
+  missing/offline/unsupported/corrupt destinations, source mutation, entry and
+  ancestor swaps, no-replace races, post-publication corruption and durability
+  failures. Native Windows sharing and handle-release proof remains a required
+  CI execution gate, not a claim based on Linux skips.
+- This closes another preservation implementation seam, not the reclamation or
+  parent completion gate. Runtime-enabled reclamation remains refused.
+  Post-publication orchestration, final policy/root/producer revalidation and
+  separately authorized release-backed adoption remain outstanding.
+
+### 2026-10-16 - Target-set and full ZIP readback preparation merged
+- #7026 merged at `2026-10-16T21:13:41Z` as
+  `883623d68b5813ed8d6fa08c26cfd8f02fe9628f`, from final head
+  `e51f946af997413f92ed6a37f1951d657a2be95f`. Fresh Copilot approval
+  `5553659288` accepted the corrected implementation. The addressed ancestry
+  thread is resolved. Complete same-head CI `38965506680` and workflow guard
+  `38965507387` passed before the normal submitter merge.
+- Native archive job `117192789324` checked out a merge candidate containing
+  that exact head and executed the existing `source_roots` selection: 491
+  passed, 22 skipped. The complete bounded isolated Linux plugin suite at the
+  final head passed 1,393 tests with 85 skips; cleanup was verified.
+- Review caught two real readback defects. POSIX read-only verification now
+  revalidates every lexical ancestor edge against its held directory identity,
+  rather than accepting an archive in a renamed-away root. Real opened-member
+  truncation now yields a per-target EOF failure and still checks later targets;
+  the same classification preserves additive snapshot failure reporting.
+  Ordinary publication's pinned-original behavior is unchanged.
+- CI also caught target-module growth past its shrink-only ceiling. Resolution
+  moved into the focused readback module; no baseline was widened.
+- This completes the bounded typed-readback slice, not source reclamation.
+  Runtime enabled settings still fail explicitly. Exact-ZIP-only publication
+  to additional required targets, post-publication policy/revision checks and
+  scheduler integration are next. Both parent Plan and Validation Plan remain
+  open; no source retirement, configuration change or rollout occurred.
+
+### 2026-10-16 - Explicit target-set and ZIP readback preparation
+- Added strict internal policy parsing with no implicit retention age or target
+  inference. Complete target resolution reuses existing options and rejects
+  unsupported, duplicate and source-overlapping destinations. The active
+  transport must be explicitly included; ordinary session-state sync remains
+  single-target.
+- Filesystem targets now expose typed, pass-local full ZIP readback. Missing,
+  corrupt, redirected or changed evidence cannot satisfy the all-target result,
+  even after a successful transfer or with identical size/mtime. OneDrive
+  readback acknowledges local bytes, not cloud upload. The read-only pinned
+  boundary creates no directories and issues no durability writes.
+- Enabled runtime reclamation is explicitly refused before sync writes until
+  post-publication orchestration exists. No deletion path or default changed.
+  This is a preparation slice, not completed reclamation or live adoption.
+- Bounded isolated Linux validation passed 1,383 tests with 85 skips across the
+  complete plugin suite; native readback assertions remain for the existing
+  Windows `source_roots` CI lane. Required review, complete same-head CI,
+  scheduler integration and parent effort completion remain open.
+
+### 2026-10-16 - Native retirement file boundary reviewed and merged
+- #7023 actually merged as `7dab91a9600bb845f9a0a4bf0853b7866ad21639`
+  at `2026-10-16T20:12:47Z`, from final head
+  `ffbb5a9443dc91377975901f6e20f4092f76ceab`. Fresh Copilot approval
+  `5553165043` accepted the corrected writer-exclusion proof. The prior
+  finding's thread was resolved after that acceptance.
+- The review identified a real test confound: CRT writable handles do not share
+  DELETE access, so their own sharing mask could make a permissive retirement
+  handle appear exclusive. Native probes now share READ, WRITE and DELETE,
+  require error 32 at the exclusion boundary, and successfully open/write
+  outside it.
+- Complete same-head CI `38958305525` passed before merge. Its native archive
+  job `117167238664` executed the `source_roots` selection on a merge candidate
+  containing the final head: 463 passed, 15 skipped. Bounded full Linux
+  validation before the test-only correction passed 1,323 tests with 83 skips;
+  the corrected focused rerun passed four with 11 native skips.
+- The internal primitive is not called by scheduled sync or manual commands.
+  POSIX retirement remains explicitly unsupported; all-target verification,
+  required-target configuration and orchestration are next. Both this effort
+  and its parent validation obligations remain open. No live retirement,
+  configuration change or rollout occurred.
+
+### 2026-10-16 - All-target reclamation policy reviewed
+- #7016 merged as `2d7640c56fa0f344bdd0b1d068c83e133105110b` after
+  exact-head approval `5552430865` with no open findings and complete
+  same-head CI `38951000049`. The selected policy requires explicit opt-in,
+  an explicit retention age, local ZIP verification and verified publication
+  to every required configured target.
+- The first implementation slice is the exact-file retirement boundary and
+  isolated platform proof, not an enabled deletion mode. POSIX remains
+  unsupported unless exact-entry identity and writer exclusion can be proved;
+  a pinned directory and a final stat/unlink sequence do not satisfy that bar.
+- All-target verification, configuration, scheduler integration, native
+  acceptance, released adoption and the parent Plan/Validation items remain
+  open. No live source retirement or rollout is authorized by the amendment.
+
+### 2026-10-16 - Process-log destination payload slice reviewed and merged
+- #7001 actually merged at `2026-10-16T11:05:25Z` as
+  `c9edb06f54c482976e2380ae0f7bb941bf28950f`, from final head
+  `7416402018b5dce32ab1d835a469de5a7330faf5`. Copilot approval
+  `5546826932` reported no open issues after both findings were fixed.
+  Complete same-head CI `38889754850` and the required workflow guards
+  passed before the normal submitter merge.
+- Parent durability barriers now run after either mkdir outcome, including
+  retries after a failed flush and concurrent creation. Windows destination
+  inspection retains extended-path support. The native archive-source job
+  executed 449 tests with 14 skips, including the new handle-lifetime,
+  read-only failure/cleanup and long-destination regressions; Linux CI
+  agent-logger groups passed 493 / 32 skipped and 835 / 32 skipped.
+- Managed PR completion reconciled the retained source worktree. Re-read
+  the effort Plan and Validation Plan: this closes only the process-log
+  payload destination slice. #5727 remains open for session-state,
+  health-metadata and admission/read containment. No full parent checkbox,
+  release, adoption, complete compaction or accounting parity is claimed.
+- Reclamation remains the next unassigned preservation stretch, not concurrent
+  shared-module work. Accounting, daily products and consumer adoption remain
+  active. No source evidence was retired and no runtime rollout was performed.
+
+### 2026-10-16 - Bounded process-log payload destination containment
+- Continued the claimed #5727 process-log destination slice after the source-read
+  receipt merged. Directory creation begins inside the held ancestor boundary:
+  POSIX payload operations use directory/file descriptors; Windows keeps each
+  parent unrenamable before creating the next child and through publication.
+- Incremental destination inspection and byte accounting use that same boundary.
+  Source identity/size and pre-publication entry checks remain shared with the
+  existing transfer. Failed moves no longer pre-delete an older good payload.
+  Destination failures are not swallowed as benign source disappearance.
+- Deterministic Linux tests exercise redirects before/after ancestor opening,
+  before child creation and at each payload operation, plus explicit I/O errors
+  and previous-good-copy retention. A real Windows regression attempts ancestor
+  rename during creation/copy and verifies handle release afterward; native
+  execution and fresh-head CI/review remain required before merge.
+- Session-state writes, health metadata, identity-admission containment and
+  readers remain separate #5727 obligations. Reclamation is next and unassigned;
+  accounting, daily products, consumer parity, release and authorized adoption
+  remain active. No original evidence, runtime or live configuration changed.
+
+### 2026-10-13 - Process-log source containment reviewed and merged
+- #6156 merged at `2026-10-14T06:35:39Z` as
+  `f79c873ee4c03022216d5d1a0ff3d8a79f9e4fc1`, from final head
+  `f66434f9bb7e78574766479e5d7c3e95af53040f`. The current-head Balanced
+  Copilot review had zero open findings. Complete successful same-head CI
+  `38515571854` and fresh required-check run `38518755723` both finished
+  before merge; historical watcher rollups were not used as gate evidence.
+- Process-log enumeration, direct reads and filesystem transfer sources
+  reuse canonical ancestor pinning. Intentional ancestor aliases, configured
+  reference identity, incremental POSIX enumeration, native handle release,
+  root-change diagnostics and per-entry copy deferral retain their documented
+  contracts. Only source-opener `ELOOP` is treated as a skipped candidate;
+  other source-open and all destination-publication failures remain visible.
+- Final-head Linux CI executed the agent-logger suite in two contained groups:
+  476 passed / 29 skipped and 823 passed / 32 skipped. The publisher's native
+  rebased-head selection passed 192 tests with 87 documented platform skips
+  and verified cleanup. The preceding 264-pass Linux receipt is historical,
+  not substituted for validation of the final rebased head.
+- Re-read the effort's Plan and Validation Plan after actual merge. This
+  closes the process-log source-read containment slice only. #5727 remains
+  open for destination containment; reclamation, complete transports,
+  source/session discovery, usage-evidence preservation, catalog/accounting,
+  daily products, fixed-corpus consumer parity and released adoption remain
+  active. No original evidence was retired or runtime rollout performed.
+- The next preservation stretch remains coordinated with the existing
+  publisher and the separate usage-evidence slice. This receipt does not
+  transfer source publication ownership or authorize a second concurrent
+  driver of those shared modules.
 
 ### 2026-10-13 - Usage-evidence amendment reviewed and merged
 - #6442 merged after the current-head Copilot review had no open Medium/High

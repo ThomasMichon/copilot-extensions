@@ -37,6 +37,7 @@ def _final_cold_error(record) -> str | None:
 def deferred_command(
     command: list[str], record_path: Path, *, seed_id: str | None = None,
     admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
 ) -> list[str]:
     prefix = [
         sys.executable, "-m", "agent_worktrees.launch_seed_exec",
@@ -48,6 +49,8 @@ def deferred_command(
         prefix += ["--admission-only"]
     if preserve_seed_id:
         prefix += ["--preserve-seed-id", preserve_seed_id]
+    if native_resume_session:
+        prefix += ["--native-resume-session", native_resume_session]
     return [*prefix, "--", *command]
 
 
@@ -111,14 +114,18 @@ def _setup_command(record_path: Path, seed_id: str, command: list[str]) -> list[
 def launch(
     record_path: Path, command: list[str], *, invoke: bool = False, seed_id: str | None = None,
     admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
 ) -> int:
     if (preserve_seed_id and not admission_only) or (admission_only and (seed_id or invoke)):
         raise ValueError("Admission-only launch cannot claim a prompt")
+    if native_resume_session and not admission_only:
+        raise ValueError("Native resume requires owner-held admission-only execution")
     if admission_only:
         with launch_admission.guard(record_path):
             return _launch(
                 record_path, command, invoke=invoke, seed_id=seed_id, admission_only=True,
                 preserve_seed_id=preserve_seed_id,
+                native_resume_session=native_resume_session,
             )
     return _launch(record_path, command, invoke=invoke, seed_id=seed_id)
 
@@ -126,6 +133,7 @@ def launch(
 def _launch(
     record_path: Path, command: list[str], *, invoke: bool, seed_id: str | None,
     admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
 ) -> int:
     try:
         record = tracking.load_record(record_path)
@@ -133,6 +141,24 @@ def _launch(
         print(f"Could not read launch-prompt worktree: {exc}", file=sys.stderr)
         return 3
     current = launch_seed_state.peek(record_path)
+    if native_resume_session:
+        from .session_liveness import session_liveness
+
+        if (
+            record.resolved_head_session != native_resume_session
+            or record.pending_handoffs
+            or getattr(record, "execution_leg_opaque", False)
+            or getattr(record, "session_backend_opaque", False)
+            or record.status in {"finalizing", "complete", "completed", "finalized", "archived"}
+            or sessions.has_mux_session(record.worktree_id)
+            or session_liveness(native_resume_session) != "dead"
+        ):
+            print("Native head changed, is live, or has unconfirmed liveness.", file=sys.stderr)
+            return 3
+        cold_error = _final_cold_error(record)
+        if cold_error:
+            print(cold_error, file=sys.stderr)
+            return 3
     if admission_only:
         if (
             record.pending_seed
@@ -226,6 +252,7 @@ def main() -> int:
     parser.add_argument("--seed-id", default=None)
     parser.add_argument("--admission-only", action="store_true")
     parser.add_argument("--preserve-seed-id", default=None)
+    parser.add_argument("--native-resume-session", default=None)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -236,6 +263,7 @@ def main() -> int:
             args.record, command, invoke=args.invoke, seed_id=args.seed_id,
             admission_only=args.admission_only,
             preserve_seed_id=args.preserve_seed_id,
+            native_resume_session=args.native_resume_session,
         )
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         print(f"Could not hand off staged launch prompt: {exc}", file=sys.stderr)

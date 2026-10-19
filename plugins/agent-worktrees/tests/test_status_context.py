@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import repos as repos_module
 from agent_worktrees import tracking
@@ -111,4 +113,55 @@ def test_status_context_alias_resolution_fails_open(monkeypatch, capsys):
     monkeypatch.setattr(m.worktree_identity, "_find_repo_dir", lambda: None)
     rc = m.cmd_status_context(_ns())
     assert rc == 0
+    assert capsys.readouterr().out.strip() == "raw-host-01  win  test-chamber:8e45"
+
+
+@pytest.mark.parametrize(
+    ("platform", "key", "badge"),
+    [
+        ("windows", "friendly-host", "win"),
+        ("wsl", "friendly-host-wsl", "wsl"),
+    ],
+)
+def test_status_context_disambiguates_physical_host_using_record_platform(
+    monkeypatch, capsys, platform, key, badge,
+):
+    entries = {
+        name: m.cfg.MachineEntry(
+            key=name,
+            display_name="host",
+            hostname="raw-host-01",
+            execution_platform=environment,
+            physical_host="host-family",
+        )
+        for name, environment in (("friendly-host", "windows"), ("friendly-host-wsl", "wsl"))
+    }
+    with pytest.raises(ValueError, match="physical-host metadata"):
+        m.cfg.find_machine_entry(entries, "RAW-HOST-01")
+    monkeypatch.setattr(
+        m, "_find_record_for_path",
+        lambda _p: _record(machine="RAW-HOST-01", platform=platform),
+    )
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(repos_module, "resolve_path", lambda _name: "/repo/test-chamber")
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda *_a, **_k: entries)
+    assert m.cmd_status_context(_ns()) == 0
+    assert capsys.readouterr().out.strip() == f"{key}  {badge}  test-chamber:8e45"
+
+
+def test_status_context_preserves_ambiguous_physical_host(monkeypatch, capsys):
+    entries = {
+        name: m.cfg.MachineEntry(
+            key=name,
+            display_name=name,
+            hostname="raw-host-01",
+            execution_platform="windows",
+            physical_host="host-family",
+        )
+        for name in ("host-one", "host-two")
+    }
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: _record(machine="raw-host-01"))
+    monkeypatch.setattr(repos_module, "resolve_path", lambda _name: "/repo/test-chamber")
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda *_a, **_k: entries)
+    assert m.cmd_status_context(_ns()) == 0
     assert capsys.readouterr().out.strip() == "raw-host-01  win  test-chamber:8e45"

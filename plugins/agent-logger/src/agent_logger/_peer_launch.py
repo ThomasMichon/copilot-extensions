@@ -24,10 +24,11 @@ PEERS = {
     "agent-containers": "agent_containers",
     "agent-dispatch": "agent_dispatch",
     "agent-ssh": "agent_ssh",
+    "agent-pull-requests": "agent_pull_requests",
 }
 OWNERS = {
     "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
-    "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
+    "agent-logger", "agent-index", "agent-machines", "agent-worktrees", "agent-pull-requests",
 }
 
 
@@ -93,7 +94,7 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
         if upper.startswith((
             "AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_", "AGENT_CONTAINERS_",
             "AGENT_LOGGER_", "AGENT_WORKTREES_", "AGENT_BRIDGE_", "AGENT_INDEX_",
-            "AGENT_MACHINES_", "AGENT_SSH_",
+            "AGENT_MACHINES_", "AGENT_SSH_", "AGENT_PULL_REQUESTS_",
         )) or (
             upper.startswith("AGENT_")
             and upper.endswith(("_ROOT", "_DIR", "_HOME", "_INSTALLATION_ID"))
@@ -147,6 +148,8 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
             value = inherited.get(key)
             if value:
                 environment[key] = value
+    elif plugin == "agent-pull-requests":
+        environment["AGENT_PULL_REQUESTS_HOME"] = context["stateRoot"]
     return environment
 
 

@@ -1,9 +1,0 @@
-{
-  "comment": "Expand read-only legacy and refused installation resolution coverage in consumer wrappers.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

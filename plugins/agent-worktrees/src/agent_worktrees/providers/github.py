@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
+from ..pr_review_policy import KNOWN_REVIEW_STATES, normalized_review_time
 from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 from .pr_source import github_source, pull_payload, source_text
@@ -282,7 +283,8 @@ class GitHubProvider:
         return f"gh pr ready failed for {repo}#{number}: {detail}"
 
     def get_snapshot(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        strict_safety: bool = False,
     ) -> PRSnapshot:
         """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
         Mirrors the gitea provider over GitHub's REST API (near-identical
@@ -315,6 +317,22 @@ class GitHubProvider:
             raise ProviderError(f"gh returned non-JSON PR payload: {exc}") from exc
         if not isinstance(pr, dict):
             raise ProviderError(f"unexpected gh PR payload for {repo}#{number}")
+        if strict_safety:
+            labels_raw = pr.get("labels")
+            if (
+                not isinstance(pr.get("draft"), bool)
+                or not isinstance(pr.get("title"), str)
+                or not isinstance(labels_raw, list)
+                or any(
+                    not isinstance(label, dict)
+                    or not isinstance(label.get("name"), str)
+                    or not label["name"].strip()
+                    for label in labels_raw
+                )
+            ):
+                raise ProviderError(
+                    f"GitHub mutation safety metadata is incomplete for {repo}#{number}"
+                )
 
         # GitHub computes ``mergeable`` asynchronously and reports it null on a
         # freshly-opened PR; only a real bool is a known state (else None). It
@@ -387,12 +405,30 @@ class GitHubProvider:
                 if not isinstance(rid, int):
                     raise ProviderError(f"GitHub review on page {page} has no integer id", transient=True)
                 state = str(r.get("state", "")).upper()
+                user = r.get("user")
+                login = user.get("login") if isinstance(user, dict) else None
+                if not isinstance(login, str) or not login.strip():
+                    raise ProviderError(
+                        f"GitHub review on page {page} has no reviewer identity",
+                        transient=True,
+                    )
+                if state not in KNOWN_REVIEW_STATES:
+                    raise ProviderError(
+                        f"GitHub review on page {page} has unknown state",
+                        transient=True,
+                    )
+                submitted_at = r.get("submitted_at")
+                if state != "PENDING" and normalized_review_time(submitted_at) is None:
+                    raise ProviderError(
+                        f"GitHub review on page {page} has no valid submission time",
+                        transient=True,
+                    )
                 reviews.append(
                     Review(
                         id=rid,
                         state=state,
-                        user=str((r.get("user") or {}).get("login", "")),
-                        submitted_at=str(r.get("submitted_at", "") or ""),
+                        user=login,
+                        submitted_at=str(submitted_at or ""),
                         commit_id=str(r.get("commit_id", "") or ""),
                         dismissed=(state == "DISMISSED"),
                     )
@@ -515,12 +551,13 @@ class GitHubProvider:
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
         delete_source_branch: bool = True, expected_head_sha: str = "",
+        hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
     ) -> str:
         """Directly merge PR ``number`` via ``gh pr merge``.
 
-        The ``pr-merge <#> --now`` submitter-direct primitive. ``--squash`` keeps
-        the non-interactive merge method explicit; ``--admin`` is used only when
-        the configured review is non-blocking. ``delete_source_branch`` (default
+        The ``pr-merge <#> --now`` primitive uses explicit ``--squash`` merging.
+        A normal head-pinned merge comes first; configured ``--admin`` fallback
+        requires authoritative check verification. ``delete_source_branch`` (default
         ``True``, matching :meth:`request_auto_complete`'s own default) passes
         ``--delete-branch`` so the head branch is cleaned up on merge -- safe
         because ``finalize``/``pr-complete`` verify a merged PR against the
@@ -551,7 +588,20 @@ class GitHubProvider:
         return merge_pull(
             repo, number, squash=squash, admin=admin,
             delete_source_branch=delete_source_branch, expected_head_sha=expected_head_sha,
+            hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
             host=host, invoke=lambda argv: run_cli(argv, env=self._env(token, host=host)),
+        )
+
+    def pull_review_exception(
+        self, repo: str, number: int, *, expected_head_sha: str,
+        hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
+        api_base: str = "", token: str | None = None,
+    ) -> tuple[bool, bool, str]:
+        from .github_review_gate import pull_review_exception
+        return pull_review_exception(
+            self, repo, number, expected_head_sha=expected_head_sha,
+            hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
+            api_base=api_base, token=token, invoke=run_cli,
         )
 
     def close_pull(
@@ -682,82 +732,10 @@ class GitHubProvider:
     def pull_review_gate(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
     ) -> tuple[bool, bool | None]:
-        """Live GitHub-rulesets review gate for a PR: ``(review_required, bypassable)``.
-
-        Native ``enable_auto_merge`` arms successfully even when a required
-        review is what's actually blocking the merge -- GitHub queues it
-        indefinitely rather than refusing (#3296 follow-up).
-
-        Reads ``gh pr view --json mergeStateStatus,reviewDecision,baseRefName``,
-        then -- only when ``reviewDecision`` is ``REVIEW_REQUIRED`` -- the
-        branch **rulesets** API for whether the acting identity can bypass
-        it (``current_user_can_bypass``). Classic branch protection has no
-        per-actor bypass signal, so ``bypassable`` is ``None`` (unknown, not
-        "no") when rulesets don't apply -- callers must treat ``None`` as
-        "do not attempt a bypass", never as an affirmative yes.
-
-        Returns ``(False, None)`` when no review is required (or the read
-        itself fails) -- the ordinary auto-merge path is correct there.
-        """
-        host = self.authority_endpoint(api_base)
-        proc = run_cli(
-            ["gh", "pr", "view", str(number), "--repo", repo,
-             "--json", "reviewDecision,baseRefName"],
-            env=self._env(token, host=host),
+        from .github_review_gate import pull_review_gate
+        return pull_review_gate(
+            self, repo, number, api_base=api_base, token=token, invoke=run_cli,
         )
-        if proc.returncode != 0:
-            return False, None
-        try:
-            data = json.loads(proc.stdout)
-        except json.JSONDecodeError:
-            return False, None
-        if data.get("reviewDecision") != "REVIEW_REQUIRED":
-            return False, None
-
-        base_ref = (data.get("baseRefName") or "").strip()
-        if not base_ref:
-            return True, None
-        rproc = run_cli(
-            ["gh", "api", "--hostname", host,
-             f"repos/{repo}/rules/branches/{quote(base_ref, safe='')}"],
-            env=self._env(token),
-        )
-        if rproc.returncode != 0:
-            return True, None
-        try:
-            rules = json.loads(rproc.stdout)
-        except json.JSONDecodeError:
-            return True, None
-        if not isinstance(rules, list):
-            return True, None
-        ruleset_ids = {
-            r.get("ruleset_id") for r in rules
-            if isinstance(r, dict)
-            and r.get("type") == "pull_request"
-            and r.get("ruleset_id")
-        }
-        if not ruleset_ids:
-            return True, None
-
-        for ruleset_id in ruleset_ids:
-            sproc = run_cli(
-                ["gh", "api", "--hostname", host,
-                 f"repos/{repo}/rulesets/{ruleset_id}"],
-                env=self._env(token),
-            )
-            if sproc.returncode != 0:
-                continue
-            try:
-                ruleset = json.loads(sproc.stdout)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(ruleset, dict):
-                continue
-            if ruleset.get("current_user_can_bypass") in (
-                "always", "pull_requests_only",
-            ):
-                return True, True
-        return True, False
 
     def get_repo_policy(
         self, repo: str, *, default_branch: str = "", api_base: str = "",

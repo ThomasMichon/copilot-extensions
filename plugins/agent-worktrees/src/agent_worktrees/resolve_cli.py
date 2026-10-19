@@ -9,13 +9,16 @@ import platform
 import sys
 import threading
 
+from machine_transport import split_machine_environment, resolve_machine_selection
+
 from . import activity, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
 from . import codename_tracking, config as cfg, machine_identity
 from .launch_trace import append_launch_event
+from .execution_spaces import ExecutionSpaceError, registry_for_config
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
-from .launch_progress import step
+from .launch_progress import preview_mode, step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 
 
@@ -25,14 +28,45 @@ def _core():
     return core
 
 
-def _target_is_local(config: cfg.Config, name: str | None) -> bool:
+def _target_is_local(
+    config: cfg.Config, name: str | None, environment: str | None = None,
+) -> bool:
     if not name:
         return False
-    if config.machine and name.casefold() == config.machine.casefold():
-        return True
-    from .resolve_machine_cli import _machine_key_for_display
+    if not environment and config.machine and name.casefold() == config.machine.casefold():
+        return machine_identity.is_local_machine(name, config)
+    from .execution_spaces import registry_for_config
 
-    return machine_identity.is_local_machine(_machine_key_for_display(config, name), config)
+    entries = registry_for_config(config)
+    selected = resolve_machine_selection(entries, name, environment, allow_physical_context=True)
+    target = selected.target
+    if entries:
+        entry = selected.entry
+        if entry is not None:
+            if target.environment and target.environment != cfg.detect_platform():
+                return False
+            if machine_identity.is_local_machine(entry.key, config):
+                return True
+            if entry.execution_platform:
+                return False
+            target = split_machine_environment(entry.key, target.environment)
+    if target.environment and target.environment != cfg.detect_platform():
+        return False
+    if selected.entry is None:
+        from machine_transport import is_observed_local_name
+
+        if is_observed_local_name(
+            name, config_machine=config.machine, entries=entries,
+            environment=cfg.detect_platform(),
+        ):
+            return machine_identity.is_local_machine(config.machine, config)
+    if target.environment and config.machine:
+        current = resolve_machine_selection(entries, config.machine, cfg.detect_platform()).target
+        if target.machine.casefold() == current.machine.casefold():
+            return target.environment == current.environment
+    if not target.environment and config.machine and name.casefold() == config.machine.casefold():
+        return True
+    return False
 
 
 def _apply_assignment_env(*args, **kwargs):
@@ -231,6 +265,39 @@ class _ResolveEarlyExit(RuntimeError):
         self.exit_code = exit_code
 
 
+def _remote_selector_args(state: ResolveCommandState) -> list[str]:
+    if getattr(state.args, "require_native_seed", False):
+        raise ValueError("Remote --require-native-seed is unsupported; launch on the target.")
+    if getattr(state.args, "owner_ref", None):
+        raise ValueError("Remote --owner-ref is unsupported; create owned worktrees on the target.")
+    if getattr(state.args, "copilot_args", None):
+        raise ValueError("Remote Copilot arguments are unsupported; pass them on the target.")
+    args = (
+        ["--base"] if state.use_base else ["--new"] if state.use_new else
+        ["--worktree-id", str(state.worktree_id)] if state.worktree_id else []
+    )
+    for name in ("bare_resume", "restore"):
+        if getattr(state.args, name, False):
+            args.append("--" + name.replace("_", "-"))
+    if getattr(state.args, "target_no_mux", False) or (
+        not state.use_json and getattr(state.args, "no_mux", False)
+    ):
+        args.append("--no-mux")
+    for name in (
+        "dry_run", "no_resume", "no_fast_forward", "recovery", "defer_projections",
+        "bridge", "defer_new_seed", "stage_launch_seed",
+    ):
+        if getattr(state.args, "seed", None) and name in ("defer_new_seed", "stage_launch_seed"):
+            continue  # Structured admission already guarantees queued seed staging.
+        if getattr(state.args, name, False):
+            args.append("--" + name.replace("_", "-"))
+    for name in ("profile", "parent_session", "caller_worktree", "native_resume_session"):
+        value = getattr(state.args, name, None)
+        if value is not None:
+            args.append("--" + name.replace("_", "-") + "=" + str(value))
+    return args
+
+
 def add_parsers(sub) -> None:
     """Register the ``resolve`` subcommand."""
     parser = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
@@ -243,6 +310,7 @@ def add_parsers(sub) -> None:
     parser.add_argument(
         "--no-resume", action="store_true", help="Don't auto-resume the last Copilot session"
     )
+    parser.add_argument("--native-resume-session", default=None, help="Require owner-fenced execution of this exact dormant native head")
     parser.add_argument(
         "--bare-resume",
         action="store_true",
@@ -303,6 +371,11 @@ def add_parsers(sub) -> None:
         help="Keep creation prompts queued until the returned command executes",
     )
     parser.add_argument("--stage-launch-seed", action="store_true", help="Require typed launch-seed staging")
+    # The fence is unconditional; this capability flag excludes older engines before mutation.
+    parser.add_argument(
+        "--require-native-seed", action="store_true",
+        help="Require atomically fenced native launch-seed staging",
+    )
     parser.add_argument("--seed-id", default=None, help="Execute this already-staged launch intent")
     parser.add_argument("--launch-request-b64", default=None, help="Accept a structured target-local launch request")
     parser.add_argument("--launch-request-status", default=None, help="Inspect an admitted target-local launch request")
@@ -366,6 +439,21 @@ def add_parsers(sub) -> None:
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
+    with preview_mode(getattr(args, "dry_run", False)):
+        return _cmd_resolve(args)
+
+
+def _cmd_resolve(args: argparse.Namespace) -> int:
+    native_resume = getattr(args, "native_resume_session", None)
+    if native_resume is not None and (
+        not native_resume or not getattr(args, "worktree_id", None)
+        or not getattr(args, "no_resume", False)
+        or any(getattr(args, name, None) for name in (
+            "new_worktree", "base", "bare_resume", "restore", "seed", "seed_id",
+            "launch_request_b64", "launch_request_status",
+        ))
+    ):
+        return output._json_error("Native resume requires an existing unseeded --worktree-id and --no-resume", exit_code=3)
     if (
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
@@ -375,7 +463,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         return cmd_request(args)
     if getattr(args, "defer_new_seed", None) is None:
         args.defer_new_seed = True
-    append_launch_event("resolve_handler_start")
+    if not getattr(args, "dry_run", False):
+        append_launch_event("resolve_handler_start")
     try:
         state = ResolveCommandState.from_args(args)
     except _ResolveEarlyExit as exc:
@@ -469,6 +558,59 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             output.err("Run 'agent-worktrees list' to see available worktrees.")
             return 1
 
+        if state.requested_machine:
+            config = state.load_config()
+            try:
+                target_is_local = _target_is_local(
+                    config, state.requested_machine, getattr(args, "environment", None),
+                )
+            except (ValueError, ExecutionSpaceError) as exc:
+                output.err(str(exc))
+                return 1
+            from .execution_spaces import registry_for_config
+            requested_environment = resolve_machine_selection(
+                registry_for_config(config), state.requested_machine,
+                getattr(args, "environment", None), allow_physical_context=True,
+            ).target.environment
+            remote_args: list[str] = []
+            if not target_is_local or (
+                requested_environment and requested_environment != cfg.detect_platform()
+            ):
+                try:
+                    remote_args = _remote_selector_args(state)
+                except ValueError as exc:
+                    output.err(str(exc))
+                    return 2
+            if requested_environment:
+                want_platform = requested_environment
+                if not target_is_local or want_platform != cfg.detect_platform():
+                    from .resolve_machine_cli import _in_ssh_session
+
+                    if _in_ssh_session():
+                        output.err("Cannot dispatch another machine environment from an SSH session.")
+                        return 1
+                    rc = _emit_remote_plan_for_env(
+                        config, state.requested_machine, requested_environment,
+                        remote_args,
+                    )
+                    if rc is not None:
+                        return rc
+                    output.err("Requested machine environment is unavailable.")
+                    return 1
+            if not target_is_local:
+                rc = (
+                    _try_machine_handoff(config, state.requested_machine, remote_args)
+                    if remote_args else _try_machine_handoff(config, state.requested_machine)
+                )
+                if rc is not None:
+                    return rc
+                output.err("Requested machine is unavailable.")
+                return 1
+
+        if state.use_base and getattr(args, "dry_run", False):
+            config = state.load_config()
+            return _resolve_base_repo(config, args, profile=_resolve_profile(config, args))
+
         if state.worktree_id:
             return _resolve_noninteractive_worktree(state)
 
@@ -481,39 +623,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 output.err(str(exc))
                 return 1
 
-        if state.requested_machine:
-            config = state.load_config()
-            try:
-                target_is_local = _target_is_local(config, state.requested_machine)
-            except ValueError as exc:
-                output.err(str(exc))
-                return 1
-            requested_environment = getattr(args, "environment", None) or ""
-            if requested_environment:
-                from .resolve_machine_cli import _ENV_LABEL_TO_NAME
-
-                want_platform = _ENV_LABEL_TO_NAME.get(requested_environment.lower())
-                if want_platform is None:
-                    output.err(f"Unknown environment: {requested_environment}")
-                    return 1
-                if not target_is_local or want_platform != cfg.detect_platform():
-                    from .resolve_machine_cli import _in_ssh_session
-
-                    if _in_ssh_session():
-                        output.err("Cannot dispatch another machine environment from an SSH session.")
-                        return 1
-                    rc = _emit_remote_plan_for_env(
-                        config, state.requested_machine, requested_environment
-                    )
-                    if rc is not None:
-                        return rc
-                    output.err("Requested machine environment is unavailable.")
-                    return 1
-            if not target_is_local:
-                rc = _try_machine_handoff(config, state.requested_machine)
-                if rc is not None:
-                    return rc
-
+        if getattr(args, "dry_run", False):
+            output.err("--dry-run requires an explicit worktree, --new, or --base; no picker was opened")
+            return 2
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
         current_platform = cfg.detect_platform()
@@ -582,32 +694,25 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # WSL worktree) fail closed with a bogus "Worktree not found" instead of
     # SSHing into the requested environment -- confirmed live.
     try:
-        same_machine = _target_is_local(config, state.requested_machine)
-    except ValueError as exc:
+        same_machine = _target_is_local(
+            config, state.requested_machine, getattr(state.args, "environment", None),
+        )
+    except (ValueError, ExecutionSpaceError) as exc:
         return output._json_error(str(exc))
-    requested_environment = getattr(state.args, "environment", None) or ""
+    requested_environment = (
+        resolve_machine_selection(
+            registry_for_config(config), state.requested_machine,
+            getattr(state.args, "environment", None), allow_physical_context=True,
+        ).target.environment if state.requested_machine else ""
+    )
     same_environment = True
     if requested_environment:
-        from . import resolve_machine_cli
-
-        want_platform = resolve_machine_cli._ENV_LABEL_TO_NAME.get(requested_environment.lower())
-        if want_platform is None:
-            return output._json_error(f"Unknown environment: {requested_environment}")
-        same_environment = want_platform == cfg.detect_platform()
+        same_environment = requested_environment == cfg.detect_platform()
     if state.requested_machine and not (same_machine and same_environment):
-        remote_args: list[str] = []
-        if state.use_base:
-            remote_args.append("--base")
-        elif state.use_new:
-            remote_args.append("--new")
-        else:
-            remote_args += ["--worktree-id", str(state.worktree_id)]
-            if getattr(state.args, "bare_resume", False):
-                remote_args.append("--bare-resume")
-            if getattr(state.args, "restore", False):
-                remote_args.append("--restore")
-        if getattr(state.args, "target_no_mux", False):
-            remote_args.append("--no-mux")
+        try:
+            remote_args = _remote_selector_args(state)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=2)
         route_args = (config, state.requested_machine,
                       getattr(state.args, "environment", None) or "", remote_args)
         seed = getattr(state.args, "seed", None)
@@ -645,16 +750,17 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             preflight=launch_preflight,
         )
         env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
-        output._json_output(
-            {
-                "action": "exec",
-                "work_dir": work_dir,
-                "cmd": launch_cmd,
-                "env": env,
-                "post_exit": False,
-                "no_mux": True,
-            }
-        )
+        launch = {
+            "action": "exec",
+            "work_dir": work_dir,
+            "cmd": launch_cmd,
+            "env": env,
+            "post_exit": False,
+            "no_mux": True,
+        }
+        if getattr(state.args, "dry_run", False):
+            launch["preview"] = True
+        output._json_output(launch)
         return 0
 
     if state.use_new:
@@ -693,7 +799,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
-    from .execution_spaces import ExecutionSpaceError, require_record_mutation
+    from .execution_spaces import require_record_mutation
     try:
         require_record_mutation(record, config)
     except ExecutionSpaceError as exc:
@@ -714,6 +820,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             compose_pair=True, config=config,
         )
     if getattr(state.args, "restore", False):
+        if getattr(state.args, "dry_run", False):
+            return output._json_error("--restore preview is unsupported; no session was restored", exit_code=3)
         session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
         restored = _perform_remux(
             worktree_id=record.worktree_id,
@@ -736,30 +844,31 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 "Previous launch-prompt handoff is unconfirmed; the seed is retained "
                 "but will not be automatically submitted twice.", exit_code=3,
             )
-    try:
-        with step("Recording worktree resume", worktree_id=worktree_id), tracking._RecordLock(
-            yaml_path, require_sidecar=True,
-        ):
-            record = tracking.load_record(yaml_path)
-            require_record_mutation(record, config)
-            tracking.mark_resumed(record, save=False)
-            tracking.save_record(record)
-    except ExecutionSpaceError as exc:
-        return output._json_error(str(exc), exit_code=3)
-    except TimeoutError as exc:
-        return output._json_error(
-            f"Cannot resolve {record.worktree_id}: contended by another process ({exc})",
-            exit_code=3,
+    if not getattr(state.args, "dry_run", False):
+        try:
+            with step("Recording worktree resume", worktree_id=worktree_id), tracking._RecordLock(
+                yaml_path, require_sidecar=True,
+            ):
+                record = tracking.load_record(yaml_path)
+                require_record_mutation(record, config)
+                tracking.mark_resumed(record, save=False)
+                tracking.save_record(record)
+        except ExecutionSpaceError as exc:
+            return output._json_error(str(exc), exit_code=3)
+        except TimeoutError as exc:
+            return output._json_error(
+                f"Cannot resolve {record.worktree_id}: contended by another process ({exc})",
+                exit_code=3,
+            )
+        activity.log_event(
+            "worktree_resumed",
+            worktree_id=record.worktree_id,
+            branch=record.branch,
+            resume_count=record.resume_count,
         )
 
-    activity.log_event(
-        "worktree_resumed",
-        worktree_id=record.worktree_id,
-        branch=record.branch,
-        resume_count=record.resume_count,
-    )
-
     no_resume = getattr(state.args, "no_resume", False)
+    native_resume = getattr(state.args, "native_resume_session", None)
     last_session = None
     if not no_resume:
         with step("Resolving resume session", worktree_id=worktree_id):
@@ -774,7 +883,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 lane="new",
                 generation_key=f"new:{record.worktree_id}",
                 explicit_profile=explicit_profile,
-                resume_session=last_session,
+                resume_session=native_resume or last_session,
+                allocate_new=not native_resume and not getattr(state.args, "dry_run", False),
             )
     except profile_assignment.ProfileAssignmentError as exc:
         return output._json_error(str(exc), exit_code=3)
@@ -804,12 +914,15 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         _emit_parent_context_hint(record, to_stderr=True)
 
     seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
+    if native_resume and (seed_pending or not no_resume):
+        return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
     if seed_pending:
         launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
     else:
         launch_cmd = deferred_command(
             launch_cmd, yaml_path, admission_only=True,
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
+            native_resume_session=native_resume,
         )
 
     launch = {
@@ -829,6 +942,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     }
     if selection.assignment is not None:
         launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+    if getattr(state.args, "dry_run", False):
+        launch["preview"] = True
+        if warning := getattr(selection, "warning", ""):
+            launch["preview_warning"] = warning
     project = config.repo_name
     if project:
         launch["project"] = project
@@ -862,7 +979,10 @@ def _resolve_noninteractive_worktree(state: ResolveCommandState) -> int:
     launch_preflight = _preflight_launch(config, state.args, plan_work_dir)
     if launch_preflight.error:
         return _core()._launch_preflight_error(launch_preflight)
-    if getattr(state.args, "restore", False) and not _restore_before_resume(record):
+    if (
+        getattr(state.args, "restore", False) and not getattr(state.args, "dry_run", False)
+        and not _restore_before_resume(record)
+    ):
         return 1
     profile = _resolve_profile(config, state.args)
     return _resolve_resume(

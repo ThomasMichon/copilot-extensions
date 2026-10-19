@@ -42,7 +42,10 @@ class TestExistingFeaturePush:
     failure is actually retryable (a non-fast-forward race), not for every
     failure -- a hook rejection is not fixed by rebase-and-retry."""
 
-    def test_reports_push_error(self, monkeypatch):
+    def test_reports_push_error(
+        self, monkeypatch: pytest.MonkeyPatch, pr_repo: tuple[cfg.Config, str, Path, Path],
+    ) -> None:
+        config, _, worktree, _ = pr_repo
         monkeypatch.setattr(pr_ops, "_rev", lambda *_args, **_kwargs: "deadbeef")
         monkeypatch.setattr(
             pr_ops.git_ops,
@@ -53,9 +56,8 @@ class TestExistingFeaturePush:
         )
 
         result = pr_ops._push_existing_feature(
-            ".", "feature/change", "origin", None, None, None, {},
-            config=cfg.Config(srcroot=".", machine="test", platform="linux",
-                              repos={"test": cfg.RepoConfig(anchor=".", worktree_root=".")}),
+            str(worktree), "feature/change", "origin", None, None, None, {},
+            config=config,
             worktree_id="", title="", body=None, open_pr=None,
             draft=False, attribution=None,
         )
@@ -65,7 +67,10 @@ class TestExistingFeaturePush:
             "BLOCKED: release guard"
         )
 
-    def test_reports_retry_guidance_for_non_fast_forward(self, monkeypatch):
+    def test_reports_retry_guidance_for_non_fast_forward(
+        self, monkeypatch: pytest.MonkeyPatch, pr_repo: tuple[cfg.Config, str, Path, Path],
+    ) -> None:
+        config, _, worktree, _ = pr_repo
         monkeypatch.setattr(pr_ops, "_rev", lambda *_args, **_kwargs: "deadbeef")
         monkeypatch.setattr(
             pr_ops.git_ops,
@@ -76,9 +81,8 @@ class TestExistingFeaturePush:
         )
 
         result = pr_ops._push_existing_feature(
-            ".", "feature/change", "origin", None, None, None, {},
-            config=cfg.Config(srcroot=".", machine="test", platform="linux",
-                              repos={"test": cfg.RepoConfig(anchor=".", worktree_root=".")}),
+            str(worktree), "feature/change", "origin", None, None, None, {},
+            config=config,
             worktree_id="", title="", body=None, open_pr=None,
             draft=False, attribution=None,
         )
@@ -5682,24 +5686,27 @@ class TestSelfMergeBypassNote:
             self._gate_result = gate_result
             self.calls = []
 
-        def pull_review_gate(self, repo, number, *, api_base="", token=None):
+        def pull_review_exception(
+            self, repo, number, *, expected_head_sha, hold_labels=(),
+            wip_title_prefixes=(), api_base="", token=None,
+        ):
             self.calls.append((repo, number))
             return self._gate_result
 
     def test_none_when_not_self_merge_profile(self):
-        provider = self._GhLikeProvider((True, True))
+        provider = self._GhLikeProvider((True, False, ""))
         flow = self._flow(merge_actor="")  # not pr-self-merge
         note = pr_ops.self_merge_bypass_note(flow, provider, "o/r", 7)
         assert note is None
         assert provider.calls == []  # never even consulted
 
     def test_none_when_no_pr_number_yet(self):
-        provider = self._GhLikeProvider((True, True))
+        provider = self._GhLikeProvider((True, False, ""))
         note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", None)
         assert note is None
         assert provider.calls == []
 
-    def test_none_when_provider_lacks_pull_review_gate(self):
+    def test_none_when_provider_lacks_pull_review_exception(self):
         class _NoGate:
             pass
 
@@ -5707,34 +5714,47 @@ class TestSelfMergeBypassNote:
         assert note is None
 
     def test_note_when_review_required_and_bypassable(self):
-        provider = self._GhLikeProvider((True, True))
-        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", 7)
+        provider = self._GhLikeProvider((True, False, ""))
+        note = pr_ops.self_merge_bypass_note(
+            self._flow(), provider, "o/r", 7, expected_head_sha="head",
+        )
         assert note is not None
         assert "Maintainer bypass" in note
         assert "pr-merge" in note
         assert provider.calls == [("o/r", 7)]
+        assert "No verdict yet" not in note
+        assert "required CI" in note
+        assert "change request" in note
 
     def test_none_when_review_required_but_not_bypassable(self):
-        provider = self._GhLikeProvider((True, False))
-        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", 7)
+        provider = self._GhLikeProvider((False, False, "not authorized"))
+        note = pr_ops.self_merge_bypass_note(
+            self._flow(), provider, "o/r", 7, expected_head_sha="head",
+        )
         assert note is None
 
     def test_none_when_no_review_required(self):
-        provider = self._GhLikeProvider((False, None))
-        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", 7)
+        provider = self._GhLikeProvider((False, False, "not required"))
+        note = pr_ops.self_merge_bypass_note(
+            self._flow(), provider, "o/r", 7, expected_head_sha="head",
+        )
         assert note is None
 
     def test_none_when_bypassability_unknown(self):
-        provider = self._GhLikeProvider((True, None))
-        note = pr_ops.self_merge_bypass_note(self._flow(), provider, "o/r", 7)
+        provider = self._GhLikeProvider((False, True, "unreadable"))
+        note = pr_ops.self_merge_bypass_note(
+            self._flow(), provider, "o/r", 7, expected_head_sha="head",
+        )
         assert note is None
 
     def test_none_when_gate_read_raises(self):
         class _Boom:
-            def pull_review_gate(self, repo, number, **kw):
+            def pull_review_exception(self, repo, number, **kw):
                 raise RuntimeError("gh api failed")
 
-        note = pr_ops.self_merge_bypass_note(self._flow(), _Boom(), "o/r", 7)
+        note = pr_ops.self_merge_bypass_note(
+            self._flow(), _Boom(), "o/r", 7, expected_head_sha="head",
+        )
         assert note is None
 
 

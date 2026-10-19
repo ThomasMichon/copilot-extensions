@@ -56,6 +56,7 @@ jobs:
     name: main source gate
     permissions:
       contents: read
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
@@ -64,9 +65,7 @@ jobs:
       GIT_TERMINAL_PROMPT: "0"
     steps:
       - name: Check out trusted main history, never the PR tree
-        if: >-
-          github.event.pull_request.user.login == github.repository_owner &&
-          !startsWith(github.event.pull_request.head.ref, 'release/promote-')
+        if: github.event.pull_request.user.login == github.repository_owner
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
@@ -78,7 +77,7 @@ jobs:
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: git -c core.hooksPath= -c core.fsmonitor=false fetch --no-tags --no-recurse-submodules origin "$HEAD_SHA"
-      - name: Only the promotion pipeline's own PR, a workflow-only bootstrap PR, or a recognized automated/state PR, may land on main
+      - name: Admit only generated releases, owner workflow/control transactions, or recognized rollback state
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -86,9 +85,67 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_COMMITS: ${{ github.event.pull_request.commits }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "$HEAD_REF" == release/promote-* && "$PR_AUTHOR" == "$REPO_OWNER" ]]; then
-            echo "Legitimate promotion-pipeline PR -- OK."
+            python -I -B - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          trusted = Path.cwd().resolve(strict=True)
+          sys.path.insert(0, str(trusted / "tools"))
+          from promotion_control import _blob, _git, _tree
+
+          repository = os.environ["TARGET_REPOSITORY"]
+          branch = re.fullmatch(r"release/promote-([1-9][0-9]{0,19})", os.environ["HEAD_REF"])
+          base = os.environ["BASE_SHA"]
+          if (
+              branch is None or os.environ["HEAD_REPOSITORY"] != repository
+              or not re.fullmatch(r"[0-9a-f]{40}", base)
+          ):
+              raise RuntimeError("promotion has no exact same-repository owning run/base")
+          response = subprocess.run(
+              ["gh", "api", f"repos/{repository}/actions/runs/{branch[1]}"],
+              check=True, capture_output=True, text=True, timeout=45,
+          )
+          run = json.loads(response.stdout)
+          if (
+              not isinstance(run, dict) or type(run.get("id")) is not int
+              or run["id"] != int(branch[1])
+              or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0
+              or run.get("path") != ".github/workflows/validate-and-promote.yml"
+              or run.get("event") not in ("repository_dispatch", "workflow_dispatch")
+              or run.get("head_branch") != "main"
+              or not isinstance(run.get("repository"), dict)
+              or run["repository"].get("full_name") != repository
+              or not isinstance(run.get("head_repository"), dict)
+              or run["head_repository"].get("full_name") != repository
+              or not isinstance(run.get("head_sha"), str)
+              or not re.fullmatch(r"[0-9a-f]{40}", run["head_sha"])
+          ):
+              raise RuntimeError("promotion owning run is not the canonical trusted Main workflow")
+          executing = run["head_sha"]
+          _git(trusted, ["merge-base", "--is-ancestor", executing, base])
+          source, current = _tree(trusted, executing), _tree(trusted, base)
+          for path in (
+              ".github/workflows/validate-and-promote.yml",
+              ".github/workflows/ci.yml",
+          ):
+              if path not in source or path not in current:
+                  raise RuntimeError("promotion control-generation evidence is missing")
+              if _blob(trusted, source[path], limit=1 << 20) != _blob(
+                  trusted, current[path], limit=1 << 20,
+              ):
+                  raise RuntimeError("executing release control differs from current Main control")
+          print("Canonical owning run executes the current reviewed Main control generation.")
+          PY
+            echo "Legitimate promotion-pipeline PR with current executing control -- OK."
             exit 0
           fi
           if [ "$PR_AUTHOR" != "$REPO_OWNER" ]; then
@@ -179,6 +236,69 @@ jobs:
               exit 1
             fi
             echo "Automated rollback_release.py revert PR -- OK."
+            exit 0
+          fi
+          if printf '%s\n' "$changed" | grep -Fxq '.github/promotion-control.json'; then
+            # Import only the checked-out trusted Main validator. PR objects
+            # remain Git blob data; no PR helper or workflow is executed.
+            python -I -B - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          trusted = Path.cwd().resolve(strict=True)
+          sys.path.insert(0, str(trusted / "tools"))
+          from promotion_control import MANIFEST_PATH, _blob, _paths, _tree
+
+          if os.environ["HEAD_REPOSITORY"] != os.environ["TARGET_REPOSITORY"]:
+              raise RuntimeError("control transactions must originate in the owner's repository")
+          base, head = os.environ["BASE_SHA"], os.environ["HEAD_SHA"]
+          if any(not re.fullmatch(r"[0-9a-f]{40}", value) for value in (base, head)):
+              raise RuntimeError("control transaction identities must be immutable commits")
+          before, after = _tree(trusted, base), _tree(trusted, head)
+          changed = {
+              path for path in before.keys() | after.keys()
+              if before.get(path) != after.get(path)
+          }
+          if MANIFEST_PATH not in changed or MANIFEST_PATH not in after:
+              raise RuntimeError("control activation requires a non-deleted manifest change")
+          raw = _blob(trusted, after[MANIFEST_PATH], limit=64 << 10)
+          declared = set(_paths(raw)) - {MANIFEST_PATH}
+          required = {
+              ".github/workflows/ci.yml",
+              ".github/workflows/validate-and-promote.yml",
+          }
+          allowed = required | {".github/workflows/base-branch-reminder.yml"}
+          if not required <= declared or not declared <= allowed:
+              raise RuntimeError("control manifest must name only the qualified release workflows")
+          manifest = json.loads(raw)
+          canonical = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+          if manifest["files"] != sorted(declared) or raw != canonical:
+              raise RuntimeError("control manifest must use canonical sorted JSON and workflow paths")
+          if MANIFEST_PATH in before:
+              existing = set(_paths(_blob(trusted, before[MANIFEST_PATH], limit=64 << 10)))
+              if not existing <= declared | {MANIFEST_PATH}:
+                  raise RuntimeError("control transactions cannot remove an existing declaration")
+          protected = declared | {MANIFEST_PATH}
+          if not changed <= protected:
+              raise RuntimeError("control transaction changes an undeclared or non-control path")
+          for path in protected:
+              if path not in after:
+                  raise RuntimeError("control transactions cannot delete a declared workflow")
+              _blob(trusted, after[path], limit=64 << 10 if path == MANIFEST_PATH else 1 << 20)
+              parts = path.split("/")
+              for length in range(1, len(parts) + 1):
+                  prefix = "/".join(parts[:length])
+                  aliases = {
+                      "/".join(other.split("/")[:length]) for other in after
+                      if "/".join(other.split("/")[:length]).casefold() == prefix.casefold()
+                  }
+                  if aliases != {prefix}:
+                      raise RuntimeError("control transaction contains a case-equivalent path alias")
+          print("Owner control transaction: canonical manifest and regular workflow blobs verified.")
+          PY
             exit 0
           fi
           non_workflow="$(echo "$changed" | grep -v '^\.github/workflows/' || true)"

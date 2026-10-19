@@ -23,12 +23,14 @@ from plugin_test_containment import (
     isolated_environment,
     run_contained,
 )
-from standalone_consumers import STANDALONE_CONSUMERS
+from standalone_consumers import STANDALONE_CONSUMERS, local_dependency_source
+from seasoned_uv import run_uv_install
 
 REPO = Path(__file__).resolve().parent.parent
 COMPONENT_ALIASES = {
     "agent-index-service": "services/index",
     "agent-dispatch-service": "services/dispatch",
+    "agent-chat-service": "services/chat",
 }
 
 
@@ -144,6 +146,8 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
 
     The caller must validate and establish that root, then hold its
     environment-scoped lease throughout preparation and subsequent test use.
+    Core packages own their local dependency graph in both development and
+    materialized layouts; injecting canonical copies adds conflicting sources.
     """
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     root = python.parent.parent
@@ -161,40 +165,18 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
     sources: list[str] = []
     if component == "services/index":
         sources = [
-            str(REPO / "libs" / "zdd"),
-            str(REPO / "libs" / "agent-procutil"),
-            str(REPO / "plugins" / "agent-index" / "libs" / "dropin-registry"),
             str(REPO / "plugins" / "agent-index") + ("" if smoke else "[store,server]"),
         ]
     elif component == "services/dispatch":
-        # services/dispatch depends on the agent-dispatch PLUGIN, not a
-        # shared libs/<lib> -- the same shape as services/index's
-        # dependency on agent-index above. tools/materialize_main.py's
-        # uv-editable materializer only ever vendors an escaping
-        # libs/<lib> reference, by deliberate design (its own containment
-        # check requires the resolved path be EXACTLY canonical_root/
-        # libs/<lib>; a plugin tree is a different trust shape and is not
-        # safely vendorable the same way). So services/dispatch's own
-        # pyproject.toml declares a plain versioned `agent-dispatch`
-        # dependency with NO [tool.uv.sources] escape, and this harness
-        # supplies the local path sources a real install needs, exactly
-        # like services/index's own entry above.
-        sources = [
-            str(REPO / "libs" / "zdd"),
-            str(REPO / "libs" / "agent-procutil"),
-            str(REPO / "libs" / "dropin-registry"),
-            str(REPO / "libs" / "plugin-activation"),
-            str(REPO / "libs" / "plugin-resolve"),
-            str(REPO / "libs" / "single-instance-lease"),
-            str(REPO / "plugins" / "agent-dispatch"),
-        ]
+        sources = [str(REPO / "plugins" / "agent-dispatch")]
     extra = ("test" if smoke else "native,test") if component == "services/index" else "dev"
     if component == "worktree-manager":
         # The Manager distribution includes sibling bin/references payloads,
         # not just an importable wheel; exercise its real source layout.
         sources.append("--editable")
     sources.append(str(REPO / component) + f"[{extra}]")
-    with tempfile.TemporaryDirectory(prefix="standalone-dependencies-") as temporary:
+    # Keep retained source/override topology below the Windows relative-path limit.
+    with tempfile.TemporaryDirectory(prefix="standalone-dependencies-", dir=REPO) as temporary:
         overrides: list[str] = []
         if component == "services/index":
             # dev freezes source versions; test the local compatibility seam,
@@ -202,7 +184,9 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             override = Path(temporary) / "overrides.txt"
             core = (REPO / "plugins" / "agent-index").resolve().as_uri()
             core_extra = "" if smoke else "[store,server]"
-            procutil = (REPO / "libs" / "agent-procutil").resolve().as_uri()
+            procutil = local_dependency_source(
+                REPO / "plugins" / "agent-index", "agent-procutil", source_root=REPO,
+            ).as_uri()
             override.write_text(
                 f"agent-index{core_extra} @ {core}\nagent-procutil @ {procutil}\n",
                 encoding="utf-8",
@@ -218,8 +202,10 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             core = (REPO / "plugins" / "agent-dispatch").resolve().as_uri()
             override.write_text(f"agent-dispatch @ {core}\n", encoding="utf-8")
             overrides = ["--override", str(override)]
-        subprocess.run(
-            ["uv", "pip", "install", "--python", str(python), *overrides, *sources],
+        run_uv_install(
+            "uv", ["--python", str(python), *overrides, *sources],
+            trusted_source_roots=(REPO,),
+            retained_resource_roots=(REPO / "libs" / "versioned-runtime",),
             cwd=REPO,
             check=True,
             capture_output=True,
@@ -335,6 +321,8 @@ def main(argv: list[str] | None = None) -> int:
                     root / "tests" / "test_runtime_resource_distribution.py",
                     root / "tests" / "test_distribution.py",
                     root / "tests" / "test_release_distribution.py",
+                    root / "tests" / "test_container.py",
+                    root / "tests" / "test_fleet_image.py",
                 ]
                 if args.smoke else [root / "tests"]
             )

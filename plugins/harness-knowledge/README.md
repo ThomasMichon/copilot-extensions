@@ -5,6 +5,18 @@ its private **knowledge** repo. It ships a setup skill plus small configurator
 scripts; there is no runtime, venv, binstub, hook, or installer. Enable the
 plugin, then run the **`binding-knowledge`** skill once for the machine.
 
+An explicitly selected topology can carry both roles as
+`control_plane: {project: example-harness, harness: example-harness,
+knowledge: example-knowledge}`. The scalar `project` keeps older daemons
+launching in the harness; the explicit pair retains the companion relationship
+for first-touch binding. With both repositories canonically registered,
+`bind_knowledge.py --control-plane <machines.yaml> --agent-worktrees-path
+"<exact native command>" --json` reuses this plugin's existing writer after
+native role/registration/configuration-root checks. It does not require a
+running Bridge, silently re-point an existing binding, or turn knowledge into
+an executable project. See the skill for unsupported-reader and registration
+gates.
+
 A stateless harness holds the shareable *intelligence* (instructions, config,
 skills, sub-agents) but no personal state. Personal state (efforts, logs,
 visions, notes, artifacts, personal issues) lives in a separate knowledge repo,

@@ -20,6 +20,9 @@ authors = [
 # against the schemas/ and fixtures/ kept here.
 dependencies = []
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

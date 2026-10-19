@@ -36,7 +36,9 @@ from collections.abc import Mapping, Sequence
 
 from agent_procutil import no_window_flags
 
+from ...engine_client import _engine_environment
 from .command_transport import resolve_command as _resolve_command
+from .configuration_context import run_list
 from .pivots import RegisteredPivot, format_template, parse_list_payload
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
@@ -81,7 +83,7 @@ def _child_process_env() -> dict[str, str]:
     removed, safe to hand to *any other* plugin's CLI. See the module
     docstring for why this matters -- without it, a pivot action can fail with
     a spurious cross-plugin "payload context mismatch"."""
-    env = dict(os.environ)
+    env = _engine_environment()
     for key in _CHILD_ENV_UNSET:
         env.pop(key, None)
     return env
@@ -459,26 +461,7 @@ class RegisteredPivotRuntime:
                 self._procs.remove(proc)
 
     def _run_list(self, machine: object, gen: object = None) -> None:
-        ctx = {"machine": "" if machine is None else str(machine)}
-        # D2: a ``stream`` pivot runs the streaming runner, which writes the
-        # cache progressively (and, for ``subscribe``, keeps applying live
-        # deltas). It self-heals to the one-shot path when the provider doesn't
-        # understand ``--stream``. A non-stream pivot keeps the original
-        # compute-then-write-once contract.
-        if self.pivot.stream:
-            self._run_list_stream(machine, ctx)
-            return
-        state, rows, err, summary = self._exec_list(ctx)
-        with self._lock:
-            self._inflight.discard(machine)
-            # Drop a result whose fetch was invalidated mid-flight (a steer /
-            # action cleared the cache after this fetch started) so stale data
-            # can't overwrite the just-invalidated cache. The next ``ensure``
-            # (cache miss, no longer in flight) refetches the current state.
-            if gen is not None and gen != self._gen:
-                return
-            self._cache[machine] = (state, rows, err)
-            self._summaries[machine] = summary
+        run_list(self, machine, gen)
 
     def _run_list_stream(self, machine: object, ctx: Mapping[str, object]) -> None:
         """Streaming ``list`` runner (D2): Popen ``list … --stream``, consume the

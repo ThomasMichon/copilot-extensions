@@ -38,16 +38,21 @@ Pure standard library; no runtime dependencies.
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
+import logging
 import os
 import socket
 import sys
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA = 1
+_ENDPOINT_LOCK_TIMEOUT = 5.0
+_LOG = logging.getLogger(__name__)
 
 # Windows GetExitCodeProcess sentinel for a process that is still running.
 _STILL_ACTIVE = 259
@@ -209,6 +214,43 @@ def endpoint_file(runtime_dir: Path | str) -> Path:
     return Path(runtime_dir) / "endpoint.json"
 
 
+@contextlib.contextmanager
+def _endpoint_lock(runtime_dir: Path | str) -> Iterator[None]:
+    """Serialize publication and owner-checked removal across processes."""
+    path = Path(runtime_dir) / ".endpoint.lock"
+    # Keep this inode: unlinking a lock file would split concurrent holders.
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(descriptor, "r+b") as handle:
+        if sys.platform == "win32":
+            import msvcrt
+        else:
+            import fcntl
+        deadline = time.monotonic() + _ENDPOINT_LOCK_TIMEOUT
+        while True:
+            try:
+                if sys.platform == "win32":
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK, errno.EINTR):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"endpoint mutation lock timed out: {path}") from exc
+                time.sleep(min(0.01, remaining))
+        try:
+            yield
+        finally:
+            if sys.platform == "win32":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def write_endpoint(
     runtime_dir: Path | str,
     transport: str,
@@ -233,11 +275,12 @@ def write_endpoint(
     d.mkdir(parents=True, exist_ok=True)
     target = endpoint_file(d)
     tmp = d / f".endpoint.{os.getpid()}.tmp"
-    tmp.write_text(json.dumps(ep.to_record()), encoding="utf-8")
-    if sys.platform != "win32":
-        with contextlib.suppress(OSError):
-            os.chmod(tmp, 0o600)
-    os.replace(tmp, target)  # atomic within the same filesystem
+    with _endpoint_lock(d):
+        tmp.write_text(json.dumps(ep.to_record()), encoding="utf-8")
+        if sys.platform != "win32":
+            with contextlib.suppress(OSError):
+                os.chmod(tmp, 0o600)
+        os.replace(tmp, target)  # atomic within the same filesystem
     return target
 
 
@@ -250,15 +293,30 @@ def clear_endpoint(runtime_dir: Path | str, *, owner_pid: int | None = None) -> 
     cleanup -- see :func:`is_stale`.
     """
     path = endpoint_file(runtime_dir)
-    record = read_endpoint(runtime_dir)
-    pid = owner_pid if owner_pid is not None else os.getpid()
-    if record is not None and record.pid is not None and record.pid != pid:
-        return
-    record = read_endpoint(runtime_dir)
-    if record is not None and record.pid is not None and record.pid != pid:
-        return
-    with contextlib.suppress(OSError):
-        path.unlink()
+    acquiring = False
+    removed = False
+    try:
+        if not path.parent.exists():
+            return
+        acquiring = True
+        with _endpoint_lock(runtime_dir):
+            acquiring = False
+            record = read_endpoint(runtime_dir)
+            pid = owner_pid if owner_pid is not None else os.getpid()
+            if record is not None and record.pid is not None and record.pid != pid:
+                return
+            record = read_endpoint(runtime_dir)
+            if record is not None and record.pid is not None and record.pid != pid:
+                return
+            path.unlink(missing_ok=True)
+            removed = True
+    except OSError as exc:
+        if acquiring and isinstance(exc, TimeoutError):
+            _LOG.warning("Endpoint cleanup skipped: mutation lock timed out for %s", path)
+        elif removed:
+            _LOG.warning("Endpoint removed but mutation lock release failed for %s", path, exc_info=True)
+        else:
+            _LOG.warning("Endpoint cleanup failed for %s", path, exc_info=True)
 
 
 def read_endpoint(runtime_dir: Path | str) -> Endpoint | None:

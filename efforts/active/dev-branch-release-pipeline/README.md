@@ -6,11 +6,11 @@
   (promoted to `main` by the CI pipeline); Phase 7 work branches off `dev`
   per the current contributor flow.
 - **Created:** 2026-09-22
-- **Status:** Active (reopened 2026-10-02 for Phase 7; Phase 8 superseded by
+- **Status:** Active (Phases 7 and 9; Phase 8 superseded by
   main-owned-workflow-control Phase 5 — see Journal)
-- **Vision:** none yet for the pipeline itself — this effort may spawn a
-  `visions/release-pipeline` entry once the design settles; revisit at
-  Phase 2/3 boundary. It is, however, the named realization vehicle for the
+- **Vision:** [`release-pipeline`](../../../visions/release-pipeline/README.md)
+  (source-owned release identity and continuous delivery). Also the named
+  realization vehicle for the
   [`coverage-guided-ci`](../../../visions/coverage-guided-ci/README.md)
   vision's baseline-generation/correlation concept (this pipeline's
   promotion gate is the natural place to earn a coverage baseline and
@@ -44,6 +44,12 @@ version bumps, materializing vendored code, and validating the result — so
 in-flight merge. This removes the PR-time burden of precise version bumps and
 vendoring, while giving us a real pre-release validation gate for the first
 time.
+
+The verified development commit is the durable release and artifact owner.
+Generated main commits carry that source marker and remain operational landing
+receipts, not competing release identities. Versioning, materialization and
+explicitly governed control inputs still need one consistent, validated
+composition; content integrity does not reduce to trusting a source marker.
 
 ## Participants
 
@@ -92,6 +98,62 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-18 promotion lifecycle clarification (verbatim):**
+
+> Close those old ones then to keep them out of the PR queue. We sitll need to fix the dev-to-main promotion flow to include waiting and drving the PR to merge before marking complete, so new runs can't trigger while the previous PR is still active. We also need (as part of this agent's charter) a way to ensure those PRs always go through, and aren't dependent on running redundant checks which may fail due to flakiness.
+
+The campaign driver retains the active promotion through verified Main merge,
+publication/readback and explicit recovery of blockers; opening a PR or ending
+its producing run does not discharge that responsibility. The implementation
+mechanisms below are **agent-recommended**. Reliable progress for a properly
+qualified candidate does not authorize accepting failed qualification, weakening
+integrity/freshness, adding authority, or treating absent evidence as success.
+
+**2026-10-15 delivery and source-identity clarification:**
+
+> I feel like this issue happened a couple times in a row. We need to sweep over blockers of previous release attempts and check for repeat patterns. We really need a release once an hour, if not sooner.
+
+> When a dev-to-main promotion occurs, what matters is the `dev` commit hash. We expect to just "blit over" everything in main, and mark main with the source dev commit. We'll also publish artifacts, but frankly those artifacts really belong to the associated dev commit, which should be the durable marker. Exact main commits shouldn't matter, only the dev commit id stored in the main commit; we can tag the main commit with the dev commit once landed. We should avoid hash checks which result in catch-22s.
+
+**PR-time hash-compatibility clarification (verbatim):**
+
+> The has refusals are also a problem, because they get easily broken and nothing is catching the breaks before PRs go in. This is the kind of thing which needs to be caught at PR time; by the time a release goes out, we may need be more forgiving, or at least perform some normalization before hash-comparison
+
+**Main publication boundary clarification (verbatim):**
+
+> How can it land *AND* fail? If this merges:
+> https://github.com/ThomasMichon/copilot-extensions/pull/6938
+> I expect that to mean "release succeeded". If we have a failure, don't allow this merge through.
+
+**2026-10-16 latency, sequencing and CI capacity clarification (verbatim):**
+
+> What's the main blocker here? Is CI getting stuck in a queue? We need CI to be under 10 minutes
+
+> CI for PRs should be under 10 minutes; CI for validate-and-promote should be more like 30, but 1 hour is okay nce we have the parallel "use dev locally" effort through
+
+> Focus on getting current promotion flow unblocked before disrupting it; once it runs against, focus on shortening the time
+
+> We've accumulated over 50 actrive PRs in copilot-extensions; we desperately need main promotion and to make the CI pipeline shorter so we're not jammed in the queue. We don't have enough resources to sustain this test load
+
+> You should dig into tests at a per-test timing level and really identify the bad actors when run in the CI/validation flow. We'll want to file bugs on getting those tightened up
+
+The quoted wording and original spelling are preserved verbatim. Phase 9's
+operative plan below interprets the timing and recovery-first requirements;
+the quotations are not edited into implementation instructions.
+
+**2026-10-17 recovery focus (verbatim):**
+
+> Okay, your goal is to get the dev-to-main pipeline moving, focusing on addressing blocking and flaky issues in the pipeline and validation
+
+The operator also explicitly allowed minimal, normally reviewed pipeline and
+validation repair PRs. This restores narrow repair execution, not CI waivers,
+administrator merges, deadline increases or emergency promotion.
+
+Phase 9 is the agent-recommended decomposition of this clarification. It does
+not grant a new main-path exception, relax byte integrity or silently change
+the separately owned main-control preservation policy. The original pipeline
+request follows.
 
 > 1. Agree. We'll generate the entirety of main from the CI build, and apply
 > it whole, which will produce a nice incremental diff, accounting for
@@ -691,6 +753,92 @@ Historical proposal and supersession evidence:
       and [main-owned-workflow-control Phase 5](../main-owned-workflow-control/README.md#phase-5---finish-validation-and-automation-consolidation);
       the current-main audit does not establish deployed prevention.
 
+### Phase 9 - Source-owned release identity and repeat-blocker prevention
+
+_(Agent-recommended implementation and validation decomposition of the
+2026-10-15 operator clarification; not a replacement release writer.)_
+
+- [x] Land the reviewed source-identity and cadence contract before changing
+      the mechanism.
+- [ ] Exercise actual producer, materializer and verifier agreement in bounded
+      ordinary PR checks before development merge, reusing existing CI lanes.
+      Cover relevant attribute, closure and materializer inputs even when no
+      artifact-tool file changed; do not add an unconditional exhaustive matrix.
+- [ ] Reconcile the recurrence audit with existing repair owners. Distinguish
+      source merges from actual trusted-control activation and qualified
+      releases; #6237, #4876 and #6865 retain their implementation boundaries.
+- [ ] Make the verified development commit the durable release/artifact-set
+      lookup and landed-release tag identity, reusing the existing source
+      marker. Keep candidate, parent and landed-main commits as operational
+      provenance and stale-write receipts rather than second release keys.
+- [ ] Freeze and reuse the admitted composition and lock for the source-owned
+      artifact set. Wire build, export, attestation, availability, publication,
+      tagging and readback consistently; preserve validated legacy lookup.
+- [ ] Share a declared canonical source representation between production and
+      verification. Normalize known non-semantic checkout/staging differences
+      before source comparison while preserving raw published-byte digests.
+      Unknown or semantic differences must remain explicit, actionable failures.
+- [ ] Reuse immutable artifacts for equivalent source, content and variants
+      across different Git containers. Reject conflicting bytes or provenance
+      under the same binding without silently retargeting published objects.
+- [ ] Preserve source governance, byte integrity, exact lock authority, required
+      qualification and atomic publication. Any change to independently owned
+      main control requires its existing explicit review/authorization path.
+- [ ] _(Operator-required.)_ Keep each promotion active until its exact PR is
+      actually merged and the required publication/readback is verified. Do not
+      trigger another Dev-to-Main promotion while the preceding promotion PR
+      remains active, including after a failed or interrupted producing run.
+- [ ] _(Agent-recommended mechanism.)_ Extend the existing whole-run
+      serialization and merge waiter with a durable active-PR admission and
+      recovery contract. Reuse the authoritative existing PR/generation state;
+      distinguish resuming that generation from dispatching a new one. Pending
+      source advances coalesce rather than producing competing candidates.
+- [ ] _(Operator-required.)_ Ensure qualified promotion PRs are driven through
+      their normal merge gate without redundant checks becoming an independent
+      flaky obstacle. Keep a named campaign owner until actual terminal
+      evidence, not merely a submitted merge request or green wrapper.
+- [ ] _(Agent-recommended mechanism.)_ Reuse complete, trusted qualification
+      bound to the exact source, composed payload, controller/helper, toolchain
+      and required portfolio. Retain the compact Main admission/freshness gate;
+      remove only proven duplicate promotion-PR or post-Main full validation.
+      Distinct source, generated, native and installation coverage remains
+      required until an equivalent reviewed replacement is proven.
+- [ ] _(Agent-recommended mechanism.)_ Reconcile Dev-CI/source-validation and
+      full-suite/baseline-collection repetitions as well. Collect required
+      baselines in the same complete passing execution where possible, and
+      reuse existing exact-source run/artifact provenance only when portfolio,
+      platform, configuration and collector compatibility are proven. A source
+      proof never substitutes for unproven materialized-consumer coverage.
+- [ ] _(Agent-recommended mechanism.)_ Prove existing publication/event
+      authority reliably delivers the required Main gate and a nonadministrator
+      exact-head merge. Missing checks, API ambiguity, moved Main, unqualified
+      or closed candidates retain explicit recovery ownership. Do not create a
+      second merge writer or enable the separately scoped Maintainer steward.
+- [ ] Measure actual qualified source advancement, queue time and blocking
+      stages against hourly-or-faster delivery while changes are pending;
+      ordinary PR event-to-required-gate time must be below ten minutes,
+      including queueing. Target thirty minutes for validate-and-promote;
+      the one-hour allowance requires actual local-Dev workflow acceptance.
+      Unblock the current promotion before changing its performance.
+- [x] _(Agent-recommended sequencing.)_ Contain superseded PR CI without
+      interrupting the executing Main qualification. Retain rolling Dev/manual
+      validation and every current-head gate. While Main is canonically paused,
+      the reviewed Dev-only policy may land without changing that pinned
+      qualification. The failed candidate has now been retired unmerged.
+      Activate matching CI policy through the existing reviewed Main-control
+      path after that retirement and before any fresh qualification or resume
+      containing source that asserts it. Recheck the pause before the Dev merge;
+      governed Main controls are never replaced silently.
+      Source #7124 and matching Main #7129 are merged with the pause preserved;
+      this closes the policy interlock, not qualification or latency acceptance.
+- [ ] Identify individual slow tests and fixture costs in the actual CI and
+      validation flow, distinguish hosted timings from local profiles, and
+      file deduplicated optimization bugs without dropping behavioral coverage
+      or increasing containment limits.
+- [ ] Prove normal release and client compatibility, journal the result and
+      retain responsibility for unresolved acceptance. A contract PR, source
+      merge, tag, or green wrapper alone does not complete this phase.
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
@@ -823,13 +971,1141 @@ Its remaining compatible obligations are transferred to #6430 and the canonical
 main-owned-workflow-control Phase 5. Existing release gates and other
 participants' phase ownership remain unchanged.
 
+### Phase 9 validation
+
+- [ ] An ordinary PR that breaks producer/verifier agreement fails before merge.
+      Prove the selector covers root/nested attributes, declared source closures,
+      materializers and hash/canonicalization helpers on the relevant platforms.
+      Reuse bounded contract portfolios rather than duplicating full validation.
+- [ ] The actual entry points agree across declared LF/CRLF and attribute-policy
+      representations, canonical/materialized layouts and irrelevant staging
+      noise. Changed shipped source/dependency content still fails; no downloaded
+      wheel or archive is normalized to bypass its raw digest.
+- [ ] Same verified dev source, admitted payload and lock with a different
+      candidate/squash commit or bookkeeping-only main change reuses the
+      immutable artifact set without a new Main-SHA identity refusal.
+- [ ] Wrong source binding, altered source/wheel/bundle/index bytes,
+      wrong signatures, conflicting variants and missing/extra assets refuse.
+      A source marker alone cannot satisfy integrity.
+- [ ] A different dev commit with equal payload gets accurate source provenance;
+      a content-only no-op never claims a source marker that was not recorded.
+- [ ] Candidate/base races, unauthorized control changes and moved immutable
+      tags remain rejected. A safe retry does not overwrite another writer.
+- [ ] Legacy indexes, tags, deploy provenance and serving generations remain
+      usable under validated compatibility; missing dev lineage is not invented.
+      Optional client artifacts do not become a source-installation gate.
+- [ ] Exact generated consumers and validator bootstrap qualify the transition
+      that activates them, not merely a later dev source state.
+- [ ] Two natural qualified release cycles with pending source changes
+      demonstrate the cadence, source marker, artifact reuse and landed tag.
+      Missed targets and remaining blockers stay explicit and owned.
+- [ ] Measure ordinary PR event-to-required-gate completion below ten minutes,
+      including queue delays; separately measure validate-and-promote against
+      the thirty-minute target. Do not apply the conditional one-hour allowance
+      before the local-Dev workflow has actual acceptance evidence.
+- [ ] A second Dev advance, manual request or retry cannot dispatch a competing
+      promotion while an earlier promotion PR is open. A failed/cancelled run
+      cannot lose that obligation; resume or explicit retirement is auditable.
+- [ ] The existing workflow remains incomplete while its promotion PR is
+      pending and reports success only after the exact verified merge and
+      required publication/readback. Closed-without-merge and uncertain writes
+      cannot produce success-shaped completion.
+- [ ] Exact valid qualification is reused without rerunning the same full
+      portfolio at a duplicate event. Missing, failed, skipped, incomplete,
+      forged or mismatched evidence still refuses; changed source, generated
+      bytes, control/helper, toolchain, portfolio or Main base cannot reuse
+      incompatible proof.
+- [ ] Shared full-suite/baseline evidence retains every enrolled case and every
+      required nonempty baseline artifact with exact source/run/profile
+      provenance. Partial PR selections, different platforms, incompatible
+      collectors and interrupted executions cannot authorize reuse.
+- [ ] A properly qualified candidate receives the required Main gate and merges
+      through the existing authorized publisher. Prove a redundant lane is not
+      dispatched and cannot hold that merge; a genuinely required failing lane
+      must still block. Retain ordinary contribution/control admission.
+- [ ] A real canary and the two natural cycles demonstrate one active candidate,
+      terminal merge ownership and fewer duplicate invocations/checks. Report
+      queue/execution timing and any remaining service or flaky-test failures
+      separately, without implying a waiver.
+
 ## Proposal
 
+Phase 9 extends the existing source marker, generator, artifact identity and
+tagger rather than introducing another release authority. The implementation
+must separate the development source key from canonical payload/lock identity
+and from operation-specific Git receipts. Main-derived inputs that genuinely
+affect versions or shipped bytes must be frozen and attributable, not silently
+discarded or re-read as mutable state at another stage.
 
-_Pending — Phase 1 design work will produce concrete tool choices and
-generator contract details here or in a linked sub-doc._
+The twelve historical manifest/candidate hash refusals were content-hash
+inequalities, not established generated-commit comparisons. Preserve and verify
+that byte contract while removing incidental container dependencies. They are
+also integration/coverage failures when a changed producer and verifier reach
+release without proving agreement at PR time. Existing artifact CI portfolios
+should be reused with correct input/path selection and a shared canonical
+representation, not replaced by blanket acceptance of mismatched bytes.
+The separately governed control-preservation policy is not changed by this
+proposal.
 
 ## Journal
+
+### 2026-10-19 - Generated Fleet guard exposes one more source/control profile seam
+
+The changed-controller qualification `39206595414` admitted Dev
+`dd12fff539b9bb8bf2b2ae8dd255c6035fd3e32d`. All fourteen source jobs, nine
+nonempty baselines, artifact build and attestation passed. Candidate
+`a9fb46b6717c9785fc366cbe2503f80d41dacf2f` then entered exact-candidate CI
+`39212912232` before any product PR or publication.
+
+The twelve Fleet native matrix cells fail the same source-policy assertion:
+Dev's newer preallocation contract forbids the legacy detector still deliberately
+preserved in Main. Linux and Windows logs reproduce the identical one-failed,
+sixteen-passed guard result before the Fleet product tests. Preserve both
+policies rather than replacing independently owned Main control.
+
+The original source assertions and dependency-selection cases now read the
+validated recorded Dev recipe. Separate actual-controller assertions retain
+both native routes, all six partitions, required gates and original deadlines;
+deadline, partition and required-gate mutations still fail. A subprocess
+regression blocks PyYAML imports while exercising both contracts, retaining the
+preserved Fleet cell's pytest-only bootstrap without a workflow/dependency edit.
+
+The complete seventy-two-module portfolio named by actual Main CI, plus existing
+release contracts, passes 3,743 cases, 294 subtests and 34 platform/opt-in skips
+in 349.93 seconds against the Git-backed preserved-control fixture. Canonical
+source/helper consumers separately pass 275 cases. Four existing unregistered
+marker warnings remain visible. These are compatibility results, not a live
+release; failed candidate evidence still blocks publication, merge and resume.
+The candidate's full Bridge cell has passed, but its complete qualification has
+not. Retain this generation until terminal and then qualify changed source.
+
+### 2026-10-18 - Rehearsed Main controller activated; full qualification next
+
+#7221 merged as `e81a305c6056454971773c24d31e3a03e43184d0` after exact-head
+Copilot approval and all three original CI gates passed. Its post-publication
+test blobs match the complete controlled-Main rehearsal. The activation's
+repinned merge-wait suite independently passes all twenty-three cases.
+
+Main workflow-only #7216 then merged normally, without an administrator
+override, as `a325f5063e7cc0a2b3276be81be3e4959f8f4651`. Both Main source gates
+passed; its exact-head Copilot review reported no open issues and requested
+final human review. The repository owner explicitly authorized that clean
+comment verdict for this exact activation. This is not a general review waiver.
+The two preserved workflows now pin the reviewed source repair; the release
+pause, preservation manifest, original job coverage and Main's eight-minute
+Bridge limit remain unchanged.
+
+The immediate objective is a fresh complete qualification against this changed
+trusted controller, immutable publication/readback, verified promotion merge and
+tag, then canonical resume. The owner authorized continued corrective PRs,
+promotions, local deployment and validation to restore operation. No generated
+release, client rollout, natural-cycle or timing acceptance is claimed here.
+
+### 2026-10-18 - Preview custody contract merged; Main activation is next
+
+#7215 merged as `87bfbec660f6901ad95f3b418e6746812141676e` after actual
+current-head Copilot approval and all three original CI checks succeeded.
+It preserves preview validation without issuing publication custody for
+`push=false`; fourteen literal Main lifecycle cases and the unchanged old-Main
+guard's sixty-five cases pass. The workflow-only activation will pin this actual
+merged source. Main remains paused; none of the live qualification, publication,
+resume, natural-cycle or client gates are closed by the source follow-up.
+
+The earlier #7201 CI run `39188200125` took 23.9 minutes from provider run
+creation to required PR-gate completion. This includes dependency/queue time,
+not an attribution of its individual cause, and does not satisfy the
+under-ten-minute target. That latency obligation remains open independently of
+the successful source merge.
+
+Main activation review also identified an existing merge-wait fixture that
+omitted the newly required original qualification owner. Literal rehearsal
+reproduced its early `KeyError` before any provider call. Successful fixture
+cases now supply matching `1-1` ownership, while a missing-owner negative keeps
+the production refusal. The complete existing suite passes twenty-three cases
+against the actual Main controller; the default legacy profile retains its
+twenty-two cases plus one explicit inapplicable-feature skip. A source-owned
+`--workflow` test entry point makes this exact preactivation check repeatable.
+
+The complete controlled-workflow rehearsal then exposed fifty-five additional
+fixture/profile assumptions before activation. Repairs retain every original
+test function and negative parametrization while distinguishing partitioned Dev
+recipes, independently preserved unpartitioned Main CI, early versus qualified
+PR ownership, and the unchanged Main execution limits. The integrated
+twenty-six-file portfolio now passes 1,633 cases with four platform skips and
+294 subtests in 93.16 seconds. The complete changed canonical-source modules
+also pass 283 cases with one explicit legacy-feature skip. Four existing
+unregistered `windows_only` marker warnings remain visible in that rehearsal;
+it is not native-platform or live release acceptance.
+
+### 2026-10-18 - Lifecycle source merged; activate preserved Main control next
+
+#7201 merged as `103c42811b50b8c16e66a07852d56f2aadec64fa` after current-head
+Copilot review and all three original CI gates succeeded. The source now owns
+cursor-safe active/retired promotion inventory, immutable exact-source/admitted
+Main-base scheduling evidence, deferred push/manual-CI recovery and original
+qualification-owner output. A coupled CI selector contract now checks behavior
+rather than one regex spelling, and distinguishes recorded Dev policy from
+independently retained Main control.
+
+The changed-source portfolio passes 468 cases with ten explicit legacy-controller
+skips and twenty subtests; the additional partition/source-layout module passes
+120 cases. Exact prepared Main data passes thirteen lifecycle cases and the
+existing twenty-four publication/freshness boundary cases, including the real
+admission-record writer and queued ownership refusal. These are source and
+prepared-data results, not deployed qualification or a cadence measurement.
+
+The next stretch applies only the separately reviewed Main CI/controller
+workflow changes, pinned to that actual merged helper source. The preservation
+manifest and pause remain unchanged; Main's Bridge budget remains eight minutes.
+One fresh changed-input qualification must then prove the generated consumer,
+publication/readback and exact Main merge before canonical resume. All live
+ownership/reuse, natural-cycle, latency and client-acceptance obligations above
+remain open. Maintainer stewardship and owner-only review rescue are not enabled
+by this source merge.
+
+A final preactivation check reproduced a dry-run ownership gap in both literal
+Gate record steps: manual `push=false` still validates source but has no
+publication job to resume. Its admission record would block a later real
+promotion of unchanged inputs. Record writing and upload are now guarded by
+publication intent; expensive preview validation and the no-push output path
+remain unchanged. The source contract rejects the old condition and exercises
+both literal steps across preview, real manual publication and automatic
+dispatch before the Main activation PR.
+
+### 2026-10-18 - Repair lifecycle event ordering before control activation
+
+The current-head review of #7201 identified four real scheduling gaps. A
+newer run that merely queued and failed admission must not suppress deferred
+work after an older merge-only retry succeeds. Delayed promotion closure must
+use the same ordering rule as completion, including newer admitted failures.
+A finishing paused no-op must not discard a resume/control wake. Recorded
+retirement must block unchanged-source automatic retries from every event,
+including delayed CI and dispatches already queued before closure.
+
+The repair uses complete, authenticated Gate/source-job attempt history to
+distinguish actual admission from queued, declined and skipped runs. Retirement
+uses GitHub's closed-unmerged connection rather than REST's combined
+closed/merged inventory, with paginated readback and immutable candidate-source
+verification. Live compatibility exposed the merged-history pagination limit
+before activation; the corrected reader consumes the actual current history
+in one inventory page and fourteen total API reads. It permits the new Dev
+source without weakening the retirement check.
+
+The prepared Main gate independently rechecks retirement after resolving
+automatic source admission. Its literal workflow test executes the real CLI
+for both an allowed advance and a retired unchanged source. No additional
+permission, writer, workflow, CI waiver or qualification retry is introduced.
+Main activation and all parent release/client acceptance gates remain pending.
+
+A subsequent review found two related boundary cases. Known non-owner authors
+are now excluded before requiring repository provenance for a deleted fork.
+Terminal promoter events reconcile an actual merged PR even if the run was
+cancelled or failed after the Actions-token merge; that token suppresses the
+ordinary PR-closure event. Source CI still requires success, and no merged PR
+means no deferred retry. Focused unit and literal dispatcher regressions retain
+strict owner provenance and cover both successful recovery and refusal.
+
+The next review identified offset-pagination drift in active-PR admission.
+Open and closed-unmerged Main inventories now share a stable cursor reader;
+open traversal is creation-ascending, preserving surviving entries when an
+earlier PR closes. Inconsistent totals or cursor/identity ambiguity refuse
+admission. A regression closes the first ordinary PR between page reads and
+proves that the following promotion cannot be mistaken for an idle inventory.
+
+Two later findings exposed the limit of job-only generation ordering. Delayed
+CI must obey the same ownership decision as closure/completion, while changed
+sources remain eligible; deferred discovery must also retain successful manual
+CI rather than consider only a failed push. The prepared Gate now issues a
+small immutable admission artifact named by exact Dev and freshly admitted Main
+base, using the existing artifact action and no additional permissions. The
+reader verifies canonical Main execution, the original successful Gate upload
+attempt and its creation window. All automatic event paths and queued Gate
+admission share that source/base ownership check. Original qualification
+receipts remain independently required.
+
+Deferred CI selection now covers eligible push and manual runs of the exact
+current source. The latest run by creation time/ID wins, with its current
+attempt; a newer failure or pending run blocks an older success. Direct event
+evidence survives run-index lag. Tests cover delayed old CI after a newer
+publication failure, changed source/base eligibility, queued admission,
+successful manual CI after resume/merge, latest-failure refusal and immutable
+record provenance. Main control data still requires separate reviewed
+activation and fresh release acceptance.
+
+### 2026-10-18 - Reviewed lifecycle charter implemented locally; Main activation pending
+
+Plan amendment #7199 merged as
+`fd9294796fa9164bbea105a39a16ca5dae18e632` after current-head Copilot approval
+and all three original required checks passed. The local source slice adds a
+complete read-only active-PR inventory, deferred-advance scheduling and stable
+qualification-origin output. The existing trusted dispatcher handles successful
+CI/promoter completions and owner-authored Main closures without executing PR
+code or creating another workflow/job.
+
+Prepared Main control data is derived from the actual preserved controller, not
+the legacy Dev template. It prepares a branch without opening a PR, qualifies
+the complete generated consumer, publishes and reads back immutable source
+assets, then opens the ready PR inside the already credentialed publisher.
+The separate merger remains checkout-free, secret-free and nonadministrative.
+Publication/merge-job recovery retains the original qualification owner; an
+uncertain merge response is reconciled by bounded readback without another
+blind write. Normal already-current sources avoid duplicate source validation;
+explicit qualification-only operation remains available.
+
+Deferred CI while a PR is active is recovered after actual merge or explicit
+retirement/resume. Successful no-ops cannot recursively dispatch; unchanged
+retired sources are not retried automatically, and stale completion events do
+not take progress back from a newer generation. Source/generated/native
+coverage and all nine baseline requirements are unchanged. Full-suite/baseline
+coalescing remains a separately measured follow-through item, not an excuse to
+drop a required execution profile.
+
+The exact prepared controller passes the existing 24 publication/freshness
+boundary cases and 11 lifecycle cases, including literal PR-opening negative
+controls, stable-origin retry, uncertain-write readback and real admission-CLI
+trigger transport. Broader source policy checks exposed coupled event-condition
+test assumptions; their restricted evaluator is retained with explicit new
+closed-event contexts. No local independent-review verdict is claimed when its
+prepared-data inputs are inaccessible. Normal source and actual Main PR review
+remain mandatory before activation.
+
+Main itself is still unchanged and paused. The prepared helper pin is not an
+activation receipt; it must select the actual reviewed merged source that
+contains these helpers. Candidate-only Main CI enrollment preserves bootstrap
+operation before those test files ship, and Bridge keeps the same two-worker
+policy and unchanged eight-minute bound. Fresh qualification, actual Main merge,
+publication/resume, two natural cycles and client acceptance remain open.
+
+### 2026-10-18 - Candidate repair merged; retain promotion ownership beyond run lifetime
+
+Source repair #7187 merged as
+`ead7b3eaf9bfd3dd733e43384038ae73bba95a33` after actual current-head Copilot
+approval and all three original required checks succeeded. This is a source
+merge, not a qualified product release or permission to resume Main.
+The operator explicitly retires superseded candidates #6950 and #7184; both
+are closed unmerged with their branches and artifacts retained.
+
+The new operator clarification is captured verbatim above. Inspection confirms
+the current Main controller already retains whole-workflow concurrency through
+its exact-candidate merge waiter. Its required Main gate is distinct from the
+full candidate qualification. The remaining lifecycle gap is an active PR left
+behind by a failed/interrupted run; workflow concurrency alone expires with
+that run. Main-push CI also retains full validation after pre-merge qualification.
+The next reviewed slice must address durable admission/recovery and proven
+evidence reuse rather than add a second publisher or waive a failed portfolio.
+
+Main stays paused. Matching candidate worker/validator activation, fresh
+qualification, verified merge/publication, resume, cadence and client acceptance
+remain open. The ordinary Maintainer merge/rebase steward remains separately
+disabled; this promotion charter does not grant its activation authority.
+
+### 2026-10-18 - Repair candidate inputs and prove bounded native Bridge completion
+
+The four candidate-failure tracks are integrated into one source repair, not a
+new qualification attempt or a Main-control overwrite. Source-specific workflow
+contracts now replay the exact recorded Dev controller while retaining the
+actual preserved Main CI in generated fixtures. All 139 selected contract cells
+pass, including missing/invalid source-lineage refusals.
+
+The complete Dispatch adoption module passes 61 cases in both canonical and
+genuinely materialized inputs; Codespaces passes 58 with two existing native
+Windows skips in each form. Real materialization performs 31 operations with
+zero skipped operations, and parsed installer references and UV sources are
+local in the generated form. Missing-consumed-input negatives remain intact.
+Native MCP cleanup retains bounded stage/stack diagnostics and its original
+twenty-second child deadline; four focused cleanup cases pass. This does not
+establish the historical hosted cleanup root cause or accept it as a flake.
+
+Bridge profiling finds both fixture overhead and a real HTTP/2 starvation
+defect, tracked in #7186. Before cancellation, a completed control response has
+queued terminal frames while a quiet SSE reader owns the shared read lock.
+The explicitly authorized transport repair isolates each long-lived SSE pool
+from the control pool, preserving logical connection identity, scoped cookies,
+authentication, TLS, complete response-body validation and every deadline.
+Deterministic shared-lock/ownership/cleanup regressions pass; the original eight
+native lifecycle/cancellation cases pass across twenty fresh executions.
+
+The complete native Bridge suite now passes all twelve file groups:
+6,444 passed, 60 platform/opt-in skips, 341.274 seconds including local runner
+preparation. This leaves 138.726 seconds inside the unchanged eight-minute
+candidate-job bound before hosted setup differences. Real PowerShell coverage
+is present; this is not the container profile that omitted native cases.
+Two workers reuse the existing contained-job pattern only for promotion
+candidates, with unchanged item, group, aggregate and resource bounds.
+
+Install contracts, module caps and the newly declared development dependency's
+seven-day seasoning check pass. Current-head hosted review/checks, minimal
+reviewed Main worker-policy and matching validator-pin activation, a new changed-input qualification,
+publication/resume, natural-cycle cadence and client acceptance remain open.
+The failed candidate #7184 stays unmerged and Main stays paused.
+
+The first repair PR check also catches its coupled qualification inventory
+contract: the candidate-only worker environment must be recognized explicitly,
+not mistaken for an unknown partition recipe. Admit only the exact reviewed
+two-worker expression or the historical no-worker step, preserve the full row
+set and bind the changed recipe digest. Reject expanded worker scope/count,
+filters and extra environment fields. Matching trusted helper activation is
+therefore part of the next minimal Main-control PR; old pinned inventory code
+cannot validate the new step by implication.
+The exact ordinary runner lane plus the complete qualification module passes
+594 cases with twelve platform skips after this correction.
+
+Current-head Windows CI and review then expose a clean-checkout fixture defect:
+shared clones do not inherit remote-tracking Main refs, and a local Main branch
+had masked that absence. Seed the fixture from the original checkout's exact
+canonical Main commit; a real-Git negative fixture has no local Main branch in
+either checkout and initially no cloned Main remote ref. Preserve the actual
+Main controller and source-lineage assertions.
+
+The same CI also reproduces the unresolved native purge signature #7020.
+Fixture-only timestamped phase output now distinguishes startup, engine load,
+real identity reads, home refusal and runtime purge at the unchanged twenty-
+second child deadline. Timeout readback is bounded and re-raises the original
+exception; all purge safety assertions remain. This is not a diagnosed cause
+or an accepted-flake claim. The full source-controller, standalone and install-
+contract guard modules pass 475 cases with five Windows-only skips after these
+changes; current-head hosted review/checks still decide admission.
+The next Windows run passes the original 216 artifact-contract cases but
+exposes CRLF translation in the new regression's hand-authored Git alternates
+file. A real-Git negative control reproduces exit 128 with CRLF and success
+with LF against the same object store. Write exact LF bytes and assert the
+absence of CR; all twelve source-contract cases then pass locally. This is a
+fixture serialization repair, not a source-lineage or Windows coverage waiver.
+That head receives current-head Copilot approval and passes the Windows repair,
+but the synthetic merge with #7140 exposes a separate stale Configuration
+contract: the independently selected native Configuration job is still compared
+to Manager's newly path-admitted predicate. Pin the native job's own unchanged
+Main-PR exclusion instead, retaining its five-minute bound, required membership
+and real owner/UI checks. Mutation regressions prove independence from Manager
+selection and continued refusal of widened Main scope; all 29 cases pass.
+No workflow admission policy is changed by this test-only correction.
+
+### 2026-10-18 - Source and artifact repair passes; candidate qualification blocks publication
+
+Qualification `39152940504` admitted exact Dev
+`a9c26ff2332ec050970dab792d8536e9af0144c7` from trusted Main `ff6773de1b`,
+confirmed from completed source-checkout evidence. All fourteen source jobs and
+all nine required baseline artifacts succeeded. Artifact construction and
+attestation succeeded, and generated candidate
+`b40b0aabf9bd1b82b7f2fa607a21f803e7a8532a` opened as #7184.
+
+Canonical full candidate CI `39155521483` failed, so qualification correctly
+blocked publication, product Main merge and tagging. Main remains paused at
+the same control commit and exposed source. The terminal generation's announced
+Main-control/helper-pin hold is released; #7184 remains open and unmerged, not
+implicitly retired or eligible for a retry.
+
+The next repair has four bounded tracks. Source-specific workflow contracts
+incorrectly read the preserved older Main controller; their source and generated
+fixtures must distinguish those authorities without dropping checks. Dispatch
+and Codespaces installer fixtures assume canonical input while candidate tests
+execute already-materialized input; repair the fixtures while preserving every
+cell and missing-consumed-input negative. A native MCP PowerShell cleanup case
+reached its twenty-second inner deadline after dependency denial; a passing
+instrumented local case localizes settlement but does not establish the hosted
+root cause or an accepted flake. Finally, the provider confirms Bridge's ordinary
+candidate job exceeded its unchanged eight-minute budget; per-test profiling,
+not a deadline increase, owns that blocker.
+
+Source-control contract and installer-fixture repairs have separate isolated
+local owners; native settlement diagnosis and Bridge profiling remain explicit.
+No new qualification is dispatched until the demonstrated blockers have real
+reviewed fixes and the unchanged source/generated/native gates can pass.
+Release, resume, natural-cycle cadence and client acceptance remain open.
+
+### 2026-10-18 - Both observed qualification blockers repaired in reviewed source
+
+Source #7181 merged as `a912c1d2346598f4c8badfceef0c45692c3f9ac6` after
+current-head Copilot approval and the complete ordinary CI run `39151234210`
+passed, including all three required checks. The flat-library artifact builder,
+complete alias-grid fixture optimization and fail-closed enrolled baseline
+contracts are now reviewed source. Local full-plus-baseline proof retained all
+12,626 Worktrees cases in 648.926 seconds within unchanged bounds.
+
+The next gate is the minimal workflow-only Main activation: select that immutable
+reviewed helper and carry the enrolled collector/upload failure fields, preserving
+the pause, exposed product, control manifest, source matrix and every resource
+limit. No source merge is treated as qualification, publication, resume or
+client deployment. Phases 7 and 9 and their Validation Plan remain open.
+
+Matching workflow-only Main #7183 then merged normally, without administrator
+override, as `ff6773de1b539f5227b98634be13fcaaa75adac7` after actual current-head
+Copilot approval and successful Main source gate. Actual merged-controller
+readback passed the source baseline and premerge-boundary contracts. Semantic
+comparison admits exactly the helper pin and three enrolled-evidence failure
+fields; pause, exposed product, CI and control-manifest blobs are unchanged.
+
+One changed paused qualification, `39152940504`, was dispatched at 18:10:29 UTC
+against that trusted Main/helper pair, with `push=true` and
+`qualification_only=true`. Its gate passed; admitted-source checkout evidence
+and all downstream source, baseline, artifact, candidate, publication and landing
+gates remain to be read back. This is not an unchanged retry or a release claim.
+The new generation's bounded Main-control/helper-pin hold is announced while
+ordinary Dev work continues.
+
+**Latest outcome:** source repairs #7152 and #7164 and matching Main activation
+#7166 are merged. Fresh qualification `39123233231` passed all fourteen source
+validation jobs, then failed composed-candidate materialization because its
+trusted helper pin predates reviewed retained-flat support from #6944. No
+candidate publication or product merge occurred. Main helper activation #7167
+is now merged, with the pause and exposed product unchanged. Fresh full
+qualification remains open. Historical preparation entries below retain their
+original in-flight state; subsequent entries record the later outcomes.
+
+### 2026-10-18 - Separate coverage collection exhausts the unchanged job deadline
+
+Source compatibility prevention #7169 merged as
+`c1eb1be5d7fbb2fc0cda8dea9eaaf5c0550ac249`, after actual current-head approval
+and the newest same-head CI suite succeeded. The description edit had started
+another CI suite; an earlier green run was not evidence that the current
+required contexts had settled. The correction remains ordinary reviewed
+source work, not a CI waiver.
+
+Fresh paused qualification `39129398512` executed trusted Main `e86100f353`
+and admitted exact Dev `753c8384974052e1515950663017386ec376d9dc`. It did not
+include the later #7169 merge. Twelve source jobs succeeded. Worktrees and
+Dispatch passed their full suites in 635 and 765 seconds respectively, then
+both reached the existing 30-minute job deadline during separate serial
+coverage collection. GitHub's annotations explicitly identify that timeout;
+it was not external cancellation. Worktrees reached chunk 85/85 and Dispatch
+wrote its 44-chunk JSON at cancellation, but neither earned an uploaded
+baseline. Build, qualification, publication and product merge were skipped.
+The run is terminal; Main remains paused and no qualified replacement exists.
+
+The narrow repair adds an opt-in two-chunk scheduler only for those two
+existing baseline recipes, retaining five-file chunks, complete enrollment,
+the coverage/context driver and deterministic per-line union. Both drivers
+share one existing containment tree and budget, with separate sandbox,
+coverage, report and pytest temp paths. A failed chunk stops new scheduling,
+drains bounded active work and refuses partial evidence. Other recipes remain
+serial and the combined job deadline does not increase.
+
+The driver/report work in open #6783 remains independently owned; the
+outer-collector repair was coordinated before editing the shared file.
+Synthetic real-driver comparisons preserve exact test identities, per-line
+contexts, fixture setup/teardown and portfolio tiers across serial and parallel
+execution; a real failed chunk cannot write an authoritative output.
+Full heavy-suite timing, normal review, required CI, compatible Main control
+activation and fresh complete qualification remain separate gates. No
+unchanged qualification rerun, baseline waiver or strict-selection activation
+is authorized by this repair.
+
+The new scheduler contracts are directly re-exported through the already
+selected coverage-guided-selection test module in both existing CI lanes.
+No new test filename is added to preserved Main control: legacy Main can still
+execute its unchanged source selector before the new helper/test payload ships,
+while generated current-source candidates collect the additional contracts.
+
+A complete disconnected Linux Worktrees baseline now executes all 85 chunks
+within the fixed shared budget and retains the actual JSON for readback:
+12,491 test records, matching the complete serial reference's 12,155 passes
+and 336 skips. Every coverage context belongs to that same test set. Collection
+takes 427.430 seconds; the separate conservative serial full-suite reference
+takes 557.687 seconds. Their sum is 985.117 seconds, not a claim of one
+continuously timed production run. A preceding complete collection took
+408.354 seconds but its local witness export failed; that attempt is not
+substituted for the retained baseline. Dispatch's complete combined recipe
+and actual hosted qualification remain separate validation gates.
+
+Dispatch's complete disconnected combined recipe also succeeds: all nine
+full-suite groups finish with 6,070 passes and 154 skips, followed by all 44
+instrumented chunks. The retained baseline has exactly 6,224 test records and
+all coverage contexts refer to that same set. Full execution takes 374.624
+seconds, collection 286.490 seconds, and the continuously measured combined
+recipe 661.114 seconds, below the unchanged 1,800-second job deadline. These
+local Linux results do not stand in for source review, current-head required
+checks, hosted qualification or verified publication.
+
+Source repair #7173 merged as
+`f4dec6df9788b75342605ec19c514439d55b6188` after actual current-head Copilot
+approval with no open findings and all three original required checks passed.
+The first review correctly identified that plugin test changes still require
+a changefile; the canonical patch entry was added, its actual guard passed and
+the corrected head's full CI run `39137863840` succeeded. No version manifest,
+CI requirement, baseline or validation limit was waived. Normal reconciliation
+retained the source worktree's pre-completion backup.
+
+The next stretch is only the matching reviewed Main workflow activation:
+the baseline-worker environment and CLI option, with the corrected five-file
+comment. Preserved Main CI keeps its existing selector; the helper pin, pause,
+product and control manifest remain unchanged. Only after that control is
+compatible may one fresh complete paused qualification earn hosted source,
+generated/native consumer, artifact and publication evidence. The source merge
+does not close Phase 9, authorize resume or satisfy natural-cycle/client gates.
+
+Workflow-only Main activation #7175 merged as
+`2561af5292f79185c01a25affaf8fb9c223366ef` after actual current-head Copilot
+approval with no open findings and the enforced Main source gate passed.
+Normal squash merge used no administrator override. The actual proposed Main
+files passed the reviewed source contract, and parsed comparison proved only
+the two baseline-step semantic fields changed. CI, the four-path control
+manifest, helper `b576e17ec2280c27866b0be550ff7b0604cfaa58`, pause and exposed
+product remained unchanged. A fresh complete paused qualification is the next
+owned gate; no release, resume or client adoption is inferred from activation.
+
+Qualification `39140871444` then admitted exact Dev
+`f4dec6df9788b75342605ec19c514439d55b6188` from Main `2561af5292`. It stopped
+without signing, candidate qualification, publication or product merge.
+Although all fourteen source jobs reported success, only eight of nine
+required baseline artifacts existed. Worktrees' full suite passed in 706
+seconds, but one instrumented chunk reached its unchanged 300-second limit;
+`continue-on-error` masked that failure and the empty upload as job success.
+Dispatch's full suite, baseline and upload succeeded. The terminal generation's
+Main hold was released; the pause and exposed product remain unchanged.
+
+Artifact construction independently refused the correctly materialized flat
+`agent-installation-context` library because its duplicated structural checks
+still required `src/`. The local repair reuses the materializer's existing
+declared-module policy for canonical and vendored closure discovery, including
+explicitly retained flat references. Missing modules, unsafe roots, symlinks and
+metadata refusals remain enforced. A real pinned-materializer-to-source-builder
+bridge and the full artifact contract cohort pass: 314 cases, four unchanged
+platform skips. The proposed helper also completes real unsigned construction
+for the exact failed Dev/Main pair in 390.252 seconds, exporting a nonempty
+thirteen-artifact index; nothing was signed or pushed.
+
+The timed-out cohort's 367-test progress trace matches the alias-slot matrix
+batch, not the later timestamp-only candidates. Profiling one actual case found
+185 uncached config loads and 730 YAML parses. The fixture now shares one
+per-case config snapshot and memoizes the real topology parser by exact path,
+mode and content, returning independent copies. Changed bytes reparse; final
+config/topology invariance and a freshness regression guard this test-only
+optimization. Production registry freshness is unchanged. The same instrumented
+cohort plus its comparison peer falls from 133.402 to 30.794 seconds locally:
+all 440 original IDs and tiers remain, with one added freshness guard.
+
+The complete isolated current Worktrees suite then passed: 12,290 passed and
+336 platform/capability skips across all eighteen groups in 308.805 seconds.
+The complete instrumented baseline passed in 340.121 seconds, retaining all
+12,626 cases and 368 covered files; every one of its 12,472 attributed test
+contexts names a retained case. The continuous 648.926-second full-plus-baseline
+run retains the original per-item/group/plugin bounds, two-worker opt-in and
+shared collector resource limits. This is local proposed-source proof, not a
+replacement for hosted qualification.
+
+The source workflow now makes enrolled collector/upload failures visible and
+retains the independent complete-artifact check. Chunk diagnostics identify the
+original index and test paths even after an active sibling drains. Local
+current-suite proof is complete; ordinary source review/CI and a matching
+reviewed immutable helper-pin/control activation still precede another fresh
+qualification. No
+test, baseline, time/resource bound or publication gate is waived. Existing
+unregistered `windows_only` marker warnings remain part of Phase 9's ordinary
+test-hygiene follow-up, not a reason to bypass validation.
+
+### 2026-10-18 - Source suites pass; pinned materializer compatibility blocks composition
+
+Source #7164 merged as `0b5b636802a6988b59af45c9c5174d281be9592d` after actual
+current-head Copilot approval and all original required checks succeeded.
+Main control #7166 then merged as
+`c75fbdc597200e22210b634037accfbe0e46d260`, activating only the two reviewed
+workflow declarations. Normal Main merge required no administrator override.
+The pause, exposed product source, control manifest and helper pin were
+byte-identical before and after that workflow activation.
+
+Fresh paused qualification `39123233231` admitted exact Dev
+`938fc9aa1abe1883374748e6b274aa7cfcf01f3f` from trusted Main `c75fbdc597`.
+All fourteen source-validation jobs passed. The full Worktrees step completed
+in 570 seconds within its unchanged 900-second aggregate; its separate
+coverage collection and upload also succeeded. This is actual hosted source
+proof, not a qualified product release or a complete latency acceptance.
+
+The next composed-artifact build refused two explicit noneditable
+installation-context references, direct from Agent Machines and nested through
+installer-readiness. Reviewed #6944 deliberately retained those flat-module
+references and added compatible canonical materialization. The active immutable
+helper predates that support. Changing the manifests to editable sources would
+break the installed-layout contract; weakening materialization refusal would
+ship unresolved references.
+
+The bounded compatibility regression executes the actual pinned helper import
+closure against the current source manifests and libraries, rather than testing
+the newer source materializer in its place. It reproduces both old-pin refusals
+and verifies the replacement's copied bytes and direct/nested rewrites. Both
+existing artifact-contract lanes already select this module and the affected
+source paths. A full non-pushing composition using the reviewed replacement
+helper also succeeds against the exact failed source and Main base.
+
+The failed run is terminal and is not retried unchanged. No candidate,
+qualification receipt, artifact publication or product merge occurred.
+Workflow-only Main activation #7167 merged as
+`e86100f35398eeb7fa2a168f039952ff1a2673d1`, after actual current-head Copilot
+approval with no findings and the enforced Main source gate passed. Normal
+merge used no administrator override. Only the immutable helper scalar changed
+to reviewed `b576e17ec2280c27866b0be550ff7b0604cfaa58`; the pause, product state,
+control manifest and every release gate remain unchanged. All 46 cases in the
+artifact-readiness suite now pass against that actual Main pin, including the
+old-helper refusal. Fresh complete qualification, normal resume, natural
+release cycles and client compatibility remain open.
+
+Review identified that an initial fixture fed already-materialized candidate
+manifests back into the materializer. The corrected fixture keeps the
+candidate's controller pin but replays unmaterialized inputs from its recorded
+exact Dev commit, refusing absent or invalid lineage. A real generated Git
+checkout, deliberately different generated library bytes and both current/old
+helper cases cover that boundary. All 52 artifact-readiness cases pass locally;
+current-head hosted native execution and review remain separate gates.
+
+### 2026-10-18 - Native fixture repair merged; bounded full-suite recovery continues
+
+Source repair #7152 merged as
+`1cc109db49f95c3c6a4fc732c6b69164e69ea496` after actual current-head Copilot
+approval and all three original required checks succeeded. The hosted Windows
+candidate-contract lane is green on the repaired output-file fixture. The
+source worktree was reconciled through the verified squash merge with its
+backup retained. This is a source repair, not Main activation or qualification.
+
+The next narrow experiment uses exactly two contained workers only for the
+existing Linux full-Worktrees source and candidate steps. Every selected test
+and the 30/300/900-second, process, memory and storage limits remain unchanged.
+The CI option requires an owning promotion run: ordinary manual validation of
+an older released Main remains serial before the new test dependency ships.
+Guards, collection, baselines and other plugins retain their existing options.
+The open Windows performance contribution retains its separate ownership and
+unresolved margin proof.
+
+A disconnected serial reference completed all 17 ordinary groups on the first
+private candidate, but subsequent reviewed runtime-source changes invalidated
+that timing comparison. The final paired runs hold every other tracked input
+byte and mode identical, changing only the execution-profile option. Both
+complete all 17 groups with 11,941 passes and 336 unchanged skips. Serial
+execution takes 560.951 seconds and the two-worker profile 348.064 seconds,
+including container preparation and cleanup, a 37.95 percent local reduction.
+The largest reported pytest group falls from 88.73 to 46.49 seconds. Limits,
+test selection and failure handling are unchanged; the temporary container
+profile is removed before publication.
+
+These are complete local Linux witnesses, not hosted or Windows margin proof,
+and do not qualify a release. Normal source review, all current-head required
+checks, matching Main control activation and full release qualification remain
+open. The Windows performance contribution keeps its independent completion
+gate; no production changes were imported from its branch.
+
+Review found that a new standalone guard file was not in CI's explicit module
+list. The policy assertions are now called through six directly collected
+cases in the existing admission suite. Both platform change filters include
+the helper, both workflow declarations and the test-dependency manifest, with
+reachability regression coverage. This also avoids a missing-test bootstrap
+on older Main. The exact selected Linux CI cohort passes 241 cases with 12
+existing skips and 22 existing exhaustive-tier deselections.
+
+### 2026-10-17 - Prove Git for Windows output capture before updating the repair
+
+The next hosted Windows job, `117588931328` in `39097888644`, exposed the
+remaining inherited fixture assumption: every one of the 33 decision cases
+reported `/dev/stdout: No such file or directory`. Native Bash was executing;
+this was neither a timeout nor an accepted flake.
+
+The shared fixture now uses a pre-created, test-owned `GITHUB_OUTPUT` file
+with a forward-slash native path and keeps its contents separate from process
+stdout and stderr. Dedicated guards prove file ownership, cleanup, independent
+channels and unchanged nonzero exit propagation. The native launch guard runs
+outside the intentionally skipped legacy-controller class.
+
+Before another source push, the exact repaired fixture was executed on real
+native Windows under its bounded Job supervisor: all four affected methods
+passed without skips, including all 33 real Bash decision cases. Each child
+retains the five-second limit and consoleless launch. The coupled Linux
+portfolio passes 171 cases with 10 existing legacy-controller skips and 152
+subtests; the complete prepared Main boundary passes 24 cases. These witnesses
+do not replace the required current-head hosted CI or release qualification.
+
+### 2026-10-17 - Repair the native admission fixture before another qualification
+
+The hosted Windows candidate-contract run `39084596299` reported 31 failed
+shell subcases, with 136 passes, 11 existing skips and 105 passing subtests.
+The new fixture launched bare Bash with a replacement environment and a native
+temporary output path, instead of using the module's existing native,
+consoleless shell boundary. The repair shares that boundary between both test
+families, retains the new fixture's five-second child deadline and strict shell
+mode, and captures the decision through standard output. Nonzero exits retain
+both stdout and stderr in the assertion.
+
+Review also identified that Actions string equality is case-insensitive. The
+literal admission model now covers mixed-case strings accordingly; the actual
+decision script is independently exercised to refuse noncanonical gate values.
+That distinction preserves both the allocation model and the publication
+refusal rather than pretending an uppercase value cannot allocate a runner.
+
+Main now includes the reviewed hosted setup controls through #7153 and #7154.
+The prepared no-op admission view was re-pinned to exact Main
+`c1c0fea7ba3beea33b4010be009489696e51e4be`, with its actual adjacent CI and
+base-admission declarations. All 23 controlled boundary cases pass in the
+bounded Linux fixture run; actual hosted Windows success remains required.
+Only the prepared Promote admission field differs semantically. No helper,
+qualification gate, timeout, package policy or artifact-integrity check changed.
+The current Worktrees aggregate-budget blocker and normal release qualification
+remain open; pause-only successful workflows do not close them.
+
+### 2026-10-17 - Prepare bounded no-op Promote admission
+
+Paused normal runs already decline expensive source validation, but the
+unconditional Promote job still allocated a runner and deployment environment
+merely to decline that source again. The prepared source/Main pair changes
+only that job's admission field: retain `always()` for dependency-failure
+visibility while requiring successful gate execution and its exact
+`is_dev=true` output. The unchanged decision step still refuses every missing,
+failed, cancelled, skipped or unknown validation result.
+
+Semantic YAML comparison confirms all other job data, dependencies, steps,
+permissions, budgets and release evidence checks are identical on each side.
+The exact prepared Main controller passes all 23 controlled boundary/admission
+tests under the bounded supervisor; the source view passes its applicable
+cases with the existing explicit legacy-controller skip. Neither local proof
+activates Main or qualifies a product. The disjoint hosted review-setup
+allowlist stage has the next coordinated Main slot; this V&P activation must
+re-pin its eventual base and clear normal review and required gates afterward.
+
+### 2026-10-16 (PDT) - Retire failed candidate; repair release-layout qualification
+
+The paused replacement's full materialized-candidate CI failed the installer
+human-output guard before Main merge. Its fixture copied canonical wrappers
+without their local engine assets and required another rewrite even when the
+tested release wrapper was already materialized. Real materializer no-op
+behavior for a local reference was correct; no product hash waiver is needed.
+The operator authorized retiring only candidate PR #7113 and its parent/child
+validation runs. Both runs are terminal cancelled, the candidate is closed
+unmerged, and Main remains paused and unchanged. Published inputs and evidence
+are retained. The temporary noncritical CI intake request ended with that
+failure; it is not an ongoing hold or cancellation permission.
+
+The existing PR-only containment contribution now includes explicit canonical
+and materialized installer fixtures built from real consumer bodies and
+canonical assets. Both prove actual declaration admission, complete local
+engine/support bytes, byte-stable reapplication and tamper refusal; the
+whole-payload cases retain both build and in-place owner ordering. The focused
+fixture/policy modules pass 129 cases. The repaired fixture also passes all 45
+cases against an isolated archive of the exact failed candidate, without
+editing or republishing that candidate.
+
+Review found unsafe expression evaluation in the new policy test helper. All
+three such call sites in the module now share an explicit primitive-only AST
+evaluator, with unsupported syntax and unknown names rejected even in inactive
+branches. The request quotations remain verbatim, with an outside-quote
+explanation rather than rewritten operator wording.
+
+Follow-up review added full operand-type validation followed by short-circuit
+interpretation, with lookup-count cases proving the distinction, and nested
+support-asset copying in the fixture. The coherent source portfolio now passes
+222 cases plus 75 subtests, with nine existing opt-in skips; the exact failed
+candidate archive passes all 46 installer cases. No production parser,
+materializer or byte-admission policy changed.
+
+The former sequencing assumption below is superseded: the old candidate can no
+longer finish. Retire that attempt (done), land the reviewed Dev repair while
+the canonical pause remains set, activate matching reviewed Main CI controls,
+then qualify a fresh source through every normal gate. Neither this fixture
+fix nor a Dev merge proves release, latency or installed acceptance.
+
+### 2026-10-17 - Retire obsolete CI and prepare PR-only cancellation containment
+
+Read-only inventory confirmed 55 open PRs and 100 queued workflow records in
+the current listing. Twelve ordinary CI runs referenced superseded PR heads.
+The operator approved cancelling only those exact obsolete runs after live
+head, workflow, repository and base checks. Eleven are now provider-confirmed
+cancelled; the twelfth had already completed and was left untouched.
+Normal cancellation could not terminate `always()` jobs, so force cancellation
+was separately approved only for the ten remaining obsolete runs. Current-head
+checks, Dev CI, promotion and review runs were excluded.
+
+The proposed prevention cancels superseded PR runs only on head synchronization,
+not on metadata edits that would restart the same head, and prevents cancelled PRs
+from continuing standalone Index jobs or allocating the final required
+aggregate. Uncancelled dependency failures still reach that aggregate and
+report failure. Dev/manual rolling behavior and the promotion aggregate remain
+unchanged; no current-head coverage, timeout, permission or release gate is
+removed. Before implementation, seven regressions failed against the old
+policy. The focused policy/trusted-policy/publication portfolio now passes
+87 tests with 75 subtests and nine existing opt-in skips.
+
+This source policy is not yet landed or active. The current promotion remains
+on its immutable Main controls and pinned source. A fresh canonical pause permits
+landing the reviewed Dev correction first: automatic promotions remain stopped,
+and the executing older candidate does not acquire the new source assertions.
+Main-control preservation still requires the matching reviewed control change
+after the current qualification and before resuming or qualifying newer source;
+otherwise the next candidate would correctly expose the old controlled CI
+behavior. This pause interlock avoids disturbing the active promotion while
+containing new PR waste. It does not complete the ten-minute CI budget or
+release qualification.
+
+### 2026-10-16 - Required baseline collection blocks paused replacement before publication
+
+Paused qualification run `38967279712` tested Dev
+`883623d68b5813ed8d6fa08c26cfd8f02fe9628f`. Every full-source suite,
+artifact build and signed validation passed, but promotion job `117213929076`
+correctly refused the missing Worktrees coverage baseline (#7032). The producer
+log proves a 25-file instrumented batch exceeded its unchanged 300-second cap;
+the nonblocking collection step and missing-file-ignore upload explain its
+otherwise green job. Candidate creation, qualification, publication and Main
+merge did not run. Main remains paused and unqualified.
+
+The bounded repair changes only the collector's default batch size to five
+files and reports each batch before execution. It retains the entire inventory,
+300-second cap, attribution merging and fail-closed behavior. The existing
+#5694 corpus, fixture, containment and runner ownership is untouched. Real
+Python 3.12 collection of the exact failed 25-file/722-item inventory passes in
+five batches of 8.41, 16.00, 64.70, 184.87 and 8.03 seconds. The full selector
+regression file passes 127 tests; explicit real collection/plan/error contracts
+pass 22 tests, including default and explicit chunking with shared-line
+attribution. These local witnesses do not qualify a release.
+
+Next: merge the reviewed collector repair through Dev, then earn a fresh
+paused replacement with complete source, candidate and artifact evidence.
+Resume, consumer deployment and both natural pending-source cadence cycles
+remain open.
+### 2026-10-17 - Fresh qualification exhausted the unchanged Worktrees aggregate
+
+Fresh paused qualification `39024583508` executed trusted Main
+`a2f59e9dae82738ba2537e9a58196cd5cca0e3c8` and admitted actual Dev
+`b367d11da269b9844dd5a1af305fdfcf3c6ca492`, which contains source repair
+#7124. It failed the full Worktrees job before build, attestation, candidate
+qualification, publication or a product merge. Main remains paused and the
+existing product remains unqualified; neither a successful pause-only automatic
+run nor a workflow-only repair is product qualification.
+
+The exact source runner and failed job establish an aggregate-budget failure,
+not a new ten-second item limit: fifteen completed groups reported 10,838 passes,
+173 existing skips and 857.66 pytest seconds. Interpreter and containment
+overhead left 9.70186 seconds of the unchanged 900-second plugin budget for
+group sixteen of seventeen. No named assertion trace established a functional
+regression or an accepted flake. No budget, selection or release gate was
+relaxed, and no unchanged qualification retry was dispatched.
+
+Existing #5694 retains ownership of the performance implementation. Its
+published candidate still owes repeated complete normal Windows budget and
+group-headroom proof, current review and required checks. Its two-worker
+work-stealing setting belongs to the Windows rotation, not the serial Linux
+release command; those are distinct measurements. The separately observed
+paused-run Promote allocation is retained under #6237 and #3336 for a bounded
+control repair, not permission to change the release while it is qualifying.
+
+The approved twelve-entry deferred-CI restoration cohort is fully accounted
+for, and its monitor is stopped. Two restored runs succeeded; changed or closed
+sources were not replayed. Existing replacements were recorded, including a
+cancelled replacement that is explicitly not passing proof. This completes
+that bounded capacity action, not the release or latency acceptance gates.
+
+### 2026-10-17 - Disconnected benchmark exposed source-checkout-dependent fixtures
+
+The exact failed Dev source was exercised through the canonical disconnected
+container wrapper with unchanged 30/300/900-second limits. Nine groups passed;
+group ten reported 912 passes, 16 existing skips and two failed push-error
+fixtures before the remaining groups could run. Both fixtures passed `"."`
+into the real publication path and received the publication-lock refusal
+instead of reaching their intended mocked push errors. This partial run is
+neither a full performance baseline nor evidence that the hosted timeout was
+fixed.
+
+The same fixtures remain in #5694's published candidate after its test-file
+split. A diagnostic-only overlay supplies the existing real, test-owned Git
+repository and configuration while retaining both original error assertions,
+push doubles and the production publication lock. The canonical disconnected
+wrapper passes both affected cases; no production ownership, Git configuration
+scrubbing, timeout or skip policy changed. The finding and proposed overlay are
+coordinated with #5694's existing owner. A complete candidate comparison and
+all normal qualification remain outstanding.
+
+### 2026-10-17 - Source containment and materialized-fixture repair merged
+
+PR #7124 merged normally at `027887e06949d7cbf676b82b48bc82a6eb9aa244`.
+The exact source head received an actual Approved Copilot review with no open
+issues, and all three original required checks passed. The reviewed fixture
+repair covers canonical and already-materialized source layouts without
+relaxing admission or downloaded-byte integrity. The strict AST test evaluator
+and PR-only cancellation policy landed in the same contribution; no additional
+CI-triggering push was made for explained chronological evidence or cosmetic
+review suggestions.
+
+The matching Main control is already active through #7129, while the canonical
+pause remains set. This closes the reviewed Dev/Main policy-activation
+interlock, not release qualification or the ten-minute CI/cadence targets.
+The next stretch is a fresh trusted-Main qualification that captures a new
+live Dev source, preserves the three governed control paths, and executes
+every source/candidate/native/consumer/integrity/publication/readback gate
+before any product transition reaches Main.
+
+The separate bounded queue-relief operation retired the approved attempts and
+recorded current-head deferrals for paced restoration. It changes no workflow
+admission setting or release gate; no cancelled attempt is treated as passing
+proof. The release effort remains Active, with client acceptance and the two
+natural qualified-cycle observation still outstanding.
+
+### 2026-10-17 - Matching Main CI containment activated while paused
+
+PR #7129 merged normally at `a2f59e9dae82738ba2537e9a58196cd5cca0e3c8`
+after actual current-head Copilot review and the original Main source gate.
+The owner-authored passing Comment had no Medium/High findings; cosmetic
+predicate-anchor suggestions were explained and declined. No administrator
+merge or branch-policy exception was used.
+
+The merge changes only `.github/workflows/ci.yml`, with the four reviewed
+PR-only cancellation fields. The release state is byte-identical to its
+previous Main base: canonical pause and the old source marker remain intact.
+Product files, the immutable helper pin and the three-path control declaration
+are unchanged. This activates the control prerequisite for fresh qualification;
+it is not product qualification, publication, resumption or deployment.
+
+The source companion #7124 has an actual Approved review on its exact head
+and all three original required checks passing; its merge is the next step.
+Phase 9 remains open until fresh qualification and the release/client
+acceptance matrix actually pass.
+
+### 2026-10-16 - Source-owned helper implementation; activation remains open
+
+The source-identity/PR-time contract merged as #6939. Source helpers now bind
+version-2 artifact indexes and immutable availability lookup to the verified
+Dev commit, preserve version-1 validation, reuse the signed admitted
+composition/lock without rebuilding for another Git container, and record new
+landings with Dev-named tags. Source, composition, archive/wheel bytes,
+governance, immutable collisions and original hosted-signature checks remain
+hard failures.
+
+The independently reviewed Bridge release-label repair merged as #6992
+(`1d5bf16e408025f85315b035abc916faee35c5fb`). It normalizes the actual fallback
+release label, exercises already-stamped/materialized inputs, and re-attests
+only the current authority corpus with confined, deterministic capture.
+Current-head approval and CI succeeded; this is a source repair, not proof of
+a qualified containing Main release or installed acceptance.
+
+The Index plugin fixture repair then merged as #6995
+(`46a6c1a78df5aa06d93d9b1bb3bdac76349c00d0`) after current-head approval and
+green CI. Canonical/materialized layouts are explicit, fallback fixtures
+actually remove their temporary local dependency, and staged Bash is normalized
+after all text/materializer rewrites. The full contained Index suite passed
+1,060 cases; the review-fix selection passed 33, including two non-vacuous
+CRLF/coordinator regressions. This closes that source-fixture slice only.
+The next stretch remains reviewed helper/control activation and actual
+known-good replacement, not unpausing on the strength of these source merges.
+
+The new qualifier derives the required executed portfolio from canonical CI,
+including full suites, native platforms and matrix rows. Final publication
+requires its exact successful attempt and consumer-authority raw readback
+before a Main merge. Ordinary PR input selection now includes real source,
+attribute and materializer inputs; eight actual producer/materializer/verifier
+roundtrips cover canonical checkout representation and source/archive/wheel
+tamper refusal.
+
+Independent implementation review caught two additional authority/completion
+gaps, both repaired without weakening evidence. The prepared required Main
+source gate authenticates the owning run's executing control generation by
+workflow blob equality, so obsolete in-flight graphs cannot publish after
+resume. Immutable version aliases from prior squash-landed or never-landed
+candidates are authenticated through the prior signed Dev index and actual
+per-plugin source closure, not a nonexistent Main ancestry relationship.
+Real two-release regressions cover both cases and preserve current raw-byte,
+signature, provenance and no-clobber refusals.
+
+Before activation, an actual controlled consumer view exposed legacy-only test
+assumptions that the default Dev view could not reveal. All prior assertions
+and negative cases are retained; the prepared graph now executes its real
+pinned launcher, canonical reader, fresh-proof merge waiter, premerge publisher
+and postmerge receipt path. The full legacy view passes 1,226 cases and the
+controlled view passes 1,235; their explicit platform/inactive-tier skips are
+not credited as live qualification. A measured native cumulative timeout is
+addressed by partitioning into the existing second Windows job, preserving all
+cases and both five-minute bounds rather than extending a deadline.
+
+The helper implementation merged as #7005 at
+`c2caa135dbb5c1d6bbacfee5c48f9b6a0c17d104` after a normal branch refresh,
+fresh exact-head review with no open findings, and all required checks.
+CI run `38952655125` succeeded on the reviewed source head. No branch
+protection, check binding or review requirement was changed to resolve the
+earlier server-side merge refusal. The next slice pins this actual merged Dev
+commit in the prepared workflow-only Main bootstrap and re-executes its
+functional admission/publication proofs before opening that control PR.
+
+These source changes do not activate Main control. #6237 retains one
+coordinated, explicitly authorized workflow/control repair; the pipeline is
+paused after #6949, and the exposed product snapshot is not declared healthy.
+The paused `qualification_only` path preserves the pause and every other gate
+while preparing a normal candidate PR replacement. Its trusted control,
+first-transition qualification, actual known-good Main replacement, installed
+consumer acceptance and hourly-or-faster cadence proof remain open. A source
+merge, helper receipt or documentation change is not effort completion.
+
+### 2026-10-16 - Reviewed Main workflow bootstrap landed; replacement remains open
+
+The workflow-only bootstrap #7022 merged as
+`6972054f04607d8999dbc05c1d9e3d930005efb0` with the actual merged #7005
+helper pin. Review identified and resolved the merge waiter's missing
+job-level Actions read permission and the removed postlanding attribution
+refresh. The final explicit functional portfolio passes 20 cases, including
+dispatch inputs, invalid identities and visible provider failures. The
+refresh remains a bounded, nonqualifying idempotent metadata operation;
+qualification and artifact publication/readback remain entirely premerge.
+Fresh exact-head review had no open blocking findings and the required Main
+source gate succeeded. The exact-head merge did not request administrator
+bypass or change any protection.
+
+The separate canonical three-workflow control declaration #7025 merged as
+`3c3a8bef04f5f77eddd9d2987dc5f0bdd5b06a7a` after exact-head approval and
+successful required Main admission. The actual Main diff from the paused
+snapshot contains only those three workflows and the canonical declaration;
+the product source marker and pause are unchanged.
+Control landing is not a known-good product release:
+the existing product snapshot remains unqualified and the pause remains set.
+The next slice is the explicit, fully qualified paused replacement.
+Only after actual known-good Main readback
+may canonical resume, installed consumer acceptance and natural cadence
+validation proceed.
+
+The first two manual qualification dispatches were replaced in GitHub's
+pending slot before executing any job. Newer automatic dispatches were still
+occupying the same serialized lane with full source suites despite the pause.
+The narrow #7036 admission repair merged as
+`f1837c45e71ead77fe21f01227931f0d85d6786e` after exact-head approval and
+required Main admission. A validated, fresh Main pause now declines normal
+source validation in the cheap gate; explicit qualification-only replacement
+retains every downstream gate. The actual functional portfolio passes 21
+cases. Running jobs are not cancelled, pending-slot semantics are unchanged,
+and neither cancelled dispatch counts as qualification or cadence evidence.
+
+### 2026-10-16 - Collector repair merged; current replacement precedes latency changes
+
+Collector repair #7049 merged as
+`b75d4f62ffb8afb7f2a2ded09b19d48d141b76ac` after exact-head approval,
+all three required checks and complete CI run `38977784933` succeeded.
+The review's native-path expectation finding was corrected before approval.
+The collector retains every test and its unchanged 300-second cap; the exact
+failed 25-file/722-item inventory passed in five batches, the longest 184.87
+seconds. This closes the collector source repair, not containing-release
+qualification. Fresh paused qualification `38982486731` is the next owned
+release gate; no resume or client update has been performed.
+
+The operator distinguished the latency budgets and explicitly prioritized
+restoring this flow before changing its performance. The successful PR CI
+took 46m34s event-to-completion. Its guards job spent 17m15s executing serial
+steps, while many short jobs waited much longer for runners; the final
+aggregate itself executed in four seconds after queueing. Queue delay and
+test execution are separate problems, not proof of a hung test. Read-only
+per-test investigations now cover payload foundation, JavaScript unit tests
+and artifact/shared-library contracts. Their findings must retain hosted
+versus local measurement provenance and become deduplicated bugs; no active
+workflow or owned test-corpus lane is modified by this profiling.
+
+The investigation filed #7075 for the two actual hosted CLI parity cases at
+100.038409 and 72.827613 seconds, and #7076 for synthetic binding/lifecycle
+fixtures inheriting real WSL guest identity. The latter prevents treating a
+failed local profile as equivalent to hosted passes; production identity
+refusals remain required. Actual hosted Worktrees per-item hotspots were
+attached to the existing #5694 owner, while #3336 retains the timing
+provenance, missing hosted Python per-test evidence and smaller repeated-YAML
+parsing optimization. Filing these bugs does not change the running promotion
+or complete the latency acceptance gates.
+
+The next paused replacement, `38982486731`, tested source
+`40f3f51dac6b0e69124d51215a2b4371571394c1` and failed only Worktrees
+`test_successful_posix_helper_cannot_leave_a_redirected_descendant` in full
+job `117254600034`. Every other source family passed; candidate construction,
+qualification, artifact publication and Main merge were skipped.
+The original failure observes an unchanged live-process identity after cleanup;
+the reader already excludes zombies. The cause remains unproven after three
+bounded local checks, including the full selected CI neighborhood. The operator
+authorized one same-source failed-job diagnostic retry, attempt 2, preserving
+every release gate. A repeat failure stops further retries; a pass neither
+classifies this as an accepted flake nor closes the retained #6237 cleanup
+defect. No timeout, Main control, pause or installed runtime was changed.
 
 ### 2026-10-13 - Phase 8 superseded by the canonical campaign
 
@@ -2676,6 +3952,3 @@ than fully pre-solved in the plan — operator direction: land the plan now
 and resolve those with tests during implementation.
 
 Phase 7 implementation can now begin.
-
-
-

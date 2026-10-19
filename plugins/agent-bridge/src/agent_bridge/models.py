@@ -15,11 +15,22 @@ from .cli_mode_models import (  # noqa: F401 -- re-exported public models
     RegisterLiveSessionRequest,
 )
 from .install_paths import effective_config_dir
+from .live_message_models import (  # noqa: F401 -- re-exported public models
+    AckMessagesRequest,
+    AckMessagesResult,
+    LiveMessage,
+    LiveMessageDelivery,
+    LiveMessageListResponse,
+    LiveMessageReceipt,
+    SendMessageRequest,
+    SendMessageResult,
+)
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 from .preference_models import PreferencePolicyFields
 from .session_start_models import StartSessionRequest  # noqa: F401 -- public model re-export
 from .execution_identity_models import ExecutionSpaceConfigFields
 from .session_status import SessionStatus
+from .remote_acp_config import RemoteAcpTarget
 from .prompt_models import (  # noqa: F401 -- preserved public model imports
     PendingPrompt,
     PendingQueueResponse,
@@ -70,7 +81,7 @@ class AgentProfile(BaseModel):
 
     name: str
     description: str = ""
-    target_type: Literal["local", "ssh", "command"] = "local"
+    target_type: Literal["local", "ssh", "command", "remote-acp"] = "local"
     cwd: str | None = None
     host: str | None = None
     user: str | None = None
@@ -110,10 +121,11 @@ class SessionInfo(BaseModel):
     acp_session_id: str | None = None  # ACP-sourced session id (durable identity)
     durable_session_id: str | None = None  # acp_session_id, or session_id if that's all there is
     target_dir: str | None = None
-    target_type: Literal["local", "ssh", "command"] = "local"
+    target_type: Literal["local", "ssh", "command", "remote-acp"] = "local"
     target_host: str | None = None
     project: str | None = None  # resolved repo/binstub (agent-worktrees project)
     worktree_id: str | None = None  # agent-worktrees worktree ID
+    mode: Literal["acp", "cli"] = "acp"
     elevated: bool = False
     read_only: bool = False
     status: SessionStatus
@@ -208,6 +220,7 @@ class AnswerAskUserRequest(BaseModel):
     """
 
     tool_call_id: str
+    request_id: str | None = None
     content: dict[str, Any] = Field(default_factory=dict)
     action: str = "accept"
 
@@ -347,6 +360,9 @@ class ResultCurrentState(BaseModel):
     attention: ResultField
     active_work: ResultField
     pending_input: ResultField
+    pending_messages: ResultField = Field(default_factory=lambda: ResultField(
+        availability="unsupported_for_target", reason="target does not expose a live inbox"
+    ))
 
 
 class ResultLimits(BaseModel):
@@ -498,79 +514,6 @@ class LiveProgressRequest(BaseModel):
     phase: str = ""
     blocker: str | None = None
     pr: str | None = None
-
-
-LiveMessageDelivery = Literal["queue", "steer", "interrupt"]
-
-
-class SendMessageRequest(BaseModel):
-    """Post a message INTO a live interactive session (Phase 2 write path)."""
-
-    sender: str
-    body: str
-    reply_to: str | None = None
-    kind: str = "prompt"
-    delivery: LiveMessageDelivery = "steer"  # not "queue": see _live_message_delivery
-    wait: bool = False
-    wait_timeout: float = 120.0
-    #: Optional freshness assertion (#2906): the session id the caller believes
-    #: is the *current* live registration for the target's worktree. When set,
-    #: the bridge rejects (409) the message if it doesn't match the current live
-    #: session -- so a steer addressed to a rolled/taken-over incarnation fails
-    #: fast instead of durably queuing a wrong-incarnation write.
-    expected_session_id: str | None = None
-    #: Stable producer key. Repeating a send with the same key returns the
-    #: original message id instead of enqueuing a duplicate.
-    idempotency_key: str | None = None
-
-
-class SendMessageResult(BaseModel):
-    """Result of enqueuing a message for delivery into a live session.
-
-    ``duplicate``: an identical idempotent retry matched the original
-    (``message_id``). With ``wait`` (D1), ``replied`` is True once the reply turn's
-    ``turn_complete`` lands, with its text (``reply``) and ``stop_reason``; on a
-    timeout it is False and the message still sits durably in the queue.
-    """
-
-    ok: bool = True
-    session_id: str
-    message_id: int
-    duplicate: bool = False
-    replied: bool = False
-    reply: str | None = None
-    stop_reason: str | None = None
-
-
-class LiveMessage(BaseModel):
-    """A pending message awaiting delivery into a live session."""
-
-    id: int
-    sender: str
-    body: str
-    reply_to: str | None = None
-    kind: str = "prompt"
-    delivery: LiveMessageDelivery = "steer"
-    created_at: float
-
-
-class LiveMessageListResponse(BaseModel):
-    """Pending messages for a live session, oldest-first (the poll response)."""
-
-    messages: list[LiveMessage]
-
-
-class AckMessagesRequest(BaseModel):
-    """Ack delivered messages by id (the extension acks after ``session.send``)."""
-
-    ids: list[int]
-
-
-class AckMessagesResult(BaseModel):
-    """Result of acking delivered messages."""
-
-    ok: bool = True
-    acked: int
 
 
 class CursorInfo(BaseModel):
@@ -727,6 +670,11 @@ class TopologyProfile(BaseModel):
 
     machines_yaml: str | None = None
     agents_config: str | None = None
+    source_repo: str | None = Field(
+        default=None,
+        description="Stable source repository captured by adoption; a configuration "
+        "locator, not an execution-space identity.",
+    )
     # System-wide spawn defaults applied to every **derived** agent in this
     # profile (the topology roster synthesized from machines.yaml). Derived agents
     # otherwise carry no copilot args, so the model target lived, redundantly, on
@@ -767,12 +715,13 @@ class ServiceConfig(ExecutionSpaceConfigFields):
     # written by an OLDER build carrying a since-removed field -- notably the
     # retired ``session_host_enabled`` toggle (dotfiles#1478) -- loads cleanly as
     # the current always-on shape and the stale key is dropped on the next write.
-    model_config = {"extra": "ignore"}
+    model_config = {"extra": "ignore", "hide_input_in_errors": True}
 
     # Schema version marker for the config-migrate framework. A real field (not
     # an ignored extra) so it round-trips through model_dump / save_config. Keep
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
     schema_version: int = 2
+    remote_acp: dict[str, RemoteAcpTarget] = Field(default_factory=dict)
 
     # Port 0 is the "unset" sentinel: the daemon binds an OS-assigned ephemeral
     # port and advertises it via active.json (dotfiles #694 -- no fixed 9280/9281

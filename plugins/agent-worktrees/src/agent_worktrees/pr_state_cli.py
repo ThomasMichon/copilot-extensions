@@ -90,6 +90,8 @@ def add_parsers(sub) -> None:
         "the active PR has merged)",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--repo", default=None, help="Read an explicit registered target instead of tracked metadata")
+    p.add_argument("--pr", type=int, default=None, help="PR number with --repo")
     p.add_argument(
         "--all", action="store_true", help="List every tracked PR, not just the active one"
     )
@@ -354,6 +356,18 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
 
 def cmd_pr_status(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
+    if getattr(args, "repo", None) or getattr(args, "pr", None) is not None:
+        if not getattr(args, "repo", None) or getattr(args, "pr", None) is None:
+            return output._json_error("Explicit PR status requires both --repo and --pr")
+        if args.worktree_id or any(getattr(args, key, False)
+                                   for key in ("all", "no_live", "resolve_threads")):
+            return output._json_error("Explicit PR status cannot be combined with tracked-worktree options")
+        from .pr_cli import cmd_pr_watch_dispatch
+        argv = ["threads" if getattr(args, "threads", False) else "snapshot",
+                args.repo, str(args.pr), "--json"]
+        if args.config:
+            argv.extend(["--config", args.config])
+        return cmd_pr_watch_dispatch(argv)
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
     except Exception as e:
@@ -410,14 +424,17 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
 
     live_block = result.get("live")
     live = live_block if isinstance(live_block, dict) else {}
+    verdict = str(live.get("verdict") or "").upper()
     if result.get("state") == "merged" or live.get("merge_state") == "merged":
         state = pc.PR_STATE_MERGED
     elif live.get("conflict"):
         state = pc.PR_STATE_CONFLICT
-    elif live.get("verdict") == "approved":
+    elif verdict == "APPROVED":
         state = pc.PR_STATE_APPROVED
-    elif live.get("verdict") in ("changes_requested", "change_requested"):
+    elif verdict in ("CHANGES_REQUESTED", "CHANGE_REQUESTED", "REQUEST_CHANGES"):
         state = pc.PR_STATE_CHANGES_REQUESTED
+    elif verdict in ("COMMENT", "COMMENTED"):
+        state = pc.PR_STATE_COMMENTED
     elif result.get("has_pr"):
         state = pc.PR_STATE_AWAITING_REVIEW
     else:
@@ -441,7 +458,12 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         )
     if use_json:
         output._json_output(result)
+        if result.get("live_error"):
+            return 1
         return 0 if result.get("has_pr") or "error" not in result else 1
+    if result.get("live_error"):
+        output.err("PR live observation unavailable: " + result["live_error"])
+        return 1
     if result.get("error"):
         output.err(result["error"])
         return 1

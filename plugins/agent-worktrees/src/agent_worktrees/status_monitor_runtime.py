@@ -16,12 +16,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent_procutil import windowless_python
+from agent_procutil import no_window_kwargs, windowless_python
 
 from . import activity, locks, output, sessions_pane_retire, stale_runtime_reap, tracking
 from . import config as cfg
 from . import status_updater_cli
 from .status_monitor_python import direct_monitor_python
+from .mux_list_result import is_empty_tmux_listing, parse_monitor_sessions
 
 
 def _core():
@@ -809,24 +810,13 @@ def _monitor_list_sessions(
             capture_output=True,
             text=True,
             timeout=15,
+            **no_window_kwargs(),
         )
     except Exception:
         return None
     if r.returncode != 0:
-        return None
-    out: dict[str, tuple[int, str]] = {}
-    for line in (r.stdout or "").strip().splitlines():
-        if line.count(":") < 3:
-            continue
-        name, _, created = line.rpartition(":")
-        name, _, session_id = name.rpartition(":")
-        name, _, cnt = name.rpartition(":")
-        incarnation = f"{session_id}:{created}"
-        try:
-            out[name] = (int(cnt), incarnation)
-        except ValueError:
-            out[name] = (0, incarnation)
-    return out
+        return {} if is_empty_tmux_listing(mux_bin, r) else None
+    return parse_monitor_sessions(r.stdout)
 
 
 def _monitor_managed_session_union(

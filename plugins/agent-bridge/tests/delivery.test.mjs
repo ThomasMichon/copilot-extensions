@@ -239,16 +239,13 @@ test("buildDeliveredSendOptions never omits source regardless of message shape",
   }
 });
 
-test("deliveryPlan maps queue and unknown delivery to default enqueue send", () => {
+test("deliveryPlan preserves explicit queue and refuses unknown delivery", () => {
   const queued = deliveryPlan({ id: 8, sender: "a", body: "x", delivery: "queue" });
   assert.equal(queued.abortFirst, false);
   assert.equal(queued.options.mode, undefined);
   assert.equal(queued.options.source, DELIVERY_SOURCE);
 
-  const unknown = deliveryPlan({ id: 9, sender: "a", body: "x", delivery: "later" });
-  assert.equal(unknown.abortFirst, false);
-  assert.equal(unknown.options.mode, undefined);
-  assert.equal(unknown.options.source, DELIVERY_SOURCE);
+  assert.throws(() => deliveryPlan({ id: 9, delivery: "later" }), /unknown message delivery/);
 });
 
 test("deliveryPlan maps steer to immediate send without abort", () => {
@@ -256,6 +253,46 @@ test("deliveryPlan maps steer to immediate send without abort", () => {
   assert.equal(plan.abortFirst, false);
   assert.equal(plan.options.mode, "immediate");
   assert.equal(plan.options.source, DELIVERY_SOURCE);
+});
+
+test("a legacy peer message defaults to immediate steering, never implicit SDK enqueue", () => {
+  const plan = deliveryPlan({ id: 14, sender: "peer", body: "continue" });
+  assert.equal(plan.options.mode, "immediate");
+  assert.equal(plan.abortFirst, false);
+  assert.equal(plan.options.source, DELIVERY_SOURCE);
+});
+
+test("ordinary peer kinds interject into a busy main turn without aborting it", async () => {
+  const messages = ["prompt", "notify", "status-check"].map((kind, index) => ({
+    id: index + 20, sender: "peer", body: "update", kind,
+  }));
+  const { calls, deps } = interruptHarness(messages);
+  const mainTurn = new MainTurn();
+  mainTurn.observe({ type: "assistant.turn_start", data: {} });
+  assert.deepEqual(await drainInbox("s", { ...deps, mainTurn }), [20, 21, 22]);
+  assert.deepEqual(calls, [
+    ["send", "immediate"], ["send", "immediate"], ["send", "immediate"],
+    ["ack", [20, 21, 22]],
+  ]);
+});
+
+test("an immediate message consumed before send resolves is not replayed by a later interrupt", async () => {
+  const message = { id: 30, sender: "peer", body: "update", delivery: "steer" };
+  const inFlight = new InFlightMessages();
+  const { deps } = interruptHarness([message]);
+  deps.session.send = async () => { inFlight.observe(recorded(message)); };
+  assert.deepEqual(await drainInbox("s", { ...deps, inFlight }), [30]);
+  assert.deepEqual(inFlight.takeBefore(31), []);
+});
+
+test("consumption memory is bounded and nested events cannot consume root messages", () => {
+  const inFlight = new InFlightMessages(2);
+  for (const id of [1, 2, 3]) inFlight.observe(recorded({ id }));
+  assert.equal(inFlight.consumed.size, 2);
+  const message = { id: 4 };
+  inFlight.sent(message);
+  inFlight.observe({ ...recorded(message), agentId: "child" });
+  assert.deepEqual(inFlight.takeBefore(5), [message]);
 });
 
 test("deliveryPlan maps interrupt to abort, then an immediate send", () => {

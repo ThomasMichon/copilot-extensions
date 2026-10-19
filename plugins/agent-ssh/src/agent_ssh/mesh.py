@@ -20,6 +20,8 @@ reachability probe of a single target, use ``agent-ssh verify``/``explore``.)
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -74,11 +76,31 @@ class Mesh:
         return asdict(self)
 
 
+def _machines_file_at(root: Path) -> Path | None:
+    for relative in (
+        Path("machines.yaml"),
+        Path(".agent-worktrees/machines.yaml"),  # marketplace-isolation: allow registry
+        Path("config/machines.yaml"),
+        Path(".github/machines.yaml"),
+    ):
+        candidate = root / relative
+        try:
+            mode = candidate.stat().st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            if candidate.is_symlink():
+                raise ValueError(f"machines.yaml source is a broken symlink: {candidate}")
+            continue
+        if not stat.S_ISREG(mode):
+            raise ValueError(f"machines.yaml source is not a regular file: {candidate}")
+        return candidate
+    return None
+
+
 def find_machines_file(start: Path | None = None) -> Path | None:
     """Resolve ``machines.yaml`` for the calling repo.
 
-    Prefer the git top-level of *start* (or cwd); fall back to walking parents so
-    the command also works from a subdirectory when git is unavailable.
+    Use Bridge's existing conventional location priority within the calling Git
+    repository. Without Git, walk parents but never cross a ``.git`` boundary.
     """
     start = (start or Path.cwd()).resolve()
     try:
@@ -87,50 +109,85 @@ def find_machines_file(start: Path | None = None) -> Path | None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=10,
+            env={key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")},
             creationflags=no_window_flags(),
         )
         if top.returncode == 0:
             root = Path(top.stdout.strip())
-            cand = root / "machines.yaml"
-            if cand.is_file():
-                return cand
+            return _machines_file_at(root)
     except FileNotFoundError:
         pass
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("timed out resolving the calling Git repository") from exc
     for parent in (start, *start.parents):
-        cand = parent / "machines.yaml"
-        if cand.is_file():
+        cand = _machines_file_at(parent)
+        if cand is not None:
             return cand
+        if (parent / ".git").exists():
+            break
     return None
 
 
-def _load(path: Path) -> dict[str, Any]:
+def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
     """Load a machines.yaml document, fail-safe.
 
-    A malformed/unreadable config must not crash a session-context feature, so
-    any read/parse error yields an empty document (mesh-status then reports no
-    machines) rather than raising.
+    Legacy context consumers remain tolerant. CLI and mutating consumers use
+    strict loading so an unavailable or malformed source cannot look empty.
     """
+    if strict and not stat.S_ISREG(path.stat().st_mode):
+        raise ValueError(f"machines.yaml source is not a regular file: {path}")
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
+        if strict:
+            raise
         return {}
     try:
         import yaml
-
-        doc = yaml.safe_load(text)
     except ModuleNotFoundError:
         try:
             doc = json.loads(text)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
+            if strict:
+                raise ValueError(f"cannot parse machines.yaml at {path}: {exc}") from exc
             return {}
-    except Exception:  # a malformed machines.yaml is non-fatal here
-        return {}
+    else:
+        try:
+            doc = yaml.safe_load(text)
+        except (yaml.YAMLError, ValueError) as exc:
+            if strict:
+                raise ValueError(f"cannot parse machines.yaml at {path}: {exc}") from exc
+            return {}
+    if strict and (not isinstance(doc, dict) or not isinstance(doc.get("machines"), dict)):
+        raise ValueError(f"machines.yaml at {path} must contain a 'machines' mapping")
+    if strict:
+        for key, entry in doc["machines"].items():
+            if not isinstance(entry, dict):
+                raise ValueError(f"machine '{key}' at {path} must be a mapping")
+            for block in ("ssh", "dtssh"):
+                if entry.get(block) is not None and not isinstance(entry[block], dict):
+                    raise ValueError(f"machine '{key}' {block} at {path} must be a mapping")
+            dtssh_alias = (entry.get("dtssh") or {}).get("alias")
+            if dtssh_alias is not None and not isinstance(dtssh_alias, str):
+                raise ValueError(f"machine '{key}' dtssh alias at {path} must be a string")
+            environments = (entry.get("ssh") or {}).get("environments", [])
+            if environments is None:
+                environments = []
+            if not isinstance(environments, list) or any(
+                not isinstance(environment, dict) for environment in environments
+            ):
+                raise ValueError(f"machine '{key}' SSH environments at {path} must be mappings in a list")
+            for environment in environments:
+                alias = environment.get("alias")
+                if alias is not None and not isinstance(alias, str):
+                    raise ValueError(f"machine '{key}' SSH alias at {path} must be a string")
     return doc or {}
 
 
-def load_mesh(path: Path) -> Mesh:
-    """Project a ``machines.yaml`` document into a :class:`Mesh`."""
-    doc = _load(path)
+def load_mesh(path: Path, *, strict: bool = False) -> Mesh:
+    """Project topology; mutating callers must request strict input validation."""
+    doc = _load(path, strict=strict)
     if not isinstance(doc, dict):
         return Mesh(source=str(path))
     project = ""

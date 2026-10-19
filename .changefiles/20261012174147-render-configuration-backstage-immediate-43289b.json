@@ -1,9 +1,0 @@
-{
-  "comment": "Render Configuration backstage immediately with full-content plugin sections",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

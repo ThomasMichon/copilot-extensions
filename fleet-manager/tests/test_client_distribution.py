@@ -7,12 +7,12 @@ import inspect
 import io
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tarfile
 import zipfile
+from pathlib import Path
 
 import pytest
 from packaging.requirements import Requirement
@@ -26,7 +26,7 @@ FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {
 
 def run(argv, *, cwd=None, env=None):
     return subprocess.run(
-        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=30, **FLAGS,
+        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=30, check=False, **FLAGS,
     )
 
 
@@ -38,17 +38,38 @@ def project_at(root, *, nested=False):
     shutil.copytree(PROJECT / "src", project / "src", ignore=shutil.ignore_patterns("__pycache__"))
     library = root / "libs" / "versioned-runtime"
     library.mkdir(parents=True)
-    for name in ("versioned_runtime.py", "standalone_build.py"):
+    for name in (
+        "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_construction.py", "standalone_build.py",
+        "versioned_runtime_source.py",
+    ):
         shutil.copy2(LIBRARY / name, library / name)
     return project, library
+
+
+def build_path(path):
+    if os.name != "nt":
+        return str(path)
+    # The owned worktree sandbox can exceed setuptools' relative MAX_PATH paths.
+    # Use an existing filesystem alias; never change host long-path policy.
+    import ctypes
+    from ctypes import wintypes
+
+    function = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    function.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    function.restype = wintypes.DWORD
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = function(str(path), buffer, len(buffer))
+    assert 0 < size < len(buffer), "owned fixture path cannot be resolved"
+    return buffer.value
 
 
 def build(project, output, operation="build_wheel"):
     output.mkdir(exist_ok=True)
     return run(
         [sys.executable, "-I", "-c",
-         f"from setuptools.build_meta import {operation}; {operation}({str(output)!r})"],
-        cwd=project,
+         f"from setuptools.build_meta import {operation}; {operation}({build_path(output)!r})"],
+        cwd=build_path(project),
     )
 
 
@@ -65,6 +86,10 @@ def wheel(tmp_path_factory):
 def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies(wheel):
     artifact, library = wheel
     with zipfile.ZipFile(artifact) as archive:
+        assert {
+            f"fleet_manager/gateway_{name}.py"
+            for name in ("auth", "broker", "client", "contract", "controller", "index", "server")
+        } <= set(archive.namelist())
         member = "fleet_manager/_versioned_runtime.py"
         assert archive.namelist().count(member) == 1
         data = archive.read(member)
@@ -73,6 +98,16 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         rows = list(csv.reader(io.StringIO(archive.read(name).decode())))
         expected = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
         assert [row for row in rows if row[0] == member] == [[member, expected, str(len(data))]]
+        for name in (
+            "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+            "versioned_runtime_source.py",
+        ):
+            member = f"fleet_manager/{name}"
+            content = (library / name).read_bytes()
+            assert archive.namelist().count(member) == 1
+            assert archive.read(member) == content
+            digest = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode()
+            assert [row for row in rows if row[0] == member] == [[member, digest, str(len(content))]]
         metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
         requirements = [
             Requirement(line.removeprefix("Requires-Dist:").strip())
@@ -81,14 +116,24 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         ]
         assert all(requirement.marker is not None
                    and not requirement.marker.evaluate({"extra": ""})
-                   and (requirement.marker.evaluate({"extra": "dev"})
-                        or requirement.marker.evaluate({"extra": "release-verification"}))
+                   and any(requirement.marker.evaluate({"extra": extra})
+                           for extra in ("dev", "release-verification", "auth", "server",
+                                         "runtime-authentication"))
                    for requirement in requirements)
         verification = [requirement for requirement in requirements
                         if requirement.marker.evaluate({"extra": "release-verification"})]
         assert len(verification) == 1
         assert canonicalize_name(verification[0].name) == "cryptography"
         assert verification[0].specifier == SpecifierSet(">=46,<47")
+        for extra in ("auth", "server"):
+            enabled = {canonicalize_name(requirement.name) for requirement in requirements
+                       if requirement.marker.evaluate({"extra": extra})}
+            assert enabled == {"pyjwt", "cryptography", "jwcrypto", "joserfc"}
+        identity = [requirement for requirement in requirements
+                    if requirement.marker.evaluate({"extra": "runtime-authentication"})]
+        assert len(identity) == 1
+        assert canonicalize_name(identity[0].name) == "joserfc"
+        assert identity[0].specifier == SpecifierSet(">=1.7.5,<2")
         assert not any(name.endswith("/_standalone_runtime_build.py") for name in archive.namelist())
 
 
@@ -139,13 +184,18 @@ def test_nested_service_directory_uses_same_canonical_resource(tmp_path):
 
 
 @pytest.mark.client_distribution_full
-@pytest.mark.parametrize("resource", ["versioned_runtime.py", "standalone_build.py"])
+@pytest.mark.parametrize("resource", [
+    "versioned_runtime.py", "versioned_runtime_leases.py",
+    "versioned_runtime_construction.py", "standalone_build.py",
+    "versioned_runtime_source.py",
+])
 @pytest.mark.parametrize("included_copy", [False, True])
 def test_missing_build_resource_is_not_a_successful_partial_wheel(tmp_path, resource, included_copy):
     project, library = project_at(tmp_path)
     if included_copy:
-        included = (project / "src" / "fleet_manager" / "_versioned_runtime.py"
-                    if resource == "versioned_runtime.py" else project / "_standalone_runtime_build.py")
+        name = "_versioned_runtime.py" if resource == "versioned_runtime.py" else resource
+        included = (project / "_standalone_runtime_build.py" if resource == "standalone_build.py"
+                    else project / "src" / "fleet_manager" / name)
         shutil.copy2(library / resource, included)
     (library / resource).unlink()
     result = build(project, tmp_path / "artifacts")
@@ -215,11 +265,12 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
         # -S excludes the runner's installed fleet package; only this target is evidence.
         return run([
             sys.executable, "-I", "-S", "-B", "-c",
-            "import sys; sys.path.insert(0, sys.argv.pop(1)); "
+            ("import sys, importlib.util; sys.path.insert(0, sys.argv.pop(1)); "
+            "assert importlib.util.find_spec('joserfc') is None; "
             "from importlib.metadata import distribution; "
             "entry = next(e for e in distribution('fleet-manager').entry_points "
             "if e.group == 'console_scripts' and e.name == 'fleet-manager'); "
-            "raise SystemExit(entry.load()())",
+             "raise SystemExit(entry.load()())"),
             str(target), *args,
         ], env=clean)
 

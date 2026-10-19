@@ -177,7 +177,13 @@ def _validate_dependencies(
             # plugin dependency requirement for that existing contract.
             if not declaration.body.agent:
                 raise RegistrarError("worker body agent is required")
-        spec = declaration.spec.get("repository_issue_loop", declaration.spec)
+        spec = declaration.spec
+        if declaration.kind == RegistrationKind.EMITTER:
+            spec = next(
+                (spec[key] for key in ("repository_issue_loop", "effort_driver_loop")
+                 if spec.get(key) is not None),
+                spec,
+            )
         if spec.get("evaluator_ref") and declaration.kind != RegistrationKind.EVALUATOR:
             if available_declarations is None:
                 available_declarations = rd.RegistrarSources().refresh(

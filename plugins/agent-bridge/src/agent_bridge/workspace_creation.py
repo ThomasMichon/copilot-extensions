@@ -28,12 +28,26 @@ if TYPE_CHECKING:
     from .session_manager import Session, SessionManager
 
 
+def creation_fact_options(options: dict[str, Any]) -> dict[str, Any]:
+    facts = {name: value for name, value in options.items()
+             if name not in {"caller_id", "caller_session_id"}}
+    owner_ref = facts.get("caller_owner_ref")
+    if isinstance(owner_ref, str):
+        owner_scope = owner_ref.partition("#")[0]
+        owner_parts = owner_scope.split("/")
+        if len(owner_parts) == 3 and all(owner_parts):
+            facts["caller_owner_ref"] = owner_scope
+    return facts
+
+
 async def start_request(
     request: StartSessionRequest, manager: SessionManager, target: SpawnTarget, *,
     agent_name: str | None, env: dict[str, str], source: PreferenceSource,
 ) -> StartSessionResponse | None:
     """Adapt keyed requests without changing the legacy unkeyed start path."""
     if request.creation_key is None:
+        if request.provider_instance:
+            raise HTTPException(status_code=422, detail="provider_instance requires creation_key")
         if request.creation_prompt is not None:
             raise HTTPException(status_code=422, detail="creation_prompt requires creation_key")
         return None
@@ -43,6 +57,7 @@ async def start_request(
     try:
         session, creation = await start(
             manager, target, key=request.creation_key, prompt=request.creation_prompt,
+            provider_instance=request.provider_instance,
             agent_name=agent_name, caller_id=request.caller_id,
             caller_session_id=request.caller_session_id, mcp_servers=request.mcp_servers,
             copilot_args=request.copilot_args, env_overrides=env or None,
@@ -118,9 +133,13 @@ def _sessionless(
 
 async def start(
     manager: SessionManager, target: SpawnTarget, *, key: str,
-    prompt: str | None = None, **options: Any,
+    prompt: str | None = None, provider_instance: bool = False, **options: Any,
 ) -> tuple[Session, dict[str, Any]]:
     """Persist intent before effects; replay never allocates or starts twice."""
+    if provider_instance:
+        from .provider_creation import start as start_provider
+
+        return await start_provider(manager, target, key=key, prompt=prompt, **options)
     if not isinstance(key, str) or not key.strip() or len(key) > 1024:
         raise AcquisitionRefused("creation_key_invalid", "creation key must be non-empty and at most 1024 characters")
     if (
@@ -136,17 +155,9 @@ async def start(
     db = manager.db
     store = AcquisitionStore(db)
     digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
-    fact_options = {name: value for name, value in options.items()
-                    if name not in {"caller_id", "caller_session_id"}}
-    owner_ref = fact_options.get("caller_owner_ref")
-    if isinstance(owner_ref, str):
-        owner_scope = owner_ref.partition("#")[0]
-        owner_parts = owner_scope.split("/")
-        if len(owner_parts) == 3 and all(owner_parts):
-            fact_options["caller_owner_ref"] = owner_scope
     facts = {
         "target": json.loads(target.to_json()), "prompt": prompt,
-        "options": fact_options,
+        "options": creation_fact_options(options),
     }
     facts_digest = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
     with executor(db, f"creation:{digest}"):

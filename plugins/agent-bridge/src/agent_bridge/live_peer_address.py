@@ -130,7 +130,7 @@ def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAdd
             print("[!] Omitting a local-only automatic reply address from the remote message.",
                   file=sys.stderr)
             reply_to = None
-    wait = not getattr(args, "no_wait", False)
+    wait = getattr(args, "wait_reply", False) and not getattr(args, "no_wait", False)
     wait_timeout = getattr(args, "reply_timeout", 120.0) if wait else 120.0
     result = client.send_remote_live_message(
         address.machine, str(address), sender=sender, message=prompt,
@@ -190,10 +190,14 @@ def peer_reply_requested(payload: dict[str, Any]) -> bool:
 
 
 def peer_wait_timeout(value: Any) -> float:
+    from .live_message_models import validate_live_reply_timeout
     from .remote_errors import RemoteBridgeError
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 1 <= value <= 600:
-        raise RemoteBridgeError(400, "invalid_request", "wait_timeout must be between 1 and 600 seconds")
-    return float(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RemoteBridgeError(400, "invalid_request", "wait_timeout must be a finite number between 0 and 600 seconds")
+    try:
+        return validate_live_reply_timeout(value)
+    except ValueError as exc:
+        raise RemoteBridgeError(400, "invalid_request", f"wait_timeout {exc}") from exc
 
 
 async def require_peer_reply_protocol(client: BridgeClient) -> None:

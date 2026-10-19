@@ -358,6 +358,16 @@ def cmd_backfill_sessions(args) -> int:
 
 def cmd_doctor(args) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
+    if (
+        getattr(args, "repair_machine_record", None) is not None
+        or getattr(args, "from_machine", None) is not None
+        or getattr(args, "to_machine", None) is not None
+    ):
+        from .machine_record_repair import targeted_doctor
+        return targeted_doctor(args)
+    if getattr(args, "guest_distribution", None) is not None:
+        from .guest_environment_cli import targeted_doctor
+        return targeted_doctor(args)
     if getattr(args, "repair_creation", None) is not None or getattr(args, "seed_id", None):
         from .creation_tail_repair import targeted_doctor
         return targeted_doctor(args)
@@ -814,8 +824,8 @@ def cmd_reconcile_binstubs(args) -> int:
             inst.transfer_project_binstub(args.transfer)
         elif getattr(args, "remove", None):
             inst.remove_project_binstub(args.remove)
-        else:
-            inst.reconcile_binstubs()
+        elif inst.reconcile_binstubs().get("blocked"):
+            return 1
     except inst.BinstubOwnershipError as exc:
         output.err(str(exc))
         return 1

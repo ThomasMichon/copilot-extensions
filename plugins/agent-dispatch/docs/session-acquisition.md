@@ -10,6 +10,47 @@ routing change cannot replace the recorded execution project. The created-agent
 receipt retains the owner repository/worktree/path for retries and cleanup.
 Older coordinators lacking keyed-allocation recording fail closed.
 
+An already assigned ordinary worktree is reconciled through the ground owner's
+version-1 exact record API in its recorded execution project. Existing
+project/path bindings cannot change. When legacy metadata is absent, a
+successful exact owner read must establish the candidate namespace and path
+before they are bound; a failed lookup cannot make a mutable routing hint
+permanent.
+Owner attribution is compared with the original allocation task from retained
+allocation provenance, not a dedup re-emission's new task ID. Admission still
+belongs to the current task and generation.
+
+A recorded native head selects strict worktree-scoped Bridge resume. Dispatch
+uses the positional `resume <worktree-id> --strict` CLI contract with default
+headless ACP selection, not a creation-only worktree selector flag. Dispatch
+stores the actual resumed `SessionInfo`, including its exact native, workspace,
+project and path, rather than manufacturing a fresh-created readiness receipt.
+Resume failures never fall through to create. Only positively indexed empty
+history without opaque/provider bindings, known native IDs or retirement may
+select ordinary keyed creation in the existing workspace under the original
+key; Bridge independently rechecks launch authority.
+
+Old acquisition rows remain historical evidence, not a blanket veto or a launch
+permit. Current task generation, queued/unowned state, holds, reservation release,
+retirement, foreign holders and exact native identity are checked again before
+the first prompt. Releasing an exclusive slot is not conversation retirement.
+Explicitly retired IDs remain forbidden, but do not veto a different current,
+unretired native head; unknown unretired historical identities still conflict.
+Bare historical CLI handles are native IDs under their original producing
+driver, even after an ordinary-bridge retry; unclassifiable bare handles refuse.
+An inherited handle also retains its exact originating evidence across tasks
+sharing an exclusive lane; unrelated worktree history is not imported.
+A handleless inherited retirement marker permits only current-head inspection
+when all known retired identities are attributable. Exact resumed-agent storage
+can atomically clear that current derived marker for a different unretired
+head; historical retirement evidence is unchanged. It never permits creation.
+Assigned keyed reservations missing project/path metadata defer through normal
+supervisor retry without probing or launching a native session.
+Reconciliation preserves explicit prior workspace ownership;
+a fresh ordinary Bridge allocation remains Bridge-owned and `targeted` from
+Dispatch's perspective. Deploy compatible exact-record, strict-resume and
+coordinator facts/storage support together; older capabilities refuse explicitly.
+
 Explicit `make_embody_spawn` and interactive CLI embodiment use
 `agent-bridge acquire --request-file -`, current-client HTTP protocol 34. Existing
 `spawn_backend=bridge` selects ACP; explicit `embody` selects CLI. No missing-
@@ -52,9 +93,11 @@ Retries retain the recorded allocation even without an exclusive key, including
 its native handle and retirement marker. Routing changes do not change that
 allocation or destructive absence probes. An older coordinator lacking the
 recording fields refuses before create; a recording response that ignores them
-holds the reservation. Legacy carried allocations missing project/path,
+holds the reservation. On the legacy acquire path, carried allocations missing project/path,
 incompatible owner results, reassigned or missing carried worktrees preserve
-the binding for repair rather than allocate a replacement.
+the binding for repair rather than allocate a replacement. Ordinary assigned
+worktrees use the current-owner reconciliation above without changing known
+bindings or replacing native history.
 
 Before the first create, the coordinator also binds the selected execution
 project through the reservation's `/allocation` operation. Even a lost ground

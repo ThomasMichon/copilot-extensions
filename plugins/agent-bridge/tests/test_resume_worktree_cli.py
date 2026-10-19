@@ -169,7 +169,7 @@ def test_unknown_target_reports_neither(monkeypatch, capsys):
     )
 
 
-def test_singleton_repo_target_falls_back_to_anchor_key(monkeypatch, capsys):
+def test_singleton_repo_target_canonicalizes_to_anchor_key(monkeypatch, capsys):
     client = _FakeClient(
         session_resume=BridgeClientError(404, "not found"),
         worktree_resume=lambda worktree_id, reclaim=False, strict=False: (
@@ -192,12 +192,68 @@ def test_singleton_repo_target_falls_back_to_anchor_key(monkeypatch, capsys):
     m._cmd_resume(_args("llama.cpp@Atlas-Core"))
 
     assert client.worktree_calls == [
-        ("llama.cpp@Atlas-Core", False, False),
         ("llama.cpp@anchor", False, False),
     ]
     assert "Repo llama.cpp loaded as owned session owned-anchor-1" in (
         capsys.readouterr().out
     )
+
+
+def test_singleton_alias_resume_crosses_actual_http_id_validation(monkeypatch, tmp_db, capsys):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from agent_bridge import singleton_resume, worktree_native_resume
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.routes.sessions import _session_info
+    from agent_bridge.session_manager import Session
+    from agent_bridge.singleton_anchor import SingletonRepo
+    from agent_bridge.spawn_target import SpawnTarget
+
+    app = FastAPI()
+    app.include_router(worktree_native_resume.router)
+    app.state.db = tmp_db
+    app.state.session_manager = SimpleNamespace(is_draining=False)
+    app.state.resolver = object()
+    session = Session("singleton-session", "singleton", SpawnTarget(
+        type="local", cwd="/example", project="example", worktree_id="example@anchor",
+    ))
+    session.acp_session_id = "singleton-native"
+    session.status = SessionStatus.IDLE
+    resume = AsyncMock(return_value=_session_info(session))
+    monkeypatch.setattr(singleton_resume, "resume_singleton_anchor", resume)
+    monkeypatch.setattr(
+        "agent_bridge.resume_handoff_cli.find_singleton_repo",
+        lambda name: SingletonRepo("example", "/example") if name == "example" else None,
+    )
+    with TestClient(app) as http:
+        invalid = http.post("/api/v1/worktrees/example@host/resume/acp")
+        assert invalid.status_code == 400
+        resume.assert_not_awaited()
+
+        def through_http(worktree_id, *, reclaim=False, strict=False):
+            response = http.post(
+                f"/api/v1/worktrees/{worktree_id}/resume/acp",
+                params={"reclaim": reclaim, "strict": strict},
+            )
+            if response.status_code >= 400:
+                raise BridgeClientError(response.status_code, response.json()["detail"])
+            return response.json()
+
+        client = _FakeClient(
+            session_resume=BridgeClientError(404, "not an owned session"),
+            worktree_resume=through_http,
+            agents=[{"name": "example@host", "project": "example"}],
+        )
+        _patch_client(monkeypatch, client)
+        m._cmd_resume(_args("example@host", json=True))
+    assert client.worktree_calls == [("example@anchor", False, False)]
+    resume.assert_awaited_once()
+    assert resume.call_args.args[0] == "example@anchor"
+    assert '"session_id": "singleton-session"' in capsys.readouterr().out
 
 
 class TestResumeJsonOutput:

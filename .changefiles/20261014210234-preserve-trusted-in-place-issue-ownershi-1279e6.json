@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve trusted in-place issue ownership independent of comment order and add optional child-scoped repository GitHub authentication with process-tree timeout cleanup",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

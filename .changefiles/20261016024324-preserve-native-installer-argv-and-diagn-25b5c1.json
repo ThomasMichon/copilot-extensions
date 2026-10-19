@@ -1,0 +1,9 @@
+{
+  "comment": "Follow up native policy argument forwarding with PowerShell 5.1-compatible process arguments, concurrent output capture, actionable stderr, and primary-error-preserving owned construction cleanup.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

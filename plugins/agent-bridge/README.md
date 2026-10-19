@@ -5,7 +5,22 @@ machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
 container venues.
 
+An explicitly configured, already-running remote ACP server is also a client
+target: see [experimental remote ACP](docs/remote-acp.md) for the neutral
+qualified HTTP/2/SSE + WebSocket profile, scoped authentication, headless
+approval contract, and connection-only ownership boundary.
+
 Supports **Windows** and **Linux/WSL** (macOS planned).
+
+Both installers co-deploy the canonical Python runtime resolver and its lease
+and construction companions into the Bridge installation's `scripts/` directory,
+alongside the existing native-shell resolver deployment in `bin/`. Native
+service worktree-owner launches therefore do not require an interactive `PATH`
+or a helper inside the Worktrees installation. Legacy owner selection still
+requires a completed runtime slot and refuses retired installation ownership;
+installation-cell launches retain same-cell provenance validation. This does
+not change runtime selection, provision a missing owner, or adopt another
+marketplace's runtime.
 
 Internal owner-driven deployment and service restart accept optional
 `conditional`/`routing_dir` keyword arguments using the shared
@@ -14,6 +29,70 @@ This bypasses caller configuration, legacy recovery and force-reaping, and
 refuses legacy daemons without an authoritative effective-config snapshot.
 Production capture/attestation is not yet wired; ordinary explicit cutover is
 unchanged. Anonymous health and authenticated control remain distinct contracts.
+
+An installer `update` reusing the selected completed slot separately checks the
+daemon actually serving. Healthy/current serving is a no-op; a healthy, adopted
+older daemon uses ordinary guarded cutover from the unchanged slot. The
+installer-internal `deploy --reconcile-serving` mode retains the observed
+PID/start reference, rechecks the predecessor at publication and authenticated
+control, and confirms native exit without force-reaping. It requires the existing
+control credential and never generates, repairs or rotates one. Missing, damaged,
+unhealthy or changed ownership fails explicitly; an inactive installation or
+forwarded route is not started locally. This mode neither repairs stale
+cutovers nor substitutes for the effective-config conditional-repair contract.
+A reconcile failure does not publish a success manifest or fall back to
+stop/rebuild.
+Rollback validates the captured older predecessor rather than requiring the
+target version and permits undrain only after that same native process is
+verified at its restored route. A local-to-forwarded ownership change is a
+refusal, not the initial forwarded-installation no-op. Native predecessor exit
+is confirmed before the cutover lock and durable breadcrumb are released;
+unresolved retirement or retained cutover evidence also blocks a later
+healthy/current shortcut without attempting automatic recovery.
+The installers first use `--reconcile-serving --probe-serving` read-only:
+exit 0 means no transition, exit 10 identifies an older serving daemon, and
+other exits fail. Only exit 10 acquires the existing reference-counted
+`update-in-progress` marker around a freshly guarded reconcile, with cleanup
+on success or failure. Current, inactive and forwarded no-ops remain marker-free.
+Health observation and control probe the routed client address, including IPv6;
+the captured predecessor's client never retries a connection into a replacement.
+A previous-only route after graceful shutdown is inactive only when its native
+process has verifiably exited or is absent and the route stays unchanged.
+Permission failures, reused/live PIDs and retained cutover evidence still refuse
+without repair. Supported bind addresses are checked against local OS binding,
+not a literal-address list; native process and health ownership checks remain.
+The successor CLI worker writes a fresh per-launch PID/native-birth receipt.
+Reconcile retains that worker's native reference, separately from a broker or
+virtual-environment launch handle, and matches its existing health slot PID,
+slot ownership and birth before publication and retirement. A same-version
+unrelated responder is not a successful launch. Cleanup uses identity-verified
+graceful control, never a broker-PID tree kill; uncertain cleanup retains its
+receipt and writer-reconciliation breadcrumb. Failure before drain admission
+leaves the predecessor's raw route and any operator-owned drain unchanged.
+Promotion and verify-before-retire reject a draining successor. Cleanup's
+identity probe retains unready health payloads without weakening ordinary health
+readiness checks. Watchdog replacement strips the one-shot launch ID rather than
+replaying a receipt identity into a replacement process.
+The passive serving worker also reads only the existing credential: a missing,
+empty or malformed file after the parent's check fails without regeneration.
+Ordinary daemon startup retains its create-capable credential loader.
+Publication is recorded separately from the current route. Rollback must
+non-forcingly drain a successor that may have accepted work before requesting
+its shutdown, even if another owner has since replaced its route. A busy or
+unverified successor is retained with reconciliation evidence; never-published
+passive cleanup does not acquire a drain gate.
+If published cleanup fails after closing an initially open admission gate,
+it reopens only that gate, after fresh native-worker and exact active-publication
+checks. Both the undrain acknowledgement and fresh health must confirm admission
+is open. A pre-existing or unknown drain is not reopened, and changed ownership
+refuses compensation. The original cleanup failure and reconciliation evidence
+remain even when admission is successfully restored.
+After draining a published successor, rollback revalidates the captured
+predecessor's native identity and health before successor shutdown, and probes
+again before restoring routing. Predecessor shutdown also requires its own
+verified drain gate to remain closed. Confirmed clean guarded rollback clears
+its transient breadcrumb inside the transaction so a fresh update can retry;
+uncertain cleanup or retirement retains reconciliation evidence.
 
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`
@@ -39,12 +118,306 @@ previously accepted session IDs.
 Explicit HTTP/client `qualified_peer: true` opts into tuple-only resolution
 and the new protocol; qualified CLI forwarding supplies it. Prefix text alone
 never upgrades a legacy exact-ID request to a newer carrier operation.
+Qualified peer sends return their admission receipt without waiting by default.
+`--wait-reply` opts into receipt-backed post-consumption reply evidence, requiring
+HTTP protocol 39 at both bridges and remote operation version 5. Qualified
+addressing without a reply wait retains protocol-35/version-4 compatibility.
+
+The opt-in `effective_runtime` module supplies the **configuration/manager**
+capture component, not a complete `RuntimeSnapshot` adapter or an exposed
+capture endpoint. It reads the serving app's current typed config, auth token,
+actual database, manager policy overrides and explicitly declared required
+environment. Startup-resolved roots and original port/relay policy must come from
+the serving launch owner; missing origins refuse. Passive ports and deferred
+relay activation do not overwrite durable policy. Captures remain immutable,
+repr-redacted private bytes with opaque random identities; private comparisons
+invalidate the binding when captured state changes, without publishing a hash
+of credential values.
+
+An explicit `include_resolver=True` expands coverage to the serving resolver's
+current topology, agent credentials/configuration, exact local identity, applied
+CLI namespaces, admission/cache state, and namespace/cold-store registry ledgers.
+`resolver_runtime.restore_resolver` reconstructs that component without scanning
+disk or executing providers. Failed provider replacements preserve the resolver
+actually serving, not the newer scan candidate. Unknown resolver implementations,
+opaque fallback callbacks and in-flight discovery/enumeration refuse capture.
+An additional explicit `include_relay=True` captures known effective credential
+sources, cached credentials and the composed `RelayTokenGate` owner. File-backed
+gate paths retain their external store authority; capture does not read or freeze
+those files. In-memory token registries remain private. `restore_relay` rebuilds
+an **unstarted** server preserving any-match and scope-denial semantics without
+minting credentials or re-running provider discovery. Opaque/legacy callbacks,
+unknown or instance-modified sources, in-flight requests and unavailable relay
+state refuse. Injected credential environment names must be explicitly declared
+in the serving launch's required-environment contract.
+
+`include_roster=True` additionally requires resolver and relay coverage and
+captures the actual warmed `AgentRosterCache`, not merely the resolver's topology.
+Unscanned discovery, uninitialized namespaces, in-flight scans, mismatched
+provider identities and unknown cache implementations refuse. The detached
+`roster_runtime.FrozenRoster` retains original same-execution-space monotonic
+timestamps and only serves still-fresh observations. Failed/expired namespaces
+remain incomplete; an explicit refresh request never pretends a scan occurred.
+Restoration starts no cache task or provider process. Legacy component captures
+remain supported for preparation but cannot grant foreground serving.
+
+These expansions do not restore the complete application or constitute a full
+`RuntimeSnapshot`.
+
+`runtime_restore.restore_runtime` strictly prepares **complete component
+coverage only** from an already authenticated private payload. It rejects
+coercions, unknown/missing fields, partial coverage, config/manager disagreement
+and undeclared environment. It restores the actual resolver and an unstarted
+relay without disk discovery or credential minting. `build_manager` checks the
+captured database and uses the existing construction owner while preserving the
+session-host root and drain-only tunables. Required environment is returned as
+a child-only mapping, including required-variable absence. Read-only manager
+hydration preserves live statuses, open turns and replay events without startup
+GC or synthesizing a predecessor-restart interruption. The child mapping binds
+the captured config/install namespace and refuses conflicting declared root
+environment. It never exports into the caller's process. Preparation is not
+application readiness, native custody, routing publication or permission to
+activate a listener.
+`Database(path, read_only=True)` opens an existing, current-schema database using
+SQLite read-only/query-only enforcement, without migration, directory creation
+or an event-writer thread. It is suitable for passive hydration before adoption;
+an absent or incompatible database refuses rather than provisioning itself.
+
+`create_app(restored_runtime=...)` opts into a separate passive candidate
+lifespan: read-only database hydration, the captured resolver and unstarted
+relay, and **only** a nonsecret `/health` route. Candidate health reports
+`status: candidate`, `ready: false` and a separate `candidate_ready` flag;
+it is never active-serving readiness or native attestation. Config/token
+overrides refuse. This path does not rediscover configuration, load telemetry
+from disk/environment, publish routing or markers, start background ownership
+loops, attach hosts or run the ordinary frontend's shutdown cleanup.
+It leaves the predecessor's open turns, statuses and replay cursors intact.
+The candidate records its actual executing interpreter separately from the
+predecessor's captured executable; neither record is native process custody.
+The ordinary launch owner's internal `_cmd_start` API accepts an explicit
+`required_runtime_environment` tuple to record launch origins before working
+directory and passive port/relay overrides. Omission keeps capture unconfigured;
+an explicit empty tuple means no required variables, not ambient discovery.
+There is no new CLI flag or automatic capture/repair activation.
+
+`runtime_transfer` adds explicit private preparation and acknowledgement over an
+already authenticated channel. The sender requires
+[`OwnedChild`](../../libs/zdd/README.md#zddprivate_child----owned-child-birth-custody)
+birth/principal/image custody matching the channel before transmitting state,
+and privately rechecks capture freshness after the reply. The receiver requires
+an independently established parent identity and opaque namespace before reading.
+Its one-use receipt checks actual passive readiness, read-only database, current
+executable and config/install roots, plus exact config/manager/resolver/relay,
+auth and declared environment state. Reply fields and JSON types must match
+exactly. One original `Deadline` covers transfer and acknowledgement; an
+unacknowledged candidate is not successful preparation.
+
+Before acknowledgement, `PendingRuntime.bind_predecessor(app, endpoint)` can
+explicitly retain the authenticated channel's original native peer reference.
+The expected full published endpoint is supplied independently of frames and
+must match the registered parent's birth/principal, differ from the candidate,
+and remain the exact active publication under the routing fence. The same
+original preparation deadline covers acquisition and acknowledgement; unknown
+channels, foreign identities, stale publications and late binding refuse.
+Acknowledgement rechecks the live publication and consumes failures without
+retry. Failed acquisition/acknowledgement releases retained custody; successful
+custody belongs to the candidate lifespan and is closed even if database
+cleanup fails. It is separate from `OwnedChild` signalling custody.
+
+`require_predecessor_exit(endpoint, deadline)` checks the same full endpoint
+and captured configuration identity against the **retained native reference**,
+using a later receiver's original budget. Closing the preparation channel,
+reaping the process, a coordinator claim, a missing PID or an HTTP response
+cannot substitute for exact native exit. This nonblocking requirement is
+evidence only, not an `ADOPT` grant. `test_predecessor_runtime.py` covers binding,
+refusal and cleanup policy; the native transfer matrix also proves live-peer
+refusal after channel closure on Linux and Windows.
+
+This is a component API, not a production launcher or listener. It does not
+export into the sender environment, grant active-serving readiness, publish a
+route or authorize adoption, drain or retirement. `test_runtime_transfer.py`
+contains bounded native Linux/Windows child-transfer, continuity, drift and
+receipt-refusal proofs; `-k 'runtime_transfer and not real'` is the focused
+protocol smoke selection, while the unfiltered file is the explicit native
+matrix. Use the bounded paths in [`TESTING.md`](../../TESTING.md).
+Restricted launch inheritance and persistent child lifetime, post-exit adoption,
+and full cutover/exit acceptance remain required before automatic
+retirement. No automatic registration, runtime update or repair enablement is
+added by constructing these components.
+
+`runtime_controls.RuntimeControls` explicitly binds the application event loop,
+actual retained listening socket, current process birth and effective private
+configuration to the shared receiver's native peer and exact-publication grants.
+Serving applications support private capture, attestation, synchronous
+drain/undrain and **graceful shutdown intent**, not proof of exit. Drain gates do
+not schedule work or arm an unfenced auto-undrain watchdog; an outstanding
+ordinary drain/watchdog refuses this path, and ordinary controls cannot release
+a private drain. Each later mutation requires a fresh one-use grant and routing
+fence. Ordinary-mode drain watchdog behavior is otherwise unchanged.
+
+A privately prepared candidate supports route-lock-free attestation with
+`ready: false`, plus distinct `ATTEST_PREPARED` evidence with `prepared: true`;
+it must have completely written its receipt and still match its
+actual prepared resources and immutable private state. Receipt write failures
+remain consumed but do not mark it prepared. `ACTIVATE_RESOURCES` is a separate
+one-use grant requiring the candidate's exact active publication. It replaces
+the passive database owner with a writable connection to the same existing,
+current-schema WAL database, without migration, directory creation, SQLite busy waits
+or an event-writer thread. The app, manager and pinned hydrated event logs adopt
+the same owner without altering existing event IDs, open turns or replay cursors; both old
+and new owners close outside the fence at candidate shutdown. File replacement,
+schema/journal mismatch and repeated activation refuse. Immutable configuration
+and exact resource-owner checks remain enforced after this resource transition.
+The original grant deadline and immutable configuration are rechecked after
+opening, before swapping ownership; expiry, cancellation or drift closes the
+unadopted resource and leaves the passive owner unchanged.
+The candidate remains health-only, passive and `ready: false`; writable
+resources are not serving readiness.
+
+After resource adoption, `PendingRuntime.prepare_serving` explicitly prepares
+the ordinary authenticated ASGI graph from the captured config/token and actual
+restored manager/resolver, and starts an initially idle event writer **outside**
+the routing fence. Preparation exposes no serving routes and does not set
+readiness. Failed preparation retains cleanup ownership and cannot be retried or
+committed by a later grant. It does not run the ordinary lifespan, rediscover
+configuration/topology, start maintenance or roster-refresh loops, attach hosts,
+bind the singleton relay or publish markers.
+
+The separate `ACTIVATE_SERVING` grant requires the candidate to be the exact
+active publication. Its short synchronous commit verifies the retained listening
+socket, actual started server, healthy writable database/event writer, warmed
+captured roster, immutable effective state and authenticated middleware/route
+graph. It then exposes foreground routes and attests `ready: true`.
+`adopted: false` remains explicit: foreground serving is not post-exit singleton,
+host or maintenance adoption. No candidate can capture, drain, undrain or retire
+through this component. `ADOPT` remains unavailable until those resources have
+their own receiver-fenced lifecycle. Candidate shutdown retracts the local
+dispatch target and closes both database owners outside the routing fence.
+
+An explicitly supplied predecessor endpoint enables the candidate's separate
+`RESERVE_SINGLETON` and `ACTIVATE_SINGLETON` relay capabilities. Reservation
+requires foreground activation, the captured relay graph and exact exit through
+the previously retained predecessor reference. It binds **only the captured
+loopback port**, without ordinary startup, port eviction, credential minting or
+an ephemeral fallback. Windows uses exclusive-address ownership; Unix permits
+normal departed-connection TIME_WAIT reuse, but never simultaneous listeners
+or `SO_REUSEPORT`.
+
+`PendingRuntime.prepare_relay(app)` prepares the async transport **outside**
+the routing fence, within the original reservation deadline. Its accept-time
+gate closes pre-commit connections without entering credential handlers.
+A fresh `ACTIVATE_SINGLETON` grant rechecks native peer, exact active
+publication, predecessor exit, effective state and retained transport before
+opening admission. It returns `relay_ready: true, adopted: false`; neither
+reservation nor transport preparation grants credential access. Replay,
+expired reservation, drift and occupied ports refuse. Candidate shutdown
+closes only its own reservation, transport and client tasks, with bounded
+async cleanup outside the fence; a foreign relay owner is never stopped.
+`test_staged_relay.py` and `test_relay_adoption.py` cover these policies.
+`test_relay_adoption_native.py` uses three real processes on Linux and Windows
+to prove live-predecessor refusal, exact exit after preparation-channel closure,
+same-port reservation, closed admission, fresh native activation, restored
+credential-source/token-gate behavior and owned cleanup.
+
+These components do not install a production private-control listener, attach
+hosts, publish a route, cancel turns or replace native exit evidence with a
+claim. `test_runtime_controls.py` includes
+native Linux/Windows private-channel capture, passive readiness and preparation
+attestation proofs;
+`-k 'runtime_controls and not real'` is its focused protocol smoke selection.
+The shared [two-phase conditional contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support)
+can now separate passive preparation from foreground activation.
+`test_runtime_serving.py` exercises native Linux/Windows private grants with an
+actual uvicorn listener and authenticated HTTP, including warmed-roster
+completeness, replay/drift refusal, and event/turn/cursor continuity. The ordinary
+launch path remains unchanged. Full post-exit host/cache/maintenance adoption,
+bounded ownership-aware frontend shutdown, the production restricted launcher
+and complete `RuntimeSnapshot` wiring remain unimplemented on this private path.
+The current component still strictly checks captured source/cache state;
+ongoing mutable-cache/token lifecycle authority is part of that remaining full
+adapter, not established by initial singleton activation. Native foreground
+and singleton proofs are component evidence, not full cutover or
+production-lifetime acceptance; automatic activation remains disabled.
+
+[Native Session Host attachment](docs/private-host-attachment.md) describes the
+separate opt-in host-owned capture, original-frontend exit custody, fixed-size
+TCP staging ticket and freshly granted cursor-preserving activation component.
+It is proved with real Linux/Windows frontend and child processes, but is not
+wired into production host launch or the main runtime snapshot/ADOPT adapter.
+Legacy hosts cannot acquire this authority by reloading their index.
 
 [Session preference authority](docs/session-preferences.md) documents optional
 execution-user defaults, the unchanged caller-settings default, and the
 execution/ACP capability limits.
 
 ## Responsibility boundary
+
+Trusted-venue plugin preparation uses the dispatcher's controller worktree,
+not the daemon's launch directory or the remote product checkout when controller
+context is supplied. A declared `caller_owner_ref` resolves through the
+Worktrees owner to its local, nonterminal checkout; any supplied controller
+path must agree, and a `#session` qualifier must match `caller_session_id`.
+Without declared ownership, an absolute existing `caller_worktree` directory
+is accepted without Worktrees adoption. With neither, legacy configured
+provider discovery remains unchanged; opaque affinity IDs are not paths.
+Invalid explicit controller context refuses launch rather than falling back.
+These rules also apply to replacement on recovery. Selection uses only a
+per-subprocess cwd, never daemon `chdir`, adoption changes, or global profiles.
+
+Related-repository selections retain their `enable` boolean through provider
+metadata, replacement preparation and both launch modes. Provider CLI handoffs
+use `--stage-plugin SOURCE` for enabled selections and
+`--stage-plugin-disabled SOURCE` for disabled selections, without changing source
+strings. Legacy retained plain-source rows still mean enabled. If a related
+payload also appears in the provider plan, its current payload details can
+replace stale details without replacing the provider's enablement decision.
+When that related lookup is deferred, the provider's resolved origin or archive
+is retained rather than replaced with an unresolved target-side lookup.
+Native CLI dispatch resolves the caller's repository root from nested working
+directories and searches it before configured anchors for both related selections
+and reflected payloads, even when that checkout has no venue-provider config.
+
+The existing Bridge-owned request provenance records whether controller
+context was explicit or inherited from affinity. An inherited ID remains
+opaque even when it looks absolute: only an actually usable absolute directory
+provides cwd; otherwise configured discovery continues without changing the
+claim identity. Known explicit context never downgrades during recovery or
+provider refresh. For older unmarked records only, a `caller_worktree` equal to
+the session's `caller_id`, without a declared owner, retains the legacy affinity
+interpretation. Ignoring an unavailable absolute-looking legacy directory emits
+a warning without the raw path; nonmatching explicit context still validates.
+
+Before plugin preparation, a cold credential reverse-forward uses the existing
+Session Host startup readiness budget. It must complete a real relay-protocol
+round trip before installation or child launch; the short post-launch relay
+health deadline does not bound initial SSH establishment.
+
+Fresh and replacement launches resolve leading literal or environment-selected
+`cd` overrides before trusting conventional workspace metadata. Preparation,
+the child command, and ACP use the same concrete directory; live reattachment
+continues using its persisted workspace.
+
+Pre-launch cancellation releases only that start's resources. Once a launch
+request is submitted, cancellation requires remote cleanup checked against the
+session, launch nonce, boot identity, and PID start times before ownership can
+be released. Missing or mismatched launch authority is inconclusive, so claims
+and TargetLocks remain held rather than permitting a duplicate child.
+Claim admission records an explicit `skipped` outcome when no claim was
+attempted (no owner, disabled admission, or absent management command). A
+pre-launch failure then releases only the new local lock, without inferring
+claim ownership from a later PATH lookup. Acquired or uncertain attempted
+claims still require confirmed release.
+Admission also snapshots the exact Codespace name and claim owner into existing
+session-owned target metadata, independently of controller provenance. Normal
+teardown and daemon-restart cleanup use that durable identity; known skipped
+admission has no claim to release, while legacy unmarked targets retain their
+caller-worktree fallback.
+Fresh attempts record no claim before target-lock admission, so a refused alias
+cannot inherit legacy teardown authority over an incumbent's same-owner claim.
+Confirmed rollback commits an explicit no-claim receipt before releasing the
+new local lock, so ending an older failed session cannot release a later
+same-owner lease. Unconfirmed release and inherited/transferred obligations
+retain their recorded identity.
 
 agent-bridge owns **live cross-boundary agent communication**: starting or
 resuming a persistent session, sending a turn, streaming its response, and
@@ -118,6 +491,13 @@ restart. Bad entries warn but do not block valid peers. `agent-bridge doctor`
 lists every provider finding with the exact entry, target, and cleanup or
 re-registration remedy.
 
+An exact ready provider-exec instance can opt into replay-safe native creation
+with `create <agent> --creation-key <key> --provider-instance` (HTTP protocol
+36). It retains one native result without allocating or fabricating a worktree.
+Ordinary keyed creation remains local-worktree-only. See
+[session creation contracts](docs/session-acquisition.md#exact-provider-instance-creation)
+for pending/terminal recovery and the separate first-prompt boundary.
+
 ### Namespace reader observations
 
 Only CLI `namespace-list` reads use optional procutil CPU metrics. Agent Bridge
@@ -179,11 +559,14 @@ and fallback/completeness semantics remain unchanged.
 When a host agent delegates work with `send`, it gets a **continuous, low-noise
 feed** of the remote agent's progress -- not a silent block that looks "stuck".
 
-- **`send`** streams the remote turn live by default, then returns when the turn
-  settles.
+- **`send`** streams bridge-owned ACP turns by default. Represented live-session
+  sends return an inbox receipt immediately; see
+  [peer messaging](skills/agent-bridge/references/agent-messages.md) for bounded
+  readback and optional reply waiting.
 - **`wait`** streams the in-flight turn to completion.
-- **`read`** resumes the feed from where the host last left off, or does
-  random-access historical reads.
+- **`read`** resumes an ACP feed or does random-access historical reads.
+  Represented live sessions return a bounded cursor-neutral result snapshot,
+  including pending inbox metadata and an optional message receipt.
 - **`start`** does not stream (no conversation yet).
 
 ### Collapsed feed (default)
@@ -497,6 +880,13 @@ flow, independent of Copilot CLI extension activation.
 Use [`agent-bridge-troubleshooting`](skills/agent-bridge-troubleshooting/SKILL.md)
 for wedged dispatches, resume issues, relay/auth failures, and repair drills.
 
+The native installers also accept
+[prepared merged-source payloads](../../tools/prepare_runtime_source.md).
+These use a source-qualified immutable runtime generation without changing
+the package version or Copilot's plugin-content source. The `runtime-source`
+bounded suite exercises the actual Windows and POSIX identity/manifest
+functions; this optional source path does not change ordinary installation.
+
 ## Docs
 
 | Document | Description |
@@ -534,6 +924,13 @@ daemon downgrade between capability check and POST. It shares ordinary turn
 admission, not acquisition or reviewer-specific transport. The successful result
 carries the native UUID that admitted the turn; admission does not prove the
 model completed it.
+
+Ordinary worktree `resume` derives the exact native head from the owning
+project, even when no bridge-owned record exists. It loads that conversation
+headlessly by default; `--cli` resumes it in the owner's existing mux launch
+path. It never substitutes a fresh conversation or takes over a live
+conflicting execution leg. See the [resume command contract](skills/agent-bridge/references/cli-commands.md#session-management)
+for protocol compatibility, native identity and uncertain-launch behavior.
 
 ## Platforms
 

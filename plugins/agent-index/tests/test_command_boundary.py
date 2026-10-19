@@ -26,7 +26,10 @@ def test_legacy_stdio_dependency_is_not_part_of_host_profile():
     assert extras["stdio-mcp"] == ["mcp>=2.0,<3.0"]
     for dependencies in (project["dependencies"], extras["store"], extras["server"]):
         assert not any(value.startswith("mcp") for value in dependencies)
-    assert "agent-index[store,server,stdio-mcp]" in extras["dev"]
+    assert "agent-index[store,server,stdio-mcp,fleet]" in extras["dev"]
+    assert extras["fleet"] == ["fleet-manager[auth]>=0.1.0.dev1"]
+    for dependencies in (project["dependencies"], extras["store"], extras["server"]):
+        assert not any(value.startswith("fleet-manager") for value in dependencies)
 
 
 @pytest.mark.parametrize("role", ["host", "client", "unconfigured"])
@@ -144,26 +147,33 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
     assert "_ensure_engine" not in sh_ensure
 
 
-def test_installers_preserve_two_step_cuda_engine_swap():
-    """`agent-index-engine` (the separate embedding-server package, effort
-    agent-index-server-package-split) is installed in TWO steps into the
-    durable engine venv: the light `agent-index` base package first, then
-    `agent-index-engine` itself (which depends on it) -- mirroring the same
-    zdd/agent-procutil pre-install pattern the main service venv already
-    uses for its own vendored deps."""
+def test_installers_preserve_two_step_cuda_engine_resolution():
+    """Install attributable base/server sources before resolving the full CUDA graph."""
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
 
     assert 'AGENT_INDEX_TORCH_INDEX' in ps
-    assert '--no-deps --reinstall-package torch torch' in ps
+    assert '--no-deps' not in ps
+    assert '--no-build-isolation' not in ps
+    assert '--index-url $torchIdx  --reinstall-package torch torch' in ps
     assert '$baseOut = Invoke-IndexUvPipInstall --python $EngineVenvPython "$PluginDir"' in ps
     assert '"$PluginDir\\server")' in ps
-    assert "'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }" in ps
+    assert ps.index('$baseOut = Invoke-IndexUvPipInstall') < ps.index(
+        '$srvOut = Invoke-IndexUvPipInstall @pipArgs'
+    ) < ps.index('$torchOut = Invoke-IndexUvPipInstall')
+    assert "'engine-update' { if (-not (Install-Engine -Upgrade)) { throw 'Engine runtime update failed' }; Restart-EngineDaemon }" in ps
 
     assert 'AGENT_INDEX_TORCH_INDEX' in sh
-    assert '--no-deps --reinstall-package torch torch' in sh
+    assert '--no-deps' not in sh
+    assert '--no-build-isolation' not in sh
+    assert '--index-url "$torch_idx"  --reinstall-package torch torch' in sh
     assert '_uv_pip_install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?' in sh
     assert '"$PLUGIN_DIR/server")' in sh
+    assert sh.index('_uv_pip_install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR"') < sh.index(
+        '_uv_pip_install "${uv_args[@]}"'
+    ) < sh.index('_uv_pip_install --python "$ENGINE_VENV_PYTHON" --index-url')
+    engine_update = sh.split('    engine-update)', 1)[1].split('    status)', 1)[0]
+    assert '_install_engine upgrade || exit $?' in engine_update
     assert 'engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)' in sh
 
 
@@ -217,14 +227,17 @@ def test_default_durable_autostart_stays_unprivileged_and_tasks_remain_opt_in():
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
 
-    start_fn = ps.split("function Start-LauncherDetached {", 1)[1].split(
-        "\nfunction Install-LogonAutostartEntry {", 1
-    )[0]
     autostart_fn = ps.split("function Install-LogonAutostartEntry {", 1)[1].split(
         "\nfunction Install-LogonAutostart {", 1
     )[0]
     assert "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" in ps
-    assert "Start-Process -FilePath 'conhost.exe'" in start_fn
+    # Start-now goes through the user-mode ensure path (spawn_daemon), never a
+    # PowerShell process launch that would stay inside the installer's Job.
+    assert "function Start-LauncherDetached" not in ps
+    assert "& $Ensure" in autostart_fn
+    assert "Start-Process" not in autostart_fn
+    assert "-Ensure { Ensure-ServiceRunning }" in ps
+    assert "-Ensure { Ensure-EngineRunning }" in ps
     assert "Invoke-ScopedElevation" not in autostart_fn
     assert "Get-ScheduledTask -TaskName $ScheduledTaskName" in autostart_fn
     assert "Remove-LogonAutostart -Name $Name" in autostart_fn

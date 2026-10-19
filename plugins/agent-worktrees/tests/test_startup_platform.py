@@ -64,10 +64,13 @@ def test_platform_detection_preserves_windows_linux_and_wsl(
     monkeypatch, forbid_platform_discovery, platform_id, proc_version, expected,
 ):
     monkeypatch.setattr(sys, "platform", platform_id)
+    monkeypatch.setattr(Path, "is_file", lambda _path: False)
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: "0::/user.slice")
+    monkeypatch.setattr(os, "uname", lambda: type("Kernel", (), {"release": "generic"})(), raising=False)
     real_open = open
 
     def read_version(path, *args, **kwargs):
-        if path == "/proc/version":
+        if Path(path) == Path("/proc/version"):
             return io.StringIO(proc_version)
         return real_open(path, *args, **kwargs)
 

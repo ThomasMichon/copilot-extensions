@@ -1,7 +1,8 @@
 # Session-local Usage Evidence and Historical Estimates
 
 Parent: [Session Intelligence and Accounting](README.md). Coordination: #6439.
-This is a proposed slice contract, not an implemented API.
+Preservation is implemented in #7072. The historical-estimation implementation
+and its validation are recorded below; reviewed source landing remains a gate.
 
 ## Scope and ownership
 
@@ -105,24 +106,26 @@ intervals or guarantees for a historical cohort.
 
 ## Validation
 
-- [ ] Committed WAL rows are captured; absent/corrupt/rebuilt stores retain old
+- [x] Committed WAL rows are captured; absent/corrupt/rebuilt stores retain old
   observations; duplicate and conflicting evidence has explicit semantics.
-- [ ] Repo-scoped capture includes no out-of-scope rows. Missing/old schemas,
+- [x] Repo-scoped capture includes no out-of-scope rows. Missing/old schemas,
   read limits, lock contention and unsafe paths report honest failures.
-- [ ] Dry run is side-effect free; capture precedes signatures/compaction;
+- [x] Dry run is side-effect free; capture precedes signatures/compaction;
   unchanged evidence does not trigger perpetual resync; failed publication
   retries without dropping accounting.
-- [ ] Modern per-call records work without the shared store; checkpoints and
+- [x] Modern per-call records work without the shared store; checkpoints and
   shutdown totals remain separate from per-call rows and never double-count.
-- [ ] Synced and archived session artifacts preserve the same usage evidence,
+- [x] Synced and archived session artifacts preserve the same usage evidence,
   with live/archive duplicate and continuation semantics unchanged.
-- [ ] Synthetic fixtures prove feature counting, model intervals, emitted tool
+- [x] Synthetic fixtures prove feature counting, model intervals, emitted tool
   arguments, reasoning visibility, resets and partial/live-tail behavior.
-- [ ] Held-out validation is session-disjoint and source-copy-disjoint; sparse,
-  inaccurate or incompatible calibration abstains with explicit diagnostics.
-- [ ] Known synthetic relationships recover expected estimates and bounded
-  error; a misleading relationship fails admission rather than reports success.
-- [ ] Real count-only validation reports measured coverage, held-out errors and
+- [x] Held-out validation is session-disjoint and source-copy-disjoint; sparse,
+  incompatible or explicitly configured accuracy-ceiling failures abstain with
+  diagnostics. Best-effort mode instead discloses poor held-out accuracy.
+- [x] Known synthetic relationships recover expected estimates and bounded
+  error; a misleading relationship fails admission when an accuracy ceiling is
+  selected, rather than masquerading as a suitable calibrated relationship.
+- [x] Real count-only validation reports measured coverage, held-out errors and
   failure/abstention cases without exposing transcript content.
 - [ ] Focused native tests, lint and repository guards pass; source review and
   required checks complete before merge. Linux-only evidence is not invented.

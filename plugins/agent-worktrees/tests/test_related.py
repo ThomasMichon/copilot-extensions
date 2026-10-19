@@ -2286,6 +2286,12 @@ class TestRelatedCurrentMachine:
     so a locally-checked-out repo reports "Not checked out on '<host>'".
     """
 
+    @pytest.fixture(autouse=True)
+    def _native_platform(self, monkeypatch):
+        from agent_worktrees import config as cfg
+
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+
     @staticmethod
     def _write_registry(anchor: Path, key: str, hostname: str) -> None:
         anchor.mkdir(parents=True, exist_ok=True)

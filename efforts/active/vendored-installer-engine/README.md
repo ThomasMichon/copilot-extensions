@@ -578,6 +578,158 @@ installs, no service-specific config needed for this class of plugin.
 
 ## Journal
 
+### 2026-10-16 — Strict derived ownership views implemented
+
+- Added a provider-neutral `claims ownership` source surface over the existing
+  registered-project tracking ledger, without a second registry, provider
+  callback, daemon probe, cached record load or mutation. The projection keeps
+  reservation/allocation/retention phases, exact opaque identity and original
+  creator, following matching accepted receipts to the recorded current owner.
+- Strict raw YAML/claim validation and ordinary input-change checks expose
+  incomplete records, duplicate identities/tokens/references, interrupted
+  handoffs and missing transfer recipients as uncertainty. Filters cannot hide
+  a conflicting owner or an unreadable project. An empty view is not absence,
+  and the local, non-transactional snapshot never grants cleanup authority.
+- Bounded Linux source validation passed 421 ownership, producer, finalization,
+  transfer and legacy lookup cases. F/E9 lint, whitespace, install-contract
+  and documentation-consistency checks passed. No native or live Docker
+  lifecycle acceptance, provider enablement or runtime rollout is claimed.
+- This closes the source ownership-view sub-item only. Provider integration,
+  allocation callers, atomic identity-conditional cleanup, live acceptance and
+  the combined parent Plan/Validation items remain open.
+
+### 2026-10-16 — Admitted read-only Docker verification merged
+
+- PR #7035 merged as `4eadccbcf1bccc391745da0e57ac90da9c32dd8b` at
+  16:45 Pacific after a current-head Balanced approval with no open findings
+  and successful CI. The published source passed 220 bounded Linux cases,
+  160 library cases on Python 3.10 and 167 native Windows cases with 53
+  explicit POSIX-only skips. Native fixtures are not live Docker acceptance.
+- Direct-local reads now share one admitted daemon connection, reject malformed
+  or unsolicited responses and close failed admission on interruption.
+  Reservation recovery covers both resource kinds and all returned generations
+  without turning partial coverage into absence.
+- Automatic removal remains unavailable for both containers and volumes;
+  sessions accept only GET requests. The atomic identity-conditional cleanup
+  requirement remains open. No provider, allocation caller, runtime deployment
+  or live resource was enabled or changed.
+- **Next Docker source slice:** derive strict owner/resource views from the
+  existing ledger, reporting incomplete or duplicate ownership as uncertainty.
+  The combined Docker Plan and Validation items and the parent effort remain
+  open. The operator-directed removal of blanket serial-merge guidance is
+  being landed separately; independent PRs need no shared merge slot.
+
+### 2026-10-16 — Container deletion also needs an atomic identity mechanism
+
+- PR #7035 review identified that Moby's removal path calls `GetContainer()`,
+  whose exact-ID miss falls back to an exact container name
+  ([removal](https://github.com/moby/moby/blob/3f38b15147b14ce0ce7b11558a1aa9e9f14db103/daemon/delete.go),
+  [lookup](https://github.com/moby/moby/blob/3f38b15147b14ce0ce7b11558a1aa9e9f14db103/daemon/container.go)).
+  A real-stream fixture with those lookup semantics reproduced deletion of a
+  colliding unrelated container after the inspected ID disappeared.
+- The source adapter now refuses automatic removal for both containers and
+  named volumes before connecting. The lower-level session accepts only reads.
+  No connection pinning, re-inspection or post-delete observation is claimed to
+  make Docker's name-fallback API atomic. Ownership is retained rather than
+  weakened to work around the unavailable cleanup primitive.
+- The scoped contract retains an explicit atomic cleanup design/proof gate.
+  Single-daemon read verification, ownership views and retained-resource
+  reporting can proceed, but this PR does not close the combined Docker item,
+  authorize live allocation/deletion or enable a producer. The parent remains
+  Active; no runtime or production resource changed.
+
+### 2026-10-16 — Diagnostic foundation and ownership/session proposal merged
+
+- PR #6625 merged to `dev` as
+  `fd07892b8f23e5f5263cac1538347922eff76c54` at 01:06 Pacific.
+  The final head `f0de56d529f3a66d5b582b3283990b294a061cec` received a
+  current Balanced approval with no open findings. The source workspace is
+  reconciled to that squash; the implementation remains diagnostic-only.
+- The merged proposal preserves one authoritative claims ledger and retained
+  named volumes, with explicit admitted-session and derived ownership-view
+  implementation gates. No separate registry, generic settlement bypass or
+  automatic name-based volume deletion was introduced.
+- **Next source slice:** implement the direct-local session adapter without
+  reconnect or subprocess ownership, then the provider and read-only ownership
+  views before integrated producer enablement. Unsupported transport/platform
+  routes remain unavailable rather than inheriting CLI snapshot authority.
+  Docker lifecycle, live authorization and the parent Plan/Validation gates
+  remain open. No resource, service or runtime rollout occurred.
+
+### 2026-10-14 — Registry-rooted Docker ownership continuation
+
+- Operator direction, verbatim:
+  > Got it. Continue driving. Come up with a system which ensures we can track what owns what.
+- The scoped Docker plan captures that direction without adding a second
+  ownership registry or changing reusable fleet leases. The existing ledger
+  records creator/current-owner obligations before allocation; exact resource
+  binding, retained-volume reporting and accepted transfer remain its authority.
+- **Agent-recommended implementation refinement:** use one explicitly admitted
+  daemon-bound session for identity, inventory and mutation. A contained actual
+  fixture-process regression shows that separate CLI calls can observe A/B/A
+  and falsely report absence. Ordinary snapshots cannot discharge ownership.
+  Stream loss, reconnect or unadmitted proxy/remote routing must remain unknown.
+- The [scoped implementation contract](temporary-container-obligations.md#registry-rooted-ownership-and-daemon-session-proof)
+  also calls for read-only ownership views of that same ledger and bounded
+  transport-child cleanup. These refinements remain under normal source review;
+  they are not implemented/live evidence or a new allocation-quiescence proof.
+- Named volumes remain owned and held under `retain-volumes`. Docker producer
+  integration and all live, rollout and parent completion gates remain open.
+  No Docker resource or production system was changed by this continuation.
+
+### 2026-10-13 — Qualified Docker callback prerequisite merged
+
+- PR #6614 merged to `dev` as
+  `1c960f88564f2187ed5fc64ad09f2a420d066577` at 20:23 Pacific.
+  Its exact head `4c2f0a070d5795ee8c0d827009f23e1f1914607f` received a
+  Balanced approval with zero open findings. All 23 visible checks completed
+  successfully or intentionally skipped, including both required gates.
+  The exact head and gates were rechecked immediately before the exclusive
+  serial merge slot was used.
+- Registered status and reclaim prefixes now survive same-cell primary-module
+  routing; unsupported command substitutions refuse rather than silently
+  selecting another callback. Provider-declared legacy provisioning suppression
+  stays in the child environment. Native batch routing now preserves quoted
+  payload paths with spaces while rejecting shell-significant command prefixes.
+  Fleet borrowing and the generic ownership ledger are unchanged.
+- The published snapshot passed 582 contained callback/consumer regressions
+  with two intentional skips and 110 exact-snapshot native Windows callback,
+  registry and adapter cases with two intentional skips. The preceding
+  structural selection passed 847 guards with 14 intentional skips before the
+  final Windows quoting correction; it is not a native Docker lifecycle proof.
+- Post-merge reconciliation retained recovery evidence and advanced the
+  continuing source workspace onto the verified squash. The foreign PR
+  obligation was settled using provider merge evidence.
+- **Next source stretch:** implement the independent shared Docker identity
+  helper and separate raw-resource callbacks, then wire the clean-room and
+  devcontainer producers under
+  [the reviewed scoped plan](temporary-container-obligations.md).
+  The combined Docker implementation/validation item and all live, native
+  lifecycle, remaining-adopter and serving-convergence gates remain open.
+  No Docker allocation/removal, service change or runtime rollout occurred.
+  The effort remains Active.
+
+### 2026-10-13 — Volume deletion identity boundary discovered
+
+- The independent Docker identity primitive is under source implementation;
+  it does not allocate resources or replace the authoritative worktree ledger.
+  Container mutation can address the full immutable ID. Volume probes can
+  verify unique name, creation evidence and born-at-creation labels.
+- Docker's current volume-removal client exposes only a name and `Force`
+  option, not an immutable birth identity or a conditional-delete parameter
+  ([API source](https://github.com/moby/moby/blob/master/client/volume_remove.go)).
+  A replacement between inspection and name-based deletion therefore cannot
+  be excluded by the proposed identity check alone. Automatic volume deletion
+  is blocked in the draft primitive rather than presented as exact-ID cleanup.
+- **Operator-selected decision:** the form value was `retain-volumes`.
+  Keep named volumes owned and held; automatic name-based deletion remains
+  blocked until a separate identity-safe cleanup mechanism is reviewed.
+  The proposed container-scoped tmpfs alternative was not selected.
+  [The scoped plan](temporary-container-obligations.md) records the exact
+  selection and its retained-obligation validation requirement. This source
+  amendment precedes producer enablement; it does not authorize live mutation
+  or resolve the combined temporary-resource validation item.
+
 ### 2026-10-13 — Generic disposable ownership slice merged; Docker integration next
 
 - PR #6391 merged to `dev` as `b78c23aa05c74079f9724cfcfff9c4de14e5f37a`

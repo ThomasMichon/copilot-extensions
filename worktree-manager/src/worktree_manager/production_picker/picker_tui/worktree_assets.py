@@ -13,6 +13,86 @@ _ASSET_CODES = {
 _HELD_CLAIM_STATES = ("", "active", "at-rest")
 
 
+def needs_descendant_details(row: dict) -> bool:
+    """Use existing provider inspection only when a subtree may be present."""
+    if row.get("claims_projection") is not None:
+        return True
+    summary = row.get("claims_assets")
+    if isinstance(summary, dict):
+        counts = summary.get("by_kind")
+        return not isinstance(counts, dict) or bool(counts.get("worktree"))
+    return any(
+        isinstance(claim, dict) and claim.get("kind") == "worktree"
+        and claim.get("state", "") in ("", "active")
+        for claim in row.get("resources") or []
+    )
+
+
+def claim_coverage(rec: dict) -> list[str]:
+    """Qualify bounded links without deriving claims or treating absence as proof."""
+    links = rec.get("claims_links") or []
+    count, complete = rec.get("claims_link_count"), rec.get("claims_links_complete")
+    projection = rec.get("claims_projection")
+    notices = []
+    known_count = type(count) is int and count >= len(links)
+    omitted = count - len(links) if known_count else 0
+    if omitted:
+        notices.append(f"+{omitted} omitted")
+    unresolved = projection.get("unresolved_count") if isinstance(projection, dict) else None
+    if type(unresolved) is int and unresolved > 0:
+        notices.append(f"{unresolved} unresolved")
+    elif isinstance(projection, dict) and projection.get("complete") is False:
+        notices.append("descendants incomplete")
+    if complete is False and not notices:
+        notices.append("incomplete")
+    unknown = (
+        type(complete) is not bool or not known_count
+        or (rec.get("asset_hints") or {}).get("coverage_unknown")
+        or (projection is not None and (
+            not isinstance(projection, dict)
+            or type(projection.get("complete")) is not bool
+            or type(unresolved) is not int or unresolved < 0
+        ))
+        or (projection is None and rec.get("claims_descendants_available"))
+    )
+    if unknown and (
+        links or rec.get("claims_summary") or projection is not None
+        or (rec.get("asset_hints") or {}).get("held_count")
+        or rec.get("claims_descendants_available")
+    ):
+        notices.append("coverage unknown")
+    return notices
+
+
+def descendant_details(payload: dict) -> list[dict]:
+    """Adapt the existing explicit transitive query, retaining each real owner."""
+    if not isinstance(payload, dict) or any(
+        not isinstance(payload.get(key), list) for key in ("obligations", "unresolved")
+    ):
+        raise TypeError("engine omitted descendant claim inspection")
+    result = []
+    for key in ("obligations", "unresolved"):
+        for claim in payload[key]:
+            if (
+                not isinstance(claim, dict)
+                or not isinstance(claim.get("path"), list) or not claim["path"]
+                or any(not isinstance(part, str) for part in claim["path"])
+                or any(
+                    claim.get(field) is not None and not isinstance(claim[field], str)
+                    for field in ("kind", "ref", "state", "note", "reason", "url")
+                )
+            ):
+                raise ValueError("engine returned an invalid descendant claim")
+            if key == "unresolved":
+                result.append({
+                    **claim, "kind": "unresolved", "state": "unresolved",
+                    "note": claim.get("reason") or "descendant unavailable",
+                })
+            elif len(claim["path"]) > 1:
+                result.append(dict(claim))
+    return result
+
+
 def claim_details(payload: dict) -> list[dict]:
     """Explicit full-ledger inspection, never copied into a current row."""
     raw = payload.get("outbound") if isinstance(payload, dict) else None
@@ -46,6 +126,14 @@ def asset_hints(row: dict) -> dict:
         counts = summary.get("by_kind")
         count = summary.get("held_count")
         available = summary.get("details_available")
+        if "by_kind" in summary and counts is None:
+            result = {
+                "hints": [], "overflow": 0, "details": [],
+                "details_available": True, "coverage_unknown": True,
+            }
+            if type(count) is int and count >= 0:
+                result["held_count"] = count
+            return result
         if (
             not isinstance(counts, dict) or len(counts) > 128
             or type(count) is not int or count < 0

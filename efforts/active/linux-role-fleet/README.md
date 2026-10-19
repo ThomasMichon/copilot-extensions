@@ -169,8 +169,11 @@ Implementation sequencing below is **agent-recommended**:
   serial durable-admission, construction and owned-activation/removal gates;
   it does not deliver a managed installer or authorize a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
-  agent-recommended #6464 setup prerequisite proposal; it does not implement
-  execution or require downstream plugins to create core installation cells.
+  agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
+  source implementation is merged in #6944; fresh-environment/native acceptance
+  and actual consuming setup remain open under #6464. Downstream plugins are
+  not required to create core installation cells, and active-core apply remains
+  unsupported.
 - [ ] Define controller-owned live configuration validation, atomic activation,
   last-valid-state recovery and explicit restart-required outcomes.
 - [ ] Implement explicit inspect/plan/apply behavior for the chosen adapter:
@@ -494,3 +497,105 @@ not to the vision. This effort does not acquire or migrate live capacity.
   established client-closure/API/data-schema compatibility gate before execution
   and activation, with an incompatible-candidate refusal case that preserves
   the prior active client/configuration and the monotonic admission floor.
+
+### 2026-10-14 - Repair candidate and retained native execution gate
+- The #6464 boundary reviewed in #6477 is implemented as a locally committed
+  `agent-machines` candidate, not a published PR, released runtime or live
+  consumer repair. It uses the current public source-neutral activation and
+  installation-context APIs; ordinary downstream delivery neither creates nor
+  requires core installation cells.
+- A fresh native Linux clean-room run passed all six gates: real materialized
+  payload installation and first-use CLI repair, 30 conductor cases and 138
+  canonical packaging/source-guard cases. The Windows conductor portfolio also
+  passed all 30 cases. These synthetic ordinary-owner proofs do not satisfy
+  live setup, native WSL/macOS or unsupported active-core apply gates.
+- Full Windows integration remains blocked. Serial native scenario matrices
+  were separated without dropping assertions; measured cold-host workflow
+  budgets and whole-tree fixture cleanup are explicit. A native ARM64
+  interpreter comparison passed nine of ten selected integration cases, but a
+  subsequent run failed four of ten. Shared host scheduling pressure remains
+  observed, not a proven root cause or an accepted flake. An isolated pass is
+  not permission to merge around the still-red native gate.
+- The candidate observes validated already-active core cells but refuses
+  undeclared core repair actions. #6464 retains native execution, actual
+  consuming setup integration and real missing/stale-runtime repair before
+  closure. #6424 retains managed client lifecycle; controller/connector,
+  authorization, useful roles and adopter migration remain independently open.
+  This campaign and routing foundation remain Active.
+
+### 2026-10-17 - Repair review corrections; lifecycle integration retained
+- #6944 remains open at `c82d93bdd9dd6926d80cfc69083cd2b5fcdfd149`.
+  Its review corrections bind actual executable admission, re-admit initially
+  ready and refreshed/post-install outcomes, propagate refused prerequisite
+  blockers, and preserve process ownership through SIGINT/SIGTERM spawn and
+  cleanup boundaries. Executable lookup through a relative `PATH` entry now
+  produces an absolute admitted `argv[0]`; changing to the payload working
+  directory at launch cannot reinterpret that executable path.
+
+| Execution lane | Result | Scope |
+|----------------|--------|-------|
+| Linux binaries in WSL | 91 passed, three Windows-only skips | Complete repair/boundary/journal portfolio; installed WSL platform check also passed |
+| Linux binaries in WSL | 166 passed | Packaging/source/trusted-reader portfolio |
+| Windows-native processes | Nine passed, one POSIX-only skip | Executable admission, CMD and real plan/apply selection |
+| Windows-native processes, preceding final-probe candidate | 14 passed | Cancellation/drift selection |
+
+These bounded Windows selections are not a new full Windows-suite claim.
+
+- Fresh-box attempts passed materialization and payload stamping but failed
+  first-use provisioning with `TLS HandshakeFailure` fetching setuptools 84
+  metadata from public `files.pythonhosted.org`. This reproduced in two
+  disposable Docker attempts; it was not diagnosed as a universal feed outage.
+  #6944 records that validation boundary, and #6464 retains its fresh-install
+  follow-up. No TLS/feed waiver was used or passing result claimed. Native macOS,
+  declared active-core apply and actual consuming setup remain under #6464.
+  Current-head review and required CI still gate #6944; source publication
+  does not establish a promoted release, installed repair or live deployment.
+- The journal's first required Manager run hit the exact tracked #6490
+  second-caller `RoutingLockTimeout` signature (CI run `39001166643`, job
+  `117304199673`): one failed, 2,621 passed and 53 skipped. This is not a
+  passing gate or permission to bypass it; the updated journal still needs
+  real current-head CI success.
+- The reviewed #6624 client-admission boundary and merged #6569 byte staging
+  remain the managed-client prerequisites under #6424/#6240. Separate proposed
+  Gateway SSH runtime/policy leaves are published in #7083/#7087, not yet
+  accepted as merged dependencies or wired lifecycle behavior. Their owners
+  may add the required canonical release entries for those leaves; shared
+  configuration, admission/execution and lifecycle integration stays with its
+  existing owner. An admission receipt is not an execution grant.
+- Next serial implementation remains the validated client boundary followed by
+  explicit configuration projection, provider adaptation and setup/reconcile
+  integration against reviewed dependencies. Standalone controller/connector
+  lifecycle, authorization, useful service roles, persistence and safe cutover
+  remain unresolved. This campaign and routing foundation stay Active.
+
+### 2026-10-17 - Ordinary repair merged; fleet completion gates retained
+- #6944 merged into `dev` at `2026-10-17T14:41:24Z`, commit
+  `b576e17ec2280c27866b0be550ff7b0604cfaa58`. The reviewed source head was
+  `c246cd7a613925ed4f6859a9049d9a51eaaad7b0`; its actual Balanced review
+  `5558255196` reported no open issues and CI `39040731281` succeeded.
+- The final corrections independently bind declared action content, preserve
+  declared interpreter semantics while attesting executable content, and
+  confirm transient Windows/POSIX cleanup before releasing repair ownership.
+  The runtime-owner census includes non-repairable and unresolved enabled
+  peers, rejects linked/reparse runtime roots and ancestors, and refuses
+  ambiguous ownership before probes or installers execute.
+- Current source evidence includes 119 native Linux repair cases with four
+  Windows-only skips, 160 Bridge authority cases and 167 packaging/scenario
+  cases. The native Windows ownership/census/junction/fresh-apply selection
+  passed 14 cases; this selection is not a new full Windows-suite claim.
+  These are source-contract results, not a fresh Docker provisioning,
+  native macOS, active-core apply or actual consuming-setup pass.
+- No new fresh-box acceptance receipt was produced after the previously
+  recorded package-feed TLS failure. #6464 retains that follow-up and the
+  remaining native/consuming setup gates; no TLS/feed exception or passing
+  first-provision result is inferred from the merge.
+- The independently owned Gateway SSH runtime leaf #7083 merged into `dev`
+  at `2026-10-17T11:53:40Z`; policy leaf #7087 remains open. This records
+  source availability only: neither shared lifecycle wiring nor live
+  automatic recovery has been delivered by those leaves.
+- Current stewardship is limited to completing owned upstream PRs. The
+  campaign and routing foundation remain Active; broader implementation and
+  activation stay paused. Managed client admission, controller/connector
+  lifecycle, authorization, useful roles, persistence and safe cutover remain
+  unresolved. No plugin/runtime update, enrollment, capacity acquisition or
+  service migration is authorized or performed by this journal update.

@@ -199,7 +199,10 @@ def materialize_uv_editable_ref_into(
         # refuse the whole consumer explicitly instead.
         return [f"SKIP {dest_consumer_dir}: {exc}"]
     for name, raw_path, lib, editable in refs:
-        if not editable:
+        if not editable and not (
+            uer.is_safe_lib_name(lib)
+            and uer.is_retained_flat_ref(source_consumer_dir, name, canonical_root_r / "libs" / lib)
+        ):
             log.append(
                 f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
                 "outside its own root but is missing editable = true -- "
@@ -345,8 +348,8 @@ def _uv_source_entry_pattern(name: str, raw_path: str) -> re.Pattern[str]:
     path_value = r'(?:"' + escaped_path + r'"|\'' + escaped_path + r"')"
     return re.compile(
         r'^([ \t]*' + key + r'\s*=\s*)\{\s*(?:'
-        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*true'
-        r'|editable\s*=\s*true\s*,\s*path\s*=\s*' + path_value +
+        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*(?:true|false)'
+        r'|editable\s*=\s*(?:true|false)\s*,\s*path\s*=\s*' + path_value +
         r')\s*\}[ \t]*(?:#.*)?$',
         re.MULTILINE,
     )
@@ -404,7 +407,7 @@ def _materialize_one_uv_editable_ref(
     so the rewrite must too, or a valid `uv`-editable entry authored with
     the other order would pass ``--check`` yet make promotion emit an
     unresolvable ``SKIP``."""
-    if not (canonical / "src").is_dir():
+    if not uer.has_canonical_python_sources(canonical):
         return f"SKIP {dest_lib_dir}: {canonical}/src not found -- refusing (canonical lib source must exist)"
     if not (canonical / "pyproject.toml").is_file():
         return f"SKIP {dest_lib_dir}: {canonical}/pyproject.toml missing -- refusing"
@@ -488,9 +491,11 @@ def materialize_installer_engine_ref_into(
     )
 
 
-def materialize_installer_engine_refs(dest: Path, *, canonical_root: Path) -> list[str]:
+def materialize_installer_engine_refs(
+    dest: Path, *, canonical_root: Path, human_sources: frozenset[Path] | None = None,
+) -> list[str]:
     """Expand canonical installer-engine references across every plugin."""
-    return mie.materialize_refs(dest, canonical_root=canonical_root)
+    return mie.materialize_refs(dest, canonical_root=canonical_root, human_sources=human_sources)
 
 
 def materialize_launch_wrapper_assets_into(
@@ -515,14 +520,20 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
 
     ``canonical_root`` is a parameter (not hardcoded to ``REPO``) so a test
     can point it at an isolated tree instead of the real checkout."""
+    human_sources = mie.validate_human_output_sources(canonical_root)
     log = [
         f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
         for pointer_path in find_retired_directory_pointers(dest)
     ]
     log.extend(materialize_file_pointers(dest, canonical_root=canonical_root))
     log.extend(materialize_uv_editable_refs(dest, canonical_root=canonical_root))
-    log.extend(materialize_installer_engine_refs(dest, canonical_root=canonical_root))
+    log.extend(materialize_installer_engine_refs(
+        dest, canonical_root=canonical_root, human_sources=human_sources,
+    ))
     log.extend(materialize_launch_wrapper_assets(dest, canonical_root=canonical_root))
+    log.extend(mie.materialize_human_output_declarations(
+        dest, canonical_root=canonical_root, human_sources=human_sources,
+    ))
     return log
 
 

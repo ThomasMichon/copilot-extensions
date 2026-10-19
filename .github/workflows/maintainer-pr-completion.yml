@@ -1,0 +1,48 @@
+name: Maintainer PR completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Optional PR number for bounded manual recovery"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  checks: read
+
+concurrency:
+  group: maintainer-pr-completion-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    # Authority, protected-environment and live-canary acceptance are separate.
+    # Automatic events are wired only with activation, avoiding idle skipped runs.
+    # Enabling requires a reviewed change; a writable repository variable is not consent.
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted workflow tooling without credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Report only using the staged source policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_PR: ${{ inputs.pr }}
+        run: |
+          args=()
+          if [ -n "$TARGET_PR" ]; then
+            if [[ ! "$TARGET_PR" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Invalid target PR number."
+              exit 1
+            fi
+            args+=(--pr "$TARGET_PR")
+          fi
+          python tools/maintainer_pr_completion.py --report-only "${args[@]}"

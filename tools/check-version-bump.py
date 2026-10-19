@@ -49,6 +49,9 @@ Usage::
     python tools/check-version-bump.py --list           # show the plugin<->vendored-lib map
 
 Exit code 0 = conformant (or nothing to check), 1 = a touched plugin didn't bump.
+Revision and blob arguments use an explicit path separator so Git does not try
+to stat long SHA expressions as Windows paths. A failed diff is an error, not
+an empty change set.
 """
 from __future__ import annotations
 
@@ -105,7 +108,9 @@ def _merge_base(base: str, head: str) -> str | None:
 
 
 def _changed_files(base: str, head: str) -> list[str]:
-    r = _git("diff", "--name-only", f"{base}..{head}")
+    r = _git("diff", "--name-only", f"{base}..{head}", "--")
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip() or "git diff failed while reading changed files")
     return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
 
 
@@ -114,7 +119,7 @@ def _plugin_json_version_at(ref: str, plugin: str) -> str | None:
 
     ``None`` when the file does not exist at that ref (a plugin added or removed
     across the range) or carries no version -- callers skip those."""
-    r = _git("show", f"{ref}:plugins/{plugin}/plugin.json")
+    r = _git("show", f"{ref}:plugins/{plugin}/plugin.json", "--")
     if r.returncode != 0:
         return None
     m = _PLUGIN_JSON_VERSION.search(r.stdout)
@@ -129,7 +134,7 @@ def _pyproject_project_version_at(ref: str, rel_pyproject: str) -> str | None:
     ``None`` on a missing file, unparseable TOML, or a manifest with no
     ``[project].version`` -- same "skip, don't crash" contract as
     ``_plugin_json_version_at``."""
-    r = _git("show", f"{ref}:{rel_pyproject}")
+    r = _git("show", f"{ref}:{rel_pyproject}", "--")
     if r.returncode != 0:
         return None
     try:
@@ -241,7 +246,8 @@ def _vendored_consumers() -> dict[str, list[str]]:
     packaged_peers = [
         plugin for plugin in (
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
-            "agent-logger", "agent-index", "agent-machines",
+            "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
+            "agent-pull-requests",
         )
         if (PLUGINS_DIR / plugin).is_dir()
     ]
@@ -431,7 +437,11 @@ def main(argv: list[str] | None = None) -> int:
         _print_list()
         return 0
 
-    code, violations = check(args.base, args.head)
+    try:
+        code, violations = check(args.base, args.head)
+    except RuntimeError as error:
+        print(f"check-version-bump: {error}", file=sys.stderr)
+        return 1
     if violations:
         print("check-version-bump: FAILED", file=sys.stderr)
         for v in violations:

@@ -283,7 +283,10 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
     ],
 )
 @pytest.mark.parametrize(
-    "owner", ["agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger"],
+    "owner", [
+        "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
+        "agent-pull-requests",
+    ],
 )
 def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
     tmp_path, monkeypatch, resolver, sibling_id, module, owner
@@ -341,7 +344,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         if owner == "agent-codespaces":
             adapter = _codespaces_adapter(monkeypatch)
             result = adapter.run(*raw_args)
-        elif owner in ("agent-containers", "agent-logger"):
+        elif owner in ("agent-containers", "agent-logger", "agent-pull-requests"):
             from agent_dispatch import peer_launch
 
             prefix = peer_launch.launch_prefix(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import json
 import os
 import sys
@@ -11,11 +12,11 @@ import time
 from . import registrar_discovery as rd
 from .config import overrides_path
 from .overrides import overridden_off_ids
-from .registrar import RegistrarError
+from .registrar import ProfileDeclaration, RegistrarError
 from .registrar_reconcile import declared_registration_id, declaration_to_registration
 from .supervisor_registration import registration_override_ids
 from .worker_instances import (
-    ACTIVATION_CONSENT, OWNER, active_dir, digest, read_records,
+    ACTIVATION_CONSENT, OWNER, active_dir, digest, instance_dir, read_records,
     save_instance, templates, validate_configuration, _validate_dependencies,
 )
 
@@ -107,19 +108,134 @@ def _states(declarations: tuple, overrides: set, observed: dict) -> dict:
     }
 
 
+def _code_span(value: str) -> str:
+    delimiter = "`"
+    while delimiter in value:
+        delimiter += "`"
+    return f"{delimiter} {value} {delimiter}"
+
+
 def _cards(row: dict, body: str) -> dict:
+    if row.get("component_errors"):
+        row.update(validity="metadata-error", pool_toggleable="false")
+        body += "\n\nComponent metadata requires repair: " + "; ".join(row["component_errors"])
+    if row.get("components"):
+        body += f"\n\nComponents ({row['components_basis']}):\n\n" + "\n\n".join(
+            f"{component['name']} ({component['kind']}, {component['id']})\n\n"
+            f"Declared scopes: {json.dumps(component['repo_scopes'])}; "
+            f"labels: {json.dumps(component['labels'])}.\n\n"
+            f"Source document: {_code_span(component['source_path']) if component['source_path'] else 'not recorded'}\n\n"
+            f"Content revision: {component['revision']}"
+            for component in row["components"]
+        )
     row["card"] = {"title": row["title"], "body": body}
     row["save_card"] = {"title": f"Save {row['title']}", "body": f"{body}\n\n{SAVE_EFFECTS}"}
     row["activate_card"] = {"title": f"Save and Activate {row['title']}", "body": f"{body}\n\n{ACTIVATE_EFFECTS}"}
     return row
 
 
+def _declared_routing(declaration: ProfileDeclaration) -> tuple[list[str], list[str]]:
+    if declaration.kind == "supervised-lane":
+        return [declaration.repos], list(declaration.labels)
+    spec = declaration.spec
+    if declaration.kind == "emitter" and spec.get("ci_repair") is not None:
+        from .producers.ci_repair import task_routing
+        config = spec["ci_repair"]
+        if not isinstance(config, Mapping):
+            raise RegistrarError(f"{declaration.name}: CI repair routing requires an object")
+        repo, labels = task_routing(config)
+        if not isinstance(repo, str):
+            raise RegistrarError(f"{declaration.name}: declared repo scope must be text")
+        return [repo], labels
+    loop = next(
+        (spec[key] for key in ("repository_issue_loop", "effort_driver_loop") if spec.get(key) is not None),
+        None,
+    ) if declaration.kind == "emitter" else None
+    if declaration.kind == "schedule":
+        entries = spec.get("schedules") or [spec]
+    else:
+        entries = [spec if loop is None else loop]
+    scopes = []
+    labels = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise RegistrarError(f"{declaration.name}: routing metadata requires an object")
+        repo = "all" if declaration.kind == "evaluator" and entry.get("all_repos") else entry.get("repo")
+        if declaration.kind == "schedule":
+            repo = repo or spec.get("default_repo")
+        if repo is not None and not isinstance(repo, str):
+            raise RegistrarError(f"{declaration.name}: declared repo scope must be text")
+        if repo:
+            scopes.append(repo)
+        selected_labels = [entry.get("task_label")] if loop is not None else entry.get("labels", ())
+        if selected_labels is None:
+            selected_labels = ()
+        if not isinstance(selected_labels, (list, tuple)) or any(
+            not isinstance(label, str) for label in selected_labels
+        ):
+            raise RegistrarError(f"{declaration.name}: declared labels must be a list of text")
+        labels.extend(selected_labels)
+    return list(dict.fromkeys(scopes)), list(dict.fromkeys(labels))
+
+
+def _component_metadata(declarations: tuple, *, basis: str, source_path: str | None = None) -> dict:
+    """Project registrar identity without exposing executable specs or environment."""
+    components = []
+    for declaration in declarations:
+        registration = declaration_to_registration(declaration, machine=None)
+        scopes, labels = _declared_routing(declaration)
+        components.append({
+            "id": registration["id"],
+            "name": declaration.name,
+            "kind": registration["kind"],
+            "declaration_kind": declaration.kind,
+            "owner": declaration.owner,
+            "repo_scope": scopes[0] if scopes else None,
+            "repo_scopes": scopes,
+            "labels": labels,
+            "source_path": declaration.source_path or source_path,
+            "revision": digest(registration),
+        })
+    if len(components) == 1:
+        kind = components[0]["kind"]
+    else:
+        kind = "composite" if components else "unknown"
+    return {
+        "kind": kind,
+        "components": components,
+        "components_basis": basis,
+    }
+
+
+def _catalog_components(
+    declarations: tuple, *, basis: str, context: str, errors: list[str],
+    source_path: str | None = None,
+) -> dict:
+    try:
+        return {
+            **_component_metadata(declarations, basis=basis, source_path=source_path),
+            "component_errors": [],
+        }
+    except (RegistrarError, TypeError, ValueError) as exc:
+        message = f"{context}: cannot project component metadata: {exc}"
+        errors.append(message)
+        return {
+            "kind": "unknown", "components": [], "components_basis": "unknown",
+            "component_errors": [message],
+        }
+
+
 def catalog() -> dict:
     """No mkdir, network clients, mutation, service ensure, or task access."""
+    from functools import cache
+    from plugin_activation import resolve_active_plugins
     from .overrides import load_overrides
+    from .worker_templates import discover_templates
+
+    activation = cache(resolve_active_plugins)
     errors = []
     records = read_records(errors=errors)
-    report = rd.RegistrarSources().refresh(emit_warnings=False)
+    report = rd.RegistrarSources(activation_source=activation).refresh(emit_warnings=False)
     errors.extend(str(finding) for finding in report.combined.findings)
     if report.trusted_error:
         errors.append(report.trusted_error)
@@ -133,6 +249,7 @@ def catalog() -> dict:
             "validity": "error", "enabled": "unknown", "activity": "unknown",
             "editable": "false", "instantiable": "false",
             "provenance": "registrar discovery",
+            "kind": "error", "components": [], "components_basis": "unknown",
         }, error + "\n\nRun registrar doctor; unsafe mutations are refused."))
     local_names = set()
     for record in records:
@@ -205,6 +322,11 @@ def catalog() -> dict:
             "dependency_errors": draft_errors,
             "publication_errors": publication_errors,
             **state,
+            **_catalog_components(
+                runtime_declarations, basis="published" if active_conf is not None else "draft",
+                context=record["id"], errors=errors,
+                source_path=str((publication if active_conf is not None else instance_dir() / f"{record['name']}.json").absolute()),
+            ),
         }
         if publication_errors:
             row.update(
@@ -212,6 +334,7 @@ def catalog() -> dict:
                 enabled="unknown", activity="unknown", pool_toggleable="false",
                 pool_name="", lanes=None,
                 statistics={"declarations": None, "lanes": None, "observed_running": None},
+                kind="unknown", components=[], components_basis="unknown",
             )
         elif active_conf is None:
             row.update(enabled="not-published", activity="not-published")
@@ -248,6 +371,10 @@ def catalog() -> dict:
             "pool_toggleable": str(not errors and declaration.kind == "supervised-lane").lower(),
             "pool_name": declaration.name, "owner": declaration.owner or "local",
             **_states((declaration,), overrides, observed),
+            **_catalog_components(
+                (declaration,), basis="source",
+                context=f"source:{declared_registration_id(declaration)}", errors=errors,
+            ),
         }
         body = (f"{row['description']}\n\nOwned by {row['provenance']}. "
                 "Read-only here: edit through the owning repository/plugin configuration flow.")
@@ -283,14 +410,36 @@ def catalog() -> dict:
             "editable": "false", "instantiable": "true", "prerequisites": prerequisite,
             "dependency_status": "inputs-required", "dependency_errors": [],
             "revision": digest(fragment), "fields": _fields("", _template_defaults(fragment)),
+            "kind": kind, "components": [], "components_basis": "template",
         }, f"Template: {name}\n\n{prerequisite}\n\nValidation refuses missing inputs/dependencies "
            "before saving or publishing. The template/source remains unchanged."))
+    if errors:
+        for row in rows:
+            if "pool_toggleable" in row:
+                row["pool_toggleable"] = "false"
+    provider_rows, template_discovery = discover_templates(activation())
+    rows.extend(provider_rows)
+    for index, finding in enumerate(template_discovery["findings"]):
+        detail = f"{finding['source']}: {finding['reason']}: {finding['detail']}"
+        rows.append({
+            "id": f"template-error:{index}", "title": "Template discovery requires attention",
+            "group": "Discovery errors", "finding_scope": "templates", "description": detail,
+            "provenance": finding["source"], "kind": "error", "validity": "error",
+            "enabled": "unknown", "activity": "not-applicable",
+            "editable": "false", "instantiable": "false",
+            "components": [], "components_basis": "unknown",
+            "card": {"title": "Template discovery requires attention", "body": detail},
+        })
     return {
+        "schema_version": 1,
+        "fetched_at": time.time(),
         "entries": rows,
         "summary": {
             "configured": len(records), "source_declarations": sum(r["group"] == "Source declarations" for r in rows),
-            "templates": len(templates()), "errors": errors,
+            "templates": len(templates()) + len(provider_rows), "errors": errors,
+            "template_discovery": template_discovery,
             "activity_known": observed["known"], "activity_reason": observed.get("reason"),
+            "activity_updated_at": observed.get("updated_at"),
             "target": "CLI-local machine; independent of operational machine selection",
         },
     }

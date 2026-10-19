@@ -11,6 +11,12 @@ import pytest
 
 from agent_bridge import __main__ as m
 from agent_bridge import session_targeting_cli as targeting
+from agent_bridge.local_cache_refresh import _checkout_root
+
+
+@pytest.fixture(autouse=True)
+def unmanaged_controller(monkeypatch, tmp_path):
+    monkeypatch.setattr("agent_bridge.local_cache_refresh._checkout_root", lambda path: tmp_path)
 
 
 def _ns(**kw):
@@ -34,6 +40,126 @@ def _ns(**kw):
 
 
 class TestCmdCreateCliDispatch:
+    @pytest.mark.parametrize("prefix", ["codespace", "container"])
+    @pytest.mark.parametrize("detach", [False, True])
+    def test_related_enablement_reaches_native_provider(self, monkeypatch, prefix, detach):
+        from types import SimpleNamespace
+        from agent_bridge.transport import PluginRef
+
+        calls = []
+        monkeypatch.setattr(targeting.shutil, "which", lambda name: f"/bin/{name}")
+        monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: ["/controller"])
+        monkeypatch.setattr(
+            "agent_bridge.related_plugins.related_plugins_for_repo",
+            lambda repo, anchors=None: [
+                PluginRef("disabled@synthetic", enable=False), PluginRef("enabled@synthetic"),
+            ],
+        )
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return SimpleNamespace(returncode=0, stdout="example/project")
+
+        monkeypatch.setattr(targeting.subprocess, "run", run)
+        with pytest.raises(SystemExit) as result:
+            targeting._cmd_create_cli(f"{prefix}:example", None, None, detach=detach)
+        assert result.value.code == 0
+        assert calls[0][1:] == ["namespace-target-repo", "example"]
+        assert calls[1][3:9] == [
+            "--stage-plugin-disabled", "disabled@synthetic",
+            "--stage-plugin", "enabled@synthetic", "--plugin-root", "/controller",
+        ]
+        assert ("--detach" in calls[1]) is detach
+
+    @pytest.mark.parametrize("prefix", ["codespace", "container"])
+    @pytest.mark.parametrize("configured_anchor", [False, True])
+    @pytest.mark.parametrize("detach", [False, True])
+    def test_controller_repository_precedes_anchor_for_native_payloads(
+        self, monkeypatch, tmp_path, prefix, configured_anchor, detach,
+    ):
+        import base64
+        import io
+        import json
+        import tarfile
+        from pathlib import Path
+        from types import SimpleNamespace
+        from plugin_resolve.reflection import build_plan
+
+        controller, anchor = tmp_path / "controller", tmp_path / "anchor"
+        for root, text, enable in ((controller, "controller-v2", False), (anchor, "anchor-v1", True)):
+            payload = root / ".ai" / "sample"
+            payload.mkdir(parents=True)
+            (payload / "plugin.json").write_text(json.dumps({
+                "name": "sample", "version": "1.0.0", "author": {"name": "Synthetic Publisher"},
+            }), encoding="utf-8")
+            (payload / "payload.txt").write_text(text, encoding="utf-8")
+            (root / ".ai" / "marketplace.json").write_text(json.dumps({
+                "name": "synthetic", "owner": {"name": "Synthetic Publisher"},
+                "plugins": [{"name": "sample", "source": "sample", "version": "1.0.0"}],
+            }), encoding="utf-8")
+            settings = root / ".github" / "copilot"
+            settings.mkdir(parents=True)
+            (settings / "settings.json").write_text(json.dumps({
+                "extraKnownMarketplaces": {
+                    "synthetic": {"source": {"source": "directory", "path": "./.ai"}},
+                },
+            }), encoding="utf-8")
+            related = root / ".agent-worktrees"
+            related.mkdir()
+            (related / "related.yaml").write_text(
+                "related:\n  example/project:\n    plugins:\n"
+                f"      - {{source: sample@synthetic, enable: {str(enable).lower()}}}\n",
+                encoding="utf-8",
+            )
+        (anchor / ".git").mkdir()
+        (controller / ".git").write_text(f"gitdir: {anchor / '.git' / 'worktrees' / 'controller'}\n")
+        nested = controller / "nested" / "directory"
+        nested.mkdir(parents=True)
+        monkeypatch.chdir(nested)
+        monkeypatch.setattr("agent_bridge.local_cache_refresh._checkout_root", _checkout_root)
+        monkeypatch.setattr(
+            "agent_bridge.related_plugins.control_plane_anchors",
+            lambda: [anchor] if configured_anchor else [],
+        )
+        monkeypatch.setattr(targeting.shutil, "which", lambda name: f"/bin/{name}")
+        plans = []
+
+        def run(argv, **kwargs):
+            if argv[1] == "namespace-target-repo":
+                return SimpleNamespace(returncode=0, stdout="example/project")
+            roots = [Path(argv[i + 1]) for i, arg in enumerate(argv) if arg == "--plugin-root"]
+            assert roots == [controller, *([anchor] if configured_anchor else [])]
+            assert "--stage-plugin" not in argv
+            assert argv[3:5] == ["--stage-plugin-disabled", "sample@synthetic"]
+            assert ("--detach" in argv) is detach
+            plan = build_plan([{"source": argv[4], "enable": False}], roots)
+            plans.append(plan)
+            item = plan["plugins"][0]
+            with tarfile.open(fileobj=io.BytesIO(base64.b64decode(item["archive"]))) as archive:
+                assert archive.extractfile(item["relative"] + "/payload.txt").read() == b"controller-v2"
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(targeting.subprocess, "run", run)
+        with pytest.raises(SystemExit) as result:
+            targeting._cmd_create_cli(f"{prefix}:example", None, None, detach=detach)
+        assert result.value.code == 0
+        assert len(plans) == 1 and plans[0]["plugins"][0]["enable"] is False
+
+    @pytest.mark.parametrize("prefix", ["codespace", "container"])
+    def test_explicit_worktree_is_forwarded_to_the_native_venue_owner(self, monkeypatch, prefix):
+        from types import SimpleNamespace
+        observed = []
+        monkeypatch.setattr(targeting.shutil, "which", lambda name: f"/bin/{name}")
+        monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+        monkeypatch.setattr(
+            targeting.subprocess, "run",
+            lambda argv, **kw: observed.append(argv) or SimpleNamespace(returncode=0),
+        )
+        with pytest.raises(SystemExit) as result:
+            m._cmd_create(_ns(target=f"{prefix}:synthetic", worktree_id="selected"))
+        assert result.value.code == 0
+        assert observed[0][3:5] == ["--worktree-id", "selected"]
+
     def test_codespace_target_execs_agent_codespaces_copilot(
         self, monkeypatch,
     ) -> None:

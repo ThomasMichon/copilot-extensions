@@ -29,6 +29,12 @@ class RecoveryPreview:
     source_head: str
     expected_head: str
     overrides: tuple[str, ...] = ()
+    saved_head: str = ""
+    publication_fingerprint: str = ""
+    action: Literal["rewrite", "settle-publication"] = "rewrite"
+    evidence_fingerprint: str = ""
+    evidence_status: Literal["none", "backed-sync", "unusable"] = "none"
+    rebase_base_sha: str = ""
 
     def __post_init__(self) -> None:
         if any(not value.strip() for value in (self.provider, self.repo, self.branch)):
@@ -41,6 +47,17 @@ class RecoveryPreview:
             raise ValueError("Recovery requires a full destination fingerprint.")
         if not all(_COMMIT.fullmatch(value) for value in (self.source_head, self.expected_head)):
             raise ValueError("Recovery requires full source and expected-head commit IDs.")
+        if self.saved_head and not _COMMIT.fullmatch(self.saved_head):
+            raise ValueError("Recovery requires a full original saved-head commit ID.")
+        for fingerprint in (self.publication_fingerprint, self.evidence_fingerprint):
+            if fingerprint and not _FINGERPRINT.fullmatch(fingerprint):
+                raise ValueError("Recovery requires full publication and evidence fingerprints.")
+        if self.action not in ("rewrite", "settle-publication"):
+            raise ValueError("Unknown recovery action.")
+        if self.evidence_status not in ("none", "backed-sync", "unusable"):
+            raise ValueError("Unknown recovery evidence status.")
+        if self.action == "settle-publication" and not self.evidence_fingerprint:
+            raise ValueError("Settlement requires independently validated publication evidence.")
 
     def confirmation(self, reason: str) -> str:
         payload = {"operation": asdict(self), "reason": _reason(reason)}
@@ -95,7 +112,7 @@ class ConfirmationRequired(ValueError):
             "Recovery confirmation no longer matches the proposed operation; obtain a new preview "
             "and operator sign-off."
             if changed else
-            "Recovery requires explicit operator sign-off for this PR and proposed rewrite. "
+            "Recovery requires explicit operator sign-off for this PR and proposed action. "
             "Inspect the preview; never add confirmation on an agent's own judgment."
         )
         super().__init__(message)
@@ -162,12 +179,14 @@ class RecoveryAudit:
     finished_at: str | None = None
     source_backup_ref: str | None = None
     published_backup_ref: str | None = None
+    saved_publication: dict[str, object] | None = None
 
     def _write(self) -> None:
         payload = {
             "schema": "agent-worktrees.pr-break-glass",
             "version": 1,
             "operation": asdict(self.approved.operation),
+            "saved_publication": self.saved_publication,
             "reason": self.approved.reason,
             "confirmation": self.approved.confirmation,
             "authorization_basis": "explicit per-PR operator sign-off; procedural confirmation",
@@ -207,6 +226,7 @@ class RecoveryAudit:
 
 def begin_audit(
     git_dir: Path, approved: ConfirmedRecovery, invoker: InvocationAttribution,
+    *, saved_publication: dict[str, object] | None = None,
 ) -> RecoveryAudit:
     """Persist an authorized attempt before publication; failures propagate."""
     if not git_dir.is_dir():
@@ -218,6 +238,7 @@ def begin_audit(
         approved=approved,
         invoker=invoker,
         started_at=datetime.now(timezone.utc).isoformat(),
+        saved_publication=saved_publication,
     )
     audit._write()
     return audit

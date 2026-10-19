@@ -57,6 +57,7 @@ class ForeignRepoResolution:
     repo_config: cfg.RepoConfig | None
     repo_name: str = ""
     same_as_active: bool = False
+    error: str = ""
 
     @property
     def resolved(self) -> bool:
@@ -81,15 +82,13 @@ def resolve_repo_config_for_slug(
        registered repo's remote. Loads **that repo's own** layered config via
        :func:`agent_worktrees.config.load_project_config` (never inheriting
        the caller's identity/config) and returns its ``default_repo``.
-    3. **Unregistered** -- no registered repo claims ``repo_slug``. Returns an
-       unresolved :class:`ForeignRepoResolution` (``repo_config=None``); the
-       caller must fail honestly rather than guess or fall back.
+    3. **Checkout-free** -- when no registered local project resolves, use
+       an explicit machine/related PR binding for the target slug. Without
+       such a binding, return unresolved rather than inherit the caller's.
 
-    A target repo found in the registry but with **no PR binding this
-    machine can build** (anchor unresolvable, config load failure) is treated
-    the same as unregistered -- partial/best-effort binding would risk acting
-    under the wrong provider/policy, which is exactly what this function
-    exists to prevent.
+    A registry entry without a local checkout does not veto an explicit
+    checkout-free binding. Other config load failures remain visible and
+    block fallback, so malformed or inaccessible project policy is not bypassed.
     """
     from . import repos as repos_mod
 
@@ -116,14 +115,21 @@ def resolve_repo_config_for_slug(
             continue
         try:
             foreign_config = cfg.load_project_config(entry.name)
-        except Exception:
-            return ForeignRepoResolution(None)
+        except cfg.ProjectNotRegisteredError:
+            break
+        except Exception as exc:
+            return ForeignRepoResolution(
+                None, entry.name,
+                error=f"Could not load registered project {entry.name!r}: {exc}",
+            )
         resolved = foreign_config.repos.get(entry.name)
         if resolved is None:
-            return ForeignRepoResolution(None)
+            break
         return ForeignRepoResolution(resolved, entry.name)
 
-    return ForeignRepoResolution(None)
+    from .pr_related_binding import resolve_related_binding
+    resolved, name, error = resolve_related_binding(config, repo_slug)
+    return ForeignRepoResolution(resolved, name, error=error)
 
 
 def _profile_for_pr_config(prc: cfg.PRConfig):

@@ -23,6 +23,9 @@ class-attribute access a test uses -- keep working unchanged.
 from __future__ import annotations
 
 import json
+import logging
+
+log = logging.getLogger("agent-dispatch.supervisor")
 
 #: Cleanup-envelope / conclusion-retry states (terminal-worker release and
 #: spawn-conclusion tracking share this three-state vocabulary).
@@ -153,6 +156,8 @@ def _conclusion_state(outcome: dict) -> str:
         "removed",
         "already-removed",
     }:
+        if action in {"primed", "already-primed"} and outcome.get("managed_gc_eligible") is False:
+            return _CONCLUSION_PENDING
         return _CONCLUSION_COMPLETE
     if action == "failed" or reason in _TRANSIENT_CONCLUSION_REASONS:
         return _CONCLUSION_PENDING
@@ -180,9 +185,86 @@ def _conclusion_retry_payload(reservation: dict) -> dict:
         return {}
     if not isinstance(payload, dict):
         return {}
-    if not payload.get("acp_session_id") and payload.get("session"):
-        payload["acp_session_id"] = payload["session"]
+    identity = payload.get("acp_session_id")
+    if not isinstance(identity, str) or not identity.strip():
+        if "acp_session_id" in payload:
+            log.warning(
+                "Ignoring invalid ACP session identity in cleanup checkpoint for %s",
+                reservation.get("key", "unknown reservation"),
+            )
+            payload.pop("acp_session_id")
+        legacy_identity = payload.get("session")
+        if isinstance(legacy_identity, str) and legacy_identity.strip():
+            payload["acp_session_id"] = legacy_identity
     return payload
+
+
+def _retired_cleanup_plan(
+    reservation: dict,
+    *,
+    local_session_id: str | None = None,
+    conclusion_session: str | None = None,
+    target_missing: bool = False,
+    cleanup_kind: str = "attempt",
+) -> tuple[str, dict]:
+    prior = _conclusion_retry_payload(reservation)
+    if conclusion_session is None:
+        conclusion_session = prior.get("acp_session_id")
+    if target_missing:
+        worktree_cleanup = {
+            "state": _CONCLUSION_COMPLETE,
+            "outcome": {
+                "action": "already-removed",
+                "reason": "recorded-target-directory-missing",
+            },
+        }
+    elif reservation.get("conclusion_state") in {
+        _CONCLUSION_COMPLETE,
+        _CONCLUSION_HELD,
+    }:
+        worktree_cleanup = {
+            "state": reservation.get("conclusion_state"),
+            "outcome": prior,
+        }
+    elif reservation.get("worktree_ownership") in {"targeted", "reused"}:
+        worktree_cleanup = {
+            "state": _CONCLUSION_COMPLETE,
+            "outcome": {
+                "action": "preserved",
+                "reason": f"{reservation.get('worktree_ownership')}-worktree",
+            },
+        }
+    elif reservation.get("worktree"):
+        worktree_cleanup = {"state": _CONCLUSION_PENDING}
+    else:
+        worktree_cleanup = {
+            "state": _CONCLUSION_COMPLETE,
+            "outcome": {
+                "action": "skipped",
+                "reason": "reservation-has-no-worktree",
+            },
+        }
+    payload: dict[str, object] = {
+        "action": "pending",
+        "reason": "retired-body-cleanup",
+        "cleanup_kind": cleanup_kind,
+        "worktree_cleanup": worktree_cleanup,
+    }
+    states = [worktree_cleanup["state"]]
+    if local_session_id is not None:
+        payload["session_end"] = {
+            "state": _CONCLUSION_PENDING,
+            "session_id": local_session_id,
+        }
+        states.append(_CONCLUSION_PENDING)
+    if conclusion_session:
+        payload["acp_session_id"] = conclusion_session
+    state = (
+        _CONCLUSION_PENDING
+        if _CONCLUSION_PENDING in states
+        else (_CONCLUSION_HELD if _CONCLUSION_HELD in states else _CONCLUSION_COMPLETE)
+    )
+    return state, payload
 
 
 def _conclusion_retry_meta(reservation: dict) -> tuple[int, float]:
@@ -193,3 +275,15 @@ def _conclusion_retry_meta(reservation: dict) -> tuple[int, float]:
     except (TypeError, ValueError):
         return 0, 0.0
     return attempts, next_at
+
+
+def _conclusion_retry_due(reservation: dict, now: float) -> bool:
+    payload = _conclusion_retry_payload(reservation)
+    if isinstance(payload.get("worktree_cleanup"), dict):
+        return any(
+            isinstance(payload.get(name), dict)
+            and payload[name].get("state") == _CONCLUSION_PENDING
+            and _component_retry_meta(payload[name])[1] <= now
+            for name in ("session_end", "worktree_cleanup")
+        )
+    return _conclusion_retry_meta(reservation)[1] <= now

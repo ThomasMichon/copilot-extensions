@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from .carrier_protocol import (
@@ -37,6 +38,35 @@ if TYPE_CHECKING:
     from .carrier_persistent import PersistentCarrier
 
 
+_STARTUP_STDERR_REASONS = (
+    ("host_key_rejected", (b"host key verification failed", b"remote host identification has changed")),
+    ("authentication_rejected", (b"permission denied", b"authentication failed")),
+    ("command_unavailable", (
+        b"command not found", b": not found", b"no such file or directory",
+        b"is not recognized as an internal or external command",
+        b"the system cannot find the path specified",
+    )),
+)
+
+
+async def _drain_startup_stderr(
+    stream: asyncio.StreamReader, state: dict[str, str | None],
+) -> None:
+    suffix = b""
+    try:
+        while chunk := await stream.read(1024):
+            if state["reason"] is None:
+                window = (suffix + chunk).lower()
+                for reason, phrases in _STARTUP_STDERR_REASONS:
+                    if any(phrase in window for phrase in phrases):
+                        state["reason"] = reason
+                        break
+                suffix = window[-64:] if state["reason"] is None else b""
+    except OSError:
+        if state["reason"] is None:
+            state["reason"] = "stderr_read_failed"
+
+
 class _CarrierLifecycleMixin:
     """Connection lifecycle: start, reconnect backoff, retire, diagnose."""
 
@@ -61,7 +91,8 @@ class _CarrierLifecycleMixin:
         self.connection_identity = connection_identity
         self.remote_command = remote_command
         self._opener = opener
-        self._closer = closer
+        self._process_closer = closer
+        self._closer = self._close_process
         self._idle_timeout = idle_timeout
         self._heartbeat_interval = heartbeat_interval
         self._stale_timeout = stale_timeout
@@ -81,6 +112,7 @@ class _CarrierLifecycleMixin:
         self._reconnect_task: asyncio.Task[None] | None = None
         self._idle_task: asyncio.Task[None] | None = None
         self._pending: dict[str, asyncio.Future[Envelope]] = {}
+        self._request_epochs: dict[str, int] = {}
         self._subscriptions: dict[str, CarrierSubscription] = {}
         self._buffer_budget = _BufferBudget(max_buffered_bytes)
         self._logical_clients = 0
@@ -92,6 +124,8 @@ class _CarrierLifecycleMixin:
         self._backoff = reconnect_initial
         self._reconnect_count = 0
         self._transport_epoch = 0
+        self._startup_failure: dict[str, Any] | None = None
+        self._stderr_tasks: dict[int, asyncio.Task[None]] = {}
 
 
     async def acquire(self) -> CarrierLease:
@@ -136,6 +170,13 @@ class _CarrierLifecycleMixin:
                 and self._state != "connecting"
             ):
                 return
+            if self._process is not None and self._process.returncode is not None:
+                await self._transport_failed(
+                    CarrierUnavailable("carrier process exited", reconnectable=True),
+                    expected_epoch=self._transport_epoch,
+                )
+            if self._closed:
+                raise CarrierUnavailable("carrier has retired")
             while True:
                 delay = self._next_connect_at - time.monotonic()
                 if delay > 0:
@@ -143,18 +184,33 @@ class _CarrierLifecycleMixin:
                 self._state = "connecting"
                 attempt_epoch = self._transport_epoch
                 process: _Process | None = None
+                stderr_state: dict[str, str | None] = {"reason": None}
+                stage = "open"
                 try:
                     process = await self._opener()
+                    stage = "stdio"
                     if process.stdin is None or process.stdout is None:
                         raise CarrierUnavailable(
                             "carrier process is missing stdio pipes"
+                        )
+                    stderr = getattr(process, "stderr", None)
+                    if stderr is not None:
+                        stderr_task = asyncio.create_task(
+                            _drain_startup_stderr(stderr, stderr_state),
+                            name="ssh-carrier-stderr",
+                        )
+                        self._stderr_tasks[id(process)] = stderr_task
+                        stderr_task.add_done_callback(
+                            partial(self._forget_stderr, id(process))
                         )
                     frame = encode_envelope(
                         hello_envelope(max_frame_size=self._max_frame_size),
                         max_frame_size=self._max_frame_size,
                     )
+                    stage = "hello-write"
                     process.stdin.write(frame)
                     await process.stdin.drain()
+                    stage = "hello-read"
                     peer_hello = await asyncio.wait_for(
                         read_envelope(
                             process.stdout,
@@ -162,6 +218,7 @@ class _CarrierLifecycleMixin:
                         ),
                         timeout=self._handshake_timeout,
                     )
+                    stage = "hello-validate"
                     validate_hello(peer_hello)
                     outbound_max_frame_size = negotiated_frame_size(
                         peer_hello,
@@ -172,6 +229,7 @@ class _CarrierLifecycleMixin:
                         await self._closer(process)
                     raise
                 except Exception as exc:
+                    exit_code = process.returncode if process is not None else None
                     if process is not None:
                         await self._closer(process)
                     if (
@@ -180,10 +238,22 @@ class _CarrierLifecycleMixin:
                     ):
                         continue
                     self._record_connect_failure(exc)
+                    reason = stderr_state["reason"] or (
+                        "startup_timeout" if isinstance(exc, (TimeoutError, asyncio.TimeoutError))
+                        else "process_exited" if exit_code is not None
+                        else "no_startup_diagnostic"
+                    )
+                    self._startup_failure = {
+                        "stage": stage,
+                        "error_type": type(exc).__name__,
+                        "exit_code": exit_code,
+                        "reason": reason,
+                    }
                     raise CarrierUnavailable(
-                        f"carrier handshake failed: {type(exc).__name__}",
+                        f"carrier handshake failed: {type(exc).__name__} "
+                        f"(stage={stage}, exit={exit_code}, reason={reason})",
                         reconnectable=True,
-                    ) from exc
+                    ) from None
 
                 if self._closed:
                     await self._closer(process)
@@ -222,6 +292,7 @@ class _CarrierLifecycleMixin:
                     )
                 self._state = "healthy"
                 self._last_error = ""
+                self._startup_failure = None
                 self._next_connect_at = 0.0
                 self._backoff = self._reconnect_initial
                 self._start_task(
@@ -237,6 +308,29 @@ class _CarrierLifecycleMixin:
                     "ssh-carrier-stale",
                 )
                 return
+
+
+    def _forget_stderr(self, process_id: int, task: asyncio.Task[None]) -> None:
+        if self._stderr_tasks.get(process_id) is task:
+            del self._stderr_tasks[process_id]
+
+
+    async def _close_process(self, process: _Process) -> None:
+        try:
+            await self._process_closer(process)
+        finally:
+            stderr_task = self._stderr_tasks.pop(id(process), None)
+            try:
+                if stderr_task is not None:
+                    try:
+                        await asyncio.wait({stderr_task}, timeout=0.05)
+                    finally:
+                        stderr_task.cancel()
+                        await asyncio.gather(stderr_task, return_exceptions=True)
+            finally:
+                transport = getattr(getattr(process, "stderr", None), "_transport", None)
+                if transport is not None:
+                    transport.close()
 
 
     def _record_connect_failure(self, exc: BaseException) -> None:
@@ -310,6 +404,7 @@ class _CarrierLifecycleMixin:
                 if not future.done():
                     future.set_exception(CarrierUnavailable("carrier retired"))
             self._pending.clear()
+            self._request_epochs.clear()
             for subscription in self._subscriptions.values():
                 subscription._terminate(CarrierUnavailable("carrier retired"))
             self._subscriptions.clear()
@@ -325,7 +420,7 @@ class _CarrierLifecycleMixin:
     def diagnostics(self) -> dict[str, Any]:
         """Return counts and health only; no command, payload, token, or SSH data."""
         queue = self._writer_queue
-        return {
+        result: dict[str, Any] = {
             "state": self._state,
             "logical_clients": self._logical_clients,
             "active_requests": len(self._pending),
@@ -336,3 +431,6 @@ class _CarrierLifecycleMixin:
             "reconnect_count": self._reconnect_count,
             "last_error": self._last_error or None,
         }
+        if self._startup_failure is not None:
+            result["startup_failure"] = dict(self._startup_failure)
+        return result

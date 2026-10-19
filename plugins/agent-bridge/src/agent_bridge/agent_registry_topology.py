@@ -242,7 +242,9 @@ def _find_covering_agent(
         return None
 
     env_name = platform
-    resolver = compat.AgentResolver(registry, machines)
+    resolver = compat.AgentResolver(
+        registry, machines, local_execution_space=local_execution_space,
+    )
     for name, agent in registry.items():
         if agent.auto_discovered or agent.derived or agent.project != local_agent.project:
             continue

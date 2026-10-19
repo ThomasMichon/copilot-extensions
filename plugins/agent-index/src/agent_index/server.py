@@ -388,6 +388,8 @@ def build_app(*, passive: bool = False) -> FastAPI:
         with search_engine_lock:
             cached_search_engine = None
 
+    app.state.get_search_engine = get_search_engine
+
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:
         gate: DrainGate = request.app.state.drain_gate
@@ -731,6 +733,22 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
 
     cfg = cfg or load_config()
     data_dir().mkdir(parents=True, exist_ok=True)
+    fleet_policy = None
+    policy_path = os.environ.get("AGENT_INDEX_FLEET_POLICY")
+    if policy_path:
+        from .fleet_backend import FleetPolicy
+        from .indexing.engine import configured_sources
+        from .store.source_layout import LAYOUT, selected_layout
+
+        if os.environ.get("AGENT_INDEX_SOURCE_MODE") != "explicit":
+            raise ValueError("fleet ingress requires explicit declared sources")
+        if selected_layout() != LAYOUT:
+            raise ValueError("fleet ingress requires an explicitly selected source-aware store")
+        if cfg.host not in ("127.0.0.1", "::1", "localhost"):
+            raise ValueError("fleet ingress requires a private native API listener")
+        fleet_policy = FleetPolicy.load(
+            Path(policy_path), declared_sources=tuple(configured_sources()),
+        )
     sock = _bind_listen_socket(cfg.host, cfg.port)
     bound_port = sock.getsockname()[1]
     app = build_app(passive=passive)
@@ -756,7 +774,13 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
             namespaced = bool(app.state.installation_id)
             _publish_active_evidence(app, strict=namespaced)
             _publish_routing(cfg, bound_port, strict=namespaced)
-        server.run(sockets=[sock])
+        if fleet_policy is None:
+            server.run(sockets=[sock])
+        else:
+            from .fleet_backend import fleet_ingress
+
+            with fleet_ingress(fleet_policy, app):
+                server.run(sockets=[sock])
     finally:
         if app.state.promoted:
             _clear_routing()

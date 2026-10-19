@@ -15,8 +15,11 @@ version skew, and this guard fails the moment one is introduced.
 
 Scope: every ``pydantic.BaseModel`` subclass *defined in* the ``agent_bridge``
 package (discovered by walking the package so new models are covered
-automatically). ``extra="allow"`` and the default (``"ignore"``) are both fine —
-only ``"forbid"`` is banned.
+automatically), except the two explicitly classified local remote-endpoint
+configuration models. Those reject unknown configuration rather than silently
+ignoring an unsupported auth selector; they are not peer request/response
+readers. ``extra="allow"`` and the default (``"ignore"``) are both fine for wire
+models — only ``"forbid"`` is banned.
 """
 
 from __future__ import annotations
@@ -27,6 +30,9 @@ import pkgutil
 from pydantic import BaseModel
 
 import agent_bridge
+from agent_bridge.remote_acp_config import RemoteAcpTarget, RemoteAuth
+
+_LOCAL_CONFIGURATION_MODELS = frozenset({RemoteAcpTarget, RemoteAuth})
 
 
 def _agent_bridge_models() -> list[type[BaseModel]]:
@@ -73,7 +79,7 @@ def test_no_wire_model_forbids_extra_fields():
     offenders = [
         f"{c.__module__}.{c.__name__}"
         for c in _agent_bridge_models()
-        if c.model_config.get("extra") == "forbid"
+        if c not in _LOCAL_CONFIGURATION_MODELS and c.model_config.get("extra") == "forbid"
     ]
     assert not offenders, (
         "These agent-bridge wire models set extra='forbid', which breaks "
@@ -93,3 +99,14 @@ def test_guard_catches_a_forbidding_model():
     # Defined in this test module, not agent_bridge, so the real guard ignores
     # it -- but the detection predicate must flag it.
     assert _Forbidding.model_config.get("extra") == "forbid"
+
+
+def test_local_configuration_is_explicit_and_does_not_exempt_wire_subclasses():
+    assert _LOCAL_CONFIGURATION_MODELS <= set(_agent_bridge_models())
+    assert all(c.model_config.get("extra") == "forbid" for c in _LOCAL_CONFIGURATION_MODELS)
+    assert all(c.model_config.get("frozen") for c in _LOCAL_CONFIGURATION_MODELS)
+
+    class FutureWireModel(RemoteAuth):
+        pass
+
+    assert FutureWireModel not in _LOCAL_CONFIGURATION_MODELS

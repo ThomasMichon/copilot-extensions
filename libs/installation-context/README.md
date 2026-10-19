@@ -12,6 +12,8 @@ cells. Mutation remains explicit and non-automatic:
   plus `awk`, a SHA-256 command (`sha256sum`, `shasum`, or `openssl`), and a
   physical-path command (`realpath -m` or `readlink -f`).
 - `installation-context.ps1` provides the PowerShell 5.1+/pwsh bootstrap.
+  Missing native types compile in one batch to bound cold diagnostic startup;
+  re-entry retains already-loaded types rather than recompiling them.
 - `legacy-entrypoint-probe.sh` and `legacy-entrypoint-probe.ps1` derive
   conservative legacy-footprint evidence from `payload-invocation.json` and
   gate installer/bootstrap mutation through the read-only `probe-legacy`
@@ -69,6 +71,34 @@ of Windows device basenames.
 
 All successful actions emit one JSON object. Ambiguous or mismatched evidence
 writes an actionable error to stderr and exits nonzero.
+
+### WSL guest identity
+
+Direct WSL entry normally supplies the distribution name; SSH and supervised
+entry may not. In a real WSL guest, a missing name now refuses explicitly
+rather than becoming ordinary native POSIX identity. Native hosts and containers
+ignore inherited WSL shell variables. Logical machine addresses remain owned
+by the existing machine map, separate from distribution and host-default names.
+
+Use `guest-status --distribution "Example Distro"` to inspect the current guest,
+or, on Windows, compare that designated name with the current user's registered
+WSL default. The requested name is a comparison only: it cannot supply missing
+guest identity or authorize enrollment over an unregistered SSH entry.
+Reports never select a different guest, alter the OS default or
+rewrite existing runtime/worktree records. A guest cannot observe the Windows
+host default through this API: `hostDefault.status` is honestly `unavailable`.
+
+To make a guest recognizable without shell variables, invoke
+`guest-register --distribution "Example Distro"` through its matching named
+direct WSL entry. PowerShell uses `-Distribution`. This explicit enrollment
+writes only the canonical OS profile's
+`.copilot-extensions/guest-environment.json`, under a bounded lock, with
+owner-only file creation. Its versioned schema binds the named distribution
+to the OS machine-id and canonical account home, not an incumbent runtime owner.
+All three runners read the same registration; repeated enrollment is idempotent.
+Conflicting, linked, malformed, foreign-profile/guest and shared-writable
+registrations refuse rather than being replaced. No automatic repair, distro
+rename or data relocation is performed.
 
 ### Interrupted reservations
 

@@ -24,11 +24,10 @@ import argparse
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 from dataclasses import asdict
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from agent_procutil import no_window_flags as _creation_flags
 
@@ -43,10 +42,12 @@ from .config import (
 )
 from .resolver import (
     _append_copilot_args,
+    add_related_plugins,
     build_restricted_acp_spawn_command,
     host_gh_token,
     resolve_extra_copilot_args,
     resolve_live_exec_target,
+    target_repo_for_cli,
 )
 from .ssh_transport import (
     build_remote_command,
@@ -135,18 +136,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional container name; omitted clears all safely stale records",
     )
 
-    exec_p = sub.add_parser("exec", help="Run the ACP launch command in a container")
-    exec_p.add_argument("name", help="Container name")
-    exec_p.add_argument("--stdio", action="store_true", help="Attach stdio transport.")
-    exec_p.add_argument(
-        "--force", action="store_true",
-        help="Terminate a live SSH holder and take over this trusted container",
-    )
-    exec_p.add_argument("copilot_args", nargs="*", help="Extra copilot args (after --).")
+    from .dispatch_projection import add_exec_subparser
+    add_exec_subparser(sub)
 
     from .copilot_login import add_copilot_login_subparser as _add_copilot_login_subparser
     _add_copilot_login_subparser(sub)
-    from .copilot_venue import add_copilot_subparser as _add_copilot_subparser
+    from .copilot_venue import add_copilot_subparser as _add_copilot_subparser, add_plugin_selection_arguments
     _add_copilot_subparser(sub)
     from .forward_keeper import add_subparser as _add_forward_keeper_subparser
     _add_forward_keeper_subparser(sub)
@@ -239,8 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     # The `container:` namespace resolver over a process boundary: agent-bridge
     # drives these instead of importing `agent_containers.resolver`. Emit plain
     # JSON (agent_bridge-free); the bridge shim reconstructs SpawnTarget /
-    # NamespaceAgentInfo. Containers do not support cross-repo / plugins, so
-    # namespace-resolve takes only a name (mirrors the resolver's resolve(name)).
+    # NamespaceAgentInfo. Bridge owns selection; trusted metadata carries it.
     sub.add_parser(
         "namespace-list",
         help="Print JSON list of container agents for the `container:` namespace.",
@@ -252,10 +246,10 @@ def main(argv: list[str] | None = None) -> int:
         "(not-found -> exit 3).",
     )
     ns_resolve_p.add_argument("name", help="Container name")
+    add_plugin_selection_arguments(ns_resolve_p)
     ns_target_p = sub.add_parser(
         "namespace-target-repo",
-        help="Print the workspace repo a container hosts (always empty -- "
-        "containers do not drive related-repo plugin injection).",
+        help="Print the workspace repo a container hosts for bridge plugin selection.",
     )
     ns_target_p.add_argument("name", help="Container name")
     ns_ready_p = sub.add_parser(
@@ -272,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
     ns_recreate_p.add_argument("--timeout", type=float, default=600.0)
     from .workspace import add_workspace_subparsers
     add_workspace_subparsers(sub)
+    from .dispatch_projection import add_subparsers as add_dispatch_subparsers
+    add_dispatch_subparsers(sub)
 
     # --- relay-profile (declarative credential-relay seam for agent-bridge #892 Inc 2)
     sub.add_parser(
@@ -387,8 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "namespace-resolve":
             return _cmd_namespace_resolve(args)
         if args.command == "namespace-target-repo":
-            print("")  # containers do not drive related-repo plugin injection
-            return 0
+            return target_repo_for_cli(args.name)
         if args.command == "namespace-ensure-ready":
             return _cmd_namespace_ensure_ready(args)
         if args.command == "namespace-recreate":
@@ -548,24 +543,17 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
 
 def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
     """Remove only a provider-created launch env path."""
+    from .session_host_context import guard_cleanup_path
+
     if args.expected_instance:
         from .session_host_context import cleanup_user
 
         user = cleanup_user(args.expected_instance, args.expected_user)
     else:
         _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)
-    remote_env = PurePosixPath(args.remote_env)
-    if (
-        not remote_env.is_absolute()
-        or len(remote_env.parts) < 4
-        or remote_env.parts[-3:-1] != (".agent-containers", "launch")
-        or remote_env.suffix != ".env"
-        or not re.fullmatch(r"[0-9a-f]{32}", remote_env.stem)
-    ):
-        raise RuntimeError(
-            f"Refusing unsafe Session Host env cleanup path: {args.remote_env!r}"
-        )
-    if cleanup_remote_env(args.expected_instance or args.name, user, str(remote_env)) is False:
+    target = args.expected_instance or args.name
+    remote_env = guard_cleanup_path(target, user, args.remote_env)
+    if cleanup_remote_env(target, user, remote_env) is False:
         raise RuntimeError("launch environment cleanup could not be confirmed")
     return 0
 
@@ -605,7 +593,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
     except KeyError as e:
         print(str(e).strip("'"), file=sys.stderr)
         return _NS_NOT_FOUND_EXIT
-    print(json.dumps(spec))
+    print(json.dumps(add_related_plugins(spec, getattr(args, "stage_plugins", []))))
     return 0
 
 
@@ -965,6 +953,10 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     stdio and the child (inherited pipes are unreliable under
     ``CREATE_NO_WINDOW`` on Windows).
     """
+    if getattr(args, "dispatch_binding_id", None) is not None or getattr(args, "expected_container_id", None) is not None:
+        from .dispatch_projection import launch_task
+
+        return launch_task(args, _exec_stdio)
     extra = resolve_extra_copilot_args(getattr(args, "copilot_args", None))
     target = resolve_live_exec_target(args.name, config=load_config())
 

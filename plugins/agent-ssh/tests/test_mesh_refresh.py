@@ -120,9 +120,69 @@ def registry_run():
 
 def test_refresh_mesh_reports_missing_machines_yaml(tmp_path: Path) -> None:
     result = mesh_refresh.refresh_mesh(machines_yaml=tmp_path / "absent.yaml")
+    assert result.ok is False
+    assert result.machines_yaml == str(tmp_path / "absent.yaml")
+    assert "cannot load mesh source" in result.detail
+
+
+def test_refresh_mesh_absent_conventional_source_is_noop(monkeypatch) -> None:
+    monkeypatch.setattr(mesh_refresh.mesh_mod, "find_machines_file", lambda: None)
+    result = mesh_refresh.refresh_mesh()
     assert result.ok is True
     assert result.machines_yaml is None
     assert "no machines.yaml" in result.detail
+
+
+@pytest.mark.parametrize("body", [
+    "", "machines: []", "- list", "machines: [unterminated",
+    "machines: {host-a: []}", "machines: {host-a: {ssh: []}}",
+    "machines: {host-a: {dtssh: 1}}",
+    "machines: {host-a: {ssh: {environments: invalid}}}",
+    "machines: {host-a: {ssh: {environments: ''}}}",
+    "machines: {host-a: {ssh: {environments: 0}}}",
+    "machines: {host-a: {dtssh: {alias: []}}}",
+    "machines: {host-a: {dtssh: {alias: {}}}}",
+    "machines: {host-a: {dtssh: {alias: false}}}",
+    "machines: {host-a: {ssh: {environments: [{name: linux, alias: []}]}}}",
+    "machines: {host-a: {ssh: {environments: [{name: linux, alias: {}}]}}}",
+])
+def test_refresh_mesh_invalid_source_does_not_actuate(
+    tmp_path: Path, body: str,
+) -> None:
+    path = tmp_path / "machines.yaml"
+    path.write_text(body, encoding="utf-8")
+
+    def forbidden():
+        pytest.fail("invalid topology must fail before transport discovery")
+
+    result = mesh_refresh.refresh_mesh(machines_yaml=path, resolve_payload_root=forbidden)
+    assert result.ok is False
+    assert "cannot load mesh source" in result.detail
+    assert not (tmp_path / ".ssh").exists()
+
+
+def test_refresh_mesh_confirmed_empty_source_is_noop(tmp_path: Path) -> None:
+    path = tmp_path / "machines.yaml"
+    path.write_text("machines: {}\n", encoding="utf-8")
+    result = mesh_refresh.refresh_mesh(machines_yaml=path)
+    assert result.ok is True
+    assert result.machines_yaml == str(path)
+    assert result.aliases == []
+    assert not (tmp_path / ".ssh").exists()
+
+
+def test_refresh_mesh_unreadable_source_is_not_empty(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "machines.yaml"
+    path.write_text(SAMPLE, encoding="utf-8")
+
+    def unreadable(_path, **_kwargs):
+        raise PermissionError("source read denied")
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    result = mesh_refresh.refresh_mesh(machines_yaml=path)
+    assert result.ok is False
+    assert "source read denied" in result.detail
+    assert not (tmp_path / ".ssh").exists()
 
 
 def test_refresh_mesh_reports_no_dtssh_machines(tmp_path: Path) -> None:

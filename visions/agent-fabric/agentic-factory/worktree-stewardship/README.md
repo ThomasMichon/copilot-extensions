@@ -1,15 +1,16 @@
 # Worktree Stewardship - Vision
 
-- **Subject:** Consent-based continuity of dormant worktree objectives
+- **Subject:** Explicit conversation handover and consent-based worktree continuity
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-10
+- **Last revised:** 2026-10-18
 
 ## Purpose & Intent
 
 Accepted work remains durably pending with a visible owner until its objective is
-verified complete or explicitly transferred. Dormant worktrees can regain useful
-attention without losing their founding intent, source work, or operator control.
+verified complete or explicitly transferred. Interactive work can become
+supervised background responsibility, and dormant worktrees can regain useful
+attention, without losing founding intent, source work, or operator control.
 Stewardship composes the existing registrar, supervisor, task queue, and worktree
 authority; it is not another cleanup queue.
 
@@ -32,6 +33,34 @@ whose scope covers the objective, together with a sufficiently settled charter
 and done criteria. Ambiguous mandates request steering. Age, a merged branch,
 or an inactive process is neither consent nor proof of completion.
 Orchestrators may assess and propose candidates; their proposal is not consent.
+
+### explicit-conversation-handover
+
+An operator can hand over a sufficiently settled conversation in either of two
+forms: continue the same worktree objective under background supervision, or
+graduate accepted intent into a durable task or effort allocated to an eligible
+worker. Both preserve relevant decisions, source changes, restrictions,
+acceptance and traceability to the originating conversation. Graduation leaves
+the planning conversation free to continue without making it a competing owner
+of the delegated execution.
+
+Handover is complete only when the rightful authority durably accepts the
+responsibility and its execution or waiting state is visible. A queued task may
+wait for capacity without being abandoned; a sent message or successful process
+launch alone is not acceptance. Closing the originating console after handover
+does not cancel the objective. Background responsibility is independent of
+whether its supported execution body is CLI, ACP or another session provider;
+handover does not require replacing a healthy conversation merely to hide it.
+
+### scoped-objectives-and-sequencing
+
+Each worktree carries a legible objective, current slice, permitted repository
+and effect scope, acceptance and control owner. Related work names its task,
+effort, dependency and contribution relationships rather than deriving scope
+from a title or giving a worker the whole portfolio's authority.
+Ordered work advances through explicit prerequisites and completion conditions;
+blocked successors remain pending, while independent eligible work can proceed.
+The task authority owns these relationships, not a second stewardship sequencer.
 
 ### founding-objective-continuity
 

@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agent_worktrees import config as cfg, tracking, tracking_session_deregistration_write, tracking_write
 from agent_worktrees.tracking import SessionEntry, WorktreeRecord, save_record
@@ -90,6 +91,129 @@ def test_apply_session_deregister_is_a_noop_for_an_unknown_session(record_path):
     assert record.session_entry("sess-1").ended_at is None
 
 
+def test_delayed_source_end_preserves_replacement_and_claim(record_path, monkeypatch):
+    from agent_worktrees import obligations
+
+    record = tracking.load_record(record_path)
+    ref = tracking.format_claim_ref(
+        record.machine, record.repo, record.worktree_id, session="sess-1",
+    )
+    tracking.add_resource_claim(
+        record,
+        tracking.ResourceClaim(
+            kind="session", ref=ref, created_at="first", state=obligations.ACTIVE,
+        ),
+        save=False,
+    )
+    tracking.save_record(record, record_path)
+    raw = yaml.safe_load(record_path.read_text())
+    raw["sessions"][0]["activations"] = [
+        {
+            "ordinal": 1, "started_at": "first", "start_recorded_at": "first",
+            "start_source": "hook", "source_identity": "native:first",
+            "ended_at": "replacement", "end_source": "inferred:next-start",
+        },
+        {
+            "ordinal": 2, "started_at": "replacement",
+            "start_recorded_at": "replacement", "start_source": "hook",
+            "source_identity": "native:replacement",
+        },
+    ]
+    record_path.write_text(yaml.safe_dump(raw))
+    stops = []
+    monkeypatch.setattr(
+        tracking_session_deregistration_write, "stop_fsmonitor_daemon", stops.append,
+    )
+
+    result = tracking_session_deregistration_write.apply_session_deregister({
+        "yaml_path": str(record_path), "session_id": "sess-1",
+        "source_identity": "native:first", "end_reason": "user_exit",
+        "ended_at": "old-exit", "recorded_at": "delayed",
+    })
+
+    assert result.get("ok") is True
+    updated = tracking.load_record(record_path)
+    entry = updated.session_entry("sess-1")
+    assert entry.ended_at is None
+    assert entry.activations[-1].ended_at is None
+    claim = next(item for item in updated.resources if item.ref == ref)
+    assert claim.state == obligations.ACTIVE
+    assert stops == []
+    assert entry.activations[0].end_reason == "user_exit"
+
+
+@pytest.mark.parametrize("end_source", [None, "native:unknown", "native:repeated"])
+def test_unconfirmed_source_end_does_not_mutate_record(record_path, end_source):
+    record = tracking.load_record(record_path)
+    record.sessions[0].activations = [
+        tracking.SessionActivation(
+            ordinal=1, started_at="first", start_recorded_at="first",
+            source_identity="native:repeated", ended_at="second",
+        ),
+        tracking.SessionActivation(
+            ordinal=2, started_at="second", start_recorded_at="second",
+            source_identity="native:repeated",
+        ),
+    ]
+    tracking.save_record(record, record_path)
+    before = record_path.read_bytes()
+
+    result = tracking_session_deregistration_write.apply_session_deregister({
+        "yaml_path": str(record_path), "session_id": "sess-1",
+        "source_identity": end_source, "end_reason": "user_exit",
+    })
+
+    assert result["lifecycle"] == "unconfirmed"
+    assert record_path.read_bytes() == before
+
+
+def test_current_source_end_releases_only_its_claim_and_is_idempotent(record_path):
+    from agent_worktrees import obligations
+
+    record = tracking.load_record(record_path)
+    record.sessions[0].activations = [
+        tracking.SessionActivation(
+            ordinal=1, started_at="first", start_recorded_at="first",
+            source_identity="native:current",
+        ),
+    ]
+    ref = tracking.format_claim_ref(
+        record.machine, record.repo, record.worktree_id, session="sess-1",
+    )
+    tracking.add_resource_claim(
+        record, tracking.ResourceClaim(
+            kind="session", ref=ref, created_at="first", state=obligations.ACTIVE,
+        ), save=False,
+    )
+    tracking.save_record(record, record_path)
+    args = {
+        "yaml_path": str(record_path), "session_id": "sess-1",
+        "source_identity": "native:current", "end_reason": "user_exit",
+        "ended_at": "exit", "recorded_at": "received",
+    }
+    result = tracking_session_deregistration_write.apply_session_deregister(args)
+    assert result["lifecycle"] == "ended"
+    assert result["activation"] == {"ordinal": 1, "source_identity": "native:current"}
+    updated = tracking.load_record(record_path)
+    assert updated.sessions[0].ended_at == "exit"
+    assert updated.sessions[0].activations[0].end_reason == "user_exit"
+    assert next(item for item in updated.resources if item.ref == ref).state == obligations.RELEASED
+    before = record_path.read_bytes()
+    result = tracking_session_deregistration_write.apply_session_deregister(args)
+    assert result["lifecycle"] == "duplicate"
+    assert record_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("identity", ["", "x" * 129, ["native:invalid"], "native:\nunsafe"])
+def test_invalid_source_end_reports_rejection_without_mutation(record_path, identity):
+    before = record_path.read_bytes()
+    result = tracking_session_deregistration_write.apply_session_deregister({
+        "yaml_path": str(record_path), "session_id": "sess-1", "source_identity": identity,
+    })
+    assert result["error"] == "lifecycle"
+    assert record_path.read_bytes() == before
+
+
 def test_stop_fsmonitor_daemon_runs_while_the_lock_is_still_held(
     record_path, monkeypatch,
 ):
@@ -148,6 +272,39 @@ def test_deregister_session_reaches_a_live_daemon(record_path, monkeypatch, monk
 
     record = tracking.load_record(record_path)
     assert record.session_entry("sess-1").ended_at is not None
+
+
+@pytest.mark.parametrize("source_identity", [None, "native:current"])
+def test_v2_daemon_cannot_downgrade_source_bound_end(
+    record_path, monkeypatch, monkeypatch_config, source_identity,
+):
+    from agent_worktrees import locks, status_monitor_runtime
+
+    record = tracking.load_record(record_path)
+    record.sessions[0].activations = [
+        tracking.SessionActivation(1, "start", "start", source_identity="native:current"),
+    ]
+    tracking.save_record(record, record_path)
+    requests = []
+    server = tracking_write.start_server(
+        lambda kind, payload: requests.append(payload) or {"ok": True},
+    )
+    server.start()
+    try:
+        fields = tracking_write.rendezvous_fields(server)
+        fields["tracking_write_verb_versions"]["session_deregister"] = 2
+        monkeypatch.setattr(locks, "read_lock", lambda path: fields)
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+        result = tracking.deregister_session(
+            "wt-dereg", "sess-1", source_identity=source_identity,
+            end_reason="user_exit" if source_identity else None,
+        )
+        assert result["lifecycle"] == ("ended" if source_identity else "unconfirmed")
+        assert requests == []
+    finally:
+        server.close()
+    entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert bool(entry.ended_at) is bool(source_identity)
 
 
 def test_deregister_session_never_waits_for_a_cold_daemon_boot(

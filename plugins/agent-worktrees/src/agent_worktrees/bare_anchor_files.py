@@ -32,14 +32,14 @@ REFRESH_FAILED = "refresh-failed"
 QUIET_STATUSES = frozenset({REFRESHED, NONE, CURRENT})
 
 
-def _git(path: str, *args: str):
+def _git(path: str, *args: str, no_hooks: bool = False):
     """Run git in the anchor, ignoring inherited repository selectors.
 
     An ambient ``GIT_DIR``/``GIT_WORK_TREE``/``GIT_INDEX_FILE`` (for example
     from a hook or a parent git process) would otherwise redirect these
     probes and the ``read-tree -u`` refresh to an unrelated repository.
     """
-    return git_ops.git(*args, cwd=path, check=False, isolated_repository=True)
+    return git_ops.git(*args, cwd=path, check=False, isolated_repository=True, no_hooks=no_hooks)
 
 
 def _git_dir(path: str) -> Path | None:
@@ -48,7 +48,7 @@ def _git_dir(path: str) -> Path | None:
     return Path(text) if out.returncode == 0 and text else None
 
 
-def _work(path: str, git_dir: Path, *args: str):
+def _work(path: str, git_dir: Path, *args: str, no_hooks: bool = False):
     """Run git against the anchor's own index and work tree.
 
     ``core.bare=false`` plus an explicit ``--git-dir``/``--work-tree`` lets
@@ -58,7 +58,7 @@ def _work(path: str, git_dir: Path, *args: str):
     """
     return _git(
         path, "--no-optional-locks", "-c", "core.bare=false",
-        "--git-dir", str(git_dir), "--work-tree", path, *args,
+        "--git-dir", str(git_dir), "--work-tree", path, *args, no_hooks=no_hooks,
     )
 
 
@@ -68,17 +68,19 @@ def _tail(result) -> str:
     return text.replace(";", ",")[:120]
 
 
-def current_status(path: str, head: str) -> str:
+def current_status(path: str, head: str, *, no_hooks: bool = False) -> str:
     """Status for an anchor whose ref did not move: is its index at ``head``?"""
     git_dir = _git_dir(path)
     if git_dir is None or not (git_dir / "index").is_file():
         return NONE
-    if _work(path, git_dir, "diff-index", "--cached", "--quiet", head).returncode != 0:
+    if _work(
+        path, git_dir, "diff-index", "--cached", "--quiet", head, no_hooks=no_hooks,
+    ).returncode != 0:
         return STALE_INDEX
     return CURRENT
 
 
-def precheck(path: str, old: str, new: str) -> str | None:
+def precheck(path: str, old: str, new: str, *, no_hooks: bool = False) -> str | None:
     """Return a refusal status, or ``None`` when the files can advance safely.
 
     Run BEFORE the ref moves; any refusal leaves the ref where it is. A pure
@@ -90,29 +92,34 @@ def precheck(path: str, old: str, new: str) -> str | None:
     # Another git process owns the index; every check below would misreport.
     if (git_dir / "index.lock").exists():
         return INDEX_LOCKED
-    if _work(path, git_dir, "diff-index", "--cached", "--quiet", old).returncode != 0:
+    if _work(
+        path, git_dir, "diff-index", "--cached", "--quiet", old, no_hooks=no_hooks,
+    ).returncode != 0:
         return STALE_INDEX
     # Re-stat the index first: plumbing diff-files and read-tree -u compare
     # cached stat data, so an untouched-but-restatted file would otherwise
     # read as modified. Content changes still show up below.
     _git(
         path, "-c", "core.bare=false", "--git-dir", str(git_dir), "--work-tree", path,
-        "update-index", "-q", "--refresh",
+        "update-index", "-q", "--refresh", no_hooks=no_hooks,
     )
-    if _work(path, git_dir, "diff-files", "--quiet").returncode != 0:
+    if _work(path, git_dir, "diff-files", "--quiet", no_hooks=no_hooks).returncode != 0:
         return DIRTY
     # No --exclude-per-directory: untracked paths in the way refuse here.
-    if _work(path, git_dir, "read-tree", "-m", "-u", "-n", old, new).returncode != 0:
+    if _work(
+        path, git_dir, "read-tree", "-m", "-u", "-n", old, new, no_hooks=no_hooks,
+    ).returncode != 0:
         return COLLISION
     # Current git treats IGNORED files as expendable even without
     # --exclude-per-directory, so a local path that a newly tracked one would
     # overwrite or remove is refused explicitly.
     added = _git(
         path, "diff-tree", "-r", "-z", "--name-only", "--no-renames", "--diff-filter=A", old, new,
+        no_hooks=no_hooks,
     )
     if added.returncode != 0:
         return COLLISION
-    tracked = _OldTracked(path, git_dir, old)
+    tracked = _OldTracked(path, git_dir, old, no_hooks=no_hooks)
     for rel in filter(None, added.stdout.split("\0")):
         if _in_the_way(path, rel, tracked):
             return COLLISION
@@ -123,16 +130,21 @@ class _OldTracked:
     """Membership in ``old``'s tree, loaded on first use and case-folded when
     the anchor's file system is case-insensitive (``core.ignorecase``)."""
 
-    def __init__(self, path: str, git_dir: Path, old: str) -> None:
+    def __init__(self, path: str, git_dir: Path, old: str, *, no_hooks: bool = False) -> None:
         self._args = (path, git_dir, old)
         self._paths: set[str] | None = None
         self._fold = False
+        self._no_hooks = no_hooks
 
     def __contains__(self, rel: str) -> bool:
         if self._paths is None:
             path, git_dir, old = self._args
-            listing = _work(path, git_dir, "ls-tree", "-r", "-z", "--name-only", old)
-            ignorecase = _work(path, git_dir, "config", "--bool", "core.ignorecase")
+            listing = _work(
+                path, git_dir, "ls-tree", "-r", "-z", "--name-only", old, no_hooks=self._no_hooks,
+            )
+            ignorecase = _work(
+                path, git_dir, "config", "--bool", "core.ignorecase", no_hooks=self._no_hooks,
+            )
             self._fold = ignorecase.stdout.strip() == "true"
             names = filter(None, listing.stdout.split("\0")) if listing.returncode == 0 else ()
             self._paths = {self._key(n) for n in names}
@@ -170,12 +182,12 @@ def _in_the_way(path: str, rel: str, tracked: _OldTracked) -> bool:
     return False
 
 
-def refresh(path: str, old: str, new: str) -> str:
+def refresh(path: str, old: str, new: str, *, no_hooks: bool = False) -> str:
     """Advance the anchor's index and files from ``old`` to ``new``."""
     git_dir = _git_dir(path)
     if git_dir is None or not (git_dir / "index").is_file():
         return NONE
-    result = _work(path, git_dir, "read-tree", "-m", "-u", old, new)
+    result = _work(path, git_dir, "read-tree", "-m", "-u", old, new, no_hooks=no_hooks)
     if result.returncode != 0:
         return f"{REFRESH_FAILED}:{_tail(result)}"
     return REFRESHED

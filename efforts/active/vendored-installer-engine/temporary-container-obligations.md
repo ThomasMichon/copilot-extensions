@@ -29,6 +29,29 @@ close-out, or transfer ownership through an explicitly accepted handoff, before
 it may finalize. Do not retrofit disposable deletion requirements onto fleet
 borrow/return semantics.
 
+**2026-10-13 operator-selected storage/cleanup choice, verbatim:**
+
+> retain-volumes
+
+**Choice summary:** keep separately named temporary volumes owned and held.
+Do not replace them with container-scoped tmpfs as a workaround, and do not
+automatically delete a volume by name after a birth-identity inspection.
+Docker's current CLI/client removal interface exposes a name and force option,
+not a birth-conditional deletion primitive. A separate identity-safe volume
+cleanup mechanism must be reviewed before automated volume deletion is enabled.
+Container-ID lifecycle work and read-only volume verification can proceed;
+volume retention does not satisfy the full close-out or parent completion gate.
+This choice authorizes source design, not live allocation, cleanup or rollout.
+
+**2026-10-14 ownership-system continuation, verbatim:**
+
+> Got it. Continue driving. Come up with a system which ensures we can track what owns what.
+
+**Scope summary:** continue the disposable Docker accountability system below,
+using the existing ownership ledger rather than a competing container registry.
+The operator delegated source design and continued execution; this adds no
+live allocation/removal or rollout authority and does not reverse `retain-volumes`.
+
 Cover `tools/clean-room/run.sh`, both Linux and Windows arms of `run.ps1`,
 their authentication/identity/result-permission helper containers, and
 `tools/run_tests_in_devcontainer.py` with its temporary workspace volume.
@@ -111,6 +134,12 @@ cross-owner lifecycle contract, not merely a call-site-only fix.
    A volume has no container-style immutable ID: bind its daemon, unique name,
    creation evidence and reservation label, rejecting replacement instances.
    Names are display/selection aids only, never destructive authority.
+   **Operator-selected clarification, 2026-10-13:** named volumes remain
+   owned and held. Since the current Docker volume-removal interface cannot
+   condition deletion on that birth evidence, automated volume removal is
+   refused before mutation. Read-only identity/absence proof and explicitly
+   accepted responsibility transfer remain supported; a separate cleanup
+   mechanism must clear review before changing this restriction.
 5. **Standalone runs are explicit, not fictitiously tracked.** Receive the exact
    ownership-tool argv and owner context through the producer interface; preserve
    child CWD/environment identity. An explicit valid owner can use an anchor's
@@ -149,10 +178,19 @@ to bypass its invariants or the live cleanup confirmation gate.
   active reservation/claim. Settle a failed launch only after an authoritative
   probe of the pinned daemon confirms that the reservation created no resource.
 - Cleanup validates exact identity and ownership immediately before removal,
-  respects explicit cleanup authority, and records a verified absence receipt
-  in the authoritative ledger afterward. Nonzero cleanup or verification exits
+  requires an atomic identity-conditional mutation as well as explicit cleanup
+  authority, and records a verified absence receipt in the authoritative ledger
+  afterward. The current Docker container and volume APIs do not satisfy that
+  mutation gate; retain ownership and refuse automatic deletion until a
+  separately reviewed mechanism does. Nonzero cleanup or verification exits
   fail visibly and leave the claim active. Never infer absence from an arbitrary
   inspect error, process exit, Docker name reuse or daemon mismatch.
+- Named-volume retention is an explicit outcome, not successful full cleanup.
+  Report the retained volume and active creator obligation when container
+  cleanup completes; keep its finalize gate in force. No `down`, `prune`,
+  disconnect, test-success or generic settlement path may turn that held
+  volume into a released claim. A volume already absent may close only through
+  the registered exact-subject, pinned-daemon proof, never a caller assertion.
 - `down`, error cleanup and `prune` enumerate owned receipts, not broad name
   prefixes. No preemptive removal of another run's name, broad Docker prune,
   silently successful cleanup or label-only destructive selection.
@@ -160,6 +198,61 @@ to bypass its invariants or the live cleanup confirmation gate.
   `--keep` and diagnostic retention never implicitly authorize `at-rest`.
 - Recovery uses ledger reservations and authoritative label/daemon queries.
   Local receipts can assist diagnosis but cannot override ledger ownership.
+
+## Registry-rooted ownership and daemon-session proof
+
+**Agent-recommended implementation refinement:** satisfy the reviewed immutable
+identity and confirmed-closeout contract with one ownership graph and a
+daemon-bound operation session. This changes the Docker helper's transport
+implementation, not the generic ledger ABI, fleet borrowing or cleanup authority.
+
+- The existing ledger owns the edge from current owner to reservation and bound
+  resource. A claim retains original creator, stable token, allocation epoch,
+  canonical endpoint and immutable birth identity through accepted transfer.
+  Docker labels carry creator/token/generation for recovery; they are evidence,
+  not an alternative ownership store or destructive permission.
+- Ownership views read that same graph. Owner-to-resource inspection includes
+  pending, allocating, bound and retained obligations. Resource-to-owner lookup
+  matches exact daemon/resource identity and follows accepted transfer evidence;
+  incomplete records, duplicate owners or unavailable execution spaces remain
+  explicit uncertainty, not an inferred unowned resource. A derived lookup
+  view cannot override the locked producer transactions.
+- Ordinary CLI snapshots are diagnostic only. Checking daemon A, listing on B,
+  then checking A again cannot prove absence or authorize removal. Authoritative
+  inventory, birth inspection and mutation must share one admitted daemon-bound
+  connection for the entire operation, with no redirect or automatic reconnect.
+  A broken/expired stream or incomplete response retains ownership.
+- Route admission belongs to trusted provider configuration/code, never an
+  owner-supplied claim field, caller assertion or successful diagnostic probe.
+  The initial adapter covers explicitly admitted direct local Docker streams.
+  Arbitrary TCP/SSH or intermediaries that can choose a backend per request
+  remain unavailable for authoritative proof until a binding adapter clears
+  separate review. A persistent stream alone is not proof of backend identity.
+- The helper owns its bounded, windowless transport child and descendants;
+  cleanup failure is visible. Session exit is not allocation quiescence and
+  must never synthesize `allocation_finished`. No new background daemon, Docker
+  SDK in agent-worktrees, registry or finalize-time Docker census is introduced.
+- Automatic deletion remains refused for both containers and named volumes.
+  Moby's removal path uses `GetContainer()`, which falls back from an absent
+  full ID to an exact name. A disappearing container can therefore redirect
+  deletion to an unrelated container named with that ID. A bound connection
+  and another inspection do not make that operation identity-conditional.
+  A current owner may close an already-absent resource only through the same
+  authoritative exact-subject proof and allocation-quiescence gate, or transfer
+  a bound obligation through explicit acceptance. Safe physical cleanup
+  requires a separately reviewed atomic identity-conditional mechanism.
+
+The separate-process A/B/A fixture reproduces false absence in the original
+CLI implementation. The source foundation now labels CLI results diagnostic-only
+and refuses authoritative proof and automatic removal before invocation.
+The source adapter implements direct-local read sessions, not provider
+integration or safe deletion. Required source validation covers same-session
+identity and absence; refusal of name-fallback deletion races and mutating
+requests; connection loss/reconnect refusal; nonbinding-route
+admission; malformed/truncated/oversized responses; bounded child-tree cleanup;
+and original-creator/current-owner visibility through retained resources and
+accepted transfers. Native fixture proofs remain distinct from live Docker
+acceptance. Producer enablement stays gated by the validation plan below.
 
 ## Validation plan
 
@@ -178,13 +271,30 @@ to bypass its invariants or the live cleanup confirmation gate.
       active parent worktree. Docker producer integration remains pending below.
 - [ ] Prove running and stopped-but-existing containers block; exact verified
       removal settles; cleanup failure, outage, daemon mismatch, malformed
-      response and interrupted allocation remain active.
+      response and interrupted allocation remain active. Until an atomic
+      identity-conditional cleanup mechanism is reviewed, prove automatic
+      container deletion refuses before connecting, including ID/name
+      collisions after inspection; this refusal does not satisfy removal proof.
 - [ ] Prove failed launch settles only after confirmed no allocation; bind
       failure never starts/mutates the resource; repair can bind an allocation
       born with the reservation labels after the caller was interrupted.
 - [ ] Prove rename does not change identity, reused names/recreated resources
       cannot be removed, owner/label mismatch refuses and endpoint changes
       cannot create a false absence verdict.
+- [ ] Prove admitted single-daemon operation sessions reject A/B/A routing,
+      reconnect, truncated/oversized responses and unavailable transport
+      admission; confirm bounded transport-child cleanup.
+- [x] Source ownership views preserve original creator and current owner,
+      expose all allocation/retention phases and accepted transfers, and do
+      not treat duplicate/unavailable records as unowned resources. Bounded
+      tracking fixtures exercise real producer transitions and accepted chains;
+      execution-space probing and integrated live Docker acceptance remain
+      distinct open gates, not conclusions of this observational snapshot.
+- [ ] Prove named volumes remain owned and held after container/test completion;
+      automatic deletion refuses before a name-based mutation, retained status
+      is visible, and finalize remains blocked. Review an identity-safe volume
+      cleanup mechanism separately before enabling automated deletion; this
+      open requirement is not discharged by container-only lifecycle proof.
 - [ ] Prove no generic settle/release/sweep/disconnect path fabricates safe
       temporary-container state; explicit accepted transfer preserves ownership.
 - [ ] Prove fleet lease return remains valid without deleting its reusable
@@ -203,7 +313,7 @@ to bypass its invariants or the live cleanup confirmation gate.
       changefiles and do not hand-edit versions.
 - [ ] After separate explicit cleanup authorization, perform a harmless live
       sleep-container proof with no host mounts, privilege, networking or auth.
-      Verify the actual ledger/finalize gate, exact-ID cleanup and absence
+      Verify the actual ledger/finalize gate, identity-conditional cleanup and absence
       receipt. Mocked tests do not satisfy this live item.
 - [ ] Report native PowerShell/Windows-container/macOS evidence separately;
       parser checks or simulated platform tests are not native lifecycle proof.

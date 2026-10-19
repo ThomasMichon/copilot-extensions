@@ -44,6 +44,7 @@ import pytest
 
 from agent_codespaces.config import CodespacesConfig, RepoConfig
 from agent_codespaces.lifecycle import CodespaceInfo
+from agent_codespaces._invoke import dispatch_argv
 from agent_codespaces.resolver import CodespaceResolver
 
 _COPILOT = "copilot --acp --stdio --allow-all --experimental"
@@ -114,15 +115,31 @@ class TestResolveCrossRepo:
         )
         cmd = _remote_cmd(target.spawn_command)
         assert cmd == (
-            f"[ -d /workspaces/example-marketplace/.git ] || "
-            f"git clone {remote} /workspaces/example-marketplace; "
+            f"[ -e /workspaces/example-marketplace/.git ] || "
+            f"git clone -- {remote} /workspaces/example-marketplace && "
             f"cd /workspaces/example-marketplace && {_COPILOT}"
         )
         assert target.codespace["name"] == "cs-1"
+        assert target.codespace["checkout_provision_command"] == (
+            f"[ -e /workspaces/example-marketplace/.git ] || "
+            f"git clone -- {remote} /workspaces/example-marketplace"
+        )
         assert target.codespace["repo"] == "example-marketplace"
         assert target.codespace["workspace_folder"] == (
             "/workspaces/example-marketplace"
         )
+
+    @pytest.mark.asyncio
+    async def test_disabled_related_selection_survives_metadata_and_cli(self, _patched):
+        _patched(CodespacesConfig())
+        target = await CodespaceResolver().resolve(
+            "cs-1", extra_plugins=[types.SimpleNamespace(source="literal=false", enable=False)],
+        )
+        assert target.codespace["related_plugins"] == [
+            {"source": "literal=false", "enable": False},
+        ]
+        index = target.spawn_command.index("--stage-plugin-disabled")
+        assert target.spawn_command[index + 1] == "literal=false"
 
     @pytest.mark.asyncio
     async def test_own_product_no_clone(self, _patched):
@@ -162,6 +179,9 @@ class TestResolveCrossRepo:
             "repo": _CS_REPO,
             "acp_command": cmd,
             "workspace_folder": "/workspaces/example-web",
+            "provider_command": dispatch_argv(),
+            "plugin_plan": True,
+            "related_plugins": [],
         }
 
     @pytest.mark.asyncio

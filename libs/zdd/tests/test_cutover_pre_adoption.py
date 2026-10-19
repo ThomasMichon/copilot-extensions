@@ -113,6 +113,26 @@ def test_opt_in_drains_before_promotion_and_preserves_default_order(
     assert breadcrumb.read_breadcrumb(tmp_path) is None
 
 
+@pytest.mark.parametrize("selected_previous", [False, True])
+def test_retained_previous_is_not_an_implicit_drain_target(tmp_path, monkeypatch, selected_previous):
+    orch, events, _ = orchestrator(tmp_path, monkeypatch)
+    table = routing.read_table(tmp_path, strict=True)
+    previous = routing.Endpoint.from_dict(table["active"])
+    routing.routing_table_path(tmp_path).write_text(json.dumps({
+        **{key: value for key, value in table.items() if key != "active"},
+        "previous": previous.to_dict(),
+    }))
+    monkeypatch.setattr(
+        routing, "read_active_endpoint",
+        lambda *_: previous if selected_previous else None,
+    )
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert result.ok and result.committed
+    assert ("drain-9281" in events) is selected_previous
+    assert ("shutdown-9281" in events) is selected_previous
+    assert routing.read_table(tmp_path)["active"]["generation"] > previous.generation
+
+
 @pytest.mark.parametrize("confirms_exit", [False, True])
 def test_failed_promotion_never_restores_writer_before_successor_exit(
     tmp_path, monkeypatch, confirms_exit,

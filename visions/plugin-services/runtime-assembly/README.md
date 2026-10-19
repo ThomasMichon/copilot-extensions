@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-10-16
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -56,6 +56,24 @@ source.
   available from an approved source, or refused with a precise reason.
 
 ## Features
+
+### adopter-supplied-complete-defaults
+
+An adopting harness can supply a complete, reviewed selection policy that
+works for operators who never customize local runtime settings. Its existing
+installation authority applies that policy automatically: prefer compatible
+verified release profiles, and select the separately governed source mode
+when availability or admission prevents artifact mode. Routine fallback does
+not require a human to approve individual dependencies or write an approval
+file. Optional overlays may select deliberate capabilities or stronger
+restrictions; they never weaken existing acquisition policy.
+
+The baseline selects behavior, not a new trust root. A release profile still
+requires authentic release approval and actual feed admission. Source mode
+still binds independently verified source and freezes a complete exact closure
+within declared constraints before assembly. Neither the presence of a
+candidate nor its self-declared approval authorizes it. Adopting a default
+never grants service activation, model download or unattended execution.
 
 ### one-verified-acquisition-path
 
@@ -116,6 +134,22 @@ contract. It never bypasses a blocked package, seasoning requirement or
 governed feed, and an artifact-integrity or source-provenance failure is not
 an ordinary availability fallback. If no permitted dependency closure can
 be assembled, the outcome is explicit and the current generation survives.
+
+### selected-development-source-assembly
+An authority-selected, clean merged development snapshot can be assembled
+directly, without waiting for a generated release-branch payload or installing
+Copilot plugin content from that checkout. This explicit source mode is not
+an artifact-availability fallback and does not claim promotion attestation.
+It retains the same source integrity, exact dependency admission, immutable
+completion, health, activation and rollback guarantees.
+
+Assembly materializes the complete declared first-party dependency closure
+from the selected snapshot, including development-only source indirections.
+Materialization and version composition use the canonical source
+representation rather than a second approximation of promotion. The
+assembled runtime contains no live dependency on the source checkout.
+Source identity, package version, optional capability profile and exact
+assembly/dependency identity remain separately observable.
 
 ### optional-client-artifacts-complete-promotion
 

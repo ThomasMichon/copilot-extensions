@@ -23,14 +23,23 @@ distinct consequences before submission.
 |-------------|---------------------|-------------|
 | Coordinator | Own reviewed proposal, shared Manager contract, integration, publication, and completion | Current managed planning worktree |
 | Backend implementer | Own bounded worker catalog and local instance lifecycle slice after contract review | Dedicated managed worktree allocated by Coordinator |
+| Release-cooperation peer | Completed #6758/#6759 coordination through their writers; no source edits, merge authority, or updater | Existing #6421 consumer driver |
 
 ## Coordination
 
 - **Topology:** Dependency-ordered PRs; separate worktrees for independently owned implementation slices.
 - **Host (owns PRs):** Coordinator.
 - **Delegates:** Backend implementer owns only its assigned worker lifecycle slice; shared contribution contracts stay Coordinator-owned.
+- **Release cooperation:** The peer's bounded public claim deduplication and owner follow-through for #6758/#6759 completed when #6763 merged. Original writers retain code, PR and merge custody. All further recovery/update execution remains with the retained #6600 owner; Coordinator retains installed Configuration/Workers acceptance and effort completion, not updater execution.
 - **Handoff:** Each slice reports cited changes and validation against the reviewed contract; Coordinator integrates and owns the end-to-end completion gate.
 - The earlier local override controls remain shipped by #6306. Remote machine selection and second-machine validation remain separately owned by #6283; this effort does not take or close that work.
+- **Cross-surface alignment:** The Manager and Companion clients share the
+  Configuration/Workers goals: resource and template information, provenance,
+  configured versus observed state, supported actions and explicit effects and
+  consent. Both consume the owning capabilities rather than creating separate
+  configuration or lifecycle authorities. Presentation may suit each surface;
+  the meaning of the information and actions must agree. The upstream vision
+  update and Companion implementation remain with their existing owners.
 
 ## Context
 
@@ -78,6 +87,39 @@ Operator-selected design choices:
 - New configuration home: `user-local` -- this machine, not repository source.
 - Creation behavior: `save-and-activate` -- offer Save and Activate together, with explicit confirmation. Do not reduce the requested workflow to save-only.
 
+Follow-through direction, verbatim:
+
+> Monitor, ensure deployment, then return to driving this Worktree's effort
+>
+> Monitor the rollout, get deployed, help unblock as needed, and keep driving this effort
+
+Deployment diagnostic direction, verbatim:
+
+> Focus on unblocking deployment. What's broken? What can we fix
+>
+> We clearly need logs, and we need to audit what its flow entails during draining
+
+Subsequent CI-repair direction, verbatim:
+
+> Make the necesary fixes, and figure out how to make this more robust
+
+Subsequent ownership-focus direction, verbatim:
+
+> Focus in work exclusively owned by this worktree
+
+This coordinator therefore focuses on its Configuration/Workers acceptance
+harness and effort lifecycle. Shared release-control and consumer repairs
+remain with their existing owners; this direction grants no updater,
+activation, source takeover or overlapping implementation authority.
+
+Subsequent cross-surface direction, verbatim with only the downstream
+repository name redacted:
+
+> There a vision being updated upstream for also showing the same information in the Companion App from [downstream harness]. So we have the same goals across both surfaces
+
+Apply that shared intent to this effort's Manager acceptance work; do not
+silently add Companion implementation or claim its acceptance is complete.
+
 ## Plan
 
 ### Phase 1 - Review the workspace and lifecycle contract
@@ -114,7 +156,9 @@ Operator-selected design choices:
 
 ### Phase 5 - Release and local outcome
 
-- [ ] Clear current-head review and required CI for every implementation and documentation slice.
+- [x] Clear current-head review and required CI for every implementation and documentation slice.
+- [ ] Audit the monitor drain path and publish bounded diagnostics for its waits, blockers, timing and outcomes. _Audit/source merged in #6807; normal promotion and installed trace receipt remain pending._
+- [ ] Support the generated-main consumer repairs and the reviewed pre-merge candidate-validation slice under #6237/#6838 without duplicating retained PRs. _Source repairs, gate #6851 and bootstrap #6867 merged; candidate #6938 merged, but immutable-main CI `38865507739` failed. Fix-forward and qualified containing-release proof remain open. (agent-recommended implementation approach)_
 - [ ] Confirm normal promotion to main, run the unified local update, and verify the installed Manager/provider versions exercise the redesigned Configuration surface.
 - [ ] Reconcile all Plan and Validation Plan items, archive the completed effort, release its binding, and finalize owned worktrees. _(agent-recommended)_
 
@@ -130,7 +174,7 @@ Operator-selected design choices:
 - [x] Cancel performs no configuration write, activation, task creation, or agent launch; repeated submission/retry cannot create duplicate instances or work. _(agent-recommended)_
 - [x] Desired enablement, observed live state, and task/agent outcomes remain independently visible; Enable never claims a running pool merely because a disable override was cleared.
 - [x] Reproducible renders cover the walkthrough steps, loading, populated tables, edit/instantiate, effect confirmation, success, and failure, including a compact terminal size. _(agent-recommended)_
-- [ ] Targeted tests and real consumer-boundary integration exercise the combined Manager/provider path; record Windows and Linux coverage and the reason for any skipped clean-room or live-venue lane. _(agent-recommended)_
+- [x] Targeted tests and real consumer-boundary integration exercise the combined Manager/provider path; record Windows and Linux coverage and the reason for any skipped clean-room or live-venue lane. _(agent-recommended)_
 - [ ] Documentation navigation/assets pass existing guards, and the final installed local surface matches the promoted source.
 
 ## Proposal
@@ -149,197 +193,11 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
 
 ## Journal
 
-### 2026-10-12 - Kickoff
+Historical entries are preserved in dated journals. The Plan and Validation Plan
+above remain the completion gate; journal milestones do not close the effort.
 
-- Captured the illustrated-guide request and the subsequent local UX findings verbatim.
-- Confirmed horizontal section navigation, the effort slug, user-local creation, and the Save and Activate option with the operator.
-- Traced delayed opening to status/options discovery before mounting the current dialog.
-- Inventory found existing declaration/recipe/override primitives but no complete worker instance edit/instantiate API.
-- Existing remote-machine follow-up #6283 remains separately owned.
-- Proposal drafted; runtime implementation has not started.
-
-### 2026-10-12 - Proposal reviewed
-
-- Planning PR #6382 merged after current-head approval with zero findings and required CI success.
-- Synced the implementation worktree onto the reviewed dev state.
-- Begin the shared section/list/action contract and provider lifecycle specification; no runtime behavior has changed yet.
-
-### 2026-10-12 - Implementation and consumer-boundary checks
-
-- Implementation is in managed worktrees, **not yet published**. The Manager
-  adds additive `placement: config` list contributions, immediate Configuration
-  entry, horizontal sections, full-content detail/editor/receipt screens, and
-  inert browsing of legacy one-shot contributions.
-- Workers now separates templates, source-owned declarations, and user-local
-  drafts. Save-only leaves the published version untouched; explicit activation
-  publishes through the existing registrar and reports pending or partial failure
-  separately from persistence. No second supervisor or task-steering draft path
-  is introduced.
-- Recovered the backend worker's staged implementation after its runtime reported
-  failure; independently corrected evaluator-reference lookup and visible
-  discovery errors, then committed and integrated it as `e8de5b077`.
-- Provider checks: 187 selected catalog/instance/registrar/override tests and 274
-  loop-expansion consumer tests passed. These include first-touch CLI save,
-  existing-supervisor reconciliation, stable retries, stale edits, missing
-  evaluators, failed publication, and unchanged source bytes.
-- Manager checks: the broader pivot/Profiles/region selection passed, followed
-  by 51 focused checks with the actual provider interpreter. The real
-  list-to-form-to-CLI round-trip proves Cancel, Save-only, Edit, explicit Save
-  and Activate, and a pending receipt in isolated state. Standard-width fitting
-  explicitly retains status, activity, lane statistics, provenance, and
-  descriptions at 118 columns; blocked-provider tests cover 118x40 and 80x24.
-- The standalone test runner installs non-editable code and uses Python `-I`;
-  `--prepare` is required after source changes. The earlier apparent Escape
-  regression was stale installed test code, not a reason to change keyboard
-  semantics.
-- Remaining: finish recipe prerequisite coverage, illustrated guide and renders,
-  review/CI/promotion, unified local update and installed-surface proof, then
-  reconcile the full Validation Plan and archive/finalize.
-
-### 2026-10-12 - Guide, prerequisites, and pre-submit review
-
-- Added the linked Configuration workbench walkthrough with 13 identifier-neutral
-  PNG renders: Profiles/Apply, Workers loading/catalog/actions/details,
-  instantiate/declaration/edit, effect confirmation, pending receipt, failure,
-  and compact 80x24. The existing production compositor and Fira Code rasterizer
-  generate all steps with one command; screenshots are fixtures, not live claims.
-- Catalog details now expose missing dependencies. A fleet requires SSH
-  transport before saving, but browsing/saving never probes remote hosts.
-  FleetSpawner still owns liveness admission and defers sleeping hosts without
-  reserving tasks. There is no separate local fleet-alias registry to invent.
-- A cohesive pre-submit code review identified three correctness gaps, all fixed:
-  full Configuration stdout/stderr survives successful and failed commands;
-  other instances' still-published declaration names remain reserved after
-  Save-only edits; and Enable clears the exact target's logical and concrete
-  masks while reporting running state unknown. Ordinary action status-line
-  behavior and permissive legacy toggle semantics remain unchanged.
-- Windows checks: 294 provider instance/CLI/fleet/recipe/discovery tests and
-  95 Manager Configuration/forms/Profiles/region tests passed. The latter
-  includes all 13 reproducible guide scenarios, real provider round-trips,
-  and real subprocess receipts longer than 200 characters on success and
-  partial failure. Documentation navigation/assets pass the existing guard.
-- Validation tiers: unit and lightweight real CLI/Manager consumer checks
-  exercised; fresh isolated first-touch roots exercised without changing
-  operator configuration. Linux coverage awaits required CI. A live remote
-  venue is not applicable to this local-only configuration surface; remote
-  configuration remains #6283's separately owned work. Installed local proof
-  follows normal promotion and the unified update; it is still pending.
-
-### 2026-10-12 - Required CI size correction
-
-- Opened implementation PR #6427. Its first guards job rejected the expanded
-  rendering module's hard line cap. Mechanically extracted machine/section
-  navigation-band rendering into a focused mixin, preserving the existing
-  rendering class's inherited public methods and character-grid behavior.
-- Module-size and documentation guards now pass locally. Sixty-seven focused
-  Config/Profiles/region/navigation checks, including the thirteen walkthrough
-  captures and real provider round-trip, passed after reinstalling the changed
-  Manager test package. No publication gate was bypassed.
-
-### 2026-10-12 - Current-head review corrections
-
-- The first GitHub review on #6427 identified exact-case stored identity,
-  draft-versus-published runtime reporting, and selection during a slow
-  post-submit refresh. Addressed all three rather than merging past them.
-- Every instance read verifies its stored immutable name/ID/revision against
-  the requested filename; Windows cannot rewrite an existing identity through
-  a differently cased path. Runtime state, lane statistics and local controls
-  now derive from the active snapshot, while draft validity/capacity/revision
-  remain separately visible. Configuration post-submit reads swap in place.
-- Ninety-six Manager and 296 provider checks passed. New regressions exercise
-  a real case-insensitive Windows edit, a published pool beneath a differently
-  shaped reviewer draft, and selected-row preservation while the reload is
-  deliberately blocked and subsequently reordered. Current-head review and
-  required CI are still release gates, followed by installed proof.
-
-### 2026-10-12 - Explicit Configuration targeting
-
-- A fresh GitHub review confirmed the three previous corrections and identified
-  one remaining generic contribution-boundary gap: machine-scoped configuration
-  pivots could inherit a hidden operational target after removal of Machines
-  navigation. Parsing now requires explicit account/global scope for config
-  placement; ordinary pivots keep their prior default machine scope.
-- Configuration row actions no longer inherit the previously selected machine.
-  Legacy section compatibility receives the local identity instead. Updated
-  the contribution contract and added parser/context regressions; Workers'
-  own global CLI-local contract is unchanged.
-- The changed Configuration/compatibility selection produced 96 passes and one
-  auxiliary real-CLI verification startup timeout on the shared Windows host.
-  That verification now uses the existing product action deadline rather than
-  a shorter test-only deadline; the real override round-trip and both new scope
-  regressions passed on the focused rerun.
-- A broader local `manifest` selector also reached unchanged pane-launch and
-  self-install fixtures: one PowerShell startup timeout and three missing
-  fallback provider-reference fixtures in the non-editable cached test package.
-  Their implementation/test files match the publication base; this is not a
-  claim that the broader suite passed. Required CI remains authoritative, with
-  no failed gate waived.
-
-### 2026-10-12 - Catalog discovery snapshot and path diagnostics
-
-- The current-head review confirmed the explicit Configuration scope fix.
-  Its full agentic lane timed out waiting for a GitHub runner; the fallback
-  review identified repeated registrar scans and raw path-resolution errors.
-- Dependency validation now reuses one discovery snapshot across declarations;
-  catalog validation shares the already-fetched snapshot across all instances.
-  An explicitly empty snapshot remains authoritative and still rejects missing
-  evaluators. No extra registry or cache lifetime is introduced.
-- Local instance envelope discovery reports filesystem and symlink-resolution
-  failures as contextual indeterminate registrar errors instead of leaking
-  unrelated exception types.
-- Forty-two worker-instance/catalog guard checks passed, including seven new
-  regression cases for snapshot reuse and both source/active path failures.
-  Required CI, fresh review, promotion and installed local proof remain pending.
-
-### 2026-10-12 - Publication repair visibility and integration refresh
-
-- The next review confirmed the discovery/path corrections and identified a
-  corrupt published snapshot aborting the whole browse command. Workers now
-  retains that instance as an explicit repair row, with path/reason errors,
-  unknown published runtime/capacity and no local toggle. Its valid draft,
-  other instances and templates remain visible; draft capacity never stands
-  in for an unreadable publication.
-- Dependency checks for source-owned declarations also share the catalog's
-  discovery snapshot. Regression coverage includes source declarations as well
-  as multiple local instances, and malformed JSON, encoding, schema, incomplete
-  envelopes and permission failures.
-- Rebased onto current dev, preserving the peer's new effort-index row. The
-  only conflict was that index; Manager merges were mechanical. Fixed a test's
-  eager dictionary lookup before its deferred initial load, retaining its
-  error/retry and stale-response assertions.
-- Forty-seven provider checks and 73 Manager configuration/Profiles/region
-  checks passed, including the real provider round-trip. A fresh provider venv
-  restore is blocked by the newly merged FastAPI >=0.143.0 floor (#6362):
-  the governed feed currently exposes at most 0.142.2. The provider checks used
-  the already-provisioned backend test environment with approved 0.142.2 and
-  current worktree source/shared libraries, not a feed bypass or manifest edit.
-  This proves the changed catalog/lifecycle code, not packaging against the
-  new dependency floor. Required CI and final promoted installation still
-  must pass their own declared dependencies; neither gate is waived.
-
-### 2026-10-12 - Required CI integration corrections
-
-- Required CI's Linux Manager suite exposed ten failures after 1,918 passes.
-  Corrected the real Profiles monolithic/split rendering mismatch by including
-  section chrome in both paths. Updated the isolated setup-race fixture's
-  local/config context and registered-pivot fixture's placement, and removed
-  an obsolete Configuration-dialog assertion while retaining Maintenance's
-  native OptionList contract. No failing check was waived or retried unchanged.
-- A fresh balanced review confirmed publication repair handling and identified
-  corrupt drafts, custom choice defaults, and behavioral tests in the guard
-  lane. Catalog browsing now retains healthy drafts/templates and emits repair
-  rows for malformed draft JSON, encoding, identity, revision, configuration
-  shape and source metadata. Mutation readers remain strict.
-- Custom `allow_other` defaults restore through the shared field restoration
-  mechanics. Configuration supports one custom multichoice value per line,
-  preserving multiple saved members and literal commas; ordinary create and
-  steering forms retain their existing Other semantics.
-- Removed the behavioral module's blanket guard marker. Only the inexpensive
-  inert catalog contract is a guard; real CLI and supervisor reconciliation
-  remain full-suite integration tests. That guard passed in 0.65 seconds.
-- Fifty-three provider checks passed in the existing governed dependency
-  environment. All 159 selected Manager checks passed, including the ten
-  Linux CI failure paths, Config round-trips, Profiles parity, setup reload
-  races and shared create/steering behavior. The FastAPI floor restore limitation
-  remains recorded above; fresh-head CI/review and final installed proof remain
-  release gates.
+- [2026-10-16 - configuration acceptance](journal/2026/10.16-configuration-acceptance.md)
+- [2026-10-15 - diagnostics and release qualification](journal/2026/10.15-diagnostics-and-release-qualification.md)
+- [2026-10-14 - transport and deployment gates](journal/2026/10.14-transport-and-deployment-gates.md)
+- [2026-10-13 - release and consumer repairs](journal/2026/10.13-release-and-consumer-repairs.md)
+- [2026-10-12 - implementation and guide](journal/2026/10.12-implementation-and-guide.md)

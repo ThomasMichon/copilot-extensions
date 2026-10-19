@@ -90,6 +90,7 @@ def repo(tmp_path: Path) -> Path:
     _git(["init", "-q", "-b", "main"], root)
     _git(["config", "user.name", "Test"], root)
     _git(["config", "user.email", "test@example.com"], root)
+    _git(["config", "core.autocrlf", "false"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)
@@ -301,13 +302,13 @@ def test_promote_with_candidate_branch_never_touches_main_directly(tmp_path: Pat
         ["ls-remote", str(origin), "refs/heads/release/promote-test"], repo
     ).split()[0]
     assert remote_candidate == report["commit"]
-    # no tag pushed or named for the pre-merge candidate -- the caller tags
-    # the real post-merge commit as `<tag_stem>-<merge sha8>`.
+    # A source-owned tag is not published until the real Main landing exists.
     assert report["tag"] is None
     remote_tags = _git(["ls-remote", "--tags", str(origin)], repo)
     assert report["tag_stem"] not in remote_tags
     state = json.loads(_git(["show", f"{report['commit']}:{pr.PIPELINE_STATE_PATH}"], repo))
-    assert state["last_promotion"]["tag"] == report["tag_stem"]
+    assert state["last_promotion"]["tag"] == report["source_tag"]
+    assert report["source_tag"] == f"promote-dev-{report['dev_head']}"
     assert report["commit"][:8] not in report["tag_stem"]
 
 
@@ -332,12 +333,43 @@ def test_promote_writes_pipeline_state_into_generated_commit(repo: Path):
     state_json = _git(["show", f"{report['commit']}:{pr.PIPELINE_STATE_PATH}"], repo)
     state = json.loads(state_json)
     assert state["last_promotion"]["dev_head"] == dev_head
-    # The state records the stem; the directly created tag is exactly
-    # `<stem>-<sha8>` of the commit that carries this state.
-    assert state["last_promotion"]["tag"] == report["tag_stem"]
-    assert report["tag"] == f"{report['tag_stem']}-{report['commit'][:8]}"
+    assert state["last_promotion"]["release_id"] == dev_head
+    assert state["last_promotion"]["tag"] == f"promote-dev-{dev_head}"
+    assert report["tag"] == f"promote-dev-{dev_head}"
     assert report["tag"] in _git(["tag", "--points-at", report["commit"]], repo).splitlines()
     assert state["paused"] is False
+
+
+def test_qualification_only_keeps_pause_and_uses_no_direct_tag_or_main_publication(repo: Path):
+    _git(["checkout", "-q", "main"], repo)
+    state = repo / pr.PIPELINE_STATE_PATH
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({
+        "schema": "copilot-extensions.release-pipeline-state", "version": 1,
+        "paused": True, "pause_reason": "containment while the replacement is qualified",
+    }), encoding="utf-8")
+    main = _commit(repo, "pause publication")
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins/demo-plugin/repaired.py").write_text("repaired = True\n", encoding="utf-8")
+    dev = _commit(repo, "repair the generated consumer")
+    with pytest.raises(pr.PromotionPaused):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main")
+    report = pr.promote(
+        repo=repo, dev_ref="dev", main_ref="main", qualification_only=True,
+    )
+    assert report["promoted"] is True
+    assert report["tag"] is None
+    replacement = json.loads(_git(["show", f"{report['commit']}:{pr.PIPELINE_STATE_PATH}"], repo))
+    assert replacement["paused"] is True
+    assert replacement["pause_reason"] == "containment while the replacement is qualified"
+    assert replacement["last_promotion"]["release_id"] == dev
+    assert _git(["rev-parse", "main"], repo) == main
+    assert not _git(["tag", "--points-at", report["commit"]], repo)
+
+
+def test_qualification_only_refuses_the_direct_main_push_path(repo: Path):
+    with pytest.raises(pr.PromotionError, match="normal candidate PR path"):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=True, qualification_only=True)
 
 
 def test_promote_tag_stem_is_utc(repo: Path, monkeypatch):
@@ -594,6 +626,27 @@ def test_promote_a_second_time_with_only_state_change_is_a_no_op(repo: Path):
 
     second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert second["promoted"] is False
+
+
+def test_new_development_commit_with_equal_payload_records_the_new_source_before_noop(repo: Path):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins/demo-plugin/new-file.txt").write_text("source payload\n", encoding="utf-8")
+    first_dev = _commit(repo, "first source")
+    first = pr.promote(repo=repo, dev_ref="dev", main_ref="main")
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+    _git(["commit", "-q", "--allow-empty", "-m", "new source identity, identical payload"], repo)
+    second_dev = _git(["rev-parse", "dev"], repo)
+    assert second_dev != first_dev
+    second = pr.promote(repo=repo, dev_ref="dev", main_ref="main")
+    assert second["promoted"] is True
+    state = json.loads(_git(["show", f"{second['commit']}:{pr.PIPELINE_STATE_PATH}"], repo))
+    assert state["last_promotion"]["dev_head"] == second_dev
+    assert state["last_promotion"]["release_id"] == second_dev
+    first_tree = _git(["rev-parse", first["commit"] + "^{tree}"], repo)
+    second_tree = _git(["rev-parse", second["commit"] + "^{tree}"], repo)
+    assert pr._tree_excluding_state(first_tree, repo=repo) == pr._tree_excluding_state(second_tree, repo=repo)
+    _git(["update-ref", "refs/heads/main", second["commit"]], repo)
+    assert pr.promote(repo=repo, dev_ref="dev", main_ref="main")["promoted"] is False
 
 
 def _write_changefile(repo: Path, name: str, plugin: str, bump_type: str) -> None:

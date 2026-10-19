@@ -6,7 +6,7 @@ import copy
 from contextlib import ExitStack
 from pathlib import Path
 
-from . import claim_handoffs as handoffs, resource_producer as producer, tracking
+from . import claim_handoffs as handoffs, config as cfg, resource_producer as producer, tracking
 from .claim_handoff_admission import validate_producer_uniqueness
 
 
@@ -73,8 +73,25 @@ def _clear_consumer_markers(
         tracking.save_record(consumer, consumer_path, preserve_handoff_reservations=False)
 
 
-def accept_producers(bundle_id: str, *, actor: str):
+def _record_matches_ref(record: tracking.WorktreeRecord, ref: tracking.ClaimRef) -> bool:
+    return (
+        (record.repo, record.worktree_id) == (ref.project, ref.worktree_id)
+        and handoffs._same_worktree(
+            tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+            handoffs._canonical_ref(ref),
+        )
+    )
+
+
+def accept_producers(bundle_id: str, *, actor: str, machine: str | None = None):
     """Persist the active recipient before discharging any source obligation."""
+    if machine is None:
+        try:
+            machine = cfg.load_config(include_control_plane_related_pr=False).machine
+        except (OSError, ValueError) as exc:
+            raise handoffs.ClaimHandoffError(
+                f"cannot establish producer handoff caller identity: {exc}"
+            ) from exc
     path = handoffs.registry_path()
     with tracking._RecordLock(path, require_sidecar=True):
         bundles, index, bundle = handoffs.load_accept_bundle(
@@ -85,17 +102,19 @@ def accept_producers(bundle_id: str, *, actor: str):
         )
         source_ref = handoffs._qualified_ref(bundle.source, "source")
         consumer_ref = handoffs._qualified_ref(bundle.consumer, "consumer")
-        if not handoffs._same_machine(source_ref.machine, consumer_ref.machine, project=consumer_ref.project):
+        if not handoffs.local_record_ref(consumer_ref, machine=machine):
             raise handoffs.ClaimHandoffError("producer handoff cannot mutate a remote owner")
         consumer_path = handoffs._record_path(consumer_ref)
         if bundle.state == "accepted":
             with tracking._RecordLock(consumer_path, require_sidecar=True):
                 consumer = handoffs._load_record_from_path(consumer_path, role="consumer")
-                if (consumer.machine, consumer.repo, consumer.worktree_id) != (consumer_ref.machine, consumer_ref.project, consumer_ref.worktree_id):
+                if not _record_matches_ref(consumer, consumer_ref):
                     raise handoffs.ClaimHandoffError("producer handoff record identity mismatch")
                 _validate_consumer(bundle, consumer)
                 _clear_consumer_markers(bundle, consumer, consumer_path)
                 return bundle
+        if not handoffs.same_local_records(source_ref, consumer_ref, machine=machine):
+            raise handoffs.ClaimHandoffError("producer handoff cannot mutate a remote owner")
         source_path = handoffs._record_path(source_ref)
         with ExitStack() as stack:
             for record_path in handoffs._ordered_lock_paths(source_path, consumer_path):
@@ -103,7 +122,7 @@ def accept_producers(bundle_id: str, *, actor: str):
             source = handoffs._load_record_from_path(source_path, role="source")
             consumer = handoffs._load_record_from_path(consumer_path, role="consumer")
             for record, ref in ((source, source_ref), (consumer, consumer_ref)):
-                if (record.machine, record.repo, record.worktree_id) != (ref.machine, ref.project, ref.worktree_id):
+                if not _record_matches_ref(record, ref):
                     raise handoffs.ClaimHandoffError("producer handoff record identity mismatch")
             if consumer.status in producer.FROZEN_OWNER_STATUSES:
                 raise handoffs.ClaimHandoffError(

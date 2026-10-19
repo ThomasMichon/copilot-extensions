@@ -117,15 +117,25 @@ class _SessionHostConnectionMixin:
         )
 
         expected_instance = (getattr(target, "venue", None) or {}).get("instance_id")
-        args = bind_launch_purpose(
-            args, preference_options["preference_source"],
-            preserving=bool(
-                load_session_id or preference_options.get("confirmed_preferences") or model
-                or preference_options.get("launch_preferences", {}).get("model")
-                or preference_options.get("provider_intent")
-            ),
+        preserving = bool(
+            load_session_id or preference_options.get("confirmed_preferences") or model
+            or preference_options.get("launch_preferences", {}).get("model")
+            or preference_options.get("provider_intent")
         )
+        args = bind_launch_purpose(args, preference_options["preference_source"], preserving=preserving)
         verify_selected_instance(args, expected_instance)
+        prepare_child = getattr(spawner, "prepare_child", None)
+        if prepare_child is not None:
+
+            async def prepare_bound_child(argv):
+                prepared = await prepare_child(argv)
+                bound = bind_launch_purpose(
+                    prepared, preference_options["preference_source"], preserving=preserving,
+                )
+                verify_selected_instance(bound, expected_instance)
+                return bound
+
+            spawner.prepare_child = prepare_bound_child
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a
             # command the agent runs (e.g. an in-session `test-chamber services
@@ -601,11 +611,7 @@ class _SessionHostConnectionMixin:
         from .session_host.endpoints import CredentialRelayReadinessError
 
         def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
-            if session.event_log:
-                session.event_log.append(event_type, data)
-            self._capture_progress(session, event_type, data)
-            if event_type == "usage_update":
-                self._handle_usage_update(session, data)
+            self._route_acp_event(session, event_type, data)
 
         # Release any stale (dead-transport) client first so its socketpair +
         # relay tasks are freed; host-mode shutdown DETACHES (child survives).

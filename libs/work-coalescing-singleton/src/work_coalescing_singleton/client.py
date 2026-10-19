@@ -8,6 +8,7 @@ already owns that (its own session-state / installation-cell layout).
 from __future__ import annotations
 
 import json
+import math
 import secrets
 import socket
 import time
@@ -26,15 +27,27 @@ def new_client_id() -> str:
     return secrets.token_hex(8)
 
 
-def _send_recv(host: str, port: int, token: str, message: dict, *, timeout: float) -> dict:
+def _send_recv(
+    host: str, port: int, token: str, message: dict, *, timeout: float,
+    completion_deadline: float | None = None,
+) -> dict:
+    def remaining() -> float:
+        if completion_deadline is None:
+            return timeout
+        budget = min(timeout, completion_deadline - time.monotonic())
+        if budget <= 0:
+            raise TimeoutError("daemon request completion deadline expired")
+        return budget
+
     try:
-        with socket.create_connection((host, port), timeout=timeout) as sock:
-            sock.settimeout(timeout)
+        with socket.create_connection((host, port), timeout=remaining()) as sock:
             envelope = dict(message, version=PROTOCOL_VERSION, token=token)
+            sock.settimeout(remaining())
             sock.sendall(json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n")
             sock.shutdown(socket.SHUT_WR)
             buf = b""
             while not buf.endswith(b"\n"):
+                sock.settimeout(remaining())
                 chunk = sock.recv(65536)
                 if not chunk:
                     break
@@ -49,6 +62,8 @@ def _send_recv(host: str, port: int, token: str, message: dict, *, timeout: floa
         raise DaemonUnavailable("malformed response") from exc
     if not isinstance(response, dict) or response.get("version") != PROTOCOL_VERSION:
         raise DaemonUnavailable("malformed response")
+    if completion_deadline is not None and time.monotonic() >= completion_deadline:
+        raise DaemonUnavailable("daemon request completion deadline expired")
     return response
 
 
@@ -84,8 +99,22 @@ def request(
     payload: dict,
     request_deadline_s: float,
     client_id: str | None = None,
+    completion_timeout_s: float | None = None,
 ) -> dict:
-    """Send one coalesced request. Raises ``DaemonUnavailable`` on any miss."""
+    """Send one request, optionally bounding the entire transport completion.
+
+    The optional monotonic completion budget includes dialing, sending and all
+    response fragments. Ordinary calls retain their server-deadline grace.
+    """
+    completion_deadline = None
+    if completion_timeout_s is not None:
+        if (
+            isinstance(completion_timeout_s, bool)
+            or not isinstance(completion_timeout_s, (int, float))
+            or not math.isfinite(completion_timeout_s) or completion_timeout_s <= 0
+        ):
+            raise ValueError("completion_timeout_s must be finite and positive")
+        completion_deadline = time.monotonic() + completion_timeout_s
     deadline = time.time() + request_deadline_s
     message: dict = {
         "action": "request",
@@ -96,7 +125,10 @@ def request(
     }
     if client_id:
         message["client_id"] = client_id
-    resp = _send_recv(host, port, token, message, timeout=request_deadline_s + 1.0)
+    resp = _send_recv(
+        host, port, token, message, timeout=request_deadline_s + 1.0,
+        **({"completion_deadline": completion_deadline} if completion_deadline is not None else {}),
+    )
     if resp.get("fallback"):
         reason = resp.get("reason")
         if reason:

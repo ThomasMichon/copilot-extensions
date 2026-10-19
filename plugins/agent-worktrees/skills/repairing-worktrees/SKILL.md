@@ -84,6 +84,39 @@ content-addressed `.yaml.repair-<digest>.bak` beside the record (created exclusi
 with mode `0600`; existing non-private POSIX backups refuse reuse). Contention or
 a changed record requires a fresh inspection. Never hand-edit tracking YAML.
 
+### Legacy native machine label
+
+After selecting a canonical local machine alias, an older record may still name
+the observed hostname. Inspect one exact record with:
+
+```text
+<agent-worktrees catalog argv[0]> doctor --repair-machine-record <full-worktree-id> --from-machine <previous-label> --json
+```
+
+Add `--fix` only after reviewing `repairable: true`. This scope proves that the
+previous label, configured identity and observed host select the same native
+machine. Existing linked checkouts retain selected-repository Git proof. Removed
+checkouts instead require canonical native worktree/knowledge registration and
+exact receiving-namespace evidence; an existing non-Git directory never falls
+back to that historical proof. With no roster, only the actual observed hostname
+is an eligible previous label, and removed-checkout repair is unavailable.
+Foreign/ambiguous identities, native/guest crossings, wrong receiving stores,
+indirect paths and combined repair scopes refuse. Optionally assert the exact
+configured target with `--to-machine`; it cannot select another execution space.
+
+Only the top-level `machine` scalar changes. IDs, paths, branches, sessions,
+ownership references, claim ledgers and lifecycle state remain byte-preserved.
+Valid old same-machine references remain aliases; linked records are not rejected
+merely for being paired or controlled. See
+[native label proof, audit and resident-roster verification](../../docs/machine-record-repair.md).
+Wrong-store duplicates/orphans require the separate targeted integrity capability
+tracked by #7097, not YAML edits or broader lifecycle cleanup.
+This is not a machine transfer or a checkout rename. The normal exact-byte backup,
+record/publication locks and changed-record refusal apply. An already-normalized
+record is a no-op. Enumerate actual local record IDs before invoking this scope;
+do not infer IDs from a new machine prefix or normalize removed historical
+records without checkout proof.
+
 Run it per project (`dotfiles`, `test-chamber`, …) — the command scopes to the
 current project's tracking store; the Copilot session-state/store it cleans is
 shared across projects, so the guards (current + registered session ids) protect

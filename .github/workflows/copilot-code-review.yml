@@ -1,0 +1,16 @@
+name: Copilot Code Review setup
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  copilot-setup-steps:
+    # Preserve hosted review capacity; ARC selection is not additive overflow.
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Complete minimal review setup
+        timeout-minutes: 5
+        run: echo "Copilot Code Review setup complete."

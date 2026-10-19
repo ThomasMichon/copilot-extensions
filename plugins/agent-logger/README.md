@@ -40,6 +40,12 @@ session-to-log pipeline out of any single bespoke service:
   scheduler or job lease by itself; a host/runner owns scheduling and, when it
   wants real logs rather than manifests, runs the `session-log-writer` agent,
   persists its render bundle, and applies the configured landing policy.
+- **Usage evidence and historical estimates** — scheduled sync preserves
+  bounded per-session accounting; the read-only `agent-logger usage` pipeline
+  extracts count-only transcript features and fits session-held-out calibration
+  with explicit empirical uncertainty and unknowns. See
+  [usage evidence](docs/usage-evidence.md) and
+  [transcript estimation](docs/usage-estimation.md).
 
 ## Design principles
 

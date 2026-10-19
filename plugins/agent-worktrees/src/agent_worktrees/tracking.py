@@ -24,6 +24,9 @@ import yaml
 from . import config as cfg
 from . import disposition_history, record_cache
 from .effort_focus import ActiveEffort, active_effort_from_mapping
+from .record_io import load_record_uncached as _load_record_uncached
+from .tracking_session_activations import SessionActivation as SessionActivation
+from . import tracking_session_activations as session_activations
 
 #: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
 #: status bar (120-col default) and the Worktree Picker's table rows; longer prose
@@ -36,7 +39,8 @@ TITLE_MAX = 30
 #: ``archived`` is post-``finalized`` -- the tombstone `retire_record`
 #: writes for an unpaired reaped worktree instead of deleting it.
 WorktreeStatus = Literal[
-    "active", "complete", "pushed", "finalized", "orphaned", "archived",
+    "active", "complete", "completed", "pushed", "finalizing",
+    "finalized", "orphaned", "archived",
 ]
 
 # A Copilot session's asserted lifecycle state within its worktree
@@ -204,24 +208,6 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
 
 
 @dataclass
-class SessionActivation:
-    """One observed interval in which a session was associated with a worktree.
-
-    Hook delivery is at-least-once and a Copilot session may be resumed many
-    times.  Keeping each interval append-only preserves that history instead of
-    overwriting the session's original ``started_at`` on every resume.
-    """
-
-    ordinal: int
-    started_at: str
-    start_recorded_at: str
-    start_source: str = "hook"
-    ended_at: str | None = None
-    end_recorded_at: str | None = None
-    end_source: str | None = None
-
-
-@dataclass
 class SessionEntry:
     """A Copilot session associated with a worktree.
 
@@ -246,6 +232,8 @@ class SessionEntry:
     pane_id: str | None = None
     activations: list[SessionActivation] = field(default_factory=list)
     relation_revision: int = 0
+    pruned_sources: list[str] = field(default_factory=list)
+    source_history_saturated: bool = False
 
 
 @dataclass
@@ -930,6 +918,7 @@ class WorktreeRecord:
     # explicit, per-record operator edit ever promotes it). Emitted only
     # when set, so a legacy/pre-Phase-1 YAML stays byte-identical.
     codename_source: str | None = None
+    _loaded_machine: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -1253,7 +1242,7 @@ def _path_write_lock(path: Path) -> threading.RLock:
         return lk
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def _atomic_write(path: Path, content: str | bytes) -> None:
     """Write content to a file atomically via temp + atomic replace.
 
     Serialized per path by an in-process lock (so the picker's own background
@@ -1269,7 +1258,7 @@ def _atomic_write(path: Path, content: str) -> None:
     with _path_write_lock(path):
         fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         try:
-            os.write(fd, content.encode())
+            os.write(fd, content if isinstance(content, bytes) else content.encode())
             os.close(fd)
             _replace_with_retry(tmp, str(path))
         except BaseException:
@@ -1527,34 +1516,21 @@ def _yaml_safe_load(raw: str) -> object:
 
 
 def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
-    """Load a worktree tracking record from a YAML file. Routed through
-    :mod:`record_cache`; self-invalidating on ``(mtime_ns, size)``. ``copy_result=False`` is read-only."""
+    """Load using the record cache's ``(mtime_ns, size)`` invalidation.
+
+    Copies carry transient machine CAS evidence, never serialized. A non-copy
+    result is shared/read-only; clone it before making an intentional update.
+    """
     from .pr_publication_state import loaded
     record = record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result)
-    return loaded(record) if copy_result else record
+    if copy_result:
+        record = loaded(record)
+        record._loaded_machine = record.machine  # Read-time CAS evidence, never serialized.
+    return record
 
 
-def _load_record_uncached(path: Path) -> WorktreeRecord:
-    """The parse :func:`load_record` memoizes via :mod:`record_cache` --
-    call :func:`load_record` instead of this directly."""
-    raw = _read_text_with_retry(path)
-    try:
-        data = _yaml_safe_load(raw)
-    except yaml.reader.ReaderError:
-        # alice_example/dotfiles#1789: a stray C0 control char (e.g. BEL)
-        # persisted into a
-        # value makes the YAML reader raise on every load, wedging all future
-        # disposition writes. Self-heal by stripping the illegal control chars
-        # and re-parsing; the next save then rewrites the file cleanly. Do not
-        # reinterpret unrelated malformed YAML as a repairable record.
-        repaired = _strip_control_chars(raw)
-        if repaired == raw:
-            raise
-        data = _yaml_safe_load(repaired)
-
-    if not isinstance(data, dict):
-        raise yaml.YAMLError("worktree tracking record must be a YAML mapping")
-
+def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
+    """Parse an already-read tracking mapping without filesystem effects."""
     title = data.get("title")
     if title == "null" or title is None:
         title = None
@@ -1633,56 +1609,8 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
                     succ = entry.get("successor")
                     pred = entry.get("predecessor")
                     pane = entry.get("pane_id")
-                    activations: list[SessionActivation] = []
-                    raw_activations = entry.get("activations")
-                    if isinstance(raw_activations, list):
-                        for raw_activation in raw_activations:
-                            if not isinstance(raw_activation, dict):
-                                continue
-                            act_started = raw_activation.get("started_at", "")
-                            if act_started in (None, "", "null"):
-                                continue
-                            if hasattr(act_started, "isoformat"):
-                                act_started = act_started.isoformat()
-                            act_ended = raw_activation.get("ended_at")
-                            if hasattr(act_ended, "isoformat"):
-                                act_ended = act_ended.isoformat()
-                            elif act_ended in (None, "", "null"):
-                                act_ended = None
-                            start_recorded = raw_activation.get(
-                                "start_recorded_at", act_started
-                            )
-                            if start_recorded in (None, "", "null"):
-                                start_recorded = act_started
-                            if hasattr(start_recorded, "isoformat"):
-                                start_recorded = start_recorded.isoformat()
-                            end_recorded = raw_activation.get("end_recorded_at")
-                            if hasattr(end_recorded, "isoformat"):
-                                end_recorded = end_recorded.isoformat()
-                            elif end_recorded in (None, "", "null"):
-                                end_recorded = None
-                            try:
-                                ordinal = int(raw_activation.get("ordinal", 0))
-                            except (TypeError, ValueError):
-                                ordinal = 0
-                            if ordinal <= 0:
-                                ordinal = len(activations) + 1
-                            activations.append(SessionActivation(
-                                ordinal=ordinal,
-                                started_at=str(act_started),
-                                start_recorded_at=str(start_recorded or act_started),
-                                start_source=str(
-                                    raw_activation.get("start_source") or "hook"
-                                ),
-                                ended_at=str(act_ended) if act_ended else None,
-                                end_recorded_at=(
-                                    str(end_recorded) if end_recorded else None
-                                ),
-                                end_source=(
-                                    str(raw_activation["end_source"])
-                                    if raw_activation.get("end_source") else None
-                                ),
-                            ))
+                    activations = session_activations.parse_activations(entry.get("activations"))
+                    pruned_sources, saturated = session_activations.parse_pruning_fence(entry)
                     sessions_list.append(SessionEntry(
                         session_id=str(entry["session_id"]),
                         started_at=str(sa),
@@ -1693,6 +1621,8 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
                         predecessor=str(pred) if pred else None,
                         pane_id=str(pane) if pane else None,
                         activations=activations,
+                        pruned_sources=pruned_sources,
+                        source_history_saturated=saturated,
                         relation_revision=_bounded_nonnegative_int(
                             entry.get("relation_revision", 0),
                             field="session relation_revision",
@@ -2181,7 +2111,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
         codename_source=(str(data["codename_source"])
                          if data.get("codename_source") else None),
     )
-    record._loaded_from = path
+    record._loaded_from, record._loaded_machine = path, record.machine
     return record
 
 
@@ -2539,9 +2469,12 @@ def _save_record_unlocked(
     from .resource_producer import preserve_claims
     preserve_claims(record, current, path)
 
+    current_sessions = {s.session_id: s for s in current.sessions or ()} if current else {}
     for session in record.sessions or ():
+        if session.session_id in current_sessions:
+            session_activations.merge_pruning_fence(session, current_sessions[session.session_id])
         if len(session.activations) > _MAX_SESSION_ACTIVATIONS:
-            session.activations = session.activations[-_MAX_SESSION_ACTIVATIONS:]
+            session_activations.prune_activations(session, _MAX_SESSION_ACTIVATIONS)
     if len(record.head_transitions) > _MAX_HEAD_TRANSITIONS:
         record.head_transitions = record.head_transitions[-_MAX_HEAD_TRANSITIONS:]
     if len(record.handoffs) > _MAX_HANDOFFS:
@@ -2972,30 +2905,7 @@ def _save_record_unlocked(
                     {"relation_revision": s.relation_revision}
                     if s.relation_revision else {}
                 ),
-                **(
-                    {"activations": [
-                        {
-                            "ordinal": activation.ordinal,
-                            "started_at": activation.started_at,
-                            "start_recorded_at": activation.start_recorded_at,
-                            "start_source": activation.start_source,
-                            **(
-                                {"ended_at": activation.ended_at}
-                                if activation.ended_at else {}
-                            ),
-                            **(
-                                {"end_recorded_at": activation.end_recorded_at}
-                                if activation.end_recorded_at else {}
-                            ),
-                            **(
-                                {"end_source": activation.end_source}
-                                if activation.end_source else {}
-                            ),
-                        }
-                        for activation in s.activations
-                    ]}
-                    if s.activations else {}
-                ),
+                **session_activations.activation_fields(s),
             }
             for s in record.sessions
         ]
@@ -3263,11 +3173,17 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
       RECREATE a file a legitimate concurrent hard-delete had already
       removed (copilot-extensions#3749).
 
+    Open PRs and held outbound resources prohibit retirement, even when the
+    checkout is already gone. Re-read responsibility under the record lock;
+    stale caller snapshots cannot erase a newly acquired obligation.
+
     Returns ``True`` once the record is durably retired (tombstoned or
     deleted, or found already retired by a concurrent call); ``False`` if
-    deferred by a contended lock -- callers treat that as "retry on a later
-    reap pass," not a failure.
+    deferred by a contended lock or changed pair -- callers retry on a later
+    reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
+    from .retirement_safety import require_retirable, retirement_blocker, same_pair
+
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
     if record.is_paired:
@@ -3294,6 +3210,12 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
             if not path.exists():
                 return True
 
+            latest = load_record(path)
+            require_retirable(latest)
+            if not same_pair(record, latest):
+                return False
+            record = latest
+
             hard_delete_sibling = False
             if record.is_paired:
                 sibling: WorktreeRecord | None = None
@@ -3301,7 +3223,11 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     sibling = find_paired_record(record)
                 except Exception:
                     sibling = None
-                if sibling is not None and sibling.reaped_at:
+                if (
+                    sibling is not None
+                    and sibling.reaped_at
+                    and retirement_blocker(sibling) is None
+                ):
                     hard_delete_sibling = True
 
             if hard_delete_sibling:
@@ -3876,10 +3802,11 @@ class _RecordLock:
     Always check ``acquired`` inside a ``blocking=False`` ``with`` block before
     writing; for the default ``blocking=True`` it is always True.
 
-    **Scope -- keep the lock window to the RMW only (#4547).** Wrap exactly the
-    ``load_record -> mutate -> save_record`` window and **never hold the lock
-    across network or git I/O** (a fetch, push, rebase, or provider call). Two
-    consequences follow:
+    **Scope -- keep normal RMW locks short (#4547).** Do not hold across fetch,
+    push, rebase, or provider I/O. Cleanup is the deliberate exception: under
+    ``FinalizeLock``, its record-writer fence spans local removal so no new
+    responsibility appears between validation and deletion. Ordinary writers
+    use the following short-RMW protocol:
 
     - **Foreground CLI verbs** whose RMW is self-contained (``set-pr``,
       ``set-disposition``, ``mark-complete``, resume's ``mark_resumed``, the

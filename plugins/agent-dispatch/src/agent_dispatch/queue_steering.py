@@ -15,6 +15,7 @@ notifiers. It is not usable standalone.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import json
 import sqlite3
 import uuid
@@ -27,6 +28,7 @@ from .queue_common import (
 )
 from .queue_records import SpawnState, Status, TaskError
 from .registrations import RegistrationKind, RegistrationStatus
+from .steering import SteeringError, steer_request_fingerprint
 
 
 class QueueSteeringMixin:
@@ -108,7 +110,7 @@ class QueueSteeringMixin:
         gated -- it does not block the task's own resume path.
         """
         ts = self._now(now)
-        card = {**card, "ts": ts}
+        card = {**card, "ts": ts, "revision": uuid.uuid4().hex}
         payload = json.dumps(card, separators=(",", ":"))
         awaiting = 1 if card.get("request_input") else 0
         with self._connect() as conn:
@@ -175,6 +177,7 @@ class QueueSteeringMixin:
         wake_requested: bool = False,
         wake_message: str | None = None,
         expected_status: str | None = None,
+        expected_revision: str | None = None,
         idempotency_key: str | None = None,
         now: float | None = None,
     ) -> Task:
@@ -187,11 +190,21 @@ class QueueSteeringMixin:
         task nonetheless showed the answer already recorded) -- without a
         key, blindly retrying on that ambiguous timeout would append a
         second, duplicate answer. With one, a retry carrying the same key
-        is recognized here and returns the already-committed result
-        unchanged, re-running none of the status transition or wake-enqueue
-        side effects a second time.
+        is recognized here and returns the current task, re-running none of
+        the status transition or wake-enqueue
+        side effects a second time. Reusing the key with a different request
+        refuses. A supplied card/owner revision is checked inside that same
+        transaction, after exact-request replay and before any mutation.
         """
         ts = self._now(now)
+        try:
+            fingerprint = steer_request_fingerprint(
+                fields=fields, sender=sender, wake_requested=wake_requested,
+                wake_message=wake_message, expected_status=expected_status,
+                expected_revision=expected_revision,
+            )
+        except SteeringError as exc:
+            raise TaskError(str(exc)) from exc
         payload = json.dumps(fields, separators=(",", ":"))
         wake_enqueued = False
         notify_owned_transition = False
@@ -206,10 +219,15 @@ class QueueSteeringMixin:
             conn.execute("BEGIN IMMEDIATE")
             if idempotency_key is not None:
                 duplicate = conn.execute(
-                    "SELECT 1 FROM task_steer WHERE task_id = ? AND idempotency_key = ?",
+                    "SELECT request_fingerprint FROM task_steer"
+                    " WHERE task_id = ? AND idempotency_key = ?",
                     (task_id, idempotency_key),
                 ).fetchone()
                 if duplicate is not None:
+                    if duplicate["request_fingerprint"] != fingerprint:
+                        raise TaskError(
+                            "steering request key conflicts with a different or unverifiable legacy request"
+                        )
                     task = self._fetch(conn, task_id)
                     conn.execute("COMMIT")
                     if task is None:
@@ -221,6 +239,8 @@ class QueueSteeringMixin:
                 raise TaskError(f"no such task {task_id!r}")
             try:
                 _check_expected_status(task, expected_status)
+                if expected_revision is not None and expected_revision != task.steering_revision:
+                    raise TaskError("task card or owner changed; refresh and retry")
             except TaskError:
                 conn.execute("COMMIT")
                 raise
@@ -234,10 +254,11 @@ class QueueSteeringMixin:
                         else ""
                     )
                 )
-            conn.execute(
-                "INSERT INTO task_steer (task_id, ts, fields, sender, idempotency_key)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (task_id, ts, payload, sender, idempotency_key),
+            inserted = conn.execute(
+                "INSERT INTO task_steer"
+                " (task_id, ts, fields, sender, idempotency_key, request_fingerprint)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (task_id, ts, payload, sender, idempotency_key, fingerprint),
             )
             resumed = task.status == Status.SUSPENDED
             cold_headless = bool(resumed and self._has_headless_reservation(conn, task_id))
@@ -291,6 +312,7 @@ class QueueSteeringMixin:
                 ),
             )
             result = self._fetch(conn, task_id)
+            wake = None
             if (
                 wake_requested
                 and not cold_headless
@@ -298,7 +320,7 @@ class QueueSteeringMixin:
                 and result.owner
                 and result.owner_session_id is not None
             ):
-                self._enqueue_wake(
+                wake = self._enqueue_wake(
                     conn,
                     result,
                     message=wake_message,
@@ -306,12 +328,65 @@ class QueueSteeringMixin:
                 )
                 wake_enqueued = True
                 result = self._fetch(conn, task_id)
+            if result is None:
+                raise TaskError(f"no such task {task_id!r}")
+            wake_status = (
+                "not_requested" if not wake_requested
+                else "resume_requested" if cold_headless
+                else wake.status if wake is not None
+                else "no_owner" if result is not None and not result.owner
+                else "no_owner_session"
+            )
+            acceptance = {
+                "request_id": idempotency_key, "request_fingerprint": fingerprint,
+                "steer_id": inserted.lastrowid, "task_id": task_id, "accepted_at": ts,
+                "status": result.status, "owner": result.owner,
+                "owner_session_id": result.owner_session_id, "generation": result.generation,
+                "steering_revision": task.steering_revision, "wake_status": wake_status,
+                "wake_operation_id": wake.id if wake is not None else None,
+            }
+            conn.execute(
+                "UPDATE task_steer SET acceptance = ?, wake_operation_id = ? WHERE id = ?",
+                (json.dumps(acceptance, separators=(",", ":")),
+                 wake.id if wake is not None else None, inserted.lastrowid),
+            )
             conn.execute("COMMIT")
         if wake_enqueued:
             self._notify_wake()
         if notify_owned_transition:
             self._notify_owned_transition()
         return result  # type: ignore[return-value]
+
+    def steer_receipt(self, task_id: str, request_id: str) -> dict | None:
+        """Original acceptance plus current consumption/original-wake observation."""
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            row = conn.execute(
+                "SELECT acceptance, taken_at, wake_operation_id FROM task_steer"
+                " WHERE task_id = ? AND idempotency_key = ?", (task_id, request_id),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+            if row["acceptance"] is None:
+                raise TaskError("steering request has no verifiable acceptance receipt")
+            wake_row = (
+                conn.execute(
+                    "SELECT * FROM wake_outbox WHERE task_id = ? AND id = ?",
+                    (task_id, row["wake_operation_id"]),
+                ).fetchone()
+                if row["wake_operation_id"] is not None else None
+            )
+            conn.execute("COMMIT")
+        acceptance = json.loads(row["acceptance"])
+        if row["wake_operation_id"] is not None and wake_row is None:
+            raise TaskError("steering request's original wake receipt is unavailable")
+        wake = WakeOperation._from_row(wake_row) if wake_row is not None else None
+        return {
+            "acceptance": acceptance, "consumed_at": row["taken_at"],
+            "wake": asdict(wake) if wake is not None else None,
+            "wake_status": wake.status if wake is not None else acceptance["wake_status"],
+        }
 
     def save_card_draft(
         self,

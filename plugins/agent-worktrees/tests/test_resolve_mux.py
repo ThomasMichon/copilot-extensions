@@ -10,7 +10,11 @@ import argparse
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from agent_worktrees import __main__ as cli
+
+pytestmark = pytest.mark.guard
 
 
 def _args(**over):
@@ -114,6 +118,7 @@ def test_json_remote_resume_emits_environment_specific_handoff():
             "wt-1",
             "--bare-resume",
             "--no-mux",
+            "--defer-new-seed",
         ],
     }
 
@@ -135,7 +140,7 @@ def test_json_remote_base_emits_base_handoff():
          patch.object(cli, "_emit_remote_plan_for_env", side_effect=_emit):
         assert cli.cmd_resolve(args) == 0
 
-    assert captured["remote_args"] == ["--base"]
+    assert captured["remote_args"] == ["--base", "--no-resume", "--defer-new-seed"]
 
 
 def test_remote_plan_rejects_unknown_explicit_environment(tmp_path):

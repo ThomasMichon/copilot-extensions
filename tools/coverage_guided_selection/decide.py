@@ -9,9 +9,9 @@ lines, which tests should run, and why?*
 2. `correlation.fetch_baseline_asset` -- download that generation's full
    coverage map from its Release asset (network I/O).
 3. `debt.assess_debt` -- is this resolved generation too stale to trust.
-   If so, curate the fallback tier from the full baseline directly
-   (step 6) and skip straight past remap/selection below -- there is no
-   point remapping attribution this run has already decided not to trust.
+   Legacy consumers curate the fallback tier directly when exceeded.
+   The additive smoke-floor execution mode still retains every remappable
+   implicated test: debt adds smoke, never permission to drop a detector.
 4. `ancestor_resolution.remap_or_invalidate_baseline` -- otherwise, carry
    its attribution forward to the fork commit.
 5. `selection.select_tests` -- diff-scoped selection against the changed
@@ -130,6 +130,7 @@ def decide(
     age_threshold_seconds: float | None = None,
     fallback_runtime_budget_s: float = 300.0,
     eligible_tests: frozenset[str] | None = None,
+    include_smoke_floor: bool = False,
 ) -> SelectionDecision:
     """Decide which tests to run for `plugin` at `fork_commit`.
 
@@ -152,6 +153,11 @@ def decide(
     generation) -- each of those is a normal, auditable fallback reason,
     not an exception. Only a genuine git/plumbing failure inside the
     helpers this calls propagates.
+
+    `include_smoke_floor` unions the curated fallback into a fresh
+    selection too, retaining remappable implicated tests even when debt
+    exceeds its threshold. Existing shadow consumers retain their early
+    debt fallback unchanged by default.
     """
     resolved = resolve_nearest_baseline(repo_root, plugin, fork_commit, main_ref=main_ref)
     if resolved is None:
@@ -214,7 +220,7 @@ def decide(
         else eligible_tests
     )
 
-    if assessment.exceeded:
+    if assessment.exceeded and not include_smoke_floor:
         # Curate from the FULL earned baseline, never `remapped`: the
         # remap/invalidate step (below) drops coverage for exactly the
         # files this diff touches, so curating from it would shrink the
@@ -242,7 +248,7 @@ def decide(
     )
 
     sel = select_tests(remapped, changed_lines)
-    if sel.fallback_triggered:
+    if assessment.exceeded or sel.fallback_triggered or include_smoke_floor:
         # Same reasoning as the debt-exceeded branch above: curate from the
         # full baseline, not the remapped/invalidated one.
         fb = compute_fallback_set(
@@ -260,10 +266,16 @@ def decide(
         # fallback -- the fallback must only ever ADD safety-net coverage
         # for what's unattributed, never remove coverage already earned.
         combined_tests = tuple(sorted(set(sel.selected_tests) | set(fb.selected_tests)))
+        if assessment.exceeded:
+            reason = f"{COVERAGE_DEBT_PREFIX}{'; '.join(assessment.reasons)}"
+        elif sel.fallback_triggered:
+            reason = f"{SELECTION_FALLBACK_PREFIX}{reasons_str}"
+        else:
+            reason = f"{FRESH_SELECTION}; additive smoke floor"
         return SelectionDecision(
-            mode="fallback",
+            mode="fallback" if assessment.exceeded or sel.fallback_triggered else "selected",
             selected_tests=combined_tests,
-            reason=f"{SELECTION_FALLBACK_PREFIX}{reasons_str}",
+            reason=reason,
             baseline_generation=measured_commit,
             baseline_commit_on_main=resolved.baseline_commit,
             debt=assessment.as_dict(),

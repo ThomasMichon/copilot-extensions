@@ -92,11 +92,14 @@ drain, extend and test that shared seam rather than bypassing it in the plugin.
 
 - Preserve ordinary no-context legacy commands and acknowledged notification
   schemas. Cell-specific mutation never falls back to an unqualified root.
-- First upgrade from a pre-cutover lease-only owner uses an explicit,
-  identity-checked transition: request the existing graceful shutdown, prove
-  lease release, and adopt its final persisted state. An unreachable holder,
-  drain failure, or uncertain shutdown blocks activation; it does not license
-  parallel startup. Later upgrades use the governed routed contract.
+- A pre-cutover lease-only owner without verifiable same-cell ownership blocks
+  activation. Its PID text, wall-clock start time and rendezvous token are not
+  installation or native-instance authority. Do not fabricate governed-instance
+  evidence, send shutdown to an unproven endpoint, signal the holder, or start a
+  second owner. This explicit refusal is the operator-selected first-upgrade
+  boundary; no new one-time authorization surface is added. A future migration
+  protocol requires separately reviewed scope. Later attributable upgrades use
+  the governed routed contract.
 - Default-off user-local governance still controls adoption. Existing
   unattributed legacy state blocks automatic cell activation until explicitly
   attributed through the canonical migration contract; do not silently copy,
@@ -154,8 +157,10 @@ authorize interrupting a shared process.
   daemon or publish a route. Its marker and manifest select the completed
   target; interruptions converge to coherent selection metadata without
   activation. A racing on-demand startup uses the serialized committed
-  selection. First upgrade from a lease-only owner preserves pending state and
-  refuses an unreachable holder rather than starting a duplicate.
+  selection. An actual lease-only owner without same-cell attestation, whether
+  reachable or unreachable, must remain running with pending state unchanged:
+  installer activation refuses without sending shutdown, changing selection,
+  publishing a route or starting a duplicate.
 - Two independently governed cells invoke the actual shipped PR-owner payload,
   retain separate state and endpoints, and cannot observe, stop, promote,
   repair, or retire each other's owner. Use actual adoption primitives,

@@ -14,8 +14,10 @@ conflating the two streams.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -69,9 +71,42 @@ def _executable(path: Path, text: str) -> None:
 def _run_harness(
     tmp_path: Path, uv_stub_body: str, extra_script: str, delays_file: Path
 ) -> subprocess.CompletedProcess:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(exist_ok=True)
+    # The canonical policy launches UV in a subprocess. Its settings probe
+    # returns before the install-only SRE/counter body has any side effects.
+    uv = fake_bin / "uv"
+    _executable(
+        uv,
+        "#!/bin/sh\n"
+        "for arg do\n"
+        '    if [ "$arg" = "--show-settings" ]; then\n'
+        "        cat <<'SETTINGS'\n"
+        "PipInstallSettings { settings: PipSettings {\n"
+        "    index_locations: IndexLocations { indexes: [], flat_index: [], },\n"
+        "    exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },\n"
+        "}, }\n"
+        "SETTINGS\n"
+        "        exit 0\n"
+        "    fi\n"
+        "done\n"
+        + f"{shlex.quote(sys.executable)} -c "
+        + shlex.quote(
+            "import datetime, sys; args = sys.argv[1:]; "
+            "assert args[:2] == ['pip', 'install']; "
+            "assert '--quiet' in args and '--reinstall' in args; "
+            "cutoff = datetime.datetime.fromisoformat(args[args.index('--exclude-newer') + 1].replace('Z', '+00:00')); "
+            "assert cutoff <= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)"
+        )
+        + ' "$@" || exit 99\n'
+        + uv_stub_body
+        + '\nuv "$@"\n',
+    )
+    policy = _INSTALL_SH.with_name("installer_dependency_policy.py")
     harness = tmp_path / "harness.sh"
     harness.write_text(
         "#!/bin/sh\nset -eu\n"
+        f"INSTALLER_ENGINE_DEPENDENCY_POLICY={shlex.quote(str(policy))}\n"
         + _extract_sh_functions("test_is_sre_module_mismatch", "invoke_uv_pip_install_resilient")
         # Matches the real `_warn() { echo "  [WARN] $*" >&2; }` -- routed to
         # stderr so it never pollutes the wrapper's captured stdout payload.
@@ -79,15 +114,11 @@ def _run_harness(
 _warn() { echo "WARN: $*" >&2; }
 
 """
-        + uv_stub_body
-        + "\n\n"
-        + extra_script
+        + extra_script.replace("fake-python", shlex.quote(sys.executable))
         + "\n",
         encoding="utf-8",
     )
     harness.chmod(0o755)
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir(exist_ok=True)
     # Stub `sleep` so the test doesn't actually wait through the 3s/6s/10s
     # backoff schedule, while recording each requested delay so the caller
     # can assert the actual schedule, not just the retry count.
@@ -95,6 +126,7 @@ _warn() { echo "WARN: $*" >&2; }
     env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
     return subprocess.run(
         [_BASH, str(harness)],
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         env=env,

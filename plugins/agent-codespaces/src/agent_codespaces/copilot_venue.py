@@ -13,6 +13,7 @@ import os
 import sys
 import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 
 from remote_login_shell import wrap_login_shell
 
@@ -39,6 +40,12 @@ def add_copilot_subparser(sub) -> None:
              "`agent-worktrees copilot` there.",
     )
     copilot_parser.add_argument("name", help="CodeSpace name")
+    copilot_parser.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
+    from .plugin_preparation import disabled_plugin
+    copilot_parser.add_argument(
+        "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
+    )
+    copilot_parser.add_argument("--plugin-root", dest="plugin_roots", action="append", default=[])
     copilot_parser.add_argument(
         "--worktree-id", dest="worktree_id", default=None,
         help="The worktree id to reserve/attach on the venue side (forwarded "
@@ -568,11 +575,20 @@ def _cmd_copilot_connect(
         )
 
     def connect(remote_command: str) -> int:
-        return interactive_ssh(
-            args.name, reverse_forwards,
-            relay_port=relay_port, relay_token=relay_token,
-            remote_command=remote_command,
-        )
+        from .plugin_preparation import attached_launch_command
+        prepared_context = {}
+        with _attached_preparation(args, config, prepared_context=prepared_context) as relay_ready:
+            forwards = [
+                spec for spec in reverse_forwards
+                if not relay_ready or spec != f"{relay_port}:127.0.0.1:{relay_port}"
+            ]
+            return interactive_ssh(
+                args.name, forwards,
+                relay_port=relay_port, relay_token=relay_token,
+                remote_command=attached_launch_command(
+                    remote_command, prepared_context.get("workspace"),
+                ),
+            )
 
     try:
         return run_venue_copilot(
@@ -590,3 +606,68 @@ def _cmd_copilot_connect(
     finally:
         stop_heartbeat.set()
         _owner.release(args.name, tenant)
+
+
+@contextmanager
+def _attached_preparation(args, config, *, prepared_context=None):
+    """Keep async relay supervision alive while SSH owns the main thread/TTY."""
+    import asyncio
+    from .plugin_preparation import prepare_attached
+
+    ready = threading.Event()
+    stop_requested = threading.Event()
+    state = {}
+
+    def worker():
+        async def run():
+            stopped = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            task = asyncio.current_task()
+
+            def stop():
+                if state.get("prepared"):
+                    stopped.set()
+                else:
+                    task.cancel()
+
+            state["stop"] = lambda: loop.call_soon_threadsafe(stop)
+            if stop_requested.is_set():
+                stop()
+
+            def prepared(relay_ready):
+                state["prepared"] = True
+                state["relay_ready"] = relay_ready
+                ready.set()
+                if stop_requested.is_set():
+                    stopped.set()
+
+            try:
+                await prepare_attached(
+                    args, config, on_ready=prepared, release=stopped.wait,
+                    **({"prepared_context": prepared_context} if prepared_context is not None else {}),
+                )
+            except BaseException as exc:
+                if not isinstance(exc, asyncio.CancelledError) or not stop_requested.is_set():
+                    state["error"] = exc
+            finally:
+                ready.set()
+
+        asyncio.run(run())
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    try:
+        ready.wait()
+        if "error" in state:
+            raise state["error"]
+        yield state.get("relay_ready", False)
+    finally:
+        stop_requested.set()
+        if thread.is_alive() and "stop" in state:
+            try:
+                state["stop"]()
+            except RuntimeError:
+                pass
+        thread.join()
+    if "error" in state:
+        raise state["error"]

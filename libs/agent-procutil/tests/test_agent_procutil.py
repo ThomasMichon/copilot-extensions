@@ -697,9 +697,14 @@ def _access_denied() -> OSError:
 
 @pytest.fixture()
 def fake_popen(monkeypatch):
+    from agent_procutil import daemon
+
     calls: list = []
     fake = _FakePopen(calls)
     monkeypatch.setattr(pu.subprocess, "Popen", fake)
+    monkeypatch.setattr(
+        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError("fixture")),
+    )
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     return fake
 

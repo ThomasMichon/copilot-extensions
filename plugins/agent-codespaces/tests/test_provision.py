@@ -302,6 +302,55 @@ class TestDispatchProvisionCommand:
         assert cmd == "echo relay"
         assert lookups == []
 
+    def test_helpers_phase_cannot_execute_checkout_creating_hooks(self, tmp_path, monkeypatch):
+        from agent_codespaces.provision import dispatch_provision_command
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_assets.build_provision_command", lambda **kw: "HELPERS",
+        )
+        lookups = []
+        command = dispatch_provision_command(
+            self._cfg(tmp_path), "synthetic", lookups.append, phase="helpers",
+        )
+        assert command == "HELPERS"
+        assert lookups == []
+
+    def test_hooks_phase_contains_only_authenticated_hooks(self, tmp_path, monkeypatch):
+        from agent_codespaces.provision import dispatch_provision_command
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_assets.build_provision_command",
+            lambda **kw: pytest.fail("hooks phase must not redeploy helpers"),
+        )
+        command = dispatch_provision_command(
+            self._cfg(tmp_path), "synthetic", lambda name: "o/r", phase="hooks",
+        )
+        assert "echo on-connect" in command
+        assert "echo on-create" not in command
+
+    def test_provision_cli_selects_hooks_phase(self, tmp_path, monkeypatch, capsys):
+        from agent_codespaces import __main__ as cli
+        monkeypatch.setattr("agent_codespaces.config.load_merged_config",
+                            lambda **kw: self._cfg(tmp_path))
+        monkeypatch.setattr("agent_codespaces.lifecycle.repository_for_codespace", lambda name: "o/r")
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_assets.build_provision_command",
+            lambda **kw: pytest.fail("hooks CLI phase must not redeploy helpers"),
+        )
+        assert cli.main(["provision-command", "--codespace", "synthetic", "--phase", "hooks"]) == 0
+        assert "echo on-connect" in capsys.readouterr().out
+
+    def test_provision_cli_default_still_deploys_helpers_and_hooks(self, tmp_path, monkeypatch, capsys):
+        from agent_codespaces import __main__ as cli
+        monkeypatch.setattr("agent_codespaces.config.load_merged_config",
+                            lambda **kw: self._cfg(tmp_path))
+        monkeypatch.setattr("agent_codespaces.lifecycle.repository_for_codespace", lambda name: "o/r")
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_assets.build_provision_command", lambda **kw: "HELPERS",
+        )
+        assert cli.main(["provision-command", "--codespace", "synthetic"]) == 0
+        output = capsys.readouterr().out
+        assert output.startswith("HELPERS")
+        assert "echo on-connect" in output
+
     def test_with_codespace_appends_repo_hooks_in_subshell(
         self, tmp_path: Path, monkeypatch,
     ) -> None:

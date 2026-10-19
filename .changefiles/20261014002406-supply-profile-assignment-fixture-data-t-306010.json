@@ -1,9 +1,0 @@
-{
-  "comment": "Supply profile-assignment fixture data to the registration-specific authority loader.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

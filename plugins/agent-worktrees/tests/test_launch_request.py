@@ -1,10 +1,17 @@
 """Remote requests reuse target seed authority and stable creation identity."""
 
+from __future__ import annotations
+
 import base64
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+from datetime import datetime
 import json
+import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -66,6 +73,46 @@ def test_resume_admitted_once_via_real_daemon_then_finished_never_replays(tmp_pa
         request.execute(authority, intent)
     assert launch_seed_state.peek(record.yaml_path) is None
     assert request.inspect(intent["request_id"])["state"] == "completed-or-superseded"
+
+
+def test_resume_does_not_allocate_a_random_worktree_suffix(
+    tmp_path: Path, authority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+    )
+    token_hex = request.secrets.token_hex
+
+    def no_allocation(size: int) -> str:
+        assert size != 2, "Resume attempted to allocate a new worktree suffix"
+        return token_hex(size)
+
+    monkeypatch.setattr(request.secrets, "token_hex", no_allocation)
+    intent = _intent()
+    first = request.execute(authority, intent)
+    receipt = request._read_admission(tmp_path, intent["request_id"])
+    assert receipt["suffix"] == intent["request_id"]
+    assert first["worktree_id"] == intent["worktree_id"]
+    assert request.execute(authority, intent) == first
+    assert request._read_admission(tmp_path, intent["request_id"]) == receipt
+
+
+@pytest.mark.parametrize("state", ["active", "unknown"])
+def test_structured_resume_rejects_hosted_provider_via_real_daemon(
+    tmp_path, authority, state,
+):
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+    )
+    record.execution_leg = tracking.ExecutionLegBinding(
+        provider="ahp", state=state, binding_revision=1, blob={},
+    )
+    tracking.save_record(record, record.yaml_path)
+    before = record.yaml_path.read_bytes()
+    with pytest.raises(ValueError, match="native execution leg"):
+        request.execute(authority, _intent())
+    assert record.yaml_path.read_bytes() == before
+    assert launch_seed_state.peek(record.yaml_path) is None
 
 
 @pytest.mark.parametrize("kind,field,value", [
@@ -130,7 +177,10 @@ def test_resume_new_intent_can_replace_old_but_old_request_cannot_restore_it(tmp
     assert launch_seed_state.peek(record.yaml_path).text == "replacement"
 
 
-def test_new_response_loss_reuses_allocated_worktree_not_new_creation(tmp_path, authority, monkeypatch):
+@pytest.mark.parametrize("concurrent", [False, True])
+def test_new_response_loss_reuses_allocated_worktree_not_new_creation(
+    tmp_path, authority, monkeypatch, concurrent,
+):
     from agent_worktrees import worktree_creation
 
     created = []
@@ -144,29 +194,182 @@ def test_new_response_loss_reuses_allocated_worktree_not_new_creation(tmp_path, 
                                 seed_id=kwargs["pending_seed_id"])
         return {"worktree": {"id": wid}}
     monkeypatch.setattr(worktree_creation, "_create_worktree_core", create)
-    first = request.execute(authority, _intent("new"))
-    receipt = request.execute(authority, _intent("new"))
+    if concurrent:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: request.execute(authority, _intent("new")), range(2)))
+        first, receipt = results
+    else:
+        first = request.execute(authority, _intent("new"))
+        receipt = request.execute(authority, _intent("new"))
     assert first == receipt
     assert created == [receipt["worktree_id"]]
     assert launch_seed_state.peek(tmp_path / f"{created[0]}.yaml").kind == "new"
 
 
-def test_new_admission_uses_real_creation_core_with_fixed_allocation(tmp_path, authority, monkeypatch):
+@pytest.mark.parametrize("machine,platform,prefix", [
+    ("test", "windows", "test-win"),
+    ("test-wsl", "wsl", "test-wsl"),
+])
+def test_new_admission_uses_real_creation_core_with_fixed_allocation(
+    tmp_path, authority, monkeypatch, machine, platform, prefix,
+):
     from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
 
-    config = _create_config(tmp_path)
+    config = replace(_create_config(tmp_path), machine=machine, platform=platform)
+    monkeypatch.setattr(request.cfg, "detect_platform", lambda: platform)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
     first = request.execute(config, _intent("new"))
     second = request.execute(config, _intent("new"))
     assert first == second
     records = tracking.list_records(tmp_path)
     assert len(records) == 1
-    assert records[0].worktree_id.endswith("a" * 32)
+    assert re.fullmatch(
+        rf"{re.escape(prefix)}-\d{{8}}-\d{{6}}-[0-9a-f]{{4}}", records[0].worktree_id,
+    )
+    assert "a" * 32 not in records[0].worktree_id
     seed = launch_seed_state.peek(records[0].yaml_path)
     assert seed.seed_id == "a" * 32 and seed.kind == "new"
     launch_seed_state.remove(records[0].yaml_path, remove_record=True)
     with pytest.raises(ValueError, match="instead of recreating"):
         request.execute(config, _intent("new"))
+
+
+def test_lost_admission_response_reuses_its_short_allocation(
+    tmp_path: Path, authority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    dispatch = request._dispatch
+    intent = _intent("new")
+
+    def lose_response(verb: str, args: dict) -> dict:
+        result = dispatch(verb, args)
+        if verb == "launch_request_admit":
+            raise OSError("admission response lost")
+        return result
+
+    monkeypatch.setattr(request, "_dispatch", lose_response)
+    with pytest.raises(OSError, match="response lost"):
+        request.execute(config, intent)
+    admission = request._admission_path(tmp_path, intent["request_id"])
+    original = json.loads(admission.read_text(encoding="utf-8"))
+    assert re.fullmatch(r"[0-9a-f]{4}", original["suffix"])
+    assert original["suffix"] != intent["request_id"]
+
+    monkeypatch.setattr(request, "_dispatch", dispatch)
+    result = request.execute(config, intent)
+    assert result["worktree_id"] == original["worktree_id"]
+    assert result["seed_id"] == intent["request_id"]
+    assert len(tracking.list_records(tmp_path)) == 1
+
+
+@pytest.mark.parametrize("already_created", [False, True])
+def test_legacy_long_allocation_is_recovered_without_renaming(
+    tmp_path: Path, authority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    already_created: bool,
+) -> None:
+    import hashlib
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = replace(_create_config(tmp_path), machine="test-wsl", platform="wsl")
+    monkeypatch.setattr(request.cfg, "detect_platform", lambda: "wsl")
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    intent = _intent("new")
+    identity = "test-wsl-wsl-20261013-100000-" + intent["request_id"]
+    request._apply_admit({
+        "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+        "fingerprint": hashlib.sha256(
+            json.dumps(intent, sort_keys=True, ensure_ascii=False).encode("utf-8"),
+        ).hexdigest(),
+        "kind": "new", "worktree_id": identity, "timestamp": "20261013-100000",
+    })
+    if already_created:
+        record = tracking.create_new_record(
+            identity, f"worktree/{identity}", str(tmp_path / "tree"),
+            config.repo_name, config.machine, config.platform, tmp_path,
+        )
+        receipt = request._read_admission(tmp_path, intent["request_id"])
+        request._apply_creation_start({
+            "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+            "fingerprint": receipt["fingerprint"],
+        })
+        request._apply_creation_finish({
+            "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+            "fingerprint": receipt["fingerprint"],
+        })
+        launch_seed_state.stage(
+            record.yaml_path, kind="new", text=intent["text"], seed_id=intent["request_id"],
+        )
+
+    result = request.execute(config, intent)
+    assert result["worktree_id"] == identity
+    assert len(tracking.list_records(tmp_path)) == 1
+    assert launch_seed_state.peek(tmp_path / f"{identity}.yaml").seed_id == intent["request_id"]
+
+
+def test_short_allocation_collision_does_not_adopt_an_existing_worktree(
+    tmp_path: Path, authority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    first = request.execute(config, _intent("new"))
+    allocation = request._read_admission(tmp_path, _intent()["request_id"])
+
+    class FixedDateTime:
+        @staticmethod
+        def now() -> datetime:
+            return datetime.strptime(allocation["timestamp"], "%Y%m%d-%H%M%S")
+
+    monkeypatch.setattr(request, "datetime", FixedDateTime)
+    token_hex = request.secrets.token_hex
+    monkeypatch.setattr(
+        request.secrets, "token_hex",
+        lambda size: allocation["suffix"] if size == 2 else token_hex(size),
+    )
+    with pytest.raises(ValueError, match="creation is incomplete"):
+        request.execute(config, {**_intent("new"), "request_id": "b" * 32, "text": "another task"})
+    seed = launch_seed_state.peek(tmp_path / f"{first['worktree_id']}.yaml")
+    assert seed.seed_id == _intent()["request_id"]
+    assert seed.text == _intent()["text"]
+    assert len(tracking.list_records(tmp_path)) == 1
+
+
+@pytest.mark.parametrize("field", ["suffix", "timestamp", "worktree_id"])
+def test_short_receipt_allocation_mismatch_refuses_before_record_or_seed_changes(
+    tmp_path: Path, authority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, field: str,
+) -> None:
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    intent = _intent("new")
+    result = request.execute(config, intent)
+    record_path = tmp_path / f"{result['worktree_id']}.yaml"
+    record_before = record_path.read_bytes()
+    seed_path = launch_seed_state.state_path(record_path)
+    seed_before = seed_path.read_bytes()
+    path = request._admission_path(tmp_path, intent["request_id"])
+    receipt = request._read_admission(tmp_path, intent["request_id"])
+    receipt[field] = {
+        "suffix": "0000" if receipt["suffix"] != "0000" else "1111",
+        "timestamp": "20000101-000000" if receipt["timestamp"] != "20000101-000000" else "20000102-000000",
+        "worktree_id": "other-win-20000101-000000-abcd",
+    }[field]
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    damaged = path.read_bytes()
+
+    with pytest.raises(ValueError, match="Invalid stored launch admission allocation"):
+        request.execute(config, intent)
+    with pytest.raises(ValueError, match="Invalid stored launch admission allocation"):
+        request.inspect(intent["request_id"])
+
+    assert record_path.read_bytes() == record_before
+    assert seed_path.read_bytes() == seed_before
+    assert path.read_bytes() == damaged
 
 
 def test_unaccepted_new_cannot_recreate_removed_worktree(tmp_path, authority, monkeypatch):
@@ -252,6 +455,14 @@ def test_decode_round_trip_preserves_shell_metacharacters():
     assert request.decode(encoded) == intent
     with pytest.raises(ValueError):
         request.decode(encoded + "!")
+
+
+@pytest.mark.parametrize("worktree_id", ["wt-a", ""])
+def test_new_protocol_request_rejects_an_existing_worktree_selector(worktree_id: str) -> None:
+    intent = {**_intent("new"), "worktree_id": worktree_id}
+    encoded = base64.b64encode(json.dumps(intent).encode("utf-8")).decode("ascii")
+    with pytest.raises(ValueError, match="New launch request cannot name an existing worktree"):
+        request.decode(encoded)
 
 
 @pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
@@ -356,7 +567,7 @@ def test_status_unstaged_resume_is_admission_incomplete(tmp_path, authority):
 ])
 @pytest.mark.parametrize("corruption", [
     "null", "[]", "{}", "missing-field", "bad-fingerprint",
-    "bad-flags", "bad-worktree",
+    "bad-flags", "bad-worktree", "bad-suffix", "bad-short-allocation",
 ])
 def test_corrupt_admission_is_structured_for_every_registered_handler(
     tmp_path, admission_config, verb, corruption,
@@ -381,6 +592,10 @@ def test_corrupt_admission_is_structured_for_every_registered_handler(
             receipt["fingerprint"] = None
         elif corruption == "bad-flags":
             receipt["accepted"] = "yes"
+        elif corruption == "bad-suffix":
+            receipt["suffix"] = "b" * 32
+        elif corruption == "bad-short-allocation":
+            receipt["suffix"] = "abcd"
         else:
             receipt["worktree_id"] = "../outside"
         damaged = json.dumps(receipt)

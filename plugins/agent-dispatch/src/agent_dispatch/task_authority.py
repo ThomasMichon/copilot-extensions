@@ -9,11 +9,61 @@ fencing-epoch check belongs here).
 
 from __future__ import annotations
 
-from fastapi import HTTPException, Request
+import time
 
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+
+from .coordinator_auth import _make_control_auth
+from .coordinator_task_models import TaskGrantBody
+from .events import EventBus
 from .lease import FencingGuard
 from .queue import Status, TaskQueue
-from .task_scope import mint_task_scope_token
+from .task_scope import DEFAULT_TTL_SECONDS, mint_task_scope_token
+
+
+def register_task_grant_route(
+    app: FastAPI,
+    queue: TaskQueue,
+    control_token: str | None,
+    fencing_guard: FencingGuard | None,
+    bus: EventBus,
+) -> None:
+    control_auth = _make_control_auth(
+        control_token, lambda kind, detail: bus.publish({"type": kind, **detail}),
+        operation="task_grant", code_prefix="task_grant",
+        rejection_event="task.grant_rejected",
+        unavailable_message="task grants require configured control authority",
+        forbidden_message="task grants require control authority",
+    )
+
+    @app.post("/tasks/{task_id}/task-grant", dependencies=[Depends(control_auth)])
+    def task_grant(task_id: str, body: TaskGrantBody, response: Response) -> dict:
+        task = queue.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="no such task")
+        if (
+            task.status not in Status.HELD
+            or task.owner != body.worker_id
+            or task.owner_session_id != body.owner_session_id
+            or task.generation != body.expected_generation
+        ):
+            raise HTTPException(status_code=409, detail="task ownership incarnation changed")
+        epoch = fencing_guard.current_epoch() if fencing_guard is not None else 0
+        if epoch != body.expected_epoch:
+            raise HTTPException(status_code=409, detail="task grant coordinator epoch changed")
+        assert control_token is not None
+        now = time.time()
+        token = mint_task_scope_token(
+            control_token, task_id=task_id, worker_id=body.worker_id,
+            owner_session_id=body.owner_session_id, generation=task.generation,
+            epoch=epoch, now=now,
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "task_id": task_id, "worker_id": body.worker_id,
+            "owner_session_id": body.owner_session_id, "generation": task.generation,
+            "epoch": epoch, "expires_at": now + DEFAULT_TTL_SECONDS, "task_token": token,
+        }
 
 
 def resolve_task_authority(

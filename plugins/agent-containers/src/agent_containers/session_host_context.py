@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any, Iterator
 
 from .config import SECURITY_PROFILE_LABEL, TRUSTED_PROFILE, ContainersConfig, FleetConfig
@@ -65,3 +67,36 @@ def cleanup_user(instance_id: str, bound_user: str | None) -> str:
     if inspection.get("Id") != instance_id or profile != TRUSTED_PROFILE:
         raise RuntimeError("immutable cleanup target is not the prepared trusted instance")
     return bound_user
+
+
+def guard_cleanup_path(target: str, user: str, remote_env: str) -> str:
+    """Validate the launch path and its actual directory before cleanup."""
+    from . import ssh_transport
+    from .launch_storage import directory_guard, launch_directory
+
+    path = PurePosixPath(remote_env)
+    canonical_ram = str(path.parent) == launch_directory(user)
+    legacy_home = path.parts[-3:-1] == (".agent-containers", "launch")
+    if (
+        not path.is_absolute()
+        or len(path.parts) < 4
+        or ".." in path.parts
+        or not (canonical_ram or legacy_home)
+        or path.suffix != ".env"
+        or not re.fullmatch(r"[0-9a-f]{32}", path.stem)
+    ):
+        raise RuntimeError(
+            f"Refusing unsafe Session Host env cleanup path: {remote_env!r}"
+        )
+    ssh_transport._validate_target(target, user)
+    # missing_ok=True: a missing RAM root (e.g. after a container restart
+    # clears /dev/shm) must not block the idempotent cleanup contract that
+    # still has to remove surviving /tmp wrappers and receipts;
+    # directory_guard still refuses a symlinked ancestor either way.
+    checked = ssh_transport._run([
+        "docker", "exec", "-u", user, target,
+        "sh", "-c", directory_guard(str(path.parent), require_ram=canonical_ram, missing_ok=True),
+    ])
+    if checked.returncode:
+        raise RuntimeError("Refusing unsafe Session Host cleanup directory")
+    return str(path)

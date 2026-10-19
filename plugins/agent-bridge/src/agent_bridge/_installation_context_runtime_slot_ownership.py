@@ -296,6 +296,73 @@ def validate_runtime_slot_ownership(
 
 
 @_validation_scope
+def discard_failed_runtime_slot(
+    *,
+    runtime,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    snapshot_id: str,
+    runtime_version: str,
+    expected_ownership_sha256: str,
+    expected_namespace_generation: int,
+    expected_install_generation: int,
+    expected_payload_root: str | os.PathLike[str],
+    expected_payload_version: str,
+    durable_home: str | os.PathLike[str],
+) -> bool:
+    """Reclaim an unfinished owned candidate, never a receipt-only reservation.
+
+    The caller must retain the canonical construction descriptor. Receipt
+    governance stays locked through the canonical cleanup's selector recheck
+    and deletion; a changed generation, completion, or ownership refuses.
+    """
+    if not LOWER_SHA256.fullmatch(expected_ownership_sha256):
+        _fail("Expected ownership SHA-256 must be lowercase 64-hex.")
+    _assert_nonnegative_generation(expected_namespace_generation, "expected namespace generation")
+    _assert_nonnegative_generation(expected_install_generation, "expected install generation")
+    validated = validate_context_receipt(
+        context, durable_home, expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id, environment={},
+    )
+    durable = canonical_path(durable_home)
+    cell_root = Path(validated["cellRoot"])
+    with _DirectoryLock(
+        durable / "marketplaces" / ".locks" / f"{expected_marketplace_id}.genesis",
+        kind="genesis", marketplace_id=expected_marketplace_id,
+        timeout_seconds=RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS,
+    ), _DirectoryLock(
+        cell_root / ".locks" / f"{expected_plugin_id}.install.lock",
+        kind="install", marketplace_id=expected_marketplace_id,
+        plugin_id=expected_plugin_id, timeout_seconds=RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS,
+    ):
+        current = validate_context_receipt(
+            context, durable, expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id, environment={},
+        )
+        if (current["namespaceGeneration"], current["generation"]) != (
+            expected_namespace_generation, expected_install_generation,
+        ):
+            _fail("Installation receipt generations changed before failed candidate cleanup.")
+        ownership = validate_runtime_slot_ownership(
+            context=context, expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id, snapshot_id=snapshot_id,
+            runtime_version=runtime_version, expected_payload_root=expected_payload_root,
+            expected_payload_version=expected_payload_version, durable_home=durable,
+            environment={},
+        )
+        root = Path(ownership["slotRoot"]).parent.parent
+
+        def validate(slot: Path) -> None:
+            if os.path.lexists(slot / RUNTIME_SLOT_COMPLETION_FILE):
+                _fail("A runtime with cell completion evidence cannot be discarded.")
+            if _sha256_file(slot / RUNTIME_SLOT_OWNERSHIP_FILE) != expected_ownership_sha256:
+                _fail("Runtime slot ownership changed before failed candidate cleanup.")
+
+        return runtime.discard_failed_candidate(root, runtime_version, validate=validate)
+
+
+@_validation_scope
 def provision_runtime_slot(
     *,
     context: str | os.PathLike[str],
@@ -305,6 +372,8 @@ def provision_runtime_slot(
     runtime_version: str,
     expected_payload_root: str | os.PathLike[str] | None = None,
     expected_payload_version: str | None = None,
+    expected_namespace_generation: int | None = None,
+    expected_install_generation: int | None = None,
     durable_home: str | os.PathLike[str] | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -314,6 +383,11 @@ def provision_runtime_slot(
     _assert_plugin_id(expected_plugin_id)
     _assert_snapshot_id(snapshot_id)
     _assert_runtime_version(runtime_version)
+    if (expected_namespace_generation is None) != (expected_install_generation is None):
+        _fail("Runtime slot provisioning requires both expected receipt generations.")
+    if expected_namespace_generation is not None:
+        _assert_nonnegative_generation(expected_namespace_generation, "expected namespace generation")
+        _assert_nonnegative_generation(expected_install_generation, "expected install generation")
     caller_environment = environment if environment is not None else os.environ
     if durable_home is not None and not _path_is_fully_qualified(durable_home):
         _fail("--durable-home must be absolute.")
@@ -357,6 +431,10 @@ def provision_runtime_slot(
             expected_plugin_id=expected_plugin_id,
             environment={},
         )
+        if expected_namespace_generation is not None and (
+            validated["namespaceGeneration"], validated["generation"]
+        ) != (expected_namespace_generation, expected_install_generation):
+            _fail("Installation receipt generations changed before runtime slot provisioning.")
         versions_root, slot_root, _ = _runtime_slot_paths(
             validated,
             runtime_version,

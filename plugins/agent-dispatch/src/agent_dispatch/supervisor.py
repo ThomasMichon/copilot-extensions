@@ -43,6 +43,7 @@ import httpx
 
 from .bridge_events import BridgeSubscription, SupervisorEventWake
 from .client import DispatchClient, DispatchError
+from .client_cleanup_recovery import HostBoundConclusionClient
 from .loop_governance import LoopGovernance
 from .queue import SpawnState, Status
 from .spawn_factories import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -117,11 +118,14 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
     _bounded_component_failure,
     _cleanup_envelope_state,
     _component_retry_meta,
+    _conclusion_retry_due,
     _conclusion_retry_meta,
     _conclusion_retry_payload,
     _conclusion_state,
     _hold_pending_cleanup,
+    _retired_cleanup_plan,
 )
+from .supervisor_identity import RestrictedStartupMixin
 
 log = logging.getLogger("agent-dispatch.supervisor")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
@@ -145,7 +149,7 @@ _MIN_RESERVING_TIMEOUT_SECONDS = 600
 class _ReservationsUnavailable(Exception):
     """The coordinator couldn't be reached to list reservations."""
 
-class Supervisor:
+class Supervisor(RestrictedStartupMixin):
     """Reserve -> spawn -> record, with terminal-state reconciliation.
 
     ``max_concurrent`` caps in-flight spawns. ``max_attempts`` bounds failed spawn
@@ -224,6 +228,7 @@ class Supervisor:
             from . import remote_dispatch
 
             machine = remote_dispatch.local_machine()
+        self._conclusion_client = HostBoundConclusionClient(client, machine)
         lane_identity = json.dumps(
             {
                 "machine": machine,
@@ -563,7 +568,8 @@ class Supervisor:
     def _prepare_spawn_task(self, task: dict, reservation: dict) -> dict:
         """Prepare the selected backend's reservation-bound startup facts."""
         ordinary = getattr(self.spawn_fn, "ordinary_bridge_for", None)
-        if callable(ordinary) and ordinary(task):
+        restricted = getattr(self.spawn_fn, "restricted_bridge_for", None)
+        if (callable(ordinary) and ordinary(task)) or (callable(restricted) and restricted(task)):
             return {**task, "spawn_reservation_key": reservation["key"], "_spawn_client": self.client}
         if not self._spawn_requires_reusable_worktree(task):
             return task
@@ -757,46 +763,9 @@ class Supervisor:
         session id instead. Bind that, not the escrow handle -- skip (retry
         next sweep) when it isn't known yet.
         """
-        bound = 0
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
-            local_sid = _parse_local_body_handle(res.get("session_handle"))
-            if local_sid is None:
-                continue
-            try:
-                task = self.client.get(res["task_id"])
-            except DispatchError:
-                continue
-            if (
-                not self._matches_pool(task)
-                or task.get("status") not in _LEASED
-                or not task.get("owner")
-                or task.get("owner_session_id")
-            ):
-                continue
-            try:
-                acp_session_id = self.local_acp_session_fn(local_sid)
-            except Exception:
-                log.exception(
-                    "failed to resolve ACP session id for bridge session %s",
-                    local_sid,
-                )
-                continue
-            if not acp_session_id:
-                continue  # not yet known -- leave unbound for a later sweep
-            try:
-                self.client.bind_owner_session(
-                    task["id"],
-                    task["owner"],
-                    acp_session_id,
-                    expected_generation=task.get("generation"),
-                )
-                bound += 1
-            except DispatchError:
-                log.exception(
-                    "failed to bind headless owner session for task %s",
-                    task.get("id"),
-                )
-        return bound
+        from .supervisor_identity import bind_owner_sessions
+
+        return bind_owner_sessions(self)
 
     def release_resumed_cold_tasks(self, *, now: float | None = None) -> int:
         """Resume viable cold bodies or release ones whose worktree vanished."""
@@ -829,7 +798,7 @@ class Supervisor:
             )
             if target_missing is True:
                 try:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         key,
                         conclusion_state=_CONCLUSION_COMPLETE,
                         conclusion_detail=json.dumps(
@@ -1046,6 +1015,9 @@ class Supervisor:
             except DispatchError:
                 continue
             if not self._matches_pool(task):
+                continue
+            if res.get("driver") == "restricted-bridge":
+                reconciled += self._reconcile_restricted_start(res, task)
                 continue
             if res.get("agent_info") or res.get("driver") == "ordinary-bridge":
                 from .ordinary_bridge import reconcile_created
@@ -1415,72 +1387,6 @@ class Supervisor:
             outcome = {**outcome, "acp_session_id": session_id}
         return self._conclusion_state(outcome), outcome
 
-    def _retired_cleanup_plan(
-        self,
-        reservation: dict,
-        *,
-        local_session_id: str | None = None,
-        conclusion_session: str | None = None,
-        target_missing: bool = False,
-        cleanup_kind: str = "attempt",
-    ) -> tuple[str, dict]:
-        prior = self._conclusion_retry_payload(reservation)
-        if target_missing:
-            worktree_cleanup = {
-                "state": _CONCLUSION_COMPLETE,
-                "outcome": {
-                    "action": "already-removed",
-                    "reason": "recorded-target-directory-missing",
-                },
-            }
-        elif reservation.get("conclusion_state") in {
-            _CONCLUSION_COMPLETE,
-            _CONCLUSION_HELD,
-        }:
-            worktree_cleanup = {
-                "state": reservation.get("conclusion_state"),
-                "outcome": prior,
-            }
-        elif reservation.get("worktree_ownership") in {"targeted", "reused"}:
-            worktree_cleanup = {
-                "state": _CONCLUSION_COMPLETE,
-                "outcome": {
-                    "action": "preserved",
-                    "reason": (f"{reservation.get('worktree_ownership')}-worktree"),
-                },
-            }
-        elif reservation.get("worktree"):
-            worktree_cleanup = {"state": _CONCLUSION_PENDING}
-        else:
-            worktree_cleanup = {
-                "state": _CONCLUSION_COMPLETE,
-                "outcome": {
-                    "action": "skipped",
-                    "reason": "reservation-has-no-worktree",
-                },
-            }
-        payload: dict[str, object] = {
-            "action": "pending",
-            "reason": "retired-body-cleanup",
-            "cleanup_kind": cleanup_kind,
-            "worktree_cleanup": worktree_cleanup,
-        }
-        states = [worktree_cleanup["state"]]
-        if local_session_id is not None:
-            payload["session_end"] = {
-                "state": _CONCLUSION_PENDING,
-                "session_id": local_session_id,
-            }
-            states.append(_CONCLUSION_PENDING)
-        if conclusion_session:
-            payload["acp_session_id"] = conclusion_session
-        state = (
-            _CONCLUSION_PENDING
-            if _CONCLUSION_PENDING in states
-            else (_CONCLUSION_HELD if _CONCLUSION_HELD in states else _CONCLUSION_COMPLETE)
-        )
-        return state, payload
-
     def _retire_release_for_cleanup(
         self,
         reservation: dict,
@@ -1510,6 +1416,18 @@ class Supervisor:
     _bounded_component_failure = staticmethod(_bounded_component_failure)
     _hold_pending_cleanup = staticmethod(_hold_pending_cleanup)
     _cleanup_envelope_state = staticmethod(_cleanup_envelope_state)
+    _retired_cleanup_plan = staticmethod(_retired_cleanup_plan)
+
+    @staticmethod
+    def _validated_cleanup_claim(claim: dict) -> tuple[str, dict]:
+        token, reservation = claim.get("claim_token"), claim.get("reservation")
+        if not isinstance(token, str) or not token.strip():
+            log.warning("cleanup claim protocol error: missing or malformed token")
+            raise DispatchError(426, "cleanup claim lacks a valid token")
+        if not isinstance(reservation, dict):
+            log.warning("cleanup claim protocol error: missing reservation snapshot")
+            raise DispatchError(426, "cleanup claim lacks its reservation snapshot")
+        return token, reservation
 
     def release_requested_bodies(self, *, now: float | None = None) -> int:
         """Retire proven-absent bodies and preserve cleanup obligations."""
@@ -1538,6 +1456,20 @@ class Supervisor:
                 continue
             body_already_released = res.get("state") in SpawnState.RELEASABLE
             can_release = body_already_released
+            claim_token: str | None = None
+            if body_already_released:
+                if not _conclusion_retry_due(res, now):
+                    continue
+                try:
+                    claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
+                    if not claim.get("claimed"):
+                        continue
+                    claim_token, claimed_reservation = self._validated_cleanup_claim(claim)
+                    self._conclusion_client.validate_spawn_conclusion_claim(res["key"], claim_token)
+                    res = claimed_reservation
+                except DispatchError:
+                    log.exception("failed to claim or validate cleanup retry for %s", res["key"])
+                    continue
             conclusion_session: str | None = None
             released_target_dir: str | None = None
             retry_payload = self._conclusion_retry_payload(res)
@@ -1546,7 +1478,6 @@ class Supervisor:
                 conclusion_session = str(recorded_acp)
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             local_sid = _parse_local_body_handle(res.get("session_handle"))
-            claim_token: str | None = None
             session_end = retry_payload.get("session_end")
             session_end_pending = (
                 isinstance(session_end, dict) and session_end.get("state") == _CONCLUSION_PENDING
@@ -1577,16 +1508,9 @@ class Supervisor:
                 if next_attempt_at > now:
                     continue
                 if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
-                    try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
-                    except DispatchError:
-                        continue
-                    if not claim.get("claimed"):
-                        continue
-                    claim_token = claim.get("claim_token")
                     held_payload = self._hold_pending_cleanup(retry_payload)
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             res["key"],
                             conclusion_state=_CONCLUSION_HELD,
                             conclusion_detail=json.dumps(
@@ -1598,27 +1522,6 @@ class Supervisor:
                         )
                     except DispatchError:
                         pass
-                    continue
-            if body_already_released and cleanup_envelope:
-                if not session_due and not worktree_due:
-                    continue
-                try:
-                    claim = self.client.claim_spawn_conclusion_retry(res["key"])
-                except DispatchError:
-                    log.exception(
-                        "failed to claim session cleanup retry for %s",
-                        res["key"],
-                    )
-                    continue
-                if not claim.get("claimed"):
-                    continue
-                claim_token = claim.get("claim_token")
-                try:
-                    self.client.validate_spawn_conclusion_claim(
-                        res["key"],
-                        claim_token,
-                    )
-                except DispatchError:
                     continue
             if session_due:
                 cleanup_sid = str(session_end.get("session_id") or local_sid or "")
@@ -1698,10 +1601,15 @@ class Supervisor:
                         )
                         target_dir = None
                     released_target_dir = target_dir
-                    try:
-                        resolved_acp = self.local_acp_session_fn(local_sid)
-                    except Exception:
-                        resolved_acp = None
+                    resolved_acp = None
+                    if not recorded_acp:
+                        try:
+                            resolved_acp = self.local_acp_session_fn(local_sid)
+                        except Exception:
+                            log.exception(
+                                "failed to resolve ACP identity for releasing local body %s",
+                                local_sid,
+                            )
                     conclusion_session = (
                         str(recorded_acp)
                         if recorded_acp
@@ -1742,6 +1650,29 @@ class Supervisor:
                         released += 1
                         continue
                     else:
+                        if conclusion_session:
+                            checkpoint = {
+                                **retry_payload,
+                                "action": "pending",
+                                "reason": "ending-released-body",
+                                "acp_session_id": conclusion_session,
+                            }
+                            try:
+                                self._conclusion_client.record_spawn_conclusion(
+                                    res["key"],
+                                    conclusion_state=(
+                                        res.get("conclusion_state") or _CONCLUSION_PENDING
+                                    ),
+                                    conclusion_detail=json.dumps(
+                                        checkpoint, sort_keys=True, separators=(",", ":"),
+                                    ),
+                                )
+                            except DispatchError:
+                                log.exception(
+                                    "failed to checkpoint ACP identity before ending local body %s",
+                                    local_sid,
+                                )
+                                continue
                         try:
                             can_release = self.local_end_fn(local_sid)
                         except Exception:
@@ -1902,28 +1833,9 @@ class Supervisor:
                 }
                 conclusion_state = _CONCLUSION_HELD
             else:
-                if body_already_released and claim_token is None:
+                if body_already_released:
                     try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
-                    except DispatchError:
-                        log.exception(
-                            "failed to claim cleanup retry for %s",
-                            res["key"],
-                        )
-                        continue
-                    if not claim.get("claimed"):
-                        continue
-                    claim_token = claim.get("claim_token")
-                    try:
-                        self.client.validate_spawn_conclusion_claim(
-                            res["key"],
-                            claim_token,
-                        )
-                    except DispatchError:
-                        continue
-                elif body_already_released and claim_token is not None:
-                    try:
-                        self.client.validate_spawn_conclusion_claim(
+                        self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
                             claim_token,
                         )
@@ -1991,7 +1903,7 @@ class Supervisor:
                     detail_outcome,
                 )
                 if body_already_released:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         res["key"],
                         conclusion_state=conclusion_state,
                         conclusion_detail=conclusion_detail,
@@ -2272,7 +2184,7 @@ class Supervisor:
                         ),
                     }
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             reservation["key"],
                             conclusion_state=(
                                 _CONCLUSION_HELD
@@ -2296,7 +2208,7 @@ class Supervisor:
                     "next_attempt_at": 0,
                 }
                 try:
-                    self.client.record_spawn_conclusion(
+                    self._conclusion_client.record_spawn_conclusion(
                         reservation["key"],
                         conclusion_state=_CONCLUSION_PENDING,
                         conclusion_detail=json.dumps(
@@ -2330,7 +2242,7 @@ class Supervisor:
                         ),
                     }
                     try:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             reservation["key"],
                             conclusion_state=(
                                 _CONCLUSION_HELD
@@ -2406,6 +2318,11 @@ class Supervisor:
         )
         now = time.time()
         for res in reservations:
+            if (
+                res.get("release_requested")
+                and isinstance(self._conclusion_retry_payload(res).get("worktree_cleanup"), dict)
+            ):
+                continue
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -2453,7 +2370,7 @@ class Supervisor:
                         continue
                     if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         try:
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 conclusion_state=_CONCLUSION_HELD,
                                 conclusion_detail=res.get("conclusion_detail") or "{}",
@@ -2504,7 +2421,7 @@ class Supervisor:
                             else _CONCLUSION_PENDING
                         )
                         try:
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 conclusion_state=state,
                                 conclusion_detail=json.dumps(
@@ -2650,25 +2567,30 @@ class Supervisor:
                 if res.get("state") == SpawnState.SETTLED:
                     if not policy_applies or res.get("conclusion_state") != _CONCLUSION_PENDING:
                         continue
+                    if not _conclusion_retry_due(res, now):
+                        continue
+                    try:
+                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
+                        if not claim.get("claimed"):
+                            continue
+                        conclusion_claim_token, claimed = self._validated_cleanup_claim(claim)
+                        self._conclusion_client.validate_spawn_conclusion_claim(
+                            res["key"], conclusion_claim_token,
+                        )
+                        res = claimed
+                    except DispatchError:
+                        continue
                     prior_attempts, next_attempt_at = self._conclusion_retry_meta(res)
                     if next_attempt_at > now:
                         continue
                     if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         try:
-                            claim = self.client.claim_spawn_conclusion_retry(res["key"])
-                            if not claim.get("claimed"):
-                                continue
-                            claim_token = claim.get("claim_token")
-                            self.client.validate_spawn_conclusion_claim(
-                                res["key"],
-                                claim_token,
-                            )
-                            self.client.record_spawn_conclusion(
+                            self._conclusion_client.record_spawn_conclusion(
                                 res["key"],
                                 detail=detail,
                                 conclusion_state=_CONCLUSION_HELD,
                                 conclusion_detail=res.get("conclusion_detail"),
-                                claim_token=claim_token,
+                                claim_token=conclusion_claim_token,
                             )
                         except DispatchError:
                             pass
@@ -2705,7 +2627,7 @@ class Supervisor:
                                     else _CONCLUSION_PENDING
                                 )
                                 try:
-                                    self.client.record_spawn_conclusion(
+                                    self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=state,
                                         conclusion_detail=json.dumps(
@@ -2738,7 +2660,7 @@ class Supervisor:
                                     else _CONCLUSION_PENDING
                                 )
                                 try:
-                                    self.client.record_spawn_conclusion(
+                                    self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=state,
                                         conclusion_detail=json.dumps(
@@ -2764,7 +2686,7 @@ class Supervisor:
                                     "same_owner_nudge": "delivered",
                                 }
                                 try:
-                                    res = self.client.record_spawn_conclusion(
+                                    res = self._conclusion_client.record_spawn_conclusion(
                                         res["key"],
                                         conclusion_state=_CONCLUSION_PENDING,
                                         conclusion_detail=json.dumps(
@@ -2792,7 +2714,7 @@ class Supervisor:
                         continue
                 if policy_applies and conclusion_claim_token is None:
                     try:
-                        claim = self.client.claim_spawn_conclusion_retry(res["key"])
+                        claim = self._conclusion_client.claim_spawn_conclusion_retry(res["key"])
                     except DispatchError:
                         log.exception(
                             "failed to claim terminal cleanup retry for %s",
@@ -2801,12 +2723,14 @@ class Supervisor:
                         continue
                     if not claim.get("claimed"):
                         continue
-                    conclusion_claim_token = claim.get("claim_token")
                     try:
-                        self.client.validate_spawn_conclusion_claim(
+                        conclusion_claim_token, claimed = self._validated_cleanup_claim(claim)
+                        self._conclusion_client.validate_spawn_conclusion_claim(
                             res["key"],
                             conclusion_claim_token,
                         )
+                        res = claimed
+                        prior_attempts, _ = self._conclusion_retry_meta(res)
                     except DispatchError:
                         continue
                 outcome = (
@@ -2841,7 +2765,7 @@ class Supervisor:
                         separators=(",", ":"),
                     )
                     if conclusion_claim_token is not None:
-                        self.client.record_spawn_conclusion(
+                        self._conclusion_client.record_spawn_conclusion(
                             res["key"],
                             conclusion_state=conclusion_state,
                             conclusion_detail=encoded_conclusion,
@@ -2885,6 +2809,11 @@ class Supervisor:
         from .activity_snapshots import capture
         snapshots = capture(self.client, self._pool_reservations(state=SpawnState.SPAWNED))
         for res, task in snapshots:
+            if res.get("driver") == "restricted-bridge":
+                from .supervisor_identity import publish_restricted_activity
+
+                publish_restricted_activity(self, res, task)
+                continue  # Its renewal hook heartbeats with the exact scoped incarnation.
             if task.get("status") == Status.SUSPENDED:
                 continue
             owner = task.get("owner")
@@ -3033,6 +2962,11 @@ class Supervisor:
                 pass
         return held
 
+    def renew_restricted_grants(self) -> int:
+        from .supervisor_identity import renew_restricted_grants
+
+        return renew_restricted_grants(self)
+
     def recover_gone(self) -> int:
         """Release the spawn reservation of a **confirmed-gone** embody so its
         task can be re-embodied -- the auto-recovery half of the liveness model.
@@ -3066,6 +3000,8 @@ class Supervisor:
 
         recovered = 0
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
+            if res.get("driver") == "restricted-bridge":
+                continue  # Physical task-incarnation bindings require explicit repair, not requeue.
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -3621,6 +3557,7 @@ class Supervisor:
         self.reconcile_reserving()
         self.release_requested_bodies(now=now)
         self.bind_headless_owner_sessions()
+        self.renew_restricted_grants()
         self.nudge_idle_headless_tasks(now=now)
         self.cool_dormant_bodies()
         self.release_resumed_cold_tasks(now=now)
@@ -3681,7 +3618,11 @@ class Supervisor:
                     )
                     break
                 from .ordinary_bridge import reserve_for_backend
-                resp = reserve_for_backend(self.client, task, self.supervisor_id, ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task))
+                resp = reserve_for_backend(
+                    self.client, task, self.supervisor_id,
+                    ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task),
+                    restricted=getattr(self.spawn_fn, "restricted_bridge_for", lambda _: False)(task),
+                )
             except DispatchError:
                 continue
             if resp.get("coordinator_launch") and (resp["coordinator_launch"].get("ok") or resp["reservation"].get("state") != "failed"): return spawned + ([task["id"]] if resp["coordinator_launch"].get("ok") else [])
@@ -3784,7 +3725,11 @@ class Supervisor:
                     if handle.get("retained"):
                         log.error("spawn reservation %s retained for explicit repair: %s", key, detail)
                     elif handle.get("deferred"):
-                        self.client.defer_spawn(key, detail=detail)
+                        self.client.defer_spawn(
+                            key, detail=detail,
+                            **({"expected_generation": handle["expected_generation"]}
+                               if "expected_generation" in handle else {}),
+                        )
                         active -= 1
                         log.info(
                             "spawn deferred (carried session busy) for task %s (%s): %s",

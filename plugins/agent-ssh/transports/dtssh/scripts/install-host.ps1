@@ -631,6 +631,43 @@ function Install-Shortcut {
     $shortcut.Save()
 }
 
+function Start-DetachedHostLauncher {
+    <#
+      Start the watchdog launcher outside the caller's lifetime. Win32_Process.Create
+      re-parents it under the WMI provider host, so neither the installer's Job (an
+      SSH session's, an updater's) nor the session that ran the installer takes the
+      host down when it ends -- a Start-Process child stays in that Job. conhost
+      --headless keeps it windowless; it runs from $InstallDir, never the payload.
+      A WMI child would otherwise get the provider's environment, so this process's
+      complete environment (PATH, LOCALAPPDATA and any override) is passed through
+      Win32_ProcessStartup, exactly as Start-Process would inherit it.
+      Returns the new pid, or $null.
+    #>
+    param([Parameter(Mandatory)][string[]]$LauncherArgs)
+    $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+    $pwsh = (Get-Command pwsh).Source
+    $commandLine = "`"$conhost`" --headless `"$pwsh`" " + ($LauncherArgs -join ' ')
+    try {
+        $environment = [string[]]@(
+            [Environment]::GetEnvironmentVariables().GetEnumerator() |
+                ForEach-Object { "$($_.Key)=$($_.Value)" }
+        )
+        $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -ErrorAction Stop `
+            -Property @{ EnvironmentVariables = $environment }
+        $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -ErrorAction Stop `
+            -Arguments @{
+                CommandLine = $commandLine
+                CurrentDirectory = $InstallDir
+                ProcessStartupInformation = $startup
+            }
+        if ($r.ReturnValue -eq 0 -and $r.ProcessId) { return [int]$r.ProcessId }
+        Write-Warning "Win32_Process.Create returned $($r.ReturnValue) for the dtssh host launcher"
+    } catch {
+        Write-Warning "Win32_Process.Create failed for the dtssh host launcher: $($_.Exception.Message)"
+    }
+    return $null
+}
+
 function Start-HostLauncher {
     param([switch]$Foreground)
     if (Get-HostProcess) { Write-Host "dtssh host already running"; return }
@@ -638,14 +675,17 @@ function Start-HostLauncher {
     $args = @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$LauncherDst`"", '-Alias', $Alias, '-Port', "$Port")
     if ($Tunnel) { $args += @('-Tunnel', $Tunnel) }
     if ($User) { $args += @('-User', $User) }
-    # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
-    # handoff and can flash a console (windows-launch-hardening #786).
-    $launcherProc = Start-Process -FilePath 'conhost.exe' `
-        -ArgumentList (@('--headless', 'pwsh') + $args) `
-        -WorkingDirectory $InstallDir `
-        -WindowStyle Hidden `
-        -PassThru
     if ($Foreground) {
+        # The caller IS the supervisor here (the dispatch companion): it owns the
+        # launcher's lifetime and waits on it.
+        # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
+        # handoff and can flash a console (windows-launch-hardening #786).
+        # daemon-spawn: allow the foreground supervisor waits on this child and owns its lifetime
+        $launcherProc = Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList (@('--headless', 'pwsh') + $args) `
+            -WorkingDirectory $InstallDir `
+            -WindowStyle Hidden `
+            -PassThru
         $deadline = (Get-Date).AddSeconds(40)
         do {
             if ($launcherProc.HasExited) {
@@ -664,6 +704,12 @@ function Start-HostLauncher {
             }
         } catch { }
         throw "dtssh host did not stay running; check $InstallDir\dtssh-host.log"
+    }
+    if (-not (Start-DetachedHostLauncher -LauncherArgs $args)) {
+        # daemon-spawn: allow last resort when WMI is unavailable; the host then lives only as long as this caller
+        Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', 'pwsh') + $args) `
+            -WorkingDirectory $InstallDir -WindowStyle Hidden | Out-Null
+        Write-Warning 'dtssh host launcher started inside this process tree; it stops when this session ends'
     }
     # Poll instead of a single fixed-delay check: a binary that `Install-Dtssh`
     # just downloaded/replaced, or a cold tunnel negotiation, can take longer

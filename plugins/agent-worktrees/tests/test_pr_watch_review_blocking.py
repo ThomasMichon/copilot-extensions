@@ -3,12 +3,10 @@ that decides whether ``pr-watch wait`` waits for a real APPROVED/
 CHANGES_REQUESTED verdict or for a bare COMMENT (see ``pr_contract.
 default_until`` / ``effective_verdict``'s ``review_blocking`` parameter).
 
-GitHub's Copilot code-review app cannot render a binding verdict on a
-``pr-self-merge`` repo's owner-authored PR -- it only ever submits a
-``COMMENT`` review. Waiting for ``approved``/``changes_requested`` there never
-resolves. A maintainer (live merge authority) should wait on ``commented``
-instead; a contributor without merge authority still needs a human
-maintainer's real verdict, even on the same repo.
+An explicitly non-blocking review policy accepts comment-shaped evidence
+for assessment, but must also observe approvals and blocking feedback.
+A contributor without merge authority still needs the repository's required
+human review, even when a maintainer has a separate completion path.
 """
 
 from __future__ import annotations
@@ -161,6 +159,30 @@ class TestPrWatchUntilDefaultIntegration:
     def test_default_until_matches_posture(self, review_blocking, expected):
         assert pc.default_until(review_blocking) == expected
 
+    @pytest.mark.parametrize("state", ["APPROVED", "COMMENTED", "CHANGES_REQUESTED"])
+    def test_nonblocking_default_observes_every_submitted_review_shape(self, state):
+        before = pc.PRSnapshot(head_sha="head", author="author", mergeable=True)
+        after = pc.PRSnapshot(
+            head_sha="head", author="author", mergeable=True,
+            reviews=(pc.Review(id=1, state=state, user="reviewer", commit_id="head"),),
+        )
+        events = pc.compute_events(
+            pc.Baseline.from_snapshot(before), after, pc.default_until(False),
+        )
+        expected = {
+            "APPROVED": "approved", "COMMENTED": "commented",
+            "CHANGES_REQUESTED": "changes_requested",
+        }
+        assert [event["event"] for event in events] == [expected[state]]
+
+    def test_nonblocking_default_wakes_when_ci_finishes_after_review(self):
+        before = pc.PRSnapshot(checks_state="pending")
+        after = pc.PRSnapshot(checks_state="success")
+        events = pc.compute_events(
+            pc.Baseline.from_snapshot(before), after, pc.default_until(False),
+        )
+        assert [event["event"] for event in events] == ["checks_succeeded"]
+
 
 class TestPrWatchSelfMergeNoteToken:
     """The post-wait self-merge-bypass read `cmd_pr_watch_dispatch` performs
@@ -285,4 +307,3 @@ class TestPrWatchSelfMergeNoteToken:
         assert note_calls.call_count == 1
         err = capsys.readouterr().err
         assert "bypass available" in err
-

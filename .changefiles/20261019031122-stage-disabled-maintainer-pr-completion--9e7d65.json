@@ -1,0 +1,9 @@
+{
+  "comment": "Stage disabled maintainer PR completion stewardship with strict review, CI, identity and bounded recovery contracts",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

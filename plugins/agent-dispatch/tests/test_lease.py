@@ -12,10 +12,13 @@ over the real HTTP-backed :class:`CoordinatorRendezvous`.
 from __future__ import annotations
 
 import socket
+import subprocess
+import sys
 import threading
 import time
 
 import pytest
+from agent_procutil import no_window_flags
 
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.coordinator import create_app
@@ -120,6 +123,24 @@ class _FlakyDiscoverRendezvous:
         if self.discover_should_fail:
             raise RuntimeError("enumeration currently unavailable")
         return self._inner.discover_coordinator()
+
+    def fencing_epoch(self):
+        return current_fencing_epoch(self._inner)
+
+
+def test_active_lease_cannot_renew_after_new_floor_and_discovery_outage(directory, clock):
+    flaky = _FlakyDiscoverRendezvous(directory)
+    lease = CoordinatorLease(flaky, "host-a")
+    assert lease.tick().epoch == 1
+    before = directory.get("host-a")
+    directory.register("successor", role=ROLE_COORDINATOR, epoch=5)
+    flaky.discover_should_fail = True
+    clock.advance(5)
+    with pytest.raises(RuntimeError, match="enumeration currently unavailable"):
+        lease.tick()
+    assert lease.is_active is False
+    assert directory.get("host-a")["last_seen"] == before["last_seen"]
+    assert directory.get("successor")["role"] == ROLE_COORDINATOR
 
 
 def test_active_coordinator_keeps_heartbeating_through_a_discovery_only_outage(
@@ -326,6 +347,74 @@ def test_current_fencing_epoch(directory):
     assert current_fencing_epoch(directory) == 1
 
 
+@pytest.mark.parametrize("removal", ["expire", "deregister", "demote"])
+def test_fencing_floor_survives_presence_removal(directory, clock, removal):
+    directory.register("boss", role=ROLE_COORDINATOR, epoch=5)
+    if removal == "expire":
+        clock.advance(directory.ttl_seconds + 1)
+        directory.reap()
+    elif removal == "deregister":
+        directory.deregister("boss")
+    else:
+        directory.heartbeat("boss", role=ROLE_STANDBY, epoch=1)
+    assert directory.discover_coordinator() is None
+    assert current_fencing_epoch(directory) == 5
+    guard = FencingGuard(directory)
+    assert guard.current_epoch() == 5
+    assert guard.is_valid(4) is False
+    directory.register("older", role=ROLE_COORDINATOR, epoch=2)
+    assert guard.current_epoch() == 5
+    replacement = CoordinatorLease(directory, "replacement").tick()
+    assert replacement.is_active is True
+    assert replacement.epoch == 6
+
+
+def test_queue_fencing_floor_survives_concurrent_writers_and_restart(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    database = tmp_path / "tasks.db"
+    queues = [TaskQueue(database) for _ in range(2)]
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(
+            lambda epoch: queues[epoch % 2].advance_fencing_epoch(epoch),
+            [0, 5, 3, 8, 1, 4],
+        ))
+    assert all(result >= epoch for result, epoch in zip(results, [0, 5, 3, 8, 1, 4]))
+    restarted = TaskQueue(database)
+    assert restarted.advance_fencing_epoch(0) == 8
+    child = subprocess.run(
+        [
+            sys.executable, "-c",
+            "import sys; from agent_dispatch.queue import TaskQueue; "
+            "print(TaskQueue(sys.argv[1]).advance_fencing_epoch(0))",
+            str(database),
+        ],
+        capture_output=True, text=True, timeout=20, creationflags=no_window_flags(),
+    )
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "8"
+    directory = FleetDirectory(fencing_floor=restarted.advance_fencing_epoch)
+    replacement = CoordinatorLease(directory, "replacement").tick()
+    assert replacement.is_active is True
+    assert replacement.epoch == 9
+
+
+def test_restarted_lease_adopts_its_retained_coordinator_epoch(directory):
+    directory.register("boss", role=ROLE_COORDINATOR, epoch=5)
+    state = CoordinatorLease(directory, "boss").tick()
+    assert state.is_active is True
+    assert state.epoch == 5
+    assert directory.discover_coordinator()["epoch"] == 5
+
+
+@pytest.mark.parametrize("epoch", [-1, True, "5", 1.5, 2**63])
+def test_queue_fencing_floor_rejects_invalid_epochs(tmp_path, epoch):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        queue.advance_fencing_epoch(epoch)
+    assert queue.advance_fencing_epoch(0) == 0
+
+
 def test_guard_rejects_deposed_writer_after_failover(directory, clock):
     boss = CoordinatorLease(directory, "boss", lease_ttl=30.0)
     standby = CoordinatorLease(directory, "host-b", lease_ttl=30.0)
@@ -422,11 +511,19 @@ def test_lease_ttl_default_is_shorter_than_directory_ttl():
 
 
 @pytest.fixture
-def http_rv(tmp_path):
+def http_rv_app(tmp_path, request):
     """A CoordinatorRendezvous wired to a real coordinator on an ephemeral port."""
     import uvicorn
 
     app = create_app(TaskQueue(tmp_path / "tasks.db"))
+    clock = None
+    mode = getattr(request, "param", None)
+    if mode == "restart":
+        app.state.directory.register("former", role=ROLE_COORDINATOR, epoch=5)
+        app = create_app(TaskQueue(tmp_path / "tasks.db"))
+    elif mode == "expire":
+        clock = FakeClock()
+        app.state.directory._clock = clock
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -449,11 +546,60 @@ def http_rv(tmp_path):
         client.close()
         raise RuntimeError("coordinator did not start")
 
-    yield CoordinatorRendezvous(client)
+    yield app, CoordinatorRendezvous(client), clock
 
     client.close()
     server.should_exit = True
     thread.join(timeout=5)
+
+
+@pytest.fixture
+def http_rv(http_rv_app):
+    return http_rv_app[1]
+
+
+@pytest.mark.parametrize("http_rv_app", ["expire", "restart"], indirect=True)
+def test_http_takeover_advances_above_expired_or_restarted_authority_floor(http_rv_app):
+    _app, rendezvous, clock = http_rv_app
+    if clock is not None:
+        rendezvous.register("former", role=ROLE_COORDINATOR, epoch=5)
+        clock.advance(91)
+    assert rendezvous.discover_coordinator() is None
+    assert rendezvous.fencing_epoch() == 5
+    replacement = CoordinatorLease(rendezvous, "replacement")
+    state = replacement.tick()
+    assert state.is_active is True and state.epoch == 6
+    guard = FencingGuard(rendezvous)
+    with pytest.raises(FencedError):
+        guard.check(5)
+    guard.check(replacement.fencing_token())
+
+
+@pytest.mark.parametrize("response", [
+    None, {}, {"epoch": True}, {"epoch": -1}, {"epoch": "5"}, {"epoch": 2**63},
+])
+def test_http_retained_fencing_floor_refuses_malformed_authority(response):
+    import json
+    import httpx
+    from agent_dispatch.client import DispatchError
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, content=json.dumps(response)),
+    )
+    with DispatchClient("http://coordinator.test", transport=transport) as client:
+        with pytest.raises(DispatchError, match="invalid retained fencing epoch"):
+            CoordinatorRendezvous(client).fencing_epoch()
+
+
+@pytest.mark.parametrize("content", [b"", b"not-json", b"\xff"])
+def test_http_retained_fencing_floor_refuses_invalid_encoding(content):
+    import httpx
+    from agent_dispatch.client import DispatchError
+
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=content))
+    with DispatchClient("http://coordinator.test", transport=transport) as client:
+        with pytest.raises(DispatchError, match="invalid retained fencing epoch"):
+            CoordinatorRendezvous(client).fencing_epoch()
 
 
 def test_lease_and_guard_over_http(http_rv):

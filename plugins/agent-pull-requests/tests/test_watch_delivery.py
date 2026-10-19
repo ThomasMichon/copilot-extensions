@@ -634,6 +634,33 @@ def test_acknowledged_state_requires_absolute_deadline_field():
         WatchRegistry().restore_state(entries)
 
 
+def test_acknowledged_absolute_deadline_survives_clock_pair_skew_and_repeated_reloads(monkeypatch):
+    clock = {"wall": 1000.0, "monotonic": 100.0}
+    monkeypatch.setattr(time, "time", lambda: clock["wall"])
+    monkeypatch.setattr(time, "monotonic", lambda: clock["monotonic"])
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(
+        key, "one", until=(MERGED,), acknowledged=True,
+        notify={"argv": ["consumer"]}, timeout=20,
+    )
+    saved = registry.snapshot_state()
+    deadline = saved[0]["deadline_at"]
+    assert deadline == 1020.0
+    for _ in range(4):
+        clock["wall"] += 0.015625
+        clock["monotonic"] += 0.001
+        assert registry.snapshot_state()[0]["deadline_at"] == deadline
+        clock["wall"] += 1.0
+        clock["monotonic"] += 10.0
+        restored = WatchRegistry()
+        assert restored.restore_state(saved, strict=True) == 1
+        saved = restored.snapshot_state()
+        assert saved[0]["deadline_at"] == deadline
+        assert saved[0]["remaining_timeout"] == pytest.approx(deadline - clock["wall"])
+        registry = restored
+
+
 def test_default_shutdown_drains_actual_callback_beyond_old_deadline(make, tmp_path):
     started, finished = tmp_path / "started", tmp_path / "finished"
     daemon = make()

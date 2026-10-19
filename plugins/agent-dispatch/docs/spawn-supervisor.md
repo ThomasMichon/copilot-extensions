@@ -113,6 +113,14 @@ sharing the `exclusive_key` — perpetually failing a resume against a
 confirmed-gone body instead of ever reaching a fresh spawn. See
 `troubleshooting-agent-dispatch`'s "stuck on the same dead session" entry.
 
+For ordinary same-worktree recovery, a receipt proving the retired native
+conversation is binding even when the handle write never completed. A terminal
+release without any native identity evidence remains unknown and refuses
+automatic resume or creation. Ordinary inheritance across different tasks
+retains the exact original allocation reservation, not merely a directory or
+handle; an unproven legacy handleless origin refuses instead of searching
+unrelated lane history.
+
 Retired reservations keep session and allocation cleanup as separate
 `conclusion_state`/`conclusion_detail` metadata. Positive body absence first
 retires the active reservation atomically; only then may the supervisor run the
@@ -125,6 +133,15 @@ worktree. A supervisor crash leaves the claim pending; after its bounded lease
 expires another supervisor may safely reclaim it. Thus failed session-record
 retirement remains retryable without reasserting ownership of the body or its
 exclusive key.
+
+Before ending a released local body, the supervisor checkpoints any known
+durable Copilot session ID. If that write fails, teardown waits rather than
+discarding the bridge's only identity mapping. Restarted cleanup uses the
+checkpoint even when the bridge record has disappeared, and wrapping cleanup
+in a retirement envelope preserves that identity. Legacy `session` fields are
+accepted as identities only when they are nonblank strings; structured session
+results are never coerced into IDs. Missing identity still preserves a recorded
+lifecycle head as a visible cleanup hold, rather than guessing or deleting it.
 
 ### Where it lives
 
@@ -160,6 +177,10 @@ unresolved body or orphan pending cleanup.
 `DispatchClient` exposes each as a method. Events (`spawn.reserved`,
 `spawn.spawned`, `spawn.failed`, `spawn.settled`, `spawn.rearmed`) are published
 on the SSE bus.
+
+Conclusion calls include `claimant_machine` only when explicitly supplied.
+An unbound legacy claim remains a bodyless POST; a host-bound supervisor sends
+its resolved identity through claim, validation, and outcome publication.
 
 ### Routing assignment provenance
 

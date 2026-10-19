@@ -23,6 +23,7 @@ The queue stores the card/steer objects opaquely, so the coordinator stays a
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -48,6 +49,32 @@ CARD_BODY_MAX = 20000
 
 class SteeringError(ValueError):
     """A malformed request-input spec or an invalid steer submission."""
+
+
+def steer_wake_message(task_id: str, message: str | None) -> str:
+    return message or (
+        f"Task {task_id} received steering. Resume, run `agent-dispatch "
+        f"steer take {task_id} --all`, re-read the task for any direction "
+        "or ambient-state changes, and continue."
+    )
+
+
+def steer_request_fingerprint(
+    *, fields: dict, sender: str | None, wake_requested: bool,
+    wake_message: str | None, expected_status: str | None, expected_revision: str | None,
+) -> str:
+    """Bind a retry key to the complete canonical request, not only its answer."""
+    request = {
+        "fields": fields, "sender": sender, "wake": wake_requested, "message": wake_message,
+        "expected_status": expected_status, "expected_revision": expected_revision,
+    }
+    try:
+        payload = json.dumps(
+            request, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise SteeringError("steering request must contain finite JSON values") from exc
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _clip(value: str | None, limit: int) -> str | None:

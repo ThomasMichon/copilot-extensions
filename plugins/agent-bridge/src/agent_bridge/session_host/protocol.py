@@ -36,6 +36,7 @@ class ProtocolError(Exception):
 class MsgType(bytes, enum.Enum):
     # Frontend -> Host
     ATTACH = b"A"      # payload: u64 last_acked_seq (0 == fresh attach)
+    ATTACH_PRIVATE = b"P"  # payload: native-control-issued one-use staging ticket
     ACK = b"K"         # payload: u64 seq
     WRITE = b"W"       # payload: raw ACP bytes to relay into child stdin
     TERMINATE = b"T"   # payload: empty -- explicit, sanctioned reap
@@ -158,3 +159,14 @@ async def read_message(
         # Unknown but well-formed type: skip (forward-compat, #51).
         mtype = None
     return mtype, body[1:]
+
+
+async def read_private_attach(reader: asyncio.StreamReader) -> bytes:
+    """Read only a staging ticket, not an arbitrary-size ACP message."""
+    (length,) = _U32.unpack(await reader.readexactly(4))
+    if length != 65:
+        raise ProtocolError("invalid private attachment length")
+    body = await reader.readexactly(65)
+    if body[:1] != MsgType.ATTACH_PRIVATE.value:
+        raise ProtocolError("invalid private attachment type")
+    return body[1:]

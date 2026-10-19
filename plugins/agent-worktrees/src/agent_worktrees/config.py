@@ -23,12 +23,18 @@ import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
 from machine_transport import find_machine_entry as _mt_find_machine_entry
 from machine_transport import machine_name  # noqa: F401 (re-export)
+from machine_transport import detect_platform
+from machine_transport import find_machine_metadata as _mt_find_machine_metadata
 from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
 from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
+from . import machine_instructions
 from .codename_config import CodenameConfig, parse_codename
+from .pr_observation_config import ObservationConfig, parse_observation
+from .pr_publication_config import PublicationChecksConfig, parse_publication_checks, parse_string_tuple
+from .pr_related_binding import parse_repository
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
     cached_load_config_scope,
@@ -67,6 +73,10 @@ MARKETPLACE_OVERLAYS_DIR = CANONICAL_INREPO_CONFIG_DIR / "marketplaces"
 # a target repo is computed on demand by ``load_config``. Lives at
 # ``~/.agent-worktrees/config.yaml`` (the shared runtime root).
 GLOBAL_CONFIG_FILENAME = "config.yaml"
+
+class ProjectNotRegisteredError(ValueError):
+    """No repository registration resolved for the requested local project."""
+
 
 @dataclass(frozen=True)
 class CopilotProfile:
@@ -189,6 +199,7 @@ class PRConfig:
     enabled: bool = False
     required: bool = False         # enforce PRs: refuse direct-to-master
     provider: str = "gitea"        # gitea | github | azure-devops
+    repository: str = ""          # explicit checkout-free related PR target
     strategy: str = "keep-alive"   # default disposition: keep-alive | detach
     branch_prefix: str = "feature"
     # ``head_scheme`` selects how create-pr *publishes* the PR head (#1815) --
@@ -381,6 +392,8 @@ class PRConfig:
     fork: ForkConfig = field(default_factory=ForkConfig)
     # Free-text repo guidance surfaced by every pr_reminder().
     notes: str = ""
+    observation: ObservationConfig | None = None
+    publication_checks: PublicationChecksConfig | None = None
 
     def __post_init__(self) -> None:
         publication_deadline.validate(self.push_timeout_seconds)
@@ -516,10 +529,10 @@ class RepoConfig:
 @dataclass(frozen=True)
 class Config:
     """Top-level project configuration."""
-
     srcroot: str
     machine: str
     platform: str
+    configured_machine: str | None = field(default=None, kw_only=True)
     repo_name: str = ""
     repos: dict[str, RepoConfig] = field(default_factory=dict)
     knowledge_repo: str = ""
@@ -554,6 +567,7 @@ class Config:
     ThomasMichon/copilot-extensions#3296."""
     copilot_identity_switch_enabled: bool = False
     """Master switch for :mod:`copilot_identity`; default false, config-file based. See docs/config-reference.md."""
+    checkout_free_pr: dict[str, PRConfig] = field(default_factory=dict, kw_only=True)
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -698,91 +712,47 @@ def load_machines_yaml(
 
 
 def find_machine_entry(
+    entries: dict[str, MachineEntry], name: str, *, execution_platform: str | None = None,
+) -> MachineEntry | None:
+    """Resolve a key, alias, hostname or display name case-insensitively.
+
+    Execution context disambiguates physical metadata shared by native and guest
+    registrations. Without it, strict selection is unchanged. Return None when
+    no entry matches; ambiguous or conflicting selections raise.
+    """
+    return _mt_find_machine_entry(
+        entries, name, reject_ambiguous=True, execution_platform=execution_platform,
+    )
+
+
+def find_machine_metadata(
     entries: dict[str, MachineEntry], name: str,
 ) -> MachineEntry | None:
-    """Look up a machine by key, alias, ``hostname`` field, or display_name
-    (case-insensitive).
-
-    Hostnames are case-insensitive, so match without regard to case (Windows
-    reports COMPUTERNAME in mixed case but tooling often lowercases it). Matching
-    the explicit ``hostname`` field lets a machine keyed by a friendly name still
-    be found by its raw COMPUTERNAME. Returns None if no entry matches.
-    """
-    return _mt_find_machine_entry(entries, name)
+    """Guest identity may borrow host metadata, never host execution ownership."""
+    return _mt_find_machine_metadata(entries, name)
 
 
-def detect_machine(repo_dir: str | Path | None = None) -> str:
-    """Auto-detect machine name from hostname.
+def detect_machine(
+    repo_dir: str | Path | None = None, *, value: str | None = None,
+) -> str:
+    """Local execution name; preserve native aliases, qualify WSL guest keys."""
+    from .machine_identity import resolve_execution_machine
 
-    If *repo_dir* is provided, reads ``machines.yaml`` and matches
-    the COMPUTERNAME against machine keys, the explicit ``hostname`` field, and
-    aliases (exact match). Returns the canonical name (alias if set, otherwise
-    key). Falls back to the raw hostname if no registry is available.
-    """
-    hostname = socket.gethostname().lower()
-
-    if repo_dir is not None:
-        try:
-            entries = load_machines_yaml(repo_dir)
-            from .execution_spaces import detect_legacy_machine
-            return detect_legacy_machine(entries, hostname)
-        except FileNotFoundError:
-            pass  # no registry -- fall through to raw hostname
-
-    return hostname
+    return resolve_execution_machine(
+        value if value is not None else socket.gethostname().lower(),
+        guest=detect_platform() == "wsl", configured=value is not None,
+        load_entries=(lambda: load_machines_yaml(repo_dir)) if repo_dir is not None else None,
+    )
 
 
 def render_copilot_instructions(
-    entry: MachineEntry, project: str = "",
+    entry: MachineEntry, project: str = "", *, machine: str = "",
 ) -> str:
-    """Render the content of ``machine.instructions.md`` for a machine.
-
-    Detects the current platform and includes it along with the
-    deployment environment (SSH alias) so agents know their exact
-    identity for service deployments.  When *project* is provided,
-    includes project and binstub metadata.
-    """
-    plat = detect_platform()
-
-    # Find the SSH alias matching the current platform
-    deploy_env = ""
-    for ssh_env in entry.ssh_environments:
-        if ssh_env.name == plat:
-            deploy_env = ssh_env.alias
-            break
-
-    lines = [
-        f"Machine: {entry.display_name}",
-        f"Hostname: {entry.key}",
-        f"Environment: {entry.environment}",
-        f"Platform: {plat}",
-    ]
-    if deploy_env:
-        lines.append(f"Deployment environment: {deploy_env}")
-    if entry.role:
-        lines.append(f"Role: {entry.role}")
-    if entry.description:
-        lines.append(f"Description: {entry.description}")
-    if entry.capabilities:
-        lines.append(f"Capabilities: {', '.join(entry.capabilities)}")
-    if project:
-        lines.append(f"Project: {project}")
-        lines.append(f"Binstub: {project}")
-    return "\n".join(lines) + "\n"
-
-
-def detect_platform() -> str:
-    """Detect the current platform: 'windows', 'wsl', or 'linux'."""
-    if sys.platform == "win32":
-        return "windows"
-    # WSL detection
-    try:
-        with open("/proc/version") as f:
-            if "microsoft" in f.read().lower():
-                return "wsl"
-    except OSError:
-        pass
-    return "linux"
+    """Render machine context through the public platform-detection seam."""
+    return machine_instructions.render_copilot_instructions(
+        entry, project, machine=machine, platform=detect_platform(),
+        hostname=socket.gethostname(),
+    )
 
 
 def _home() -> Path:
@@ -900,6 +870,7 @@ def _load_config_uncached(
     *,
     include_control_plane_related_pr: bool = True,
     project: str | None = None,
+    _machine_binding: dict[str, str] | None = None,
 ) -> Config:
     """Load and parse the layered project config.
 
@@ -940,6 +911,8 @@ def _load_config_uncached(
             avoid resolving the same active-plugin corpus twice.
         project: Explicit project identity. When supplied, it overrides legacy
             machine/global ``repo_name`` values for this load.
+        _machine_binding: Internal per-load provenance capture; never a YAML
+            setting and never persisted.
 
     Returns:
         Parsed Config object.
@@ -986,11 +959,9 @@ def _load_config_uncached(
         or global_raw.get("platform")
         or detect_platform()
     )
-    machine = (
-        machine_raw.get("machine")
-        or global_raw.get("machine")
-        or detect_machine()
-    )
+    from .machine_identity import configured_machine_binding
+    configured_machine = configured_machine_binding(machine_raw, global_raw, _machine_binding)
+    machine = configured_machine or detect_machine()
     srcroot = machine_raw.get("srcroot") or global_raw.get("srcroot") or ""
 
     # Active project / default repo name.
@@ -1032,6 +1003,7 @@ def _load_config_uncached(
         names.append(repo_name)
 
     repos: dict[str, RepoConfig] = {}
+    checkout_free_pr: dict[str, PRConfig] = {}
     inrepo_profile_assignments: dict[str, Any] = {}
     for name in names:
         machine_repo = machine_repos.get(name) or {}
@@ -1042,8 +1014,8 @@ def _load_config_uncached(
             name, platform
         )
         if not anchor:
-            # No anchor anywhere -- can't manage this repo. Skip silently unless
-            # it was the only candidate (validated after the loop).
+            from .pr_related_binding import remember_checkout_free_pr
+            remember_checkout_free_pr(checkout_free_pr, name, machine_repo, cp_related_pr.get(name, {}))
             continue
 
         worktree_root = machine_repo.get("worktree_root") or derive_worktree_root(
@@ -1086,7 +1058,7 @@ def _load_config_uncached(
         repos[name] = _build_repo_config(merged, anchor, str(worktree_root))
 
     if not repos:
-        raise ValueError(
+        raise ProjectNotRegisteredError(
             f"No repo could be resolved for project {repo_name or '?'!r}.\n"
             f"Checked machine-local config ({path}) and the repos registry "
             f"({registry_paths.registry_path('repos.yaml', legacy_root=legacy_install_dir())}).\n"
@@ -1124,11 +1096,13 @@ def _load_config_uncached(
     repository_assignment_raw = inrepo_profile_assignments.get(repo_name)
 
     config = Config(
+        configured_machine=configured_machine or None,
         srcroot=srcroot,
         machine=machine,
         platform=platform,
         repo_name=repo_name,
         repos=repos,
+        checkout_free_pr=checkout_free_pr,
         knowledge_repo=(
             machine_raw.get("knowledge_repo")
             or global_raw.get("knowledge_repo")
@@ -1166,7 +1140,41 @@ def _load_config_uncached(
     )
     from .execution_spaces import canonicalize_legacy_config
 
-    return canonicalize_legacy_config(config)
+    config = canonicalize_legacy_config(config, configured=bool(configured_machine))
+    # Explicit execution-space keys are not a migration surface.
+    if detect_platform() != "wsl":
+        return config
+    try:
+        entries = load_machines_yaml(config.default_repo.anchor, config=config)
+    except FileNotFoundError:
+        entries = {}
+    if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
+        if not configured_machine:
+            detect_machine(config.default_repo.anchor)
+        return config
+    # Resolve after the config-source binding is available, without calling
+    # load_machines_yaml's overlay fallback (which loads this config recursively).
+    identity_anchors = [config.default_repo.anchor]
+    if config.default_repo.stateless or config.default_repo.requires_external_state_root:
+        from . import state_root
+
+        identity_anchors = [
+            source.anchor for source in state_root.config_source_anchors(
+                config, base_anchor=config.default_repo.anchor,
+            )
+        ]
+    for anchor in identity_anchors:
+        root = Path(anchor)
+        if any((root / rel).is_file() for rel in (
+            Path(INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
+        )):
+            return replace(config, machine=detect_machine(
+                anchor, value=config.machine if configured_machine else None,
+            ))
+    else:
+        if machine_raw.get("machine") or global_raw.get("machine"):
+            return replace(config, machine=detect_machine(value=config.machine))
+    return config
 
 
 def load_config(
@@ -1229,7 +1237,7 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
         return {}
 
 
-def _load_inrepo_config(anchor: str) -> dict[str, Any]:
+def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
     """Return the repo's in-repo flat settings dict, or ``{}``.
 
     Prefers the config as **committed** on the resolved default branch
@@ -1246,12 +1254,7 @@ def _load_inrepo_config(anchor: str) -> dict[str, Any]:
         Path(INREPO_CONFIG_FILENAME),
     )
 
-    merged = inrepo_config_source.load_inrepo_config_from_committed_ref(
-        root, rel_candidates
-    )
-    if not merged:
-        base_path = next((root / rel for rel in rel_candidates if (root / rel).exists()), None)
-        merged = _load_yaml_safe(base_path) if base_path is not None else {}
+    merged = inrepo_config_source.load_config_base(root, rel_candidates, strict=strict)
 
     context = registry_paths.installation_context()
     marketplace_id = (
@@ -1267,7 +1270,7 @@ def _load_inrepo_config(anchor: str) -> dict[str, Any]:
             / GLOBAL_CONFIG_FILENAME
         )
         if overlay_path.exists():
-            merged = _deep_merge(merged, _load_yaml_safe(overlay_path))
+            merged = _deep_merge(merged, inrepo_config_source.load_config_file(overlay_path, strict=strict))
     return merged
 
 
@@ -1691,21 +1694,7 @@ def _parse_pr(raw: Any) -> PRConfig:
     # PR mode is on, so a lone ``required: true`` turns the mode on too.
     enabled = bool(raw.get("enabled", False)) or required
 
-    def _str_tuple(value: Any) -> tuple[str, ...]:
-        """Coerce a scalar-or-list config value into a tuple of strings.
-
-        Accepts a list/tuple (each item stringified), a lone scalar (wrapped),
-        or a falsy/missing value (empty tuple). Empty strings are dropped so a
-        stray ``""`` in a YAML list can't become a match-everything token.
-        """
-        if isinstance(value, (list, tuple)):
-            return tuple(s for s in (str(x).strip() for x in value) if s)
-        if value:
-            s = str(value).strip()
-            return (s,) if s else ()
-        return ()
-
-    labels = _str_tuple(raw.get("labels", ()))
+    labels = parse_string_tuple(raw.get("labels", ()))
 
     def _choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
         """Normalize a config enum to one of ``allowed`` (case-insensitive),
@@ -1736,6 +1725,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         enabled=enabled,
         required=required,
         provider=str(raw.get("provider", "gitea")),
+        repository=parse_repository(raw.get("repository", "")),
         strategy=str(raw.get("strategy", "keep-alive")),
         branch_prefix=str(raw.get("branch_prefix", "feature")),
         head_scheme=head_scheme,
@@ -1749,10 +1739,10 @@ def _parse_pr(raw: Any) -> PRConfig:
         auto_open=bool(raw.get("auto_open", False)),
         source_attribution=_source_attribution(raw.get("source_attribution", "codename")),
         source_attribution_configured=("source_attribution" in raw),
-        required_body_sections=_str_tuple(raw.get("required_body_sections", ())),
+        required_body_sections=parse_string_tuple(raw.get("required_body_sections", ())),
         automerge_label=str(raw.get("automerge_label", "")).strip(),
-        hold_labels=_str_tuple(raw.get("hold_labels", ())),
-        wip_title_prefixes=_str_tuple(raw.get("wip_title_prefixes", ())),
+        hold_labels=parse_string_tuple(raw.get("hold_labels", ())),
+        wip_title_prefixes=parse_string_tuple(raw.get("wip_title_prefixes", ())),
         approval_required=bool(raw.get("approval_required", True)),
         allow_stale_approval=bool(raw.get("allow_stale_approval", False)),
         dismiss_stale_reviews=(
@@ -1779,6 +1769,8 @@ def _parse_pr(raw: Any) -> PRConfig:
         roles=_parse_pr_roles(raw.get("roles")),
         fork=_parse_fork(raw.get("fork")),
         notes=str(raw.get("notes", "")).strip(),
+        observation=parse_observation(raw.get("observation")),
+        publication_checks=parse_publication_checks(raw.get("publication_checks")),
     )
 
 

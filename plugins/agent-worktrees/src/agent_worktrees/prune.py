@@ -30,6 +30,7 @@ import logging
 from typing import Callable, Optional
 
 from . import git_ops, tracking
+from .retirement_safety import retirement_blocker
 
 log = logging.getLogger(__name__)
 
@@ -198,12 +199,9 @@ def _content_verdict(
     # no unique commits and the *real* merge state lives on the PR(s).  Trust
     # the (reconciled) PR records over git heuristics here.
     if rec.prs:
-        if rec.has_live_pr():
-            live = [p.number for p in rec.prs
-                    if not tracking._pr_is_terminal(p)]
-            nums = ", ".join(f"#{n}" for n in live if n is not None) or "?"
-            return PruneVerdict(False, "open-pr",
-                                f"PR {nums} still open/in review", turn_count)
+        blocker = retirement_blocker(rec)
+        if blocker is not None and blocker.bucket == "open-pr":
+            return PruneVerdict(False, blocker.bucket, blocker.reason, turn_count)
         merged = [p.number for p in rec.prs if p.state == "merged"]
         if merged:
             nums = ", ".join(f"#{n}" for n in merged if n is not None) or "?"
@@ -295,7 +293,7 @@ def cross_machine_claim_count(rec: tracking.WorktreeRecord) -> int:
     :func:`assemble_closure_descriptor` caller shares.
     """
     return _count_cross_machine_worktree_claims(
-        [c for c in rec.resources if c.is_live], rec.machine)
+        [c for c in rec.resources if c.is_live or c.is_unsettled], rec.machine)
 
 
 def cleanup_disposition(
@@ -316,11 +314,9 @@ def cleanup_disposition(
 
     Safety invariant: a ``finalized`` worktree (or one git proves COMPLETED)
     is cleanable **provided its working tree carries no uncommitted content**
-    (``info.dirty == 0``) -- at that point its work is at minimum pushed to
-    the remote feature branch, so removing the local copy loses nothing. This
-    preserves the long-standing default and avoids over-preserving on a
-    *stale* local PR state (use ``--reconcile-prs`` / live reconcile to
-    refine those). A worktree finalized earlier and modified afterward
+    (``info.dirty == 0``) and it has no open PR or held resource obligations.
+    A stale open PR conservatively holds cleanup until ``--reconcile-prs``
+    confirms settlement. A worktree finalized earlier and modified afterward
     (``info.dirty > 0``, whether classified ``DIRTY`` or an ``ORPHAN`` that
     still carries a dirty count) is excluded from this shortcut regardless of
     ``rec.status`` -- see the ``info.dirty > 0`` guard below.
@@ -339,6 +335,9 @@ def cleanup_disposition(
 
     if info.state == S.ACTIVE:
         return CleanupDisposition(False, "active", v.reason)
+
+    if v.category == "open-pr":
+        return CleanupDisposition(False, v.category, v.reason)
 
     # Claimed-resource safety spares an IN-FLIGHT owned resource while its
     # claimant is alive/unconfirmed. A FINISHED resource never reaches here as
@@ -371,7 +370,7 @@ def cleanup_disposition(
     # ``reopen_finalized_owner``), so it had no effect on this check either
     # -- purely cosmetic, not worth a subprocess spawn on every submitted
     # prompt.
-    held_claims = [c for c in rec.resources if c.is_live]
+    held_claims = [c for c in rec.resources if c.is_live or c.is_unsettled]
     if held_claims and (
         rec.status == "finalized" or info.state == S.COMPLETED
         or v.category in ("merged", "empty", "conversation-only")
@@ -470,8 +469,6 @@ def cleanup_disposition(
     if rec.status == "finalized" or info.state == S.COMPLETED:
         return CleanupDisposition(True, "clean", v.reason)
 
-    if v.category == "open-pr":
-        return CleanupDisposition(False, "open-pr", v.reason)
     if v.category == "closed-unmerged":
         return CleanupDisposition(False, "closed-unmerged", v.reason)
     if v.category == "merged":
@@ -540,9 +537,12 @@ def reconcile_pr_states(
     ``merged`` the local state becomes ``"merged"``; otherwise a live state of
     ``"closed"`` becomes ``"closed"``.  A live ``open`` is left as-is.
 
-    With ``only_live`` (the default) only non-terminal records are refreshed --
-    that is the stale case (local ``open`` while the PR merged externally).
-    Pass ``only_live=False`` to re-verify terminal records too.
+    With ``only_live`` (the default), records already explicitly ``merged``
+    or ``closed`` are skipped; everything else -- including an unconfirmed
+    or ``unknown`` PR state that :func:`retirement_safety.retirement_blocker`
+    still treats as pending -- is re-queried so reconciliation can clear
+    that guard once the provider confirms real settlement.  Pass
+    ``only_live=False`` to re-verify explicitly-terminal records too.
 
     Mutates ``rec.prs`` in place and returns ``(number, old_state, new_state)``
     tuples for every record that changed.  The caller persists ``rec`` if it
@@ -552,7 +552,11 @@ def reconcile_pr_states(
     for pr in rec.prs:
         if pr.number is None:
             continue
-        if only_live and tracking._pr_is_terminal(pr):
+        if only_live and pr.state in ("merged", "closed"):
+            # Consistent with retirement_safety.retirement_blocker's pending
+            # definition: an unconfirmed/unknown state still blocks cleanup,
+            # so it must still be re-queried here rather than skipped as
+            # tracking._pr_is_terminal() would (it treats unknown as terminal).
             continue
         repo = pr.repo or rec.repo
         try:

@@ -2,6 +2,9 @@
 requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [project]
 name = "agent-machines"
 version = "0.1.1-dev4"
@@ -20,11 +23,15 @@ dependencies = [
     "agent-procutil",
     "agent-machine-transport",
     "agent-remote-login-shell",
+    "agent-installer-readiness",
+    "agent-installation-context",
 ]
 
 [tool.uv.sources]
-agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
 agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = true }
+agent-installer-readiness = { path = "../../libs/installer-readiness", editable = true }
+# Flat-module metadata must remain retained, not an unsupported live editable.
+agent-installation-context = { path = "../../libs/installation-context", editable = false }
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Vendored byte-identical from libs/plugin-resolve;
 # shared with agent-worktrees / agent-bridge / agent-codespaces.
@@ -40,6 +47,15 @@ agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
 # manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "../../libs/agent-procutil", editable = true }
+# Shared machines.yaml registry parsing, ambiguity-checked execution
+# identity, and local-vs-SSH transport resolution (module
+# ``machine_transport``). This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# plugin's own root and resolves live to `libs/machine-transport`, so this
+# `dev`-branch checkout has nothing to keep manually in sync -- only a real
+# `main`-branch release (tools/materialize_main.py) ever gets a real local
+# copy.
+agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
 
 [project.optional-dependencies]
 dev = [
@@ -65,3 +81,6 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 # Vendored byte-identical primitive (install-contract); its subprocess calls to
 # mklink are intentional and it must not diverge from the canonical source.
 "scripts/versioned_runtime.py" = ["S603", "S607"]
+
+[tool.pytest.ini_options]
+markers = ["guard: bounded source and structural contract checks"]

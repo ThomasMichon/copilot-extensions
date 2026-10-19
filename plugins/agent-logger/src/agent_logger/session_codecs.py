@@ -61,21 +61,72 @@ class _LimitedTarInput(io.FileIO):
         return data
 
 
+class _LimitedTarDecoded:
+    """Bound expanded container bytes before tarfile parses headers or metadata."""
+
+    def __init__(self, source: BinaryIO) -> None:
+        self.source = source
+        self.consumed = 0
+
+    def read(self, size: int = -1) -> bytes:
+        remaining = MAX_TAR_CONTAINER_BYTES - self.consumed + 1
+        maximum = remaining if size < 0 else min(size, remaining)
+        data = self.source.read(maximum)
+        self.consumed += len(data)
+        if self.consumed > MAX_TAR_CONTAINER_BYTES:
+            raise ValueError("session tar exceeds its decoded-container byte budget")
+        return data
+
+
+def _validate_read_limit(max_bytes: int) -> None:
+    if type(max_bytes) is not int or max_bytes < 0:
+        raise ValueError("member byte limit must be a nonnegative integer")
+
+
+def _file_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def _file_revision(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    # Windows stat/fstat expose different ctime semantics; compare it API-to-API.
+    return (*_file_identity(info), info.st_ctime_ns)
+
+
+@contextmanager
+def _open_stable_archive(path: Path) -> Iterator[BinaryIO]:
+    from agent_logger.sync.publication_directory import publication_directory
+
+    with publication_directory(path.parent, create=False) as directory:
+        with directory.open(path.name) as raw:
+            before = os.fstat(raw.fileno())
+            named_before = directory.stat(path.name)
+            if _file_identity(before) != _file_identity(named_before):
+                raise ValueError("session archive changed while opening")
+            yield raw
+            if _file_revision(before) != _file_revision(os.fstat(raw.fileno())) or (
+                _file_revision(named_before) != _file_revision(directory.stat(path.name))
+            ):
+                raise ValueError("session archive changed during reading")
+
+
 def _copy_and_digest(
     source: BinaryIO,
     destination: BinaryIO | None,
     maximum_bytes: int,
+    *,
+    digest: bool = True,
 ) -> ArchiveMemberDigest:
-    digest = hashlib.sha256()
+    hasher = hashlib.sha256() if digest else None
     size = 0
     while chunk := source.read(min(1024 * 1024, maximum_bytes - size + 1)):
         size += len(chunk)
         if size > maximum_bytes:
             raise ValueError("session archive member exceeds its byte budget")
-        digest.update(chunk)
+        if hasher is not None:
+            hasher.update(chunk)
         if destination is not None:
             destination.write(chunk)
-    return ArchiveMemberDigest(size, digest.hexdigest())
+    return ArchiveMemberDigest(size, hasher.hexdigest() if hasher is not None else "")
 
 
 class Codec(ABC):
@@ -103,6 +154,12 @@ class Codec(ABC):
     @abstractmethod
     def read_member(self, archive: Path, member: str) -> bytes | None:
         """Return the bytes of ``member`` from ``archive``, or ``None``."""
+
+    def read_member_bounded(
+        self, archive: Path, member: str, *, max_bytes: int,
+    ) -> bytes | None:
+        """Read with a preallocation bound, or explicitly decline support."""
+        raise ValueError(f"codec {self.name!r} does not support bounded member reads")
 
     @abstractmethod
     def extract_all(self, archive: Path, dest_dir: Path) -> None:
@@ -215,9 +272,24 @@ class TarGzCodec(Codec):
             return [m.name for m in tar.getmembers() if m.isfile()]
 
     def member_digests(self, archive: Path) -> dict[str, ArchiveMemberDigest]:
-        from agent_logger.sync.provenance import open_regular_no_follow
+        result, _ = self._scan_members(archive)
+        return result
 
+    def read_member_bounded(
+        self, archive: Path, member: str, *, max_bytes: int,
+    ) -> bytes | None:
+        """Validate the whole bounded TAR stream while retaining only one member."""
+        _validate_read_limit(max_bytes)
+        target = _validate_source_member_name(member)
+        _, data = self._scan_members(archive, target=target, max_bytes=max_bytes)
+        return data
+
+    def _scan_members(
+        self, archive: Path, *, target: str | None = None, max_bytes: int = 0,
+    ) -> tuple[dict[str, ArchiveMemberDigest], bytes | None]:
         result: dict[str, ArchiveMemberDigest] = {}
+        names: set[str] = set()
+        selected: bytes | None = None
         total = 0
         headers = 0
         metadata_bytes = 0
@@ -243,11 +315,15 @@ class TarGzCodec(Codec):
                 nonlocal headers, metadata_bytes
                 # Patched Python readers bypass frombuf, including for extended headers.
                 parser = getattr(super(), "_frombuf", None)
-                info = (
-                    parser(buf, encoding, errors, **kwargs)
-                    if parser is not None
-                    else super().frombuf(buf, encoding, errors)
-                )
+                try:
+                    info = (
+                        parser(buf, encoding, errors, **kwargs)
+                        if parser is not None
+                        else super().frombuf(buf, encoding, errors)
+                    )
+                except (tarfile.InvalidHeaderError, tarfile.TruncatedHeaderError) as exc:
+                    # TarFile.next otherwise treats a later corrupt header as EOF.
+                    raise ValueError("invalid session tar member header") from exc
                 headers += 1
                 if headers > MAX_ARCHIVE_MEMBERS:
                     raise ValueError("session archive exceeds its member budget")
@@ -263,37 +339,53 @@ class TarGzCodec(Codec):
                         raise ValueError("session tar exceeds its metadata byte budget")
                 return info
 
-        with open_regular_no_follow(archive) as raw:
+        with _open_stable_archive(archive) as raw:
             if os.fstat(raw.fileno()).st_size > MAX_ARCHIVE_INPUT_BYTES:
                 raise ValueError("session archive exceeds its compressed-input byte budget")
             with (
                 _LimitedTarInput(raw.fileno()) as limited,
                 gzip.GzipFile(fileobj=limited, mode="rb") as decoded,
-                tarfile.open(fileobj=decoded, mode="r|", tarinfo=BoundedTarInfo) as tar,
+                tarfile.open(
+                    fileobj=_LimitedTarDecoded(decoded), mode="r|", tarinfo=BoundedTarInfo,
+                ) as tar,
             ):
                 for info in tar:
+                    name = _validate_member_name(info.name)
+                    key = name.casefold() if _CASE_INSENSITIVE else name
+                    if not name or key in names:
+                        raise ValueError(
+                            f"duplicate or empty session archive member: {info.name!r}"
+                        )
+                    names.add(key)
+                    if name != info.name:
+                        raise ValueError(f"noncanonical session archive member: {info.name!r}")
                     if info.isdir():
                         if info.size:
                             raise ValueError(f"nonempty session tar directory: {info.name!r}")
                         continue
                     if not info.isfile():
                         raise ValueError(f"non-regular session archive member: {info.name!r}")
-                    name = _validate_member_name(info.name)
-                    if not name or name in result:
-                        raise ValueError(
-                            f"duplicate or empty session archive member: {info.name!r}"
-                        )
-                    if name != info.name:
-                        raise ValueError(f"noncanonical session archive member: {info.name!r}")
                     if info.size < 0 or info.size > MAX_ARCHIVE_MEMBER_BYTES:
                         raise ValueError("session archive member exceeds its byte budget")
+                    if info.size > MAX_ARCHIVE_BYTES - total:
+                        raise ValueError("session archive exceeds its total byte budget")
+                    if name == target and info.size > max_bytes:
+                        raise ValueError("session archive member exceeds its requested byte limit")
                     source = tar.extractfile(info)
                     if source is None:
                         raise ValueError(f"missing session archive member: {info.name!r}")
+                    destination = io.BytesIO() if name == target else None
+                    # Bounded single-member reads only need the selected member's
+                    # bytes/digest; draining the rest without hashing avoids
+                    # SHA-256 cost proportional to total archive content.
                     with source:
                         result[name] = _copy_and_digest(
-                            source, None, min(MAX_ARCHIVE_MEMBER_BYTES, MAX_ARCHIVE_BYTES - total)
+                            source, destination, info.size,
+                            digest=target is None or name == target,
                         )
+                    if destination is not None:
+                        selected = destination.getvalue()
+                        destination.close()
                     if result[name].size != info.size:
                         raise ValueError(f"truncated session archive member: {info.name!r}")
                     total += result[name].size
@@ -306,7 +398,9 @@ class TarGzCodec(Codec):
                     container_bytes += len(trailing)
                     if container_bytes > MAX_TAR_CONTAINER_BYTES:
                         raise ValueError("session tar exceeds its decoded-container byte budget")
-        return result
+                    if any(trailing):
+                        raise ValueError("nonzero trailing data in session tar")
+        return result, selected
 
 
 def _zip_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
@@ -438,24 +532,10 @@ def _preflight_zip(raw: BinaryIO) -> None:
 
 @contextmanager
 def _open_zip(path: Path) -> Iterator[zipfile.ZipFile]:
-    from agent_logger.sync.provenance import existing_real_directory, open_regular_no_follow
-
-    parent = existing_real_directory(path.parent)
-    if parent is None:
-        raise ValueError(f"unsafe session ZIP directory: {path.parent}")
-    path = parent / path.name
-    with open_regular_no_follow(path) as raw:
-        before = os.fstat(raw.fileno())
+    with _open_stable_archive(path) as raw:
         _preflight_zip(raw)
         with zipfile.ZipFile(raw) as archive:
             yield archive
-        after = os.fstat(raw.fileno())
-        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-            after.st_size,
-            after.st_mtime_ns,
-            after.st_ctime_ns,
-        ):
-            raise ValueError(f"session ZIP changed during reading: {path}")
 
 
 def _source_files(root: Path) -> Iterator[Path]:
@@ -547,6 +627,24 @@ class ZipCodec(Codec):
             info = _zip_members(opened).get(name)
             if info is None:
                 return None
+            with opened.open(info) as source:
+                data = source.read(info.file_size + 1)
+            if len(data) != info.file_size:
+                raise ValueError(f"truncated session ZIP member: {info.filename!r}")
+            return data
+
+    def read_member_bounded(
+        self, archive: Path, member: str, *, max_bytes: int,
+    ) -> bytes | None:
+        """Bound the selected member before opening its decompression stream."""
+        _validate_read_limit(max_bytes)
+        name = _validate_source_member_name(member)
+        with _open_zip(archive) as opened:
+            info = _zip_members(opened).get(name)
+            if info is None:
+                return None
+            if info.file_size > max_bytes:
+                raise ValueError("session ZIP member exceeds its requested byte limit")
             with opened.open(info) as source:
                 data = source.read(info.file_size + 1)
             if len(data) != info.file_size:

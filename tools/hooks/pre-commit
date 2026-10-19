@@ -40,6 +40,19 @@ fi
 cd "$ROOT"
 failed=0
 
+# Keep child argv below Windows limits without dropping paths or later failures.
+run_batched() {
+    local command_count="$1"
+    shift
+    local -a command=("${@:1:command_count}")
+    shift "$command_count"
+    local offset result=0
+    for ((offset=1; offset<=$#; offset+=32)); do
+        "${command[@]}" "${@:offset:32}" || result=1
+    done
+    return "$result"
+}
+
 # --- 1. ruff on staged Python -------------------------------------------------
 STAGED_PY=()
 while IFS= read -r -d '' f; do
@@ -56,7 +69,7 @@ if [[ ${#STAGED_PY[@]} -gt 0 ]]; then
     fi
     if [[ ${#RUFF[@]} -eq 0 ]]; then
         echo "pre-commit: ruff not found -- skipping lint (pip install ruff to enable)" >&2
-    elif ! "${RUFF[@]}" check --select F,E9 --force-exclude "${STAGED_PY[@]}"; then
+    elif ! run_batched $((${#RUFF[@]} + 5)) "${RUFF[@]}" check --select F,E9 --force-exclude -- "${STAGED_PY[@]}"; then
         echo "" >&2
         echo "pre-commit: ruff found issues in staged files (rules: F, E9)." >&2
         echo "  Fix them, or run with --no-verify to bypass (discouraged)." >&2
@@ -74,7 +87,7 @@ done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*SKILL.md')
 if [[ ${#STAGED_SKILLS[@]} -gt 0 ]]; then
     if [[ ${#PY[@]} -eq 0 ]]; then
         echo "pre-commit: python not found -- skipping SKILL.md validation" >&2
-    elif ! "${PY[@]}" "$ROOT/tools/check-skills.py" "${STAGED_SKILLS[@]}"; then
+    elif ! run_batched $((${#PY[@]} + 2)) "${PY[@]}" "$ROOT/tools/check-skills.py" -- "${STAGED_SKILLS[@]}"; then
         echo "" >&2
         echo "pre-commit: SKILL.md validation failed (see errors above)." >&2
         echo "  A description over 1024 chars makes the Copilot CLI DROP the skill." >&2
@@ -92,7 +105,7 @@ done < <(git diff --cached --name-only --diff-filter=ACM -z -- 'efforts/**/READM
 if [[ ${#STAGED_EFFORT_VISION[@]} -gt 0 ]]; then
     if [[ ${#PY[@]} -eq 0 ]]; then
         echo "pre-commit: python not found -- skipping effort/vision structure validation" >&2
-    elif ! "${PY[@]}" "$ROOT/tools/check-effort-vision-structure.py" "${STAGED_EFFORT_VISION[@]}"; then
+    elif ! run_batched $((${#PY[@]} + 2)) "${PY[@]}" "$ROOT/tools/check-effort-vision-structure.py" -- "${STAGED_EFFORT_VISION[@]}"; then
         echo "" >&2
         echo "pre-commit: effort/vision structure validation failed (see errors above)." >&2
         echo "  Fix it, or run with --no-verify to bypass (discouraged)." >&2
@@ -116,7 +129,7 @@ if [[ ${#STAGED_ALL[@]} -gt 0 ]]; then
     # like a flag (e.g. a file literally named "--all") must never be
     # parsed as one, which would silently switch the guard into full-tree
     # mode (checking HEAD) instead of checking the actual staged paths.
-    elif ! "${PY[@]}" "$ROOT/tools/check-large-files.py" -- "${STAGED_ALL[@]}"; then
+    elif ! run_batched $((${#PY[@]} + 2)) "${PY[@]}" "$ROOT/tools/check-large-files.py" -- "${STAGED_ALL[@]}"; then
         echo "" >&2
         echo "pre-commit: large-file check failed (see errors above)." >&2
         echo "  Store a large generated artifact as a Release asset/CI artifact" >&2

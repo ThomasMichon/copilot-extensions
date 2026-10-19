@@ -49,8 +49,11 @@ name: Promote trigger (dev-advancement filter)
 # protect -- neither harness needs visibility into the other's source list.
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["CI", "Validate and promote dev to main"]
     types: [completed]
+  pull_request_target:
+    branches: [main]
+    types: [closed]
 
 permissions:
   contents: read
@@ -150,22 +153,65 @@ jobs:
   filter-and-dispatch:
     name: filter (dev-ancestry) and dispatch
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event != 'pull_request'
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event != 'pull_request' &&
+       ((github.event.workflow_run.name == 'CI' &&
+         github.event.workflow_run.conclusion == 'success') ||
+        github.event.workflow_run.name == 'Validate and promote dev to main')) ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.action == 'closed' &&
+       github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.user.login == github.repository_owner &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: write
+      pull-requests: read
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.workflow_sha }}
+      - name: Resolve genuine or deferred Dev advancement without losing active-PR ownership
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPLETED_WORKFLOW: ${{ github.event.workflow_run.name }}
+          COMPLETED_RUN: ${{ github.event.workflow_run.id }}
+          COMPLETED_SHA: ${{ github.event.workflow_run.head_sha }}
+          CLOSED_PR: ${{ github.event.pull_request.number }}
+        run: |
+          args=()
+          if [ "$GITHUB_EVENT_NAME" = "pull_request_target" ]; then
+            args+=(--closed-main-pr "$CLOSED_PR")
+          elif [ "$COMPLETED_WORKFLOW" = "CI" ]; then
+            [[ "$COMPLETED_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "::error::CI completion has no valid source identity."
+              exit 1
+            }
+            git fetch origin dev
+            if ! git merge-base --is-ancestor "$COMPLETED_SHA" origin/dev; then
+              echo "::notice::CI completion is not a genuine Dev ancestor; no promotion is dispatched."
+              exit 0
+            fi
+            args+=(--source-ci-run "$COMPLETED_RUN")
+          elif [ "$COMPLETED_WORKFLOW" = "Validate and promote dev to main" ]; then
+            args+=(--completed-promotion-run "$COMPLETED_RUN")
+          else
+            echo "::error::Unexpected promotion scheduling event."
+            exit 1
+          fi
+          python -I -B tools/promotion_lifecycle.py --repository "$GITHUB_REPOSITORY" \
+            "${args[@]}" --github-output "$GITHUB_OUTPUT"
       - name: Check dev ancestry and dispatch if genuine
+        if: steps.source.outputs.dispatch_sha != ''
         env:
           # Explicit API dispatch retains the trusted default-branch workflow
           # definition; the receiving gate independently pins current dev.
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          SHA: ${{ steps.source.outputs.dispatch_sha }}
         run: |
           git fetch origin dev
           if git merge-base --is-ancestor "$SHA" origin/dev; then

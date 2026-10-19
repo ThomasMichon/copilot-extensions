@@ -60,6 +60,38 @@ def occupancy_from_state(state) -> str:
 def occupancy_from_readiness(readiness: dict) -> dict:
     """Copy ``readiness`` and set ``occupancy`` from its classification fields."""
     out = dict(readiness)
+    if readiness.get("merge_state") in ("merged", "closed"):
+        out["occupancy"] = str(readiness["merge_state"])
+        return out
+    if readiness.get("wip"):
+        out["occupancy"] = "wip"
+        return out
+    if readiness.get("held"):
+        out["occupancy"] = "held"
+        return out
+    if readiness.get("conflict"):
+        out["occupancy"] = "author-conflict"
+        return out
+    if (
+        readiness.get("approval_stale")
+        and not readiness.get("approval_stale_authorized")
+        and readiness.get("verdict") != "APPROVED"
+    ):
+        out["occupancy"] = "needs-review"
+        return out
+    if readiness.get("verdict") == "CHANGES_REQUESTED":
+        out["occupancy"] = "needs-revision"
+        return out
+    if readiness.get("operation") == "direct":
+        if readiness.get("mergeable") is None:
+            out["occupancy"] = "needs-mergeability"
+            return out
+        if readiness.get("ready_for_direct_merge"):
+            out["occupancy"] = "needs-merge"
+            return out
+        if readiness.get("review_assessment_required"):
+            out["occupancy"] = "needs-review-assessment"
+            return out
     out["occupancy"] = occupancy_for(
         wip=bool(readiness.get("wip")),
         conflict=bool(readiness.get("conflict")),

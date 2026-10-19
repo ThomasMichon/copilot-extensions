@@ -93,7 +93,16 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
             assert args.session_id == "bridge-a"
             if args.command == "resume":
                 assert args.strict
-            result = {"session_id": "bridge-a", "status": "stopped"}
+                result = {"session_id": "bridge-a", "status": "idle", "verb": "resumed"}
+            elif args.command == "status" and args.full:
+                result = {
+                    "session_id": "bridge-a", "acp_session_id": "native-a",
+                    "durable_session_id": "native-a", "worktree_id": "worktree-a",
+                    "project": "example", "target_dir": "/example/worktree",
+                    "status": "idle", "read_only": False, "at_rest": True, "liveness": None,
+                }
+            else:
+                result = {"session_id": "bridge-a", "status": "stopped"}
         return subprocess.CompletedProcess(argv, 0, json.dumps(result), "")
 
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
@@ -105,4 +114,4 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
     handle = ordinary_bridge.start(task, **kwargs)
     ordinary_bridge.start(task, **kwargs)
     ordinary_bridge.observe(handle)
-    assert calls == ["create", "send", "status", "resume", "send", "wait"]
+    assert calls == ["create", "send", "status", "resume", "status", "send", "wait"]

@@ -455,9 +455,8 @@ class PickerScreenMaintenanceActionsMixin:
                "verb": "New worktree", "confirm": "Create",
                "prompt": f"Creates on {tm} {te} · options (none required):",
                "opts": opts}
-        # Both local and SSH launches stage confirmed text on the target.
-        # Anchor/Bare remain unsupported prompt modes, checked on confirmation.
-        show_prompt = _SEED_PROMPT_ENABLED
+        # Prompt recovery currently supports only this execution environment.
+        show_prompt = _SEED_PROMPT_ENABLED and (tm, te) == self.src.LOCAL
         scr = ScopeDlgScreen(dlg, show_prompt=show_prompt)
 
         def _after(confirmed):

@@ -57,6 +57,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -379,6 +380,16 @@ def revert(
         raise PromotionError(
             f"no generated promotion commit found in {main_ref}'s history "
             "-- refusing to revert an unrecognized state"
+        )
+    recorded = _read_pipeline_state(promotion_commit, repo=repo).get("last_promotion")
+    expected = last_promotion.get("dev_head") if isinstance(last_promotion, dict) else None
+    if (
+        not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{40}", expected)
+        or not isinstance(recorded, dict) or recorded.get("dev_head") != expected
+    ):
+        raise PromotionError(
+            "the latest source release has no matching landing receipt "
+            "-- refusing to select an older promotion as the rollback target"
         )
 
     # Restore the promotion commit's PARENT tree wholesale (the same

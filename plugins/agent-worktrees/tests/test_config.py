@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -46,12 +47,24 @@ class TestDetectPlatform:
         real_open = open
 
         def fake_open(f, *args, **kwargs):
-            if str(f) == "/proc/version":
+            if Path(f) == Path("/proc/version"):
                 return io.StringIO(proc_version.read_text())
             return real_open(f, *args, **kwargs)
 
         monkeypatch.setattr("builtins.open", fake_open)
-        monkeypatch.setattr(cfg.sys, "platform", "linux")
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr("os.uname", lambda: SimpleNamespace(release="generic"), raising=False)
+        real_read_text = Path.read_text
+        monkeypatch.setattr(
+            Path, "read_text", lambda path, *args, **kwargs: "0::/user.slice"
+            if path == Path("/proc/1/cgroup") else real_read_text(path, *args, **kwargs),
+        )
+        real_is_file = Path.is_file
+        monkeypatch.setattr(
+            Path, "is_file",
+            lambda path: False if path in (Path("/.dockerenv"), Path("/run/.containerenv"))
+            else real_is_file(path),
+        )
         assert cfg.detect_platform() == "wsl"
 
 
@@ -2071,6 +2084,10 @@ class TestFindMachineEntry:
 # ---------------------------------------------------------------------------
 
 class TestDetectMachine:
+    @pytest.fixture(autouse=True)
+    def _native_platform(self, monkeypatch):
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+
     def _write(self, tmp_path: Path, body: str) -> Path:
         (tmp_path / "machines.yaml").write_text(body, encoding="utf-8")
         return tmp_path

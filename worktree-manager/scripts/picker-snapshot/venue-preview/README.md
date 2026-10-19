@@ -44,7 +44,7 @@ uv venv .venv
 uv pip install --python .venv\Scripts\python.exe -e ".[dev]"
 
 cd scripts\picker-snapshot
-npm install   # installs @resvg/resvg-js, the deterministic SVG->PNG rasterizer
+python install.py  # age-gated locked SVG->PNG rasterizer
 ```
 
 ## Run

@@ -18,7 +18,66 @@ The table distinguishes:
 - **Source declarations**: discovered repository/plugin declarations, read-only
   here. Ownership/provenance identifies their configuration flow.
 - **Available templates**: built-in recipes plus a bounded worker-pool template,
-  with **Instantiate** actions. Recipe fragments are not complete instances.
+  with **Instantiate** actions; provider-owned fragments are discoverable but
+  have no Instantiate action. Recipe fragments are not complete instances.
+
+### Shared catalog metadata
+
+The JSON envelope identifies `schema_version: 1` and a `fetched_at` epoch
+timestamp. The latter is a read time, not proof of recent worker activity.
+`summary.activity_updated_at` separately carries the supervisor receipt time
+when available; `activity_known` and `activity_reason` retain the existing
+freshness judgment.
+
+Each row has a `kind` and `components_basis`. For a concrete configuration,
+`components` projects the effective registrations' IDs, names, runtime and
+declaration kinds, owners, repo scope when declared, labels, source paths when
+known, and content revisions. Executable specs, command argv and environment
+values are not included in component metadata. A multi-component configuration
+has kind `composite`, including when several components have the same kind.
+
+`repo_scopes` preserves every declared scope in first-declared order, including
+wrapped schedule entries and their `default_repo` fallback. The legacy
+`repo_scope` string retains the first scope for compatible older consumers;
+use the list for a complete view. Evaluator all-repository opt-in is `all`.
+Labels come from each kind's actual routing configuration: lane labels,
+evaluator watch labels, schedule task labels, or a composed emitter's nested
+task label. No title/name classification is used.
+The built-in CI-repair emitter projects its producer-owned lane (or repository
+fallback) and fixed task label through the same routing helper used when
+creating an admitted task.
+
+File-backed declarations retain the observed leaf source document through
+repository and verified-plugin discovery. Local instance components name the
+draft or published file matching their basis. This attribution does not alter
+the executable registration. The content revision fingerprints the complete
+canonical registration, so an executable change remains observable without
+returning its command, spec or environment values.
+
+For a published local instance the component basis is `published`, even if
+its Save-only draft has changed shape. An unpublished instance uses `draft`;
+source-owned declarations use `source`. An unreadable publication uses
+`unknown` and exposes no inferred components. Uninstantiated templates have
+their declared kind, basis `template` and an empty component list, not fabricated
+registration IDs. Discovery-error rows similarly contain no components.
+
+These additive fields let independent terminal and graphical consumers
+describe the same owning catalog without classifying sources from titles or
+reconstructing composed registrations. The Manager table shows Kind and its
+Details card lists component identity, scopes, labels, source documents and
+content revisions. At standard terminal widths the secondary
+Kind column yields to the existing status, capacity, source and description
+columns; wider terminals show it alongside them. Existing IDs, edit revisions,
+form fields and activation semantics are unchanged.
+
+Projection failures are isolated per row, including registrar-supported
+specifications whose full routing metadata is malformed. The row is marked
+`metadata-error`, its `component_errors` also appear in `summary.errors`, and
+its component basis is `unknown` with no invented components. Healthy sources,
+instances and templates remain visible. Existing enablement/publication facts
+are not replaced with a fabricated stopped state; details name the failed
+projection. Any catalog error disables toggle affordances consistently, even
+when the error is found after another row was projected.
 
 Descriptions, source attribution, validation, publication, capacity, effective
 disable overrides, and observed activity are separate facts. A recent local
@@ -69,6 +128,102 @@ stale edits, redirected files, ambiguous discovery and missing dependencies fail
 explicitly. Cancel never executes a provider command or writes task-steering drafts.
 The stored name and ID must match the exact edit target, including case;
 Windows case-insensitive file lookup cannot rename an existing instance.
+
+### Discover provider templates without registering them
+
+Providers may publish a version-1 inert JSON index at:
+
+| Provider | Index home |
+|---|---|
+| Enabled plugin | `dispatch-templates.json` in each identity-verified live payload root |
+| Registered repository or declared repository pointer | `templates/index.json` in the existing agent-dispatch repository configuration layers |
+| User-local | `templates/index.json` beneath this installation's `registrar_dir()` |
+
+Repository layers retain canonical `.copilot-extensions/agent-dispatch`
+selection, `.agent-dispatch` fallback and the active installation's marketplace
+overlay. They are reported separately, not merged using a new local-wins rule.
+Registering an active registrar pointer is not required to discover templates
+from an already registered repository. A legacy repository pointer retains its
+pointer attribution; its label/path basename is not a registered repo identity.
+Arbitrary directory pointers are not additional template roots.
+
+```json
+{
+  "schema": "agent-dispatch.template-index",
+  "version": 1,
+  "templates": [
+    {
+      "id": "record-source",
+      "title": "Record source",
+      "description": "Produce ordinary tasks through a configured adapter.",
+      "kind": "emitter",
+      "declaration": "recipes/record-source.json",
+      "requirements": ["Choose a source adapter and stable record identity."]
+    }
+  ]
+}
+```
+
+`declaration` references an existing JSON object/fragment relative to the index
+directory, contained within the owning provider root. It does not copy the
+declaration into a second registry. IDs use 1-80 letters, digits, `.`, `_` or
+`-`, starting with a letter/digit. Titles are at most 200 characters,
+descriptions 2,000, and requirements at most 32 nonempty strings of up to
+1,000 characters. Text fields must be NUL-free. Each JSON document is bounded
+to 1 MiB; an index contains at most 256 entries. Unknown versions/fields,
+duplicate JSON keys or entry IDs,
+unsupported kinds, unavailable roots/files and containment failures are explicit
+findings; healthy peers remain visible. `kind` describes the fragment, not
+validated effective registrations. Runtime kinds and existing built-in
+composite recipe kinds are supported; `composite` may describe a fragment
+without a top-level kind.
+
+New rows qualify the provider's local ID with its source/root/layer context.
+The ID is stable while that context is stable; relocating a provider root
+produces a distinct variant. Revisions fingerprint the index entry, raw
+declaration object and resolution context, not unresolved inherited resources.
+Equal bytes at different relative dependency roots are distinct contributions.
+Details retain all provider-reported applicability scopes, root kind, index,
+declaration path, requirements and revision. Raw commands/specs/environment
+values are not returned by this discovery projection.
+
+Provider rows report `resolution: discovered-only`,
+`dependency_status: not-resolved`, `instantiable: "false"` and an explicit
+`unsupported_reason`. Only Details is available through the existing Manager
+contribution. The current `workers save` command still refuses these new IDs:
+safe external recipe materialization is not implemented. Do not treat declared
+requirements as evaluated prerequisites or copy relative references into the
+local-instance directory. Built-in IDs, recipe references and their existing
+save/activation actions are unchanged.
+
+`summary.template_discovery` reports `state` (`complete` or `partial`),
+`provider_templates`, `findings` and `instantiation: builtin-only`. Its findings
+also appear as read-only Discovery errors rows labelled Template discovery
+requires attention, with `finding_scope: templates`. Missing optional
+indexes are normal; broken canonical, fallback or active marketplace template
+directory links or unavailable configuration ancestors are explicit findings
+rather than absent optional layers.
+Healthy selected layers remain visible without changing registrar selection.
+Audit-only reads isolate permission/probe failures per layer: a readable
+fallback may remain browsable alongside an unavailable canonical-layer finding,
+without asserting that it is an effective registration or overriding precedence.
+The same distinction applies to installation-local roots, template directories
+and index links; genuine first-touch absence remains an empty optional source.
+Unavailable optional repository integration reports a
+partial scan rather than a healthy empty result. Registered-only lookups share
+a bounded snapshot. Inventory additionally requires the repository owner's
+`repos list --strict --json` completeness marker; an older tolerant inventory
+can contribute individually verified roots but leaves discovery partial.
+Discovery never installs that integration. Only regular index/declaration
+files are opened, so a FIFO or device cannot block the catalog. Plugin sources
+and templates share one lazily acquired current activation report, preserving
+each verified live root and its applicability.
+
+Inert-template findings are separate from `summary.errors`: they do not disable
+unrelated source toggles or local-instance edits. Existing registrar,
+publication, draft and component-metadata failures keep their original mutation
+refusals. Browsing creates no directories, registrations, tasks or agents and
+does not execute provider commands, start a service or contact a coordinator.
 
 ### Effects require confirmation
 

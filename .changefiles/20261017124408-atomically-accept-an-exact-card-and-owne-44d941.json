@@ -1,0 +1,9 @@
+{
+  "comment": "Atomically accept an exact card and owner revision, bind retries to the full steering request, and expose immutable acceptance with request-specific consumption and wake receipts through HTTP, SDK, CLI and native forms.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -138,18 +138,38 @@ def validate_start(
 ) -> None:
     ensure(conn)
     rows = conn.execute(
-        "SELECT a.*,s.agent_info,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree,"
+        "SELECT a.*,s.agent_info,s.driver,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree,"
+        "s.conversation_retired,"
+        "s.session_handle AS reserved_session_handle,s.allocation_project AS reserved_allocation_project,"
         "EXISTS(SELECT 1 FROM acquisition_markers m WHERE m.reservation_key=s.key) AS acquisition_marked FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON s.key=a.reservation_key WHERE s.task_id=? "
         "ORDER BY s.attempt DESC LIMIT 1", (task.id,),
     ).fetchall()
+    if rows and rows[0]["driver"] == "restricted-bridge":
+        restricted = rows[0]
+        empty_deferral = restricted["reservation_state"] == "deferred" and not any(
+            restricted[field] for field in (
+                "agent_info", "delivery_id", "acquisition_marked", "reserved_worktree",
+                "reserved_session_handle", "reserved_allocation_project",
+                "conversation_retired", "release_requested",
+            )
+        )
+        if not empty_deferral:
+            from .restricted_delivery import validate_start as validate_restricted_start
+
+            validate_restricted_start(restricted, task, native_id)
+            return
     if rows and rows[0]["agent_info"]:
+        from .ordinary_agent_facts import identity
         ordinary = rows[0]
         info = json.loads(ordinary["agent_info"])
+        actual = identity(info)
         if (
-            ordinary["acquisition_marked"] or ordinary["delivery_id"]
-            or ordinary["reservation_state"] not in {"reserving", "spawned"} or ordinary["release_requested"]
-            or native_id != info["connection"]["native_session_id"]
+            ordinary["reservation_state"] not in {"reserving", "spawned"}
+            or ordinary["release_requested"] or ordinary["conversation_retired"]
+            or native_id != actual.native
+            or (ordinary["native_session_id"] and ordinary["native_session_id"] != actual.native)
+            or actual.worktree != ordinary["reserved_worktree"]
             or not info["task_generation"] <= task.generation <= info["task_generation"] + 1
             or ("/" in (task.owner or "") and task.owner.split("/", 1)[1] != ordinary["reserved_worktree"])
         ):

@@ -432,7 +432,9 @@ def _ssh_namespace(args: argparse.Namespace, remote_cmd: str, *, timeout: float)
         repo=None,
         effort=getattr(args, "effort", None),
         session_id=None,
-        stage_plugins=[],
+        stage_plugins=list(getattr(args, "stage_plugins", []) or []),
+        plugin_roots=list(getattr(args, "plugin_roots", []) or []),
+        skip_plugin_preparation=bool(getattr(args, "stop", False)),
         force=getattr(args, "force", False),
         force_claim=getattr(args, "force_claim", False),
     )
@@ -620,7 +622,9 @@ def cmd_detach(
         seed_ready_timeout = max(args.register_timeout, 180.0)
 
         def builder(plugin_dirs: list[str]) -> str:
-            extra = [f"--plugin-dir={d}" for d in plugin_dirs] + copilot_args
+            # CLI discovers the registered identities through repository settings.
+            # Repeating them as external directories loads duplicate plugins.
+            extra = copilot_args
             captured["plugin_dirs"] = list(plugin_dirs)
             command = seed_prefix + build_copilot_remote_command(
                 plan["identity"], anchor=plan["anchor"], driver=args.driver, seed=typed_seed,
@@ -659,8 +663,10 @@ def cmd_detach(
         for attempt in range(_LAUNCH_ATTEMPTS):
             captured.pop("result", None)
             try:
+                ssh_args = _ssh_namespace(args, "agent-worktrees embody", timeout=launch_timeout)
+                ssh_args.plugin_worktree_id = getattr(args, "worktree_id", None)
                 rc = ssh_session(
-                    _ssh_namespace(args, "agent-worktrees embody", timeout=launch_timeout),
+                    ssh_args,
                     remote_cmd_builder=builder, result_sink=sink, settle_on_disconnect=False,
                 )
             except ContextRefused as exc:

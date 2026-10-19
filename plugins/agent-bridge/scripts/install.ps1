@@ -59,6 +59,14 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {
+        throw 'Required installer human-output initializer is unavailable.'
+    }
+    . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -429,6 +437,7 @@ if ($env:OS -eq 'Windows_NT') {
 #                           are pinned at. Junction-free, so these ARE the slot
 #                           (Link == Venv); rewritten to the new slot on cutover.
 $SrcVersion = $null
+$SourceRuntimeIdentity = $null
 $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
 if (Test-Path $pyprojForVer) {
     $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
@@ -438,6 +447,7 @@ if (-not $SrcVersion) {
     Write-Fail 'Cannot determine plugin version from pyproject.toml (required for the versioned runtime).'
     exit 1
 }
+$PackageVersion = $SrcVersion
 $VersionedRuntime = $true
 $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
 if ($env:OS -eq 'Windows_NT') { $VenvPython = Join-Path $VenvDir 'Scripts\python.exe' }
@@ -481,6 +491,46 @@ function Get-BootstrapPython {
     return $null
 }
 
+function Get-SourceRuntimeIdentity {
+    param(
+        [string]$Payload = $PluginDir,
+        [string]$ExpectedVersion = '',
+        [string]$FailureContext = 'Source runtime identity validation failed'
+    )
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Source runtime validation requires a bootstrap Python interpreter' }
+    $arguments = @('-I', '-B', (Join-Path $ScriptDir 'versioned_runtime_source.py'),
+        '--payload', $Payload, '--package-version', $PackageVersion,
+        '--plugin', 'agent-bridge', '--format', 'json')
+    if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
+    $nativeError = ''
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "${FailureContext} (exit ${code}): $detail$nativeError" }
+    return $detail.Trim()
+}
+
+function Initialize-SourceRuntime {
+    $metadata = Join-Path $PluginDir 'runtime-source.json'
+    try {
+        [System.IO.File]::GetAttributes($metadata) | Out-Null
+    } catch [System.IO.FileNotFoundException] {
+        return
+    } catch [System.IO.DirectoryNotFoundException] {
+        return
+    }
+    $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
+    $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = if ($env:OS -eq 'Windows_NT') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else {
+        Join-Path $VenvDir 'bin/python'
+    }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
+}
+
 function Remove-PluginBuildArtifacts {
     param([string]$SourceDir = '')
 
@@ -512,21 +562,10 @@ function Invoke-UvPipInstallResilient {
         [string]$SourceDir = ''
     )
 
-    Remove-PluginBuildArtifacts -SourceDir $SourceDir
-    $delays = @(3, 6, 10)
-    $out = & uv pip install @Arguments 2>&1
-    $exit = $LASTEXITCODE
-    if ($exit -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
-    foreach ($delay in $delays) {
-        if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
-        Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        Start-Sleep -Seconds $delay
-        Remove-PluginBuildArtifacts -SourceDir $SourceDir
-        $out = & uv pip install @Arguments 2>&1
-        $exit = $LASTEXITCODE
-        if ($exit -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
-    }
-    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
+    $result = Invoke-UvPipInstallResilientShared -Arguments $Arguments `
+        -BeforeAttempt { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
+    if ($result.ExitCode -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
+    return $result
 }
 
 function Invoke-UvVenvResilient {
@@ -764,7 +803,7 @@ function Get-PayloadHash {
         $entries = [System.Collections.Generic.List[string]]::new()
         # pyproject.toml plus its declared `readme`, which setuptools embeds in
         # the installed distribution metadata.
-        foreach ($meta in @('pyproject.toml', 'README.md')) {
+        foreach ($meta in @('pyproject.toml', 'README.md', 'runtime-source.json')) {
             $mp = Join-Path $base $meta
             if (Test-Path -LiteralPath $mp) {
                 $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($mp))).Replace('-', '').ToLower()
@@ -803,7 +842,15 @@ function Test-PayloadUnchangedSinceAdmission {
        $false (after reporting it) when it differs; the caller must then fail
        without publishing the marker or manifest, or activating. Nothing to
        verify when no slot was built ('reuse') or no hash was admitted. #>
-    param([string]$AdmittedHash = '', [string]$Admission = '')
+    param([string]$AdmittedHash = '', [string]$Admission = '', [switch]$SourceIdentityOnly)
+    $selectedIdentity = Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($selectedIdentity -or (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
+        $identity = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
+        if ($identity -ne $selectedIdentity) {
+            throw 'Source runtime identity changed after runtime selection; refusing publication'
+        }
+    }
+    if ($SourceIdentityOnly) { return $true }
     if ($Admission -eq 'reuse' -or -not $AdmittedHash) { return $true }
     $fresh = Get-PayloadHash
     if ($fresh -eq $AdmittedHash) { return $true }
@@ -813,49 +860,29 @@ function Test-PayloadUnchangedSinceAdmission {
 }
 
 function Invoke-VersionedSlotClean {
-    <# Ensure the target slot exists, tossing it first if a prior build left it
-       INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-       over a corpse (#935). The current/active slot is never tossed. Returns
-       $false when the primitive REFUSES (e.g. the incomplete slot is selected or
-       still in use): building over it would mutate a live/selected slot in
-       place, so the caller must not proceed (#5472). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return $true }
+    param([string]$PayloadHash = '')
+    if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return $true }
-    & $py $vr --root $InstallDir --link-name 'venv' slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Step $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Runtime slot versions/$SrcVersion could not be safely prepared (exit $LASTEXITCODE); refusing to build over it in place"
-        return $false
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
+        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
+        Invoke-Expression $helpers
     }
+    $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
+        -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
+        -PayloadHash $PayloadHash -LinkName (Split-Path -Leaf $LinkDir)
     return $true
 }
 
 function Invoke-VersionedMarkComplete {
-    <# Write the slot's completion marker AFTER its isolated health gate passed,
-       so the slot is provably a healthy, complete build. A crashed / watchdog-
-       killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode.
-
-       $PayloadHash is the value computed ONCE before admission and used to
-       build this slot -- never recomputed here. Callers that built the slot
-       first confirm via Test-PayloadUnchangedSinceAdmission that the sources
-       still hash to it, so the marker never names bytes that were not
-       installed. #>
     param([string]$PayloadHash = '')
-    if (-not $VersionedRuntime) { return $true }
-    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', 'venv', 'mark-complete', $SrcVersion)
-    if ($PayloadHash) { $mcArgs += @('--payload-hash', $PayloadHash) }
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Step $_ }
-    # A refused publication (e.g. conflicting completion evidence for this
-    # numbered version) must fail the install, never be swallowed (#5472).
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to publish the completion marker for runtime slot versions/$SrcVersion (exit $LASTEXITCODE)"
-        return $false
+    $actualHash = Get-PayloadHash
+    if ($PayloadHash -and $PayloadHash -ne $actualHash) {
+        throw 'Payload changed during construction; completion refused'
     }
+    Complete-RuntimeConstruction -PayloadHash $actualHash
     return $true
 }
 
@@ -1197,11 +1224,10 @@ function Get-SignedBasePython {
     $cands = @()
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-            $result = Invoke-NativeCapture {
-                & py "-$v" -c 'import sys;print(sys.executable)'
-            }
-            if ($result.ExitCode -eq 0 -and $result.Output) {
-                $cands += $result.Output
+            $launcher = (Get-Command py -ErrorAction Stop).Source
+            $output = Invoke-Hidden -FilePath $launcher -ArgList @("-$v", '-c', 'import sys;print(sys.executable)')
+            if ($LASTEXITCODE -eq 0 -and $output) {
+                $cands += $output.Trim()
             }
         }
     }
@@ -1214,7 +1240,6 @@ function Get-SignedBasePython {
 }
 
 function New-SignedVenv {
-    if (-not (Invoke-VersionedSlotClean)) { return $false }
     return [bool](New-SignedVenvShared `
         -VenvDir $VenvDir `
         -VenvPython $VenvPython `
@@ -1621,6 +1646,12 @@ function Write-DeployManifest {
     # $PayloadHash: the transaction's once-computed Get-PayloadHash value, so
     # the manifest records the same content the slot was admitted/built for.
     param([string]$PayloadHash = '')
+    $fields = @{}
+    if ($SrcVersion -ne $PackageVersion -or (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
+        $json = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
+        $data = $json | ConvertFrom-Json
+        foreach ($property in $data.PSObject.Properties) { $fields[$property.Name] = $property.Value }
+    }
     $sourcePathOverride = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { '' }
     Write-DeployManifestShared `
         -Service 'agent-bridge' `
@@ -1631,7 +1662,8 @@ function Write-DeployManifest {
         -GetSourceKind ${function:Get-SourceKind} `
         -GetGitInfo ${function:Get-GitInfo} `
         -SourcePathOverride $sourcePathOverride `
-        -VersionOverride $SrcVersion `
+        -VersionOverride $PackageVersion `
+        -AdditionalFields $fields `
         -PayloadHash $PayloadHash
 }
 
@@ -2051,6 +2083,12 @@ function Write-Binstubs {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
+    # Native service callers use the Python resolver without a payload or PATH.
+    $scriptsDir = Join-Path $InstallDir 'scripts'
+    New-Item -ItemType Directory -Path $scriptsDir -Force -ErrorAction Stop | Out-Null
+    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $r) -Destination (Join-Path $scriptsDir $r) -Force -ErrorAction Stop
+    }
     if (-not $publishGlobalBinstubs) {
         Write-Ok 'Scoped install keeps the global compatibility binstub unchanged'
         return
@@ -2216,12 +2254,25 @@ function Invoke-Stamp {
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    $sourceQualified = [bool]$script:SourceRuntimeIdentity
+    $exclude = if ($sourceQualified) { @() } else {
+        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    }
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
-    Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
-    Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+    if ($sourceQualified) {
+        # Prepared payloads already contain their complete, hashed assembly.
+        # Rematerializing helpers or dependencies would change that identity.
+        $identity = Get-SourceRuntimeIdentity -Payload $snapTmp -ExpectedVersion $SrcVersion `
+            -FailureContext 'Stamped source snapshot failed identity validation; redirects were not published'
+        if ($identity -ne $script:SourceRuntimeIdentity) {
+            throw 'Stamped source snapshot failed identity validation; redirects were not published'
+        }
+    } else {
+        Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
+        Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+    }
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     # A just-copied tree can be briefly held open by an antivirus/indexer scan,
     # failing the directory rename with "access denied"; retry a bounded few times.
@@ -2402,7 +2453,8 @@ function Invoke-Install {
     # not the mutable version label. A force rebuild/restart stays a dedicated
     # command, never a routine-reconcile side effect.
     $preLockHash = Get-PayloadHash
-    if (Test-SlotContentCurrent -PayloadHash $preLockHash) {
+    if (-not (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -and
+        (Test-SlotContentCurrent -PayloadHash $preLockHash)) {
         Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
         Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
         return
@@ -2416,6 +2468,7 @@ function Invoke-Install {
         Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
         exit 75
     }
+    [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
     # The transaction's single payload fingerprint (#5472): computed once under
     # the lock, BEFORE admission, and carried unchanged through admission, the
     # completion marker and the deploy manifest.
@@ -2441,6 +2494,8 @@ function Invoke-Install {
         Exit-InstallLock
         exit 1
     }
+    [void](Invoke-VersionedSlotClean -PayloadHash $payloadHash)
+    $admission = if ($script:RuntimeConstructionReuse) { 'reuse' } else { 'construct' }
 
     # Create directories
     foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -2475,6 +2530,7 @@ function Invoke-Install {
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
             throw 'Versioned slot health gate failed'
         }
+        [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
         if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
@@ -2697,10 +2753,6 @@ function Invoke-Start {
         }
     }
 
-    $logFile = Join-Path $InstallDir 'agent-bridge.log'
-    $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
-
-
     # Prefer the scheduled task to start the daemon whenever one is registered
     # -- for BOTH headless (S4U/Password, session 0) and at-logon (interactive)
     # tasks. The Task Scheduler owns the resulting process, so it is NOT parented
@@ -2747,24 +2799,14 @@ function Invoke-Start {
         Write-Warn '  For an always-on host reached over SSH, reinstall headless: install.ps1 update -NonInteractive'
     }
 
-    # Start the service through a DETACHED, hidden pwsh launched via
-    # ShellExecute (no -NoNewWindow / no redirection on THIS call, so handles
-    # are NOT inherited from the installer). That inner pwsh does the redirected
-    # Start-Process and records the pid. Without this indirection the long-lived
-    # uvicorn server inherits the installer's std handles; when install.ps1 is
-    # run with its output redirected or piped, the server holds that handle open
-    # and the installer appears to hang after "Update complete".
-    # #1376: pin both the inner python AND its conhost host to the runtime home,
-    # never the installer's cwd (the installed-plugins payload dir). -NoNewWindow
-    # keeps this conhost alive hosting the long-lived daemon, so without an
-    # explicit working dir it would hold the payload folder open and a later
-    # ``copilot plugin update agent-bridge`` would fail (os error 32) and empty it.
-    $inner = @"
-`$p = Start-Process -FilePath '$($LinkPython -replace "'", "''")' -ArgumentList '-m','agent_bridge','start' -WorkingDirectory '$($InstallDir -replace "'", "''")' -NoNewWindow -PassThru -RedirectStandardOutput '$($logFile -replace "'", "''")' -RedirectStandardError '$($errFile -replace "'", "''")'
-Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
-"@
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
-    $pwshForHeadless = Get-PwshPath
+    # Start the service directly through the bridge's own job-surviving launch
+    # (`service start --direct` -> agent_procutil.spawn_daemon): it breaks away
+    # from the installer's Job (an SSH session's or an updater's), falls back to
+    # the WMI broker when that Job forbids breakaway, roots the daemon at the
+    # runtime home rather than the installer's cwd (#1376: never the plugin
+    # payload), and gives it its own stdio files, so the long-lived server never
+    # holds the installer's std handles open. A PowerShell process launch offers
+    # none of those lifetime guarantees.
 
     # Spawn + health-gate, retrying a few times. A single slow/failed spawn must
     # NOT leave the service down (the previous single-attempt logic exited here,
@@ -2775,27 +2817,27 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
         $label = if ($attempt -gt 1) { " (attempt $attempt/$maxAttempts)" } else { '' }
         Write-Step "Starting agent-bridge$label..."
 
-        # Launch the detached, hidden pwsh through conhost --headless so Windows
-        # Terminal (when configured as the default terminal app) cannot capture it
-        # as a visible window/tab -- -WindowStyle Hidden alone is ignored by the
-        # DefTerm handoff. ShellExecute (no -NoNewWindow / no redirection on THIS
-        # call) is preserved so the long-lived python.exe (-m agent_bridge) does
-        # not inherit the installer's std handles.
-        Start-Process -FilePath 'conhost.exe' `
-            -ArgumentList @('--headless', "`"$pwshForHeadless`"", '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) `
-            -WorkingDirectory $InstallDir `
-            -WindowStyle Hidden | Out-Null
+        # The command writes to stderr when the daemon does not come up; under
+        # $ErrorActionPreference='Stop' Windows PowerShell 5.1 would turn that
+        # into a terminating error and skip the drain and remaining retries.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $LinkPython -m agent_bridge service start --direct 2>&1 | ForEach-Object { Write-Host "  $_" }
+        } finally {
+            $ErrorActionPreference = $prevEAP
+        }
 
         # Success == the port actually answers /health (not merely "a process
         # exists"). Single-shot probe per second so the loop paces at ~1s.
         for ($i = 0; $i -lt 25; $i++) {
-            Start-Sleep -Seconds 1
             if (Test-HealthOnce) {
                 $rp = Get-RunningProcess
                 $pidTxt = if ($rp) { "pid=$($rp.Id), " } else { '' }
                 Write-Ok ("agent-bridge started ({0}port={1})" -f $pidTxt, (Get-ActiveEndpoint).Port)
                 return
             }
+            Start-Sleep -Seconds 1
         }
 
         Write-Warn "agent-bridge did not become healthy within 25s$label -- draining and retrying"
@@ -3106,6 +3148,23 @@ function Invoke-UpdateSlotBuild {
     Remove-ConsoleTrampolines -VenvDir $VenvDir
 }
 
+function Invoke-ServingRuntimeReconcile {
+    & $VenvPython -m agent_bridge deploy --reconcile-serving --probe-serving --health-timeout 180
+    if ($LASTEXITCODE -eq 0) { return }
+    if ($LASTEXITCODE -ne 10) {
+        throw "Serving runtime reconcile failed (probe exit $LASTEXITCODE); completed slot left unchanged."
+    }
+    Write-UpdateMarker
+    try {
+        & $VenvPython -m agent_bridge deploy --reconcile-serving --health-timeout 180
+        if ($LASTEXITCODE -ne 0) {
+            throw "Serving runtime reconcile failed (exit $LASTEXITCODE); completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
+        }
+    } finally {
+        Clear-UpdateMarker
+    }
+}
+
 function Invoke-Update {
     Write-Host ''
     Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
@@ -3113,33 +3172,25 @@ function Invoke-Update {
 
     if (-not (Ensure-Uv)) { exit 1 }
 
-    # Strict same-content no-op (ce#776/#777) -- checked BEFORE we stop the daemon
-    # or touch the venv. Otherwise the classic same-version path below "downgrades
-    # to stop-and-rebuild" IN PLACE over the live slot: it stops the running
-    # daemon and rewrites its python.exe / site-packages, the WinError-2 crash
-    # cascade (dotfiles#1612). If the active slot already matches the target
-    # content there is nothing to do; a genuine force-restart is a dedicated
-    # command (`service restart`), not an implicit effect of a reconcile.
-    $preLockHash = Get-PayloadHash
-    if (Test-SlotContentCurrent -PayloadHash $preLockHash) {
-        Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no stop, no rebuild)."
-        Write-DeployManifest -PayloadHash $preLockHash
-        return
-    }
-
     # Serialize concurrent installers (see Invoke-Install): don't let an
-    # overlapping install/update rebuild the venv over an in-flight one. Defer on
-    # timeout; re-check the no-op after acquiring in case it just landed.
+    # overlapping install/update race serving convergence or rebuild the venv.
     if (-not (Enter-InstallLock)) {
         Write-Fail "Another agent-bridge install held the install lock ($(Join-Path $InstallDir '.install.lock')) for the whole wait -- this run changed nothing (blocked by lock); rerun once it finishes"
         exit 75
     }
+    [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
     # The transaction's single payload fingerprint (see Invoke-Install).
     $payloadHash = Get-PayloadHash
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
-        Write-Ok "agent-bridge $SrcVersion already active after lock wait -- no-op."
-        Write-DeployManifest -PayloadHash $payloadHash
-        Exit-InstallLock
+        try {
+            # Slot/import health proves reusable bytes, not the serving version.
+            # This guarded seam never rebuilds, cold-starts or falls back to stop.
+            Invoke-ServingRuntimeReconcile
+            Write-DeployManifest -PayloadHash $payloadHash
+            Write-Ok "agent-bridge $SrcVersion content matched; serving runtime reconciled without rebuilding."
+        } finally {
+            Exit-InstallLock
+        }
         return
     }
 
@@ -3152,6 +3203,8 @@ function Invoke-Update {
         Exit-InstallLock
         exit 1
     }
+    [void](Invoke-VersionedSlotClean -PayloadHash $payloadHash)
+    $admission = if ($script:RuntimeConstructionReuse) { 'reuse' } else { 'construct' }
 
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
@@ -3264,6 +3317,12 @@ function Invoke-Update {
             Write-Step "Config migration skipped: $_"
         }
         Write-Ok 'Package updated'
+        # Completion is still part of the protected build: a late source
+        # identity failure must restart a predecessor stopped above.
+        if ($VersionedRuntime) {
+            [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
+            if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
+        }
     }
     catch {
         Write-Fail "Update failed: $_"
@@ -3273,10 +3332,8 @@ function Invoke-Update {
             # new slot -- only one this run constructed: a reused slot was already
             # published (create-once, #5472) and is never deleted here -- and
             # restart the previous version if the classic path stopped it.
-            if ($SrcVersion -and $SrcVersion -ne $prevVersion -and $admission -ne 'reuse') {
-                $failedSlot = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
-                if (Test-Path $failedSlot) { Remove-Item -Recurse -Force $failedSlot -ErrorAction SilentlyContinue }
-            }
+            # The attached construction owner reclaims only its own unfinished
+            # candidate after rollback settles; no unguarded directory deletion.
             if ($wasRunning -and -not $useCutover -and -not $activeForward) {
                 if (-not (Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous version...')) { $wasRunning = $false }
             }
@@ -3309,7 +3366,6 @@ function Invoke-Update {
     # OLD daemon keeps serving from its own immutable slot until drained. No-op in
     # legacy mode.
     if ($VersionedRuntime) {
-        if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 
@@ -3388,6 +3444,7 @@ function Invoke-Update {
 # -- Dispatch ----------------------------------------------------------------
 
 try {
+    Initialize-SourceRuntime
     switch ($Action) {
         'install'   { Invoke-Install }
         'uninstall' { Invoke-Uninstall }
@@ -3399,7 +3456,13 @@ try {
         'provision' { Invoke-Provision }
     }
 } finally {
+    try {
+        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+            Stop-RuntimeConstruction
+        }
+    } finally {
     # Release the install lock on any exit path (the OS also drops it on process
     # death, so an `exit`/crash never strands it).
     Exit-InstallLock
+    }
 }

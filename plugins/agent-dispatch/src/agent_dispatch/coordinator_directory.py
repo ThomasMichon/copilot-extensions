@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .satellites import ROLE_SATELLITE, FleetDirectory, UnknownInstance
@@ -26,7 +26,7 @@ class SatelliteHeartbeatBody(BaseModel):
 class DirectoryRegisterBody(BaseModel):
     instance: str
     role: str = "peer"
-    epoch: int = 0
+    epoch: int = Field(default=0, ge=0, le=2**63 - 1)
     machine: str | None = None
     worktrees: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
@@ -40,7 +40,7 @@ class DirectoryHeartbeatBody(BaseModel):
     worktrees: list[str] | None = None
     gate_state: str | None = None
     role: str | None = None
-    epoch: int | None = None
+    epoch: int | None = Field(default=None, ge=0, le=2**63 - 1)
 
 
 def register_directory_routes(app: FastAPI, directory: FleetDirectory) -> None:
@@ -85,6 +85,11 @@ def register_directory_routes(app: FastAPI, directory: FleetDirectory) -> None:
     @app.get("/directory/coordinator")
     def directory_coordinator() -> dict | None:
         return directory.discover_coordinator()
+
+    @app.get("/directory/fencing-epoch")
+    def directory_fencing_epoch(response: Response) -> dict:
+        response.headers["Cache-Control"] = "no-store"
+        return {"epoch": directory.fencing_epoch()}
 
     @app.post("/satellites/register")
     def satellite_register(body: SatelliteRegisterBody) -> dict:

@@ -55,8 +55,8 @@ class _FakeResp:
 def test_send_cli_survives_connection_refused_mid_delivery(monkeypatch, capsys):
     """A clean ECONNREFUSED against the retired generation's port (post-#3179
     shutdown, not mid-drain) is followed to the successor and retried, even
-    for `send`'s non-idempotent delivery POST -- and the CLI prints a normal
-    delivery confirmation, never a traceback or hard failure."""
+    for `send`'s non-idempotent delivery POST -- and the CLI confirms admission
+    without inventing delivery evidence, never a traceback or hard failure."""
     old_base = "http://127.0.0.1:57585"
     new_base = "http://127.0.0.1:47000"
     client = BridgeClient(
@@ -101,7 +101,9 @@ def test_send_cli_survives_connection_refused_mid_delivery(monkeypatch, capsys):
     m._cmd_send(args)
 
     out = capsys.readouterr().out
-    assert "Delivered to live session sess1" in out
+    assert "Accepted by live session inbox sess1" in out
+    assert "delivery evidence unavailable" in out
+    assert "Delivered to" not in out
     # The retired generation's dead port was tried first, then the routing
     # table's successor -- exactly the sequence `send` must follow to look
     # like a brief buffered pause, never a hard error, across a cutover.
@@ -128,7 +130,7 @@ def test_send_with_a_protocol_floor_sends_nothing_to_an_older_daemon(monkeypatch
     assert "predates protocol 20" in capsys.readouterr().err
 
 
-def _floor_send(monkeypatch, client, by_port):
+def _floor_send(monkeypatch, client, by_port, *, as_json=False):
     monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", by_port)
     monkeypatch.setattr("time.sleep", lambda _s: None)
     monkeypatch.setattr(m, "_get_client", lambda: client)
@@ -137,7 +139,7 @@ def _floor_send(monkeypatch, client, by_port):
     monkeypatch.setattr(m, "_live_message_kind", lambda _args: "prompt")
     monkeypatch.setattr(m, "_live_message_delivery", lambda _args: "queue")
     args = argparse.Namespace(
-        target="agent-x", prompt="hello", prompt_file=None, new=False, json=False,
+        target="agent-x", prompt="hello", prompt_file=None, new=False, json=as_json,
         no_wait=True, reply_timeout=120.0, idempotency_key=None, expected_session_id=None,
         min_daemon_protocol=20,
     )
@@ -165,36 +167,48 @@ def _floor_daemon(versions: dict, posted: list, refuse_first_post: bool = True):
     return by_port
 
 
-def test_a_protocol_floor_also_holds_for_the_replacement_daemon(monkeypatch):
+def _assert_protocol_refusal(exc, capsys, as_json):
+    assert exc.value.code == 69
+    output = capsys.readouterr()
+    assert "predates protocol 20" in output.err
+    if as_json:
+        result = json.loads(output.out)
+        assert result["outcome"] == "refused_unavailable"
+        assert result["reason"] == "unsupported_protocol"
+        assert result["retryable"] is False
+        assert result["target"] == "sess1"
+    else:
+        assert output.out == ""
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_a_protocol_floor_also_holds_for_the_replacement_daemon(monkeypatch, capsys, as_json):
     """The preflight passed on a protocol-20 daemon, but its port then refused the
     delivery; the routing table names a protocol-19 replacement. The send must
     not be retried there (it couldn't carry the message across a rename)."""
-    import pytest
-
-    from agent_bridge.client import BridgeClientError
-
     old_base, new_base = "http://127.0.0.1:57585", "http://127.0.0.1:47000"
     client = BridgeClient(old_base, "tok", connect_grace=2.0, reresolve=lambda: new_base)
     posted: list[str] = []
     by_port = _floor_daemon({old_base: [20], new_base: [19]}, posted)
-    with pytest.raises(BridgeClientError) as exc:
-        _floor_send(monkeypatch, client, by_port)
-    assert exc.value.status == 426
+    with pytest.raises(SystemExit) as exc:
+        _floor_send(monkeypatch, client, by_port, as_json=as_json)
+    _assert_protocol_refusal(exc, capsys, as_json)
     assert posted == [f"{old_base}/api/v1/live-sessions/sess1/messages"]  # never the replacement
 
 
 @pytest.mark.parametrize("pinned", [True, False])
-def test_a_protocol_floor_holds_when_an_older_daemon_restarts_at_the_same_url(monkeypatch, pinned):
+@pytest.mark.parametrize("as_json", [False, True])
+def test_a_protocol_floor_holds_when_an_older_daemon_restarts_at_the_same_url(
+    monkeypatch, capsys, pinned, as_json,
+):
     """Same URL (pinned, or the routing table still names it), but the daemon
     behind it restarted as protocol 19: the refused POST is not retried."""
-    from agent_bridge.client import BridgeClientError
-
     base = "http://127.0.0.1:57585"
     client = BridgeClient(base, "tok", connect_grace=2.0, reresolve=None if pinned else (lambda: base))
     posted: list[str] = []
-    with pytest.raises(BridgeClientError) as exc:
-        _floor_send(monkeypatch, client, _floor_daemon({base: [20, 19]}, posted))
-    assert exc.value.status == 426
+    with pytest.raises(SystemExit) as exc:
+        _floor_send(monkeypatch, client, _floor_daemon({base: [20, 19]}, posted), as_json=as_json)
+    _assert_protocol_refusal(exc, capsys, as_json)
     assert posted == [f"{base}/api/v1/live-sessions/sess1/messages"]
 
 
@@ -204,7 +218,10 @@ def test_a_protocol_floor_still_retries_a_restart_that_keeps_the_protocol(monkey
     posted: list[str] = []
     _floor_send(monkeypatch, client, _floor_daemon({base: [20, 20]}, posted))
     assert posted == [f"{base}/api/v1/live-sessions/sess1/messages"] * 2
-    assert "Delivered to live session sess1" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Accepted by live session inbox sess1" in out
+    assert "delivery evidence unavailable" in out
+    assert "Delivered to" not in out
 
 
 @pytest.mark.parametrize("failure", [
@@ -249,11 +266,10 @@ def test_a_post_that_may_have_reached_the_daemon_is_never_resent(failure):
     assert stc._connection_refused(refused) is True
 
 
-def test_an_unanswered_protocol_check_is_retried_never_skipped(monkeypatch):
+@pytest.mark.parametrize("as_json", [False, True])
+def test_an_unanswered_protocol_check_is_retried_never_skipped(monkeypatch, capsys, as_json):
     """After the refused POST the replacement's /health refuses too, then it
     answers protocol 19: the POST must not have been retried in between."""
-    from agent_bridge.client import BridgeClientError
-
     old_base, new_base = "http://127.0.0.1:57585", "http://127.0.0.1:47000"
     client = BridgeClient(old_base, "tok", connect_grace=30.0, reresolve=lambda: new_base)
     posted: list[str] = []
@@ -267,9 +283,10 @@ def test_an_unanswered_protocol_check_is_retried_never_skipped(monkeypatch):
                 raise urllib.error.URLError(ConnectionRefusedError("still starting"))
         return inner(req, timeout)
 
-    with pytest.raises(BridgeClientError) as exc:
-        _floor_send(monkeypatch, client, by_port)
-    assert exc.value.status == 426 and probes["n"] == 2
+    with pytest.raises(SystemExit) as exc:
+        _floor_send(monkeypatch, client, by_port, as_json=as_json)
+    _assert_protocol_refusal(exc, capsys, as_json)
+    assert probes["n"] == 2
     assert posted == [f"{old_base}/api/v1/live-sessions/sess1/messages"]
 
 
@@ -504,10 +521,8 @@ def test_send_leaves_the_expected_session_check_to_an_alias_aware_daemon(
         m._cmd_send(args)
         assert sent == [("resumed-1", "placeholder")]  # the daemon checks it atomically
 
-def test_a_protocol_floor_suspends_endpoint_discovery_only_during_its_own_attempts():
-    """The floor turns off the client's own retries while it probes and sends --
-    and only then: afterwards (a stream refreshing its endpoint after a cutover)
-    the resolver and grace are the client's again."""
+def test_a_protocol_floor_disables_native_retries_without_mutating_client_discovery():
+    """A request-scoped retry flag preserves discovery and grace throughout."""
     from agent_bridge import session_targeting_cli as stc
 
     client = BridgeClient("http://127.0.0.1:57585", "tok", connect_grace=5.0,
@@ -516,12 +531,12 @@ def test_a_protocol_floor_suspends_endpoint_discovery_only_during_its_own_attemp
     during: list = []
 
     def fake_request(method, path, *a, **k):
-        during.append((client._reresolve, client._connect_grace))
+        during.append((client._reresolve, client._connect_grace, k["allow_retry"]))
         return {"protocol_version": 21} if path == "/health" else {"ok": True}
 
     client._request = fake_request
     stc._hold_protocol_floor(client, 21)
     assert client._reresolve is resolver and client._connect_grace == 5.0  # intact between attempts
     assert client._request("GET", "/api/v1/x") == {"ok": True}
-    assert during == [(None, 0.0), (None, 0.0)]  # probe and request: retries off
-    assert client._reresolve is resolver and client._connect_grace == 5.0  # restored after
+    assert during == [(resolver, 5.0, False), (resolver, 5.0, False)]
+    assert client._reresolve is resolver and client._connect_grace == 5.0

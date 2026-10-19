@@ -133,15 +133,30 @@ class FleetDirectory:
         *,
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         clock: Callable[[], float] = time.time,
+        fencing_floor: Callable[[int], int] | None = None,
     ) -> None:
         self._ttl = float(ttl_seconds)
         self._clock = clock
         self._lock = threading.Lock()
         self._entries: dict[str, DirectoryEntry] = {}
+        self._fencing_floor = fencing_floor
+        self._fencing_epoch = fencing_floor(0) if fencing_floor is not None else 0
 
     @property
     def ttl_seconds(self) -> float:
         return self._ttl
+
+    def fencing_epoch(self) -> int:
+        """Presence expiry never lowers an observed coordinator epoch."""
+        with self._lock:
+            if self._fencing_floor is not None:
+                self._fencing_epoch = self._fencing_floor(self._fencing_epoch)
+            return self._fencing_epoch
+
+    def _observe_fencing_epoch(self, role: str, epoch: int) -> None:
+        if role == ROLE_COORDINATOR:
+            observed = self._fencing_floor(epoch) if self._fencing_floor is not None else epoch
+            self._fencing_epoch = max(self._fencing_epoch, observed)
 
     # -- mutations -------------------------------------------------------------
 
@@ -167,6 +182,7 @@ class FleetDirectory:
             raise ValueError("instance is required")
         now = self._clock()
         with self._lock:
+            self._observe_fencing_epoch(str(role), int(epoch))
             existing = self._entries.get(instance)
             registered_at = existing.registered_at if existing is not None else now
             entry = DirectoryEntry(
@@ -209,6 +225,10 @@ class FleetDirectory:
                 # Drop a stale record if present, then signal "re-register".
                 self._entries.pop(instance, None)
                 raise UnknownInstance(instance)
+            self._observe_fencing_epoch(
+                str(role) if role is not None else entry.role,
+                int(epoch) if epoch is not None else entry.epoch,
+            )
             entry.last_seen = now
             if status is not None:
                 entry.status = copy.deepcopy(dict(status))
@@ -301,4 +321,3 @@ class FleetDirectory:
 #: endpoints construct this; a satellite is a directory entry with
 #: ``role="satellite"``.
 SatelliteRegistry = FleetDirectory
-

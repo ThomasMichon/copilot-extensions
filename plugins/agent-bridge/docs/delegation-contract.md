@@ -36,7 +36,7 @@ delegated-agent facade.
 | Create a fresh session | `create <agent> [prompt]` | `POST /api/v1/sessions` with `force_new` as needed | Bridge `session_id`, generated display name, session status |
 | Reuse or create for this caller | `send <agent> <prompt>` | Client-side resolve/reuse followed by session creation when absent | Existing or new bridge session |
 | Submit a turn | `send <session> <prompt>` | `POST /api/v1/sessions/{id}/turns` | Immediate `turn_index`, or a queued result when `queue=true` |
-| Handle a busy hosted session | Default `send` refuses (exit 75; with `--json`, `outcome: refused_busy`); `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode; `send --json` names the result in one `outcome` (`delivered`, `queued`, `steered`, `interrupted`, `duplicate`, `accepted` -- a keyed live send to an older daemon that can't report duplicates -- or a `refused_*` with a distinct exit code) |
+| Handle a busy hosted session | Default `send` refuses (exit 75; with `--json`, `outcome: refused_busy`); `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode; `send --json` names the hosted result as `delivered`, `queued`, or a `refused_*` with a distinct exit code. Represented sends use receipt stages `admitted`, `sdk_accepted`, or `consumed`, or `duplicate`; `steered`, `interrupted`, and `accepted` are legacy-daemon outcomes, not current receipt evidence. |
 | Manage pending prompts | Queue flags through `send` | Queue snapshot, delete-one, and clear-all endpoints | Durable FIFO queue maintenance |
 | Observe a live turn | attached `send`, bare `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
 | Wait for selected attention | `wait --attention REASON` / `--all-attention`, optionally `--json` and `--position` | Authenticated `GET .../attention` with repeatable reasons, opaque position, and bounded timeout | Structured earliest-boundary settlement; human mode flushes the SSE feed through the boundary, JSON mode remains cursor-neutral |
@@ -54,7 +54,30 @@ delegated-agent facade.
 | Answer a manual permission | No dedicated CLI verb yet | `POST .../permission` with correlated request and option IDs | Parked permission resumes and emits durable resolution |
 | Hand off context | `handoff` | `POST .../handoff` | A successor session is created and linked |
 | Rebuild a damaged relay log | No CLI verb; the watchdog may trigger it internally | Authenticated `POST .../resync` | Event log is rebuilt from downstream replay and delivery cursors reset |
-| Message a represented interactive session | `send <live-handle>` | `POST /api/v1/live-sessions/{id}/messages` | Durable inbox message ID; optional waited reply |
+| Message a represented interactive session | `send <live-handle>`; optional `--wait-reply` | `POST /api/v1/live-sessions/{id}/messages` | Immediate admission receipt; SDK acceptance and consumption are distinct; optional bounded post-consumption reply evidence requires HTTP protocol 39 |
+| Observe a busy represented peer | `read <live-handle> --message-id N --json` | `GET .../result` plus `GET .../messages/{id}/receipt` | Bounded activity, pending inbox metadata, recent output, and a cursor-neutral message receipt (HTTP protocol 39) |
+
+Against older daemons, receipt-only sends retain legacy outcomes without
+receipt evidence. Explicit reply waiting refuses before submitting a message
+(`refused_unavailable`, reason `unsupported_protocol`, exit 69), rather than
+reporting an unrelated completed turn as a reply.
+Versioned receipt, reply-wait and represented-result requests re-probe their
+protocol floor before every attempt, including cutover retries. Capability
+preflight refreshes memoized protocol evidence before rejecting an
+upgraded daemon. Represented read/result dispatch rechecks a negative capability
+gate before selecting the legacy hosted surface; a cached positive still enters
+the fresh resolver guard, so downgrade refusal does not become an ACP fallback.
+A synthetic admission receipt whose evidence is no longer current does not advertise a
+message-specific receipt read; the CLI instead offers session-state inspection.
+
+Represented-message consumption removes the input from delivery polling even
+when its separate SDK acknowledgement is lost; it never fabricates that
+acknowledgement. Idle-only acquisition treats unconsumed prompts as pending work,
+including SDK-accepted inputs. A delayed acknowledgement records SDK acceptance
+but cannot overwrite an idle boundary already observed after consumption.
+Migration retains historical SDK-acceptance evidence without inventing
+consumption or classifying old acknowledged history as newly pending work.
+Newly admitted inputs carry explicit consumption-tracking provenance.
 
 Source anchors:
 

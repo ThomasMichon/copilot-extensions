@@ -54,9 +54,39 @@ def test_namespace_resolve_not_found_exit3(capsys):
 
 
 def test_namespace_target_repo_is_empty(capsys):
-    # Containers do not drive related-repo plugin injection -> always empty.
-    assert main(["namespace-target-repo", "example-web-1"]) == 0
+    with patch("agent_containers.resolver.ContainerResolver.target_repo", return_value=None):
+        assert main(["namespace-target-repo", "example-web-1"]) == 0
     assert capsys.readouterr().out.strip() == ""
+
+
+def test_namespace_target_repo_exposes_provider_owned_selection_identity(capsys):
+    with patch("agent_containers.resolver.ContainerResolver.target_repo", return_value="example/project"):
+        assert main(["namespace-target-repo", "synthetic"]) == 0
+    assert capsys.readouterr().out.strip() == "example/project"
+
+
+def test_namespace_resolve_carries_related_sources_over_the_process_boundary(capsys):
+    with patch("agent_containers.resolver.ContainerResolver.resolve_spec", return_value={
+        "type": "command", "spawn_command": ["provider"], "container": {"name": "synthetic"},
+    }):
+        assert main(["namespace-resolve", "synthetic", "--stage-plugin", "sample@synthetic"]) == 0
+    assert json.loads(capsys.readouterr().out)["container"]["related_plugins"] == [
+        {"source": "sample@synthetic", "enable": True},
+    ]
+
+
+def test_namespace_resolve_preserves_disabled_and_literal_sources(capsys):
+    with patch("agent_containers.resolver.ContainerResolver.resolve_spec", return_value={
+        "type": "command", "spawn_command": ["provider"], "container": {"name": "synthetic"},
+    }):
+        assert main([
+            "namespace-resolve", "synthetic", "--stage-plugin-disabled", "sample@synthetic",
+            "--stage-plugin", "/plain source=false",
+        ]) == 0
+    assert json.loads(capsys.readouterr().out)["container"]["related_plugins"] == [
+        {"source": "sample@synthetic", "enable": False},
+        {"source": "/plain source=false", "enable": True},
+    ]
 
 
 def test_namespace_ensure_ready_ok_and_fail(capsys):

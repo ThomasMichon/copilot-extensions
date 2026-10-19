@@ -23,8 +23,8 @@ def lock_path() -> Path:
     return state_dir() / "watch-daemon.lock"
 
 
-def subscriptions_path() -> Path:
-    return state_dir() / "watch-subscriptions.json"
+def subscriptions_path(root: Path | None = None) -> Path:
+    return (state_dir() if root is None else root) / "watch-subscriptions.json"
 
 
 def _atomic_write_json(path: Path, data: object) -> None:
@@ -54,10 +54,10 @@ def _atomic_write_json(path: Path, data: object) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def read_subscriptions_state() -> list[dict]:
+def read_subscriptions_state(root: Path | None = None) -> list[dict]:
     try:
         with _ATOMIC_REPLACE_LOCK:
-            raw = subscriptions_path().read_text(encoding="utf-8")
+            raw = subscriptions_path(root).read_text(encoding="utf-8")
     except FileNotFoundError:
         return []
     try:
@@ -69,8 +69,8 @@ def read_subscriptions_state() -> list[dict]:
     return data
 
 
-def write_subscriptions_state(entries: list[dict]) -> None:
-    _atomic_write_json(subscriptions_path(), entries)
+def write_subscriptions_state(entries: list[dict], root: Path | None = None) -> None:
+    _atomic_write_json(subscriptions_path(root), entries)
 
 
 def read_lock_data() -> dict | None:

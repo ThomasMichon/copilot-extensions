@@ -10,6 +10,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "trusted-ci.yml"
+REVIEW_WORKFLOW = "copilot-code-review.yml"
+REVIEW_JOB = "copilot-setup-steps"
+REVIEW_RUNNERS = ("ubuntu-latest", "copilot-extensions-review")
 ACTIVATION_CONDITION = "vars.TRUSTED_SELF_HOSTED_CI == 'enabled'"
 TRUSTED_JOB_CONDITION = (
     "needs.authorize.outputs.trusted == 'true' && "
@@ -138,6 +141,31 @@ def _is_github_hosted(labels: set[str]) -> bool:
     return len(labels) == 1 and next(iter(labels)) in GITHUB_HOSTED_LABELS
 
 
+def _validate_review_setup(workflow: dict[str, Any]) -> list[str]:
+    jobs = _mapping(workflow.get("jobs")) or {}
+    job = _mapping(jobs.get(REVIEW_JOB)) or {}
+    runner = job.get("runs-on")
+    expected = {
+        "name": "Copilot Code Review setup",
+        "on": {"workflow_dispatch": ""},
+        "permissions": {},
+        "jobs": {
+            REVIEW_JOB: {
+                "runs-on": runner,
+                "permissions": {},
+                "steps": [{
+                    "name": "Complete minimal review setup",
+                    "timeout-minutes": "5",
+                    "run": 'echo "Copilot Code Review setup complete."',
+                }],
+            },
+        },
+    }
+    if runner not in REVIEW_RUNNERS or workflow != expected:
+        return [f"{REVIEW_WORKFLOW}: setup does not match the reviewed contract"]
+    return []
+
+
 def _validate_no_other_runner_routes(trusted_path: Path) -> list[str]:
     errors: list[str] = []
     for path in sorted(trusted_path.parent.glob("*.y*ml")):
@@ -145,6 +173,9 @@ def _validate_no_other_runner_routes(trusted_path: Path) -> list[str]:
         errors.extend(load_errors)
         if workflow is None:
             continue
+        review_setup = path.name == REVIEW_WORKFLOW
+        review_errors = _validate_review_setup(workflow) if review_setup else []
+        errors.extend(review_errors)
         jobs = _mapping(workflow.get("jobs"))
         if jobs is None:
             errors.append(f"{path.name}: jobs must be a mapping")
@@ -154,7 +185,9 @@ def _validate_no_other_runner_routes(trusted_path: Path) -> list[str]:
             if job is None:
                 errors.append(f"{path.name}:{name}: job must be a mapping")
                 continue
-            allowed = path == trusted_path and name == "agent-bridge"
+            allowed = (
+                path == trusted_path and name == "agent-bridge"
+            ) or (review_setup and not review_errors and name == REVIEW_JOB)
             if "uses" in job and not allowed:
                 errors.append(f"{path.name}:{name}: reusable workflow route is forbidden")
             labels = _runs_on_labels(job.get("runs-on"))

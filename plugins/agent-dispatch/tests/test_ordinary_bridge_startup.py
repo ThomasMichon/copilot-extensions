@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import asdict
+from types import SimpleNamespace
 
 import pytest
 
@@ -68,12 +69,21 @@ def startup(tmp_path, monkeypatch):
                 "turn_index": 1, "native_session_id": "native-a",
             }), "")
         if command == "status":
+            if "--full" in argv:
+                return subprocess.CompletedProcess(argv, 0, json.dumps({
+                    "session_id": "bridge-a", "acp_session_id": "native-a",
+                    "durable_session_id": "native-a", "worktree_id": "worktree-a",
+                    "project": "example", "target_dir": "synthetic-worktree-a",
+                    "status": "idle", "read_only": False, "at_rest": True, "liveness": None,
+                }), "")
             return subprocess.CompletedProcess(argv, 0, '{"status":"stopped"}', "")
         assert command == "resume" and "--strict" in argv
         return subprocess.CompletedProcess(argv, 0, '{"session_id":"bridge-a"}', "")
 
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
-    monkeypatch.setattr(ordinary_bridge.subprocess, "run", run)
+    monkeypatch.setattr(ordinary_bridge, "subprocess", SimpleNamespace(
+        run=run, TimeoutExpired=subprocess.TimeoutExpired,
+    ))
     monkeypatch.setattr(bridge, "registered_agent_project", lambda *args, **kw: None)
     return queue, snapshot, Client(), calls
 
@@ -139,7 +149,9 @@ def test_interrupted_send_retries_retained_handle_without_create(startup, monkey
     monkeypatch.setattr(ordinary_bridge.subprocess, "run", original)
     ordinary_bridge.start(task, client=client, agent="local", project="example",
                           charter="reviewer", prompt="assigned task")
-    assert [call[0] for call in calls] == ["create", "store", "store", "store", "status", "resume", "store", "send"]
+    assert [call[0] for call in calls] == [
+        "create", "store", "store", "store", "status", "resume", "status", "store", "send",
+    ]
 
 
 @pytest.mark.parametrize("change", [
@@ -177,7 +189,8 @@ def test_old_acquisition_marker_requires_explicit_migration(startup):
             queue, task["spawn_reservation_key"], task_generation=task["generation"],
             agent_info={"session_id": "bridge-a", "status": "awaiting_first_prompt",
                         "ready": True, "connection": {"worktree_id": "worktree-a",
-                        "repo": "example", "native_session_id": "native-a"}},
+                        "repo": "example", "native_session_id": "native-a",
+                        "target_dir": "synthetic-worktree-a"}},
         )
     assert not calls
 
@@ -202,7 +215,10 @@ def test_retry_reservation_carries_agent_without_exclusive_key(startup):
     assert retry.session_handle == "local-body:bridge-a"
     assert retry.worktree == "worktree-a"
 
-def test_lost_create_response_replays_key_after_restart_and_routing_change(startup, monkeypatch):
+@pytest.mark.parametrize("released_origin", [False, True])
+def test_lost_create_response_replays_key_after_restart_and_routing_change(
+    startup, monkeypatch, released_origin,
+):
     queue, task, client, calls = startup
     original = ordinary_bridge.subprocess.run
     lost = True
@@ -236,6 +252,28 @@ def test_lost_create_response_replays_key_after_restart_and_routing_change(start
     assert len(creates) == 2 and creates[0] == creates[1]
     assert queue.get_reservation(retry.key).worktree_path == "synthetic-worktree-a"
     assert [call[0] for call in calls].count("send") == 1
+    queue.defer_spawn(retry.key, detail="later turn on the replayed allocation")
+    third, admitted = restarted.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert admitted and third.allocation_reservation_key == first.key
+    assert third.creation_key == first.creation_key
+    assert third.worktree == queue.get_reservation(retry.key).worktree == "worktree-a"
+    assert queue.get_reservation(first.key).worktree is None
+    if released_origin:
+        with queue._connect() as conn:
+            conn.execute("UPDATE spawn_reservations SET state='failed',release_requested=1 WHERE key=?",
+                         (first.key,))
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no proven native"):
+            ordinary_bridge.start(
+                {**task, "spawn_reservation_key": third.key}, client=client,
+                agent="local", project="changed-routing", charter="reviewer", prompt="assigned task",
+            )
+    else:
+        ordinary_bridge.start(
+            {**task, "spawn_reservation_key": third.key}, client=client,
+            agent="local", project="changed-routing", charter="reviewer", prompt="assigned task",
+        )
+    assert [call[0] for call in calls].count("create") == 2
+    assert [call[0] for call in calls].count("send") == (1 if released_origin else 2)
 
 
 def test_unrecorded_keyed_creation_reconciles_without_liveness_guess(startup):

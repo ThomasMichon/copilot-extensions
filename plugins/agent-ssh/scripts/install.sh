@@ -31,6 +31,10 @@ _resolve_vendored_lib() {
         cd "$candidate" && pwd
         return 0
     fi
+    if [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+        _fail "Source-qualified payload is missing its materialized library: $lib_name"
+        return 1
+    fi
 
     # 2. Relative path (git checkout layout: plugins/agent-ssh/../../libs/<name>)
     candidate="$PLUGIN_DIR/../../libs/$lib_name"
@@ -112,7 +116,7 @@ _install_agent_ssh_package() {
     }
     if [[ -n "${UV_CMD:-}" ]]; then
         local lib_out pkg_out
-        if lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" \
+        if ! lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" \
             --reinstall-package agent-venue-copilot --quiet \
             "pyyaml>=6.0.3" \
             "$agent_procutil_dir" \
@@ -123,26 +127,19 @@ _install_agent_ssh_package() {
             "$remote_login_shell_dir" \
             "$fleet_contracts_dir" \
             "$machine_transport_dir"); then
-            if pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --no-deps "$PLUGIN_DIR" --quiet); then
-                return 0
-            fi
-            [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
-            _step 'uv package install failed -- falling back to python -m pip'
-        else
             [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
-            _step 'uv package install failed -- falling back to python -m pip'
+            _fail 'Selected dependency installation failed'
+            return 1
         fi
+        if pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet); then
+            return 0
+        fi
+        [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
+        _fail 'Selected dependency installation failed'
+        return 1
     fi
-    "$VENV_PYTHON" -m pip install --quiet \
-        "$agent_procutil_dir" \
-        "$PLUGIN_DIR/libs/dropin-registry" \
-        "$ssh_manager_dir" \
-        "$venue_copilot_dir" \
-        "$zdd_dir" \
-        "$remote_login_shell_dir" \
-        "$fleet_contracts_dir" \
-        "$machine_transport_dir" \
-        "$PLUGIN_DIR" 2>/dev/null
+    _fail 'uv is required; unrestricted pip fallback is not supported'
+    return 1
 }
 
 ACTION="${AGENT_SSH_ACTION:-install}"
@@ -379,6 +376,7 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 LINK_PYTHON="$VENV_PYTHON"
 
 _versioned_activate() {
+    _assert_source_runtime_identity || return 1
     # CLI (no daemon): health-gate the slot, swap the `.venv` symlink onto it
     # (first migration moves a legacy real `.venv` aside), gc keeping current +
     # previous-good. Returns non-zero on failure. No-op in legacy mode.
@@ -386,12 +384,19 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    [[ -x "$py" ]] || return 0
+    if [[ ! -x "$py" ]]; then
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _fail "Source-qualified runtime interpreter is unavailable; refusing activation: $py"
+            return 1
+        fi
+        return 0
+    fi
     if ! "$VENV_PYTHON" -c 'import agent_ssh' 2>/dev/null; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
     _versioned_mark_complete || return 1
+    _assert_source_runtime_identity || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
@@ -422,6 +427,13 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _assert_source_runtime_identity || return 1
+        local py
+        py="$(_source_python)" || return 1
+        "$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_source"]["assembly_hash"])' "$SOURCE_RUNTIME_IDENTITY"
+        return
+    fi
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
     # changed the payload WITHOUT bumping the version. Fails on any error.
@@ -451,49 +463,79 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    _assert_source_runtime_identity || return 1
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        py="$(_source_python)" || return 1
+    else
+        py="$(_bootstrap_python)" || return 1
+    fi
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
+    fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime_identity
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    _assert_source_runtime_identity || return 1
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
+        return 1
+    fi
+    _runtime_construction_complete "$actual_hash"
+}
+
+_source_python() {
+    local candidate
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -I -c 'import sys; assert sys.version_info >= (3, 10)' >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    _fail 'Source runtime selection requires a bootstrap Python interpreter'
+    return 1
+}
+
+_source_runtime_identity() {
+    local payload="${1:-$PLUGIN_DIR}" expected="${2:-}" py
+    py="$(_source_python)" || return 1
+    local args=(-I -B "$SCRIPT_DIR/versioned_runtime_source.py"
+        --payload "$payload" --package-version "$PACKAGE_VERSION" --plugin agent-ssh --format json)
+    [[ -z "$expected" ]] || args+=(--expected-runtime-version "$expected")
+    "$py" "${args[@]}"
+}
+
+_initialize_source_runtime() {
+    SOURCE_RUNTIME_IDENTITY=""
+    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
     local py
-    # The freshly built slot's own interpreter: it already passed the health
-    # gate, and an ambient one may be absent or unusable.
-    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
-    if [[ -z "$py" ]]; then
-        _fail "Cannot publish the completion marker for versions/$SRC_VERSION without a bootstrap Python interpreter -- not activating"
-        return 1
-    fi
-    local ph
-    if ! ph="$(_payload_hash)" || [[ -z "$ph" ]]; then
-        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
-        return 1
-    fi
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    local out rc=0
-    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
-    [[ -z "$out" ]] || printf '%s\n' "$out" | sed 's/^/  ...    /'
-    if [[ "$rc" -ne 0 ]]; then
-        _fail "Failed to publish the completion marker for versions/$SRC_VERSION (exit $rc) -- not activating"
-        return "$rc"
+    py="$(_source_python)" || return 1
+    SRC_VERSION="$("$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_PYTHON="$VENV_PYTHON"
+}
+
+_assert_source_runtime_identity() {
+    local payload="${1:-$PLUGIN_DIR}" identity
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -e "$payload/runtime-source.json" || -L "$payload/runtime-source.json" ]]; then
+        identity="$(_source_runtime_identity "$payload" "$SRC_VERSION")" || return 1
+        if [[ "$identity" != "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _fail 'Source runtime identity changed after runtime selection; refusing publication'
+            return 1
+        fi
     fi
 }
 
@@ -567,6 +609,27 @@ _materialize_snapshot_vendored_libs() {
             _fail "Failed to copy required snapshot library: $lib"
             return 1
         fi
+    done
+    local manifest
+    for manifest in "$snapshot_dir/pyproject.toml" "$snapshot_dir"/libs/*/pyproject.toml; do
+        if ! awk '
+        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport", libs, " ") }
+        /^\[/ { sources = ($0 ~ /^\[tool\.uv\.sources\][[:space:]]*$/) }
+        sources && $0 !~ /^[[:space:]]*#/ {
+            for (i in libs) {
+                pattern = "path[[:space:]]*=[[:space:]]*\"\\.\\./\\.\\./libs/" libs[i] "\""
+                gsub(pattern, "path = \"libs/" libs[i] "\"")
+            }
+            if ($0 ~ /path[[:space:]]*=[[:space:]]*"/) {
+                sub(/,[[:space:]]*editable[[:space:]]*=[[:space:]]*true/, "")
+            }
+        }
+        { print }
+        ' "$manifest" > "$manifest.tmp"; then
+            _fail 'Failed to materialize snapshot dependency sources'
+            return 1
+        fi
+        mv -f "$manifest.tmp" "$manifest" || return 1
     done
 }
 
@@ -739,12 +802,12 @@ _deploy_binstub() {
 
 # === install-transaction lock (fail-closed) ===
 # Serializes every mutating action of this runtime (stamp/install/update/
-# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 7,
-# since fd 8 is the stamp-publication lock, or a pid-symlink fallback where flock is unavailable) held for the whole build +
+# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 7, or
+# an exact-path PID receipt fallback where flock is unavailable) held for the whole build +
 # publish transaction. A concurrent run waits up to the timeout
 # (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
 # never proceeds unlocked. The OS drops the flock if this process dies; a dead
-# owner's pid symlink is reaped.
+# owner's receipt is reclaimed; legacy dangling PID symlinks remain readable.
 __install_lock_link=""
 __install_lock_fd=""
 
@@ -757,10 +820,83 @@ _install_lock_timeout() {
     printf '%s' "$__t"
 }
 
+_create_install_lock_owner() {
+    local __path="$1" __private __result=1
+    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-create.XXXXXX")" || return 1
+    # link(1), unlike ln(1), creates exactly the named entry, never a child
+    # beneath an existing directory or directory symlink (also on BSD/macOS).
+    if printf 'copilot-extensions.install-lock-pid:v1:%s\n' "$$" > "$__private/owner" &&
+       link "$__private/owner" "$__path" 2>/dev/null; then
+        __result=0
+    fi
+    # The published link is a second, independent directory entry on the same
+    # inode: once link(1) above succeeds, admission already happened and must
+    # be reported regardless of what happens to this private staging
+    # directory next. A concurrent purge is free to reclaim unreferenced
+    # staging scratch at any time (it never follows the published link), so a
+    # best-effort cleanup failure here must never flip a successful
+    # publication back into a reported failure -- that would abandon the
+    # mutex this call just admitted, with nothing left to ever release it.
+    rm -f "$__private/owner" 2>/dev/null
+    rmdir "$__private" 2>/dev/null
+    return "$__result"
+}
+
+_read_install_lock_owner() {
+    local __path="$1" __private __record="" __owner="" __result=1
+    if [[ -L "$__path" ]]; then
+        # Legacy PID symlinks represent IDs, not references to existing filesystem nodes.
+        [[ ! -e "$__path" ]] || return 1
+        __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
+        # Preserve target bytes before command substitution can trim newlines.
+        if readlink "$__path" > "$__private/owner" &&
+           [[ -L "$__path" && ! -e "$__path" ]] &&
+           ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
+           [[ "$__record" == *$'\n' ]]; then
+            __owner="${__record%$'\n'}"
+            case "$__owner" in
+                *[!0-9]*|"") ;;
+                *) __result=0 ;;
+            esac
+        fi
+        rm -f "$__private/owner" || __result=1
+        rmdir "$__private" || __result=1
+        [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
+        return "$__result"
+    fi
+    [[ -f "$__path" ]] || return 1
+    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
+    # Capture the inode before opening it. A raced FIFO/device/link remains
+    # non-regular in this private snapshot and cannot cause a blocking open.
+    if link "$__path" "$__private/owner" 2>/dev/null &&
+       [[ -f "$__private/owner" && ! -L "$__private/owner" && ! -L "$__path" &&
+          "$__private/owner" -ef "$__path" ]]; then
+        # A NUL delimiter reports NUL instead of silently dropping it.
+        # Only EOF within the byte bound can yield a complete receipt.
+        if ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
+           [[ "$__record" == *$'\n' ]]; then
+            __record="${__record%$'\n'}"
+            case "$__record" in
+                copilot-extensions.install-lock-pid:v1:*)
+                    __owner="${__record#copilot-extensions.install-lock-pid:v1:}"
+                    case "$__owner" in
+                        *[!0-9]*|"") ;;
+                        *) __result=0 ;;
+                    esac
+                    ;;
+            esac
+        fi
+    fi
+    rm -f "$__private/owner" || __result=1
+    rmdir "$__private" || __result=1
+    [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
+    return "$__result"
+}
+
 _exit_install_lock() {
     if [[ -n "$__install_lock_link" ]]; then
         local __owner
-        __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+        __owner="$(_read_install_lock_owner "$__install_lock_link" 2>/dev/null || true)"
         [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
         __install_lock_link=""
     elif [[ -n "$__install_lock_fd" ]]; then
@@ -782,61 +918,62 @@ _enter_install_lock() {
         __install_lock_fd=7
         return 0
     fi
-    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __now
+    if ! command -v link >/dev/null 2>&1 || ! command -v mktemp >/dev/null 2>&1; then
+        _fail "PID-fallback install admission requires link(1) and mktemp; refusing to proceed unlocked"
+        return 1
+    fi
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __acquired
     __deadline=$(( $(date +%s) + __timeout ))
-    until ln -s "$$" "$__link" 2>/dev/null; do
-        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
-            return 1
-        fi
-        __owner="$(readlink "$__link" 2>/dev/null || true)"
-        if [[ -z "$__owner" ]]; then
-            # The link vanished after the failed `ln -s` (its holder released
-            # it or a reaper removed it), or the path is not a symlink this
-            # lock can attribute. Never unlink here: lock creators are not
-            # serialized by the reap mutex, so an unlink could delete a live
-            # lock taken meanwhile. Retry; an unattributable path fails
-            # closed at the deadline.
-            sleep 0.1
-            continue
-        fi
-        case "$__owner" in
-            *[!0-9]*) __live=0 ;;
-            *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
-        esac
-        if [[ "$__live" == 1 ]]; then
-            sleep 1
-        elif ln -s "$$" "$__link.reap" 2>/dev/null; then
-            # Serialize stale-owner recovery: without this PID-bearing reap
-            # mutex, two contenders could both see the same stale owner, and
-            # one's `rm -f` could delete the live lock the other just took.
-            # Unlink only if the link still holds the owner judged stale above
-            # and that owner is still not live: a dead owner cannot release its
-            # own link and only serialized reapers remove a stale one, so that
-            # value is stable under this mutex. An absent link, or one naming a
-            # different (possibly just-released) holder, is never removed.
-            __now="$(readlink "$__link" 2>/dev/null || true)"
-            if [[ -n "$__now" && "$__now" == "$__owner" ]]; then
-                case "$__now" in
-                    *[!0-9]*) rm -f "$__link" ;;
-                    *) kill -0 "$__now" 2>/dev/null || rm -f "$__link" ;;
+    # Always attempt admission once before enforcing the deadline: computing
+    # the deadline and this loop's own `date +%s` are two separate calls, so a
+    # short timeout (e.g. 1s) can straddle a second boundary between them and
+    # make a pre-check-only loop condition skip even an uncontended
+    # acquisition. Checking the deadline only after the first attempt (below)
+    # removes that race.
+    while :; do
+        __live=0
+        if _create_install_lock_owner "$__link.reap"; then
+            # Admission and stale cleanup share this mutex; no acquirer may
+            # replace the owner between a reaper's read and unlink.
+            __acquired=0
+            if _create_install_lock_owner "$__link"; then
+                __acquired=1
+            else
+                __owner="$(_read_install_lock_owner "$__link" 2>/dev/null || true)"
+                case "$__owner" in
+                    *[!0-9]*|"") ;; # Missing or malformed evidence never authorizes deletion.
+                    *)
+                        if kill -0 "$__owner" 2>/dev/null; then
+                            __live=1
+                        elif [[ "$(_read_install_lock_owner "$__link" 2>/dev/null || true)" == "$__owner" ]] &&
+                             rm -f "$__link" && _create_install_lock_owner "$__link"; then
+                            __acquired=1
+                        fi
+                        ;;
                 esac
             fi
-            rm -f "$__link.reap"
-        else
-            # Another contender is reaping. A reap mutex whose owner died
-            # mid-reap is deliberately never reclaimed automatically (that
-            # would reintroduce the check-then-unlink race); the run fails
-            # closed at its deadline until the stale .reap link is removed.
-            sleep 0.1
+            if [[ "$__acquired" == 1 ]]; then
+                __install_lock_link="$__link"
+            fi
+            if ! rm -f "$__link.reap"; then
+                _exit_install_lock
+                return 1
+            fi
+            [[ "$__acquired" != 1 ]] || return 0
         fi
+        # A dead admission-mutex owner requires explicit repair, never another reaper.
+        [[ "$(date +%s)" -lt "$__deadline" ]] || break
+        if [[ "$__live" == 1 ]]; then sleep 1; else sleep 0.1; fi
     done
-    __install_lock_link="$__link"
-    return 0
+    return 1
 }
 # === end install-transaction lock ===
 
-case "$ACTION" in
-    install|update|stamp|provision)
+PACKAGE_VERSION="$SRC_VERSION"
+_initialize_source_runtime || exit 1
+case "$ACTION:${DRY_RUN:-0}" in
+    uninstall:1) ;;
+    install:*|update:*|stamp:*|provision:*|uninstall:*)
         if ! _enter_install_lock; then
             _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
             exit 1
@@ -846,6 +983,7 @@ case "$ACTION" in
         trap '_exit_install_lock; exit 143' TERM
         ;;
 esac
+_assert_source_runtime_identity || exit 1
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
@@ -854,6 +992,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
     SOURCE_KIND="$(_source_kind "$SOURCE_PATH")"
     _acquire_stamp_publication_lock || exit 1
+    _assert_source_runtime_identity || exit 1
     trap '_release_stamp_publication_lock; _exit_install_lock' EXIT
     CURRENT_SNAPSHOT="$(_current_snapshot)"
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
@@ -863,6 +1002,7 @@ if [[ "$ACTION" == "stamp" ]]; then
         exit 0
     fi
     if _snapshot_is_reusable "$CURRENT_SNAPSHOT" "$SOURCE_KIND" "$SOURCE_PATH" "$SRC_VERSION"; then
+        _assert_source_runtime_identity "$CURRENT_SNAPSHOT" || exit 1
         printf '%s\n' "$CURRENT_SNAPSHOT" > "$INSTALL_DIR/payload-dir.$$.tmp"
         mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
         _write_stamped_version_marker
@@ -877,7 +1017,8 @@ if [[ "$ACTION" == "stamp" ]]; then
     shopt -s dotglob nullglob
     for entry in "$PLUGIN_DIR"/*; do
         case "${entry##*/}" in
-            .git|__pycache__|.pytest_cache|.venv|tests) continue ;;
+            .git|__pycache__|.pytest_cache|.venv|tests)
+                [[ -n "$SOURCE_RUNTIME_IDENTITY" ]] || continue ;;
         esac
         if ! cp -a "$entry" "$SNAPSHOT_TMP/"; then
             shopt -u dotglob nullglob
@@ -887,13 +1028,18 @@ if [[ "$ACTION" == "stamp" ]]; then
         fi
     done
     shopt -u dotglob nullglob
-    _materialize_snapshot_vendored_libs "$SNAPSHOT_TMP" || {
-        rm -rf "$SNAPSHOT_TMP"
-        exit 1
-    }
-    _materialize_snapshot_installer_engine "$SNAPSHOT_TMP"
-    printf '%s\n' "$SOURCE_PATH" > "$(_snapshot_source_marker "$SNAPSHOT_TMP")"
-    printf '%s\n' "$SRC_VERSION" > "$(_snapshot_version_marker "$SNAPSHOT_TMP")"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        _assert_source_runtime_identity "$SNAPSHOT_TMP" || exit 1
+        _assert_source_runtime_identity || exit 1
+    else
+        _materialize_snapshot_vendored_libs "$SNAPSHOT_TMP" || {
+            rm -rf "$SNAPSHOT_TMP"
+            exit 1
+        }
+        _materialize_snapshot_installer_engine "$SNAPSHOT_TMP"
+        printf '%s\n' "$SOURCE_PATH" > "$(_snapshot_source_marker "$SNAPSHOT_TMP")"
+        printf '%s\n' "$SRC_VERSION" > "$(_snapshot_version_marker "$SNAPSHOT_TMP")"
+    fi
     CURRENT_SNAPSHOT="$(_current_snapshot)"
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
         rm -rf "$SNAPSHOT_TMP"
@@ -903,6 +1049,8 @@ if [[ "$ACTION" == "stamp" ]]; then
         exit 0
     fi
     mv -f "$SNAPSHOT_TMP" "$SNAPSHOT_DIR"
+    _assert_source_runtime_identity "$SNAPSHOT_DIR" || exit 1
+    _assert_source_runtime_identity || exit 1
     printf '%s\n' "$SNAPSHOT_DIR" > "$INSTALL_DIR/payload-dir.$$.tmp"
     mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
     _write_stamped_version_marker
@@ -923,13 +1071,13 @@ if [[ "$ACTION" == "uninstall" ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo '(dry run -- nothing will be changed)'
         [[ -e "$STUB" ]] && echo "[dry-run] would remove binstub: $STUB"
-        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove (config + DB + venv): $INSTALL_DIR"
+        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove runtime/config contents (coordination retained): $INSTALL_DIR"
         echo "agent-ssh uninstall dry run complete -- nothing was changed"
         exit 0
     fi
     rm -f "$STUB"
-    rm -rf "$INSTALL_DIR"
-    _ok 'agent-ssh runtime removed'
+    remove_install_runtime_content "$INSTALL_DIR" || exit 1
+    _ok 'agent-ssh runtime removed (transaction/staging coordination retained)'
     exit 0
 fi
 
@@ -973,6 +1121,8 @@ for h in bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 b
 done
 _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
 
+_versioned_slot_clean || exit 1
+if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     _versioned_slot_clean
     if [[ -n "$UV_CMD" ]]; then
@@ -1005,16 +1155,25 @@ if ! _install_agent_ssh_package; then
 fi
 _ok 'Package installed: agent-ssh'
 
+fi
+
 # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
 _versioned_activate || exit 1
 
+_assert_source_runtime_identity || exit 1
 _deploy_binstub
 
 SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
 if [[ -f "$(_snapshot_source_marker "$PLUGIN_DIR")" ]]; then
     SOURCE_PATH="$(cat "$(_snapshot_source_marker "$PLUGIN_DIR")" 2>/dev/null || printf '%s\n' "$SOURCE_PATH")"
 fi
-write_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "$SOURCE_PATH" "$SRC_VERSION"
+SOURCE_FIELDS=""
+if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+    SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY#\{}"
+    SOURCE_FIELDS="${SOURCE_FIELDS%\}}"
+fi
+_assert_source_runtime_identity || exit 1
+write_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$SOURCE_FIELDS" "$SOURCE_PATH" "$PACKAGE_VERSION"
 
 echo ''
 if "$LINK_PYTHON" -c 'import agent_ssh' 2>/dev/null; then

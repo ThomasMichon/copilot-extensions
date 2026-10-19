@@ -9,13 +9,18 @@ preserve-existing semantics, and the ``register-project-entry`` subcommand.
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import config_migrations, installer
+from agent_worktrees import config_migrations, installer, repos
 
 # ---------------------------------------------------------------------------
 # v1 -> v2 migrator
@@ -65,6 +70,67 @@ def _patch_registry_path(monkeypatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(installer, "projects_yaml_path", lambda: target)
     monkeypatch.setattr(installer.output, "ok", lambda *_a, **_k: None)
     return target
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("edited", [False, True])
+@pytest.mark.parametrize("source_only", [False, True])
+def test_last_registry_entries_roundtrip_to_command_and_profile_reconciliation(
+    monkeypatch, tmp_path, edited, source_only,
+):
+    home = tmp_path / "home"
+    root = home / ".agent-worktrees"
+    monkeypatch.setattr(installer, "install_dir", lambda: root)
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: root / "projects.yaml")
+    monkeypatch.setattr(installer, "local_bin", lambda: home / ".local" / "bin")
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: root / "repos.yaml")
+    registry = {"projects": {"demo": {}}}
+    installer.write_projects_registry(registry)
+    installer._deploy_project_binstub("demo")
+    paths = [path for path, _ in installer._project_binstub_specs("demo")]
+    if edited:
+        paths[0].write_text("operator edit\n", encoding="utf-8")
+    before = {path: path.read_bytes() for path in paths}
+    registry["projects"].pop("demo")
+    installer.write_projects_registry(registry)
+    repo_registry = repos.ReposRegistry(
+        srcroot={"windows": str(tmp_path / "src")} if source_only else {},
+        repos={"demo": repos.RepoEntry(name="demo")},
+    )
+    repos.write_registry(repo_registry)
+    assert repos.remove_repo("demo")
+    assert yaml.safe_load((root / "projects.yaml").read_text(encoding="utf-8"))["projects"] == {}
+    assert yaml.safe_load((root / "repos.yaml").read_text(encoding="utf-8"))["repos"] == {}
+    result = installer.reconcile_binstubs()
+    assert result["registered"] == []
+    if edited:
+        assert result["preserved"] == ["demo"]
+        assert {path: path.read_bytes() for path in paths} == before
+    else:
+        assert not any(path.exists() for path in paths)
+
+    if os.name != "nt":
+        return  # Windows profile publication is exercised through its native CLI.
+    local = home / "local"
+    fragments = local / "Microsoft" / "Windows Terminal" / "Fragments"
+    state = local / "Packages" / "Microsoft.WindowsTerminal_8wekyb3d8bbwe" / "LocalState"
+    (fragments / "AgentWorktrees").mkdir(parents=True)
+    state.mkdir(parents=True)
+    fragment = fragments / "AgentWorktrees" / "agent-worktrees.json"
+    fragment.write_text(json.dumps({"profiles": [{"guid": "{old}", "name": "Demo"}]}), encoding="utf-8")
+    manager_src = Path(__file__).resolve().parents[3] / "worktree-manager" / "src"
+    environment = {
+        **os.environ, "USERPROFILE": str(home), "HOME": str(home), "LOCALAPPDATA": str(local),
+        "PYTHONPATH": os.pathsep.join([str(manager_src), os.environ.get("PYTHONPATH", "")]),
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "worktree_manager", "refresh-profiles", "--machine", "host"],
+        cwd=home, env=environment, capture_output=True, text=True, encoding="utf-8",
+        timeout=10, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert json.loads(result.stdout)["status"] == "verified_current"
+    assert json.loads(fragment.read_text(encoding="utf-8"))["profiles"] == []
 
 
 def test_register_project_writes_lean(monkeypatch, tmp_path: Path):

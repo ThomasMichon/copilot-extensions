@@ -1,0 +1,9 @@
+{
+  "comment": "Bind Configuration list queries to explicit projects and preserve previews across presentation-only row enrichment",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

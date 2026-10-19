@@ -1113,6 +1113,10 @@ class TestGitHubProvider:
             github_required_checks, "verified_merge_head",
             lambda *args, **kwargs: kwargs["expected_head_sha"] or "a" * 40,
         )
+        monkeypatch.setattr(
+            github_required_checks, "_protected_merge_head",
+            lambda *args, **kwargs: kwargs["expected_head_sha"] or "a" * 40,
+        )
 
     def test_observe_head_uses_server_date(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -1460,9 +1464,9 @@ class TestGitHubProvider:
         assert captured["env"]["GH_TOKEN"] == "tok"
         assert res.state == "open"
 
-    def test_merge_pull_squash_admin_builds_args(self, monkeypatch, passed_admin_checks):
-        # pr-merge --now: a submitter self-merge is a squash merge, admin past
-        # the non-blocking gate, and deletes the branch by default (safe --
+    def test_merge_pull_squash_prefers_normal_when_admin_allowed(self, monkeypatch, passed_admin_checks):
+        # pr-merge --now tries a protected squash merge first, even when
+        # a configured admin fallback is allowed, and deletes the branch (safe --
         # finalize/pr-complete verify a merged PR against the tracked record's
         # own head_sha, never the live remote branch).
         from agent_worktrees.providers import github
@@ -1477,7 +1481,7 @@ class TestGitHubProvider:
         assert err == ""
         a = captured["args"]
         assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
-        assert "--squash" in a and "--admin" in a
+        assert "--squash" in a and "--admin" not in a
         assert "--delete-branch" in a
 
     def test_merge_pull_delete_source_branch_false_omits_flag(self, monkeypatch):
@@ -1488,7 +1492,7 @@ class TestGitHubProvider:
             lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
         )
         github.GitHubProvider().merge_pull(
-            "o/r", 7, squash=True, delete_source_branch=False,
+            "o/r", 7, squash=True, delete_source_branch=False, expected_head_sha="a" * 40,
         )
         assert "--delete-branch" not in captured["args"]
 
@@ -1511,7 +1515,7 @@ class TestGitHubProvider:
         assert "--match-head-commit" in a
         assert a[a.index("--match-head-commit") + 1] == "deadbeef"
 
-    def test_admin_merge_pins_verified_head_when_not_given(self, monkeypatch, passed_admin_checks):
+    def test_normal_merge_pins_discovered_head_when_admin_allowed(self, monkeypatch, passed_admin_checks):
         from agent_worktrees.providers import github
         captured = {}
         monkeypatch.setattr(
@@ -1563,7 +1567,9 @@ class TestGitHubProvider:
             github, "run_cli",
             lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
         )
-        github.GitHubProvider().merge_pull("o/r", 7, squash=True, admin=False)
+        assert github.GitHubProvider().merge_pull(
+            "o/r", 7, squash=True, admin=False, expected_head_sha="a" * 40,
+        ) == ""
         assert "--admin" not in captured["args"]
 
     def test_merge_pull_honors_explicit_host(self, monkeypatch):
@@ -2223,14 +2229,52 @@ class TestGitHubProvider:
         pr = {"state": "open", "merged": False, "head": {"sha": "s"},
               "base": {"ref": "main"}, "user": {"login": "a"}}
         # a full first page (100) forces a second read; short second page stops.
-        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED"}
+        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED",
+                  "submitted_at": f"2026-01-01T00:00:{i % 60:02d}Z"}
                  for i in range(1, 101)]
-        page2 = [{"id": 101, "user": {"login": "u"}, "state": "APPROVED"}]
+        page2 = [{"id": 101, "user": {"login": "u"}, "state": "APPROVED",
+                  "submitted_at": "2026-01-02T00:00:00Z"}]
         monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
             pr=pr, reviews_pages=[page1, page2]))
         snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
         assert len(snap.reviews) == 101
         assert snap.reviews[-1].id == 101 and snap.reviews[-1].state == "APPROVED"
+
+    def test_get_snapshot_accepts_pending_review_without_submission_time(self, monkeypatch):
+        from agent_worktrees.providers import github
+        pr = {"state": "open", "merged": False, "head": {"sha": "s"},
+              "base": {"ref": "main"}, "user": {"login": "a"}}
+        pending = [[{"id": 1, "user": {"login": "reviewer"}, "state": "PENDING",
+                     "submitted_at": None, "commit_id": None}]]
+        monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
+            pr=pr, reviews_pages=pending,
+        ))
+        snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+        assert [(review.state, review.user) for review in snap.reviews] == [
+            ("PENDING", "reviewer"),
+        ]
+
+    @pytest.mark.parametrize("malformed", [
+        {"id": 101, "user": None, "state": "CHANGES_REQUESTED"},
+        {"id": 101, "user": {"login": ""}, "state": "CHANGES_REQUESTED"},
+        {"id": 101, "user": {"login": "reviewer"}, "state": "UNKNOWN"},
+        {"id": 101, "user": {"login": "reviewer"},
+         "state": "CHANGES_REQUESTED", "submitted_at": None},
+    ])
+    def test_get_snapshot_rejects_malformed_review_on_later_page(
+        self, monkeypatch, malformed,
+    ):
+        from agent_worktrees.providers import github
+        pr = {"state": "open", "merged": False, "head": {"sha": "s"},
+              "base": {"ref": "main"}, "user": {"login": "a"}}
+        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED",
+                  "submitted_at": f"2026-01-01T00:00:{i % 60:02d}Z"}
+                 for i in range(1, 101)]
+        monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
+            pr=pr, reviews_pages=[page1, [malformed]],
+        ))
+        with pytest.raises(ProviderError):
+            github.GitHubProvider().get_snapshot("o/r", 7, token="t")
 
     def test_combined_checks_state_failure_dominates(self, monkeypatch):
         from agent_worktrees.providers import github

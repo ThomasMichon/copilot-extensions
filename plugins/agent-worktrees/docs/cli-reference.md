@@ -4,6 +4,15 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Native machine-record repair
+
+`doctor --repair-machine-record <exact-id> --from-machine <old>
+[--to-machine <configured-target>] [--fix] [--json]`, scoped with `-p <project>`,
+reports one record first. Existing linked checkouts retain Git ownership proof;
+removed checkouts require independent receiving registration/namespace proof.
+Same-machine reference aliases remain unchanged. See
+[admission, audit, relationship semantics and roster verification](machine-record-repair.md).
+
 ## Disposable producer ownership
 
 `resource-producer <capabilities|reserve|begin|complete|bind|inspect|close> --json
@@ -33,6 +42,138 @@ configuration without scanning current worktree/session identity. Worktree-
 scoped keys retain their binding and checkout resolution.
 An explicit `--session-id` still selects the session's project before any
 scalar read; the shortcut does not change that targeting contract.
+
+`get execution-identity` emits the versioned
+[configured execution-identity contract](execution-identity.md), rather than a
+machine-name scalar. It distinguishes explicit registered authority from
+hostname detection and unavailable/invalid bindings without introducing a new
+configuration setting.
+
+## Session machine identity
+
+For entry-path-independent WSL installation identity, use
+`doctor --guest-distribution "Example Distro" --json`. This is a targeted
+report: it never enters general session/record repair. On Windows it checks
+the designated name against the current user's WSL default; inside the guest
+it checks the guest registration and reports host-default evidence unavailable.
+`--fix` can enroll only a verified named direct guest entry. It is idempotent
+from SSH once enrolled, never changes the OS default, and cannot be combined
+with other doctor repair scopes. The shared
+[guest-identity contract](../../../libs/installation-context/README.md#wsl-guest-identity)
+owns enrollment, refusal and cross-runner mechanics.
+
+The existing `instructions/agent-worktrees/session-guidance.instructions.md`
+file in the exact Copilot session contains a compact **Current machine
+identity** block. `hostname` is the observed OS hostname; `machine` is the
+registry's preferred name (alias when configured, otherwise key); `alias`
+is its friendly display name. Platform, resolution status and source are
+reported separately. These are contextual facts, never authorization.
+
+The combined startup lifecycle resolves and writes this block before
+worktree registration and other slower reconciliation. Fresh and resumed
+launches replace the exact-session snapshot. A HOME-cwd resume that recovers
+its project during registration refreshes the identity from that project's
+registry before final guidance is read. Native context rollover reads
+the same file through the existing session-guidance pointer. No machine
+inventory or machine-specific value is checked into instruction projections.
+Without usable registry context, the observed hostname remains visible while
+machine and alias are explicitly unresolved. An oversized combined guidance
+file retains the bounded machine block and reports the omitted guidance.
+The initial hook claims the launch under a per-session OS file lock.
+Lifecycle rewrites check that same launch ownership, read current snapshots,
+compose guidance and replace the file under the lock. A delayed prior launch
+cannot overwrite a newer resume's
+identity or command catalog. The launch marker is ordering metadata, not
+authorization or evidence that the model read the file.
+
+The legacy `machine-context` command likewise distinguishes the actual
+hostname, preferred machine name and friendly name; it no longer labels a
+registry key as the OS hostname.
+
+## Exact durable record read
+
+`agent-worktrees record --worktree-id <exact-id> --json` reads one durable
+tracking YAML from the receiving project's configured tracking namespace.
+Use the repository's binstub, its current directory, or explicit `--project`
+to select that project. IDs are exact filename components, not suffixes or
+codenames; the command never searches another project, enumerates records or
+sessions, asks the resident, or computes live facts. A newly created record
+is readable even before the resident publishes it. Ordinary `list` projection
+authority and failure behavior are unchanged.
+Membership is read from the selected project's machine-local repository
+declarations and registered anchors, not from a global default project or
+Git-backed repository policy. No plugin activation, policy overlays, or Git
+probes are needed to identify these metadata records.
+Validated operator-owned `config.d` YAML fragments merge in lexical order
+beneath `config.yaml`, preserving ordinary repository-declaration precedence.
+Managed plugin pointers are not activated by this metadata-only read.
+Project selection for this command reads Git marker and common-directory files
+without running Git or changing the caller's working directory.
+Git-file layouts without a common-directory marker (including submodules and
+separate Git directories) use the registered checkout root. Malformed or
+unreadable selection metadata returns `project-unavailable` JSON with the
+underlying diagnostic, not an unstructured traceback.
+Registered bare anchors and their linked worktrees resolve the common Git
+directory itself before considering a non-bare checkout's parent.
+
+Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
+The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
+`session_count`, `last_session_id`, `sessions_indexed`, `execution_leg`,
+`execution_leg_opaque`, `session_backend`, `session_backend_opaque`,
+`dispatch_attempt`, `dispatch_attempt_opaque`,
+and raw historical `machine`, `platform`, `owner`,
+`owner_ref`, `caller_worktree`, `parent_session`, `checkout_managed` fields
+(absent raw fields are null). `session_count` is null when sessions have not
+been indexed, not zero; an indexed empty list returns zero.
+`last_session_id` uses the existing record-local asserted-head resolution,
+including its transition ledger, without filesystem/session discovery.
+Malformed present ledgers or session states return `record-malformed` rather
+than silently deriving a legacy head. An absent or empty legacy ledger retains
+the existing asserted-head fallback; an explicit null head transition clears it.
+`execution_leg` uses the existing read-only legacy-backend compatibility view,
+preserving an unrecognized explicit leg as opaque data.
+An unrecognized legacy backend likewise remains visible as raw data with its
+opaque flag; a null derived leg does not prove absence of a provider binding.
+`dispatch_attempt` uses the canonical seven-field dispatch provenance parser.
+An absent attribution returns null with `dispatch_attempt_opaque: false`;
+an explicit null, incomplete or unrecognized attribution remains raw with
+`dispatch_attempt_opaque: true`. Consumers must check that capability and
+opacity before treating a record as unassigned.
+YAML timestamp scalars, including those nested in opaque bindings or provider
+blobs, are represented as ISO-8601 strings in JSON without rewriting the record.
+Other values must be JSON-compatible: mapping keys must be strings, and
+unsupported scalar types, non-finite numbers, and cyclic YAML are malformed.
+JSON conversion is bounded to 64 nesting levels, 10,000 expanded nodes and
+1 MiB of encoded data. Shared aliases count on every expansion; exceeding any
+budget returns `record-malformed` rather than allocating unbounded output.
+The same budgets are checked on raw record values before compatibility parsing
+can stringify them, as well as on the returned metadata.
+Keys are never silently coerced or collapsed during JSON conversion.
+Recognized legacy backends use the existing parsed version-1 representation.
+Explicit binding schema versions must be integers, not booleans, floats,
+strings, or null; malformed versions return `record-malformed` before binding
+interpretation. Unknown integer versions remain opaque, and an omitted legacy
+version retains the existing version-1 compatibility behavior.
+Durable `finalizing` and legacy `completed` statuses are returned unchanged,
+like other recognized lifecycle statuses; reading them grants no execution
+authority.
+
+The stored ID must match the requested ID, the repository must belong to the
+receiving project's configured repositories, and the stored path must be
+absolute and non-traversing. Historical paths need not exist or be locally
+executable, including paths recorded on another platform. No machine/platform
+identity is rewritten, nonce backfilled, registration created, or process
+started.
+
+Failures exit one with `{"version":1,"ok":false,"worktree":null,
+"error":{"code":"...","message":"..."}}`. Codes are `invalid-id`,
+`project-unavailable`, `record-missing`, `record-unreadable`,
+`record-malformed`, `id-mismatch`, `repository-mismatch`, and `path-invalid`.
+Argparse usage failures exit two. Missing, unreadable, or malformed metadata
+never means terminal/disposed, sessionless, or permission to allocate again.
+Successful reading likewise grants **no local execution, takeover, mutation,
+or launch authorization**. Actual launch APIs retain execution-space,
+locality, head, duplicate and live-holder protections.
 
 ## State-root and paired-worktree resolution
 
@@ -156,14 +297,14 @@ continue to work unchanged.
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
 | `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims release <ref> [--remove]` retires one; `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree, release a PR only when its reference matches the configured provider and authority and the live provider confirms it merged) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default; `claims transitive [worktree_id]` lists every unsettled obligation anywhere in a worktree's whole subtree (itself + every worktree it created, transitively) -- a diagnostic convenience, never a substitute for the per-hop finalize gate; `claims history <ref>` prints the durable, ordered claim/release/settle/reassigned event history recorded for a claimed resource -- **today `pr`-kind only**, fed from the explicit claim-lifecycle write paths, `worktree run`'s own PR-claim persistence (both its live pending-ref settle site and its tested helper), an explicit claim-handoff bundle accept's transfer, plus a context-handoff cutover's implicit agent-bridge-style session reassignment (not yet an agent-dispatch task redrive -- an empty result is NOT proof nothing happened), locally plus, with `--remote`, merged with any mirrored remote events (`refs/agent-worktrees/claim-history/v1`, same shared store as the lease refs) -- an unreadable remote store warns on stderr rather than silently showing local-only history as complete |
 | `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
-| `cleanup` | List and remove orphaned or finalized worktrees |
+| `cleanup` | List and remove orphaned or finalized worktrees. Open/unconfirmed PRs and held outbound obligations block removal and archival, including `--force` and missing checkouts; see [cleanup safety details](../skills/worktree/references/cleanup-details.md). |
 | `gc` | Garbage-collect this project's worktrees on this machine: **claim-history mirror sync** (opt-in, `--mirror-claim-history` -- pushes not-yet-mirrored `claim_history` events to the shared store; runs FIRST, before any step below can delete the tracking records a legacy event's eligibility depends on) + tracked reap (cleanup verdict) + **managed system/bridge leak sweep** (`--no-managed` to skip) + orphan-directory sweep + **orphaned launcher-shell reap** (`--no-reap-shells` to skip) + `git worktree prune` + optional **lease-ref squash** (`--lease-gc`). `--dry-run` lists without removing; `--json` reports the managed + orphan + shell + lease + claim-history-mirror sweeps. Also runs automatically on the no-daemon cadence (picker launch + session end) |
 | `reap-sessions` | Reap leaked `wt-<id>` tmux/psmux sessions whose worktree is finalized/gone/untracked **and** idle past the grace window (spares attached/active/busy) |
 | `reap-shells` | Reap **orphaned launcher shells** -- pwsh/python `-m agent_worktrees` scaffolding stranded by a force-closed terminal (parent exited, nothing running under them). Engineered to fail safe: **positive launcher-signature** matching only (a blank-command-line service can never match), session-0/service/ACP vetoes, a live-descendant spare, self-preservation, and an idle gate. **Reports candidates by default; `--yes` terminates.** Reclaims the scaffolding only -- Copilot itself is handled by `reclaim`, mux sessions by `reap-sessions` |
 | `reclaim` | Free the **exact** Copilot process(es) bound to a session/worktree, resolved from Copilot's own `inuse.<pid>.lock` claim -- precise, never splashing onto a sibling session or a worktree that merely shares a cwd. The primitive for **bare** orphans (a Copilot launched straight in a terminal, invisible to the `wt-<id>` mux fleet view; e.g. its terminal was closed/wedged). Target with `--session-id` / `--worktree-id` (infers from cwd) / `--all`, restrict with `--bare-only`. **Dry-run by default; `--yes` terminates.** Never reaps the process tree of the running command. Freeing an idle orphan loses nothing -- the session stays resumable |
 | `remux` | Restore a running **bare** (un-muxed) Copilot to the worktree's mux fleet. On Linux/WSL, reparent it into the `wt-<id>` tmux pane via `reptyr`, preserving the live process. On Windows, where ConPTY cannot adopt an arbitrary running process, preview the precise reclaim-before-resume plan and pass `--yes` to retire only the confirmed Stop-unreachable owner; the structured result says to resume next through the normal PSMux launcher. Target with `--session-id` / `--worktree-id` (infers from cwd). The Pickers expose the combined preparation + launch path as **Restore**. |
 | `backfill-sessions` | Explicitly scan legacy session state to populate empty registries and titles, derive legacy controller relations from authoritative creation fields, and inspect a bounded number of exact session projections (`--projection-budget N`). Local missing/stale projections are repaired; restored, foreign, ambiguous, colliding, and newer state remains report-only |
-| `doctor` | Diagnose machine-wide Picker pivot hygiene plus this project's `config.d` and worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles, legacy controller metadata, bounded exact-ID projection drift (`--projection-budget N`), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment. `--fix` repairs local authoritative/controller/projection state but keeps restored, foreign, ambiguous, colliding, and newer state report-only. Runs outside a project for machine-wide pivot diagnostics; project health/config is then explicitly skipped/absent. `--json` emits the exhaustive report |
+| `doctor` | Diagnose machine-wide Picker pivot hygiene plus this project's `config.d` and worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles, legacy controller metadata, bounded exact-ID projection drift (`--projection-budget N`), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment. `--fix` repairs local authoritative/controller/projection state but keeps restored, foreign, ambiguous, colliding, and newer state report-only. `--repair-machine-record <exact-id> --from-machine <old-label> [--to-machine <configured-target>]` is a separate report-first scope: `--fix` changes only a proven local native record's machine label, with exact backups/audit and no ID, path, session or ownership rewrite. Existing checkouts retain selected-repository linked-Git proof; removed ones require canonical receiving registration/namespace evidence. Refuses foreign/guest identities, wrong stores and other repair selectors. Runs outside a project for machine-wide pivot diagnostics; project health/config is then explicitly skipped/absent. `--json` emits the exhaustive report |
 | `hygiene` | Detect (and with `--fix`, remove) stale **global-Python editable installs** left by a manual `pip install -e .` against a worktree checkout (a real, empirically-hit hazard: #2726) -- a `.pth` file permanently pinned to one worktree that silently shadows whichever worktree an `import`/console-script invocation actually intends, even after that worktree is deleted. Machine-wide; no project context needed. `--json` emits the report |
 | `status` | Show worktree git status; **write mode** (`--summary "<one-liner>"` / `--title "<headline>"` / `--follow-up` / `--resolved` / `--paused` / `--unpaused`) annotates THIS worktree's Picker disposition -- `--paused`/`--unpaused` is purely informational (never affects `finalize`'s obligation gate or any other gate, unlike `--follow-up`); **history mode** (`--history` `[--limit N]` `[--json]`) prints this worktree's durable disposition trajectory (summary/title over time). A `postToolUse` hook nudges you to refresh it as work drifts (`AGENT_WORKTREES_NUDGE=off` to silence) |
 | `recent-messages` | Show a worktree's latest session's last N message-bearing turns (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; includes per-turn `tool_names` plus an ending-state signal that distinguishes a cut-off assistant turn from a clean unanswered offer. Backs the picker's **Messages** viewer |
@@ -171,6 +312,7 @@ continue to work unchanged.
 | `session-recovery` | Read one exact session's reciprocal projection and emit validated, machine-readable recovery state without changing bindings. Version-aware output includes schema version, history completeness, relation overflow (`omitted_relations` is `null` for v2 overflow), and tombstone-overflow diagnostics. `--stdin` accepts a sessionStart payload; `--emit-context` renders the bounded pointer used when startup cannot establish an authoritative worktree binding |
 | `session-lineage` | Read one exact session projection and validate every retained worktree relation against authoritative records. Reports restored evidence, missing records, unsupported or invalid projections, schema/history completeness, relation overflow, full-key v1 or opaque-digest v2 tombstones, and tombstone overflow without enumerating the live session-state root |
 | `head-session` | Project-agnostic replay of a worktree's monotonic head-transition ledger, including pending handoffs (JSON; fail-open when untracked) |
+| `record` | Read one exact durable record in the current project (`--worktree-id <exact-id> --json`), without resident roster computation, session discovery, or lifecycle/launch authority |
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
 | `fleet` | Aggregate `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. |
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |
@@ -190,6 +332,25 @@ continue to work unchanged.
 | `list` | List worktrees from tracking records. `--codename <name>` restricts to the worktree with that assigned codename, as an alternative to `--worktree-id` |
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
+
+### Parent worktree PR visibility
+
+Worktree claim summaries include active PR claims reached through active local
+child-worktree edges, including children in another registered project. PR links
+rank ahead of worktree links; the PR ledger and settlement responsibility stay
+on the child. Direct `resources`, `claims_assets` counts, and finalize gates are
+unchanged. No provider polling or claim writes occur while deriving these links.
+
+Current rows carry at most eight ranked links. `claims_link_count` counts all
+available ranked links before truncation, and `claims_links_complete` is false
+when links were omitted or a descendant could not be resolved.
+`claims_projection` reports `inherited_pr_count`, `unresolved_count`, and
+`complete`; a remote, missing, unsafe, or cyclic child remains explicitly
+incomplete rather than appearing to have no PR obligations. Use
+`claims transitive <worktree-id> --json` to inspect the paths and unresolved
+edges. Settled child edges and settled PR claims are not followed or inherited.
+The producer reuses child records within one publication and refreshes them on
+the next; resident and advisory reads consume the published row unchanged.
 
 ### Session command catalog
 
@@ -275,6 +436,32 @@ and `pr-merge` refuses (naming the reason) on a repo where the effective flow
 does not authorize that action. Full narrative in
 [worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
 
+### Routine publication reconciliation
+
+Normal `push-changes` and `git sync` automatically reconcile a lost publication
+acknowledgement when the source-owning checkout still has intact backed-sync
+evidence. The unique live numbered private PR must retain ordinary publication
+ownership and an exclusive destination. Fresh provider/ref observations must
+agree on the checkpoint's already accepted result, which must be an ancestor of
+the pinned, clean source commit. No confirmation token or ownership waiver is
+used. Unknown evidence, changed ownership/destination, and unrelated history
+remain refusals.
+
+Acknowledgement loss outside that settlement case still uses the existing
+verified publication paths: a non-forcing fast-forward retry, or an independently
+verified source replay after a rebase. The preflight checks ownership,
+destination and provider/ref agreement before deferring; it neither settles
+tracking nor authorizes a rewrite through this fallback. Corrupt recovery
+evidence still refuses rather than silently falling back.
+
+Reconciliation retains source, original saved and observed commits plus a private
+`agent-worktrees-pr-reconciliation-<id>.json` audit in the worktree's Git metadata.
+It settles tracking through the normal publication transaction without a push or
+PR edit. `push-changes` then publishes the pinned source with bounded, non-forcing
+transport and normal hooks; a racing unrelated remote update is not overwritten.
+`git sync` instead preserves the next backed transition before rebasing.
+Dry runs do not reconcile. Review/check/merge gates and rollout policy are unchanged.
+
 ### Explicit operator recovery
 
 Prefer invoking publication from the source-owning worktree's CWD. When that
@@ -287,18 +474,39 @@ agent-worktrees push-changes <recovery-worktree-id> --config <project-config> --
 
 This first call refuses with exit 2 and an exact PR/provider/repository/head-ref,
 destination fingerprint, full source commit and expected remote commit preview.
-It changes no Git refs, tracking data or remote head. The reason and preview
+The saved head remains separate from the current head agreed by the provider
+and remote ref; disagreement or an unreadable/deleted ref refuses even a preview.
+The preview also binds the original publication authority, proposed action and
+any validated recovery evidence. It changes no Git refs, tracking data, audit
+files or remote head. The reason and preview
 fingerprint are not operator authentication or permission. Obtain real operator
 sign-off for this specific PR and operation before repeating the same call with
 `--confirm-break-glass <preview-fingerprint>`. Never add confirmation automatically
-after a guard refusal. Changed source, reason, destination or expected head
-requires a fresh preview and sign-off.
+after a guard refusal. Changed source, reason, destination, saved publication,
+expected head, action or evidence requires a fresh preview and sign-off.
 
-The confirmed call publishes the pinned committed source as-is. Historical
+If an existing completed backed-sync checkpoint proves that its exact result
+is already the agreed published head, the preview prefers `settle-publication`:
+confirmation updates only local publication bookkeeping, never pushes or edits
+the PR, and leaves later local work unpublished. The preview binds the checkpoint's
+new base; settlement records that base and its corresponding publication patch ID.
+Equal source/remote commits
+or matching patches alone do not establish this proof. Otherwise `rewrite`
+publishes the pinned committed source as-is with the **previewed live head** as
+its exact CAS lease, not a silently refreshed saved lease. Both actions require
+confirmation and revalidate the plan immediately before taking effect.
+Malformed, unreadable or dangling historical checkpoints explicitly mark
+settlement evidence `unusable` and disable settlement, not the rewrite preview.
+Invalid ref arguments and failed optional Git probes receive the same treatment.
+The imperfect evidence snapshot is confirmation-bound and preserved unchanged;
+it is neither repaired nor accepted as authority.
+Outside the routine backed reconciliation above, ordinary `push-changes` and
+`--rewrite-pr` retain their saved-lease refusal.
+Historical
 ownership, suffix and replay bookkeeping may be waived; provider-confirmed
 destination, exact remote lease, serialization, protected refs, clean source,
 real hooks and fresh PR review/merge gates are not. Title/squash options and
-new-PR use are inapplicable. Source and prior published commits are retained at
+new-PR use are inapplicable. Source and actual agreed published commits are retained at
 the reported `refs/agent-worktrees/recovery/...` refs before transport.
 
 Azure recovery recognizes the standard secure SSH and HTTPS addresses of the
@@ -308,10 +516,12 @@ this source observation does not change the saved publication destination fence.
 
 The selected worktree's Git metadata contains private
 `agent-worktrees-pr-break-glass-<id>.json` audits with the reason, confirmed
-operation, retained refs and observed invoker/session context. Unknown attribution
+operation, original saved publication evidence, retained refs and observed
+invoker/session context. Unknown attribution
 stays unknown; this is not authenticated identity. Private rationale and invoker
 details are not posted to the provider. Audit `succeeded` records successful
-transport, not completed review/merge: a subsequent persistence failure explicitly
+transport or the explicitly named bookkeeping settlement, not completed
+review/merge: a subsequent persistence failure explicitly
 reports that the remote was published and needs reconciliation. Do not repeat a
 push to repair a tracking or audit error. A failed transport is followed by a
 bounded exact-ref observation: an approved commit on the remote is reconciled
@@ -335,11 +545,13 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `create-pr` (alias `pr-create`) | Squash the worktree's commits, publish the PR head branch, and open the PR. Flags: `--title`, `--body`/`--body-file`, `--draft` (open not-ready-for-review), `--new` (force a fresh head branch for a parallel PR), `--no-open` (push only; with no PR recorded yet, the result's `pr_open_skipped` and a `no PR opened` reminder say none exists; a re-run against an already-recorded PR still reports that PR), `--hold` (deprecated alias for `--draft`) |
 | `pr-ready` | Move a draft PR **out of draft** — request review |
 | `set-pr` | Record PR metadata (`--url`, `--number`) when the PR was opened out of band by a provider sub-agent |
-| `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state; prints the effective actor `flow:` plus the configured profile/resolution source and flags pull-forward once merged. `--no-live` stays offline and reports the configured profile. |
+| `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state and supported native gate evidence. `--repo <slug> --pr <n> --json` reads an explicit target through the same one-shot observation as `pr-watch snapshot`. Tracked mode prints the effective actor `flow:` and flags pull-forward once merged; `--no-live` stays offline. |
 | `pr-nudge` | Ask this repo's bound automated reviewer (`pr.reviewer`, e.g. GitHub Copilot) to (re-)review the active PR. Nothing to nudge (unconfigured/unsupported) is reported, not an error; a successful request is async -- poll `pr-status`/`pr-watch` for a fresh verdict |
 | `pr bar` | Check a PR against its merge bar, clause by clause, on one head: `ci_green`, `review_on_head` (the reviewer's latest review is on the head; `--reviewer`, default Copilot's), `review_findings_zero` (that review reports no open or previously missed findings, and agrees with the threads), `threads_unresolved_zero` (outdated threads are closed), `human_reviews_answered` (people only; an app reviewer is not one), `mergeable`, `merge_policy` (the repo's own policy through the shared classifier: no hold label, not a draft or WIP title, no outstanding change request (any reviewer's latest verdict, an app's too, or the provider's own review decision; a provider-required review is pending unless the provider affirms this actor may bypass it), and an approval on the head where the policy requires one -- resolved for the acting identity's role; an actor demoted by live authority needs a person's approval on the head). Every list is read to its last page; an unreadable page or an empty check list is `unknown`, never met, and a head that moves mid-read makes every clause `unknown` (mergeability the provider is still computing is not a change: the latest answer stands). The read is the repo provider's `PRProvider.get_bar_snapshot` (GitHub reads it today; a provider without one reads every clause `unknown`). `pr bar [<owner/name> <n> \| <n> \| <worktree-id>] [--reviewer <login>] [--json]`; exit 0 met (or merged), 10 pending, 11 failed, 12 unknown |
 | `pr rounds` | Is a PR's review/fix loop converging? One round per head the reviewer reviewed (its latest review in effect there), measured by the open plus previously missed findings it reported; a review stating no count is unmeasured, never zero. `done` when the latest round measured zero on the current head (a clean review of an older head is `continue`); `plateau` when none of the last `--plateau-passes` rounds (default 3) improved on the best before them; `round_cap` after `--max-rounds` (default 6); else `continue` ("round N of M"). Reads through the same `PRProvider.get_bar_snapshot` as `pr bar`, and fails closed the same way: no head, a head that moves or a PR that changes mid-read is `unknown`, never a stop or a go. `pr rounds [<owner/name> <n> \| <n> \| <worktree-id>] [--reviewer <login>] [--max-rounds N] [--plateau-passes N] [--json]`; exit 0 continue or done, 20 plateau, 21 round cap, 12 unknown |
-| `pr-watch` | Block until the PR moves (`wait <repo> <pr> [--until …]`) and wake the caller with a race-proof cursor; `cursor <repo> <pr>` prints the current baseline |
+| `pr-watch` | `snapshot/status <repo> <pr> --json` reads configured native gate evidence once; `threads` reads discussion bodies and reply fingerprints on demand. `wait <repo> <pr> [--until …]` blocks for transitions with an opaque cursor; `cursor <repo> <pr>` captures the baseline. `subscribe/stop/ownerstatus` use the existing shared subscription owner. See [repository-configured observation](pr-observation.md) for native requirements and ownership. |
+| `pr-watch checks` | Built-in `lenses`, `record-self-review`, `verify-self-review` and `scope-report` for an explicit repository/workspace. Configured checks also gate publication mandatorily. See [publication checks](pr-publication-checks.md). |
+| `pr-watch reply/requeue` | Explicit, bounded ADO discussion replies or recovery of an existing build-policy evaluation; no new pipeline, approval or attestation. See [remediation](pr-remediation.md) for freshness, evidence, deduplication and reconciliation requirements. |
 | `pr-merge` | Signal **merge consent** on an approved PR (applies the bound `automerge_label`); the review gate merges when satisfied. `--all` / `--loop` for sweeps |
 | `pr-complete` | Reconcile the worktree after its PR merged — fast-forward past the squash-merge (or rebase), dropping the local commits the squash already absorbed |
 | `pr-diff` | Read the active tracked PR's current unified diff (reviewer-side; provider support varies -- Azure DevOps does not expose one) |
@@ -347,6 +559,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `pr-review` | Publish a review verdict on the active tracked PR: `--approve` / `--request-changes` / `--comment`, with an optional `--body` |
 | `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
 | `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external GitHub/Azure DevOps PR tool without provider access. Optional `--tag` supplies an adopter-owned public label; `--omit-source` honors anonymous publication. `--json` returns `version`, `marker`, `body`, `attributed`. Runs from a managed source worktree; leaves files and remote PRs unchanged. See the worktree skill's `pr-attribution.md` reference. |
+| `identity-vault status/setup/verify` | Local optional shared-key setup for an already configured agent-vault database and independently running service; no project is required. `--vault-argv` supplies exact vault catalog argv as JSON; optional `--vault-context` supplies its owning validated receipt, not worktrees' context. Setup requires a running service and persists non-secret installation-scoped source selection after population and a fresh cache-loader/encryption probe. Status is read-only; verify exercises the persisted normal reader. `--prompt` is explicit; first-owner creation requires both `--initialize-owner --confirm-first-owner`. See [identity-vault](identity-vault.md). |
 | `pr` | Namespace grouping the `pr-*` verbs |
 
 `get pr-profile` / `get pr-required` / `get pr-provider` are deliberately
@@ -370,6 +583,21 @@ an optional automated-review check omitted by `gh pr checks`.
 not just required CI. A reviewer runner failure does not mean the required CI
 aggregate failed. Required-check completeness is separately verified at the
 admin merge boundary; these diagnostics neither weaken nor replace that gate.
+Direct GitHub merge tries the normal server-protected operation first, pinned
+to the expected head (or a freshly observed head). GitHub enforces its effective
+checks and reviews, including legitimate check reruns. If that operation refuses,
+only an already configured admin fallback can proceed, and its existing strict
+required-check verification still applies. A failed head lookup or changed head
+cannot authorize that fallback.
+An accepted normal merge can enter a provider queue. `pr-merge --now` reads back
+the lifecycle state before reporting a completed merge; accepted but unfinished
+requests report `merge-pending` and retain the obligation to watch. An unreadable
+completion is explicit and never reported as landed.
+An untracked direct merge discovers the head in the CLI before mutation and
+retains that exact pin for completion readback; unavailable discovery refuses.
+Completion lookup failures expose the exception type, not raw exception values.
+Merge-attempt receipts retain `merged` and `completion_verified` across providers.
+The latter is null when independent completion verification is unsupported.
 `checks_complete` reports whether both observed sources were readable/complete,
 or is null for providers that do not supply diagnostic coverage. An empty
 failure list from an unsupported provider is not proof that no failure exists.
@@ -441,6 +669,12 @@ the resident is enabled; `--classify`, `--cache-only`, and `--fresh` do not
 authorize caller-side git/session/mux reconstruction. The Manager explicitly
 requires `--current`, and incompatible engines report an upgrade error rather
 than dropping that requirement.
+
+An installed tmux binary with no running server is a healthy empty session
+inventory, not a failed probe. Its recognized no-server responses do not block
+current-roster publication or make session liveness unknown by themselves.
+Permission errors, timeouts, missing executables and other probe failures remain
+unavailable evidence; they are never treated as proof that sessions are gone.
 
 Responses include complete generation/revision/count provenance. A failed
 producer preserves last-good rows with explicit stale availability. An
@@ -608,6 +842,71 @@ removes the settings).
 > Manager owns `~/.tmux.conf` or `~/.psmux.conf`.
 
 
+## Claim handoff locality
+
+Every handoff actor must match its receiving project's exact tracking record,
+actual execution platform and absolute checkout namespace, including same-name
+native records with an unscoped machine registry. Mixed historical/current
+producer references use full-record locality at admission and acceptance;
+stored references and producer metadata are not relabeled.
+
+An accepted bundle can finish or retry from its consumer and child records
+without requiring a retired source ledger or acquiring a new cross-machine
+fence. Receiving-side identity, platform, namespace and artifact checks still
+apply; acceptance does not authorize a foreign execution space.
+Before releasing source claims, the transaction persists child-specific
+`source_owner_refs` for validated source aliases. This optional version-1
+metadata survives local/remote serialization and is used only for accepted
+completion of those exact children. Older bundles still support exact source
+references; an alias-only retry without either the source ledger or durable
+proof fails explicitly rather than guessing equivalence.
+
+## Resolve previews
+
+`resolve --dry-run --worktree-id <id>` is read-only, including with `--json`
+or when forwarded to another machine. It does not record a resume, assign a
+codename, reserve a random profile, stage or consume a launch prompt, refresh
+instructions, restore/reclaim a process, or append launch activity/trace logs.
+Existing record/session/seed state is inspected without creating writer lock
+sidecars. Execution-space authority, configuration preflight and seed
+revision/cold-start checks still apply; refusal does not change durable state.
+A current typed launch seed takes precedence over leftover legacy prompt text;
+a newer legacy revision still supersedes the typed seed.
+
+JSON existing-worktree previews retain the normal launch-plan shape and set
+`launch.preview` to `true`; the returned worktree retains its current resume
+count and timestamp. Base-repo JSON plans remain flat and set `preview: true`.
+Base-repo previews skip the informational dirty-file scan so Git cannot refresh
+the checkout's index as a side effect.
+Explicit profiles and existing-session profile replay remain visible. When a
+new random assignment would be needed, selection is deferred until a real
+launch: `launch.preview_warning` explains that no profile was reserved (the
+interactive preview prints the same warning). A preview's command is advisory,
+not an admitted launch; resolve again without `--dry-run` to execute.
+
+Restoring an existing worktree with `--restore --dry-run` is refused without
+restoring a session.
+`--json --new --dry-run` remains unsupported and creates nothing.
+Interactive dry-run requires an explicit worktree, `--new`, or `--base`;
+it does not open the state-maintaining picker.
+
+## Remote launch options
+
+Machine-targeted JSON and interactive resolve use the same option policy.
+Ordinary remote plans preserve resume opt-outs (`--no-resume`,
+`--no-fast-forward`), bare/restore mode, dry-run, recovery, projection/seed
+deferral, bridge kind, profile and parent/caller lineage. Valued arguments are
+quoted for the target's declared shell. JSON's internal direct-launch setting
+does not disable remote multiplexing: `--target-no-mux` is the explicit override.
+
+Cross-space `--owner-ref` creation and raw Copilot arguments are unsupported and
+refused before a remote plan is emitted; invoke those operations on the target.
+Structured remote prompt admission supports its New/Resume selector and mux
+choice only (queued seed staging is intrinsic). Additional behavior options
+are rejected before SSH rather than omitted from the request. Staged seed IDs
+and launch-request admission/status options remain target-local, not selectors
+to forward through `--machine`.
+
 ## Keeping worktrees current
 
 The picker keeps idle worktrees aligned with the default branch, fast-forward
@@ -669,6 +968,23 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
 
 ### `update` results: exit codes, events, and status
+
+Required payload acquisition is a barrier before the engine's runtime work:
+if its own payload refresh or an active/activation-unknown target refresh
+fails, the engine returns that failure without running runtime installers,
+anchor synchronization, pruning or local command/profile finishing. Successfully
+refreshed payloads remain available for a retry; the error names the cause and
+asks the caller to resolve it and retry `update`. Inactive inventory failures
+remain advisory.
+
+The engine collects the logical target selection before acquisition, refreshes
+its own payload once, and attempts required registered payloads before inactive
+inventory. A required failure stops remaining payload attempts immediately;
+retired inactive payloads are not removed until acquisition succeeds. The summary
+distinguishes attempted failures from remaining targets that were not attempted.
+This does not persist a resumable runtime plan or add automatic retry. The
+barrier does not make the existing combined installers prepare-only or undo
+Manager's earlier self-update.
 
 `update` (and `worktree-manager update`, which drives it) records each run
 through the shared [`update-telemetry`](../../../libs/update-telemetry/README.md)
@@ -761,6 +1077,25 @@ to the effort after release.
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
 
+### Strict repository inventory (`repos list --strict --json`)
+
+Machine consumers that need a complete inventory use `repos list --strict
+--json`. Success adds `inventory_authority: "complete"` to the existing
+`{repos: [...]}` envelope. A missing registry is a complete empty inventory;
+unreadable, dangling-link, malformed, duplicate-key or non-regular registry
+files fail with exit 2 rather than silently dropping entries. The command does not write,
+discover unregistered checkouts, clone or provision anything. Individual local
+checkout availability is separate: use `repos find <name> --registered-only
+--json` when a read or operation needs that repository's current root.
+Missing first-touch parent directories are normal absence; a broken link,
+link loop or non-directory registry ancestor is unavailable storage and cannot
+attest a complete empty inventory.
+
+The default `repos list` remains the tolerant interactive listing. Its legacy
+JSON has no authority marker and must not be interpreted as a completeness
+attestation. An older runtime that does not return the strict marker cannot
+establish inventory completeness even if it accepts or ignores the new flag.
+
 ### Bare-anchor sync (`repos sync`)
 
 `repos sync` fast-forwards a bare anchor (`core.bare=true`) by moving its
@@ -841,6 +1176,27 @@ Startup-folder host listener, so
 `transports/dtssh/scripts/install-host.{ps1,sh} uninstall` is appended
 automatically (or reported as `dtssh-host-script-missing`). `agent-worktrees`
 itself is excluded -- use its own top-level `uninstall` verb.
+
+### Service source checkouts
+
+`services list`, `status`, single-service actions and batch actions resolve
+sources from the project anchor, never from an arbitrary active worktree.
+For a bare anchor, discovery and installers use a retained detached checkout
+of the configured default branch's commit under the project's state root,
+`service-sources/<anchor-key>/<commit>`. The checkout remains available for
+redirectors and source provenance; it is not a scratch directory. Existing
+checkouts with changed HEAD, tracked content or non-ignored untracked files
+are refused, not overwritten. Repository-ignored installer build artifacts
+(such as Python bytecode caches) do not prevent later discovery or reuse.
+Checkouts are not automatically garbage-collected, since installed services
+may still reference them.
+
+Before `install`, `update` or `copy`, synchronization must succeed. Bare
+anchors use the existing safe bare-ref synchronization; ordinary anchors
+retain their checkout and fast-forward workflow. Fetch failures, divergence,
+wrong branches and local-only commits now fail explicitly before discovery or
+installer execution instead of deploying stale source. Read-only list/status
+operations do not fetch or advance the anchor.
 
 ### Deployment ownership (`extensions.agent-worktrees.auto_update`)
 

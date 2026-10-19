@@ -464,6 +464,8 @@ class SessionTraceReducer:
         event_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Apply one durable event and return zero or more transitions."""
+        if data.get("history_replay") is True:
+            return []
         if event_type not in _STRUCTURAL_EVENTS:
             return []
 

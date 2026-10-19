@@ -401,12 +401,47 @@ def _cmd_attention_wait(client, args: argparse.Namespace, caller_id: str | None,
 
 
 def _cmd_read(args: argparse.Namespace) -> None:
-    from .client import BridgeClientError
+    from .client import BridgeClientError, BridgeConnectionError
 
     core = _core()
-    client = core._get_client()
+    client = core._get_client(ensure=False)
     caller_id = core._caller_id_for(args)
     target = args.session_id
+    from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
+
+    represented = None
+    try:
+        if getattr(client, "resolve_live_result_target", None) is not None and (
+            client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)
+            or client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION, refresh=True)
+        ):
+            represented = client.resolve_live_result_target(target)
+    except BridgeConnectionError as exc:
+        print(f"[FAIL] Read evidence unavailable; the daemon was not started: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if represented:
+        if getattr(args, "range", None) or getattr(args, "event", None) is not None or getattr(args, "since", None) is not None:
+            print("[FAIL] Represented reads use bounded result positions, not ACP event ranges; use result --position.", file=sys.stderr)
+            sys.exit(2)
+        tail = getattr(args, "tail", None)
+        payload = client.get_live_result_snapshot(
+            represented["session_id"], max_items=tail if tail is not None else getattr(args, "max_items", None),
+            max_text_chars=getattr(args, "max_text_chars", None),
+        )
+        message_id = getattr(args, "message_id", None)
+        if message_id is not None:
+            payload["message_receipt"] = client.get_live_message_receipt(
+                represented["session_id"], message_id
+            )
+        if args.json:
+            core._json_out(payload)
+        else:
+            _render_result_snapshot(payload, target)
+        return
+    if getattr(args, "message_id", None) is not None:
+        print("[FAIL] --message-id requires a represented live session with receipt support.", file=sys.stderr)
+        sys.exit(2)
+    client = core._get_client()
     renderer = core._make_renderer(args)
     session_id, follow_handle = core._resolve_read_target(client, target)
     if follow_handle and session_id is None:
@@ -495,7 +530,10 @@ def _cmd_result(args: argparse.Namespace) -> None:
     core = _core()
     client = core._get_client(ensure=False)
     try:
-        represented = client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION) and bool(
+        represented = (
+            client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)
+            or client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION, refresh=True)
+        ) and bool(
             client.resolve_live_result_target(args.session_ref)
         )
         if args.expand:
@@ -521,12 +559,16 @@ def _cmd_result(args: argparse.Namespace) -> None:
         core._json_out(payload)
         return
 
+    _render_result_snapshot(payload, args.session_ref)
+
+
+def _render_result_snapshot(payload: dict, session_ref: str) -> None:
     identity = payload.get("identity") or {}
     state = payload.get("state") or {}
     fidelity = payload.get("fidelity") or {}
     latest = payload.get("latest_result") or {}
     incremental = payload.get("incremental") or {}
-    print(f"  {identity.get('logical_delegate_id', args.session_ref)}  [{state.get('session_status', '')}]  fidelity={fidelity.get('level', 'unknown')}")
+    print(f"  {identity.get('logical_delegate_id', session_ref)}  [{state.get('session_status', '')}]  fidelity={fidelity.get('level', 'unknown')}")
     snapshot_sid = identity.get("snapshot_session_id")
     current_sid = identity.get("current_session_id")
     if snapshot_sid:
@@ -546,6 +588,10 @@ def _cmd_result(args: argparse.Namespace) -> None:
         print(f"    Input:     {pending.get('availability')} ({pending.get('reason') or 'evidence unavailable'})")
     elif pending.get("value"):
         print(f"    Input:     {json.dumps(pending['value'], ensure_ascii=False)}")
+    inbox = state.get("pending_messages") or {}
+    print(f"    Inbox:     {json.dumps(inbox, ensure_ascii=False)}")
+    if payload.get("message_receipt"):
+        print(f"    Receipt:   {json.dumps(payload['message_receipt'], ensure_ascii=False)}")
 
     print(f"    Latest:    {latest.get('availability', 'unknown')}")
     latest_value = latest.get("value") or {}
@@ -557,7 +603,7 @@ def _cmd_result(args: argparse.Namespace) -> None:
             for line in str(text).splitlines() or [str(text)]:
                 print(f"      {line}")
     if latest.get("detail_ref"):
-        print(f"      expand: agent-bridge result {args.session_ref} --expand {latest['detail_ref']}")
+        print(f"      expand: agent-bridge result {session_ref} --expand {latest['detail_ref']}")
 
     print("    Work:")
     for item in incremental.get("items") or []:
@@ -598,6 +644,9 @@ def register_session_streaming_commands(sub: argparse._SubParsersAction) -> None
     read_p.add_argument("--event", type=int, metavar="N", help="Random-access read of a single event id N. Does NOT move the delivery cursor.")
     read_p.add_argument("--tail", type=int, metavar="N", help="Random-access read of the last N events. Does NOT move the delivery cursor.")
     read_p.add_argument("--since", type=int, metavar="ID", help="Random-access read of events after event id ID (incremental only-new). Does NOT move the delivery cursor.")
+    read_p.add_argument("--message-id", type=int, help="Inspect this admitted live-message receipt alongside the bounded represented read")
+    read_p.add_argument("--max-items", type=int, default=None, help="Represented read item bound (default 20, maximum 100)")
+    read_p.add_argument("--max-text-chars", type=int, default=None, help="Represented read text bound (default 6000, maximum 20000)")
     core._add_stream_args(read_p)
     read_p.set_defaults(func=_cmd_read)
 

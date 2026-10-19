@@ -267,6 +267,7 @@ _codespaces_runtime_healthy() {
 }
 
 _versioned_activate() {
+    _assert_source_runtime || return 1
     # CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
     # symlink onto it (first migration moves a legacy real `.venv` aside), then gc
     # old slots keeping current + previous-good. Returns non-zero on failure. No-op
@@ -285,6 +286,7 @@ _versioned_activate() {
     _versioned_mark_complete || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    _assert_source_runtime || return 1
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
@@ -423,45 +425,31 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
-    # #935: ensure the target slot exists, tossing it first if a prior build left
-    # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The canonical helper protects a slot owned by a live process
-    # and otherwise detaches stale marker references before rebuilding. No-op in
-    # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    [[ -d "$VENV_DIR" ]] || return 0
-    if ! _run_versioned_runtime --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" \
-        slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'; then
-        _fail "Failed to clean incomplete runtime slot (versions/$SRC_VERSION)"
-        return 1
+    _assert_source_runtime || return 1
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || {
+        printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
+    }
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    if ! declare -F _runtime_construction_begin >/dev/null; then
+        helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+        eval "$helpers"
     fi
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime
 }
 
 _versioned_mark_complete() {
-    # #935: write the slot's completion marker AFTER its isolated health gate
-    # passed, so "marker present" == "healthy, complete build". A crashed /
-    # watchdog-killed install never reaches here, leaving its slot markerless and
-    # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local py="$VENV_PYTHON"
-    if [[ ! -x "$py" ]] && ! py="$(_bootstrap_python)"; then
-        _fail "Cannot mark runtime complete: no bootstrap Python is available"
+    _assert_source_runtime || return 1
+    local actual_hash
+    actual_hash="$(_payload_hash)" || return 1
+    if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
+        printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    local ph
-    if ! ph="$(_payload_hash)" || [[ -z "$ph" ]]; then
-        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
-        return 1
-    fi
-    local args=("$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    if ! "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
-        _fail "Failed to mark runtime slot complete (versions/$SRC_VERSION)"
-        return 1
-    fi
-    return 0
+    _runtime_construction_complete "$actual_hash"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -513,6 +501,11 @@ _assert_uv() {
 # version.
 _install_package_into() {
     local py="$1" mode="${2:-}"
+    _assert_source_runtime || return 1
+    if [[ "$mode" == --editable && -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _fail "A source-qualified runtime cannot use editable dependencies"
+        return 1
+    fi
     if [[ ! -f "$SSH_MGR_DIR/pyproject.toml" ]]; then
         _fail "ssh-manager source not found at $SSH_MGR_DIR"
         return 1
@@ -617,10 +610,13 @@ _ensure_uv_index() {
 }
 
 deploy_venv() {
+    _assert_source_runtime || return 1
     if [[ -e "$VENV_DIR/.install-complete.json" ]] && ! _codespaces_runtime_healthy "$VENV_PYTHON"; then
         _fail "Completed runtime slot failed its module launch health gate (versions/$SRC_VERSION). Refusing an in-place rebuild; use distinct-generation repair or a new released version."
         return 1
     fi
+    _versioned_slot_clean || return 1
+    [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]] && return 0
     _assert_uv || return 1
     _ensure_uv_index
     mkdir -p "$VENV_DIR"
@@ -640,6 +636,8 @@ deploy_venv() {
 }
 
 deploy_package() {
+    _assert_source_runtime || return 1
+    [[ "${_RUNTIME_CONSTRUCTION_REUSE:-0}" == 1 ]] && return 0
     _install_package_into "$VENV_PYTHON" || return 1
     _stamp_build_info "$VENV_PYTHON"
     _ok "Package installed into venv"
@@ -657,10 +655,17 @@ deploy_package() {
 # so the DEPLOYED agent-codespaces CLI's `dev-release`/`dev-status` verbs can
 # shell out to it even when the operator is not standing in a source checkout
 # (docs/patterns/mutable-dev-slot.md Runtime accessibility, option 1).
-# Best-effort -- never fatal.
 _deploy_versioned_runtime_helper() {
-    cp -f "$SCRIPT_DIR/versioned_runtime.py" "$INSTALL_DIR/versioned_runtime.py" 2>/dev/null \
-        || _warn "Could not stage versioned_runtime.py into $INSTALL_DIR"
+    local temporary name
+    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime.py; do
+        temporary="$(mktemp "$INSTALL_DIR/$name.tmp.XXXXXX")" || return 1
+        if ! cp "$SCRIPT_DIR/$name" "$temporary" \
+            || ! mv -f "$temporary" "$INSTALL_DIR/$name"; then
+            rm -f -- "$temporary"
+            _fail "Could not stage $name into $INSTALL_DIR"
+            return 1
+        fi
+    done
 }
 
 # The absolute worktree checkout path claiming/releasing the mutable dev slot
@@ -677,13 +682,7 @@ _resolve_dev_slot_owner() {
     printf '%s\n' "$REPO_ROOT"
 }
 
-# Claim + (re)build the mutable `versions/dev` slot IN PLACE (an editable
-# install against THIS checkout), then activate it. Safe to call repeatedly
-# across an iteration loop: the dev venv is reused, only the editable package
-# links are refreshed -- not a fresh venv every call. Release with the
-# deployed CLI's own `dev-release` verb (not this installer -- see
-# docs/patterns/mutable-dev-slot.md). Accepts an optional "--force" arg.
-do_dev() {
+do_dev() (
     local force_flag="${1:-}"
     _header "$SERVICE_NAME (dev slot)"
     if [[ -z "$SRC_VERSION" ]]; then
@@ -691,33 +690,16 @@ do_dev() {
         return 1
     fi
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    _deploy_versioned_runtime_helper
-
-    local owner dev_dir dev_python
+    local owner dev_version dev_dir dev_python py vr helpers payload_hash
+    py="$(_bootstrap_python)" || return 1
+    vr="$SCRIPT_DIR/versioned_runtime.py"
     owner="$(_resolve_dev_slot_owner)"
-    dev_dir="$INSTALL_DIR/versions/dev"
+    dev_version="dev-$("$py" -I -c 'import uuid; print(uuid.uuid4().hex)')" || return 1
+    dev_dir="$INSTALL_DIR/versions/$dev_version"
     dev_python="$dev_dir/bin/python"
 
     _assert_uv || return 1
     _ensure_uv_index
-    if [[ ! -f "$dev_python" || ! -f "$dev_dir/pyvenv.cfg" ]]; then
-        mkdir -p "$dev_dir"
-        local venv_out
-        if ! venv_out="$(invoke_uv_venv_resilient "$UV_CMD" "$dev_dir" --python 3.11 --allow-existing 2>&1)"; then
-            if ! venv_out="$(invoke_uv_venv_resilient "$UV_CMD" "$dev_dir" --allow-existing 2>&1)"; then
-                _fail "dev venv creation failed: $venv_out"
-                return 1
-            fi
-        fi
-        if [[ ! -f "$dev_python" ]]; then
-            _fail "dev venv creation failed at $dev_dir"
-            return 1
-        fi
-        _ok "dev venv created at $dev_dir"
-    else
-        _ok "Reusing existing dev venv at $dev_dir (mutable in place)"
-    fi
-
     local prev_version claim_args=(--root "$INSTALL_DIR" dev-claim --owner "$owner")
     prev_version="$(_run_versioned_runtime --root "$INSTALL_DIR" --link-name .venv current 2>/dev/null || true)"
     [[ -n "$prev_version" ]] && claim_args+=(--previous-version "$prev_version")
@@ -738,6 +720,19 @@ do_dev() {
         _ok "dev slot claimed by $owner"
     fi
 
+    helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
+    eval "$helpers"
+    payload_hash="$(_payload_hash)" || return 1
+    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$dev_version" \
+        "$payload_hash" '.venv' "$owner" || return 1
+    local venv_out
+    if ! venv_out="$(invoke_uv_venv_resilient "$UV_CMD" "$dev_dir" --python 3.11 --allow-existing 2>&1)"; then
+        _fail "Development venv creation failed: $venv_out"
+        return 1
+    fi
+    [[ -f "$dev_python" && -f "$dev_dir/pyvenv.cfg" ]] || {
+        _fail "Development venv is incomplete: $dev_dir"; return 1;
+    }
     _install_package_into "$dev_python" --editable || return 1
     # NOTE: deliberately do NOT call _stamp_build_info here -- an editable
     # install's "package dir" resolves straight back to src/agent_codespaces/
@@ -751,24 +746,29 @@ do_dev() {
         return 1
     fi
 
-    if ! _run_versioned_runtime --root "$INSTALL_DIR" --link-name .venv mark-complete dev; then
-        _fail "Failed to mark dev slot complete"
+    [[ "$(_payload_hash)" == "$payload_hash" ]] || { _fail 'Development payload changed during construction'; return 1; }
+    _runtime_construction_complete "$payload_hash" || return 1
+    _deploy_versioned_runtime_helper || return 1
+    if ! _run_versioned_runtime --root "$INSTALL_DIR" --link-name .venv activate "$dev_version" --no-link --dev-owner "$owner"; then
+        _fail "Failed to activate development generation"
         return 1
     fi
-    if ! _run_versioned_runtime --root "$INSTALL_DIR" --link-name .venv activate dev --no-link; then
-        _fail "Failed to activate dev slot"
-        return 1
-    fi
-    _ok "dev slot active (current-version -> dev, editable install from $PLUGIN_DIR)"
+    _runtime_construction_finish || return 1
+    _ok "Development generation active: $dev_version (editable source: $PLUGIN_DIR)"
 
     deploy_binstub
     echo ""
     _ok "$SERVICE_NAME dev slot ready. Edit $PLUGIN_DIR and re-run 'dev' to refresh."
     _ok "Release when done: agent-codespaces dev-release"
-}
+)
 # === end mutable-dev-slot ===
 
 deploy_binstub() {
+    mkdir -p "$INSTALL_DIR/bin"
+    local resolver
+    for resolver in resolve-runtime.sh resolve-runtime.ps1; do
+        cp -f "$SCRIPT_DIR/$resolver" "$INSTALL_DIR/bin/$resolver"
+    done
     mkdir -p "$LOCAL_BIN"
     local stub_path="$LOCAL_BIN/agent-codespaces"
     # Self-provisioning binstub (install-on-first-use). When the runtime venv is
@@ -822,6 +822,13 @@ _version_key() {
     '
 }
 _resolve_python() {
+    if [[ -f "$_root/bin/resolve-runtime.sh" ]]; then
+        AGENT_RT_ROOT="$_root"
+        AGENT_RT_PY=""
+        source "$_root/bin/resolve-runtime.sh"
+        [[ -n "$AGENT_RT_PY" ]] && printf '%s\n' "$AGENT_RT_PY"
+        return
+    fi
     for _marker in current-version last-known-good; do
         _ver=""
         [ -f "$_root/$_marker" ] && _ver="$(tr -d ' \t\r\n' < "$_root/$_marker")"
@@ -889,8 +896,16 @@ STUB
 }
 
 _write_codespaces_deploy_manifest() {
+    _assert_source_runtime || return 1
+    local fields="" py
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        py="$(_bootstrap_python)" || return 1
+        fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" \
+            --plugin agent-codespaces --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || return 1
+    fi
     write_deploy_manifest "agent-codespaces" "agent-codespaces" \
-        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
+        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
 }
 
 # -- Actions ---------------------------------------------------------------
@@ -1227,11 +1242,16 @@ do_update() {
 do_stamp() {
     _header "$SERVICE_NAME Stamp (defer runtime to first use)"
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    _assert_source_runtime || return 1
     # Record the REAL payload dir so the binstub can find this installer on first
     # use. Under the install-contract:v4 self-stage, $PLUGIN_DIR is an ephemeral
     # per-invocation staging copy that gets reaped -- COPILOT_PLUGIN_STAGED_FROM
     # holds the true (installed-plugins) payload path; prefer it.
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _stamp_source_snapshot || return 1
+    else
+        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    fi
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
@@ -1261,6 +1281,19 @@ do_provision() {
 
 # -- Dispatch --------------------------------------------------------------
 
+source "$SCRIPT_DIR/source-runtime.sh"
+PACKAGE_VERSION="$SRC_VERSION"
+SOURCE_RUNTIME_IDENTITY=""
+case "$ACTION" in
+    install|update|provision|stamp|dev)
+        _initialize_source_runtime || exit 1
+        if [[ "$ACTION" == dev && -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+            _fail "A source-qualified payload cannot select a mutable development slot"
+            exit 1
+        fi
+        _assert_source_runtime || exit 1
+        ;;
+esac
 case "$ACTION" in
     install)   do_install ;;
     stamp)     do_stamp ;;

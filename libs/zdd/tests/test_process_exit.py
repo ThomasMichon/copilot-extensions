@@ -74,6 +74,14 @@ def test_windows_capture_failure_closes_only_opened_reference(monkeypatch, optio
     )
 
 
+def test_windows_inactive_observation_can_capture_matching_exited_object(monkeypatch):
+    calls = _windows_kernel(monkeypatch, exited=True)
+    with process_exit._open_windows(123, "456", allow_exited=True) as reference:
+        assert reference.wait(0) is True
+    assert calls[0] == ("open", 0x1000 | 0x00100000, False, 123)
+    assert calls[-1] == ("close", 99333)
+
+
 @pytest.mark.parametrize(
     "pid,token",
     [(True, "1"), (0, "1"), (-1, "1"), (2**32, "1"), ("1", "1"), (1, None), (1, ""), (1, "x"),
@@ -90,6 +98,12 @@ def test_invalid_identity_refuses_before_native_open(monkeypatch, pid, token):
     )
     with pytest.raises(ValueError, match="identity"):
         process_exit.open_process(pid, token)
+
+
+@pytest.mark.parametrize("allow_exited", [None, 1, "yes"])
+def test_inactive_observation_flag_requires_explicit_boolean(allow_exited):
+    with pytest.raises(ValueError, match="boolean"):
+        process_exit.open_process(123, "456", allow_exited=allow_exited)
 
 
 def test_unsupported_platform_has_no_pid_fallback(monkeypatch):
@@ -254,6 +268,19 @@ def test_linux_exit_between_open_and_identity_validation_refuses(monkeypatch):
     monkeypatch.setattr(process_exit.os, "close", closed.append)
     with pytest.raises(ProcessLookupError, match="exited"):
         process_exit._open_linux(123, "456")
+    assert closed == [12345]
+
+
+def test_linux_inactive_observation_can_capture_matching_exited_object(monkeypatch):
+    from zdd import singleton_linux
+
+    closed = []
+    monkeypatch.setattr(singleton_linux, "_open_pidfd", lambda _: 12345)
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda _: "456")
+    monkeypatch.setattr(process_exit.diagnostic_exit, "wait_posix", lambda *_: True)
+    monkeypatch.setattr(process_exit.os, "close", closed.append)
+    with process_exit._open_linux(123, "456", allow_exited=True) as reference:
+        assert reference.wait(0) is True
     assert closed == [12345]
 
 

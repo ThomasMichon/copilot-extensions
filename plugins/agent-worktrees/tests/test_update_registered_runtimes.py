@@ -99,9 +99,10 @@ def _isolate_enabled_plugin_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
 def _no_machine_gate_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default to "no gate manifest anywhere" so the host's own gate config
     (an anchor repo resolved through the real repos registry) never leaks in."""
+    _install_config(monkeypatch)
     monkeypatch.setattr(reconcile, "load_runtime_gate", lambda repo_dir: {})
     monkeypatch.setattr(reconcile, "gate_manifest_present", lambda repo_dir: False)
-    monkeypatch.setattr(cfg, "detect_machine", lambda repo_dir=None: "test-box")
+    monkeypatch.setattr(cfg, "detect_machine", lambda repo_dir=None, **kwargs: "test-box")
 
 
 def _install_config(monkeypatch: pytest.MonkeyPatch, anchor: str = "/repo/anchor") -> None:
@@ -884,7 +885,7 @@ def _gate(monkeypatch, *, allowed: dict[str, set[str]], present: bool,
 
     monkeypatch.setattr(reconcile, "load_runtime_gate", load)
     monkeypatch.setattr(reconcile, "gate_manifest_present", lambda repo_dir: present)
-    monkeypatch.setattr(cfg, "detect_machine", lambda repo_dir=None: machine)
+    monkeypatch.setattr(cfg, "detect_machine", lambda repo_dir=None, **kwargs: machine)
     return seen
 
 
@@ -931,7 +932,7 @@ def test_machine_detection_failure_blocks_instead_of_using_the_hostname(monkeypa
     _gated_codespaces(monkeypatch)
     _gate(monkeypatch, allowed={"agent-codespaces": {"raw-host"}}, present=True)
 
-    def detect(repo_dir=None):
+    def detect(repo_dir=None, **kwargs):
         if repo_dir is not None:
             raise RuntimeError("explicit execution space required")
         return "raw-host"

@@ -16,7 +16,9 @@ def test_pre_push_keeps_only_publication_safety_checks():
     hook = HOOKS[1].read_text(encoding="utf-8")
     invoked = set(re.findall(r'"\$ROOT/tools/([^"]+\.py)"', hook))
     assert invoked == {"check-no-internal-identifiers.py", "check-large-files.py"}
-    assert '--head "$local_sha"' in hook
+    assert '--head "$head"' in hook
+    assert '--git-ref "$head"' in hook
+    assert 'check_ref "$local_sha" "$remote_sha"' in hook
 
 
 def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():

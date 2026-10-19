@@ -169,6 +169,7 @@ def build_candidate_bundles(
 def export_artifacts(
     *, repo: Path, commit: str, content_tree: str, dev_head: str, main_before: str,
     out_dir: Path, source_policy: str = "governed", min_age_days: int | None = None,
+    reuse_repository: str | None = None,
 ) -> dict:
     """Build in a disposable candidate checkout; never mutate the promoted tree."""
     import promote_release as promotion
@@ -181,6 +182,17 @@ def export_artifacts(
     try:
         scratch = promotion.add_scratch_worktree(commit, repo=repo)
         projects = candidate_projects(scratch)
+        if reuse_repository is not None:
+            from reuse_promotion_artifacts import reuse_artifacts
+
+            reused = reuse_artifacts(
+                staging, repository=reuse_repository, dev_head=dev_head, main_before=main_before,
+                content_tree=content_tree, candidate_root=scratch, repo=repo,
+                source_policy=source_policy, min_age_days=min_age_days,
+            )
+            if reused is not None:
+                staging.rename(out_dir)
+                return reused
         argv = [
             sys.executable, str(Path(__file__).resolve()),
             "--repo", str(scratch), "--out-dir", str(staging), "--toolchain-source", source_policy,
@@ -195,10 +207,24 @@ def export_artifacts(
             raise PromotionArtifactError("could not read candidate bundle records") from exc
         bundles_path.unlink()
         index = {
-            "schema": SCHEMA, "schema_version": 1,
-            "dev_head": dev_head, "main_before": main_before,
+            "schema": SCHEMA, "schema_version": 2,
+            "dev_head": dev_head,
             "content_tree": content_tree, "artifacts": entries,
         }
+        if reuse_repository is not None:
+            signer, source, ref = (
+                os.environ.get("GITHUB_WORKFLOW_SHA"), os.environ.get("GITHUB_SHA"),
+                os.environ.get("GITHUB_REF"),
+            )
+            if (
+                not isinstance(signer, str) or not _SHA.fullmatch(signer)
+                or source != signer or ref != "refs/heads/main"
+                or not promotion._is_ancestor(signer, main_before, cwd=repo)
+            ):
+                raise PromotionArtifactError("source artifact admission requires pinned trusted Main identity")
+            index["admission"] = {
+                "signer_digest": signer, "source_digest": source, "source_ref": ref,
+            }
         (staging / INDEX_NAME).write_text(
             json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -804,13 +830,15 @@ def validate_artifacts(
         index = json.loads(index_path.read_text(encoding="utf-8"))
         if not isinstance(index, dict) or (
             index.get("schema") != SCHEMA
-            or type(index.get("schema_version")) is not int or index["schema_version"] != 1
+            or type(index.get("schema_version")) is not int or index["schema_version"] not in (1, 2)
         ):
             raise PromotionArtifactError("unsupported promotion artifact index")
-        for field, expected in (
-            ("dev_head", dev_head), ("main_before", main_before),
-            ("content_tree", content_tree),
-        ):
+        bindings = [("dev_head", dev_head), ("content_tree", content_tree)]
+        if index["schema_version"] == 1:
+            bindings.append(("main_before", main_before))
+        elif "main_before" in index:
+            raise PromotionArtifactError("source-owned artifact index must not bind a main container")
+        for field, expected in bindings:
             if not isinstance(expected, str) or not _SHA.fullmatch(expected) or index.get(field) != expected:
                 raise PromotionArtifactError(f"promotion artifact {field} mismatch")
         entries = index.get("artifacts")

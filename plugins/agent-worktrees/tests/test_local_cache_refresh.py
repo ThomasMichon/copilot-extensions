@@ -61,9 +61,18 @@ def provider(root, home, name="demo", *, content=b'---\r\napplyTo: "**"\r\n---\r
     return template, root / static.NAMESPACE / "market" / name / "fallback.local.instructions.md"
 
 
-def test_copy_opaque_bytes_without_packaged_engine(copy_workspace, monkeypatch, capsys):
+@pytest.mark.guard
+@pytest.mark.parametrize("legacy_progress", [False, True], ids=["timed", "legacy"])
+def test_copy_opaque_bytes_without_packaged_engine(
+    copy_workspace, monkeypatch, capsys, legacy_progress,
+):
     root, home = copy_workspace
-    from agent_worktrees import installer
+    from agent_worktrees import installer, launch_progress
+
+    if legacy_progress:
+        monkeypatch.setattr(launch_progress.output, "HumanOperation", None)
+    else:
+        assert launch_progress.output.HumanOperation is not None
 
     monkeypatch.setattr(
         installer, "_payload_root",
@@ -84,8 +93,13 @@ def test_copy_opaque_bytes_without_packaged_engine(copy_workspace, monkeypatch, 
     captured = capsys.readouterr()
     assert not captured.out
     for stage in ("Preparing instruction projections", "Copying declared instructions"):
-        assert f"{stage}: starting" in captured.err
-        assert f"{stage}: finished" in captured.err
+        if legacy_progress:
+            assert f"{stage}: starting" in captured.err
+            assert f"{stage}: finished" in captured.err
+        else:
+            operation = f"launch/{stage.replace(' ', '-')}"
+            assert f"{operation} starting [elapsed " in captured.err
+            assert f"{operation} done [duration " in captured.err
 
 
 def test_overwrite_untracked_and_reconcile_disabled_sources(copy_workspace):
@@ -217,7 +231,10 @@ def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, k
     def file_stat(path, *args, **kwargs):
         value = original_stat(path, *args, **kwargs)
         if path == target:
-            return os.stat_result((stat.S_IFIFO | 0o600, *value[1:]))
+            return os.stat_result(
+                (stat.S_IFIFO | 0o600, *value[1:]),
+                {"st_file_attributes": getattr(value, "st_file_attributes", 0)},
+            )
         return value
 
     def read_bytes(path):

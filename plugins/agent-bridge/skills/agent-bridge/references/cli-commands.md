@@ -98,21 +98,27 @@ ID, or a **live interactive session** (delivered as an attributed
 **Typed outcomes.** `<agent-bridge catalog argv[0]> --json send ...` prints exactly one JSON
 document on stdout for every classified outcome (progress text goes to
 stderr), always with an `outcome`.
-Accepted (exit 0, the path's existing keys kept): `delivered` (a prompt started
-a turn), `queued` (a `--queue` prompt behind a busy turn, or a live message with
-`--delivery queue`), `steered`, `interrupted`, and `duplicate` (an identical
+Accepted (exit 0): `delivered` (an ACP prompt started a turn),
+`queued` (a hosted `--queue` prompt behind a busy turn),
+`admitted`, `sdk_accepted`, `consumed` (live inbox receipt evidence), and `duplicate` (an identical
 `--idempotency-key` retry; `message_id` is the original's, nothing new
 enqueued; a keyed live send to an older daemon, whose response has no
 `duplicate` field, reports `accepted` with `duplicate: null`, since it can't
-tell). Refused, as `{outcome, target, retryable, reason, error}` with a
+tell). Legacy live responses retain `queued`, `steered`, or `interrupted` as
+requested modes, not observed delivery; `delivered: null` makes the absence of
+receipt evidence explicit. See [agent-messages.md](agent-messages.md) for
+receipt/readback semantics. Refused, as `{outcome, target, retryable, reason, error}` with a
 distinct exit code: `refused_busy` (75: the target is running a turn),
 `refused_unavailable` (69: `not_found`, `stale`, `superseded` or
 `expected_mismatch`; `stale`/`superseded` are retryable after re-resolving),
-and `refused_conflict` (65: the idempotency key is bound to a different
-request). Without `--json` the same refusals keep their text and exit codes.
+`refused_conflict` (65: the idempotency key is bound to a different request),
+and `refused_invalid` (2: an active `--wait-reply` timeout is not finite or
+outside 0..600; no message is submitted). Without `--json` the same refusals
+keep their text and exit codes.
 Any other failure (an unexpected HTTP error, a daemon that can't be reached) is
 not a classified outcome: it prints its error to stderr, leaves stdout empty and
-exits 1, so a consumer reads stdout only after an exit of 0, 65, 69 or 75.
+exits 1, so classified payloads occur at exits 0, 2, 65, 69 or 75. Other parser
+or usage errors may also exit 2 with only stderr and no classified payload.
 
 When given an **agent name**, it never starts a *fresh* session on top of an
 existing one: it reuses this caller's session for that agent — keyed by
@@ -143,6 +149,11 @@ blocks, and tool call summaries.
 # Orchestration seam: atomically capture the exact session this create owns
 <agent-bridge catalog argv[0]> create <agent-name> --prompt-file ./dispatch.md \
   --session-id-file ./created-session-id
+
+# Replay-safe native creation on an exact prepared provider-exec instance.
+# Requires protocol 36; establishes native identity without a first prompt.
+<agent-bridge catalog argv[0]> create <prepared-agent> \
+  --creation-key <opaque-key> --provider-instance
 ```
 
 `--session-id-file` is written immediately after the fresh session is created
@@ -150,7 +161,12 @@ and before the first prompt is streamed. Use it when a caller must bind later
 status, model, or result reads to this exact create rather than selecting a
 same-agent session from a broad listing.
 
-`create` always spawns a fresh session, bypassing caller reuse. For agents
+Without `--creation-key`, `create` spawns a fresh session, bypassing caller reuse.
+Keyed creation retains the original result; `--provider-instance` explicitly
+selects the no-worktree provider contract and requires that key. It cannot carry
+a creation prompt. See [session creation contracts](../../../docs/session-acquisition.md)
+for pending, changed-facts and terminal refusal behavior.
+For agents
 that allow only **one session at a time** — CodeSpaces share a single
 checkout — `create` **refuses** if a session already exists rather than
 silently latching onto it, and tells you to end the existing one first:
@@ -164,6 +180,8 @@ For a **singleton repo** (one anchor checkout, no worktree isolation),
 `create` is also a declared refusal: there is no second checkout to create.
 Use `resume <repo-or-agent>` to load/take over the anchor's current head, or
 `handoff <repo-or-agent>` to roll it forward deliberately.
+Recognized singleton agent aliases are canonicalized to `<repo>@anchor`
+before worktree-ID validation; the raw alias is not treated as a worktree ID.
 
 The singleton registry lookup is a finite, 15-second command probe. Its
 scrubbed child environment excludes the caller's Python/venv overrides.
@@ -201,15 +219,15 @@ with bounded reads instead of streaming its transcript into your context:
 ```bash
 <agent-bridge catalog argv[0]> --json live-sessions resolve --handle <sid>   # status, liveness, turn_state, latest_progress
 <agent-bridge catalog argv[0]> result <sid> --json --max-items 5 --max-text-chars 2000 [--position <p>]
-<agent-bridge catalog argv[0]> send <sid> "focus on the failing test first" --no-wait   # default: queue after current turn
+<agent-bridge catalog argv[0]> send <sid> "focus on the failing test first" --json  # immediate admission receipt
 <agent-bridge catalog argv[0]> send <sid> "check the next test step" --steer --no-wait  # join the running turn at its next step
 <agent-bridge catalog argv[0]> send <sid> "stop and handle this now" --interrupt --no-wait  # abort current turn first
 ```
 
-Live-session `send` defaults to `--delivery queue`, preserving the receiver's
-current turn and running after it ends. `--steer` uses SDK immediate delivery to
-join the running turn at its next step without cancelling it. `--interrupt`
-aborts the current turn first, then sends the message as the fresh next turn.
+Live-session `send` defaults to non-aborting steering and immediate receipt
+return. Explicit `--delivery queue` defers consumption until the turn ends.
+See [agent-messages.md](agent-messages.md) for the bounded `read --message-id`
+and opt-in `--wait-reply` contract.
 
 > **Warning:** interrupting a running turn also cancels the receiver's
 > background sub-agents. When the receiver's main turn is idle (only background
@@ -306,6 +324,9 @@ be discarded (or the cancel signature *persists* across sends). See the
 # behind your delivery cursor is (head/acked) -- without dumping the feed.
 <agent-bridge catalog argv[0]> status <session-id>
 <agent-bridge catalog argv[0]> status <session-id> --steps 5   # also show the last 5 collapsed steps
+# Exact full SessionInfo JSON (native/worktree/project/path and readiness facts).
+# Unlike compact status and resume acknowledgements, this is a full identity read.
+<agent-bridge catalog argv[0]> status <session-id> --full
 
 # Wait for a running session's current turn
 <agent-bridge catalog argv[0]> wait <session-id>
@@ -344,13 +365,54 @@ be discarded (or the cancel signature *persists* across sends). See the
 # The target may be an owned ACP session id, a worktree handle, or a
 # singleton repo key / agent name. Singleton repos are keyed internally by a
 # stable `<repo>@anchor` pseudo-worktree id, but the CLI accepts the repo key.
-# If the target's interactive CLI has stopped (e.g. after a reboot), resume
-# loads it as a fresh owned session -- a dormant target is just a note. If a
-# *live* interactive CLI still holds the checkout, resume refuses
-# (break-glass); stop that CLI first, then re-run with --force to take it over.
+# A stopped worktree resumes its owner's exact native head, including a CLI
+# conversation with no retained bridge record. Default: headless ACP.
+# --cli chooses a headed/muxed CLI without changing conversation identity.
+# A live conflicting holder, unknown head, pending handoff or failed native
+# load refuses. Stop the incumbent explicitly; cold resume never kills it or
+# creates replacement history, including when --force was supplied.
 <agent-bridge catalog argv[0]> resume <session-id|worktree-handle|repo-or-agent>
-<agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --force   # affirmative take-over
+<agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --cli
+```
 
+The client requires HTTP protocol 40 and uses
+`POST /api/v1/worktrees/{id}/resume/{mode}` (`mode`: `acp` or `cli`). The mode-qualified route is
+absent on older daemons, so even a downgrade after capability negotiation
+cannot select an old daemon's fresh-conversation fallback. The original
+unqualified HTTP route also applies native-preserving ACP resume; older
+clients retain its request/response shape, not unsafe replacement semantics.
+Native resume returns the durable
+conversation ID and selected mode; a CLI whose process is live but not yet
+represented reports `starting`, not invented idle readiness. Uncertain owner
+launches retain their process and exact native fence for reconciliation.
+Known-ID owner lookup uses the exact record RPC without waiting for roster
+publication. After a verified exact-head mux launch, either the owner's live
+session observation or the exact session's fresh Bridge registration confirms
+execution. An advisory display flag cannot veto that registered runtime;
+foreign executions and a changed native head still refuse.
+Retained local Session Host liveness is reconciled before trusting client
+readiness in either mode. Confirmed CLI success releases only its matching
+reservation, allowing immediate recovery after exit; an uncertain outcome
+keeps its reservation and launch fence.
+An owner-observed CLI that is not represented in the requesting daemon is
+read-only there; its owning bridge and mux remain the control/attachment
+boundary. ACP native launch also requires the paired Worktrees owner's
+[native admission capability](../../../../agent-worktrees/README.md#native-resume-admission);
+an older owner refuses rather than launching without its fence.
+Preflight requires exact `native_admission_version: 1`; the launch also carries
+`--require-native-admission`, so an owner downgrade between preflight and
+execution cannot silently select an older unfenced command.
+Owner-fenced recovery is scoped to native-worktree resume and imported native
+series; ordinary provider and singleton session resumes retain their existing
+transport. Imported origin affinity survives a frontend restart and does not
+authorize automatic conversation recreation.
+
+Singleton anchors are not managed worktrees: their existing ACP-only first
+initialization remains available when no conversation has ever been recorded.
+`strict` refuses that initialization. Known singleton history always loads its
+exact native conversation without a fresh fallback; CLI mode is unsupported.
+
+```bash
 # Retire the current session and continue in a fresh successor in place.
 <agent-bridge catalog argv[0]> handoff <session-id|worktree-handle|repo-or-agent>
 
@@ -376,6 +438,7 @@ successor.
 
 ```bash
 agent-bridge service start      # start the daemon (no-op if already running) -- marketplace-isolation: allow service-management
+agent-bridge service start --direct  # installer use: skip systemd/the scheduled task, start through the job-surviving detached launch (never inside the caller's Job); non-zero exit if that is impossible or it never becomes healthy -- marketplace-isolation: allow service-management
 agent-bridge service stop       # stop the daemon (kills the worker + releases the port) -- marketplace-isolation: allow service-management
 agent-bridge service restart    # zero-downtime cutover to a fresh daemon generation (same code path as `deploy`: spawn passive -> health-gate -> flip -> drain -> retire) -- marketplace-isolation: allow service-management
 agent-bridge service status     # running state + bound port + PID -- marketplace-isolation: allow service-management

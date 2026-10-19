@@ -167,7 +167,7 @@ def test_wrong_scope_units_and_malformed_quantities_withhold_totals(updates: dic
 @pytest.mark.parametrize("body", [
     b"x" * 65537, b'{"user":1,"user":2}', b'{"opaque":"do-not-render",',
     b"[]", b"\xff",
-])
+], ids=["oversized-body", "duplicate-user", "truncated-json", "non-object", "invalid-utf8"])
 def test_invalid_response_is_bounded_and_redacted(body: bytes) -> None:
     client = Client()
     client.responses[1] = GitHubResponse(200, body)

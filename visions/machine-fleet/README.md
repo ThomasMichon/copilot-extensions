@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** leaf (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -22,6 +22,12 @@ The same fabric can grow into a scalable fleet of Linux hosts running explicit,
 containerized roles from the existing service ecosystem, without making one
 container manager or a private infrastructure provider its required substrate.
 
+A fleet belongs to exactly one operator. Its machines, services, state and
+credentials form that operator's control boundary, not a multi-tenant hosting
+environment. Collaboration between operators means explicit interaction between
+independently owned fleets, never placing another operator's state or credentials
+inside this fleet.
+
 ## Concepts & Components
 
 ### Standalone fleet-manager system
@@ -37,6 +43,11 @@ client installation never installs Komodo Core, starts a controller or directly
 mutates worker container managers. A designated service host runs the
 controller/Gateway and its selected deployment-manager integration. Worker hosts
 run only their explicitly adopted connectors and service roles.
+
+Before a Gateway exists, the local CLI provides explicitly authorized bootstrap
+and recovery through the selected substrate owner. Once ready, that Gateway is
+the central service for CLI, workspace-manager and harness clients; ordinary
+clients do not become competing coordinators when it is unavailable.
 
 ### Harness-declared fleet
 
@@ -111,6 +122,8 @@ providers own their execution/session substrate. Fleet adapters route supported
 operations to these owners rather than building competing stores or supervisors.
 Index/search and other harness-side services can be registered independently of
 interactive agent sessions.
+The PR service owns its observation, subscriptions and delivery state; fleet
+placement and routing do not create a second PR watcher or registrar.
 
 ### Shared fleet state backing store
 
@@ -149,6 +162,12 @@ credentials are distinct authorities. Providers own issuance, account/audience
 selection, expiry, renewal, and any interaction required to acquire credentials.
 The Gateway is not a blanket credential pool or an implicit source of authority.
 
+Explicitly enrolled, logged-in provider machines maintain the authenticated
+channel needed to answer fresh-token requests. This responder is an installed
+credential-provider service, independent of an interactive client invocation.
+Reuse the credential owner's lifecycle rather than adding a fleet-local duplicate
+custodian or requiring a roaming client to keep remote work alive.
+
 ### Recommended fleet templates and owned configuration
 
 A harness supplies a recommended fleet shape; the adopter's own configuration
@@ -166,6 +185,39 @@ Authenticated, operator-enrolled external execution hosts can supplement a small
 fleet without becoming controller hosts implicitly.
 
 ## Features
+
+### shared-operator-surfaces
+
+Conversational agents, thin CLI clients and web surfaces operate the same
+qualified fleet relationships and authorized controls. An at-a-glance index
+connects objectives, tasks and dependencies, efforts, worktrees, bridge sessions,
+contributions and service health, exposing current responsibility, blockers,
+progress, freshness and coverage. Operators and agents can locate and steer the
+rightful owner without opening each console or maintaining their own remote
+polling inventories.
+
+### portable-service-and-presentation-extensions
+
+The Gateway offers general-purpose service API adapters and reusable UX
+components through explicit capability and authorization boundaries.
+Adopter-owned drivers supply forge integrations, identity policy, branding,
+interaction presentation and custom service views without forking the portable
+coordination core. A wrapper preserves its service's supported semantics,
+ownership and unavailable capabilities; registration is not permission to
+invent control or widen data access.
+
+Generalized capabilities can move from an adopter implementation into the shared
+product, while private policy, inventories and presentation remain extensions.
+Convergence replaces duplicated responsibilities deliberately, preserving
+accepted work and existing consumers rather than installing a second authority.
+
+### single-operator-fleet
+
+The entire fleet serves one operator, including its controller, service roles,
+storage and credential providers. Multiple machines, clients or provider accounts
+do not create additional operator tenants. Future multiplayer connects separate
+fleets through explicitly authorized interactions while each retains its own
+state and credential custody.
 
 ### unified-coordination-product
 
@@ -231,6 +283,11 @@ snapshot, with explicit stale/disconnected states. Subscription machinery
 augments the owning services' observation contracts rather than replacing their
 durable records.
 
+Fleet activity is incrementally consumable through resumable cursors without
+repeated full-fleet scans. Events retain origin and work relationships, and
+coverage gaps remain visible; a combined feed does not invent global causal
+ordering or treat silence from an offline origin as inactivity.
+
 The shared backing store accepts attributable push updates and serves coherent
 current queries and subscriptions from the same committed view. Machines and
 containers have independently fenced origin identities. Duplicate, delayed,
@@ -295,6 +352,12 @@ roles require their own authorization and safe transitions; accepting a config
 file does not silently create capacity or activate a previously retired role.
 Restart-only changes are reported explicitly, not disguised as successful reload.
 
+The same configuration-directed lifecycle supports cold installation,
+incremental in-place migration, interrupted-operation recovery and
+data-compatible rollback. Rerunning an unchanged request does not duplicate
+capacity, storage, services or writers. Unsafe data downgrades fail explicitly
+instead of presenting an old executable as successful rollback.
+
 ### safe-template-and-live-refresh
 
 "Set up my fleet" resolves the adopter's existing configuration before planning
@@ -309,6 +372,13 @@ before cleanup. Configuration removal, resource retirement and data destruction
 are separate approved operations; a template difference alone cannot authorize
 them. Stale inventory or uncertain ownership cannot produce a cleanup plan
 presented as safe convergence.
+
+An adopted Gateway can subscribe to the user's versioned configuration and
+reconcile approved changes and releases without continuous client supervision.
+Private configuration repositories need not provide CI: local validation and
+explicit user approval gate major reconfiguration. Approval binds the actual
+change, not arbitrary later revisions. Invalid or unapproved desired state
+preserves the last valid deployment.
 
 ### user-controlled-fleet-observation
 
@@ -390,6 +460,9 @@ replacement.
 
 ## Non-Goals / Boundaries
 
+- No multi-operator tenancy inside a fleet and no hosting another operator's
+  state or credentials. Cross-fleet collaboration does not enroll that
+  operator into the local fleet or merge the fleets' private stores.
 - No required provider, cloud substrate, tunnel product, identity vendor, or
   adopter-specific inventory in the portable controller.
 - No mandatory Gateway dependency for standalone services or existing direct/
@@ -408,7 +481,8 @@ replacement.
 
 - Parent: [agent-fabric](../agent-fabric/README.md)
 - Related: [host-resource-providers](../host-resource-providers/README.md),
-  [venue-parity](../venue-parity/README.md), [session-hosting](../session-hosting/README.md)
+  [venue-parity](../venue-parity/README.md), [session-hosting](../session-hosting/README.md),
+  [PR service](../plugins/agent-pull-requests/README.md)
 - Lifecycle: [plugin-services](../plugin-services/README.md), [installer](../installer/README.md),
   [runtime assembly & artifact admission](../plugin-services/runtime-assembly/README.md)
 - Cutover: [graceful daemon cutover](../../docs/patterns/graceful-daemon-cutover.md)

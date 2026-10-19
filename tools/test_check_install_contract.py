@@ -10,6 +10,24 @@ import subprocess
 from pathlib import Path
 import pytest
 
+pytest.register_assert_rewrite("runtime_profile_cases")
+from runtime_profile_cases import TestExactRuntimeProfile as TestExactRuntimeProfile
+
+from test_installer_finalizers import (
+    test_posix_purge_ignores_cdpath_for_relative_roots as test_posix_purge_ignores_cdpath_for_relative_roots,
+    test_posix_purge_keeps_the_locked_inode_and_link_target as test_posix_purge_keeps_the_locked_inode_and_link_target,
+    test_posix_purge_keeps_the_live_pid_fallback as test_posix_purge_keeps_the_live_pid_fallback,
+    test_posix_purge_path_resolution_negative_controls as test_posix_purge_path_resolution_negative_controls,
+    test_posix_purge_propagates_removal_failure as test_posix_purge_propagates_removal_failure,
+    test_posix_purge_preserves_trailing_newlines_in_the_root as test_posix_purge_preserves_trailing_newlines_in_the_root,
+    test_posix_purge_preserves_trailing_newlines_in_home as test_posix_purge_preserves_trailing_newlines_in_home,
+    test_posix_purge_timeout_retains_native_phase_output_and_original_exception as test_posix_purge_timeout_retains_native_phase_output_and_original_exception,
+    test_posix_purge_refuses_home_and_link_roots as test_posix_purge_refuses_home_and_link_roots,
+    test_posix_purge_refuses_unreadable_root as test_posix_purge_refuses_unreadable_root,
+    test_posix_purge_uses_the_physical_directory_holding_the_lock as test_posix_purge_uses_the_physical_directory_holding_the_lock,
+    test_posix_powershell_purge_compares_physical_home_identity as test_posix_powershell_purge_compares_physical_home_identity,
+)
+
 
 REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "tools" / "check-install-contract.py"
@@ -19,6 +37,84 @@ _SPEC = importlib.util.spec_from_file_location("check_install_contract", MODULE_
 assert _SPEC is not None and _SPEC.loader is not None
 checker = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(checker)
+
+
+def _gate_source(tmp_path: Path) -> Path:
+    source = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"
+    for name in ("reconcile.py", "update_gate.py", "update_runtime.py", "update_runtime_plan.py"):
+        shutil.copyfile(source / name, tmp_path / name)
+    return tmp_path
+
+
+def test_actual_update_machine_gate_contract() -> None:
+    source = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"
+    assert checker.check_machine_gate(source) == []
+
+
+def test_install_guard_runs_machine_gate_contract(monkeypatch, capsys) -> None:
+    called = []
+
+    def fail(source):
+        called.append(source)
+        return ["synthetic machine-gate violation"]
+
+    monkeypatch.setattr(checker, "check_machine_gate", fail)
+    assert checker.check() == 1
+    assert called == [REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"]
+    output = capsys.readouterr()
+    assert "synthetic machine-gate violation" in output.out + output.err
+
+
+@pytest.mark.parametrize("name,before,after", [
+    ("update_gate.py", 'if scope != "machine-gated":', "if True:"),
+    ("update_gate.py", "repo_dir = context", "repo_dir = None"),
+    ("update_gate.py", "return not reconcile.runtime_allowed(", "return reconcile.runtime_allowed("),
+    ("update_gate.py", "gate_present=gate_present", "gate_present=True"),
+    ("update_gate.py", "load_runtime_gate(repo_dir)", "load_runtime_gate(Path('other'))"),
+    ("update_gate.py", "gate_manifest_present(repo_dir)", "gate_manifest_present(Path('other'))"),
+    ("update_gate.py", "value=config.configured_machine", "value=None"),
+    ("update_runtime.py", "if step.status:", "if False:"),
+    ("reconcile.py", 'return machine in allowed', "return True"),
+])
+def test_machine_gate_contract_rejects_actual_source_regressions(
+    tmp_path: Path, name: str, before: str, after: str,
+) -> None:
+    source = _gate_source(tmp_path)
+    path = source / name
+    text = path.read_text(encoding="utf-8")
+    assert before in text
+    path.write_text(text.replace(before, after), encoding="utf-8")
+    assert checker.check_machine_gate(source)
+
+
+@pytest.mark.parametrize("function", ["plan_registered", "plan_module"])
+@pytest.mark.parametrize("before,after", [
+    ("if runtime._machine_gate_blocks(name, scope, gate_context):", "if False:"),
+    ("if runtime._machine_gate_blocks(name, scope, gate_context):",
+     "if not force and runtime._machine_gate_blocks(name, scope, gate_context):"),
+    ("status=runtime.MACHINE_GATED_SKIP, eligible=False", 'status="SKIPPED (current)"'),
+])
+def test_machine_gate_contract_rejects_each_planner_bypass(
+    tmp_path: Path, function: str, before: str, after: str,
+) -> None:
+    source = _gate_source(tmp_path)
+    path = source / "update_runtime_plan.py"
+    text = path.read_text(encoding="utf-8")
+    node = next(item for item in ast.parse(text).body if isinstance(item, ast.FunctionDef)
+                and item.name == function)
+    lines = text.splitlines(keepends=True)
+    body = "".join(lines[node.lineno - 1:node.end_lineno])
+    assert before in body
+    lines[node.lineno - 1:node.end_lineno] = [body.replace(before, after)]
+    path.write_text("".join(lines), encoding="utf-8")
+    assert checker.check_machine_gate(source)
+
+
+@pytest.mark.parametrize("name", ["update_gate.py", "update_runtime_plan.py"])
+def test_machine_gate_contract_reports_missing_source(tmp_path: Path, name: str) -> None:
+    source = _gate_source(tmp_path)
+    (source / name).unlink()
+    assert checker.check_machine_gate(source)
 
 
 def test_agent_pull_requests_wrapper_counts_as_real_engine_usage() -> None:
@@ -70,6 +166,50 @@ note="invoke_uv_pip_install_resilient"
 
     assert checker._uses_installer_engine(sh, "sh") is True
     assert checker._uses_engine_uv_install(sh, "sh") is False
+
+
+def test_captured_uv_call_remains_an_actual_install() -> None:
+    sh = '''
+source "$SCRIPT_DIR/installer-engine.sh"
+if out="$(invoke_uv_pip_install_resilient uv "$@" 2>&1)"; then
+    return 0
+fi
+'''
+    assert checker._uses_engine_uv_install(sh, "sh")
+    assert not checker._uses_engine_uv_install("# " + sh.replace("\n", "\n# "), "sh")
+
+
+def test_canonical_policy_invocation_counts_but_documentation_does_not() -> None:
+    sh = '''
+"$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" \\
+    --uv "$(command -v uv)" -- --python "$VENV_PYTHON" "$PLUGIN_DIR"
+'''
+    assert checker._uses_dependency_policy_install(sh, "sh")
+    assert not checker._uses_dependency_policy_install(
+        "# " + sh.replace("\n", "\n# "), "sh",
+    )
+    assert not checker._uses_dependency_policy_install(
+        'note="installer_dependency_policy.py --uv uv"', "sh",
+    )
+
+
+@pytest.mark.parametrize("statement", [
+    '"$PY" -I "$SCRIPT_DIR/installer_dependency_policy.py" -- --python "$PY"',
+    "& $Py -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') -- --python $Py",
+    '"$PY" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv --python "$PY"',
+])
+def test_policy_calls_require_provider_and_argument_separator(statement):
+    assert checker._incomplete_dependency_policy_calls(statement) == 1
+    assert checker._incomplete_dependency_policy_calls("# " + statement) == 0
+
+
+@pytest.mark.parametrize("statement", [
+    '"$PY" -I "$SCRIPT_DIR/installer_dependency_policy.py" \\\n    --uv uv -- --python "$PY"',
+    "& $Py -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') `\n    --uv $Uv -- --python $Py",
+    "$args = @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $Py)",
+])
+def test_policy_calls_accept_complete_native_and_array_argv(statement):
+    assert checker._incomplete_dependency_policy_calls(statement) == 0
 
 
 def test_engine_usage_accepts_trailing_comment_same_as_shared_parser() -> None:
@@ -506,18 +646,100 @@ def test_checked_completion_marker_publication_passes(tmp_path, name, text) -> N
 def test_every_shipped_installer_checks_its_completion_marker() -> None:
     assert checker._mark_complete_result_violations(checker.PLUGINS_DIR) == []
 
-def _working_bash() -> str | None:
-    candidates = [os.environ.get("CE_TEST_BASH"), shutil.which("bash")]
+
+@pytest.mark.parametrize(("suffix", "body", "accepted"), [
+    (".sh", '_runtime_construction_complete "$actual_hash"\n', True),
+    (".sh", '_runtime_construction_complete "$actual_hash" || true\n', False),
+    (".sh", '_runtime_construction_complete "$actual_hash"\nreturn 0\n', False),
+    (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash\nreturn $true\n", True),
+    (".ps1", "try {\nComplete-RuntimeConstruction -PayloadHash $actualHash\n} catch {}\nreturn $true\n", False),
+    (".ps1", "if ($enabled) {\nComplete-RuntimeConstruction -PayloadHash $actualHash\n}\nreturn $true\n", False),
+    (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash | Out-Null\nreturn $true\n", False),
+])
+def test_attached_completion_must_propagate_failure(suffix, body, accepted):
+    assert checker._helper_propagates_writer_status(body, suffix) is accepted
+
+
+@pytest.mark.parametrize("failure", [None, "writer", "hash"])
+def test_shipped_powershell_completion_returns_true_only_after_publication(tmp_path, failure):
+    host = shutil.which("powershell.exe") if os.name == "nt" else shutil.which("pwsh")
+    if not host:
+        pytest.skip("no PowerShell")
+    helpers = []
+    for path in sorted(checker.PLUGINS_DIR.glob("*/scripts/*.ps1")):
+        helper = re.search(
+            r"^function Invoke-VersionedMarkComplete \{\n.*?^\}\n",
+            path.read_text(encoding="utf-8"), re.M | re.S,
+        )
+        if helper:
+            helpers.append((path, helper.group(0)))
+    assert len(helpers) >= 10
+    script = "$ErrorActionPreference = 'Stop'\n$VersionedRuntime = $true\n"
+    script += f"$Failure = '{failure or ''}'\n"
+    script += """
+function Get-PayloadHash {
+    if ($Failure -eq 'hash') { return '' }
+    return ('a' * 64)
+}
+function Assert-SourceRuntime {}
+function Assert-SourceRuntimeIdentity {}
+function Test-SourceRuntimeUnchanged {}
+function Complete-RuntimeConstruction([string]$PayloadHash) {
+    if ($PayloadHash -notmatch '^[0-9a-f]{64}$') { throw 'hash-refused' }
+    if ($Failure -eq 'writer') { throw 'writer-refused' }
+    $script:Published = $true
+}
+"""
+    for path, helper in helpers:
+        script += helper + "\n$script:Published = $false\n"
+        script += """
+$refused = $false
+try { $ok = Invoke-VersionedMarkComplete } catch { $refused = $true }
+if ($Failure) {
+    if (-not $refused -or $script:Published) { throw 'failure did not stop publication' }
+} elseif ($refused -or $ok -ne $true -or -not $script:Published) {
+    throw 'successful publication did not return true'
+}
+"""
+        script += "Write-Output '" + path.parent.parent.name + "'\n"
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [path.parent.parent.name for path, _ in helpers]
+
+
+def _bash_environment(bash: str) -> dict[str, str]:
+    environment = dict(os.environ)
     if os.name == "nt":
+        executable = Path(bash)
+        environment["PATH"] = os.pathsep.join((
+            str(executable.parent), str(executable.parent.parent / "usr" / "bin"),
+            environment.get("PATH", ""),
+        ))
+    return environment
+
+
+def _working_bash() -> str | None:
+    candidates = [os.environ.get("CE_TEST_BASH")]
+    if os.name == "nt":
+        git = shutil.which("git")
+        if git:
+            candidates.append(str(Path(git).parent.parent / "bin" / "bash.exe"))
         candidates.append(r"C:\Program Files\Git\bin\bash.exe")
+    candidates.append(shutil.which("bash"))
     for candidate in filter(None, candidates):
         try:
             probe = subprocess.run(
-                [candidate, "-c", "echo ok"], capture_output=True, text=True, timeout=30,
+                [candidate, "-c", 'probe() { printf "%s" "$1"; }; probe "quoted value"'],
+                capture_output=True, text=True, timeout=30, env=_bash_environment(candidate),
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
         except (OSError, subprocess.TimeoutExpired):
             continue
-        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+        if probe.returncode == 0 and probe.stdout == "quoted value":
             return candidate
     return None
 
@@ -528,8 +750,15 @@ _SH_HARNESS = """set -euo pipefail
 {globals}
 _fail() {{ :; }}; err() {{ :; }}; warn() {{ :; }}; ok() {{ :; }}; info() {{ :; }}
 _warn() {{ :; }}; _ok() {{ :; }}; _info() {{ :; }}
+_assert_source_runtime() {{ :; }}
+_assert_source_runtime_identity() {{ :; }}
+_source_runtime_unchanged() {{ :; }}
 _bootstrap_python() {{ echo "$STUB_PY"; }}
 _payload_hash() {{ [[ -z "${{STUB_HASH_FAIL:-}}" ]] || return 1; echo deadbeef; }}
+_runtime_construction_complete() {{
+    [[ -n "$1" ]] || return 1
+    "$STUB_PY"
+}}
 {helper}
 if _versioned_mark_complete >/dev/null; then echo RC=0; else echo "RC=$?"; fi
 """
@@ -557,7 +786,7 @@ def test_every_shipped_shell_helper_reports_its_writer_status(
         '#!/usr/bin/env bash\ntouch "$STUB_MARK"\nexit "${STUB_RC:-0}"\n', encoding="utf-8", newline="\n"
     )
     stub.chmod(0o755)
-    env = {**os.environ, "STUB_PY": stub.as_posix(), "STUB_RC": str(writer_rc)}
+    env = {**_bash_environment(bash), "STUB_PY": stub.as_posix(), "STUB_RC": str(writer_rc)}
     if hash_fails:
         env["STUB_HASH_FAIL"] = "1"
     values = {"VERSIONED_RUNTIME": "1", "SRC_VERSION": "1.2.3", "PAYLOAD_HASH": "deadbeef"}
@@ -585,6 +814,7 @@ def test_every_shipped_shell_helper_reports_its_writer_status(
         )
         result = subprocess.run(
             [bash, "-c", script], capture_output=True, text=True, env=env, timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         status = result.stdout.strip().rpartition("RC=")[2]
         should_fail = writer_rc != 0 or (hash_fails and computes_hash)
@@ -615,6 +845,9 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
     (payload / "libs" / "lib").mkdir(parents=True)
     (payload / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
     (payload / "libs" / "lib" / "pyproject.toml").write_text("[project]\nname='l'\n", encoding="utf-8")
+    procutil = payload / "libs" / "agent-procutil"
+    procutil.mkdir()
+    (procutil / "pyproject.toml").write_text("[project]\nname='agent-procutil'\n", encoding="utf-8")
     stubs = (
         "sha256sum() { return 1; }; shasum() { return 1; }; openssl() { return 1; }\n"
         if tools == "failing" else ""
@@ -623,8 +856,12 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
     for path in sorted(checker.PLUGINS_DIR.glob("*/scripts/*.sh")):
         text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
         helper = _SH_PAYLOAD_HASH_DEF.search(text)
-        # Only the self-contained helpers (fingerprint of PLUGIN_DIR alone).
-        if helper is None or '"$__parts"' not in helper.group(0):
+        # Include streaming hashes as well as buffered hashes, but not helpers
+        # needing another resolver or interpreter from their installer.
+        if helper is None or re.search(
+            r"\b(?:_bootstrap_python|_compute_payload_hash)\b",
+            helper.group(0),
+        ):
             continue
         checked.append(path)
         script = (
@@ -633,6 +870,8 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
         )
         result = subprocess.run(
             [bash, "-c", script], capture_output=True, text=True, timeout=60,
+            env=_bash_environment(bash),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
         rc, _, out = line.partition(" OUT=")

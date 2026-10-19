@@ -21,10 +21,15 @@ from agent_logger.config import Config, load_config
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.automation import automation_disabled as _automation_disabled
-from agent_logger.sync.log_archive_cli import run_compact_logs, snapshot_process_logs
+from agent_logger.sync.log_archive_cli import run_compact_logs
+from agent_logger.sync.log_reclamation_runtime import (
+    prepare_reclamation, report_reclamation, validate_reclamation_context,
+)
+from agent_logger.sync.process_logs import sync_process_logs
 from agent_logger.sync.meta import (
     MAX_DEFERRED_FILE_SAMPLES,
     MAX_DEFERRED_PATH_CHARS,
+    status_text as _status_text,
 )
 from agent_logger.sync.notify import post_notify
 from agent_logger.sync.origin import classify_for_sync, effective_harness, mark_all
@@ -34,13 +39,6 @@ from agent_logger.sync.worktree_binding import mark_all_worktrees
 
 def _machine(cfg: Config) -> str:
     return cfg.machine_name or detect_machine()
-
-
-def _status_text(value, default: str = "(unknown)", limit: int = 512) -> str:
-    if not isinstance(value, (str, int, float, bool)):
-        return default
-    cleaned = "".join(char for char in str(value) if char.isprintable())
-    return cleaned[:limit] or default
 
 
 def _included_sessions(source, allowlist: list[str],
@@ -253,6 +251,30 @@ def _push_incremental(
     )
 
 
+def _mark_source(
+    source: Path, machine: str, effective: list[str], *, dry_run: bool, verbose: bool,
+) -> None:
+    # Tag every local session with its origin (harness repo + machine) so the
+    # sidecar syncs with the session and downstream daemons can route by origin.
+    origin_summary = mark_all(source, machine, effective, dry_run=dry_run)
+    if verbose:
+        print(f"origin:    marked {origin_summary['marked']}/"
+              f"{origin_summary['total']} session(s) {origin_summary['by_repo']}")
+
+    # session-worktree-archive-linkout Phase 3: proactively bind each session
+    # to its worktree (via the live local agent-worktrees tracking, while it's
+    # still available) rather than requiring Permanent Record to reconstruct
+    # one from the archived CWD after the fact. Must run after origin marking
+    # above -- it reads each session's just-written origin.json for its
+    # harness-project scope. A no-op (never an error) when agent-worktrees
+    # isn't installed alongside agent-logger on this machine.
+    worktree_summary = mark_all_worktrees(source, dry_run=dry_run)
+    if verbose:
+        print(f"worktree:  marked {worktree_summary['marked']}/"
+              f"{worktree_summary['total']} session(s) "
+              f"({worktree_summary['unresolved']} unresolved)")
+
+
 def run_sync(
     cfg: Config,
     *,
@@ -267,7 +289,8 @@ def run_sync(
         return 0
 
     machine = _machine(cfg)
-    log_archive_settings = cfg.process_log_archives
+    _ = cfg.process_log_archives
+    validate_reclamation_context(cfg, dry_run=dry_run)
     source = cfg.sync_source
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     allowlist = cfg.sync_repo_allowlist
@@ -293,45 +316,33 @@ def run_sync(
         print(f"session-sync: source not found: {source}", file=sys.stderr)
         return 1
 
-    # Tag every local session with its origin (harness repo + machine) so the
-    # sidecar syncs with the session and downstream daemons can route by origin.
-    origin_summary = mark_all(source, machine, effective, dry_run=dry_run)
-    if verbose:
-        print(f"origin:    marked {origin_summary['marked']}/"
-              f"{origin_summary['total']} session(s) {origin_summary['by_repo']}")
-
-    # session-worktree-archive-linkout Phase 3: proactively bind each session
-    # to its worktree (via the live local agent-worktrees tracking, while it's
-    # still available) rather than requiring Permanent Record to reconstruct
-    # one from the archived CWD after the fact. Must run after origin marking
-    # above -- it reads each session's just-written origin.json for its
-    # harness-project scope. A no-op (never an error) when agent-worktrees
-    # isn't installed alongside agent-logger on this machine.
-    worktree_summary = mark_all_worktrees(source, dry_run=dry_run)
-    if verbose:
-        print(f"worktree:  marked {worktree_summary['marked']}/"
-              f"{worktree_summary['total']} session(s) "
-              f"({worktree_summary['unresolved']} unresolved)")
-
     if dry_run:
+        reclamation = prepare_reclamation(cfg, machine, target, dry_run=True)
+        _mark_source(source, machine, effective, dry_run=True, verbose=verbose)
         scope = "" if include is None else f", {len(include)} session(s) match"
         print(
             f"session-sync: would push {source} -> {target.describe()} "
             f"(machine={machine}{scope})"
         )
-        return 0
+        return report_reclamation(reclamation, dry_run=True) if reclamation else 0
 
     lock_file = cfg.home / cfg.sync_lock_name
     with sync_lock(lock_file, timeout=cfg.sync_lock_timeout) as acquired:
         if not acquired:
             print("session-sync: another sync holds the lock; skipping", file=sys.stderr)
             return 0
+        reclamation = prepare_reclamation(cfg, machine, target, dry_run=False)
+        _mark_source(source, machine, effective, dry_run=False, verbose=verbose)
+
+        from agent_logger.usage_capture import capture_for_sync
+
+        accounting_complete, accounting_failed = capture_for_sync(cfg, include, verbose=verbose)
 
         # On-device compaction (before the push): archive cold, in-scope,
         # untracked local sessions into the compressed store and reclaim their
         # live dirs, so the scheduled service performs the whole compaction
         # lifecycle from config -- no separate `compact` invocation needed.
-        if cfg.sync_compact["enabled"]:
+        if cfg.sync_compact["enabled"] and accounting_complete:
             from agent_logger.sync.compact import compact_local
 
             cres = compact_local(cfg, verbose=verbose)
@@ -364,50 +375,7 @@ def run_sync(
                 f"file(s) in {len(result.excluded_roots)} root(s) ({mib:.1f} MiB)"
             )
 
-        # Process-log evidence alongside session-state: opt-in, and only for
-        # an unfiltered pass. `include` narrows session-state per-repo; a
-        # process log is not scoped per-repo the same way (one CLI process's
-        # log can span several repos/worktrees across its lifetime), so
-        # admission fencing for a repo-scoped sync is a known, explicit
-        # follow-up -- never silently applied by skipping the filter here.
-        process_logs_failed = False
-        if cfg.process_logs_enabled:
-            if include is not None:
-                # Always print, not only when --verbose: an explicitly
-                # enabled process-log sync going silently unpublished on a
-                # repo-scoped pass is the same "visible no-op" contract as
-                # the unsupported-target case below.
-                print(
-                    "session-sync: process-log sync skipped "
-                    "(repo-scoped sync is not yet supported)"
-                )
-            else:
-                if log_archive_settings.enabled:
-                    if snapshot_process_logs(cfg, dry_run=False):
-                        process_logs_failed = True
-                plog_result = target.push_process_logs(cfg.process_logs_source, machine)
-                if not plog_result.ok:
-                    process_logs_failed = True
-                    print(
-                        f"session-sync: process-log push failed: {plog_result.detail}",
-                        file=sys.stderr,
-                    )
-                else:
-                    # Always print, not only when files moved or --verbose:
-                    # the base Target class's "unsupported" response (SSH/
-                    # ingest targets) is itself ok=True with zero files, and
-                    # an operator who explicitly enabled sync.process_logs
-                    # on one of those targets must see that it's a no-op on
-                    # every ordinary scheduled run, not only a verbose one.
-                    print(
-                        f"session-sync: process-logs {plog_result.detail} "
-                        f"({plog_result.file_count} files)"
-                    )
-        elif log_archive_settings.enabled:
-            print(
-                "session-sync: process-log ZIP snapshots skipped "
-                "(process-log publication disabled)"
-            )
+        process_logs_failed = sync_process_logs(cfg, target, machine, include, reclamation)
 
         if prune:
             removed = target.prune(machine, cfg.sync_retention_days)
@@ -424,6 +392,7 @@ def run_sync(
             elif not arc.ok:
                 print(f"session-sync: archive push failed: {arc.detail}", file=sys.stderr)
 
+        if cfg.sync_compact["enabled"] and accounting_complete:
             opts = cfg.sync_compact
             from agent_logger.sync.compact import resolve_hub_tracked_paths
 
@@ -459,7 +428,7 @@ def run_sync(
             )
             if verbose:
                 print(f"session-sync: notify {'sent' if sent else 'failed (ignored)'}")
-        if process_logs_failed:
+        if process_logs_failed or accounting_failed:
             return 1
     return 0
 
@@ -769,6 +738,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_run = sub.add_parser("run", help="run one sync pass")
+    p_run.add_argument(
+        "--machine-config-only", action="store_true",
+        help="exclude repository configuration; required for machine-local log reclamation",
+    )
     p_run.add_argument("--dry-run", action="store_true", help="show what would happen")
     p_run.add_argument("--prune", action="store_true", help="prune old sessions after sync")
     p_run.add_argument("--verbose", action="store_true", help="verbose output")
@@ -898,11 +871,13 @@ def main(argv: list[str] | None = None) -> int:
     # value to the running sync engine; excluding it would silently keep
     # every machine on whatever stale/absent machine-local sync path it had
     # before the repo declared the correct one.
-    cfg = load_config()
+    cfg = load_config(include_repo=False) if getattr(args, "machine_config_only", False) else load_config()
 
     try:
         if args.command == "run":
             if getattr(args, "detach", False):
+                if args.machine_config_only or cfg.process_log_reclamation.enabled:
+                    raise ValueError("process-log reclamation does not support detached sync")
                 from agent_logger.sync import spawn
 
                 return spawn.spawn_detached_sync(

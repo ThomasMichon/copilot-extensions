@@ -28,11 +28,27 @@ class SpawnReservationClientMixin:
             f"/spawn-reservations/{key}/allocation", json={"project": project},
         ))
 
-    def record_created_agent(self, key: str, *, task_generation: int, agent_info: dict) -> dict:
+    def record_created_agent(
+        self, key: str, *, task_generation: int, agent_info: dict,
+        worktree_record: dict | None = None,
+    ) -> dict:
         """Persist ordinary Bridge readiness before any first task prompt."""
+        body = {"task_generation": task_generation, "agent_info": agent_info}
+        if worktree_record is not None:
+            body["worktree_record"] = worktree_record
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/created-agent",
-            json={"task_generation": task_generation, "agent_info": agent_info},
+            json=body,
+        ))
+
+    def record_resumed_agent(
+        self, key: str, *, task_generation: int, session_info: dict, worktree_record: dict,
+    ) -> dict:
+        """Store actual resumed SessionInfo without asserting a new creation."""
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/resumed-agent",
+            json={"task_generation": task_generation, "session_info": session_info,
+                  "worktree_record": worktree_record},
         ))
 
     def list_reservations(

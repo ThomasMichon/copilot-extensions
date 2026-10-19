@@ -3745,10 +3745,7 @@ resolve_current_environment() {
     [[ -n "$home_path" ]] ||
         fail "Cannot determine the current account home from the account database."
     CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"
-    CURRENT_WSL_DISTRO="${WSL_DISTRO_NAME:-}"
-    if [[ -n "$CURRENT_WSL_DISTRO" ]]; then
-        CURRENT_WSL_DISTRO_TYPE=string
-    fi
+    guest_resolve_distribution "$CURRENT_PROFILE_HOME"
 }
 
 READ_ENV_PLATFORM=""
@@ -4849,12 +4846,16 @@ run_status_action() {
     return "$exit_code"
 }
 
+. "$SCRIPT_DIR/guest-environment.sh"
+
 ACTION="${1:-}"
-[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-release || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == slot-cutover || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
-    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-release|slot-complete|slot-completion-validate|slot-cutover|status|probe-legacy} [options]"
+[[ "$ACTION" == guest-register || "$ACTION" == guest-status || "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-release || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == slot-cutover || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
+    fail "Usage: installation-context.sh {guest-register|guest-status|source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-release|slot-complete|slot-completion-validate|slot-cutover|status|probe-legacy} [options]"
 shift
 
 SOURCE_JSON=""
+DISTRIBUTION=""
+DISTRIBUTION_SUPPLIED=false
 SOURCE_FILE=""
 MARKETPLACE_KEY=""
 PLUGIN_ID=""
@@ -4900,6 +4901,7 @@ POLICY_PATH=""
 
 while (($#)); do
     case "$1" in
+        --distribution) need_value "$@"; DISTRIBUTION="$2"; DISTRIBUTION_SUPPLIED=true; shift 2 ;;
         --source-json) need_value "$@"; SOURCE_JSON="$2"; shift 2 ;;
         --source-file) need_value "$@"; SOURCE_FILE="$2"; shift 2 ;;
         --marketplace-key) need_value "$@"; MARKETPLACE_KEY="$2"; shift 2 ;;
@@ -4939,6 +4941,9 @@ while (($#)); do
         *) fail "Unknown option '$1'." ;;
     esac
 done
+
+if [[ "$ACTION" == guest-register ]]; then guest_register_environment; exit 0; fi
+if [[ "$ACTION" == guest-status ]]; then guest_environment_status; exit "$?"; fi
 
 [[ -z "$SOURCE_JSON" || -z "$SOURCE_FILE" ]] ||
     fail "Specify only one of --source-json and --source-file."

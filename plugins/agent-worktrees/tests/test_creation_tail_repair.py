@@ -23,8 +23,9 @@ from agent_worktrees import status_monitor_runtime, tracking, worktree_creation
 def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
     native_load_config = cfg.load_config
     platform = cfg.detect_platform()
+    machine = "host-wsl" if platform == "wsl" else "host"
     short = "win" if platform == "windows" else platform
-    identity = f"host-{short}-20261013-100000-abcd"
+    identity = f"{machine}-{short}-20261013-100000-abcd"
     anchors = {name: tmp_path / name for name in ("harness", "knowledge")}
     for anchor in anchors.values():
         anchor.mkdir()
@@ -39,7 +40,7 @@ def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
     roots = {name: Path(cfg.derive_worktree_root(str(anchor))) for name, anchor in anchors.items()}
     configs = {
         name: cfg.Config(
-            srcroot=str(tmp_path), machine="host", platform=platform, repo_name=name,
+            srcroot=str(tmp_path), machine=machine, platform=platform, repo_name=name,
             knowledge_repo="knowledge" if name == "harness" else "",
             auto_fast_forward=False,
             repos={name: cfg.RepoConfig(
@@ -52,7 +53,7 @@ def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
     for name, project in projects.items():
         project.mkdir()
         (project / "config.yaml").write_text(json.dumps({
-            "machine": "host", "repo_name": name,
+            "machine": machine, "repo_name": name,
             "repos": {name: {
                 "anchor": str(anchors[name]), "worktree_root": str(roots[name]),
                 "default_branch": "main",
@@ -97,7 +98,7 @@ def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
         checkout.mkdir(parents=True)
         monkeypatch.setattr(repair, "_same_repository", lambda *args, **kw: None)
     record = tracking.create_new_record(
-        identity, f"worktree/{identity}", str(checkout), "harness", "host", platform,
+        identity, f"worktree/{identity}", str(checkout), "harness", machine, platform,
         projects["harness"] / "worktrees",
     )
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="retained\nprivate intent")
@@ -264,16 +265,16 @@ def test_creation_refuses_reciprocal_pair_to_a_different_original_child(creation
         checkout = creation.roots["knowledge"] / child_id
         checkout.mkdir(parents=True)
         tracking.create_new_record(
-            child_id, f"worktree/{child_id}", str(checkout), "knowledge", "host",
+            child_id, f"worktree/{child_id}", str(checkout), "knowledge", parent.machine,
             cfg.detect_platform(), creation.projects["knowledge"] / "worktrees",
             pair_id="20261013-100000-abcd", pair_role="knowledge",
-            pair_ref=tracking.format_claim_ref("host", "harness", parent.worktree_id),
+            pair_ref=tracking.format_claim_ref(parent.machine, "harness", parent.worktree_id),
             pair_kind="worktree",
         )
     parent.pair_id = "20261013-100000-abcd"
     parent.pair_role = "harness"
     parent.pair_kind = "worktree"
-    parent.pair_ref = tracking.format_claim_ref("host", "knowledge", child_id)
+    parent.pair_ref = tracking.format_claim_ref(parent.machine, "knowledge", child_id)
     tracking.save_record(parent)
     pair = state_root.resolve_pair(creation.configs["harness"], cwd=parent.worktree_path)
     assert pair.paired and pair.sibling.worktree_id == child_id
@@ -559,7 +560,7 @@ def test_creation_new_pair_requires_successful_composition(
 
 def test_creation_refuses_untracked_companion_before_permissions(creation, monkeypatch, capsys):
     target = creation.roots["knowledge"] / (
-        f"host-{creation.short}-20261013-100000-abcd-k"
+        f"{creation.record.machine}-{creation.short}-20261013-100000-abcd-k"
     )
     target.mkdir(parents=True)
     monkeypatch.setattr(
@@ -648,15 +649,17 @@ def test_creation_refuses_companion_removed_before_knowledge_lock(
     def carve(*args, **kwargs):
         checkout.mkdir(parents=True)
         child = tracking.create_new_record(
-            child_id, f"worktree/{child_id}", str(checkout), "knowledge", "host",
+            child_id, f"worktree/{child_id}", str(checkout), "knowledge", creation.record.machine,
             cfg.detect_platform(), creation.projects["knowledge"] / "worktrees",
             pair_id="20261013-100000-abcd", pair_role="knowledge",
-            pair_ref=tracking.format_claim_ref("host", "harness", creation.record.worktree_id),
+            pair_ref=tracking.format_claim_ref(
+                creation.record.machine, "harness", creation.record.worktree_id,
+            ),
             pair_kind="worktree",
         )
         return {
             "pair_id": child.pair_id, "pair_role": "harness", "pair_kind": "worktree",
-            "pair_ref": tracking.format_claim_ref("host", "knowledge", child_id),
+            "pair_ref": tracking.format_claim_ref(creation.record.machine, "knowledge", child_id),
         }
 
     if retained:
@@ -697,10 +700,12 @@ def test_creation_uses_companion_machine_config_for_its_native_lifecycle_lock(
     checkout = creation.roots["knowledge"] / child_id
     checkout.mkdir(parents=True)
     child = tracking.create_new_record(
-        child_id, f"worktree/{child_id}", str(checkout), "knowledge", "host",
+        child_id, f"worktree/{child_id}", str(checkout), "knowledge", creation.record.machine,
         cfg.detect_platform(), creation.projects["knowledge"] / "worktrees",
         pair_id="20261013-100000-abcd", pair_role="knowledge",
-        pair_ref=tracking.format_claim_ref("host", "harness", creation.record.worktree_id),
+        pair_ref=tracking.format_claim_ref(
+            creation.record.machine, "harness", creation.record.worktree_id,
+        ),
         pair_kind="worktree",
     )
     real_lock = repair.fin.FinalizeLock
@@ -888,10 +893,12 @@ def test_creation_refuses_conflicting_retained_companion(creation, monkeypatch, 
     checkout = creation.roots["knowledge"] / child_id
     checkout.mkdir(parents=True)
     child = tracking.create_new_record(
-        child_id, f"worktree/{child_id}", str(checkout), "knowledge", "host",
+        child_id, f"worktree/{child_id}", str(checkout), "knowledge", creation.record.machine,
         cfg.detect_platform(), creation.projects["knowledge"] / "worktrees",
         pair_id="20261013-100000-abcd", pair_role="knowledge",
-        pair_ref=tracking.format_claim_ref("host", "harness", creation.record.worktree_id),
+        pair_ref=tracking.format_claim_ref(
+            creation.record.machine, "harness", creation.record.worktree_id,
+        ),
         pair_kind="worktree",
     )
     if change == "live":
@@ -985,13 +992,14 @@ def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch):
     records.mkdir(parents=True)
     root = tmp_path / "checkouts"
     platform = cfg.detect_platform()
+    machine = "host-wsl" if platform == "wsl" else "host"
     short = "win" if platform == "windows" else platform
-    identity = f"host-{short}-20261013-100000-abcd"
+    identity = f"{machine}-{short}-20261013-100000-abcd"
     checkout = root / identity
     # A native linked worktree shares the Git directory without needing a commit.
     git_ops.git("worktree", "add", "--orphan", "-b", f"worktree/{identity}", str(checkout), cwd=anchor)
     config = {
-        "machine": "host", "repo_name": "fixture",
+        "machine": machine, "repo_name": "fixture",
         "repos": {"fixture": {
             "anchor": str(anchor), "worktree_root": str(root), "default_branch": "main",
         }},
@@ -1004,7 +1012,7 @@ def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "_home", lambda: home)
     monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
     record = tracking.create_new_record(
-        identity, f"worktree/{identity}", str(checkout), "fixture", "host", platform, records,
+        identity, f"worktree/{identity}", str(checkout), "fixture", machine, platform, records,
     )
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="process fixture intent")
     before = launch_seed_state.state_path(record.yaml_path).read_bytes()

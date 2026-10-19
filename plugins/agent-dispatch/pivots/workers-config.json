@@ -13,7 +13,8 @@
     "badges": ["validity", "enabled", "activity"]
   },
   "columns": [
-    {"key": "title", "header": "WORKER / TEMPLATE", "width": 22, "priority": 1},
+    {"key": "title", "header": "WORKER / TEMPLATE", "width": 18, "priority": 1},
+    {"key": "kind", "header": "KIND", "width": 16, "priority": 6},
     {"key": "enabled", "header": "ENABLED", "width": 14, "priority": 2},
     {"key": "activity", "header": "ACTIVITY", "width": 18, "priority": 3},
     {"key": "lanes", "header": "LANES", "width": 5, "align": "r", "priority": 1},

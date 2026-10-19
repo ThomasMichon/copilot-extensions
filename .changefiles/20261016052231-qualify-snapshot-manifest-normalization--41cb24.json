@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify snapshot manifest normalization from canonical and materialized installer fixtures",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

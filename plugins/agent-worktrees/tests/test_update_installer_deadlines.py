@@ -107,7 +107,7 @@ def test_registered_runtime_and_module_fallback_use_selected_deadline(payloads, 
     )}
     assert runtime._update_modules(plugin, "linux", None, force=True, targets=targets)
     assert len(calls) == 3
-    assert all(call["timeout"] == 930 and call["env"] is environment for call in calls)
+    assert all(call["timeout"] == 930 and call["env"] == environment for call in calls)
 
 
 def test_declared_default_reaches_registered_and_module_installers(payloads, monkeypatch):
@@ -203,8 +203,10 @@ def test_real_windows_installer_failure_survives_watchdog_cleanup_budget(payload
         return original_run(argv, **kwargs)
 
     monkeypatch.setattr(runtime.subprocess, "run", run)
+    # Exit 124 is the installer's own watchdog deadline; without a published
+    # receipt that is a build-phase timeout.
     assert runtime._reconcile_one_runtime(
         "agent-example", "windows", force=True,
-    ) == "installer exited 124"
+    ) == "timed out (deadline hit during build)"
     assert calls[0]["timeout"] == 31
     assert calls[0]["env"]["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] == "1"

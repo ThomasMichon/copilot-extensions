@@ -19,9 +19,9 @@ MAX_LINE_CHARS = 80 * 1024
 class _Watchdog:
     """One sleeping watchdog per held source, never a timer thread per row."""
 
-    def __init__(self, kill) -> None:
+    def __init__(self, kill, timeout: float) -> None:
         self._condition = threading.Condition()
-        self._deadline = time.monotonic() + INITIAL_TIMEOUT
+        self._deadline = time.monotonic() + timeout
         self._closed = False
         self.expired = False
         self._kill = kill
@@ -124,7 +124,7 @@ class CurrentFeedMixin:
         from .data_ssh import _kill_proc_tree
 
         proc = self._spawn_stream(feed_argv(source))
-        watchdog = _Watchdog(lambda: _kill_proc_tree(proc))
+        watchdog = _Watchdog(lambda: _kill_proc_tree(proc), source.timeout)
         stderr = []
 
         def drain_stderr():
@@ -142,7 +142,7 @@ class CurrentFeedMixin:
         try:
             while self._feed_current(source, gen):
                 raw = proc.stdout.readline(MAX_LINE_CHARS + 1)
-                if not raw:
+                if not self._feed_current(source, gen) or watchdog.expired or not raw:
                     break
                 if len(raw) > MAX_LINE_CHARS or not raw.endswith("\n"):
                     raise ValueError("current-roster feed exceeded its frame bound")
@@ -153,9 +153,9 @@ class CurrentFeedMixin:
                         raise ValueError("current-roster feed included noise inside the protocol")
                     continue
                 frame = json.loads(stripped)
-                if isinstance(frame, dict) and frame.get("type") == "update":
-                    watchdog.arm(INITIAL_TIMEOUT)
                 rows = receiver.receive(frame)
+                if frame.get("type") in {"begin", "update"}:
+                    watchdog.arm(INITIAL_TIMEOUT)
                 if rows is not None:
                     self._feed_commit(source, gen, rows)
                     watchdog.arm(IDLE_TIMEOUT)
@@ -167,7 +167,7 @@ class CurrentFeedMixin:
                 return "cancelled"
             if watchdog.expired:
                 raise FeedUnavailable(
-                    "current-roster feed missed its publication/heartbeat deadline", retry=False,
+                    "current-roster feed missed its startup/publication/heartbeat deadline",
                 )
             errors.join(timeout=0.1)
             error = "".join(stderr).strip()

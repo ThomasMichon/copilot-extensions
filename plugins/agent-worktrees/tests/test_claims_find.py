@@ -10,7 +10,7 @@ import json
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import claims_find_cli, tracking
+from agent_worktrees import claims_find_cli, installer, tracking
 
 
 def _seed_pr_record(
@@ -246,6 +246,49 @@ def test_claims_find_pr_needs_no_project_context():
 
     assert front_door_cli._is_no_project_invocation(["claims", "find", "pr", "--json"])
     assert not front_door_cli._is_no_project_invocation(["claims", "owner", "x"])
+
+
+def test_claims_ownership_needs_no_project_context():
+    from agent_worktrees import front_door_cli
+
+    assert front_door_cli._is_no_project_invocation(["claims", "ownership", "--json"])
+    assert front_door_cli._is_no_project_invocation(
+        ["claims", "ownership", "--owner-ref", "m/p/owner", "--json"]
+    )
+    assert not front_door_cli._is_no_project_invocation(["claims", "owner", "x"])
+
+
+def test_claims_ownership_dispatch_runs_from_neutral_cwd_without_resolving_project(
+    monkeypatch, tmp_path, capfd,
+):
+    """Functional (not just membership) proof: 'claims ownership' is a
+    strict read-only global snapshot (producer_views_cli.cmd_ownership ->
+    scan_ownership) that scans every adopted project's own tracking store
+    rather than the CWD's -- it must actually reach that handler through
+    main()'s own routing from a cwd with no adopted project and an empty
+    projects registry, never touching project resolution on the way there
+    (copilot-extensions PR #7102)."""
+    registry = tmp_path / "projects.yaml"
+    registry.write_text("projects: {}\n", encoding="utf-8")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: registry)
+    m.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        m,
+        "_git_toplevel",
+        lambda _path: pytest.fail("claims ownership tried to resolve project context"),
+    )
+    monkeypatch.setattr(
+        m,
+        "_resolve_active_project",
+        lambda _project: pytest.fail("claims ownership tried to resolve an active project"),
+    )
+
+    assert m.main(["claims", "ownership", "--json"]) == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["entries"] == []
+    assert out["complete"] is True
 
 
 @pytest.mark.parametrize("endpoint, expected", [

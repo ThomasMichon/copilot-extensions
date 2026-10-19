@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import stat
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,11 +61,57 @@ def _read_json(p: Path) -> dict:
         return {}
 
 
-def _read_yaml(p: Path) -> dict:
+def _has_dangling_link(path: Path) -> bool:
+    for candidate in (path, *path.parents):
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        linked = stat.S_ISLNK(info.st_mode) or (getattr(info, "st_file_attributes", 0) or 0) & 0x400
+        if linked and not candidate.exists():
+            return True
+    return False
+
+
+class _StrictYamlLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        if not isinstance(node, yaml.MappingNode):
+            raise ValueError("YAML mapping node is invalid")
+        self.flatten_mapping(node)
+        result = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in result
+            except TypeError as error:
+                raise ValueError("YAML mapping keys must be scalar values") from error
+            if duplicate:
+                raise ValueError("Duplicate YAML mapping key")
+            result[key] = self.construct_object(value_node, deep=deep)
+        return result
+
+
+def _load_yaml(text: str, *, strict: bool = False):
+    return yaml.load(text, Loader=_StrictYamlLoader) if strict else yaml.safe_load(text)
+
+
+def _read_yaml(p: Path, *, strict: bool = False, required_key: str | None = None) -> dict:
     try:
-        data = yaml.safe_load(p.read_text("utf-8"))
+        data = _load_yaml(p.read_text("utf-8"), strict=strict)
+        if strict and data is not None and not isinstance(data, dict):
+            raise ValueError(f"Configuration must be a mapping: {p}")
+        if strict and required_key is not None and (
+            not isinstance(data, dict) or required_key not in data
+        ):
+            raise ValueError(f"Registry requires an explicit {required_key} mapping: {p}")
         return data if isinstance(data, dict) else {}
-    except (OSError, yaml.YAMLError):
+    except FileNotFoundError as error:
+        if strict and _has_dangling_link(p):
+            raise ValueError(f"Cannot read configuration mapping: {p}") from error
+        return {}
+    except (OSError, yaml.YAMLError) as error:
+        if strict:
+            raise ValueError(f"Cannot read configuration mapping: {p}") from error
         return {}
 
 
@@ -175,19 +223,87 @@ class ProjectInfo:
     copilot-extensions#3390 Phase 3e Step 3b)."""
 
 
-def repos_registry(home_dir: Path | None = None) -> dict:
-    return _read_yaml((home_dir or home()) / ".agent-worktrees" / "repos.yaml")
+@dataclass(frozen=True)
+class ProfileInputRoots:
+    """Caller-resolved input roots; never change the machine-global outputs."""
+
+    registry: Path
+    projects: dict[str, Path]
+
+    def project_dir(self, name: str) -> Path:
+        if name not in self.projects:
+            raise ValueError(f"Selected profile inputs omit project {name}")
+        return self.projects[name]
 
 
-def projects_registry(home_dir: Path | None = None) -> dict:
-    return _read_yaml((home_dir or home()) / ".agent-worktrees" / "projects.yaml")
+def _registry(
+    home_dir: Path | None, kind: str, *, strict: bool,
+    input_roots: ProfileInputRoots | None = None,
+) -> dict:
+    root = input_roots.registry if input_roots else (home_dir or home()) / ".agent-worktrees"
+    path = root / f"{kind}.yaml"
+    data = _read_yaml(path, strict=True, required_key=kind) if strict else _read_yaml(path)
+    if strict:
+        entries = data.get(kind, {})
+        if not isinstance(entries, dict) or any(
+            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name)
+            or name in {".", ".."} or (entry is not None and not isinstance(entry, dict))
+            for name, entry in entries.items()
+        ):
+            raise ValueError(f"{kind.title()} registry must contain a {kind} mapping with valid entries")
+        if kind == "repos" and not isinstance(data.get("account_map", {}), dict):
+            raise ValueError("Repos registry account_map must be a mapping")
+        for name, entry in entries.items():
+            if entry is not None:
+                _validate_registry_entry(kind, name, entry)
+    return data
+
+
+def _validate_registry_entry(kind: str, name: str, entry: dict) -> None:
+    string_fields = (
+        ("windows", "linux", "wsl", "remote", "class", "account")
+        if kind == "repos" else ("config_dir", "anchor", "display_name")
+    )
+    for field_name in string_fields:
+        value = entry.get(field_name)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"{kind}.{name}.{field_name} must be a string")
+    if kind == "repos":
+        tags = entry.get("tags")
+        if tags is not None and (
+            not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)
+        ):
+            raise ValueError(f"repos.{name}.tags must be a list of strings")
+    else:
+        wsl = entry.get("wsl")
+        if wsl is not None and (
+            not isinstance(wsl, dict) or any(
+                wsl.get(key) is not None and not isinstance(wsl[key], str)
+                for key in ("distro", "state")
+            )
+        ):
+            raise ValueError(f"projects.{name}.wsl must contain string distro/state values")
+
+
+def repos_registry(
+    home_dir: Path | None = None, *, strict: bool = False,
+    input_roots: ProfileInputRoots | None = None,
+) -> dict:
+    return _registry(home_dir, "repos", strict=strict, input_roots=input_roots)
+
+
+def projects_registry(
+    home_dir: Path | None = None, *, strict: bool = False,
+    input_roots: ProfileInputRoots | None = None,
+) -> dict:
+    return _registry(home_dir, "projects", strict=strict, input_roots=input_roots)
 
 
 def project_config(name: str, home_dir: Path | None = None) -> dict:
     return _read_yaml((home_dir or home()) / f".{name}" / "config.yaml")
 
 
-def _load_roster(machines_yaml: Path) -> tuple[RosterMachine, ...]:
+def _load_roster(machines_yaml: Path, *, strict: bool = False) -> tuple[RosterMachine, ...]:
     """Parse a ``machines.yaml`` file into :class:`RosterMachine` rows.
 
     Ported verbatim from ``agent_worktrees.terminal_fragment._load_roster``
@@ -195,25 +311,46 @@ def _load_roster(machines_yaml: Path) -> tuple[RosterMachine, ...]:
     empty behavior on a missing/malformed file.
     """
     if not machines_yaml.exists():
+        if strict and _has_dangling_link(machines_yaml):
+            raise ValueError(f"Cannot read machine roster: {machines_yaml}")
         return ()
+    if strict and not machines_yaml.is_file():
+        raise ValueError(f"Machine roster must be a file: {machines_yaml}")
     try:
-        data = yaml.safe_load(machines_yaml.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+        data = _load_yaml(machines_yaml.read_text(encoding="utf-8"), strict=strict) or {}
+    except (OSError, yaml.YAMLError) as error:
+        if strict:
+            raise ValueError(f"Cannot read machine roster: {machines_yaml}") from error
         return ()
     machines = data.get("machines") if isinstance(data, dict) else None
     if not isinstance(machines, dict):
+        if strict:
+            raise ValueError(f"Machine roster must contain a machines mapping: {machines_yaml}")
         return ()
     out: list[RosterMachine] = []
     for key, entry in machines.items():
         if not isinstance(entry, dict):
+            if strict:
+                raise ValueError(f"Invalid machine entry in roster: {machines_yaml}")
             continue
+        if strict and "ssh" in entry and not isinstance(entry["ssh"], dict):
+            raise ValueError(f"Invalid SSH entry in roster: {machines_yaml}")
         ssh = entry.get("ssh") if isinstance(entry.get("ssh"), dict) else {}
         envs = []
-        for e in (ssh.get("environments") or []):
+        environments = ssh.get("environments") if strict else (ssh.get("environments") or [])
+        if environments is None:
+            environments = []
+        if strict and not isinstance(environments, list):
+            raise ValueError(f"Invalid SSH environments in roster: {machines_yaml}")
+        for e in environments:
             if not isinstance(e, dict):
+                if strict:
+                    raise ValueError(f"Invalid SSH environment in roster: {machines_yaml}")
                 continue
             name = str(e.get("name") or "").strip()
             if not name:
+                if strict:
+                    raise ValueError(f"Missing SSH environment name in roster: {machines_yaml}")
                 continue
             envs.append(SshEnvironment(
                 name=name,
@@ -230,7 +367,7 @@ def _load_roster(machines_yaml: Path) -> tuple[RosterMachine, ...]:
     return tuple(out)
 
 
-def project_roster(repo_path: str | None) -> tuple[RosterMachine, ...]:
+def project_roster(repo_path: str | None, *, strict: bool = False) -> tuple[RosterMachine, ...]:
     """This project's ``machines.yaml`` roster, given its resolved repo path.
 
     Checks ``<repo_path>/.agent-worktrees/machines.yaml`` first, falling back
@@ -241,6 +378,14 @@ def project_roster(repo_path: str | None) -> tuple[RosterMachine, ...]:
         return ()
     root = Path(repo_path)
     machines_yaml = root / ".agent-worktrees" / "machines.yaml"
+    if strict:
+        try:
+            machines_yaml.lstat()
+        except FileNotFoundError:
+            if _has_dangling_link(machines_yaml):
+                raise ValueError(f"Cannot read machine roster: {machines_yaml}")
+            machines_yaml = root / "machines.yaml"
+        return _load_roster(machines_yaml, strict=True)
     if not machines_yaml.is_file():
         machines_yaml = root / "machines.yaml"
     return _load_roster(machines_yaml)
@@ -297,9 +442,16 @@ def repo_enabled_plugins(repo_path: str | None) -> list[str]:
     ]
 
 
-def build_repos(home_dir: Path | None = None) -> list[RepoInfo]:
-    reg = repos_registry(home_dir)
-    projects = set((projects_registry(home_dir).get("projects") or {}).keys())
+def build_repos(
+    home_dir: Path | None = None, *, strict: bool = False,
+    input_roots: ProfileInputRoots | None = None,
+) -> list[RepoInfo]:
+    kwargs = {"strict": strict, "input_roots": input_roots} if input_roots else (
+        {"strict": True} if strict else {}
+    )
+    reg = repos_registry(home_dir, **kwargs)
+    project_reg = projects_registry(home_dir, **kwargs)
+    projects = set((project_reg.get("projects") or {}).keys())
     account_map = reg.get("account_map") or {}
     pkey = _platform_key()
     out: list[RepoInfo] = []
@@ -437,13 +589,24 @@ def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str, s
 
 
 
-def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
-    reg = projects_registry(home_dir)
-    repos = {r.name: r for r in build_repos(home_dir)}
+def build_projects(
+    home_dir: Path | None = None, *, strict_rosters: bool = False,
+    input_roots: ProfileInputRoots | None = None,
+) -> list[ProjectInfo]:
+    root_kwargs = {"input_roots": input_roots} if input_roots else {}
+    reg = (projects_registry(home_dir, strict=True, **root_kwargs) if strict_rosters
+           else projects_registry(home_dir, **root_kwargs))
+    repos = {r.name: r for r in (
+        build_repos(home_dir, strict=True, **root_kwargs) if strict_rosters
+        else build_repos(home_dir, **root_kwargs)
+    )}
     out: list[ProjectInfo] = []
     for name, entry in (reg.get("projects") or {}).items():
         entry = entry or {}
-        cfg = project_config(name, home_dir)
+        project_dir = (input_roots.project_dir(name) if input_roots
+                       else (home_dir or home()) / f".{name}")
+        cfg = (_read_yaml(project_dir / "config.yaml", strict=strict_rosters)
+               if strict_rosters or input_roots else project_config(name, home_dir))
         repo = repos.get(name)
         wsl = entry.get("wsl") if isinstance(entry.get("wsl"), dict) else {}
         # Prefer the repos.yaml-resolved path; fall back to this project's
@@ -461,7 +624,7 @@ def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
             enabled_plugins=tuple(repo_enabled_plugins(repo.path) if repo else ()),
             wsl_distro=wsl.get("distro"),
             wsl_state=wsl.get("state"),
-            roster=project_roster(anchor),
+            roster=(project_roster(anchor, strict=True) if strict_rosters else project_roster(anchor)),
             display_name=entry.get("display_name"),
             anchor=anchor,
         ))

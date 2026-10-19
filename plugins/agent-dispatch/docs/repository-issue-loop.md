@@ -71,6 +71,31 @@ caller's ordinary authenticated CLI boundary. Reservation markers are accepted
 only from that verified login and only after strict field, issue-number,
 state, occurrence, and task-id validation.
 
+GitHub sources may explicitly set `forge.auth: repository` to use the optional
+installed agent-worktrees account boundary for the configured `repo`. Each
+operation resolves the sibling through the existing installation-aware command
+helper, selects the repository account, obtains a fresh credential in memory,
+and verifies that credential's identity before using it. The operation's child
+environment carries the credential; the source does not change the parent or
+supervisor environment, switch global accounts, or persist a token. One fresh
+credential environment serves all subcommands of a public discovery, reserve,
+claim or release operation; it is not cached on the provider or shared with a
+nested or later operation. Live pre-mutation identity checks still run. Missing
+integration, mismatched identity, empty/malformed output, and credential-command
+failure or warnings refuse the operation rather than falling back to ambient
+authentication. Omitted/`ambient` mode retains standalone `gh` behavior and
+requires no sibling. Both modes retain repository and pre-mutation checks.
+Scoped credential probes and forge operations use the existing captured
+process-tree runner with a 30-second timeout per command. Timeout reaps the
+command's descendants; failures report a fixed command group and numeric exit
+code without echoing arguments or credential-bearing output.
+The command adapter forwards `cwd`, environment and timeout to the contained
+capture runner. That runner owns fixed text capture and headless process-tree
+flags; incompatible or unknown process options refuse before execution.
+Authentication probe failures identify account selection, credential retrieval
+or identity verification even when the contained runner reports a timeout or
+unavailable command, without exposing the original exception or output.
+
 Azure DevOps work-item discovery has no natural per-repo boundary the way a
 GitHub `owner/name` repository does: an Azure DevOps `organization/project`
 can hold far more items than a single GitHub repo ever would, and a flat,
@@ -139,6 +164,21 @@ Reconciliation never silently releases another loop's ownership. Forge labels
 are tracked by exact label identity: loser cleanup retains a label only when
 another active trusted reservation explicitly uses that same label, and removes
 the loser's distinct label otherwise.
+
+The GitHub adapter updates one trusted comment per issue/loop in place. A fresh
+read therefore treats a validated standalone `claimed` or `released` marker as
+an ownership snapshot even when its overwritten `reserved` predecessor is no
+longer visible. Newer occurrences supersede older snapshots, while conflicting
+releases within one occurrence still cannot clear another task's claim,
+regardless of comment discovery order or a previous reservation label.
+A release matching the claimed task and label still takes precedence in
+either order.
+If multiple claims remain unreleased in the selected occurrence, select the
+greatest `at` timestamp, then task ID and label lexicographically; canonical
+payload order breaks any remaining tie. Repeated snapshots of the same claim
+use that same ordering, independent of comment discovery order.
+A claimed snapshot without a matching local task remains claimed: an empty
+replacement coordinator or failed peer connection is not release evidence.
 
 When a claimed task becomes terminal, its coordinator resource reservations
 are released. An issue that is still open also receives a released marker and

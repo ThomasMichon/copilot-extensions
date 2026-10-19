@@ -753,7 +753,7 @@ class ConnectionManager:
             process = await self.open_stdio_channel(
                 active_host,
                 remote_command,
-                discard_stderr=True,
+                discard_stderr=False,
             )
             process_hosts[id(process)] = active_host
             self._carrier_hosts[identity] = active_host

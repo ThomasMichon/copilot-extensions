@@ -12,6 +12,10 @@ unit-tested" bar.
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from agent_dispatch.supervisor import Supervisor
 from agent_dispatch.supervisor_conclusion import (
     _append_conclusion_detail,
@@ -23,6 +27,7 @@ from agent_dispatch.supervisor_conclusion import (
     _conclusion_retry_payload,
     _conclusion_state,
     _hold_pending_cleanup,
+    _retired_cleanup_plan,
 )
 
 
@@ -110,6 +115,13 @@ def test_conclusion_state_primed_and_removed_actions_are_complete():
     assert _conclusion_state({"action": "already-removed"}) == "complete"
 
 
+def test_explicitly_incomplete_priming_remains_retryable():
+    assert _conclusion_state({
+        "action": "primed", "managed_gc_eligible": False,
+        "pair_sibling": {"action": "skipped", "reason": "pair-sibling-lock-timeout"},
+    }) == "pending"
+
+
 def test_conclusion_state_transient_reasons_are_pending():
     assert _conclusion_state({"action": "failed"}) == "pending"
     assert _conclusion_state({"reason": "live-mux"}) == "pending"
@@ -137,9 +149,69 @@ def test_conclusion_retry_payload_parses_stored_json_and_normalizes_session():
     assert payload["attempts"] == 2
 
 
+@pytest.mark.parametrize(
+    "session",
+    [
+        {"action": "preserved", "head_session": "session-exact"},
+        {"action": "concluded", "session": "session-exact"},
+        ["session-exact"],
+        42,
+        True,
+        None,
+        "",
+        " \t",
+    ],
+)
+def test_conclusion_retry_payload_does_not_promote_nonidentity_session_results(session):
+    payload = _conclusion_retry_payload(
+        {"conclusion_detail": json.dumps({"session": session})}
+    )
+    assert "acp_session_id" not in payload
+    assert payload["session"] == session
+
+
+@pytest.mark.parametrize("invalid", [{"session": "wrong"}, ["wrong"], 42, True, "", " \t"])
+def test_conclusion_retry_payload_rejects_invalid_explicit_identity(invalid):
+    payload = _conclusion_retry_payload(
+        {"conclusion_detail": json.dumps({"acp_session_id": invalid})}
+    )
+    assert "acp_session_id" not in payload
+
+
+def test_conclusion_retry_payload_valid_identity_takes_precedence_over_legacy_session():
+    payload = _conclusion_retry_payload(
+        {"conclusion_detail": json.dumps({
+            "acp_session_id": "session-exact",
+            "session": "legacy-session",
+        })}
+    )
+    assert payload["acp_session_id"] == "session-exact"
+
+
+def test_conclusion_retry_payload_invalid_identity_can_use_legacy_string():
+    payload = _conclusion_retry_payload(
+        {"conclusion_detail": json.dumps({
+            "acp_session_id": {"session": "wrong"},
+            "session": "legacy-session",
+        })}
+    )
+    assert payload["acp_session_id"] == "legacy-session"
+
+
 def test_conclusion_retry_payload_defaults_for_malformed_json():
     assert _conclusion_retry_payload({"conclusion_detail": "not json"}) == {}
     assert _conclusion_retry_payload({}) == {}
+
+
+def test_retired_cleanup_plan_retains_checkpointed_identity():
+    state, payload = _retired_cleanup_plan({
+        "worktree": "wt-created",
+        "worktree_ownership": "created",
+        "conclusion_detail": json.dumps({"acp_session_id": "session-exact"}),
+    }, local_session_id="bridge-retired")
+    assert state == "pending"
+    assert payload["acp_session_id"] == "session-exact"
+    assert payload["session_end"]["session_id"] == "bridge-retired"
 
 
 def test_conclusion_retry_meta_reads_attempts_and_next_attempt_at():
@@ -159,3 +231,4 @@ def test_supervisor_re_exposes_every_helper_as_a_static_method():
     assert Supervisor._bounded_cleanup_failure({}, attempts=0, now=0.0)[0] == "pending"
     assert Supervisor._bounded_component_failure({}, now=0.0)[0] == "pending"
     assert Supervisor._conclusion_retry_meta({}) == (0, 0.0)
+    assert Supervisor._retired_cleanup_plan({}) == _retired_cleanup_plan({})

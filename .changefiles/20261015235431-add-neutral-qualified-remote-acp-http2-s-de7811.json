@@ -1,0 +1,21 @@
+{
+  "comment": "Add neutral qualified remote ACP HTTP2/SSE and WebSocket clients with bounded transports and shared scoped HTTP auth injection.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
