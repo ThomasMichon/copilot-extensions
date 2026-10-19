@@ -333,6 +333,58 @@ Conflicting breakaway creation flags are rejected. The default
 `allow_breakaway=True` remains compatible with existing callers that deliberately
 launch survivable daemons.
 
+## Opt-in Windows commands from WSL
+
+`agent_procutil.wsl.run_windows_owned` is a separate, text-mode bounded-command
+interface. Existing Windows/POSIX spawn APIs and daemon lifetimes are unchanged.
+The caller supplies an absolute WSL-invokable **base `pythonw.exe`** path; the
+library never discovers or installs a Windows interpreter. WSL's normal
+`wslpath` mapping must make this installed package readable by that interpreter.
+An unavailable interpreter, mapping, import or strict Windows Job refuses
+execution rather than falling back to an unowned command.
+
+```python
+from agent_procutil.wsl import run_windows_owned
+
+result = run_windows_owned(
+    windows_command,
+    windows_python=selected_windows_pythonw,
+    timeout=10,
+    input_text=request_text,
+)
+```
+
+The per-call windowless Windows owner first places **itself** in a strict
+kill-on-close Job. Target creation therefore inherits Windows ownership before
+execution, including the suspended-create/assignment interval of its nested
+ordinary bounded command. The caller keeps a dedicated input pipe open:
+caller exit, hard death or interruption closes it, and the Windows owner exits,
+releasing the self-Job and its descendants. This is a bounded command helper,
+not a persistent service or a POSIX-group claim over Windows processes.
+
+Target stdin, stdout and stderr remain distinct. A framed request carries text
+input independently of the lifetime signal, and the result returns separate
+captured text streams and the Windows command's actual return code. Requests
+and serialized responses have explicit byte bounds; target capture retains the
+ordinary `run_owned` memory contract. No command text, input or raw exception is
+logged by the interop wrapper. Missing or interrupted completion is explicit
+and never permission to replay an uncertain command.
+
+Portable protocol tests are separate from real WSL/Windows qualification.
+Timeout, blocked-stdin, SIGINT and caller-death cases must inspect exact owned descendants
+before an outer fixture closes its own Job. Native Job/stdio success alone is
+not that cross-OS proof.
+
+The opt-in native suite uses `AGENT_PROCUTIL_WSL_TEST_DISTRO` to select an
+existing WSL distribution and runs each failure case twice while observing
+visible windows and foreground changes. It never provisions WSL or installs a
+Windows interpreter. Set `AGENT_PROCUTIL_WSL_TEST_PACKAGE_ROOT` to the
+Windows-visible `site-packages` directory of an isolated, wheel-installed
+Linux test environment to exercise the installed package instead of source.
+Run `python -m pytest libs/agent-procutil/tests/test_wsl_native.py` on Windows.
+These native cases stay opt-in; portable protocol/refusal tests remain in the
+ordinary library suite.
+
 ## Optional owned-process CPU observations
 
 `agent-procutil[metrics]` adds psutil-backed, read-only observations. The default

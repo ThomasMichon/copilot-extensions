@@ -311,9 +311,9 @@ def _assign_suspended_to_kill_on_close_job(
 
     The returned :class:`JobHandle` owns the Job Object handle. Hold it for the
     child process lifetime; close it once ordinary cleanup has finished.
-    Private to :func:`spawn_in_kill_on_close_job`: using a bare PID is safe only
-    while the child is still suspended and cannot have exited or spawned
-    descendants before assignment.
+    Internal callers use either a still-suspended child or their own current
+    process, whose identity cannot be reused during this call. The latter
+    establishes inherited containment before a cross-OS owner creates children.
     """
     if not _is_windows():
         return None
