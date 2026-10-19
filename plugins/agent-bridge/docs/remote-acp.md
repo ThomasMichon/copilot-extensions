@@ -91,7 +91,10 @@ Reuse requires the same project, server-side cwd and complete binding snapshot;
 a stopped conversation loads its retained remote ID. Another project's binding
 never reuses or takes over that session. A changed binding refuses reuse until
 an explicit new attachment (`force_new: true`); anonymous starts always create
-a new conversation. Concurrent starts share the reserved starting session.
+a new conversation. Concurrent starts share the reserved starting session,
+including an explicit native ID whose load has not yet completed. Stopped
+caller reuse serializes with explicit resume/stop through the session's
+lifecycle lock and revalidates state and policy after acquiring it.
 
 An explicit URL must match exactly one bound target policy in the requested
 project context before credentials,
@@ -102,6 +105,8 @@ policy; unmatched or ambiguous URLs refuse without ambient-auth fallback.
 Endpoint targeting/contributions are advertised by HTTP generation 41
 (`REMOTE_ACP_TARGETS_PROTOCOL_VERSION`). The client refuses a direct URL before
 sending it to an older daemon; named remote ACP retains its generation-38 floor.
+For named targets, generation-38 through generation-40 daemons retain legacy
+CLI caller reuse; binding-aware daemon reuse applies from generation 41.
 
 ### Enabled-plugin target requirements
 

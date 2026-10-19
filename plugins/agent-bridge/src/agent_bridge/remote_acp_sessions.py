@@ -97,7 +97,10 @@ async def _attach_remote_session(
                     SessionStatus.CREATED, SessionStatus.STARTING, SessionStatus.RUNNING,
                     SessionStatus.IDLE, SessionStatus.STOPPED,
                 }
-                or (remote_session_id and candidate.acp_session_id != remote_session_id)
+                or (remote_session_id and (
+                    candidate._remote_requested_session_id
+                    if candidate.status == SessionStatus.STARTING else candidate.acp_session_id
+                ) != remote_session_id)
                 or (candidate.status == SessionStatus.STOPPED and not candidate.acp_session_id)
             ):
                 continue
@@ -107,15 +110,31 @@ async def _attach_remote_session(
                 raise RemoteSessionBusy(candidate.session_id)
             if candidate.status != SessionStatus.STOPPED:
                 return candidate
-            session = candidate
-            remote_session_id = candidate.acp_session_id
-            break
+            async with candidate._lifecycle_lock:
+                return await _attach_remote_session(
+                    manager, name, cwd=cwd, caller_id=caller_id,
+                    caller_session_id=caller_session_id, session=candidate,
+                    project=project, reuse=True,
+                )
     previous_spec = (
         RemoteAcpTarget.model_validate(session.target.remote_acp).model_dump(mode="json")
         if session is not None else None
     )
     if session is not None and previous_spec != snapshot:
         raise ValueError("Remote endpoint/profile/identity changed; explicit new attachment required")
+    if session is not None and reuse:
+        if manager._sessions.get(session.session_id) is not session or session.status not in {
+            SessionStatus.CREATED, SessionStatus.STARTING, SessionStatus.RUNNING,
+            SessionStatus.IDLE, SessionStatus.STOPPED,
+        }:
+            raise RemoteTransportError("Remote session ended or was superseded during attachment")
+        if session.status == SessionStatus.RUNNING:
+            raise RemoteSessionBusy(session.session_id)
+        if session.status != SessionStatus.STOPPED:
+            return session
+        if not session.acp_session_id:
+            raise ValueError("Remote resume requires a stopped durable session")
+        remote_session_id = session.acp_session_id
     if session is None:
         if len(manager._sessions) >= manager.MAX_SESSIONS:
             raise ValueError("Bridge session limit exceeded")
@@ -159,6 +178,7 @@ async def _attach_remote_session(
     client = AcpClient(on_event=on_event)
     session.client = client
     session.status = SessionStatus.STARTING
+    session._remote_requested_session_id = remote_session_id
 
     def require_current() -> None:
         if manager.is_draining:
@@ -220,6 +240,7 @@ async def _attach_remote_session(
         raise
     finally:
         if session.client is client and manager._sessions.get(session.session_id) is session:
+            session._remote_requested_session_id = None
             session.event_log.set_telemetry_identity(acp_session_id=session.acp_session_id)
             manager._db.update_session_status(
                 session.session_id, session.status.value, time.time(),

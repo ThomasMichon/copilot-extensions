@@ -201,6 +201,95 @@ async def test_concurrent_reuse_reserves_starting_before_handshake(remote_manage
 
 
 @pytest.mark.asyncio
+async def test_concurrent_explicit_load_reuses_requested_native_id_before_confirmation(remote_manager, monkeypatch):
+    manager, calls = remote_manager
+    original = AcpClient.load_session
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed(client, **kwargs):
+        entered.set()
+        await release.wait()
+        await original(client, **kwargs)
+
+    monkeypatch.setattr(AcpClient, "load_session", delayed)
+    request = _remote_request(manager)
+    body = StartSessionRequest(
+        agent="remote-acp:example", caller_id="caller", remote_session_id="saved",
+    )
+    pending = asyncio.create_task(start_session(body, request))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        session = next(iter(manager._sessions.values()))
+        assert session.acp_session_id is None
+        second = await asyncio.wait_for(start_session(body, request), 2)
+        assert second.session_id == session.session_id and second.status == SessionStatus.STARTING
+        assert len(manager._sessions) == 1 and calls == ["connect"]
+        release.set()
+        first = await asyncio.wait_for(pending, 2)
+        assert first.session_id == second.session_id
+        assert calls == ["connect", ("load", "saved")]
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        for session in list(manager._sessions.values()):
+            await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_stopped_caller_reuse_shares_explicit_resume_lifecycle_lock(remote_manager):
+    import threading
+
+    manager, calls = remote_manager
+    session = await connect_remote_session(manager, "example", caller_id="caller")
+    await manager.stop_session(session.session_id)
+    lock = session._lifecycle_lock
+    competing = asyncio.Event()
+    entries = 0
+
+    class ObservedLock:
+        async def __aenter__(self):
+            nonlocal entries
+            entries += 1
+            if entries == 2:
+                competing.set()
+            return await lock.__aenter__()
+
+        async def __aexit__(self, *args):
+            return await lock.__aexit__(*args)
+
+    session._lifecycle_lock = ObservedLock()
+    entered, release = threading.Event(), threading.Event()
+    resolve = manager._remote_acp_catalog.resolve
+
+    def paused(*args, **kwargs):
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(5)
+        return resolve(*args, **kwargs)
+
+    manager._remote_acp_catalog.resolve = paused
+    explicit = asyncio.create_task(manager.resume_session(session.session_id, drain=False))
+    ordinary = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        ordinary = asyncio.create_task(start_session(StartSessionRequest(
+            agent="remote-acp:example", caller_id="caller",
+        ), _remote_request(manager)))
+        await asyncio.wait_for(competing.wait(), 2)
+        assert not ordinary.done() and calls == ["connect", "new"]
+        release.set()
+        resumed, reused = await asyncio.wait_for(asyncio.gather(explicit, ordinary), 3)
+        assert resumed is session and reused.session_id == session.session_id
+        assert session.status == SessionStatus.IDLE
+        assert calls == ["connect", "new", "connect", ("load", "server-owned-session")]
+    finally:
+        release.set()
+        await asyncio.gather(explicit, *([ordinary] if ordinary else []), return_exceptions=True)
+        session._lifecycle_lock = lock
+        await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
 async def test_concurrent_stopped_reuse_reserves_before_old_client_shutdown(remote_manager):
     manager, calls = remote_manager
     session = await connect_remote_session(manager, "example", caller_id="caller")

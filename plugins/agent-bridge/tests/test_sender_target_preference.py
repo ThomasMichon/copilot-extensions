@@ -213,3 +213,34 @@ def test_remote_cli_reuse_and_takeover_require_daemon_binding_resolution(monkeyp
     assert _start_agent_session(client, target, force=force) == "validated"
     assert requests[0][2][0]["sender_repo"] == "selected"
     assert requests[0][2][0]["caller_id"] == "caller"
+
+
+@pytest.mark.parametrize("version", [38, 39, 40, 41])
+def test_named_remote_reuse_keeps_legacy_daemon_continuity(monkeypatch, version):
+    from agent_bridge.client import BridgeClient
+
+    monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "selected")
+    monkeypatch.setattr(cli, "_get_caller_id", lambda: "caller")
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
+    requests = []
+    client = BridgeClient.__new__(BridgeClient)
+    client.daemon_supports = lambda required: version >= required
+
+    def request(method, path, *args, **kwargs):
+        requests.append((method, path))
+        if (method, path) == ("GET", "/api/v1/sessions"):
+            return {"sessions": [{
+                "session_id": "legacy", "agent_name": "remote-acp:example",
+                "name": "example", "caller_id": "caller", "status": "idle",
+            }]}
+        assert (method, path) == ("POST", "/api/v1/sessions")
+        return {"session_id": "validated", "name": "example", "status": "idle"}
+
+    client._request = request
+    assert _start_agent_session(client, "remote-acp:example") == (
+        "validated" if version == 41 else "legacy"
+    )
+    assert requests == [(
+        "POST" if version == 41 else "GET", "/api/v1/sessions",
+    )]

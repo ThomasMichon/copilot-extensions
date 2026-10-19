@@ -776,6 +776,7 @@ class Session:
             migrate_selected_instance(target)
         self.client: AcpClient | None = None
         self._remote_affinity_cookies: Any = None
+        self._remote_requested_session_id: str | None = None
         self.status = SessionStatus.CREATED
         # Status read from durable storage during daemon startup before
         # rehydrate converts an adoptable session to STOPPED. Used only by the

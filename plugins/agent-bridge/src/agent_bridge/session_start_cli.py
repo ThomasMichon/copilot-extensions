@@ -258,6 +258,7 @@ def _start_agent_session(
 ) -> str:
     core = _core()
     from .client import BridgeClientError
+    from .protocol import REMOTE_ACP_TARGETS_PROTOCOL_VERSION
     from .remote_acp_config import is_remote_address
     from .session_targeting_cli import _AgentSessionConflict, _busy_session_message
 
@@ -266,8 +267,12 @@ def _start_agent_session(
         raise SystemExit(2)
     caller_id = core._get_caller_id()
 
-    # Only the daemon can validate the selected project's current remote binding.
-    if not force_new and not is_remote_address(agent_name):
+    daemon_reuse = is_remote_address(agent_name) and (
+        not agent_name.startswith("remote-acp:")
+        or client.daemon_supports(REMOTE_ACP_TARGETS_PROTOCOL_VERSION)
+    )
+    # Older named-target daemons predate binding-aware caller reuse.
+    if not force_new and not daemon_reuse:
         existing = _find_caller_session(client, agent_name, caller_id)
         if existing is not None:
             existing = _await_coming_up_settled(client, existing)
