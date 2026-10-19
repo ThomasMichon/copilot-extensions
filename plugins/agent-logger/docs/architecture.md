@@ -353,6 +353,22 @@ The registration side (`scripts/register-cold-store-provider.sh` /
 namespace-provider registration — a distinct, capability-keyed manifest
 directory, never the namespace one.
 
+### Session metrics (`agent_logger.metrics`)
+
+`agent-logger metrics --json` measures one task carried by an ordered chain of
+sessions from their event logs alone: kickoff, wall-clock duration, agent
+working time without time spent waiting on the user (`ask_user` answers and
+permission prompts), and user and agent turn counts, per session and in
+aggregate, with an optional `--until` cutoff. Sessions resolve
+through the cold-store provider's tiers and are read through the shared
+live/archive seam. Only event metadata is read, never message or tool contents.
+A chain with an unavailable session, or without a prompt, is reported as
+`unknown` with `null` metrics rather than as a partial or estimated
+measurement. Log-writer and digest manifests carry a caller-supplied
+per-session `metrics` block, `null` when absent. See
+[session metrics](session-metrics.md) for the measurement rules and the report
+schema.
+
 ### Review annotations (`agent_logger.sessions`)
 
 A durable, per-session sidecar recording which external work item (e.g. a
