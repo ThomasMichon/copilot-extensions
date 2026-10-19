@@ -1,11 +1,17 @@
-"""Execute the workflow's exact merge waiter without network calls or sleeps."""
+"""Execute the workflow's exact merge waiter without network calls or sleeps.
+
+Use --workflow PATH under the bounded supervisor to rehearse independent Main
+control while the default Dev template still uses the legacy controller.
+"""
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -54,6 +60,7 @@ def waiter(monkeypatch, tmp_path):
             "QUALIFICATION_ATTEMPT": "2", "QUALIFICATION_DIGEST": "1" * 64,
             "PUBLICATION_DIGEST": "2" * 64, "SOURCE_RELEASE": f"python-artifacts-{'d' * 40}",
             "GITHUB_RUN_ID": "1", "GITHUB_RUN_ATTEMPT": "1",
+            "QUALIFICATION_PROMOTION_RUN": "1-1",
         }.items():
             monkeypatch.setenv(key, value)
     else:
@@ -315,6 +322,17 @@ def test_missing_write_authority_cannot_fall_back_to_ambient_auth(waiter, monkey
     assert not output.exists()
 
 
+def test_missing_original_qualification_owner_refuses_before_provider_calls(waiter, monkeypatch):
+    code, output = waiter
+    if "QUALIFICATION_PROMOTION_RUN" not in code:
+        pytest.skip("Legacy controller profile predates original qualification ownership")
+    monkeypatch.delenv("QUALIFICATION_PROMOTION_RUN", raising=False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("unexpected backend call"))
+    with pytest.raises(KeyError, match="QUALIFICATION_PROMOTION_RUN"):
+        exec(compile(code, str(WORKFLOW), "exec"), {})
+    assert not output.exists()
+
+
 @pytest.mark.parametrize("rules", [
     [],
     [{"type": "required_status_checks", "parameters": {
@@ -346,3 +364,23 @@ def test_missing_strict_server_policy_cannot_authorize_merge(waiter, monkeypatch
         exec(compile(code, str(WORKFLOW), "exec"), {})
     assert not output.exists()
     assert not any(argv[1:3] == ["pr", "merge"] for argv in calls)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--workflow", type=Path, required=True)
+    options, pytest_args = parser.parse_known_args(argv)
+    workflow = options.workflow.resolve(strict=True)
+    target = Path(__file__).resolve()
+
+    class WorkflowOverlay:
+        def pytest_collection_modifyitems(self, items: list[pytest.Item]) -> None:
+            for item in items:
+                if isinstance(item, pytest.Function) and Path(item.path).resolve() == target:
+                    item.module.WORKFLOW = workflow
+
+    return pytest.main(["-q", str(target), *pytest_args], plugins=[WorkflowOverlay()])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

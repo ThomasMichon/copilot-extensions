@@ -15,7 +15,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from _promotion_workflow_test_support import assert_source_owned_boundary, source_owned
+from _promotion_workflow_test_support import (
+    assert_source_owned_boundary, source_owned, source_workflow,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promotion_artifact_readiness as readiness
@@ -28,6 +30,28 @@ from test_promotion_python_artifacts import (
 
 repo = _repo_fixture
 no_ambient_git_identity = _identity_fixture
+
+
+def _pr_profile(jobs):
+    promote = jobs["promote"]
+    publication = jobs["publish-python-artifacts"]
+    early = promote["outputs"].get("pr_number") == "${{ steps.land.outputs.pr_number }}"
+    late = publication.get("outputs", {}).get("pr_number") == "${{ steps.land.outputs.pr_number }}"
+    assert early != late, "expected exactly one declared promotion PR owner"
+    inactive = promote if late else publication
+    assert "pr_number" not in inactive.get("outputs", {}), "unexpected inactive PR output"
+    if source_owned(jobs):
+        assert_source_owned_boundary(jobs)
+        if late:
+            from test_promotion_lifecycle_workflow import lifecycle_contract
+
+            lifecycle_contract({"jobs": jobs})
+            assert not any(step.get("id") == "land" for step in promote["steps"])
+            return "qualified-before-pr"
+        assert not any(step.get("id") == "land" for step in publication["steps"])
+        return "source-owned-v2"
+    assert early and not late, "legacy controllers must retain the early PR owner"
+    return "legacy"
 
 
 def _materializer_git(root, *args):
@@ -462,12 +486,28 @@ def test_workflow_readiness_precedes_pr_creation_and_pins_the_merge_head():
     jobs = yaml.safe_load(
         (root / ".github" / "workflows" / "validate-and-promote.yml").read_text(),
     )["jobs"]
+    profile = _pr_profile(jobs)
     steps = jobs["promote"]["steps"]
     ready = next(step for step in steps if step.get("id") == "ready")
-    land = next(step for step in steps if step.get("id") == "land")
+    publication = jobs["publish-python-artifacts"]
+    landing_steps = publication["steps"] if profile == "qualified-before-pr" else steps
+    land = next(step for step in landing_steps if step.get("id") == "land")
     merger = jobs["merge-promotion"]
     wait = next(step for step in merger["steps"] if step.get("id") == "merged")
-    assert steps.index(ready) < steps.index(land)
+    if profile == "qualified-before-pr":
+        publish = next(step for step in landing_steps if step.get("id") == "publish")
+        assert landing_steps.index(publish) < landing_steps.index(land)
+        assert "continue-on-error" not in publication
+        assert "continue-on-error" not in land
+        assert jobs["qualify-candidate"]["if"] == "needs.promote.outputs.candidate_sha != ''"
+        assert "pr_number" not in jobs["promote"]["outputs"]
+        assert wait["env"]["PROMOTION_PR"] == (
+            "${{ needs.publish-python-artifacts.outputs.pr_number }}"
+        )
+    else:
+        assert steps.index(ready) < steps.index(land)
+        assert jobs["promote"]["outputs"]["pr_number"] == "${{ steps.land.outputs.pr_number }}"
+        assert land["if"] == "steps.ready.outputs.candidate_pushed == 'true'"
     if source_owned(jobs):
         assert_source_owned_boundary(jobs)
         assert '--repo "$GITHUB_WORKSPACE"' in ready["run"]
@@ -483,13 +523,11 @@ def test_workflow_readiness_precedes_pr_creation_and_pins_the_merge_head():
             "needs.materialized-candidate-consumers.result == 'success' && "
             "needs.materialized-candidate-windows.result == 'success'"
         )
-    assert jobs["promote"]["outputs"]["pr_number"] == "${{ steps.land.outputs.pr_number }}"
     assert "publish_python_artifacts.py prepare" in ready["run"]
     assert "continue-on-error" not in ready
     assert ready["run"].index("publish_python_artifacts.py prepare") < ready["run"].index(
         'echo "candidate_pushed=true"',
     )
-    assert land["if"] == "steps.ready.outputs.candidate_pushed == 'true'"
     assert "--auto" not in land["run"] and "--auto" not in wait["run"]
     assert '"--match-head-commit", os.environ["CANDIDATE_SHA"]' in wait["run"]
     assert 'pr["headRefOid"] != os.environ["CANDIDATE_SHA"]' in wait["run"]
@@ -509,6 +547,28 @@ def test_workflow_readiness_precedes_pr_creation_and_pins_the_merge_head():
                  and "publish_python_artifacts.py publish" in step["run"])
     assert '--candidate-commit "$CANDIDATE_SHA"' in final["run"]
     assert 'git fetch origin "$CANDIDATE_SHA"' in final["run"]
+
+
+def test_workflow_pr_profile_refuses_missing_or_ambiguous_ownership():
+    import copy
+
+    root = Path(__file__).resolve().parent.parent
+    jobs = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())["jobs"]
+    profile = _pr_profile(jobs)
+    owner = "publish-python-artifacts" if profile == "qualified-before-pr" else "promote"
+    other = "promote" if owner == "publish-python-artifacts" else "publish-python-artifacts"
+    missing = copy.deepcopy(jobs)
+    del missing[owner]["outputs"]["pr_number"]
+    with pytest.raises(AssertionError, match="exactly one declared promotion PR owner"):
+        _pr_profile(missing)
+    ambiguous = copy.deepcopy(jobs)
+    ambiguous[other].setdefault("outputs", {})["pr_number"] = "${{ steps.land.outputs.pr_number }}"
+    with pytest.raises(AssertionError, match="exactly one declared promotion PR owner"):
+        _pr_profile(ambiguous)
+    unknown = copy.deepcopy(jobs)
+    unknown[other].setdefault("outputs", {})["pr_number"] = "unrecognized PR producer"
+    with pytest.raises(AssertionError, match="unexpected inactive PR output"):
+        _pr_profile(unknown)
 
 
 @pytest.mark.parametrize("remote", ["d" * 40, ""])
@@ -565,10 +625,36 @@ def test_retry_pr_lookup_reuses_only_the_exact_eligible_candidate(
     monkeypatch, capsys, candidates, accepted,
 ):
     root = Path(__file__).resolve().parent.parent
-    steps = yaml.safe_load(
+    jobs = yaml.safe_load(
         (root / ".github" / "workflows" / "validate-and-promote.yml").read_text(),
-    )["jobs"]["promote"]["steps"]
+    )["jobs"]
+    profile = _pr_profile(jobs)
+    steps = jobs[
+        "publish-python-artifacts" if profile == "qualified-before-pr" else "promote"
+    ]["steps"]
     land = next(step for step in steps if step.get("id") == "land")
+    if profile == "qualified-before-pr":
+        from test_promotion_lifecycle_workflow import QualifiedPRLifecycleTests
+
+        harness = QualifiedPRLifecycleTests(
+            "test_literal_pr_opening_and_existing_pr_recovery_are_idempotent",
+        )
+        harness.opening = land["run"]
+        rows = [
+            {**harness.existing_pr(), **candidate} if isinstance(candidate, dict) else candidate
+            for candidate in candidates
+        ]
+        result, created = harness.open_pr(rows, {
+            "CANDIDATE_SHA": TREE, "DEV_SHA": DEV, "SOURCE_RELEASE": f"python-artifacts-{DEV}",
+        })
+        assert (result.returncode == 0) == accepted, result.stdout + result.stderr
+        if accepted:
+            assert result.output == f"pr_number={1 if candidates else 456}\n"
+            assert created == (not candidates)
+        else:
+            assert result.output == ""
+            assert not created
+        return
     code = re.search(r"python - <<'PY'\s*\n(.*?)^PY\s*$", land["run"], re.M | re.S)
     assert code is not None
     monkeypatch.setenv("PR_CANDIDATES", json.dumps(candidates))
@@ -581,9 +667,7 @@ def test_retry_pr_lookup_reuses_only_the_exact_eligible_candidate(
             exec(compile(code.group(1), "promotion-pr-lookup", "exec"), {})
 
 
-def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
-    root = Path(__file__).resolve().parent.parent
-    jobs = yaml.safe_load((root / ".github" / "workflows" / "ci.yml").read_text())["jobs"]
+def _assert_readiness_ci(jobs, *, builder_minutes, split_publication):
     paths = [
         ".github/workflows/ci.yml", "tools/promotion_artifact_readiness.py",
         "tools/test_promotion_artifact_readiness.py", "tools/test_promotion_candidate_retry.py",
@@ -610,22 +694,35 @@ def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
             assert native["if"] == jobs[job_id]["if"]
             assert native["runs-on"] == "windows-latest"
             assert native["timeout-minutes"] == 5
-            assert jobs[job_id]["timeout-minutes"] == 10
+            assert jobs[job_id]["timeout-minutes"] == builder_minutes
             assert "continue-on-error" not in native
             assert jobs[job_id]["outputs"]["run"] == "${{ steps.python-artifact-builder.outputs.run }}"
             assert all(
                 step["if"] == "needs.windows-python-artifact-builder.outputs.run == 'true'"
                 for step in native["steps"]
             )
-            publication = jobs["promotion-publication-windows"]
-            assert publication["needs"] == job_id
-            assert publication["if"] == native["if"]
-            assert publication["runs-on"] == "windows-latest"
-            assert publication["timeout-minutes"] == 5
-            assert "continue-on-error" not in publication
+            if split_publication:
+                publication = jobs["promotion-publication-windows"]
+                assert publication["needs"] == job_id
+                assert publication["if"] == native["if"]
+                assert publication["runs-on"] == "windows-latest"
+                assert publication["timeout-minutes"] == 5
+                assert "continue-on-error" not in publication
+            else:
+                assert "promotion-publication-windows" not in jobs
+                publication = native
+            publication_step = next(
+                step for step in publication["steps"]
+                if step.get("name") == "Source-owned qualification and publication contracts (Windows)"
+            )
+            assert publication_step["if"] == (
+                "needs.windows-python-artifact-builder.outputs.run == 'true'"
+            )
+            for name in ("test_publish_candidate_artifacts.py", "test_release_publication_boundary.py"):
+                assert f"tools/{name}" in publication_step["run"]
             for gate in ("pr-gate", "promotion-gate"):
                 assert "promotion-candidate-windows" in jobs[gate]["needs"]
-                assert "promotion-publication-windows" in jobs[gate]["needs"]
+                assert ("promotion-publication-windows" in jobs[gate]["needs"]) == split_publication
             selected = next(
                 step for step in native["steps"]
                 if step.get("name") == "Native candidate readiness and retry contracts (Windows)"
@@ -639,6 +736,23 @@ def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
                 assert f"tools/{name}" in selected["run"]
         for name in ("test_promotion_artifact_readiness.py", "test_promotion_candidate_retry.py"):
             assert f"tools/{name}" in selected["run"]
+
+
+def test_required_ci_collects_readiness_and_retry_in_their_changed_path_lanes():
+    root = Path(__file__).resolve().parent.parent
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
+    controller = yaml.safe_load(
+        (root / ".github/workflows/validate-and-promote.yml").read_text(),
+    )["jobs"]
+    profile = _pr_profile(controller)
+    # Dev owns the declared recipe; generated Main retains its independent,
+    # older combined native lane rather than copying Dev's split or budgets.
+    declared = source_workflow(root, "ci.yml")["jobs"]
+    _assert_readiness_ci(declared, builder_minutes=10, split_publication=True)
+    if profile == "legacy":
+        _assert_readiness_ci(jobs, builder_minutes=10, split_publication=True)
+    else:
+        _assert_readiness_ci(jobs, builder_minutes=5, split_publication=False)
 
 
 @pytest.mark.parametrize("job_id", ["checks", "windows-python-artifact-builder"])

@@ -1049,6 +1049,42 @@ proposal.
 
 ## Journal
 
+### 2026-10-18 - Preview custody contract merged; Main activation is next
+
+#7215 merged as `87bfbec660f6901ad95f3b418e6746812141676e` after actual
+current-head Copilot approval and all three original CI checks succeeded.
+It preserves preview validation without issuing publication custody for
+`push=false`; fourteen literal Main lifecycle cases and the unchanged old-Main
+guard's sixty-five cases pass. The workflow-only activation will pin this actual
+merged source. Main remains paused; none of the live qualification, publication,
+resume, natural-cycle or client gates are closed by the source follow-up.
+
+The earlier #7201 CI run `39188200125` took 23.9 minutes from provider run
+creation to required PR-gate completion. This includes dependency/queue time,
+not an attribution of its individual cause, and does not satisfy the
+under-ten-minute target. That latency obligation remains open independently of
+the successful source merge.
+
+Main activation review also identified an existing merge-wait fixture that
+omitted the newly required original qualification owner. Literal rehearsal
+reproduced its early `KeyError` before any provider call. Successful fixture
+cases now supply matching `1-1` ownership, while a missing-owner negative keeps
+the production refusal. The complete existing suite passes twenty-three cases
+against the actual Main controller; the default legacy profile retains its
+twenty-two cases plus one explicit inapplicable-feature skip. A source-owned
+`--workflow` test entry point makes this exact preactivation check repeatable.
+
+The complete controlled-workflow rehearsal then exposed fifty-five additional
+fixture/profile assumptions before activation. Repairs retain every original
+test function and negative parametrization while distinguishing partitioned Dev
+recipes, independently preserved unpartitioned Main CI, early versus qualified
+PR ownership, and the unchanged Main execution limits. The integrated
+twenty-six-file portfolio now passes 1,633 cases with four platform skips and
+294 subtests in 93.16 seconds. The complete changed canonical-source modules
+also pass 283 cases with one explicit legacy-feature skip. Four existing
+unregistered `windows_only` marker warnings remain visible in that rehearsal;
+it is not native-platform or live release acceptance.
+
 ### 2026-10-18 - Lifecycle source merged; activate preserved Main control next
 
 #7201 merged as `103c42811b50b8c16e66a07852d56f2aadec64fa` after current-head

@@ -317,6 +317,19 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
         "Publish and read back exact-candidate artifacts before enabling merge",
         "Land the candidate branch on main via PR + squash-merge",
     }
+    current = source_owned(jobs)
+    publishing = jobs["publish-python-artifacts"]
+    late_pr = current and publishing.get("outputs", {}).get("pr_number") == "${{ steps.land.outputs.pr_number }}"
+    if late_pr:
+        allowed.remove("Land the candidate branch on main via PR + squash-merge")
+        land = next(step for step in publishing["steps"] if step.get("id") == "land")
+        assert "uses" not in land
+        assert land["env"]["GH_TOKEN"] == "${{ secrets.APERTURE_RELEASE_TOKEN }}"
+        assert "APERTURE_RELEASE_TOKEN" not in json.dumps(publishing.get("env", {}))
+        assert all(
+            "APERTURE_RELEASE_TOKEN" not in json.dumps(step)
+            for step in publishing["steps"] if "uses" in step
+        )
     writers = set()
     for step in job["steps"]:
         if "APERTURE_RELEASE_TOKEN" in json.dumps(step):
@@ -334,7 +347,6 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
     wait = next(step for step in merger["steps"] if step.get("id") == "merged")
     assert wait["env"]["PROMOTION_MERGE_TOKEN"] == "${{ github.token }}"
     assert 'merge_token = os.environ.pop("PROMOTION_MERGE_TOKEN")' in wait["run"]
-    current = source_owned(jobs)
     if current:
         assert_source_owned_boundary(jobs)
         assert 'qualified_run = json.loads(qualification.stdout)' in wait["run"]

@@ -1571,6 +1571,12 @@ a scheduled or manually dispatched workflow.
   with bounded provider/Git fixtures. A legacy default controller is explicitly
   skipped, not credited as implementing the new boundary; fixture proof does
   not replace exact-candidate live CI and artifact qualification.
+- Rehearse the existing merge-wait portfolio against that same controller with
+  `python tools/test_promotion_merge_wait.py --workflow <prepared-workflow>`,
+  inside the normal bounded test supervisor. The fixture supplies the original
+  qualification owner for successful cases; missing ownership still refuses
+  before a provider call. Default legacy-profile results alone do not validate
+  a newly preserved Main controller.
 - Release-tool compatibility tests retain complete legacy-controller branches
   and execute the prepared source-owned graph when present. Before activation,
   the full tool portfolio must also pass with the actual controlled workflow

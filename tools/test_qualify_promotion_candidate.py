@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
+import yaml
 
+from _promotion_workflow_test_support import source_owned, source_workflow, workflow as controller_workflow
+from test_promotion_artifact_readiness import _materializer_git
 import candidate_qualification_inventory as inventory
 import qualify_promotion_candidate as qualification
 import verify_promotion_workflows as workflows
@@ -189,9 +193,43 @@ def test_relabelled_receipt_cannot_claim_a_different_owning_promotion_attempt(ba
     assert backend["runs"][0]["display_title"] == f"CI promotion {RUN} at {SHA}"
 
 
-def _candidate_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _supported_smoke_profile(text: str) -> str:
+    smoke = yaml.safe_load(text)["jobs"]["smoke"]
+    matrix = smoke["strategy"]["matrix"]
+    if smoke["name"] == "${{ matrix.plugin }}" and matrix == {
+        "plugin": "${{ fromJson(needs.discover.outputs.smoke) }}",
+    }:
+        return "unpartitioned"
+    assert smoke["name"] == "${{ matrix.name }}" and matrix == {
+        "include": "${{ fromJson(needs.discover.outputs.smoke_matrix) }}",
+    }, "fixture requires an explicitly supported smoke matrix profile"
+    return "partitioned"
+
+
+def _candidate_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, profile: str = "actual",
+) -> Path:
     workflow = tmp_path / "ci.yml"
-    text = (ROOT / ".github/workflows/ci.yml").read_text("utf-8")
+    if profile == "actual":
+        text = (ROOT / ".github/workflows/ci.yml").read_text("utf-8")
+    elif profile == "partitioned":
+        source = source_workflow(ROOT, "ci.yml")
+        if source_owned(controller_workflow(ROOT)["jobs"]):
+            dev = json.loads((ROOT / ".github/release-pipeline-state.json").read_text("utf-8"))[
+                "last_promotion"
+            ]["dev_head"]
+            text = _materializer_git(ROOT, "show", f"{dev}:.github/workflows/ci.yml").decode("utf-8")
+        else:
+            text = (ROOT / ".github/workflows/ci.yml").read_text("utf-8")
+        assert yaml.safe_load(text) == source
+        assert _supported_smoke_profile(text) == "partitioned"
+    else:
+        assert profile == "main", "unknown test fixture profile"
+        main = _materializer_git(
+            ROOT, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}",
+        ).decode().strip()
+        text = _materializer_git(ROOT, "show", f"{main}:.github/workflows/ci.yml").decode("utf-8")
+        assert _supported_smoke_profile(text) == "unpartitioned"
     # Emulate the reviewed candidate aggregate while the workflow-only bootstrap is separate.
     start = text.index("  promotion-gate:\n")
     before, gate = text[:start], text[start:]
@@ -206,15 +244,21 @@ def _candidate_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return workflow
 
 
+@pytest.mark.parametrize("profile", ["actual", "partitioned", "main"])
 def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str,
 ) -> None:
-    _candidate_workflow(tmp_path, monkeypatch)
+    workflow = _candidate_workflow(tmp_path, monkeypatch, profile=profile)
     required, allowed_skips, digest = inventory.required_jobs(ROOT)
     assert {"guards + lint", "full - agent-worktrees", "archive sources (windows-latest)"} <= required
     assert {"agent-bridge", "agent-index", "Promotion snapshot gate"} <= required
-    assert {f"agent-dispatch (partition {index}/3)" for index in (1, 2, 3)} <= required
-    assert "agent-dispatch" not in required
+    partitions = {f"agent-dispatch (partition {index}/3)" for index in (1, 2, 3)}
+    if _supported_smoke_profile(workflow.read_text("utf-8")) == "partitioned":
+        assert partitions <= required
+        assert "agent-dispatch" not in required
+    else:
+        assert "agent-dispatch" in required
+        assert not partitions & required
     assert any(name.startswith("fleet-manager (windows-latest,") for name in required)
     assert any(name.startswith("fleet-manager (ubuntu-latest,") for name in required)
     assert len(required) > 50
@@ -222,10 +266,11 @@ def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregat
     assert len(digest) == 64
 
 
+@pytest.mark.parametrize("profile", ["actual", "partitioned", "main"])
 def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str,
 ) -> None:
-    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    workflow = _candidate_workflow(tmp_path, monkeypatch, profile=profile)
     canonical = workflow.read_text("utf-8").replace("\r\n", "\n").encode("utf-8")
     workflow.write_bytes(canonical)
     lf = inventory.required_jobs(ROOT)
@@ -233,10 +278,11 @@ def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(
     assert represented != canonical and b"\r\njobs:\r\n" in represented
     workflow.write_bytes(represented)
     assert inventory.required_jobs(ROOT) == lf
-    helper = (ROOT / "tools/ci_plugin_partitions.py").read_bytes().replace(b"\r\n", b"\n")
-    assert lf[2] == hashlib.sha256(
-        canonical + b"\0tools/ci_plugin_partitions.py\0" + helper,
-    ).hexdigest()
+    digest_input = canonical
+    if _supported_smoke_profile(canonical.decode("utf-8")) == "partitioned":
+        helper = (ROOT / "tools/ci_plugin_partitions.py").read_bytes().replace(b"\r\n", b"\n")
+        digest_input += b"\0tools/ci_plugin_partitions.py\0" + helper
+    assert lf[2] == hashlib.sha256(digest_input).hexdigest()
 
 
 def test_inventory_rejects_unknown_lone_cr_source_representation(
@@ -299,7 +345,7 @@ def _partition_source(
 def test_inventory_refuses_malformed_ambiguous_or_oversized_partition_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str,
 ) -> None:
-    _candidate_workflow(tmp_path, monkeypatch)
+    _candidate_workflow(tmp_path, monkeypatch, profile="partitioned")
     _partition_source(tmp_path, monkeypatch, text)
     with pytest.raises(CandidateValidationError, match="smoke partition inventory"):
         inventory.required_jobs(ROOT)
@@ -308,7 +354,7 @@ def test_inventory_refuses_malformed_ambiguous_or_oversized_partition_data(
 def test_partition_source_is_not_executed_and_its_normalized_bytes_are_receipt_bound(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _candidate_workflow(tmp_path, monkeypatch)
+    _candidate_workflow(tmp_path, monkeypatch, profile="partitioned")
     text = "_SMOKE_PARTITIONS = {'agent-dispatch': 3}\nraise RuntimeError('must not execute')\n"
     helper = _partition_source(tmp_path, monkeypatch, text)
     original = inventory.required_jobs(ROOT)
@@ -326,7 +372,7 @@ def test_partition_source_is_not_executed_and_its_normalized_bytes_are_receipt_b
 def test_partition_matrix_requires_its_explicit_discovery_and_name_contract(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
 ) -> None:
-    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    workflow = _candidate_workflow(tmp_path, monkeypatch, profile="partitioned")
     text = workflow.read_text("utf-8")
     old, new = {
         "include": ("include: ${{ fromJson(needs.discover.outputs.smoke_matrix) }}",
@@ -346,7 +392,7 @@ def test_partition_matrix_requires_its_explicit_discovery_and_name_contract(
 def test_candidate_only_bridge_workers_retain_exact_rows_and_bind_changed_recipe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    workflow = _candidate_workflow(tmp_path, monkeypatch, profile="partitioned")
     text = workflow.read_text("utf-8")
     assert text.count(inventory._PARTITIONED_SMOKE_WORKERS_STEP) == 1
     with_workers = inventory.required_jobs(ROOT)
@@ -369,7 +415,7 @@ def test_candidate_only_bridge_workers_retain_exact_rows_and_bind_changed_recipe
 def test_candidate_bridge_worker_recipe_cannot_expand_or_narrow_qualification(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old: str, new: str,
 ) -> None:
-    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    workflow = _candidate_workflow(tmp_path, monkeypatch, profile="partitioned")
     text = workflow.read_text("utf-8")
     step = inventory._PARTITIONED_SMOKE_WORKERS_STEP
     assert text.count(step) == 1 and step.count(old) == 1
@@ -385,7 +431,7 @@ def test_candidate_bridge_worker_recipe_cannot_expand_or_narrow_qualification(
 def test_partition_runner_requires_the_complete_executed_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
 ) -> None:
-    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    workflow = _candidate_workflow(tmp_path, monkeypatch, profile="partitioned")
     text = workflow.read_text("utf-8")
     invocation = '          python tools/run-plugin-tests.py "$PLUGIN" "${args[@]}"'
     if mutation in ("collect-only", "filtered", "failure-masked"):
@@ -411,8 +457,9 @@ def test_partition_runner_requires_the_complete_executed_step(
 @pytest.mark.parametrize("partition", [1, 2, 3])
 @pytest.mark.parametrize("conclusion", ["missing", "failure", "cancelled"])
 def test_every_actual_dispatch_partition_must_execute_successfully(
-    backend: dict, monkeypatch: pytest.MonkeyPatch, partition: int, conclusion: str,
+    backend: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, partition: int, conclusion: str,
 ) -> None:
+    _candidate_workflow(tmp_path, monkeypatch, profile="partitioned")
     expected, allowed_skips, digest = inventory.required_jobs(ROOT)
     monkeypatch.setattr(qualification, "required_jobs", lambda root: (expected, allowed_skips, digest))
     backend["jobs"] = [
@@ -425,6 +472,34 @@ def test_every_actual_dispatch_partition_must_execute_successfully(
         backend["jobs"] = [row for row in backend["jobs"] if row["name"] != target]
     else:
         next(row for row in backend["jobs"] if row["name"] == target)["conclusion"] = conclusion
+    with pytest.raises(workflows.VerificationError, match="required.*row"):
+        _qualify()
+
+
+@pytest.mark.parametrize("conclusion", ["missing", "failure", "cancelled"])
+def test_unpartitioned_main_receipt_binds_actual_ci_not_unused_partition_source(
+    backend: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conclusion: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch, profile="main")
+    expected, allowed_skips, digest = inventory.required_jobs(ROOT)
+    assert "agent-dispatch" in expected
+    monkeypatch.setattr(qualification, "required_jobs", inventory.required_jobs)
+    backend["jobs"] = [
+        dict(id=index, name=name, status="completed", conclusion="success")
+        for index, name in enumerate(sorted(expected), 1)
+    ]
+    receipt = _qualify()
+    assert _verify(receipt) == qualification.receipt_digest(receipt)
+    _partition_source(tmp_path, monkeypatch, "raise RuntimeError('unused source must not execute')\n")
+    assert inventory.required_jobs(ROOT) == (expected, allowed_skips, digest)
+    assert _verify(receipt) == qualification.receipt_digest(receipt)
+    workflow.write_text(workflow.read_text("utf-8") + "# changed actual CI\n", encoding="utf-8")
+    with pytest.raises(workflows.VerificationError):
+        _verify(receipt)
+    if conclusion == "missing":
+        backend["jobs"] = [row for row in backend["jobs"] if row["name"] != "agent-dispatch"]
+    else:
+        next(row for row in backend["jobs"] if row["name"] == "agent-dispatch")["conclusion"] = conclusion
     with pytest.raises(workflows.VerificationError, match="required.*row"):
         _qualify()
 

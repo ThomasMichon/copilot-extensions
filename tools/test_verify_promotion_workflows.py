@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import yaml
 
-from _promotion_workflow_test_support import assert_source_owned_boundary, source_owned
+from _promotion_workflow_test_support import assert_source_owned_boundary, source_owned, source_workflow
 
 import verify_promotion_workflows as verification
 
@@ -313,11 +313,20 @@ def workflows():
 
 
 def test_native_consumer_smoke_budgets_preserve_other_plugin_limits():
-    smoke = workflows()["ci.yml"]["jobs"]["smoke"]
-    assert smoke["timeout-minutes"] == (
+    declared = workflows()
+    source_smoke = source_workflow(ROOT, "ci.yml")["jobs"]["smoke"]
+    source_budget = (
         "${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index' || matrix.plugin == 'agent-bridge') && 12 || 8 }}"
     )
+    main_budget = (
+        "${{ (matrix.plugin == 'agent-dispatch' || matrix.plugin == 'agent-index') && 12 || 8 }}"
+    )
+    assert source_smoke["timeout-minutes"] == source_budget
+    smoke = declared["ci.yml"]["jobs"]["smoke"]
+    expected = main_budget if source_owned(declared["validate-and-promote.yml"]["jobs"]) else source_budget
+    assert smoke["timeout-minutes"] == expected
     assert smoke["strategy"]["fail-fast"] is False
+    assert source_smoke["strategy"]["fail-fast"] is False
 
 
 def test_dispatch_mode_preserves_main_push_coverage_without_manual_exhaustive_tiers():
