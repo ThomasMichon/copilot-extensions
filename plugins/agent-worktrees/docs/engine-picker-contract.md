@@ -397,6 +397,30 @@ Native Windows hosting proof remains explicitly unqualified. The payload's
 `automatic_eligible` is always false: task policy, claims, holds, recovery
 enrollment and launch admission remain their existing owners' responsibilities.
 
+`session-role --restart-check <expected-json> --json` checks a **single explicit
+frozen identity** against the current worktree owner. The bounded (8 KiB)
+object requires exactly `project`, `worktree_id`, `worktree_path`, `native_session_id`,
+`worktree_incarnation`, `head_revision`, `owner_revision`, `activation_ordinal`,
+`source_identity` and `target_epoch` (`platform`, `environment_id`, `boot_id`).
+No ambient session, suffix lookup, nonce allocation or head mutation is used.
+The response has `schema: "native-restart-worktree-check"`, `version: 1`, and
+the exact typed `expected` object. `worktree_qualified: true` means the current
+reduced worktree state, source-bound activation, transcript presence, proven
+native death and absent mux matched, followed by an unchanged owner reread.
+It is a provisional snapshot, **not** a reservation or a launch capability.
+Changed heads/incarnations/lifecycle, terminal or paused worktrees, pause
+history, pending handoffs/seeds, indirect/missing paths, ended or ambiguous
+activations and uncertain/live processes refuse with a reason. Task provenance,
+claim metadata and bound/profile-assigned worktrees remain conservatively
+unqualified; their current owners' policy is not inferred from that metadata
+or its absence. Even a matching worktree always returns
+`launch_authorized: false` and `automatic_eligible: false`. Current task policy,
+action-time launch fencing and acknowledged restart-seed pickup remain separate
+requirements. Ended shutdown activations are not reopened by this check.
+Malformed input or unreadable evidence is a JSON error. Native Linux/WSL
+identity must match the requested target epoch; Windows, macOS and containers
+remain unsupported rather than falling back to a different launch mode.
+
 The Manager requests `resolve --stage-launch-seed --require-native-seed` for
 prompted requests. The latter is a capability handshake: engines without the
 native execution-leg fence reject it before allocation or staging. The fence

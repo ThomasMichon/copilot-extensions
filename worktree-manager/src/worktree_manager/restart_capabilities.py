@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .engine_client import EngineError
 from .manager_config import ManagerConfigError, RestartRecoveryConfig, load_config
 from .restart_observer import RestartObserver
 from .restart_attempts import RestartAttemptError, RestartAttempts
@@ -37,7 +38,7 @@ def recovery_capabilities(config: RestartRecoveryConfig, platform: str | None) -
     return {"shutdown_notifications": notifications, "automatic_restore": automatic}
 
 
-def inspect_recovery(root: Path) -> dict:
+def inspect_recovery(root: Path, *, check_attempt: str | None = None) -> dict:
     """Inspect evidence/configuration without creating state or contacting logind."""
     observer = RestartObserver(root)
     result = observer.startup()
@@ -45,6 +46,22 @@ def inspect_recovery(root: Path) -> dict:
         result["attempts"] = RestartAttempts(root).snapshot()
     except RestartAttemptError as exc:
         result["blocker"] = "; ".join(filter(None, [result.get("blocker"), str(exc)]))
+    if check_attempt is not None:
+        from .restart_owner_check import inspect_attempt
+
+        try:
+            if result.get("blocker"):
+                raise ValueError("Current owner inspection requires readable evidence and epoch.")
+            result["owner_check"] = inspect_attempt(
+                check_attempt, result["attempts"], observer.epoch,
+            )
+            blocker = (
+                "Current worktree check is provisional; current task policy, fenced launch "
+                "and acknowledged native restart Resume remain unqualified."
+            )
+        except (EngineError, ValueError) as exc:
+            blocker = str(exc)
+        result["blocker"] = "; ".join(filter(None, [result.get("blocker"), blocker]))
     try:
         config = load_config(root).restart_recovery
     except ManagerConfigError as exc:

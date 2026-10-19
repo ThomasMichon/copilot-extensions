@@ -170,7 +170,18 @@ Frozen restart-attempt identities and historical owner bindings use:
 python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_restart_attempts or test_restart_capabilities or test_restart_notification_runtime'
 ```
 
-This bounded lane covers no-write default/passive/inspection paths, legacy
+Provisional current-worktree checks additionally use
+`-k 'test_native_restart_check or test_restart_owner_check'` with those same
+two release units. The tests cover exact incarnation/head/lifecycle/activation
+binding, pause/seed/task/claim/profile refusals, changed owner observations,
+transcript/mux/liveness blockers, target-epoch skew, malformed input and typed
+response mismatch. One actual child reads persisted owner YAML and a separate
+Manager/engine process fixture verifies the no-update/no-reconcile environment
+and unchanged real attempt storage. Process observations and native epochs are
+synthetic; these fixtures do not launch Copilot, qualify current task policy,
+reserve a recovery launch or prove restart-seed acknowledgement.
+
+The frozen-identity lane covers no-write default/passive/inspection paths, legacy
 binding refusal, original-snapshot retention, cancelled-shutdown fences, private
 storage, corruption/schema refusal and atomic capacity rollback. Two real
 processes prove concurrent freeze deduplication; a disposable child exiting

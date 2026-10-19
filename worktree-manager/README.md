@@ -558,6 +558,29 @@ boundary. A draining generation admits no new freeze, and an already admitted
 freeze must finish or report its blocker before drain can report idle. The
 existing update/cutover owner and notification resource teardown are unchanged.
 
+To request a provisional current-worktree check for **one existing frozen
+attempt**, without enabling recovery:
+
+```text
+worktree-manager mux-daemon recovery-evidence --check-attempt <attempt-uuid>
+```
+
+The target epoch must still match this environment. The Manager passes the
+frozen exact head, creation nonce, path, lifecycle and source activation to
+agent-worktrees through its attributed process boundary, with a four-second
+timeout and `WORKTREE_NO_UPDATE=1` / `WORKTREE_NO_RECONCILE=1`. It checks the
+response version and exact typed request binding; old owners, errors and
+timeouts remain visible blockers, never a legacy/fresh-launch fallback.
+The optional `owner_check` reports current worktree facts only. Changed,
+paused, ended, pending, externally claimed, dispatch-associated or
+profile-assigned worktrees remain unqualified. A matching worktree is still
+**not admitted**: current task policy, fenced launch and acknowledged restart
+Resume remain unresolved, so this inspection returns a blocker/nonzero status
+even on a match. Neither command writes an attempt outcome, reserves a launch,
+starts a conversation, changes enrollment or contacts the host notification
+service. Ordinary inspection makes no owner call, and the resident daemon has
+no additional polling or blocking work from this opt-in check.
+
 Native Linux and WSL have evidence-epoch readers; WSL includes its init-process
 incarnation because a distro can restart without restarting the shared kernel.
 Native Windows, macOS and container epochs are explicitly unqualified, not

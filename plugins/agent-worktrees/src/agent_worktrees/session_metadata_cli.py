@@ -127,10 +127,16 @@ def add_parsers(sub) -> None:
         "session-role",
         help="Report this session's role vs the worktree head (head/superseded/...)",
     )
-    p.add_argument(
+    evidence = p.add_mutually_exclusive_group()
+    evidence.add_argument(
         "--hosting-evidence", action="store_true",
         help="Read-only native hosting and optional exact --session-id lifecycle evidence; "
         "requires an exact --worktree-id (no ambient session fallback)",
+    )
+    evidence.add_argument(
+        "--restart-check", metavar="EXPECTED-JSON",
+        help="Read-only exact frozen worktree/head check; never launch permission "
+        "(bounded JSON, no ambient session identity)",
     )
     p.add_argument(
         "--session-id", default=None, help="Session id (default: COPILOT_AGENT_SESSION_ID)"
@@ -279,6 +285,32 @@ def _effort_orientation(record) -> str:
 
 def cmd_session_role(args) -> int:
     """Report THIS session's role relative to its worktree's head (JSON out)."""
+    if getattr(args, "restart_check", None) is not None:
+        from . import native_restart_check
+        import json
+        import yaml
+
+        try:
+            raw = args.restart_check
+            if len(raw.encode("utf-8")) > 8192:
+                raise ValueError("Restart worktree expectations exceed their budget")
+            expected = native_restart_check.validate_expected(json.loads(raw))
+            if getattr(args, "worktree_id", None) not in (None, expected["worktree_id"]) or (
+                getattr(args, "session_id", None) not in (None, expected["native_session_id"])
+            ) or getattr(args, "worktree_dir", None):
+                raise ValueError("Restart worktree expectations conflict with extra selectors")
+
+            def load():
+                try:
+                    return tracking.load_record(cfg.tracking_dir() / f"{expected['worktree_id']}.yaml")
+                except FileNotFoundError:
+                    return None
+
+            result = native_restart_check.check(expected, loader=load)
+        except (OSError, ValueError, IndexError, RecursionError, yaml.YAMLError) as exc:
+            return output._json_error(f"Could not check native restart worktree: {exc}")
+        output._json_output(result)
+        return 0
     if getattr(args, "hosting_evidence", False):
         from . import native_hosting_evidence
         import yaml

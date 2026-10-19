@@ -1,0 +1,13 @@
+{
+  "comment": "Add explicit frozen-attempt current-worktree checks without granting native launch admission",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

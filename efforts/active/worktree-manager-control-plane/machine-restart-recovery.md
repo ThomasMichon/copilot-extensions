@@ -83,8 +83,14 @@ means of fulfilling the operator's request. They require normal source review.
 - [ ] Define recovery eligibility, intentional closure, shutdown interruption
   and unknown evidence separately. Include detached but genuinely live agents;
   attachment count is presentation evidence, not eligibility.
-- [ ] Define supported native environment boundaries, including Windows versus
+- [x] Define supported native environment boundaries, including Windows versus
   WSL and native Linux. Same-boot daemon updates must not masquerade as reboot.
+  The contracts delivered through #7252 and
+  [#7263](https://github.com/ThomasMichon/copilot-extensions/pull/7263)
+  distinguish Linux/WSL evidence epochs, native Linux's unqualified notification
+  transport, and explicitly unsupported Windows/macOS/container recovery.
+  Same-boot evidence cannot become a frozen restart candidate. This defines the
+  boundary; it does not qualify notification timing or automatic restoration.
 - [ ] Specify capability-gated, explicit local enrollment and report-only
   inspection. Unsupported or unprovable environments report a blocker rather
   than silently becoming a different launch mode.
@@ -115,15 +121,22 @@ means of fulfilling the operator's request. They require normal source review.
   The gated Linux transport and cancellation fixtures landed in #7252. Resident
   blocking-work latency remains unqualified; Windows/WSL notifications remain
   explicitly unsupported, so this item is not complete.
-- [ ] Surface failed, corrupt, stale or unavailable evidence explicitly.
+- [x] Surface failed, corrupt, stale or unavailable evidence explicitly.
   Ambiguous closure stays unconfirmed; absence of a clean-exit hook is not proof
   that automatic resurrection is authorized.
+  The evidence, notification and frozen-identity increments through #7263
+  preserve explicit blockers, reject malformed storage without reset, retain
+  stale/uncertain evidence without authorization, and leave ordinary mux
+  startup usable. Current recovery admission and launch failures remain
+  separate obligations below.
 
 ### 3. Reconcile and restore on startup
 
 - [ ] Admit recovery before ordinary dead-mux reconciliation can erase the
   previous boot's useful evidence. Freeze candidate generations and serialize
   recovery through existing ownership mechanisms.
+  Pre-admission candidate freezing landed in #7263 under the active lease and
+  drain-visible mutation fence; current owner admission is still unresolved.
 - [ ] Revalidate current worktree existence, native transcript/session identity,
   current head/succession, task policy and holds through their actual owners.
   Terminal, superseded, intentionally closed or uncertain candidates must not
@@ -135,6 +148,8 @@ means of fulfilling the operator's request. They require normal source review.
 - [ ] Persist recovery attempt and outcome; reconcile a crash between launch
   and receipt, concurrent startup, seed timeout and delayed registration before
   retrying. Do not claim exactly-once delivery merely from a pre-launch flag.
+  #7263 retains frozen candidate identity and pre-commit crash rollback, not
+  launch reservation/outcome or acknowledged seed pickup.
 - [ ] Apply bounded admission and concurrency. Authentication, dependency or
   ownership failures remain visible and resumable without busy retry loops.
 
@@ -585,3 +600,56 @@ The umbrella effort remains Active independently of this slice's completion.
   service still starts. The expanded disconnected lane passed 331 Manager tests
   with three native skips; owner sources remain unchanged from their 28-test
   receipt.
+
+### 2026-10-19 - Frozen identity increment landed; current admission next
+
+- [#7263](https://github.com/ThomasMichon/copilot-extensions/pull/7263)
+  squash-merged to `dev` as `fe5b070278` after a genuine no-findings Copilot
+  approval on exact published head `7ed0b64319` and required green CI.
+  The final disconnected Manager lane passed 331 tests with three native
+  skips; unchanged owner sources retained their 28-test receipt.
+- Resolved the Plan's environment-boundary definition and explicit
+  evidence-failure reporting items. The source/target freeze is delivered, but
+  neither current-owner admission nor recovery execution/acknowledgement is
+  complete. The focused restoration gate and umbrella effort remain open.
+- Next stretch: current owner-mediated head/incarnation/transcript/liveness and
+  task/claim/hold admission, followed by a fenced exact-conversation native
+  Resume request and explicit status-first seed pickup acknowledgement.
+  Extend the frozen identity with durable attempt/outcome reconciliation;
+  do not treat a candidate, staged prompt, pane readiness or registration as
+  permission or completed recovery.
+- Retain separate startup enrollment, blocking-work notification timing and
+  disposable native/platform qualification gates. This merge does not imply
+  release promotion, installed runtime, automatic enrollment or rollout.
+
+### 2026-10-19 - Provisional exact current-worktree checks
+
+- Added a bounded, explicit owner check for a frozen native conversation,
+  worktree creation nonce, asserted head/lifecycle revision, source activation,
+  path and current target epoch. It rereads the owner after process observation;
+  changed/paused/terminal/pending, indirect or absent paths, ended/ambiguous
+  sources, absent transcripts and live/uncertain native processes refuse.
+- Task provenance, claims and bound/profile-assigned worktrees remain
+  conservatively unqualified, not interpreted as current permission. A reduced
+  worktree match is only a provisional snapshot: `launch_authorized` and
+  `automatic_eligible` are false. Ended shutdown activations remain refused.
+  This does not complete the Plan's current task/claim/hold admission item.
+- The Manager can explicitly check one already-frozen attempt through the
+  attributed owner process with no-update/no-reconcile guards. Response
+  capability/version, exact typed expectation and target epoch are checked.
+  Even a match returns a blocker/nonzero status for current task policy,
+  fenced launch and acknowledged restart Resume. Ordinary inspection remains
+  owner-call-free; the resident loop gains no work or blocking latency.
+- Both new test surfaces first failed against the absent implementation.
+  The targeted disconnected lane passed 24 Manager and 75 owner tests,
+  including an actual child reading persisted owner YAML and a separate real
+  engine-process boundary with unchanged frozen SQLite bytes. Native epoch and
+  process observations are synthetic; no conversation, host startup or service
+  state was changed. Full restoration, current task policy, durable launch
+  outcomes, seed acknowledgement, startup enrollment and notification timing
+  remain open. This increment is not yet reviewed or merged.
+- The expanded disconnected compatibility lane passed 196 Manager tests with
+  three native-platform skips and 172 owner tests, including exact project
+  binding and existing session
+  lifecycle, hosting, frozen-storage and ordinary mux contracts. This is source
+  validation, not a claim of native restart or shutdown qualification.

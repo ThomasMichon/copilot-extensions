@@ -1230,6 +1230,19 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - Historical owner binding and private frozen restart-candidate
+  identity landed in [#7263](https://github.com/ThomasMichon/copilot-extensions/pull/7263)
+  (`fe5b070278`) after exact-head Copilot approval and required CI. The final
+  Manager contracts passed 331 tests with three native skips; the unchanged
+  owner slice retained its 28-test receipt. The focused
+  [recovery plan](machine-restart-recovery.md) resolves environment-boundary
+  definition and explicit evidence-failure reporting, not recovery execution.
+  Current owner/task/hold admission, durable launch/outcome reconciliation,
+  acknowledged exact-conversation Resume, startup enrollment and notification
+  timing remain open. The next stretch is current-owner admission and the
+  fenced restart-seed acknowledgement path. This umbrella remains Active;
+  no release or rollout is claimed.
+
 - **2026-10-19** - Restart recovery's default-off preferences, read-only
   capability reporting and gated native Linux notification transport landed in
   [#7252](https://github.com/ThomasMichon/copilot-extensions/pull/7252)
