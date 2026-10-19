@@ -341,6 +341,34 @@ Duplicate references are unusable without disabling unrelated sources.
 Provider registration reuses the existing relay owner; config does not import
 adapter code or execute provider commands during discovery.
 
+The production startup/relay-adoption path also registers **native command
+providers**. An enabled, identity-verified schema-v1 `providers.d` manifest opts
+in with `"http_credentials_version": 1`. Its existing absolute `command` is
+used as-is; anonymous legacy providers cannot supply HTTP credentials.
+`<command...> relay-profile` advertises non-secret source capabilities:
+
+```json
+{"http_sources": [{"id": "grant", "scoped": true}]}
+```
+
+The reference is derived as `<manifest.plugin>/grant`, never supplied by the
+profile. Duplicate references are ambiguous; a malformed profile refuses that
+provider without disabling healthy providers. Empty source lists are valid.
+After changing registration, use the ordinary authorized daemon lifecycle to
+refresh it; agent list/detail do not execute a credential provider.
+
+Only after exact service approval and attachment does the bridge invoke
+`<command...> http-credential grant get`. The endpoint/identity/resource/scope
+fields are sent on stdin as newline-separated `key=value` fields terminated
+by a blank line. The existing credential-source response uses `username` and
+`token` or `password` fields on stdout; nonzero exit, timeout or malformed
+encoding refuses without exposing provider output. Commands are finite,
+headless, deadline-bounded, and use the provider's existing runtime rather
+than importing its package. The provider owns actual credential acquisition,
+expiry and revocation; no credential is passed in argv or stored by the bridge.
+Startup reads capabilities, not secrets, and HTTP-only source registration
+does not start a TCP relay merely for these attachments.
+
 For application-form withdrawal, `elicitation/complete` can carry the original
 application-approval metadata with its explicit `decisionId`. It must identify
 one unique live form. Native elicitation IDs are preserved separately, never

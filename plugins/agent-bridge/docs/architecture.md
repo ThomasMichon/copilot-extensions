@@ -126,6 +126,15 @@ binstubs and venvs, and a sibling fix reaches the bridge without vendoring the
 sibling into the bridge venv. A legacy in-process `register_relay` import remains
 only as a degrade-safe fallback.
 
+HTTP credential sources also register through this production path. An enabled,
+attributed schema-v1 native provider opts in with `http_credentials_version: 1`;
+its `relay-profile` advertises source IDs and scoped-field support. The bridge
+derives provider-qualified references and calls the same provider command's
+finite `http-credential <id> get` operation only after exact service approval.
+Request fields use stdin and credentials use captured stdout, never argv or
+bridge persistence. HTTP-only registration needs no relay TCP listener.
+The source protocol and refusal rules are in [remote ACP](remote-acp.md).
+
 If no provider contributes any sources, the relay is disabled and the bridge
 still starts. If sources exist, the relay binds the provider-requested port
 (`0` means an OS-assigned loopback port) or the relay library's default fallback,

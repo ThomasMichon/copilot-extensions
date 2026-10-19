@@ -240,3 +240,6 @@ def register_credential_sources(builder) -> None:
     """Auto-discover and inject credential-relay sources from optional providers."""
     _register_provider_relay(builder, "agent-codespaces")
     _register_provider_relay(builder, "agent-containers")
+    from .http_provider_sources import register_http_credential_sources
+
+    register_http_credential_sources(builder)

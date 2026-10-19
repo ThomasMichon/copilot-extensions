@@ -42,7 +42,7 @@ from agent_bridge.launch_runtime import executing_executable
 @pytest.mark.parametrize("address_kind", ["configured", "url", "plugin"])
 async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_path, tmp_db, monkeypatch, mode, address_kind):
     from fastapi import FastAPI
-    from credential_relay import RelayBuilder
+    from http_credential_provider import configure
     from dropin_registry import EntryDecision, ScanAuthority
     from plugin_activation import ActivationReport, ActivePlugin
     from agent_bridge import related_plugins, remote_acp_sources
@@ -94,23 +94,8 @@ async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_pa
         config["remote_acp"] = {"peer": {
             "endpoint": endpoint, "transport": mode, "auth": auth,
         }}
-    calls = []
-
-    class Source:
-        name = "synthetic"
-
-        def supports(self, action, fields):
-            calls.append((action, fields))
-            return action == "get"
-
-        async def resolve(self, action, fields, *, timeout):
-            assert fields["scope"] == "read" and fields["resource"] == "synthetic-resource"
-            return "\n".join(("username=synthetic", "password=" + "synthetic-credential", ""))
-
+    calls, _ = configure(monkeypatch, tmp_path)
     manager = session_manager_from_config(tmp_db, ServiceConfig(**config))
-    builder = RelayBuilder()
-    builder.add_http_source(reference, Source(), scoped=True)
-    manager._remote_credential_policy.register_sources(builder.http_sources)
     resolver = AgentResolver({}, {})
     manager.set_resolver(resolver)
     original = AcpClient.start_remote
@@ -125,18 +110,22 @@ async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_pa
     monkeypatch.setattr(AcpClient, "start_remote", start)
     app = FastAPI()
     app.state.session_manager, app.state.resolver, app.state.ready = manager, resolver, True
+    from agent_bridge.app import _start_credential_relay
+
+    assert await _start_credential_relay(app) is None
+    assert not calls.exists()
     app.include_router(agents.router)
     app.include_router(sessions.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bridge.invalid") as api:
         params = {"project": "demo"} if address_kind == "plugin" else {}
         roster = (await api.get("/api/v1/agents", params=params)).json()["agents"]
-        assert [row["name"] for row in roster] == ["remote-acp:peer"] and not calls
+        assert [row["name"] for row in roster] == ["remote-acp:peer"] and not calls.exists()
         assert roster[0]["state"] == "bound"
         assert (await api.get("/api/v1/agents/remote-acp:peer", params=params)).json() == roster[0]
         if address_kind == "plugin":
             other = (await api.get("/api/v1/agents", params={"project": "other"})).json()
             assert other["agents"][0]["state"] == "requires-binding"
-        assert not calls
+        assert not calls.exists()
         async with httpx.AsyncClient(verify=context, trust_env=False) as probe:
             untouched = (await probe.get(url + "/evidence")).json()
         assert untouched["auth_ok"] == untouched["auth_refused"] == 0
@@ -178,6 +167,11 @@ async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_pa
         evidence = (await probe.get(url + "/evidence")).json()
     assert evidence["prompts"] == 2 and evidence["accepted_actions"] == 0
     assert evidence["auth_ok"] > 0 and proc.poll() is None
+    assert calls.exists()
+    assert all(
+        row["scope"] == "read" and row["resource"] == "synthetic-resource"
+        for row in map(json.loads, calls.read_text().splitlines())
+    )
 
 
 def authenticated_wire(spec, context, cookies=None, auth_factory=None):

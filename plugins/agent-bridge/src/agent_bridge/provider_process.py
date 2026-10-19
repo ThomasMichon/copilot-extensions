@@ -12,11 +12,11 @@ from agent_procutil import no_window_flags, spawn_sync_in_kill_on_close_job
 
 def run_captured(
     argv: list[str], timeout: float, *, errors: str = "strict",
-    env: dict[str, str] | None = None,
+    env: dict[str, str] | None = None, input_bytes: bytes | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Retain ownership of the command tree until its captured pipes close."""
     kwargs = {
-        "stdin": subprocess.DEVNULL,
+        "stdin": subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "creationflags": no_window_flags(),
@@ -29,7 +29,7 @@ def run_captured(
         argv, require_job=True, allow_breakaway=False, **kwargs,
     )
     try:
-        out, err = proc.communicate(timeout=timeout)
+        out, err = proc.communicate(input=input_bytes, timeout=timeout)
     except BaseException:
         if job is not None:
             job.close()

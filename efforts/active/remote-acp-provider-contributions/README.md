@@ -176,6 +176,33 @@ during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
 
+### 2026-10-19 - Production HTTP source registration
+
+- Fresh current-head review confirmed the global/project repair and found
+  that production relay registration did not populate the new HTTP source
+  registry. Earlier peer tests inserted a source directly and therefore did
+  not prove the startup boundary.
+- Replaced that shortcut in all six named/URL/contributed TLS peer cases with
+  real startup registration from an enabled, identity-verified native provider
+  manifest and a separate provider command process. All six failed at truthful
+  `requires-binding` state before repair.
+- Native providers explicitly opt in with `http_credentials_version: 1`;
+  their existing `relay-profile` advertises source IDs/scoped-field support.
+  References derive from the verified plugin identity. Approved acquisition
+  uses the provider's fixed `http-credential <id> get` operation and the
+  existing credential-source key/value framing, not imported adapter code,
+  arbitrary profile commands, inline secrets or a second credential store.
+- Registration acquires no credentials and HTTP-only sources do not start a
+  TCP relay. Invalid or unavailable profiles remain visible refusals without
+  disabling healthy providers; duplicate source identities are ambiguous.
+  Actual endpoint/identity/resource/scope/scheme approval remains service-owned.
+- Native TLS peer and adjacent provider/relay/auth validation passed 122 cases.
+  The focused registration/refusal/provider/profile/auth lane passed 110 cases,
+  including real command-boundary scope forwarding, inactive/unknown/legacy
+  refusal, malformed declarations, duplicate sources and sanitized failures.
+  Python lint passed. Contract re-attestation, fresh review and hosted CI
+  remain required; no live deployment or credential grant occurred.
+
 ### 2026-10-19 - Global and project activation boundary
 
 - Fresh review after reconciling the contribution branch with `dev` identified
