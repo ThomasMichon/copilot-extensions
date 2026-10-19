@@ -224,6 +224,24 @@ def test_cleanup_failure_preserves_primary_runner_failure(lane, tmp_path, monkey
     assert "owned resource remains" in report["jams"][1]["error"]
 
 
+def test_original_case_clock_includes_successful_cleanup(lane, tmp_path, monkeypatch):
+    def run(_argv, **kwargs):
+        _proof(Path(kwargs["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"]), "complete")
+        return 0
+
+    clock = iter((100.0, 461.0))
+    monkeypatch.setattr(lane.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(lane, "_run_case", run)
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "fail"
+    assert report["stages"][0]["duration_seconds"] == 361
+    assert report["stages"][0]["owned_resource_cleanup"] == "complete"
+    assert report["jams"][0]["category"] == "contained-timeout"
+    assert len(report["stages"]) == 1
+
+
 @pytest.mark.parametrize("suffix", ["", "../foreign", "ABCDEF012345", "0" * 13])
 def test_resource_names_refuse_foreign_cleanup_scope(lane, suffix):
     with pytest.raises(ValueError, match="twelve lowercase hexadecimal"):

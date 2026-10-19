@@ -267,6 +267,14 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
                         "hint": "Reconcile the exact owned resources; failed cleanup never proves absence.",
                     })
         stage["duration_seconds"] = time.monotonic() - started
+        if stage["duration_seconds"] > limits["contained_case"]:
+            stage["status"] = "fail"
+            report["jams"].append({
+                "category": "contained-timeout", "evidence": stage["log"],
+                "error_type": "TimeoutExpired",
+                "error": "Case execution and cleanup exceeded the original contained-case deadline",
+                "hint": "Account for execution, owner unwinding and cleanup within the same original budget.",
+            })
         report["stages"].append(stage)
         if stage["status"] != "pass":
             break
