@@ -148,6 +148,16 @@ def test_empty_on_malformed_yaml(tmp_path: Path) -> None:
     assert mesh.machines == []
 
 
+def test_invalid_yaml_timestamp_preserves_tolerant_loading(tmp_path: Path) -> None:
+    path = tmp_path / "machines.yaml"
+    path.write_text(
+        "machines: {host-a: {environment: 2026-13-01}}\n", encoding="utf-8",
+    )
+    assert mesh_mod.load_mesh(path).machines == []
+    with pytest.raises(ValueError, match="cannot parse machines.yaml"):
+        mesh_mod.load_mesh(path, strict=True)
+
+
 def test_malformed_metadata_fails_open(tmp_path: Path) -> None:
     p = tmp_path / "machines.yaml"
     p.write_text(

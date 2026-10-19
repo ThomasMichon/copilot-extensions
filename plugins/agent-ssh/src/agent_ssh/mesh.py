@@ -155,7 +155,7 @@ def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
     else:
         try:
             doc = yaml.safe_load(text)
-        except yaml.YAMLError as exc:
+        except (yaml.YAMLError, ValueError) as exc:
             if strict:
                 raise ValueError(f"cannot parse machines.yaml at {path}: {exc}") from exc
             return {}
