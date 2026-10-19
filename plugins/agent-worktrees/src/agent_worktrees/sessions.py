@@ -2268,6 +2268,7 @@ def mux_binding_for_session(
     *,
     mux: str | None = None,
     expected_session_name: str | None = None,
+    include_incarnation: bool = False,
 ) -> dict | None:
     """Recover a session's mux/worktree identity from its live lock process.
 
@@ -2275,7 +2276,8 @@ def mux_binding_for_session(
     read Copilot's authoritative ``inuse.<pid>.lock``, then match that live
     process's ancestry against mux pane roots. The owning ``wt-<id>`` session
     yields both the worktree and exact pane without trusting an incidental cwd
-    or sweeping historical session state.
+    or sweeping historical session state. ``include_incarnation`` adds the live
+    mux object's token from that same observation for hosting corroboration.
     """
     import subprocess
 
@@ -2358,11 +2360,14 @@ def mux_binding_for_session(
             cur = parent
         ancestry_by_pid[pid] = ancestry
 
+    pane_format = "#{session_name}|#{pane_id}|#{pane_pid}"
+    if include_incarnation:
+        pane_format += "|#{session_id}:#{session_created}"
     try:
         result = subprocess.run(
             [
                 mux_bin, "list-panes", "-a", "-F",
-                "#{session_name}|#{pane_id}|#{pane_pid}",
+                pane_format,
             ],
             capture_output=True,
             text=True,
@@ -2376,9 +2381,13 @@ def mux_binding_for_session(
     matches: dict[tuple[str, str, int, int], dict] = {}
     for line in result.stdout.splitlines():
         fields = line.strip().split("|")
-        if len(fields) != 3:
+        if len(fields) != (4 if include_incarnation else 3):
             continue
-        session_name, pane_id, pane_pid_raw = fields
+        session_name, pane_id, pane_pid_raw = fields[:3]
+        if include_incarnation:
+            object_id, _, created = fields[3].rpartition(":")
+            if not object_id or not created.isdecimal():
+                continue
         session_is_allowed = (
             session_name == expected_session_name
             if expected_session_name
@@ -2406,6 +2415,8 @@ def mux_binding_for_session(
                 "copilot_pid": copilot_pid,
                 "copilot_start_time": copilot_start_time,
             }
+            if include_incarnation:
+                matches[key]["session_incarnation"] = fields[3]
 
     return next(iter(matches.values())) if len(matches) == 1 else None
 

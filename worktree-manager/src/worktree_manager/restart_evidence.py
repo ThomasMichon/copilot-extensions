@@ -70,7 +70,9 @@ class PositiveEvidence:
         """The exact execution generation, excluding observation freshness."""
         return tuple(
             getattr(self, field.name) for field in dataclasses.fields(self)
-            if field.name not in {"observed_at", "observation_sequence", "owner_revision"}
+            if field.name not in {
+                "observed_at", "observation_sequence", "owner_revision", "mapping_revision",
+            }
         )
 
     def provider_identity(self) -> tuple:
@@ -79,7 +81,7 @@ class PositiveEvidence:
             getattr(self, field.name) for field in dataclasses.fields(self)
             if field.name not in {
                 "observed_at", "observation_sequence", "owner_revision",
-                "native_session_id", "native_incarnation",
+                "native_session_id", "native_incarnation", "mapping_revision",
             }
         )
 
@@ -203,24 +205,24 @@ class RecoveryJournal:
             current = self._latest(conn, evidence)
             if current:
                 previous = PositiveEvidence(**current["last_positive"])
-                if evidence.mapping_revision < previous.mapping_revision:
+                if (
+                    evidence.mapping_revision < previous.mapping_revision
+                    or evidence.owner_revision < previous.owner_revision
+                ):
                     return {"applied": False, "reason": "stale"}
-                if evidence.mapping_revision == previous.mapping_revision:
-                    if evidence.owner_revision < previous.owner_revision:
-                        return {"applied": False, "reason": "stale"}
-                    if evidence.identity() != previous.identity():
-                        if (
-                            evidence.provider_identity() != previous.provider_identity()
-                            or evidence.owner_revision <= previous.owner_revision
-                        ):
-                            return {"applied": False, "reason": "identity-conflict"}
-                    elif current["disposition"] == "intentional":
+                if evidence.identity() == previous.identity():
+                    if current["disposition"] == "intentional":
                         return {"applied": False, "reason": "closed"}
-                    if (
-                        evidence.observation_sequence <= previous.observation_sequence
-                        or evidence.observed_at < previous.observed_at
-                    ):
-                        return {"applied": False, "reason": "stale"}
+                elif evidence.provider_identity() == previous.provider_identity():
+                    if evidence.owner_revision <= previous.owner_revision:
+                        return {"applied": False, "reason": "identity-conflict"}
+                elif evidence.mapping_revision <= previous.mapping_revision:
+                    return {"applied": False, "reason": "identity-conflict"}
+                if evidence.identity() == previous.identity() and (
+                    evidence.observation_sequence <= previous.observation_sequence
+                    or evidence.observed_at < previous.observed_at
+                ):
+                    return {"applied": False, "reason": "stale"}
             else:
                 count = conn.execute(
                     "SELECT count(*) FROM (SELECT 1 FROM journal GROUP BY project, worktree_id)"
@@ -265,7 +267,9 @@ class RecoveryJournal:
             row = dict(current)
             row["disposition"] = (
                 "shutdown-interrupted"
-                if reason == "unknown" and current["disposition"] == "shutdown-pending"
+                if reason == "unknown" and current["disposition"] in {
+                    "shutdown-pending", "shutdown-interrupted",
+                }
                 else reason
             )
             row["detail"] = detail

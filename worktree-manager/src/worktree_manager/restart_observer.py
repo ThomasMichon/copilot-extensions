@@ -156,6 +156,7 @@ class RestartObserver:
                 or owner.get("worktree_id") != entry["worktree_id"]
                 or owner.get("worktree_path") != entry.get("worktree_path")
                 or owner.get("mux_session") != entry["mux_session"]
+                or owner.get("session_incarnation") != entry["session_incarnation"]
                 or owner.get("platform") != self.epoch.platform
                 or owner.get("liveness") != "live"
             ):

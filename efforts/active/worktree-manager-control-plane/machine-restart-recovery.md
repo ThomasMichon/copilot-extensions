@@ -222,6 +222,12 @@ The umbrella effort remains Active independently of this slice's completion.
   birth identity and the canonical owner lifecycle revision, fencing delayed
   old-native exit and observation events without inventing a second succession
   authority.
+- Provider review added explicit dotted-id, same-mux succession, mapping-only
+  refresh, repeated unknown-exit and live mux-incarnation corroboration cases.
+  Mapping freshness is separate from execution identity, so a rejoin cannot
+  reopen an intentional close or discard shutdown state. The canonical native
+  binding helper supplies the current mux incarnation without introducing a
+  second process-discovery implementation.
 - Added report-only inspection and explicit unqualified-platform reporting.
   `automatic_eligible` remains false. The first source slice does not complete
   this plan: actual native notification/startup adapters, lifecycle producers,

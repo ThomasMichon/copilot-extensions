@@ -130,6 +130,61 @@ def test_old_native_generation_cannot_overwrite_same_mux_replacement(tmp_path, r
     assert journal.snapshot()[0]["last_positive"]["native_incarnation"] == "native:replacement"
 
 
+def test_same_mux_head_succession_uses_owner_revision(tmp_path, recovery):
+    journal = recovery.RecoveryJournal(tmp_path)
+    first = positive(recovery)
+    journal.observe(first)
+    successor = dataclasses.replace(
+        first, native_session_id=OTHER_NATIVE_ID, native_incarnation="native:successor",
+        owner_revision=2, observation_sequence=2, observed_at=110.0,
+    )
+    assert journal.observe(successor)["applied"]
+    assert journal.snapshot()[0]["last_positive"]["native_session_id"] == OTHER_NATIVE_ID
+    assert journal.record_exit(first, reason="intentional", detail="native-session-end") == {
+        "applied": False, "reason": "superseded",
+    }
+
+
+def test_mapping_refresh_cannot_reopen_an_intentionally_closed_execution(tmp_path, recovery):
+    journal = recovery.RecoveryJournal(tmp_path)
+    first = positive(recovery)
+    journal.observe(first)
+    journal.record_exit(first, reason="intentional", detail="operator-stop")
+    refreshed = dataclasses.replace(
+        first, mapping_revision=4, observation_sequence=2, observed_at=110.0,
+    )
+    assert journal.observe(refreshed) == {"applied": False, "reason": "closed"}
+    assert journal.snapshot()[0]["disposition"] == "intentional"
+
+
+def test_mapping_refresh_preserves_shutdown_and_accepts_same_execution_exit(tmp_path, recovery):
+    journal = recovery.RecoveryJournal(tmp_path)
+    first = positive(recovery)
+    journal.observe(first)
+    journal.shutdown_pending("linux", "example-environment", "boot-one", notification_id="one")
+    refreshed = dataclasses.replace(
+        first, mapping_revision=4, observation_sequence=2, observed_at=110.0,
+    )
+    assert journal.observe(refreshed)["applied"]
+    assert journal.snapshot()[0]["disposition"] == "shutdown-pending"
+    assert journal.record_exit(first, reason="unknown")["applied"]
+    assert journal.snapshot()[0]["disposition"] == "shutdown-interrupted"
+
+
+def test_repeated_unknown_preserves_shutdown_interrupted_through_positive(tmp_path, recovery):
+    journal = recovery.RecoveryJournal(tmp_path)
+    first = positive(recovery)
+    journal.observe(first)
+    journal.shutdown_pending("linux", "example-environment", "boot-one", notification_id="one")
+    journal.record_exit(first, reason="unknown")
+    journal.record_exit(first, reason="unknown")
+    assert journal.snapshot()[0]["disposition"] == "shutdown-interrupted"
+    assert journal.observe(dataclasses.replace(
+        first, observation_sequence=2, observed_at=110.0,
+    ))["applied"]
+    assert journal.snapshot()[0]["disposition"] == "shutdown-interrupted"
+
+
 def test_shutdown_cancel_restores_only_the_frozen_generation(tmp_path, recovery):
     journal = recovery.RecoveryJournal(tmp_path)
     evidence = positive(recovery)

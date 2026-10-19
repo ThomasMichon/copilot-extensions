@@ -62,19 +62,23 @@ def observe(
     if state == "live":
         binding = sessions.mux_binding_for_session(
             native_id, expected_session_name=sessions.mux_session_name(worktree_id),
+            include_incarnation=True,
         )
     current = loader()
     if current is None or dataclasses.asdict(current) != before:
         return {**result, "reason": "owner-changed"}
     if state == "live" and (
-        not binding or binding.get("worktree_id") != worktree_id
+        not binding or binding.get("session_name") != sessions.mux_session_name(worktree_id)
         or not binding.get("copilot_start_time") or not binding.get("pane_start_time")
+        or not isinstance(binding.get("session_incarnation"), str)
+        or not binding["session_incarnation"]
         or type(binding.get("copilot_pid")) is not int or binding["copilot_pid"] <= 0
     ):
         return {**result, "reason": "native-host-unconfirmed", "liveness": state}
     if binding:
         result.update(
             mux_session=binding["session_name"], pane_id=binding["pane_id"],
+            session_incarnation=binding["session_incarnation"],
             native_incarnation=f"{binding['copilot_pid']}:{binding['copilot_start_time']}",
             owner_revision=record.lifecycle_revision,
         )

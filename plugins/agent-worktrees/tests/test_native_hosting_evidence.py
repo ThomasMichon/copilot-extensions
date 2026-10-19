@@ -28,6 +28,7 @@ def native_record(sample_record, tmp_path, monkeypatch):
         "session_name": sessions.mux_session_name(sample_record.worktree_id),
         "pane_id": "%1", "copilot_start_time": "native:100", "pane_start_time": "native:99",
         "copilot_pid": 101,
+        "session_incarnation": "mux:1:100",
     })
     worktree = tmp_path / "worktree"
     worktree.mkdir()
@@ -145,3 +146,18 @@ def test_windows_hosting_refuses_before_any_process_or_mux_probe(
     )
     assert result["confirmed"] is False
     assert result["reason"] == "native-hosting-unqualified"
+
+
+def test_dotted_worktree_identity_compares_encoded_mux_name(owner, native_record, monkeypatch):
+    record = replace(native_record, worktree_id="host.example-linux")
+    monkeypatch.setattr(owner.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(owner.sessions, "session_has_conversation_data", lambda _: True)
+    monkeypatch.setattr(owner, "session_liveness", lambda _: "live")
+    monkeypatch.setattr(owner.sessions, "mux_binding_for_session", lambda *_args, **_kwargs: {
+        "worktree_id": "host_example-linux", "session_name": "wt-host_example-linux",
+        "pane_id": "%1", "copilot_pid": 101, "copilot_start_time": "native:100",
+        "pane_start_time": "native:99", "session_incarnation": "mux:1:100",
+    })
+    result = owner.observe(record.worktree_id, loader=lambda: record)
+    assert result["confirmed"] is True
+    assert result["worktree_id"] == "host.example-linux"

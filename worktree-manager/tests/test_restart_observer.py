@@ -34,6 +34,7 @@ def owner_result():
         "schema": "native-hosting-evidence", "version": 1,
         "confirmed": True, "native_session_id": NATIVE_ID,
         "native_incarnation": "native:original", "owner_revision": 1,
+        "session_incarnation": "mux:1:100",
         "worktree_id": "worktree-one", "worktree_path": "/path/to/worktree-one",
         "mux_session": "wt-worktree-one",
         "platform": "linux", "liveness": "live", "automatic_eligible": False,
@@ -105,6 +106,16 @@ def test_reasonless_tombstone_cannot_erase_journal(tmp_path, observer_module, ma
     mapping.remove("example", "worktree-one")
     observer.observe(mapping, now=100.0)
     assert observer.journal.snapshot()[0]["last_positive"] == original
+
+
+def test_owner_live_mux_incarnation_must_match_registry(tmp_path, observer_module, mapping):
+    observer = build_observer(
+        observer_module, tmp_path,
+        owner_probe=lambda *_: {**owner_result(), "session_incarnation": "mux:replacement:200"},
+    )
+    observer.observe(mapping, now=10.0)
+    assert observer.journal.snapshot() == []
+    assert observer.last_result["applied"] is False
 
 
 @pytest.mark.parametrize("change", [

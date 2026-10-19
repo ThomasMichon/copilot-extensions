@@ -415,6 +415,10 @@ process cannot retire its replacement. The engine
 corroborates the current native head, conversation data, process identity and mux
 binding over its normal process boundary; stale or uncertain evidence is not
 recorded as live. A detached live session remains observable.
+The live mux incarnation is corroborated alongside the native process binding,
+not copied from a possibly stale display mapping. Mapping revisions order
+refreshes but are not execution identity: rejoining the same execution cannot
+clear intentional closure or shutdown-interruption evidence.
 
 The daemon inspects previous evidence before admitting ordinary status requests,
 then samples at most one mapping per 20 seconds with a four-second owner-query
