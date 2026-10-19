@@ -192,10 +192,11 @@ loopback, or one resolving to genuine remote SSH:
 
 ### repository-local-plugin-registration
 Eligible plugins selected for a target repository are available to both a
-headed CLI and a headless ACP agent executing there. Selected remote-marketplace
-plugins are installed and locally sourced worktree payloads are reflected into
-the execution environment before registration; local venues may reference
-already-local payloads.
+headed CLI and a headless ACP agent executing there. Locally sourced worktree
+payloads are reflected before registration; local venues may reference
+already-local payloads. Git-sourced plugins may complete repository-scoped
+acquisition and activation during native startup, without accepting work before
+the selected plugins are ready.
 The target checkout's `.github/copilot/settings.local.json` preserves the
 selected marketplace sources and enabled identities without replacing unrelated settings
 or requiring user-global registration. The operation owns only the reflected
@@ -204,11 +205,20 @@ maps wholesale. Each launch mode also receives the explicit plugin-directory
 arguments its supported contract requires. ACP receives `--plugin-dir` for each
 effective prepared plugin; CLI uses the local settings merged over the
 repository's base settings and may also receive explicit directory arguments.
-The target-local settings file is assembled after installation and reflection
-complete, before either mode launches.
-A copy or registration
-failure is not a successful, plugin-equipped launch. Restricted venues retain
+The target-local settings file is assembled after required pre-start payload
+preparation and reflection, before either mode starts. Native Git activation may
+then complete during startup, with readiness enforced before task delivery.
+A copy, registration or startup-activation failure is not a successful,
+plugin-equipped session. Restricted venues retain
 their explicit no-automatic-projection boundary.
+
+### plugin-readiness-before-work
+The execution owner does not deliver a task or advertise readiness until the
+complete effective plugin selection is available to that agent. Native
+repository-scoped Git startup is part of preparation, not permission to race
+task delivery against acquisition. A live process, allocated session identity
+or successful connection alone does not establish plugin readiness. A failed
+selection is surfaced rather than accepting work with a partial plugin set.
 
 ### plugin-source-preserving-projection
 Projection preserves the controller's declared source, not merely the bytes of

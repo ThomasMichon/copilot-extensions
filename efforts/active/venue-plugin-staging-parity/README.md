@@ -14,9 +14,11 @@
 
 An agent executing inside a target repository receives the eligible plugins
 selected for that repository, not merely a successful transport connection.
-Reflect payloads into the execution environment, register their local paths in
-the target checkout, and launch only after that preparation succeeds. Headed
-CLI and headless ACP sessions should discover equivalent skills.
+Reflect local payloads into the execution environment and register the selected
+sources in the target checkout. Native repository-scoped Git activation may
+complete during startup, but the execution owner delivers no task until the
+effective plugin selection is ready. Headed CLI and headless ACP sessions
+should discover equivalent skills.
 
 ## Participants
 
@@ -102,6 +104,17 @@ preferences as a readiness workaround. Native repository-declared auto-install
 is distinct from global plugin-management commands; shared installation
 bookkeeping alone does not grant global activation.
 
+### Startup-readiness decision
+
+The operator selected **startup-readiness**: native repository-scoped Git
+acquisition and activation may complete during productive process startup.
+Bridge must confirm the selected plugins are ready before delivering a task.
+This replaces a strict requirement that native installation bookkeeping exist
+before the productive Copilot process starts; it does not relax source
+preservation, repository scope, target-local registration before startup, or
+failure reporting. Modes requiring explicit directories must still have usable
+payload paths when those directories are supplied.
+
 ## Plan
 
 ### Phase 0 - Reconcile and review
@@ -144,7 +157,10 @@ bookkeeping alone does not grant global activation.
   integrated venue: retain Git origin/revision/location declarations, retain
   local references or reflected local copies, and rebind target-owned absolute
   local references relative to the actual execution checkout.
-- [ ] Publish worked examples mapping controller selection and execution
+- [ ] Gate task delivery on the complete effective plugin set, allowing native
+  repository-scoped Git startup acquisition without treating process creation,
+  a connection or a session acknowledgment as plugin readiness.
+- [x] Publish worked examples mapping controller selection and execution
   location to target-local settings and the complete automatic ACP directory
   set; cover source preservation, target ownership, mixed origins, installed
   fallback and explicit target-local choices.
@@ -184,7 +200,7 @@ bookkeeping alone does not grant global activation.
   same identity resolve to the selected target payload without duplicate skill
   loading. Explicit target-local operator overrides remain authoritative unless
   this operation explicitly owns that entry.
-- [x] Shared preparation covers headed CLI and ACP with the same selected
+- [x] Pre-start preparation covers headed CLI and ACP with the same selected
   payload identities; ordering tests prove remote installation and local copying
   complete before settings assembly, and settings assembly completes before
   launch. Missing installation or copy failure prevents child startup.
@@ -211,6 +227,9 @@ bookkeeping alone does not grant global activation.
 - [ ] Git preparation and activation leave user-global preferences unchanged;
   an unrelated repository using the same execution profile does not load the
   target repository's selected plugins.
+- [ ] Native startup acquisition completes before task delivery; a failed or
+  incomplete selection prevents ready status and task submission, including
+  cancellation, retry and modes with no skill contribution to observe.
 - [x] Existing own-plugin, related-plugin, Session Host resume, and native
   repository settings behavior remain intact.
 
@@ -246,6 +265,21 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-18 - Startup-readiness ordering accepted
+
+- The operator selected native repository-scoped startup activation, with task
+  delivery gated on confirmed plugin readiness. This removes a strict
+  install-before-process bookkeeping requirement, not the requirement to
+  deliver the complete selected plugin set before accepting work.
+- Source-kind preservation, target-owned relative relocation and repository-only
+  activation remain unchanged. There is no authorization for user-global
+  installation/enablement changes, a profile switch, dummy inference or private
+  native-state manipulation.
+- The seven worked settings/argument cases are published in this draft's
+  acceptance reference. Updated their ordering language and retained the
+  separate implementation/validation gates for startup readiness, Git source
+  handling and deferred adapters.
 
 ### 2026-10-18 - Source preservation and repository-scoped activation
 

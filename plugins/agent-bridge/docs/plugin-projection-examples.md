@@ -3,10 +3,11 @@
 These worked examples define the projection acceptance contract, not
 instructions to edit a running agent's settings by hand or a claim that every
 launch adapter is integrated. Selection, payload availability, registration and
-launch are separate steps. Every selected payload must be ready before
-publishing settings, and settings must be ready before starting the productive
-child. The active effort records which integration and readiness gates remain
-open.
+launch are separate steps. Required pre-start payload preparation and local
+reflection precede settings publication. Settings precede productive process
+startup; native repo-scoped Git acquisition may complete during that startup.
+No task is delivered until the effective plugin selection is confirmed ready.
+The active effort records which integration and readiness gates remain open.
 
 ## Source-preservation rule
 
@@ -262,8 +263,10 @@ marketplace as a workaround. Starting with no global enablement, another
 repository using this same profile but declaring no such selection must not
 load the helper. Sharing installed files is not sharing activation.
 
-This example requires a completed scoped acquisition before the productive
-launch; writing Git declarations alone is not evidence of that readiness.
+Native scoped acquisition may complete during startup, but writing Git
+declarations or starting the process is not evidence of readiness. Task delivery
+waits for confirmation of the complete selection. A mode supplying explicit
+directories must have usable paths when it supplies those arguments.
 
 ### 5. Absolute controller reference to a target-owned plugin
 
@@ -412,6 +415,7 @@ Apply these exclusions before calling the result ready:
 | Explicit target-local disable | No automatic directory for that logical selection, including through an alias |
 | Explicit target-local origin override | Preserve it and prepare its payload, not the overridden controller payload |
 | Unselected catalog sibling or external companion | No new enablement or directory |
-| Missing selected payload, failed install or malformed settings | No productive child launch |
+| Pre-start preparation failure or malformed settings | No productive child launch |
+| Failed or incomplete native Git startup activation | No ready status or task delivery |
 | Unrelated repository using the same profile | No activation caused by this repository's projection |
 | Configured/request-owned directory flag | Preserve the authored argument; do not misclassify it as an owned projection |
