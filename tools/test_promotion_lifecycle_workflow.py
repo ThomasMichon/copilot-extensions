@@ -42,6 +42,15 @@ def lifecycle_contract(workflow: dict[str, Any]) -> None:
     gate_steps = jobs["gate"]["steps"]
     check_index = next(index for index, step in enumerate(gate_steps) if step.get("id") == "check")
     assert gate_steps.index(guard) < check_index
+    retirement = next(step for step in gate_steps if "--automatic-source" in step.get("run", ""))
+    assert gate_steps.index(retirement) > check_index
+    assert retirement["if"] == (
+        "github.event_name == 'repository_dispatch' && steps.check.outputs.is_dev == 'true'"
+    )
+    assert retirement["env"] == {
+        "GH_TOKEN": "${{ github.token }}", "AUTOMATIC_SOURCE": "${{ steps.check.outputs.sha }}",
+    }
+    assert "--require-idle" in retirement["run"]
     assert gate_steps[check_index]["env"]["RELEASED_SOURCE"] == "${{ steps.pause.outputs.released_source }}"
     assert "released_source=" in next(step for step in gate_steps if step.get("id") == "pause")["run"]
     assert publish["env"]["QUALIFICATION_PROMOTION_RUN"] == (
@@ -77,7 +86,11 @@ def minimal_contract() -> dict[str, Any]:
             "env": {"GH_TOKEN": "${{ github.token }}"},
         }, {"id": "pause", "run": "released_source=trusted"},
             {"id": "check", "run": "confirm admitted source",
-             "env": {"RELEASED_SOURCE": "${{ steps.pause.outputs.released_source }}"}}]},
+             "env": {"RELEASED_SOURCE": "${{ steps.pause.outputs.released_source }}"}},
+            {"run": "python promotion_lifecycle.py --require-idle --automatic-source sha",
+             "if": "github.event_name == 'repository_dispatch' && steps.check.outputs.is_dev == 'true'",
+             "env": {"GH_TOKEN": "${{ github.token }}",
+                     "AUTOMATIC_SOURCE": "${{ steps.check.outputs.sha }}"}}]},
         "promote": {"outputs": {"candidate_sha": "candidate"}, "steps": []},
         "qualify-candidate": {
             "if": "needs.promote.outputs.candidate_sha != ''",
@@ -109,7 +122,7 @@ class ContractFixtureTests(unittest.TestCase):
         lifecycle_contract(original)
         for mutation in (
             "early-pr", "pr-dependent-qualification", "no-origin", "no-admission",
-            "no-final-admission", "early-open", "wrong-pr", "merge-secret",
+            "no-final-admission", "early-open", "wrong-pr", "merge-secret", "no-retirement",
         ):
             with self.subTest(mutation=mutation):
                 workflow = copy.deepcopy(original)
@@ -128,6 +141,8 @@ class ContractFixtureTests(unittest.TestCase):
                     jobs["publish-python-artifacts"]["steps"].reverse()
                 elif mutation == "wrong-pr":
                     jobs["merge-promotion"]["if"] = "needs.promote.outputs.pr_number != ''"
+                elif mutation == "no-retirement":
+                    jobs["gate"]["steps"].pop()
                 else:
                     jobs["merge-promotion"]["steps"][0]["env"]["GH_TOKEN"] = "${{ secrets.UNEXPECTED }}"
                 with self.assertRaises((AssertionError, KeyError, StopIteration)):
@@ -189,7 +204,10 @@ def api(path,**kwargs):
 verify_promotion_workflows._api=api
 args=sys.argv[1:]
 assert args[:2]==["-I","-B"]
-script=Path(args[2]).resolve()
+script=Path(args[2])
+if not script.is_absolute():
+    script=Path(os.environ["TEST_TOOLS"]).parent/script
+script=script.resolve()
 assert script==Path(os.environ["TEST_TOOLS"])/"promotion_lifecycle.py"
 sys.argv=[str(script),*args[3:]]
 runpy.run_path(str(script),run_name="__main__")
@@ -241,6 +259,46 @@ class QualifiedPRLifecycleTests(boundary._ShellFixture):
         cls.waiter = boundary.python_body(
             boundary.script(boundary.step(cls.jobs["merge-promotion"], "merged")),
         )
+
+    def test_literal_queued_admission_rechecks_retirement_using_the_real_cli(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        retirement = next(
+            step for step in self.workflow["jobs"]["gate"]["steps"]
+            if "--automatic-source" in step.get("run", "")
+        )
+        with tempfile.TemporaryDirectory(prefix="queued-promotion-admission-") as directory:
+            transport = Path(directory) / "transport.py"
+            transport.write_text(
+                """import os,runpy,sys
+from pathlib import Path
+sys.path.insert(0,os.environ["TEST_TOOLS"])
+from test_promotion_dispatch import Backend, state, DEV
+import verify_promotion_workflows
+backend=Backend()
+backend.pr["merged"]=False
+if os.environ["TEST_MODE"]=="retired":
+    backend.candidate=state(DEV)
+verify_promotion_workflows._api=backend
+assert sys.argv[1:3]==["-I","-B"]
+script=Path(os.environ["TEST_TOOLS"])/"promotion_lifecycle.py"
+sys.argv=[str(script),*sys.argv[4:]]
+runpy.run_path(str(script),run_name="__main__")
+""",
+                encoding="utf-8", newline="\n",
+            )
+            prefix = 'python() { "$PYTHON" -I -B "$TRANSPORT_HELPER" "$@"; }\n'
+            for mode in ("ready", "retired"):
+                with self.subTest(mode=mode):
+                    result = self.shell(prefix + retirement["run"], {
+                        "GITHUB_REPOSITORY": "example/project", "AUTOMATIC_SOURCE": "b" * 40,
+                        "PYTHON": Path(sys.executable).as_posix(),
+                        "TRANSPORT_HELPER": transport.as_posix(),
+                        "TEST_TOOLS": (root / "tools").as_posix(), "TEST_MODE": mode,
+                    })
+                    self.assertEqual(result.returncode == 0, mode == "ready", result.stderr)
+                    if mode == "retired":
+                        self.assertIn("retired source is unchanged", result.stderr)
+                        self.assertEqual(result.output, "")
 
     def execute_waiter(self, provider: boundary.Provider, env: dict[str, str]) -> None:
         harness = boundary.BoundaryTests("test_pending_checks_then_exact_nonadmin_merge")

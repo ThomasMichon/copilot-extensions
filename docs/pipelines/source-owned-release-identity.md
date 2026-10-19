@@ -127,6 +127,19 @@ without another push. Successful no-ops with no merged PR cannot form a
 dispatch loop; an unmerged retired candidate does not automatically retry its
 unchanged source. Stale completion events do not take responsibility back from
 a newer generation, including one whose real failure still needs recovery.
+Ownership requires authenticated, fully paginated job evidence: a successful
+Gate and actually started, non-skipped source validation in the same attempt.
+A queued run, failed admission or paused no-op does not own progress. Promotion
+closure and completion events share this ordering rule, including delayed
+closures arriving after a newer admitted run has failed. Resume/control wakes
+remain eligible behind a finishing paused no-op.
+
+Retirement is read from the complete closed-promotion history and the immutable
+candidate's recorded source, independent of the waking event. A delayed green
+CI event cannot retry the same retired source. The trusted admission gate
+rechecks that policy for automatic dispatches after resolving the live Dev tip,
+so events already queued before retirement cannot bypass it. Explicit manual
+qualification remains an operator action, not an automatic retry.
 Normal admission also declines duplicate validation of a source already
 recorded on Main; an explicit qualification-only request remains distinct.
 

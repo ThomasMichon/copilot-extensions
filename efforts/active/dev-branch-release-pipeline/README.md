@@ -1049,6 +1049,31 @@ proposal.
 
 ## Journal
 
+### 2026-10-18 - Repair lifecycle event ordering before control activation
+
+The current-head review of #7201 identified four real scheduling gaps. A
+newer run that merely queued and failed admission must not suppress deferred
+work after an older merge-only retry succeeds. Delayed promotion closure must
+use the same ordering rule as completion, including newer admitted failures.
+A finishing paused no-op must not discard a resume/control wake. Recorded
+retirement must block unchanged-source automatic retries from every event,
+including delayed CI and dispatches already queued before closure.
+
+The repair uses complete, authenticated Gate/source-job attempt history to
+distinguish actual admission from queued, declined and skipped runs. Retirement
+uses GitHub's closed-unmerged connection rather than REST's combined
+closed/merged inventory, with paginated readback and immutable candidate-source
+verification. Live compatibility exposed the merged-history pagination limit
+before activation; the corrected reader consumes the actual current history
+in one inventory page and fourteen total API reads. It permits the new Dev
+source without weakening the retirement check.
+
+The prepared Main gate independently rechecks retirement after resolving
+automatic source admission. Its literal workflow test executes the real CLI
+for both an allowed advance and a retired unchanged source. No additional
+permission, writer, workflow, CI waiver or qualification retry is introduced.
+Main activation and all parent release/client acceptance gates remain pending.
+
 ### 2026-10-18 - Reviewed lifecycle charter implemented locally; Main activation pending
 
 Plan amendment #7199 merged as

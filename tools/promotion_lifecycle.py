@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify_promotion_workflows import VerificationError, _api  # noqa: E402
-from promotion_dispatch import PromotionDispatchError, pending_source  # noqa: E402
+from promotion_dispatch import PromotionDispatchError, pending_source, require_automatic_source  # noqa: E402
 
 SCHEMA = "copilot-extensions.promotion-admission"
 _REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9_.-]+")
@@ -125,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--require-idle", action="store_true")
     parser.add_argument("--candidate-branch")
     parser.add_argument("--candidate-sha")
+    parser.add_argument("--automatic-source")
     events = parser.add_mutually_exclusive_group()
     events.add_argument("--source-ci-run", type=int)
     events.add_argument("--completed-promotion-run", type=int)
@@ -140,16 +141,28 @@ def main(argv: list[str] | None = None) -> int:
             raise PromotionAdmissionError("invalid promotion scheduling event identity")
         if event_mode and (
             args.require_idle or args.candidate_branch is not None or args.candidate_sha is not None
+            or args.automatic_source is not None
         ):
             raise PromotionAdmissionError("dispatch scheduling cannot reuse an existing candidate")
         if (args.candidate_branch is not None or args.candidate_sha is not None) and not args.require_idle:
             raise PromotionAdmissionError("existing-candidate admission requires --require-idle")
+        if args.automatic_source is not None and (
+            not args.require_idle or args.candidate_branch is not None or args.candidate_sha is not None
+        ):
+            raise PromotionAdmissionError("automatic-source admission requires a fresh idle generation")
         require_idle((), candidate_branch=args.candidate_branch, candidate_sha=args.candidate_sha)
         started = time.monotonic()
         promotions = active_promotions(args.repository)
         if args.require_idle:
             require_idle(
                 promotions, candidate_branch=args.candidate_branch, candidate_sha=args.candidate_sha,
+            )
+        if args.automatic_source is not None:
+            remaining = 120 - (time.monotonic() - started)
+            if remaining <= 0:
+                raise PromotionAdmissionError("promotion scheduling deadline expired")
+            require_automatic_source(
+                args.repository, args.automatic_source, api=_api, wait_seconds=remaining,
             )
         idle = not promotions
         decision = None
