@@ -109,6 +109,81 @@ def test_binding_is_owned_project_qualified_and_url_uses_same_policy(contributio
         catalog.resolve("https://example.com/acp", project="demo")
 
 
+@pytest.mark.parametrize("address", ["remote-acp:assistant", "https://example.com/acp"])
+def test_global_and_project_activation_does_not_infer_project_binding(contribution, address):
+    from dataclasses import replace
+
+    report = discover_remote_contributions()
+    report.targets["assistant"] = replace(
+        report.targets["assistant"], scopes=("global", "project:demo"),
+    )
+    contexts = []
+
+    def project_bindings(project):
+        contexts.append(project)
+        return {"assistant": binding()} if project == "demo" else {}
+
+    catalog = RemoteAcpCatalog(
+        {}, discover=lambda: report, project_bindings=project_bindings,
+    )
+    catalog.apply(report)
+    cached = catalog.contribution_report
+    with pytest.raises(ValueError):
+        catalog.resolve(address)
+    row = catalog.rows(refresh=False)[0]
+    assert row["global_scope"] and row["state"] == "requires-binding"
+    assert not row["spawnable"]
+    assert catalog.detail("remote-acp:assistant") == row
+    assert contexts == []
+    assert catalog.resolve(address, project="demo")[0] == "assistant"
+    assert contexts == ["demo"]
+    with pytest.raises(ValueError):
+        catalog.resolve(address, project="other")
+    with pytest.raises(ValueError):
+        catalog.resolve(address)
+    assert catalog.contribution_report is cached
+
+
+@pytest.mark.parametrize("address", ["remote-acp:assistant", "https://service.example.com/acp"])
+def test_global_and_project_activation_accepts_explicit_service_binding(contribution, address):
+    from dataclasses import replace
+
+    report = discover_remote_contributions()
+    report.targets["assistant"] = replace(
+        report.targets["assistant"], scopes=("global", "project:demo"),
+    )
+
+    def project_bindings(project):
+        raise AssertionError("unscoped service binding must not read project bindings")
+
+    catalog = RemoteAcpCatalog(
+        {}, bindings={"assistant": binding(endpoint="https://service.example.com/acp")},
+        discover=lambda: report, project_bindings=project_bindings,
+    )
+    name, target = catalog.resolve(address)
+    assert name == "assistant" and target.endpoint == "https://service.example.com/acp"
+    row = catalog.rows()[0]
+    assert row["global_scope"] and row["spawnable"]
+    assert catalog.detail("remote-acp:assistant") == row
+
+
+def test_project_only_activation_still_infers_binding_for_roster(contribution):
+    contexts = []
+
+    def project_bindings(project):
+        contexts.append(project)
+        return {"assistant": binding()}
+
+    catalog = RemoteAcpCatalog({}, project_bindings=project_bindings)
+    row = catalog.rows()[0]
+    assert row["spawnable"] and row["projects"] == ["demo"] and not row["global_scope"]
+    assert contexts == ["demo"]
+    for address in ("remote-acp:assistant", "https://example.com/acp"):
+        with pytest.raises(ValueError):
+            catalog.resolve(address)
+        assert catalog.resolve(address, project="demo")[0] == "assistant"
+
+
 @pytest.mark.parametrize("endpoint", [
     "https://example.com/other", "https://example.com/acp?query=1",
     "https://example.com/acp#fragment", "http://example.com/acp",

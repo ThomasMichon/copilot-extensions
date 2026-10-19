@@ -106,7 +106,9 @@ class RemoteAcpCatalog:
             reason = contribution.reason
             target = None
             binding = None
-            context = project or (projects[0] if len(projects) == 1 else None)
+            context = project or (
+                projects[0] if "global" not in scopes and len(projects) == 1 else None
+            )
             binding_error = False
             try:
                 lower = self._project_bindings(context) if context else {}
