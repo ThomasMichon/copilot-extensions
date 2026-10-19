@@ -6,6 +6,25 @@ import os
 import subprocess
 from pathlib import Path
 
+_CONTEXT = {
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES", "GIT_COMMON_DIR",
+    "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_DIR",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_GRAFT_FILE", "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE", "GIT_INTERNAL_SUPER_PREFIX", "GIT_NAMESPACE",
+    "GIT_NO_REPLACE_OBJECTS", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX",
+    "GIT_QUARANTINE_PATH", "GIT_REPLACE_REF_BASE", "GIT_SHALLOW_FILE", "GIT_WORK_TREE",
+}
+
+
+def repository_env() -> dict[str, str]:
+    env = {
+        key: value for key, value in os.environ.items()
+        if key.upper() not in _CONTEXT
+        and not key.upper().startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+    }
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
 
 def command(path: str) -> list[str]:
     argv = ["git", "-C", path]
@@ -14,10 +33,11 @@ def command(path: str) -> list[str]:
     return argv
 
 
-def run(path: str, *args: str) -> subprocess.CompletedProcess[str]:
+def run(path: str, *args: str, timeout: float = 5) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
-            [*command(path), *args], capture_output=True, text=True, timeout=5,
+            [*command(path), *args], capture_output=True, text=True, timeout=timeout,
+            env=repository_env(),
             **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -48,3 +68,38 @@ def origin(path: str) -> str:
     validate_checkout(path)
     result = run(path, "remote", "get-url", "origin")
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def default_branch(knowledge_path: str) -> str:
+    path = Path(knowledge_path).resolve()
+    if not knowledge_path or not path.is_dir():
+        return ""
+    try:
+        result = run(str(path), "ls-remote", "--symref", "origin", "HEAD", timeout=10)
+    except RuntimeError:
+        result = None
+    if result is not None and result.returncode == 0:
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("ref:") and "HEAD" in line:
+                ref = line[len("ref:"):].split("\t", 1)[0].strip()
+                if ref.startswith("refs/heads/"):
+                    return ref.removeprefix("refs/heads/")
+    try:
+        result = run(
+            str(path), "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD",
+        )
+    except RuntimeError:
+        return ""
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().removeprefix("origin/")
+    for candidate in ("main", "master"):
+        try:
+            result = run(
+                str(path), "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{candidate}",
+            )
+        except RuntimeError:
+            return ""
+        if result.returncode == 0:
+            return candidate
+    return ""

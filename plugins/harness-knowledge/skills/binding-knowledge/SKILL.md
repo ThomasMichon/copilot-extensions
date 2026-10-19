@@ -236,7 +236,8 @@ The declared knowledge role remains companion state and is never a Bridge
 launch target. Prefer existing agents in the selected/current harness for
 outreach unless the operator directs an explicit different repository target.
 The dependency-free preserving writer supports ordinary top-level block
-mappings; document markers, flow mappings and quoted or indented root keys
+mappings, including unrelated indentless sequence values; document markers,
+flow mappings, multiline binding values and quoted or indented root keys
 refuse explicitly without modifying the file. Both explicit and preserving
 pointer writers share one cross-process lock and atomically replace changed
 configuration; a waiting preserving writer re-reads the winning selection.

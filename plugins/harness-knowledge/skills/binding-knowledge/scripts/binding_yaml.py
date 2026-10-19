@@ -70,11 +70,18 @@ def check_document_shape(existing: str) -> None:
     if significant and (
         not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\s*:", significant[0])
         or any(
-            not line[0].isspace() and not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\s*:", line)
+            not line[0].isspace() and not line.startswith("- ")
+            and not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\s*:", line)
             for line in significant
         )
     ):
         raise RuntimeError("unsupported binding configuration shape; expected a block mapping")
+    for index, line in enumerate(significant[:-1]):
+        following = significant[index + 1]
+        if re.match(r"^knowledge_repo\s*:", line) and (
+            following[0].isspace() or following.startswith("- ")
+        ):
+            raise RuntimeError("unsupported multiline knowledge binding; configuration was preserved")
 
 
 def check_existing_binding(existing: str, knowledge: str) -> bool:

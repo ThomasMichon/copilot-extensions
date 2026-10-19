@@ -517,3 +517,71 @@ def test_bare_registration_checks_actual_origin_before_binding(tmp_path, monkeyp
     assert ready["status"] == ("ready" if matches else "mismatch")
     if not matches:
         assert "registered remote" in ready["reason"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "knowledge_repo:\n  knowledge\n",
+        "knowledge_repo: >-\n  knowledge\n",
+        "knowledge_repo: |-\n  knowledge\n",
+    ],
+)
+def test_multiline_binding_is_preserved_without_partial_replacement(tmp_path, text):
+    config = tmp_path / "config.yaml"
+    config.write_text("repo_name: harness\n" + text, encoding="utf-8")
+    before = config.read_bytes(), config.stat().st_mtime_ns
+    for preserve in (True, False):
+        with pytest.raises(RuntimeError, match="multiline knowledge binding"):
+            bk._binding_yaml.write_binding(config, "harness", "knowledge", preserve=preserve)
+        assert (config.read_bytes(), config.stat().st_mtime_ns) == before
+
+
+@pytest.mark.parametrize("existing_binding", [False, True])
+def test_unrelated_indentless_sequence_is_supported_for_matching_and_first_touch(
+    tmp_path, existing_binding
+):
+    config = tmp_path / "config.yaml"
+    existing = "repo_name: harness\ncopilot_profiles:\n- name: cloud\n  model: example\n"
+    if existing_binding:
+        existing += "knowledge_repo: knowledge\n"
+    config.write_text(existing, encoding="utf-8")
+    before = config.read_bytes(), config.stat().st_mtime_ns
+    bk._binding_yaml.write_binding(config, "harness", "knowledge", preserve=True)
+    if existing_binding:
+        assert (config.read_bytes(), config.stat().st_mtime_ns) == before
+    else:
+        assert config.read_text() == "knowledge_repo: knowledge\n" + existing
+
+
+def test_git_identity_and_branch_probes_ignore_inherited_repository_context(tmp_path, monkeypatch):
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+    def git(*args):
+        result = subprocess.run(["git", *args], capture_output=True, text=True, **kwargs)
+        assert result.returncode == 0, result.stderr
+        return result
+
+    checkout, foreign, remote = tmp_path / "checkout", tmp_path / "foreign", tmp_path / "origin.git"
+    for root in (checkout, foreign):
+        git("init", "--quiet", "--initial-branch=main", str(root))
+    (checkout / "README").write_text("synthetic\n")
+    git("-C", str(checkout), "add", ".")
+    git("-C", str(checkout), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+        "commit", "--quiet", "-m", "Synthetic source")
+    git("clone", "--quiet", "--bare", str(checkout), str(remote))
+    git("-C", str(checkout), "remote", "add", "origin", str(remote))
+    monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(foreign))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(foreign / "foreign.index"))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.worktree")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(foreign))
+    monkeypatch.setenv("BINDING_UNRELATED_ENV", "preserved")
+    cp.validate_checkout(str(checkout))
+    assert bk.knowledge_origin(str(checkout)) == str(remote)
+    assert bk.knowledge_default_branch(str(checkout)) == "main"
+    cleaned = bk._binding_git.repository_env()
+    assert "GIT_DIR" not in cleaned
+    assert "GIT_CONFIG_VALUE_0" not in cleaned
+    assert cleaned["BINDING_UNRELATED_ENV"] == "preserved"

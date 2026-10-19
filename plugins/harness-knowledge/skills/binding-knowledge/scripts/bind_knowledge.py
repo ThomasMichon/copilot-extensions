@@ -84,76 +84,7 @@ def sanitize_remote(remote: str) -> str:
     )
 
 
-def knowledge_default_branch(knowledge_path: str) -> str:
-    path = Path(knowledge_path).resolve()
-    if not knowledge_path or not path.is_dir():
-        return ""
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(path),
-                "ls-remote",
-                "--symref",
-                "origin",
-                "HEAD",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        result = None
-    if result is not None and result.returncode == 0:
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("ref:") and "HEAD" in line:
-                ref = line[len("ref:"):].split("\t", 1)[0].strip()
-                if ref.startswith("refs/heads/"):
-                    return ref.removeprefix("refs/heads/")
-
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(path),
-                "symbolic-ref",
-                "--quiet",
-                "--short",
-                "refs/remotes/origin/HEAD",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip().removeprefix("origin/")
-
-    for candidate in ("main", "master"):
-        try:
-            result = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(path),
-                    "rev-parse",
-                    "--verify",
-                    "--quiet",
-                    f"refs/remotes/origin/{candidate}",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
-        if result.returncode == 0:
-            return candidate
-    return ""
+knowledge_default_branch = _binding_git.default_branch
 
 
 def classify_origin(remote: str) -> tuple[str, str]:

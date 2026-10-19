@@ -129,3 +129,20 @@ def test_binding_projection_preserves_repository_names_as_native_yaml_strings(na
     plain = f"knowledge_repo: {name}\n"
     if isinstance(yaml.safe_load(plain)["knowledge_repo"], str):
         assert owner._check_existing_binding(plain, name)
+
+
+def test_binding_update_preserves_native_indentless_sequence_structure(tmp_path):
+    script = (
+        Path(__file__).resolve().parents[3]
+        / "plugins" / "harness-knowledge" / "skills" / "binding-knowledge"
+        / "scripts" / "binding_yaml.py"
+    )
+    spec = importlib.util.spec_from_file_location("native_sequence_binding", script)
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    path = tmp_path / "config.yaml"
+    existing = "repo_name: harness\ncopilot_profiles:\n- name: cloud\n  model: example\n"
+    path.write_text(existing, encoding="utf-8")
+    owner.write_binding(path, "harness", "knowledge", preserve=True)
+    before, after = yaml.safe_load(existing), yaml.safe_load(path.read_text())
+    assert after == {**before, "knowledge_repo": "knowledge"}
