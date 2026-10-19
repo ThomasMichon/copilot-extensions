@@ -1,0 +1,9 @@
+{
+  "comment": "Pin vendored daemon module imports and restrict installer cleanup to its loaded construction owner.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

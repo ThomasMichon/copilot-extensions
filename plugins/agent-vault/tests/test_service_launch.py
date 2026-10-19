@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import agent_procutil
@@ -50,7 +51,10 @@ def test_spawn_service_runs_from_the_runtime_root_with_a_log(monkeypatch, tmp_pa
     assert launch.spawn_service(["--foreground"]) == "proc"
     root = home.resolve()
     assert root.is_dir()
-    assert seen["argv"][1:] == ["-m", "agent_vault.service", "--foreground"]
+    assert seen["argv"][1] == "-c"
+    assert seen["argv"][3:] == [
+        str(Path(launch.__file__).resolve().parent.parent), "--foreground",
+    ]
     assert seen["cwd"] == root
     assert seen["log_path"] == root / launch.SERVICE_STDIO_LOG
     # The service always ran inside its caller's Job before: keep it running
@@ -61,6 +65,64 @@ def test_spawn_service_runs_from_the_runtime_root_with_a_log(monkeypatch, tmp_pa
 
 def test_spawn_service_is_the_shared_primitive():
     assert launch.spawn_daemon is agent_procutil.spawn_daemon
+
+
+@pytest.mark.parametrize("shadowed", [False, True])
+def test_vendored_service_imports_its_own_package_from_runtime_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, shadowed: bool,
+) -> None:
+    packages = tmp_path / "vendored packages"
+    package = packages / "agent_vault"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "service.py").write_text(
+        "import json, os, sys\n"
+        "print(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd(), "
+        "'module': __file__}))\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "runtime home"
+    home.mkdir()
+    if shadowed:
+        shadow = home / "agent_vault"
+        shadow.mkdir()
+        (shadow / "__init__.py").write_text(
+            "raise RuntimeError('runtime cwd must not select the service package')\n",
+            encoding="utf-8",
+        )
+    caller = tmp_path / "foreign caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv(config.HOME_ENV, str(home))
+    monkeypatch.setattr(launch, "__file__", str(package / "launch.py"))
+    command: list[str] = []
+    overrides: dict[str, str] = {}
+
+    def capture(
+        argv: list[str], *, env_overrides: dict[str, str], **_kwargs: object,
+    ) -> None:
+        command.extend(argv)
+        overrides.update(env_overrides)
+
+    monkeypatch.setattr(launch, "spawn_daemon", capture)
+    args = ["--foreground", "--probe-value", "value with spaces"]
+    launch.spawn_service(args)
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith("PYTHON")
+    }
+    env.update(overrides)
+    for _ in range(2):
+        result = subprocess.run(
+            [command[0], "-S", *command[1:]], cwd=home, env=env,
+            capture_output=True, text=True, timeout=10,
+            **agent_procutil.no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        observed = json.loads(result.stdout)
+        assert observed["argv"] == args
+        assert Path(observed["cwd"]) == home.resolve()
+        assert Path(observed["module"]).resolve() == (package / "service.py").resolve()
 
 
 def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):

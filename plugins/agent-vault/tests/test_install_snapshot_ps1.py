@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import agent_procutil
 import pytest
 
 
@@ -307,6 +308,41 @@ def _uv_events(env: dict[str, str]) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+def _stamp_uv_guard(tmp_path: Path, env: dict[str, str]) -> Path:
+    """Detect any UV use without compiling the deferred runtime provider."""
+    directory = tmp_path / "stamp-uv"
+    directory.mkdir()
+    provider = directory / ("uv.cmd" if os.name == "nt" else "uv")
+    provider.write_text(
+        '@echo off\n>> "%FIXTURE_UV_LOG%" echo {"phase":"unexpected-stamp-uv"}\nexit /b 1\n'
+        if os.name == "nt" else
+        "#!/bin/sh\nprintf '%s\\n' '{\"phase\":\"unexpected-stamp-uv\"}' "
+        '>> "$FIXTURE_UV_LOG"\nexit 1\n',
+        encoding="utf-8",
+    )
+    if os.name != "nt":
+        provider.chmod(0o755)
+    env.update({
+        "PATH": str(directory) + os.pathsep + env.get("PATH", ""),
+        "FIXTURE_UV_LOG": str(tmp_path / "uv-events.jsonl"),
+    })
+    return provider
+
+
+def test_stamp_uv_guard_rejects_and_records_any_invocation(tmp_path: Path) -> None:
+    env = _isolated_install_env(tmp_path / "home")
+    provider = _stamp_uv_guard(tmp_path, env)
+    command = [str(provider), "--version"]
+    if os.name == "nt":
+        command = [os.environ["COMSPEC"], "/d", "/c", *command]
+    result = subprocess.run(
+        command, env=env, capture_output=True, text=True, timeout=10,
+        **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 1, result.stderr
+    assert _uv_events(env) == [{"phase": "unexpected-stamp-uv"}]
+
+
 def test_offline_uv_settings_preflight_is_read_only(tmp_path: Path) -> None:
     env = _isolated_install_env(tmp_path / "home")
     provider = _offline_uv(tmp_path, env)
@@ -479,7 +515,7 @@ def stamped_snapshot(tmp_path_factory):
     )
     expected_version = version.replace("-dev", ".dev")
     env = _isolated_install_env(home)
-    _offline_uv(tmp_path, env)
+    _stamp_uv_guard(tmp_path, env)
     if os.name != "nt":
         system_root = home / "systemroot"
         where_exe = system_root / "System32" / "where.exe"
@@ -551,7 +587,7 @@ def stamped_snapshot(tmp_path_factory):
     shutil.rmtree(tmp_path / "libs")
     assert not payload.exists() and not (tmp_path / "libs").exists()
     return SimpleNamespace(
-        home=home, snapshot=snapshot, env=env, pwsh=pwsh,
+        home=home, snapshot=snapshot, env=env, pwsh=pwsh, fixture_root=tmp_path,
         version=version, expected_version=expected_version,
         stamp_status={
             "selected": (home / ".agent-vault" / "current-version").exists(),
@@ -573,6 +609,7 @@ def test_stamp_snapshot_retains_resources_without_creating_runtime(stamped_snaps
 def provisioned_snapshot(stamped_snapshot):
     state = stamped_snapshot
     home, snapshot, env, pwsh = state.home, state.snapshot, state.env, state.pwsh
+    _offline_uv(state.fixture_root, env)
     if os.name == "nt":
         provision = subprocess.run(
             [

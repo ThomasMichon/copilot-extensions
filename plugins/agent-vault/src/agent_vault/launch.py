@@ -18,6 +18,10 @@ from . import config
 from .cache import CACHE_DIR_ENV
 
 SERVICE_STDIO_LOG = "service-stdio.log"
+_SERVICE_BOOTSTRAP = (
+    "import sys;sys.path.insert(0,sys.argv.pop(1));"
+    "import runpy;runpy.run_module('agent_vault.service',run_name='__main__',alter_sys=True)"
+)
 # Every filesystem override the service reads (the client-side endpoint is a
 # dial spec, not a path).
 _PATH_OVERRIDES = (
@@ -35,7 +39,7 @@ def service_root() -> Path:
 
 
 def spawn_service(args: Sequence[str]) -> subprocess.Popen:
-    """Start ``python -m agent_vault.service *args`` as a detached daemon.
+    """Start the trusted ``agent_vault.service`` package as a detached daemon.
 
     Launched through ``agent_procutil.spawn_daemon``: it runs from the vault
     runtime root (never the caller's cwd, which may be a worktree or the plugin
@@ -43,7 +47,9 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
     appends its stdout/stderr to ``<root>/service-stdio.log`` so a startup crash
     leaves a traceback (the service keeps its own rotating log too). A Job that
     forbids breakaway still starts the service inside that Job, where it always
-    ran before, as a logged degradation.
+    ran before, as a logged degradation. The child imports from this package's
+    source root, including vendored layouts, rather than selecting its service
+    implementation from the runtime cwd or the caller's ambient module path.
     """
     python = sys.executable
     root = service_root()
@@ -63,7 +69,10 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
                 config._expand_kpdb(value) if name == "KPDB" else os.path.abspath(value)
             )
     return spawn_daemon(
-        [windowless_python(python), "-m", "agent_vault.service", *args],
+        [
+            windowless_python(python), "-c", _SERVICE_BOOTSTRAP,
+            str(Path(__file__).resolve().parent.parent), *args,
+        ],
         cwd=root,
         log_path=root / SERVICE_STDIO_LOG,
         env_overrides=overrides,

@@ -201,6 +201,13 @@ The Windows installer registers a Scheduled Task named `AgentVault`, triggered a
 
 `--no-service` / `-NoService` installs a client-only runtime. Even without supervision, the CLI can cold-start the daemon on demand.
 
+Cold-start and Windows self-daemonization use the shared resident launcher from
+the owned vault runtime directory. A pinned package-root bootstrap retains the
+client's trusted implementation in vendored layouts without importing a
+same-named package from the runtime directory or changing the daemon's cwd.
+PowerShell installer finalization calls only an already-loaded construction
+handler; a source-only stamp does not discover or import ambient cleanup modules.
+
 Windows `update` includes `Stop-VaultDaemonGraceful` in `scripts/install.ps1`: after building/activating the new slot, it pings the old daemon, sends the cooperative `--stop` action, waits briefly for the endpoint to be released, then starts/registers the scheduled task. This is the plugin's light connection-owner cutover: short in-flight requests finish, but the in-memory master password is intentionally released; reconnect is via the opt-in persistent cache or a single re-unlock.
 
 **POSIX/systemd `update` now uses the shared drain-safe zero-downtime cutover**

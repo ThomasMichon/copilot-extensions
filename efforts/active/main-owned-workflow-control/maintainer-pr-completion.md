@@ -14,6 +14,10 @@ remain gated. The **PR completion steward** owns this Phase 5a slice and its
 readiness, guidance and completion visibility prerequisites. The parent
 campaign remains Active.
 
+**Identity direction (operator summary):** reuse the existing App installed only
+for this repository, under sole repository-owner administration; do not create a
+second App. This selects an identity, not new permissions or live activation.
+
 This extends the existing plan from #7165, not a second automation campaign.
 Existing #3336 release, #7122 capacity, #1303 coverage, source-attribution and
 review-rescue owners retain their responsibilities. Independent implementation
@@ -169,6 +173,33 @@ Other users and separately provisioned installation cells are not thereby
 audited. The existing Windows consumer failures in #6947 and #6564 still block
 installed acceptance; source merges and a refreshed payload manifest are not
 proof that the fixes are running.
+
+### Proposed completion-token permissions
+
+The following is an **agent-recommended activation proposal**, not a report of
+the existing App's live grants or approval to change them:
+
+| Repository permission | Completion token | Purpose |
+|-----------------------|------------------|---------|
+| Contents | Write | Merge and update the opted-in branch; read pinned source policy |
+| Pull requests | Write | Read review history, request native update, and maintain PR conflict notices |
+| Checks | Read | Verify check-run results and integration identities |
+| Commit statuses | Read | Verify required legacy status contexts |
+| Administration | Read | Inspect classic branch protection and required-check policy |
+| Metadata | Read | Inspect repository identity, rules and collaborator membership |
+
+[GitHub's endpoint permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps)
+defines these access levels. PR comments accept Pull requests write instead of
+Issues write, so no separate Issues write is proposed. Completion needs no
+Actions write, Workflows write, secret-management or organization permission.
+Other approved uses of the same App may retain their own grants; completion
+tokens request only this subset. Downscoping a token does not isolate App-key
+holders from the App's overall authority.
+
+The Dev review-only ruleset exception is a separate owner-approved policy
+change, not another token permission or a CI bypass. Reuse still needs exact
+App/installation evidence, the protected Main-only workflow credential boundary,
+reviewer-veto enforcement, and the separately accepted live canary and rollback.
 
 ## Validation and completion gate
 
