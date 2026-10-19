@@ -29,7 +29,6 @@ This registry supersedes the legacy ``~/.git-repos`` file; use
 from __future__ import annotations
 
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -39,6 +38,7 @@ from pathlib import Path
 import yaml
 
 from agent_procutil import no_window_kwargs
+from machine_transport import detect_platform
 
 from . import bare_anchor_sync, git_ops, output, registry_paths
 from .repo_accounts import account_for_remote as account_for_remote
@@ -177,11 +177,7 @@ class ReposRegistry:
 
 def _current_platform() -> str:
     """Return 'windows', 'wsl', or 'linux'."""
-    if platform.system() == "Windows":
-        return "windows"
-    if os.environ.get("WSL_DISTRO_NAME"):
-        return "wsl"
-    return "linux"
+    return detect_platform()
 
 def _repos_yaml_path() -> Path:
     """Path to the repos registry file."""

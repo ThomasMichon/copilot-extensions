@@ -355,6 +355,24 @@ takeover or implementation completion is asserted.
 
 ### 2026-10-19 - Paired declaration implementation qualification
 
+- The operator-authorized continuation reconciled the retained Configuration
+  context and verified #6725's actual merge. The narrow #7205 overlap now reuses
+  the existing shared execution-root classifier in `repos._current_platform`;
+  inherited WSL labels cannot select a different registry path from the binding
+  reader. Ordinary registry mutation, serialization, preferences, accounts and
+  routing writers remain unchanged. Broader Configuration and installed
+  acceptance stay with the canonical Manager workbench plan.
+- The platform-reader follow-through passes 228 selected native tests:
+  first-touch binding/pair creation (2), ordinary registry behavior (135),
+  all Configuration cases (83), and registry transactions (8). Windows
+  Configuration validation uses disjoint selections within unchanged item and
+  group limits; a combined group exceeded its wall-clock budget and was not
+  treated as a pass. First-touch Git fixtures now have ordinary fetched origin
+  refs and explicit remote HEAD, avoiding repeated missing-ref fallback probes;
+  the native creation call defers unrelated empty instruction projection work.
+  Actual registration, installed CLI binding, pair writes, tracked resolution
+  and common-dir checks remain real. Hosted Linux must exercise the inherited
+  label with a Linux-only registration before merge.
 - Amendment #7198 actually merged as
   `1e313d5ee1f3cd688c95d53de56d7548878ee878` before implementation.
   The shared typed reader retains the legacy scalar launch target and both

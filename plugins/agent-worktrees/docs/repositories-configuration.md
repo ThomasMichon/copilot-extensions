@@ -9,6 +9,9 @@ Registration/class/local-checkout availability, directional participation,
 same-machine-agent enablement, route preference, configured knowledge identity,
 resolved state anchor and actual tracked writable pair are separate facts.
 The cards show absent, stale, unsupported and unknown/error states explicitly.
+Native registry paths use the shared execution-root platform classifier, not
+inherited transport labels such as `WSL_DISTRO_NAME`; registration, binding and
+read-only resolution therefore select the same platform key.
 An anchor is never presented as a paired writable checkout. No workspace means
 pair inspection is unsupported, rather than inferred from the CLI's CWD.
 Both tracked checkout directories must still exist for a pair to be writable.

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from agent_procutil import no_window_kwargs
+from machine_transport import detect_platform
 from agent_worktrees import config as cfg, repos, state_root, worktree_creation
 
 
@@ -56,7 +57,8 @@ def _checkout(root: Path, name: str, config: str) -> Path:
         checkout,
     )
     _run(["git", "clone", "--bare", "--quiet", str(checkout), str(remote)], root)
-    _run(["git", "remote", "add", "origin", str(remote)], checkout)
+    _run(["git", "remote", "add", "--fetch", "origin", str(remote)], checkout)
+    _run(["git", "remote", "set-head", "origin", "main"], checkout)
     return checkout
 
 
@@ -80,6 +82,7 @@ def test_first_touch_binds_declared_roles_then_creates_real_pair(
     monkeypatch.delenv("AGENT_WORKTREES_PROJECT", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
     monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
+    monkeypatch.setenv("WSL_DISTRO_NAME", "inherited-transport-environment")
 
     harness = _checkout(tmp_path, "example-harness", "stateless: true\n")
     knowledge = _checkout(
@@ -103,6 +106,12 @@ def test_first_touch_binds_declared_roles_then_creates_real_pair(
             name, str(checkout), repo_class=repo_class, default_branch="main",
             remote=str(tmp_path / f"{name}.git"),
         )
+    registered = repos.read_registry(strict=True)
+    for name, checkout in (
+        ("example-harness", harness), ("example-knowledge", knowledge),
+    ):
+        assert registered.repos[name].paths == {detect_platform(): str(checkout)}
+        assert repos.resolve_path(name) == str(checkout)
     topology = tmp_path / "machines.yaml"
     topology.write_text(
         "control_plane:\n"
@@ -147,7 +156,7 @@ def test_first_touch_binds_declared_roles_then_creates_real_pair(
     try:
         config = cfg.load_config(project="example-harness")
         created = worktree_creation._create_worktree_core(
-            config, inherit_parent_session=False,
+            config, inherit_parent_session=False, defer_projections=True,
         )
         workspace = Path(created["worktree"]["path"])
         pair = state_root.resolve_pair(None, cwd=str(workspace)).as_dict()
