@@ -310,6 +310,111 @@ def test_supervisor_target_receipt_excludes_credentials():
     assert len(target) == 64 and "reader-secret" not in target and "control-secret" not in target
 
 
+@pytest.mark.parametrize("flags,first,second,reason", [
+    (["--shared"], "http://writer-a:8787", "http://writer-b:8787", "authority conflict"),
+    (["--shared"], "http://writer-a:8787/", "http://writer-a:8787", "already running"),
+    (["--local"], "http://writer-a:8787", "http://writer-b:8787", "already running"),
+])
+def test_real_supervisor_lock_distinguishes_shared_writers_but_not_local_rendezvous(
+    monkeypatch, tmp_path, flags, first, second, reason,
+):
+    from agent_dispatch import config, remote_dispatch, single_instance, supervise_cli
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda _machine: False)
+    monkeypatch.setattr(supervise_cli, "_spawn_supervisor_daemon_detached", forbid)
+    invocation = core.build_parser().parse_args([*flags, "supervise", "register"])
+    scope = supervisor_lease_scope("host", "default")
+    with single_instance.SingleInstance(single_instance.lock_path_for(tmp_path, scope)) as acquired:
+        assert acquired
+        monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", first)
+        monkeypatch.setenv("AGENT_DISPATCH_PORT", "18787")
+        supervise_cli._write_supervisor_cycle_start(
+            scope, 1, 10.0, authority_target=supervise_cli._supervisor_authority_target(invocation),
+        )
+        monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", second)
+        monkeypatch.setenv("AGENT_DISPATCH_PORT", "28787")
+        result = supervise_cli._ensure_supervisor_daemon(invocation, "host", "default")
+    assert result["ensured"] is False and result["reason"] == reason
+
+
+@pytest.mark.parametrize("flags,authority", [
+    ([], "central"), (["--local"], "local"), (["--shared"], "central"),
+    (["--url", "http://pinned:8787"], "pinned_url"),
+])
+def test_inspect_task_keeps_selected_writer_instead_of_peer_queue(monkeypatch, capsys, flags, authority):
+    import json
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from agent_dispatch import remote_dispatch
+    from agent_dispatch.client_authority import client_authority
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", forbid)
+    monkeypatch.setattr(remote_dispatch, "browse_remote", forbid)
+    observed = []
+
+    def client(invocation, **_kwargs):
+        observed.append(client_authority(invocation))
+        return nullcontext(SimpleNamespace(
+            get=lambda task_id: {"id": task_id}, events=lambda _task: [],
+            progress_log=lambda _task: [], attachments=lambda _task: [],
+        ))
+
+    monkeypatch.setattr(core, "_client", client)
+    invocation = core.build_parser().parse_args([*flags, "inspect-task", "owned-task", "--machine", "peer"])
+    assert invocation.func(invocation) == 0
+    assert observed == [authority]
+    assert json.loads(capsys.readouterr().out)["task"]["id"] == "owned-task"
+
+
+@pytest.mark.parametrize("flags", [[], ["--local"], ["--shared"], ["--url", "http://pinned:8787"]])
+def test_mcp_remote_side_load_refuses_ssh_default_without_forwarding_credentials(monkeypatch, flags):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from agent_dispatch import mcp_server, remote_dispatch
+    from agent_dispatch.client_authority import client_authority
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda _owner: True)
+    monkeypatch.setattr(remote_dispatch, "browse_remote", forbid)
+    observed = []
+
+    def client(invocation, **_kwargs):
+        observed.append(client_authority(invocation))
+        return nullcontext(SimpleNamespace(
+            get_registration=lambda _id: {"id": "same-id", "machine": "peer", "env": "default"},
+        ))
+
+    def serve(tools):
+        with pytest.raises(DispatchError, match="remote emitter side-load cannot preserve"):
+            tools.emitter_side_load("same-id", "example/change")
+
+    monkeypatch.setattr(core, "_client", client)
+    monkeypatch.setattr(mcp_server, "serve_stdio", serve)
+    invocation = core.build_parser().parse_args([*flags, "mcp"])
+    assert invocation.func(invocation) == 0
+    assert observed == [client_authority(invocation)]
+
+
+def test_default_mcp_side_load_checks_current_authority_at_the_operation(monkeypatch):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from agent_dispatch import mcp_server, remote_dispatch
+
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_AUTHORITY", raising=False)
+    tools = mcp_server.DispatchTools(client_factory=lambda: nullcontext(SimpleNamespace(
+        get_registration=lambda _id: {"id": "same-id", "machine": "peer"},
+    )))
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda _owner: True)
+    monkeypatch.setattr(remote_dispatch, "browse_remote", forbid)
+    with pytest.raises(DispatchError, match="cannot preserve the selected authority"):
+        tools.emitter_side_load("same-id", "example/change")
+
+
 @pytest.mark.parametrize("route,expected", [
     ("local", "http://foreign:8787"), ("strict-local", "http://127.0.0.1:19847"),
 ])

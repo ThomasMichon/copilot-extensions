@@ -186,7 +186,16 @@ only when its current PID-bound status receipt names the same target.
 saved but that target is **not ensured**; reconcile the existing owner's
 configuration explicitly. The command does not start a second supervisor,
 terminate the existing one or move its registrations. Target receipts contain
-only a digest of credential-free target flags, not bearer/control credentials.
+only a digest of credential-free target flags and the configured central
+endpoint, not bearer/control credentials. Local rendezvous discovery remains
+dynamic; changing it does not create a different supervisor target.
+
+Explicit `inspect-task --machine` reads from the selected writer rather than
+implicitly inspecting that machine's independent queue over SSH. Remote MCP
+emitter side-loads refuse explicit authority before executing on an SSH owner:
+the remote login's default is not proof of the same writer, and coordinator
+credentials are not forwarded. Invoke the side-load on its owner with the same
+explicit writer instead. Legacy peer browsing/side-loading is unchanged.
 
 Central task reads are on-demand references to the central service, not local
 task rows or an offline write replica. Keep the selected authority with any

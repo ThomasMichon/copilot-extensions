@@ -801,7 +801,10 @@ def _cmd_consume(args: argparse.Namespace) -> int:
     return 0
 
 def _cmd_mcp(args: argparse.Namespace) -> int:
+    from .client_authority import client_authority
     from .mcp_server import DispatchTools, serve_stdio
 
-    serve_stdio(DispatchTools(client_factory=lambda: _core()._client(args)))
+    serve_stdio(DispatchTools(
+        client_factory=lambda: _core()._client(args), authority_resolver=lambda: client_authority(args),
+    ))
     return 0

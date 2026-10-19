@@ -45,8 +45,9 @@ def classify(args, *, client_factory, scope_repo) -> int:
 
 def inspect_task(args, *, client_factory) -> int:
     from . import remote_dispatch
+    from .client_authority import client_authority
 
-    if remote_dispatch.is_peer_machine(args.machine):
+    if client_authority(args) == "legacy" and remote_dispatch.is_peer_machine(args.machine):
         try:
             result = remote_dispatch.browse_remote(
                 args.machine,

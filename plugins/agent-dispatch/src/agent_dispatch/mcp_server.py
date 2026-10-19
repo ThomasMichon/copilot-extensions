@@ -25,6 +25,7 @@ from typing import Annotated, Any
 from pydantic import PlainValidator, StrictInt, WithJsonSchema
 
 from .client import DispatchClient, DispatchError
+from .client_authority import Authority, default_authority
 from .identity import resolve_identity, resolve_repo, resolve_repo_selector
 from .queue import StructuredResult, worker_id_for
 
@@ -68,10 +69,12 @@ class DispatchTools:
         client_factory: ClientFactory = _default_client,
         identity_resolver: IdentityResolver = resolve_identity,
         repo_resolver: RepoResolver = resolve_repo,
+        authority_resolver: Callable[[], Authority] = default_authority,
     ):
         self._client_factory = client_factory
         self._identity = identity_resolver
         self._repo = repo_resolver
+        self._authority = authority_resolver
 
     def _resolve(self, machine: str | None, worktree: str | None) -> tuple[str | None, str | None]:
         if machine is None or worktree is None:
@@ -350,6 +353,12 @@ class DispatchTools:
             registration = c.get_registration(registration_id)
             owner = registration.get("machine")
             if remote_dispatch.is_peer_machine(owner):
+                if self._authority() != "legacy":
+                    raise DispatchError(
+                        409, "remote emitter side-load cannot preserve the selected authority; "
+                        "invoke it on its owner with the same explicit writer. "
+                        "Coordinator credentials are not forwarded over SSH.",
+                    )
                 completed = remote_dispatch.browse_remote(
                     owner,
                     [

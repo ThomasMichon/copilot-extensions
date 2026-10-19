@@ -217,6 +217,15 @@ def test_native_killed_worker_leaves_external_state_for_outer_verified_cleanup(l
     )
     actual_run = subprocess.run
     calls = []
+    case_driver = tmp_path / "case-driver.py"
+    case_driver.write_text(
+        "import importlib.util,os,sys\n"
+        f"spec=importlib.util.spec_from_file_location('lane',{lane.__file__!r})\n"
+        "lane=importlib.util.module_from_spec(spec)\nspec.loader.exec_module(lane)\n"
+        f"raise SystemExit(lane._owner._run_case([sys.executable,{str(owner_script)!r}],"
+        "env=dict(os.environ),log=sys.stdout,timeout=lane._owner.CLEANUP_RESERVE_SECONDS+10))\n",
+        encoding="utf-8",
+    )
 
     def subprocess_run(argv, **kwargs):
         if argv[0] == "docker":
@@ -225,17 +234,18 @@ def test_native_killed_worker_leaves_external_state_for_outer_verified_cleanup(l
         return actual_run(argv, **kwargs)
 
     def run(_argv, *, env, log, **_kwargs):
-        result = lane._owner._run_case(
-            [sys.executable, str(owner_script)], env=env, log=log,
-            timeout=lane._owner.CLEANUP_RESERVE_SECONDS + 10,
-        )
+        # The real owner must not replace pytest-timeout's POSIX timer.
+        result = actual_run(
+            [sys.executable, str(case_driver)], env=env, stdout=log, stderr=log, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).returncode
         assert result == 124, "canonical containment did not kill the worker at its deadline"
         return result
 
     monkeypatch.setattr(lane._owner.subprocess, "run", subprocess_run)
     monkeypatch.setattr(lane, "_run_case", run)
     report = lane.run(tmp_path, central_image="protocol-stub-only")
-    assert report["result"] == "fail" and report["jams"][0]["category"] == "runner-exit"
+    assert report["result"] == "fail" and report["jams"][0]["category"] == "runner-exit", report
     assert report["stages"][0]["owned_resource_cleanup"] == "complete"
     assert "wall-clock limit exceeded (2s)" in (tmp_path / "runner.log").read_text()
     assert not (tmp_path / "sandbox" / ".containment-ready").exists()

@@ -55,7 +55,13 @@ def target_cli_args(args: argparse.Namespace, *, credentials: bool = True) -> li
 
 
 def supervisor_authority_target(args: argparse.Namespace) -> str:
-    target = json.dumps(target_cli_args(args, credentials=False), separators=(",", ":"))
+    from .config import shared_url
+
+    shared = shared_url() if client_authority(args) == "central" else None
+    target = json.dumps({
+        "flags": target_cli_args(args, credentials=False),
+        "shared_endpoint": shared.rstrip("/") if shared else None,
+    }, separators=(",", ":"))
     return hashlib.sha256(target.encode("utf-8")).hexdigest()
 
 
