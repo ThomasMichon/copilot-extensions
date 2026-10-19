@@ -340,3 +340,12 @@ The umbrella effort remains Active independently of this slice's completion.
   bounded isolated lane passed 478 Worktrees tests with 12 platform skips and
   234 Manager tests with three native skips. This remains pre-merge fixture
   evidence, not permission to enroll or claim live restoration.
+- A fresh review identified two additional Medium findings in its overview,
+  despite an empty inline-open count. Unknown/inferred End observations now
+  preserve the execution's cancelled-shutdown marker before a delayed
+  `user_exit`; an explicit operator stop still closes it. Retained intentionally
+  closed subjects without live mappings no longer consume periodic owner probes,
+  while a fresh live mapping re-admits its subject through the existing revision
+  fence. All five new regression cases failed first. The targeted isolated
+  Manager lane then passed 239 tests with three native skips; the unchanged
+  Worktrees slice retains the preceding 478-test receipt.

@@ -299,6 +299,8 @@ class RecoveryJournal:
                 elif current["detail"] in _CANCELLED_SHUTDOWN_DETAILS:
                     reason = "unknown"
                     detail = "native-end-after-cancel-unconfirmed"
+            elif reason == "unknown" and current["detail"] in _CANCELLED_SHUTDOWN_DETAILS:
+                detail = current["detail"]
             if reason == "shutdown-interrupted" and not current["notification_id"]:
                 return {"applied": False, "reason": "unconfirmed-shutdown"}
             row = dict(current)

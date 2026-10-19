@@ -460,6 +460,8 @@ source in addition to the native/mux generation. Legacy evidence defaults to
 unqualified; periodic reads never invent or assign a registration source.
 Lifecycle reads accept the owner's full retained budget of 256 intervals;
 activation ordinals remain monotonic and may exceed that retained count.
+Intentionally closed journal subjects without a live mapping stay retained but
+do not consume polling turns; a live mapping returns them to the rotation.
 
 Only a uniquely source-bound native `user_exit` can assert intentional closure.
 Other reasons, repeated same-physical/same-UUID activations, missing source proof
@@ -467,7 +469,8 @@ and incompatible owner responses stay unknown or unconfirmed. A historical End
 cannot retire a replacement. The journal serializes native End with shutdown
 metadata: a racing notification takes precedence over an apparent user exit, and
 an End after cancelled shutdown remains conservatively uncertain for that
-execution generation. This does not infer a shutdown cause from an exit code or
+execution generation, including across intermediate inferred or unknown exits.
+This does not infer a shutdown cause from an exit code or
 wall-clock timestamp, and it does not install a native notification adapter.
 
 ```bash

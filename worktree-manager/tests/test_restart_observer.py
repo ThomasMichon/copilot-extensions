@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from dataclasses import replace
 import json
 import subprocess
 import sys
@@ -295,6 +296,78 @@ def test_shutdown_notification_racing_native_end_wins_inside_journal_transaction
     row = observer.journal.snapshot()[0]
     assert row["disposition"] == "shutdown-interrupted"
     assert row["notification_id"] == "shutdown-one"
+
+
+def test_inferred_end_after_cancel_cannot_make_delayed_user_exit_intentional(
+    tmp_path, observer_module, mapping,
+):
+    result = source_bound_owner()
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: result)
+    observer.observe(mapping, now=10.0)
+    observer.journal.shutdown_pending(
+        "linux", "environment-one", "boot-one", notification_id="one",
+    )
+    observer.journal.shutdown_cancelled(
+        "linux", "environment-one", "boot-one", notification_id="one",
+    )
+    result = source_bound_owner(confirmed=False, ended_at="inferred")
+    result["lifecycle"]["activations"][0]["end_source"] = "inferred:next-start"
+    observer.observe(mapping, now=50.0)
+    result = source_bound_owner(confirmed=False, ended_at="exit", end_reason="user_exit")
+    observer.observe(mapping, now=100.0)
+    assert observer.journal.snapshot()[0]["disposition"] == "unknown"
+    assert observer.journal.snapshot()[0]["detail"] == "native-end-after-cancel-unconfirmed"
+
+
+def test_closed_unmapped_history_does_not_dilute_live_polling(
+    tmp_path, observer_module, mapping,
+):
+    calls = []
+    observer = build_observer(
+        observer_module, tmp_path, owner_probe=lambda *args: calls.append(args) or owner_result(),
+    )
+    observer.observe(mapping, now=10.0)
+    original = observer.journal.snapshot()[0]
+    evidence = observer_module.PositiveEvidence(**original["last_positive"])
+    for index in range(32):
+        closed = replace(
+            evidence, worktree_id=f"closed-{index:03d}",
+            worktree_path=f"/path/to/closed-{index:03d}",
+        )
+        observer.journal.observe(closed)
+        observer.journal.record_exit(closed, reason="intentional", detail="operator-stop")
+    for now in (30.0, 50.0, 70.0):
+        observer.observe(mapping, now=now)
+    assert [args[1] for args in calls] == ["worktree-one"] * 4
+    rows = observer.journal.snapshot()
+    assert len(rows) == 33
+    assert sum(row["disposition"] == "intentional" for row in rows) == 32
+    assert rows[-1]["last_positive"]["observation_sequence"] == 4
+
+
+def test_closed_subject_is_polled_when_a_live_mapping_returns(
+    tmp_path, observer_module, mapping,
+):
+    result = owner_result()
+    calls = []
+    observer = build_observer(
+        observer_module, tmp_path, owner_probe=lambda *args: calls.append(args) or result,
+    )
+    observer.observe(mapping, now=10.0)
+    evidence = observer_module.PositiveEvidence(**observer.journal.snapshot()[0]["last_positive"])
+    observer.journal.record_exit(evidence, reason="intentional", detail="operator-stop")
+    entry = mapping.get("example", "worktree-one")
+    mapping.remove("example", "worktree-one")
+    observer.observe(mapping, now=30.0)
+    assert len(calls) == 1
+    entry["mapping_revision"] = mapping.get("example", "worktree-one")["mapping_revision"] + 1
+    assert mapping.register(entry)["applied"]
+    result = {**owner_result(), "native_incarnation": "native:replacement", "owner_revision": 2}
+    observer.observe(mapping, now=50.0)
+    assert len(calls) == 2
+    row = observer.journal.snapshot()[0]
+    assert row["disposition"] == "live"
+    assert row["last_positive"]["native_incarnation"] == "native:replacement"
 
 
 def test_owner_live_mux_incarnation_must_match_registry(tmp_path, observer_module, mapping):

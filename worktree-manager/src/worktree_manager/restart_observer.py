@@ -209,7 +209,9 @@ class RestartObserver:
                 (row["last_positive"]["project"], row["last_positive"]["worktree_id"]): row
                 for row in self.journal.snapshot()
             }
-            keys = sorted(entries.keys() | rows.keys())
+            keys = sorted(entries.keys() | {
+                key for key, row in rows.items() if row["disposition"] != "intentional"
+            })
             if not keys:
                 self.last_result = {"applied": False, "reason": "no-live-mapping"}
                 return

@@ -128,7 +128,9 @@ PID/birth mismatch, delayed historical End versus a replacement self-claim,
 history-pruning ambiguity, pre-dispatch old-daemon refusal with a real legacy
 peer whose mutation handler stays uncalled, installed-bin helper loading,
 the 256-entry retained-history boundary, tombstone-visible closure and
-shutdown/cancellation ordering. They do not reboot a machine, kill a
+shutdown/cancellation ordering across inferred exits. Closed unmapped history
+does not dilute live polling, but a new live mapping re-admits its subject.
+They do not reboot a machine, kill a
 production session, qualify Windows native source capture, or prove acknowledged
 restart-seed delivery. Those remain separate native integration obligations.
 

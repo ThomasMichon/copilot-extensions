@@ -122,6 +122,29 @@ def test_positive_corroboration_clears_unknown_not_shutdown(tmp_path, recovery):
     assert journal.snapshot()[0]["disposition"] == "shutdown-pending"
 
 
+@pytest.mark.parametrize("native_first", [False, True])
+def test_unknown_exit_preserves_cancelled_shutdown_uncertainty(tmp_path, recovery, native_first):
+    journal = recovery.RecoveryJournal(tmp_path)
+    evidence = positive(recovery)
+    journal.observe(evidence)
+    journal.shutdown_pending(
+        "linux", "example-environment", "boot-one", notification_id="one",
+    )
+    journal.shutdown_cancelled(
+        "linux", "example-environment", "boot-one", notification_id="one",
+    )
+    if native_first:
+        journal.record_exit(evidence, reason="intentional", detail="native-session-end")
+    marker = journal.snapshot()[0]["detail"]
+    for _ in range(2):
+        journal.record_exit(evidence, reason="unknown", detail="native-end-cause-unconfirmed")
+        assert journal.snapshot()[0]["detail"] == marker
+    journal.record_exit(evidence, reason="intentional", detail="native-session-end")
+    assert journal.snapshot()[0]["disposition"] == "unknown"
+    journal.record_exit(evidence, reason="intentional", detail="operator-stop")
+    assert journal.snapshot()[0]["disposition"] == "intentional"
+
+
 @pytest.mark.parametrize("reason", ["intentional", "unknown", "shutdown-interrupted"])
 def test_delayed_old_exit_cannot_retire_replacement(tmp_path, recovery, reason):
     journal = recovery.RecoveryJournal(tmp_path)
