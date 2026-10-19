@@ -22,9 +22,14 @@ The registry is repository-side evidence; no runtime component reads it.
 
 HTTP generation 41 adds the Bridge-owned startup plugin-readiness requirement.
 Its frozen vectors include typed readiness results, readiness-bound task/mode
-inputs and omission-compatible ordinary input. The native observer and inbox
-tests consume the same golden packet; a pending selection must produce no SDK
-send or acknowledgment. Historical generation-40 packets remain unchanged,
+inputs and omission-compatible ordinary input. Every readiness golden is replayed
+through the public HTTP router, durable readiness-control acknowledgment and
+SQLite inbox. Public input uses `kind: prompt`; only the admitted inbox message
+carries the generated `startup:prompt:<control-id>` kind. The frozen control
+digest, admission receipt, inbox packet, retry identity and changed-selection
+refusal are checked at that boundary, not only through model parsing. The native
+observer and inbox tests consume the same generated packet; a pending selection
+must produce no SDK send or acknowledgment. Historical generation-40 packets remain unchanged,
 and earlier capability floors do not move merely because the health
 advertisement advances. Each semantic source has current-generation provenance,
 including the joined-session observer and delivery producer.

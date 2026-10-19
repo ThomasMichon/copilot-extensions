@@ -1878,49 +1878,49 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-generation-41.json",
-          "sha256": "6f128f0601e6a70bf3f5af45725fd8100c6efcf7eec7ce9d33b95a212ef19f7d",
+          "sha256": "d4de8e1977256251a5f5899f31ec8ef662c577a1235d568f3282a3e5275cbe1f",
           "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-live_controls-generation-41.json",
-          "sha256": "734e54a8d6c06cb2a397d96b25cd44b7dfd2118ce1242189002ea2273ce0e23f",
+          "sha256": "2586740b2c6f07ba949d9b8a69a911324fdd4ce836284d43a81bc1b83c2b08b0",
           "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-acquisition_contract-generation-41.json",
-          "sha256": "c4625e855e3acd17ce5d806d62addb84d33cb015858f61213a101493d646a9b0",
+          "sha256": "e1b38b2eda862a2af40474cb2436ab28f939f65c60e5477054af66c023f7e059",
           "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-routes-live_sessions-generation-41.json",
-          "sha256": "52343c9ccfbf0a1f6ea228fb7d54dd5f7455694fcb5ade0a7277582d5a8c1a4e",
+          "sha256": "13759c371ec766ef595ca931c9bd9613a73bba862614569e96ac427589798506",
           "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-native-observation-generation-41.json",
-          "sha256": "52ad0001faa6b179265673e245d65a213e9c1e503786fcde759c19cdb234157c",
+          "sha256": "20a0f5795003f74f8d2bf31c63e260766b44617cefdf13af11993658347e5129",
           "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-native-delivery-generation-41.json",
-          "sha256": "b5cb1b8879e7f0b1b3c94f88425f01c8d6cd3542502f1c2dba1ac06b0f62b7b3",
+          "sha256": "fa20cb5f52e9e7c493836d551909da8fd12fbeb1ed9c9fd318396e22351e1e6f",
           "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-client-cli-mode-generation-41.json",
-          "sha256": "146be26c899b5536c9bac7aaf1b03ec4b12148ee931022ca14543ee7c73d0af0",
+          "sha256": "6ee2c4487a88f8df24c01452a943c89bb3bba913637bd2912124a7733eab1fff",
           "role": "Preserve typed HTTP-41 startup readiness after mechanical extraction of the original client/control producer; public routes and capability floors are unchanged.",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-routes-live-startup-controls-generation-41.json",
-          "sha256": "701378ea65b10afdce48475fa2ad44c45242a6a84145d114d02d583d631aba8c",
+          "sha256": "084153c62cfbc930a2c9dfe05bbd3189633963e1c52e828e1b05e2c8bd77323e",
           "role": "Preserve typed HTTP-41 startup readiness after mechanical extraction of the original client/control producer; public routes and capability floors are unchanged.",
           "generation": 41
         }
@@ -4684,7 +4684,7 @@
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/plugin_readiness.py",
           "source_git_blob": "fd51388e8fd1b97f6374e61a7a8acd78b98799d3",
-          "capture_method": "Freeze the HTTP-41 typed startup-readiness golden packet from the actual tolerant-reader correction; additive request, nested plugin and result fields are ignored while ownership and required-state guards remain enforced."
+          "capture_method": "Freeze an independent public queued-prompt request, deterministic readiness-control binding, admission receipt and generated startup inbox packet. The actual HTTP router/SQLite/control-ack regression replays each vector, rejects reserved incoming kinds, preserves retry identity and refuses changed selection; the native consumer uses that same generated packet."
         },
         {
           "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
@@ -4692,7 +4692,7 @@
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/live_controls.py",
           "source_git_blob": "c55f500d6b1568ebf05153008d82b497d2544a2b",
-          "capture_method": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference."
+          "capture_method": "Freeze an independent public queued-prompt request, deterministic readiness-control binding, admission receipt and generated startup inbox packet. The actual HTTP router/SQLite/control-ack regression replays each vector, rejects reserved incoming kinds, preserves retry identity and refuses changed selection; the native consumer uses that same generated packet."
         },
         {
           "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
@@ -4700,7 +4700,7 @@
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/acquisition_contract.py",
           "source_git_blob": "331f5b16d971e5069b8b9f9070ada176128c6478",
-          "capture_method": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference."
+          "capture_method": "Freeze an independent public queued-prompt request, deterministic readiness-control binding, admission receipt and generated startup inbox packet. The actual HTTP router/SQLite/control-ack regression replays each vector, rejects reserved incoming kinds, preserves retry identity and refuses changed selection; the native consumer uses that same generated packet."
         },
         {
           "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
@@ -4708,7 +4708,7 @@
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_sessions.py",
           "source_git_blob": "37d905572259c17d5d2c501aee74176534c6fe0f",
-          "capture_method": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference."
+          "capture_method": "Freeze an independent public queued-prompt request, deterministic readiness-control binding, admission receipt and generated startup inbox packet. The actual HTTP router/SQLite/control-ack regression replays each vector, rejects reserved incoming kinds, preserves retry identity and refuses changed selection; the native consumer uses that same generated packet."
         },
         {
           "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
@@ -4716,7 +4716,7 @@
           "generation": 41,
           "source_path": "plugins/agent-bridge/extensions/agent-bridge/plugin-readiness.mjs",
           "source_git_blob": "441e130f19f486c5d69be71f9f82d770e988a542",
-          "capture_method": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference."
+          "capture_method": "Freeze an independent public queued-prompt request, deterministic readiness-control binding, admission receipt and generated startup inbox packet. The actual HTTP router/SQLite/control-ack regression replays each vector, rejects reserved incoming kinds, preserves retry identity and refuses changed selection; the native consumer uses that same generated packet."
         },
         {
           "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
@@ -4724,7 +4724,7 @@
           "generation": 41,
           "source_path": "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs",
           "source_git_blob": "dd7d21971b3b224528428ff1c6b8529de9257185",
-          "capture_method": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference."
+          "capture_method": "Freeze an independent public queued-prompt request, deterministic readiness-control binding, admission receipt and generated startup inbox packet. The actual HTTP router/SQLite/control-ack regression replays each vector, rejects reserved incoming kinds, preserves retry identity and refuses changed selection; the native consumer uses that same generated packet."
         },
         {
           "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
@@ -4732,7 +4732,7 @@
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py",
           "source_git_blob": "d70a74c51ba3733a8210838deab704203aa508f3",
-          "capture_method": "Preserve typed HTTP-41 startup readiness after mechanical extraction of the original client/control producer; public routes and capability floors are unchanged."
+          "capture_method": "Freeze an independent public queued-prompt request, deterministic readiness-control binding, admission receipt and generated startup inbox packet. The actual HTTP router/SQLite/control-ack regression replays each vector, rejects reserved incoming kinds, preserves retry identity and refuses changed selection; the native consumer uses that same generated packet."
         },
         {
           "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
@@ -4740,7 +4740,7 @@
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
           "source_git_blob": "8b1f74d379be0c4f56871f553fdf546c0127627b",
-          "capture_method": "Preserve typed HTTP-41 startup readiness after mechanical extraction of the original client/control producer; public routes and capability floors are unchanged."
+          "capture_method": "Freeze an independent public queued-prompt request, deterministic readiness-control binding, admission receipt and generated startup inbox packet. The actual HTTP router/SQLite/control-ack regression replays each vector, rejects reserved incoming kinds, preserves retry identity and refuses changed selection; the native consumer uses that same generated packet."
         }
       ],
       "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",

@@ -21,7 +21,7 @@
   "request": {
     "sender": "bridge-startup",
     "body": "assigned task",
-    "kind": "startup:prompt:example",
+    "kind": "prompt",
     "delivery": "queue",
     "expected_session_id": "native-example",
     "idempotency_key": "startup-example",
@@ -45,7 +45,7 @@
     "reason": "selected-loadout-registered",
     "session_id": "native-example",
     "cwd": "/workspace/example",
-    "selection_digest": "example-selection",
+    "selection_digest": "2df0acbe2602b43db7e2a5ecc899d28bfaf2e66ea6e87f3d813544a929aede2a",
     "missing": [],
     "control_id": 1
   },
@@ -54,7 +54,7 @@
     "sender": "bridge-startup",
     "body": "assigned task",
     "reply_to": null,
-    "kind": "startup:prompt:example",
+    "kind": "startup:prompt:1",
     "delivery": "queue",
     "created_at": 100.0,
     "plugin_readiness": {
@@ -70,7 +70,7 @@
         }
       ],
       "timeout_seconds": 120.0,
-      "selection_digest": "example-selection"
+      "selection_digest": "2df0acbe2602b43db7e2a5ecc899d28bfaf2e66ea6e87f3d813544a929aede2a"
     }
   },
   "mode_request": {
@@ -96,5 +96,25 @@
     "project": "example",
     "worktree_path": "/workspace/example",
     "reservation_key": "example-reservation"
+  },
+  "admission_response": {
+    "ok": true,
+    "session_id": "native-example",
+    "message_id": 2,
+    "duplicate": false,
+    "receipt": {
+      "session_id": "native-example",
+      "message_id": 2,
+      "stage": "admitted",
+      "admitted_at": 100.0,
+      "sdk_accepted_at": null,
+      "consumed_at": null
+    },
+    "receipt_current": true,
+    "receipt_error": null,
+    "reply_correlation": null,
+    "replied": false,
+    "reply": null,
+    "stop_reason": null
   }
 }

@@ -266,6 +266,23 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-19 - Replay frozen readiness packets at the public boundary
+
+- Full review confirmed the three recovery corrections resolved, then found
+  the same public-request error in eight readiness fixtures: they supplied the
+  reserved internal startup kind instead of a public queued prompt.
+- Corrected every affected packet and its numeric control binding, deterministic
+  selection digest and admission receipt. Added one parameterized real
+  HTTP-router/SQLite/control-ack regression over all eight fixtures; it proves
+  reserved incoming kinds still fail, readiness precedes task admission, the
+  generated inbox packet matches exactly, identical retries keep one message,
+  and changed selection is refused.
+- The regression reproduced HTTP 400 before the packet correction. The combined
+  wire/readiness/native-golden selection now passes all 89 tests, and immutable
+  source/fixture evidence checks pass. This replaces the insufficient
+  model-parsing-only check for public-request replayability. Fresh current-head
+  review and required CI still gate merge.
+
 ### 2026-10-19 - Current-head full-review recovery corrections
 
 - The first full review of the combined startup candidate found three further

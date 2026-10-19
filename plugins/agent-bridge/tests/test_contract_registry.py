@@ -146,6 +146,86 @@ def test_startup_readiness_wire_ignores_future_fields_without_relaxing_ownership
         PluginReadinessRequest.model_validate({**future, "owner": "operator"})
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name",
+    sorted(path.name for path in (CONTRACT / "fixtures/http/current").glob(
+        "startup-plugin-readiness*-generation-41.json",
+    )),
+)
+async def test_startup_golden_replays_through_public_http_and_durable_inbox(
+    name, tmp_db, monkeypatch,
+):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from agent_bridge.routes import live_sessions
+
+    fixture = _fixture(f"fixtures/http/current/{name}")
+    body = fixture["request"]
+    session_id = body["expected_session_id"]
+    expected_context = fixture["queued_message"]["plugin_readiness"]
+    monkeypatch.setattr(live_sessions.time, "time", lambda: 100.0)
+    tmp_db.register_live_session(
+        session_id, machine="synthetic", cwd=body["plugin_readiness"]["cwd"],
+        worktree_id="example-worktree", repo="example", branch=None, pid=None, role=None, now=100.0,
+    )
+    app = FastAPI()
+    app.state.db = tmp_db
+    app.include_router(live_sessions.router)
+    base = f"/api/v1/live-sessions/{session_id}"
+    async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
+        rejected = await client.post(f"{base}/messages", json={
+            **body, "kind": fixture["queued_message"]["kind"],
+        })
+        assert rejected.status_code == 400
+        assert not tmp_db.execute_read("SELECT id FROM live_messages")
+        pending = asyncio.create_task(client.post(f"{base}/messages", json=body))
+        try:
+            for _ in range(200):
+                await asyncio.sleep(0)
+                controls = (await client.get(f"{base}/controls")).json()["messages"]
+                if controls:
+                    break
+                assert not pending.done(), (await pending).text if pending.done() else name
+            else:
+                pytest.fail("the public golden request did not queue a readiness control")
+            assert len(controls) == 1
+            control = controls[0]
+            assert control["id"] == fixture["readiness_response"]["control_id"]
+            assert control["kind"] == fixture["capability"]["readiness_control"]
+            assert json.loads(control["body"]) == expected_context
+            assert not pending.done()
+            assert (await client.get(f"{base}/messages?plugin_readiness=true")).json() == {"messages": []}
+            observation = dict(fixture["readiness_response"])
+            observation.pop("control_id")
+            acknowledged = await client.post(f"{base}/controls/ack", json={
+                "ids": [control["id"]], "plugin_readiness": observation,
+            })
+            assert acknowledged.status_code == 200 and acknowledged.json() == {"ok": True, "acked": 1}
+            admitted = await asyncio.wait_for(pending, timeout=2)
+            assert admitted.status_code == 200, admitted.text
+            assert admitted.json() == fixture["admission_response"]
+            assert (await client.get(f"{base}/messages?plugin_readiness=true")).json() == {
+                "messages": [fixture["queued_message"]],
+            }
+            assert (await client.get(f"{base}/messages")).json() == {"messages": []}
+            duplicate = await client.post(f"{base}/messages", json=body)
+            assert duplicate.status_code == 200
+            assert duplicate.json() == {**fixture["admission_response"], "duplicate": True}
+            changed = await client.post(f"{base}/messages", json={
+                **body, "plugin_readiness": {**body["plugin_readiness"], "plugins": []},
+            })
+            assert changed.status_code == 409
+            assert len(tmp_db.execute_read(
+                "SELECT id FROM live_messages WHERE kind NOT LIKE 'control:%'",
+            )) == 1
+        finally:
+            if not pending.done():
+                pending.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await pending
+
+
 @pytest.mark.parametrize("mode", ["acp", "cli"])
 def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, mode):
     from agent_bridge.client import BridgeClient
