@@ -8,7 +8,8 @@
   "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
   "purpose": "Communicate with persistent agent sessions",
   "installer": "install",
-  "windowsCatalogShim": "cmd",
+  "windowsCatalogShim": "powershell",
+  "powershellPipelineInput": true,
   "provisionMode": "direct",
   "payloadRootEnv": "AGENT_BRIDGE_PAYLOAD_ROOT",
   "payloadDispatcher": {

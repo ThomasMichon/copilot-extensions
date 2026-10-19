@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve binary Windows carrier input and publish direct PowerShell catalog entrypoints",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

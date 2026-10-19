@@ -30,6 +30,12 @@ Callers invoke that path through the platform shell and should pass structured
 input through stdin or a request file rather than inline CMD arguments; the
 generated Windows catalog says so beside the `argv` (`cmd.exe` ends a command at
 a newline, so a multi-line argument is silently cut off).
+`powershellPipelineInput: true` explicitly opts a payload dispatcher into
+forwarding PowerShell object input. The dispatcher must likewise distinguish
+object pipelines from native redirected stdin and preserve raw native bytes;
+Windows PowerShell's `ExpectingInput` alone does not distinguish those paths.
+The opted-in launcher suppresses PowerShell progress records, not errors, so
+module auto-loading cannot add CLIXML to its stderr transport.
 `provisionMode` defaults to `snapshot`, where first use stamps the owning
 payload and provisions through its published snapshot. A self-staging installer
 may select `direct`; the payload shim then invokes that same installer with

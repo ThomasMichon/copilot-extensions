@@ -5,6 +5,8 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 $forwardArgs = @($args)
+$hasPipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
+$pipelineInput = if ($hasPipelineInput) { @(Get-Variable input -ValueOnly) } else { @() }
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_BRIDGE_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-bridge] owning payload root is unavailable.')
@@ -197,7 +199,11 @@ function Invoke-Runtime {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_bridge @forwardArgs
+        if ($hasPipelineInput) {
+            $pipelineInput | & $Python -m agent_bridge @forwardArgs
+        } else {
+            & $Python -m agent_bridge @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }

@@ -200,6 +200,43 @@ def _write_runtime_completion(slot: Path, version: str) -> None:
     )
 
 
+def test_object_pipeline_forwarding_is_explicit_and_default_false(tmp_path: Path) -> None:
+    manifest = _required_context_manifest(tmp_path)
+    default = generator.expected_files(manifest)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["powershellPipelineInput"] = False
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert generator.expected_files(manifest) == default
+    data["powershellPipelineInput"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    selected = generator.expected_files(manifest)
+    changed = [path for path in default if default[path] != selected[path]]
+    assert changed == [manifest.parent / "bin" / "agent-machines.ps1"]
+    body = selected[changed[0]]
+    assert "$MyInvocation.ExpectingInput -and $MyInvocation.Line" in body
+    assert "(Get-Variable input -ValueOnly) | & $_payloadDispatcher @args" in body
+    assert "$input" not in body
+
+
+@pytest.mark.parametrize("value", ["true", 1, None])
+def test_object_pipeline_forwarding_requires_boolean(tmp_path: Path, value) -> None:
+    manifest = _required_context_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["powershellPipelineInput"] = value
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="powershellPipelineInput must be a boolean"):
+        generator.load_manifest(manifest)
+
+
+def test_object_pipeline_forwarding_requires_dispatcher(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["powershellPipelineInput"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="powershellPipelineInput requires a payloadDispatcher"):
+        generator.load_manifest(manifest)
+
+
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
     return [
         json.loads(line)

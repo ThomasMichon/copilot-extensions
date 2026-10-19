@@ -513,8 +513,18 @@ contracts.
 Agent-facing sessions receive an exact payload-local command through the
 session command catalog. That command resolves and, when necessary, provisions
 the runtime from its own payload without searching `PATH` for another
-marketplace's same-named plugin. On Windows the catalog publishes the native
-`.cmd` entry so prompt bodies sent through stdin remain intact.
+marketplace's same-named plugin. On Windows the catalog publishes the direct
+`.ps1` entry. PowerShell-aware callers use that entry; native process callers
+invoke it through their PowerShell host's script boundary. PowerShell 7 accepts
+`-File`; Windows PowerShell 5.1 rejects a standalone `-` in that host argument
+list, so native callers submitting `--prompt-file -` use a safely quoted
+`-Command`/`-EncodedCommand` invocation instead. Prompt bytes still travel only
+through stdin. The `.cmd` entry
+remains for CMD-compatible callers, including the remote carrier command.
+Both paths retain normal runtime selection and admission. Native stdin is
+inherited as bytes, including framed carrier traffic and quoted, multiline
+`--prompt-file -` bodies; an actual PowerShell object pipeline remains text
+input rather than a binary transport.
 
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: daemon and service
