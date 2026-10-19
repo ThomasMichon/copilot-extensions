@@ -579,7 +579,7 @@ class GitHubProvider:
         self, repo: str, number: int, *, expected_head_sha: str,
         hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
         api_base: str = "", token: str | None = None,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, bool, str]:
         from .github_review_gate import pull_review_exception
         return pull_review_exception(
             self, repo, number, expected_head_sha=expected_head_sha,
