@@ -1,9 +1,13 @@
 """Run the pure public-SDK observer/control tests inside plugin containment."""
 
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from agent_procutil import no_window_kwargs
+
+pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
 def test_readiness_and_existing_delivery_node_contracts():
