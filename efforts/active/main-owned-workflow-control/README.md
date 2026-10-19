@@ -121,6 +121,15 @@ default and reviewed activation. The [rescue contract](bounded-review-rescue.md)
 contains **agent-recommended** lifecycle, authority and qualification details;
 this request does not itself authorize a live routing or credential change.
 
+**2026-10-18 - Provider-neutral owner-only scope (verbatim):**
+
+> Make sure the rescue plan doesn't mention linux-N machines; it should just be a general proposal for local providers (running on behalf of the repo owner only) to step in with a backup runner set in the case of congestion.
+
+The rescue proposal is provider-neutral and carries no concrete machine
+inventory. Only repository-owner-delegated local providers may supply its
+backup runner set; provider/repository/workload admission must enforce that
+boundary before activation. This does not authorize a shared contributor pool.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -147,8 +156,9 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Prove actual admitted self-hosted execution before claiming offload;
   preserve hosted review and distinct full/native qualification.
 - [ ] Design and qualify [bounded native review rescue](bounded-review-rescue.md)
-  with existing runner/controller owners: periodic observation, authorized
-  checked-in switch, bounded requeue window, hosted restoration and recheck.
+  with existing runner/controller owners: owner-only local-provider backup
+  set, periodic observation, authorized checked-in switch, bounded requeue
+  window, hosted restoration and recheck.
   Prove the control/admission path's availability or explicitly hold/escalate;
   reviewed planning is not live enablement.
 - [ ] Observe the resulting release and contribution cycles, preserve rollback,
@@ -351,7 +361,8 @@ enablement require their own explicit acceptance.)_
   [rescue validation matrix](bounded-review-rescue.md#validation-obligations),
   including fault classification, independent control availability or explicit
   outage hold, restart/dedup, failed restoration and one authorized complete
-  native ARC-to-hosted cycle before periodic enablement.
+  native local-backup-to-hosted cycle with enforced repository-owner delegation
+  before periodic enablement.
 
 ## Proposal
 
