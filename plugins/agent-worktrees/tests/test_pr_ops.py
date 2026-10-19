@@ -5717,6 +5717,9 @@ class TestSelfMergeBypassNote:
         assert "Maintainer bypass" in note
         assert "pr-merge" in note
         assert provider.calls == [("o/r", 7)]
+        assert "No verdict yet" not in note
+        assert "required CI" in note
+        assert "change request" in note
 
     def test_none_when_review_required_but_not_bypassable(self):
         provider = self._GhLikeProvider((True, False))

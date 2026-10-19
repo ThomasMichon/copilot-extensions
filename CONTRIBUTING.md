@@ -206,6 +206,15 @@ copilot-extensions finalize          # clean up the worktree
 
 ### Waiting for a verdict
 
+**Authorized Maintainers drive completion; they do not request an extra
+permission merely because GitHub still displays a CODEOWNER-review
+requirement.** After satisfying the review policy below and required CI, and
+with no outstanding reviewer change request, hold, draft or conflict, use
+`pr-merge <#> --now`. A live provider-confirmed review-rule exception is part
+of this repository's expected Maintainer flow. It does not waive blocking
+feedback or checks, authorize raw bypass commands, or grant an unlisted actor
+Maintainer rights. Contributor PRs retain their separate human-acceptance gate.
+
 > **TL;DR (the shared stopping rule both the author and reviewer converge
 > on for Copilot's own verdict — a separate gate from required status checks
 > and from merge authorization, see below):** `Approve` satisfies Copilot's
@@ -268,27 +277,16 @@ expect a `CHANGES_REQUESTED` state from it.) Approvals are enabled in this repo
 (Settings → Copilot → Code review → Auto-approval) — see [`REVIEW.md`](REVIEW.md)'s
 directive requiring Copilot to render `Approve` whenever it has no blocking
 findings, rather than habitually leaving a `Comment` review that just
-narrates readiness. **That directive, and "a genuinely ready PR should come
-back `Approve`," only holds for a PR authored by someone other than this
-repo's owner.** This repo's owner-authored PRs (i.e. this repo's own,
-self-merge PRs — the common case when driving work here) are a documented,
-empirically confirmed exception: GitHub's Copilot code review structurally
-never renders `Approve` there, only ever `Comment`
-(`plugins/agent-worktrees/src/agent_worktrees/pr_contract.py`'s
-`NONBLOCKING_VERDICT_STATES`; every review across every merged owner-authored
-PR in this repo's history has been `Comment`, with zero `Approve`s ever
-observed). On an owner-authored PR, the passing verdict is a **clean
-`Comment`** — zero remaining Medium/High-severity findings — not a `Comment`
-that is merely "waited out." Do not spend further review rounds chasing an
-`Approve` that literally cannot land there.
+narrates readiness. Owner-authored PRs can receive `Approve` too; do not
+infer the available verdict shape from an account name or historical service
+behavior. On an owner-authored PR, either `Approve` or a **clean `Comment`**
+with zero remaining Medium/High-severity findings satisfies this repo's
+Copilot gate. A comment merely "waited out" is not clean evidence.
 
-> **This never-`Approve` quirk is specific to the literal GitHub repository
-> *owner* account, not the wider Maintainer group.** The other Maintainers
-> are ordinary (non-owner) accounts from Copilot's perspective — their own
-> PRs should be treated like a Contributor's for verdict *shape* (wait for a
-> genuine `Approve`, not a clean-`Comment` substitute) even though they
-> don't need anyone else's approving review to merge (the ruleset bypass
-> above).
+> Other Maintainers' PRs retain the documented contributor verdict-shape
+> policy below unless the repository explicitly accepts a different shape.
+> Their live review-rule exception removes the need for another person's
+> approval, not the responsibility to address Copilot's findings.
 >
 > This is a bigger gap than verdict *shape* alone: without
 > `MAINTAINER_REVIEW_PAT` (see [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation)), the automatic request never
@@ -303,7 +301,7 @@ that is merely "waited out." Do not spend further review rounds chasing an
 **Everyone — Contributor and Maintainer alike — waits for a verdict before
 merging**, and no one merges past an open Medium/High-severity finding.
 What differs is only the *shape* of the passing verdict: Contributor PRs
-need `Approve`; the repo owner's own PRs need a `Comment` review with
+need `Approve`; the repo owner's own PRs accept `Approve` or a `Comment` review with
 nothing Medium/High left open (see the note above for the other
 Maintainers). Each wait below uses `pr-watch wait <owner>/<repo>
 <PR> --since <cursor> --until approved,commented,changes_requested
@@ -372,19 +370,13 @@ each attempt real room to actually land before treating it as a timeout:
    proceeding past this step at all, regardless of Maintainer approval,
    until it's resolved and a *subsequent* review actually passes — merely
    re-requesting a review is not itself a verdict.
-- **This is agent discipline, not yet tool-enforced.** `pr-merge --now`
-  itself does not check Copilot's verdict before merging --
-  `.agent-worktrees/config.yaml`'s `review_blocking: false` makes every
-  `pr-merge` call pass `--admin` to the provider (bypassing GitHub's own
-  review-gate check unconditionally), so nothing currently stops a driving
-  agent from merging before this loop is actually satisfied. Follow the
-  loop above deliberately; do not rely on the tooling to refuse a premature
-  merge on your behalf. (Flipping `review_blocking` to `true` is a real
-  lever for closing this gap, but is a separate decision with its own
-  behavior-change risk -- e.g. this repo's own ruleset already exempts the
-  maintainer from any required approving review count, so the practical
-  effect for the maintainer's own PRs needs its own validation, not an
-  assumption -- and is out of scope for this documentation change.)
+- **Review assessment remains the author's responsibility.** The GitHub
+  provider attempts a normal, head-pinned merge first. Where repository
+  configuration authorizes its fallback, it verifies the required checks
+  before an administrative merge attempt; it does not unconditionally pass
+  that flag on every call. This is not yet complete enforcement of the review
+  assessment loop or every reviewer veto. Follow the loop and all negative
+  feedback deliberately; never infer that a merge-capable actor may ignore it.
 - **`pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet
   approved"` fields still refer only to the codeowner/review-count gate**
   (see [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation)), not to Copilot's own verdict — for the maintainer's

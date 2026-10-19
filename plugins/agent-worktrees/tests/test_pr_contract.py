@@ -703,12 +703,12 @@ class TestDefaultUntil:
     def test_blocking_true_is_default_until(self):
         assert pc.default_until(True) == pc.DEFAULT_UNTIL
 
-    def test_blocking_false_swaps_verdict_events_for_commented(self):
+    def test_blocking_false_adds_comment_events_without_losing_other_reviews(self):
         until = pc.default_until(False)
         assert until == pc.NONBLOCKING_DEFAULT_UNTIL
         assert "commented" in until
-        assert "approved" not in until
-        assert "changes_requested" not in until
+        assert "approved" in until
+        assert "changes_requested" in until
         # Everything else (merge-state/lifecycle) is preserved unchanged.
         for name in ("conflict", "mergeable", "checks_failed",
                      "approval_dismissed", "merged", "closed"):
@@ -999,8 +999,8 @@ class TestPRReminder:
         assert "pr-merge" in r.next_step and "--now" in r.next_step
         assert "self-approve" not in r.next_step
         assert "cannot approve their own" not in r.next_step
-        assert "tooling needs no" in r.next_step
-        assert "wait for a clean review verdict" in r.next_step
+        assert "configured review and required CI pass" in r.next_step
+        assert "outstanding change request still blocks" in r.next_step
 
     def test_notes_surface_as_a_caution_line_in_reminder_text(self):
         flow = _self_merge_flow(notes="ask the on-call before merging on Fridays")
@@ -1041,13 +1041,11 @@ class TestPRReminder:
         assert "required checks/reviews" in r.next_step
         assert "self-approve" not in r.next_step
 
-    def test_non_blocking_self_approval_needs_no_approval_regardless_of_provider(self):
-        # review_blocking=False: nothing gates the merge, so the "no approval
-        # required" phrasing applies the same way on every provider, not just
-        # GitHub.
+    def test_non_blocking_self_merge_preserves_review_and_ci_on_every_provider(self):
         flow = _self_merge_flow(provider="azure-devops", review_blocking=False)
         r = pc.pr_reminder(flow, "create-pr")
-        assert "tooling needs no" in r.next_step
+        assert "configured review and required CI pass" in r.next_step
+        assert "outstanding change request still blocks" in r.next_step
         assert "self-approve" not in r.next_step
 
     def test_non_blocking_no_reviewer_does_not_mention_a_verdict(self):
@@ -1056,8 +1054,8 @@ class TestPRReminder:
         # submitter to wait for one that will never exist.
         flow = _self_merge_flow(reviewer="", review_blocking=False)
         r = pc.pr_reminder(flow, "create-pr")
-        assert "tooling needs no" in r.next_step
-        assert "wait for a clean review verdict" not in r.next_step
+        assert "required CI passes" in r.next_step
+        assert "configured review" not in r.next_step
 
     def test_blocking_self_merge_reminder_waits_on_approval(self):
         flow = _self_merge_flow(review_blocking=True)
@@ -1397,4 +1395,3 @@ class TestCreatePrPushedReminder:
         r = pc.pr_reminder(_self_merge_flow(), "create-pr", pc.PR_STATE_DRY_RUN)
         assert (r.state, r.headline) == ("dry-run", "dry run: nothing was pushed or opened")
         assert "without `--dry-run`" in r.next_step and "set-pr" not in r.next_step
-

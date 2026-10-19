@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from agent_worktrees import config as cfg
 from agent_worktrees import output, pr_ops, providers, tracking
 from agent_worktrees import pr_state_cli, worktree_identity
@@ -126,3 +128,29 @@ def test_pr_status_no_live_stays_configured_and_offline(monkeypatch):
     assert captured["flow"]["configured_profile"] == "pr-human-merge"
     assert captured["flow"]["resolution"] == "configured"
     assert captured["flow"]["viewer_permission"] == ""
+
+
+@pytest.mark.parametrize(
+    "verdict,expected",
+    [
+        ("APPROVED", "approved"),
+        ("approved", "approved"),
+        ("CHANGES_REQUESTED", "changes-requested"),
+        ("REQUEST_CHANGES", "changes-requested"),
+        ("COMMENTED", "commented"),
+    ],
+)
+def test_status_reminder_preserves_observed_review_state(monkeypatch, verdict, expected):
+    config = _config()
+    captured = {}
+    _patch_status_shell(monkeypatch, config, captured)
+    monkeypatch.setattr(
+        pr_ops, "pr_status", lambda *args, **kwargs: {
+            "has_pr": True,
+            "state": "open",
+            "live": {"verdict": verdict},
+        },
+    )
+
+    assert pr_state_cli.cmd_pr_status(_args(no_live=True)) == 0
+    assert captured["reminder"]["state"] == expected

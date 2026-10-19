@@ -302,8 +302,9 @@ Execution owner: **PR completion steward**. The
 [completion contract](maintainer-pr-completion.md) defines ordered slices,
 regressions, retained-owner seams and the completion gate.
 
-- [ ] Land the amended vision and completion plan through ordinary review
+- [x] Land the amended vision and completion plan through ordinary review
   before implementation; retain all existing portfolio and activation gates.
+  #7219 merged after current-head approval and required CI.
 - [ ] Repair present-day self-merge readiness and guidance first (#3638,
   #4234): distinguish actor authorization, review evidence, reviewer vetoes,
   required CI and consent. Status, watch and mutation must not contradict one

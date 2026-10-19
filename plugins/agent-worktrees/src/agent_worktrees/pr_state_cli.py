@@ -410,14 +410,17 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
 
     live_block = result.get("live")
     live = live_block if isinstance(live_block, dict) else {}
+    verdict = str(live.get("verdict") or "").upper()
     if result.get("state") == "merged" or live.get("merge_state") == "merged":
         state = pc.PR_STATE_MERGED
     elif live.get("conflict"):
         state = pc.PR_STATE_CONFLICT
-    elif live.get("verdict") == "approved":
+    elif verdict == "APPROVED":
         state = pc.PR_STATE_APPROVED
-    elif live.get("verdict") in ("changes_requested", "change_requested"):
+    elif verdict in ("CHANGES_REQUESTED", "CHANGE_REQUESTED", "REQUEST_CHANGES"):
         state = pc.PR_STATE_CHANGES_REQUESTED
+    elif verdict in ("COMMENT", "COMMENTED"):
+        state = pc.PR_STATE_COMMENTED
     elif result.get("has_pr"):
         state = pc.PR_STATE_AWAITING_REVIEW
     else:

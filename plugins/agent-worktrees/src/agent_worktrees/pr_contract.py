@@ -31,6 +31,7 @@ from datetime import datetime
 from .pr_checks import checks_payload
 from .pr_snapshot import PRSnapshot as PRSnapshot, Review as Review
 from .pr_snapshot import REVIEW_STATE_EVENT as _REVIEW_STATE_EVENT
+from .pr_status_feedback import STATUS_FEEDBACK
 
 # ---------------------------------------------------------------------------
 # Transition vocabulary (shared by pr-watch's --until and pr-status)
@@ -74,13 +75,11 @@ DEFAULT_UNTIL = (
     "checks_failed", "approval_dismissed", "merged", "closed",
 )
 
-#: Non-blocking-review variant: for a reviewer authorized only to ``COMMENT``
-#: (e.g. GitHub's Copilot code review on an owner-authored PR -- it cannot
-#: render ``APPROVED``/``CHANGES_REQUESTED`` there), waiting on those never
-#: resolves. Swap them for ``commented``. See :func:`default_until`.
+#: Non-blocking-review variant: also observe comment-only reviews without
+#: losing approvals or another reviewer's blocking feedback.
 NONBLOCKING_DEFAULT_UNTIL = (
-    "commented", "conflict", "mergeable",
-    "checks_failed", "approval_dismissed", "merged", "closed",
+    "approved", "commented", "changes_requested", "conflict", "mergeable",
+    "checks_failed", "checks_succeeded", "approval_dismissed", "merged", "closed",
 )
 
 #: The REVIEWER-side counterpart to :data:`DEFAULT_UNTIL`: a durably-assigned
@@ -979,31 +978,15 @@ def classify_pr_flow(
     prefer_auto_merge: bool = True,
     notes: str = "",
 ) -> PRFlowProfile:
-    """Derive a repo's :class:`PRFlowProfile` from its PR config values.
+    """Derive one of four configured profiles without provider/network reads.
 
-    Three shapes, distinguished only by config (no network, no provider call):
+    Disabled PRs select direct completion. A consent label selects agent-merge;
+    otherwise explicit ``submitter-direct`` or legacy ``self_approve`` selects
+    self-merge. An enabled binding with neither selects human-merge.
 
-    - **direct** (``pr.enabled`` false): no PR flow. ``finalize`` lands the
-      worktree to the default branch; the pr-* verbs do not apply.
-    - **pr-agent-merge** (enabled + an ``automerge_label`` is bound): the author
-      signals **merge consent** with that label after approval, and the review
-      gate merges. The full pr-* family applies -- this is the multi-machine system's own
-      auto-review + auto-merge shape.
-    - **pr-human-merge** (enabled but **no** ``automerge_label``): PR-gated, but
-      the agent has no consent/merge mechanism -- a **human** approves and
-      merges. ``create-pr`` / ``pr-watch`` / ``pr-status`` / ``pr-complete``
-      apply; **``pr-merge`` does not** (there is no consent label to apply).
-
-    The absence of ``automerge_label`` is the human-merge signal *by design*.
-    The one ambiguity a caller must resolve out-of-band: an ``enabled`` repo
-    that *should* have an ``automerge_label`` but is missing it because the
-    checkout's anchor is stale looks identical to a genuine human-merge repo.
-    Callers that expect agent-merge (e.g. the multi-machine system) should confirm the
-    anchor is current before treating an empty label as "human-merge".
-
-    A fourth shape, **pr-self-merge**: submitter merges directly (no consent
-    label) when ``self_approve`` or ``merge_actor == "submitter-direct"``;
-    ``review_blocking`` gates only the tooling -- a repo's verdict policy still applies.
+    An absent consent label does not block explicit self-merge. Check intended
+    agent-merge bindings for staleness before assuming human-merge. Configuration
+    selects the operation, not actor authority or review/validation readiness.
     """
     _matrix = dict(
         reviewer=reviewer, review_blocking=review_blocking,
@@ -1087,6 +1070,7 @@ PR_STATE_PUSHED = "pushed"  # create-pr pushed the branch, no PR opened: nothing
 PR_STATE_DRY_RUN = "dry-run"  # create-pr --dry-run: nothing pushed, nothing opened
 PR_STATE_AWAITING_REVIEW = "awaiting-review"
 PR_STATE_APPROVED = "approved"
+PR_STATE_COMMENTED = "commented"
 PR_STATE_CHANGES_REQUESTED = "changes-requested"
 PR_STATE_CONFLICT = "conflict"
 PR_STATE_MERGED = "merged"
@@ -1159,8 +1143,14 @@ def _merge_instruction(flow: PRFlowProfile) -> str:
     """The sanctioned way THIS repo merges -- always an agent-worktrees verb."""
     if flow.profile == PROFILE_PR_SELF_MERGE:
         if not flow.review_blocking:
-            verdict_note = "; still wait for a clean review verdict first" if flow.reviewer else ""
-            return f"merge with `pr-merge <#> --now` -- tooling needs no approval{verdict_note}"
+            readiness = (
+                "the configured review and required CI pass"
+                if flow.reviewer else "required CI passes"
+            )
+            return (
+                f"merge with `pr-merge <#> --now` after {readiness}; "
+                "an outstanding change request still blocks"
+            )
         # `review_blocking` alone doesn't prove an *approval* is required (it
         # can come from a required status check with no required review, per
         # derive_policy_matrix) -- omit the GitHub self-approval caveat
@@ -1377,6 +1367,15 @@ def pr_reminder(
             cautions=cautions,
         )
 
+    if verb == "pr-status":
+        if state in STATUS_FEEDBACK:
+            headline, next_step = STATUS_FEEDBACK[state]
+            return PRReminder(
+                flow.profile, verb, state, ok,
+                headline=headline, next_step=next_step, waiting_on=(),
+                use_instead=(), cautions=cautions,
+            )
+
     # Generic (pr-status / pr-complete / unknown verb). ``reason`` -- when the
     # caller supplies one -- overrides the flow-summary headline; used by
     # pr-status to surface a live self-merge-bypass opportunity explicitly
@@ -1385,7 +1384,7 @@ def pr_reminder(
         flow.profile, verb, state, ok,
         headline=reason or flow.summary,
         next_step=merge,
-        waiting_on=(review,) if review else (),
+        waiting_on=(review,) if review and state != PR_STATE_APPROVED else (),
         use_instead=(),
         cautions=cautions,
     )

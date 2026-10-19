@@ -1006,26 +1006,12 @@ def self_merge_bypass_note(
     flow, provider, repo: str, number: int | None, *,
     api_base: str = "", token: str | None = None,
 ) -> str | None:
-    """Explain a pr-self-merge repo's live self-merge availability, or None.
+    """Explain live review-rule authority without asserting review readiness.
 
-    Answers the question an agent otherwise has to infer by hand from a raw
-    ``eligible: false`` / ``reason: "not yet approved"`` verdict: on a
-    ``pr-self-merge`` repo, "no verdict yet" does NOT necessarily mean merge
-    is blocked -- the acting identity may hold **Maintainer bypass rights**
-    on the repo's own required-review rule (discovered landing a live
-    ruleset requiring one approving review while granting the acting
-    Maintainer bypass rights; see :meth:`GitHubProvider.pull_review_gate`).
-    Surfacing this explicitly at both ``pr-status`` and ``create-pr``
-    matters because agents have been observed hesitating or declaring "I
-    can't self-merge" here, even as a Maintainer (#3296 follow-up).
-
-    Only ever returns a note for the ``pr-self-merge`` profile, only when a
-    provider exposes ``pull_review_gate`` (currently GitHub only, via
-    ``hasattr`` -- other providers/flows are silently unaffected), and only
-    when that live read confirms BOTH a required review AND actor
-    bypassability -- never a guess. ``number is None`` (no PR yet) or any
-    read failure returns ``None``, matching :func:`_live_pr_state`'s existing
-    "omit rather than guess" contract.
+    Only the self-merge profile and affirmative provider evidence of a required,
+    actor-bypassable review rule produce a note. Unknown/unavailable evidence
+    produces none. The note is independent of review state: status, creation
+    and observation all use it, including after an approval (#3638, #4234).
     """
     from . import pr_contract as pc
 
@@ -1042,9 +1028,11 @@ def self_merge_bypass_note(
     if not (review_required and bypassable):
         return None
     return (
-        "No verdict yet, but this identity holds Maintainer bypass rights on "
-        "this repo's required-review rule -- `pr-merge <#> --now` self-merges "
-        "directly rather than waiting for a review that may never come."
+        "This identity holds repository-authorized Maintainer bypass rights "
+        "for the required-review rule. After the configured review and required CI "
+        "pass, use `pr-merge <#> --now`; missing additional required approval alone "
+        "needs no new permission prompt. This does not override a change request, "
+        "hold, conflict or failed check."
     )
 
 

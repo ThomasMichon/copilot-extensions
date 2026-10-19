@@ -7,9 +7,10 @@ and [claims presentation](../../../visions/venue-pivots-ux/README.md).
 
 ## Status and ownership
 
-Proposal: implementation follows review of this amendment. The **PR completion
-steward** owns this Phase 5a slice and its readiness, guidance and completion
-visibility prerequisites. The parent campaign remains Active.
+The contract was reviewed and merged in #7219. Implementation is active; live
+authority and activation remain separately gated. The **PR completion steward**
+owns this Phase 5a slice and its readiness, guidance and completion visibility
+prerequisites. The parent campaign remains Active.
 
 This extends the existing plan from #7165, not a second automation campaign.
 Existing #3336 release, #7122 capacity, #1303 coverage, source-attribution and
