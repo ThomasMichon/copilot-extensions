@@ -978,7 +978,7 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
                 source_identity=source_identity, end_reason=end_reason,
             )
         lifecycle = (result or {}).get("lifecycle")
-        if lifecycle not in ("historical", "unconfirmed"):
+        if lifecycle in (None, "ended"):
             _capture_session_title(wt_id, session_id)
         holder = getattr(args, "result_holder", None)
         if isinstance(holder, list):

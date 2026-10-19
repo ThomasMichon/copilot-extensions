@@ -358,3 +358,14 @@ The umbrella effort remains Active independently of this slice's completion.
   then proves another catalog pass cannot reopen the ended interval. The
   expanded isolated Worktrees lane passed 505 tests with 12 platform skips;
   Manager sources remain unchanged from their 239-test receipt.
+- A further review identified replay side effects: duplicate historical End
+  could capture a replacement's title, and a timestamp-less source-bound Start
+  could reacquire an ended interval's released claim. Title capture now runs
+  only for an actual current End or the legacy closure shape. Hook reactivation
+  of a previously ended physical source requires a usable event timestamp and
+  is refused before claim acquisition when uncertain. Timestamped logical
+  resumes retain their explicit ambiguity. The title regression now patches its
+  actual leaf owner and proves redelivery is side-effect free; all three
+  missing/invalid-timestamp cases failed before the fix. The expanded isolated
+  Worktrees lane passed 509 tests with 12 platform skips; Manager remains at
+  its unchanged 239-test receipt.

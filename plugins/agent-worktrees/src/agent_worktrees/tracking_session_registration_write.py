@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from . import config_authority, obligations, tracking, tracking_write
@@ -177,6 +178,16 @@ def _apply_session_register_locked(args: dict) -> dict:
                 )
             ):
                 return {"ok": True, "linked_handoff": None, "lifecycle": "duplicate"}
+            if source_identity is not None and source.startswith("hook") and any(
+                item.source_identity == source_identity and item.ended_at is not None
+                for item in existing.activations
+            ):
+                try:
+                    datetime.fromisoformat(started_at)
+                except (TypeError, ValueError):
+                    message = "Hook reactivation timestamp is unavailable; possible Start replay"
+                    logging.getLogger(__name__).warning("%s for %s", message, session_id)
+                    return {"error": "lifecycle", "message": message}
             if any(item.source_identity for item in existing.activations):
                 stale_source = source_identity is not None and any(
                     item.source_identity == source_identity

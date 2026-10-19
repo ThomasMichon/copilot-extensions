@@ -1043,7 +1043,7 @@ class TestDeregisterSessionStdin:
     def test_resident_old_source_end_preserves_current_same_uuid_activation(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch,
     ):
-        from agent_worktrees import native_source_context, obligations
+        from agent_worktrees import native_source_context, obligations, session_binding_cli
 
         sid = "00000000-0000-4000-8000-000000000001"
         epoch = {"platform": "linux", "environment_id": "a" * 32, "boot_id": sid}
@@ -1062,7 +1062,8 @@ class TestDeregisterSessionStdin:
         )
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "wrong-resident-session")
         monkeypatch.setattr(
-            m, "_capture_session_title", lambda *_: pytest.fail("historical End title write"),
+            session_binding_cli, "_capture_session_title",
+            lambda *_: pytest.fail("historical End title write"),
         )
         holder = []
         args = argparse.Namespace(
@@ -1079,6 +1080,8 @@ class TestDeregisterSessionStdin:
         )
         assert m.cmd_deregister_session(args) == 0
         assert holder[-1]["lifecycle"] == "historical"
+        assert m.cmd_deregister_session(args) == 0
+        assert holder[-1]["lifecycle"] == "duplicate"
         record = load_record(tmp_tracking_dir / "wt-end.yaml")
         entry = record.session_entry(sid)
         assert entry.ended_at is None

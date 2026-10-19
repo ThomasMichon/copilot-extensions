@@ -400,7 +400,9 @@ self-session claim, stop its fsmonitor, or capture its title. Missing or ambiguo
 source cannot retire a qualified interval. Repeated logical activations in one
 physical CLI with the same native UUID are deliberately unconfirmed; the ambiguity
 survives history pruning. Duplicate old Start delivery cannot reactivate an ended
-claim. Both lifecycle writes require the version-3 owner verb, including legacy
+claim. A hook cannot reactivate its ended physical source without a usable event
+timestamp; uncertain replay is refused before claim acquisition. Duplicate End
+observations do not capture a workspace title. Both lifecycle writes require the version-3 owner verb, including legacy
 requests, so an older resident cannot silently discard the new fields.
 PID-only catalog reconciliation can fill process metadata but cannot replace or
 reopen a source-bound activation. Its matching End still closes the current

@@ -184,6 +184,52 @@ def test_reused_physical_source_ambiguity_survives_history_pruning(record_path, 
     assert record_path.read_bytes() == before
 
 
+@pytest.mark.parametrize("timestamp", [None, "not-a-timestamp", True])
+def test_uncertain_start_replay_cannot_reacquire_released_claim(record_path, timestamp):
+    from agent_worktrees import __main__ as main, obligations, tracking_session_deregistration_write
+
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-1",
+        "source": "hook:new", "started_at": main._hook_event_timestamp({"timestamp": timestamp}),
+        "source_identity": "native:original",
+    }
+    assert args["started_at"] is None
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    assert tracking_session_deregistration_write.apply_session_deregister({
+        **args, "ended_at": "2026-10-19T10:00:00", "end_reason": "user_exit",
+    })["lifecycle"] == "ended"
+    before = record_path.read_bytes()
+    replay = tracking_session_registration_write.apply_session_register(args)
+    assert replay.get("error") == "lifecycle"
+    assert "timestamp" in replay["message"]
+    assert record_path.read_bytes() == before
+    record = tracking.load_record(record_path)
+    assert len(record.sessions[0].activations) == 1
+    assert record.sessions[0].ended_at == "2026-10-19T10:00:00"
+    assert all(claim.state == obligations.RELEASED for claim in record.resources)
+
+
+def test_timestamped_same_source_logical_resume_remains_explicitly_ambiguous(record_path):
+    from agent_worktrees import obligations, tracking_session_deregistration_write
+
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-1",
+        "source": "hook:resume", "started_at": "2026-10-19T10:00:00",
+        "source_identity": "native:physical",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    assert tracking_session_deregistration_write.apply_session_deregister({
+        **args, "ended_at": "2026-10-19T11:00:00", "end_reason": "user_exit",
+    })["lifecycle"] == "ended"
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "started_at": "2026-10-19T12:00:00",
+    })["ok"]
+    record = tracking.load_record(record_path)
+    assert record.sessions[0].ended_at is None
+    assert all(item.source_ambiguous for item in record.sessions[0].activations)
+    assert all(claim.state == obligations.ACTIVE for claim in record.resources)
+
+
 @pytest.mark.parametrize("source_identity", [None, "native:replacement"])
 def test_v2_daemon_cannot_downgrade_registration(
     record_path, monkeypatch, monkeypatch_config, source_identity,
