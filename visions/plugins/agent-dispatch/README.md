@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-19
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -351,6 +351,22 @@ selected successor a non-discoverable creation capability; request-level
 idempotency distinguishes transport retry from ordinary work deduplication, and
 replay still proves the named generation capability. Lost one-time authority is
 recovered by a new generation, never by revealing or reopening an old one.
+
+### acknowledged-execution-handoff
+
+An explicitly authorized adopter can transfer execution of one bounded scope
+without overlapping writers or disrupting unrelated work. Admission closure
+accounts for existing assignments and already accepted effects; a requested
+transition is not effective until the responsible authorities acknowledge that
+the old execution mode can no longer act.
+
+The transition preserves natural tasks, allocated workspaces and recorded
+session lineage. Adopter-owned effect boundaries reject stale execution
+authority, while Dispatch remains the task and execution authority. Missing
+capability, uncertain legacy writers, interrupted transitions and controller
+expiry remain visible recovery states, never implicit permission to displace
+an owner or reactivate automation. Handback has the same acknowledged,
+single-writer guarantee.
 
 ### dedup-before-create
 Before a task is created, the layer supports **finding existing equivalent work**

@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Draft; generic scoped admission, drain, effect-fence and handback contract only | #7268; implementation and adoption separately authorized |
 | [Gateway Role Tunnels](active/gateway-role-tunnels/README.md) | Active; plan reviewed, strict manifest/publication slice first, outbound channel and container qualification open | #7257; finite sub-effort of #6236, retained #6443/#5789 integration owners |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Draft; reviewed host-worktree relationship and obligation plan before implementation | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
