@@ -256,6 +256,31 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-19 - Preserve the governed restart response contract
+
+- Published the staged-origin repair at `97b995eac` on #7160.
+  Native acceptance `39217236601` passes all fifteen selected jobs at that
+  exact head, including the expanded native-account Linux/Windows legacy
+  staging cases. Only the two unselected diagnostic jobs skip.
+- Another completed actual review, submitted against the preceding
+  `e944d348` head, identifies a separate Medium compatibility regression:
+  governed `restart --json` returns success without the legacy JSON body.
+- The existing guarded `ensure()` now reports whether incumbent discovery
+  found an owner, only after ready/complete success. Governed restart emits
+  the unchanged `restarted`/`was_running` JSON shape or the ordinary success
+  message. Refusal and rollback still propagate without a success response.
+- Response-shape and failure controls cover both incumbent states. Existing
+  native incumbent coverage checks the actual `ensure()` result, and normal
+  shipped-payload acceptance now starts cold through `restart --json`, then
+  restarts its upgraded live owner while preserving pending subscriptions.
+  All operations consume the original scenario budget; no deadline is
+  increased. Both complete affected modules pass all 18 contained cases in
+  814.79 seconds, including actual cold restart, full-payload live upgrade,
+  warm restart and existing native incumbent/refusal coverage.
+- Required CI, a subsequent actual review and fresh native acceptance remain
+  binding for the final repaired head. No merge, deployment, shared-owner
+  replacement or receipt investigation is performed.
+
 ### 2026-10-19 - Revalidate marketplace admission after legacy self-staging
 
 - The actual completed review of #7160 identifies one additional Medium

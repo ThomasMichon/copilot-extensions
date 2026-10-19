@@ -179,14 +179,15 @@ def run_target(
 def ensure(
     invocation: WatchInvocation, *, restart: bool = False,
     poll_interval: float = 30.0, timeout: float = 120.0,
-) -> None:
+) -> bool:
+    """Ensure an owner is ready; report whether guarded discovery found one."""
     invocation.require_current()
     installation = invocation.fresh_installation()
     with installation.transaction(timeout=timeout, environment={}) as guard:
         invocation.require_current()
         owner = incumbent(invocation, guard, timeout=timeout)
         if owner is not None and not restart and owner.instance.runtime == invocation.runtime:
-            return
+            return True
         manifest = _regular_bytes(installation.plugin_root / "deploy-manifest.json")
         if manifest is None:
             raise PermissionError("watch selected runtime has no completed deployment manifest")
@@ -197,6 +198,7 @@ def ensure(
         result = run_target(journal, invocation, poll_interval=poll_interval, timeout=timeout)
         if not result.ok or journal._document["phase"] != "complete":
             raise RuntimeError("watch startup rolled back; no new owner was committed")
+        return owner is not None
 
 
 def stop(invocation: WatchInvocation, *, timeout: float = 120.0) -> bool:

@@ -5,6 +5,7 @@ import os
 import subprocess
 import time
 from contextlib import ExitStack
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -37,9 +38,48 @@ invocation = WatchInvocation(
 def forbidden_spawn(*args, **kwargs):
     raise AssertionError("known incumbent must not spawn a replacement")
 watch_entry.spawn_daemon = forbidden_spawn
-watch_entry.ensure(invocation)
+assert watch_entry.ensure(invocation) is True
 print(json.dumps(watch_entry.dial(invocation)), flush=True)
 """
+
+
+@pytest.mark.parametrize("was_running", [False, True])
+@pytest.mark.parametrize("json_output", [False, True])
+def test_governed_restart_preserves_existing_response_contract(
+    monkeypatch, capsys, was_running, json_output,
+):
+    from agent_pull_requests import watch_entry
+
+    invocation = object()
+    monkeypatch.setattr(cli, "_WATCH_INVOCATION", invocation)
+
+    def ensure(actual, *, restart):
+        assert actual is invocation
+        assert restart is True
+        return was_running
+
+    monkeypatch.setattr(watch_entry, "ensure", ensure)
+    assert cli._cmd_serve_restart(SimpleNamespace(json=json_output)) == 0
+    output = capsys.readouterr().out
+    if json_output:
+        assert json.loads(output) == {"restarted": True, "was_running": was_running}
+    else:
+        assert output == "agent-pull-requests: watch daemon restarted\n"
+
+
+@pytest.mark.parametrize("error", [PermissionError("owner refused"), RuntimeError("rolled back")])
+def test_governed_restart_failure_never_emits_a_success_response(monkeypatch, capsys, error):
+    from agent_pull_requests import watch_entry
+
+    monkeypatch.setattr(cli, "_WATCH_INVOCATION", object())
+
+    def ensure(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(watch_entry, "ensure", ensure)
+    with pytest.raises(type(error), match=str(error)):
+        cli._cmd_serve_restart(SimpleNamespace(json=True))
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.timeout(180)

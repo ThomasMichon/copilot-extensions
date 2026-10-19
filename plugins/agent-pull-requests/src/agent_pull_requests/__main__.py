@@ -710,7 +710,11 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
     if _WATCH_INVOCATION is not None:
         from .watch_entry import ensure
 
-        ensure(_WATCH_INVOCATION, restart=True)
+        was_running = ensure(_WATCH_INVOCATION, restart=True)
+        if args.json:
+            print(json.dumps({"restarted": True, "was_running": was_running}))
+        else:
+            print("agent-pull-requests: watch daemon restarted")
         return 0
     from single_instance_lease import AlreadyRunningError, SingleInstance
 

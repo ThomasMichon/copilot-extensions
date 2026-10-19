@@ -347,6 +347,10 @@ and Linux. On macOS, unavailable native birth evidence refuses governed startup,
 and unsupported exit evidence refuses cleanup/recovery rather than guessing from
 a PID or switching to legacy state. An absent-owner stop remains bounded;
 ordinary no-context legacy commands retain their existing behavior.
+Governed `restart --json` retains the legacy response shape:
+`{"restarted": true, "was_running": <boolean>}`. The incumbent flag comes from
+discovery under the same installation transaction guard; a failed or refused
+restart emits no success response.
 Cleanup preserves the pending phase
 and prior selection; it does not claim rollback completion, resume a
 predecessor, acquire a writer or enable effects. An adopted writer, published

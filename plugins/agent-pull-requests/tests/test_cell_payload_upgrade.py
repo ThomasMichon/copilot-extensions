@@ -268,7 +268,7 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         started = True
         try:
             result = _run(
-                command, ["serve"], environment, caller,
+                command, ["restart", "--json"], environment, caller,
                 timeout=_scenario_remaining(scenario_deadline),
             )
         except subprocess.TimeoutExpired as error:
@@ -276,6 +276,7 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
                 f"Owned startup timed out: {_cutover_failure_details(run_root)}"
             ) from error
         assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"restarted": True, "was_running": False}
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
         assert result.returncode == 0, result.stderr
         old = json.loads(result.stdout)["instance"]
@@ -338,6 +339,16 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         assert not (profile / ".agent-pull-requests").exists()
         assert not (profile / ".local" / "bin").exists()
         assert not list(caller.iterdir())
+        restarted = _run(
+            command, ["restart", "--json"], environment, caller,
+            timeout=_scenario_remaining(scenario_deadline),
+        )
+        assert restarted.returncode == 0, restarted.stderr
+        assert json.loads(restarted.stdout) == {"restarted": True, "was_running": True}
+        result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["instance"]["instanceId"] != health["instance"]["instanceId"]
+        assert read_subscriptions_state(state_root) == [saved]
     finally:
         try:
             if started:
