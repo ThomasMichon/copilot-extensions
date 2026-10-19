@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -77,29 +78,33 @@ def _wait(probe):
 
 
 def test_native_central_authority_never_promotes_a_local_queue(tmp_path):
-    evidence = tmp_path
-    if override := os.environ.get("AGENT_DISPATCH_AUTHORITY_E2E_EVIDENCE_DIR"):
-        evidence = Path(override)
-        assert evidence.is_absolute()
-        evidence.mkdir(exist_ok=False)
+    lane_path = Path(__file__).resolve().parents[3] / "tools/clean-room/central-local-authority/run.py"
+    spec = importlib.util.spec_from_file_location("central_authority_owner", lane_path)
+    lane = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lane)
+    owner = lane.read_owner(os.environ)
+    evidence = Path(owner["evidence"])
+    evidence.mkdir(exist_ok=False)
     report = {
         "scenario": "central-local-authority", "tier": "P", "family": "F1",
         "result": "fail", "cleanup": "pending", "stages": [], "jams": [],
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     image = os.environ["AGENT_DISPATCH_E2E_CENTRAL_IMAGE"]
-    suffix = uuid.uuid4().hex[:12]
-    network, central, peer = (f"authority-proof-{part}-{suffix}" for part in ("net", "central", "peer"))
+    suffix = owner["suffix"]
+    central, peer, uid_probe = owner["containers"]
+    network, = owner["networks"]
     central_token, local_token = (uuid.uuid4().hex for _ in range(2))
     report["env"] = {"image": image, "host_os": os.name, "worker_os": "linux"}
-    report["resources"] = {"network": network, "containers": [central, peer]}
+    report["resources"] = {"network": network, "containers": [central, peer, uid_probe]}
     (evidence / "cr-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     try:
         with ExitStack() as cleanup:
             cleanup.callback(_remove_owned, "network", network)
             _run("network", "create", "--internal", network)
+            cleanup.callback(_remove_owned, "container", uid_probe)
             uid, gid = _run(
-                "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
+                "run", "--rm", "--name", uid_probe, "--network", "none", "--read-only", "--cap-drop", "ALL",
                 "--entrypoint", "python", image, "-c",
                 "import os;print(os.getuid(),os.getgid())",
             ).split()

@@ -694,6 +694,12 @@ The opt-in native multi-container proof is documented in the
 It uses the actual central service, an independent peer database and native
 CLI processes inside fresh containers, including a central network partition
 without ownership migration. It is not required PR CI or a model evaluation.
+The lane's host driver durably preassigns the network and all three container
+names (including the UID probe), binds the fixture to that registry and verifies
+absence after contained-worker death within the original 360-second budget.
+`tests/test_central_authority_clean_room.py` covers report/owner refusals and a
+real native containment timeout against a file-backed daemon protocol stub.
+That fatal-worker regression is not a real Docker fault-injection proof.
 
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and

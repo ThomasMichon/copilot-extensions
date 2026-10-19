@@ -10,23 +10,29 @@ Prepare the candidate `agent-dispatch` test runtime with
 `python tools/run-plugin-tests.py agent-dispatch --prepare-only`.
 Build the candidate `services/dispatch/Dockerfile` from the repository root,
 using the environment's approved `PYTHON_INDEX_URL` build argument when needed.
-Set `AGENT_DISPATCH_CENTRAL_AUTHORITY_E2E=1` and
-`AGENT_DISPATCH_E2E_CENTRAL_IMAGE` to the candidate image. Optionally set
-`AGENT_DISPATCH_AUTHORITY_E2E_EVIDENCE_DIR` to a **nonexistent absolute path**
-under an existing private, timestamped scratch directory outside the checkout.
-The fixture exclusively creates that evidence path; do not precreate it.
+Pass the candidate image and an existing private, timestamped scratch directory
+outside the checkout to the host owner. It creates a fresh results directory,
+records every resource name before launch and exclusively creates the inner
+evidence directory.
 
 ```text
-python tools/run-plugin-tests.py agent-dispatch --test-file tests/test_central_authority_docker.py --timeout 360 --plugin-timeout 360
+python tools/clean-room/central-local-authority/run.py --central-image <candidate-image> --results-root <private-scratch>
 ```
 
 The 300-second pytest item and 360-second contained-case budgets include actual
 startup, native CLI operations, outage observation and cleanup. Docker commands
-retain a 45-second bound. There is no resampling or longer deadline on failure.
-Without an evidence override, the canonical runner owns temporary artifacts;
-with one, inspect `cr-report.json` for stage results, classified jams and cleanup
-status, alongside the runner's normal failure output. The default suite skips
-this opt-in case.
+retain a 45-second bound. The host reserves 30 seconds **inside** the same
+360-second clock for owner unwinding and verified cleanup, reusing the canonical
+contained-case owner and exact-name cleanup helpers. There is no resampling or
+longer deadline on failure. The durable `owned-resources.json` includes the
+network, central, peer and named UID-probe container. Host cleanup survives a
+fatal contained-worker exit and attempts removal and authoritative absence
+checks for every owned name; unavailable inventory is a failure, not absence.
+Inspect the outer `cr-report.json`, `runner.log` and inner
+`evidence/cr-report.json` separately. An exit-zero or skipped case without
+complete owner-bound stage evidence cannot pass; primary and cleanup failures
+remain separate jams. Direct opt-in invocation without this outer owner refuses
+before any Docker operation. The default suite skips this opt-in case.
 
 The proof must observe a real authenticated `peer` registration, reject a
 lease-eligible role and bad central credentials, and create independent central
