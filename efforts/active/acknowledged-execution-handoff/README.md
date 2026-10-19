@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, sequential PRs against `dev`
 - **Created:** 2026-10-19
-- **Status:** Draft
+- **Status:** Blocked
 - **Vision:** [Dispatch execution handoff](../../../visions/plugins/agent-dispatch/README.md#acknowledged-execution-handoff), preserving [reviewer lineage](../../../visions/plugins/agent-dispatch/reviewer/README.md#one-review-one-lineage)
 - **Umbrella issue:** [#7268](https://github.com/ThomasMichon/copilot-extensions/issues/7268)
 
@@ -72,11 +72,11 @@ grants.
 ## Plan
 
 ### Phase 1 - Review the contract
-- [ ] Land the vision extension, generic [contract](contract.md) and this effort
+- [x] Land the vision extension, generic [contract](contract.md) and this effort
       through normal proposal review.
-- [ ] Resolve review findings and identify the existing authorities to extend;
+- [x] Resolve review findings and identify the existing authorities to extend;
       do not implement a parallel lifecycle or effect store.
-- [ ] Record proposal landing and the next authorization boundary.
+- [x] Record proposal landing and the next authorization boundary.
 
 ### Phase 2 - Separately authorize implementation
 - [ ] Obtain explicit implementation scope and assign an implementation owner.
@@ -97,7 +97,7 @@ grants.
 
 ## Validation Plan
 
-- [ ] Proposal review confirms scope, owner boundaries, final-effect ordering,
+- [x] Proposal review confirms scope, owner boundaries, final-effect ordering,
       conservative legacy handling and a validation obligation for each race.
 - [ ] Deterministic unit tests prove admission, generations, stale
       acknowledgements, replay, timeout, crash recovery and handback.
@@ -119,9 +119,19 @@ grants.
 ## Proposal
 
 Read [contract.md](contract.md). It is prospective design, not a supported
-command or an instruction to operate a running system.
+command or an instruction to operate a running system. The design landed in
+[#7270](https://github.com/ThomasMichon/copilot-extensions/pull/7270).
+The next action is explicit implementation authorization and owner assignment
+under #7268. Until then, Phase 2 is blocked; review approval is not that grant.
 
 ## Journal
+
+### 2026-10-19 - Proposal landed; implementation gated
+- #7270 merged to `dev` as `cb27a321a1f6066fe910176e647e3b72f860091a`
+  after current-head Copilot approval and the required PR gate passed.
+- Phase 1 and proposal-review validation are resolved. Runtime implementation,
+  effect integration, release and adoption remain unperformed and separately
+  gated. #7268 remains open; this effort is Blocked, not Done.
 
 ### 2026-10-19 - Design-only scope
 - Claimed #7268 after checking scoped execution/handoff issues and the active
