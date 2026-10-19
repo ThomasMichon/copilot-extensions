@@ -16,6 +16,10 @@ import pytest
 import yaml
 
 from ci_plugin_partitions import partition_files, select_backend, smoke_matrix
+from _promotion_workflow_test_support import source_workflow
+from test_promotion_artifact_readiness import (
+    generated_materializer_checkout as generated_materializer_checkout,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -68,10 +72,16 @@ def test_candidate_qualification_requires_exactly_the_actual_smoke_matrix_names(
     from materialized_candidate_inventory import python_suites
 
     plugins = python_suites(REPO) - {"agent-worktrees"}
-    actual = {row["name"] for row in smoke_matrix(sorted(plugins))}
+    workflow = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    name = workflow["jobs"]["smoke"]["name"]
+    if name == "${{ matrix.name }}":
+        actual = {row["name"] for row in smoke_matrix(sorted(plugins))}
+    else:
+        assert name == "${{ matrix.plugin }}", "unaccounted qualification smoke matrix"
+        actual = plugins
     required, _, _ = required_jobs(REPO)
     assert required & (actual | plugins) == actual
-    assert len(actual) == len(plugins) + 2
+    assert len(actual) == len(plugins) + (2 if name == "${{ matrix.name }}" else 0)
 
 
 @pytest.mark.parametrize("plugins", [None, "agent-dispatch", [False], ["../outside"], ["same", "same"]])
@@ -131,7 +141,9 @@ def test_real_helper_cli_produces_exact_runner_arguments_and_no_empty_success():
 
 
 def test_workflow_matrix_keeps_every_partition_required_and_existing_deadlines():
-    workflow = yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    from test_public_toolchain_source import _artifact_scope
+
+    workflow = source_workflow(REPO, "ci.yml")
     jobs = workflow["jobs"]
     smoke = jobs["smoke"]
     assert smoke["name"] == "${{ matrix.name }}"
@@ -169,7 +181,28 @@ def test_workflow_matrix_keeps_every_partition_required_and_existing_deadlines()
         if step.get("id") == "python-artifact-builder"
     ]
     assert len(selectors) == 2
-    assert all("'^tools/(test_)?ci_plugin_partitions\\.py$'" in command for command in selectors)
+    for identifier in ("checks", "windows-python-artifact-builder"):
+        scope_jobs, expression = _artifact_scope(identifier, REPO)
+        assert scope_jobs == jobs
+        for path in (
+            "tools/ci_plugin_partitions.py", "tools/test_ci_plugin_partitions.py",
+            "tools/promotion_admission_evidence.py",
+        ):
+            assert re.search(expression, path), (identifier, path)
+        assert not re.search(expression, "docs/unrelated.md")
+
+
+def test_generated_partition_contract_keeps_independent_main_controller_unchanged(
+    generated_materializer_checkout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_public_toolchain_source import _retain_main_ci
+
+    generated = _retain_main_ci(generated_materializer_checkout, REPO)
+    controller = generated / ".github/workflows/ci.yml"
+    preserved = controller.read_bytes()
+    monkeypatch.setattr(sys.modules[__name__], "REPO", generated)
+    test_workflow_matrix_keeps_every_partition_required_and_existing_deadlines()
+    assert controller.read_bytes() == preserved
 
 
 @pytest.fixture
