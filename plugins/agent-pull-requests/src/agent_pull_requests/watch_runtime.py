@@ -13,6 +13,7 @@ from zdd import diagnostics, process_exit
 from zdd.process_exit import ProcessExitReference
 
 from . import _installation_context as api
+from ._selected_runtime import require_selected_metadata
 from .watch_installation import PLUGIN_ID, WatchInstallation
 
 
@@ -80,15 +81,19 @@ class WatchRuntime:
     def require_current(
         self, installation: WatchInstallation, *,
         environment: Mapping[str, str] | None = None,
+        require_selected: bool = False,
     ) -> None:
         """Compose current governance with immutable historical build evidence."""
         installation.require_current(environment=environment)
-        self.require_identity(installation, environment=environment)
+        self.require_identity(
+            installation, environment=environment, require_selected=require_selected,
+        )
         installation.require_current(environment=environment)
 
     def require_identity(
         self, installation: WatchInstallation, *,
         environment: Mapping[str, str] | None = None,
+        require_selected: bool = False,
     ) -> None:
         installation.read_identity(environment=environment)
         if (
@@ -109,6 +114,12 @@ class WatchRuntime:
             or _fingerprint(completed) != self.completion_fingerprint
         ):
             raise PermissionError("watch runtime completion evidence changed")
+        if require_selected:
+            require_selected_metadata(
+                api, root=installation.plugin_root, runtime_version=self.runtime_version,
+                snapshot_id=self.snapshot_id, payload_root=self.payload_root,
+                payload_version=self.payload_version, completed=completed,
+            )
         installation.read_identity(environment=environment)
 
     def evidence(self) -> dict[str, str]:

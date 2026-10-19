@@ -82,6 +82,7 @@ def _require_modules(slot: Path) -> None:
 
 def capture_running(
     installation: WatchInstallation, *, environment: Mapping[str, str] | None = None,
+    require_selected: bool = False,
 ) -> WatchRuntime:
     """Attest the *actual* interpreter and loaded owner modules, then pin its build.
 
@@ -124,7 +125,9 @@ def capture_running(
     if _running_slot(installation) != slot:
         raise PermissionError("watch running interpreter changed during validation")
     _require_modules(slot)
-    runtime.require_current(installation, environment=environment)
+    runtime.require_current(
+        installation, environment=environment, require_selected=require_selected,
+    )
     return runtime
 
 
@@ -135,7 +138,7 @@ class WatchInvocation:
     raw_context: str
 
     @classmethod
-    def capture(cls) -> WatchInvocation | None:
+    def capture(cls, *, require_selected: bool = False) -> WatchInvocation | None:
         raw_context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
         if not raw_context:
             return None
@@ -162,7 +165,10 @@ class WatchInvocation:
             receipt=Path(validated["installReceipt"]), plugin_root=root,
             payload_root=payload, durable_home=durable, os_profile=profile,
         )
-        return cls(installation, capture_running(installation), raw_context)
+        return cls(
+            installation, capture_running(installation, require_selected=require_selected),
+            raw_context,
+        )
 
     def require_current(self) -> None:
         installation = self.fresh_installation()

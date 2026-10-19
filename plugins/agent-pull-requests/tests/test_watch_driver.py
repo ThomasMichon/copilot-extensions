@@ -2,6 +2,7 @@
 
 from contextlib import ExitStack
 import socket
+import time
 
 import pytest
 from zdd import breadcrumb, publication_history, routing
@@ -80,6 +81,24 @@ def test_shared_cold_start_commits_before_effects(installed):
         assert before["active"]["generation"] == 1
         assert publication_history.read(before) is not None
         assert len(before[publication_history.KEY]["entries"]) == 1
+
+
+def test_archival_past_cutover_deadline_never_reports_success(installed, monkeypatch):
+    installation = installed[0]
+    with ExitStack() as children, installation.transaction(timeout=1, environment={}) as guard:
+        journal = _begin(installed, guard)
+        driver = _driver(installed, journal, children)
+        archive = journal.archive
+
+        def late_archive():
+            archive()
+            driver.deadline = time.monotonic() - 1
+
+        monkeypatch.setattr(journal, "archive", late_archive)
+        with pytest.raises(TimeoutError, match="cutover deadline expired"):
+            driver.run()
+        assert journal._document["phase"] == "complete"
+        assert driver.successor.health()["effectsEnabled"] is True
 
 
 def test_shared_rollover_retires_exact_old_before_completing(installed):

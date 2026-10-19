@@ -43,6 +43,9 @@ payload command and `scripts/init.ps1` / `scripts/init.sh` resolve native
 governance before touching a runtime. Missing/false policy retains legacy
 bootstrap, including first use before Python is installed. Namespaced requests
 never fall back to that legacy root.
+For an unattributed legacy payload, a valid disabled policy may omit the
+`marketplaces` map or leave it empty. Invalid member types still refuse; a
+nonempty scoped map requires resolvable source identity.
 
 ## Verbs
 
@@ -507,17 +510,20 @@ and activation remain explicit/on-demand, not a new background reconciler.
 
 Commands require coherent current/last-known-good markers and a matching
 schema-3 manifest, canonical slot ownership, immutable snapshot provenance and
-build completion. Only an entirely absent selection may provision on first
-command; partial/corrupt selection refuses without scanning for a different
-slot. An older owned, completed selected runtime remains usable under current
+build completion. Payload bootstrap may provision an entirely absent selection;
+partial/corrupt selection refuses without scanning for a different slot.
+Direct completed-runtime peer entry uses the same selection admission before
+ordinary command handlers and never provisions or accepts an LKG-only fallback.
+Reserved passive startup instead requires its existing journal authorization
+before publication; it is not an ordinary-command bypass.
+An older owned, completed selected runtime remains usable under current
 management receipts until an installer-driven update selects its replacement.
 The follow-on command preserves the caller's outside-payload working directory,
 argument vector, standard streams and native exit status. Context-bearing
 invocation requires an existing Python 3.10+ interpreter; this prerequisite does
 not affect native legacy first-touch installation.
 
-These adapters do not yet advertise the PR owner in the generated peer roster
-or complete the shipped independent-cell proof. A live lease-only holder without
+A live lease-only holder without
 verifiable same-cell ownership blocks activation, even when its legacy endpoint
 is reachable. PID text and an endpoint token do not license installer shutdown
 or fabrication of a governed instance. There is no automatic lease-only

@@ -83,13 +83,20 @@ def test_ensure_receipt_advance_retains_only_archived_real_incumbent(installed, 
 
 def test_main_captures_context_before_handler_or_discovery(monkeypatch):
     from agent_pull_requests.watch_invocation import WatchInvocation
-
+    admissions = []
     sentinel = object()
-    monkeypatch.setattr(WatchInvocation, "capture", lambda: sentinel)
+
+    def capture(*, require_selected=False):
+        assert require_selected
+        admissions.append("selected")
+        return sentinel
+
+    monkeypatch.setattr(WatchInvocation, "capture", capture)
     monkeypatch.setattr(cli, "_WATCH_INVOCATION", None)
 
     def status(args):
         assert cli._WATCH_INVOCATION is sentinel
+        assert admissions == ["selected"]
         return 0
 
     monkeypatch.setattr(cli, "_cmd_serve_status", status)
@@ -99,7 +106,7 @@ def test_main_captures_context_before_handler_or_discovery(monkeypatch):
 def test_invalid_context_never_reaches_even_read_only_discovery(monkeypatch):
     from agent_pull_requests.watch_invocation import WatchInvocation
 
-    monkeypatch.setattr(WatchInvocation, "capture", lambda: (
+    monkeypatch.setattr(WatchInvocation, "capture", lambda **_kwargs: (
         (_ for _ in ()).throw(PermissionError("fixture physical context refused"))
     ))
     monkeypatch.setattr(cli, "_cmd_serve_status", lambda _: pytest.fail("discovery ran"))

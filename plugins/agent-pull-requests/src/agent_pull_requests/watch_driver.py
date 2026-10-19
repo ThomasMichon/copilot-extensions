@@ -236,6 +236,7 @@ class WatchDriver:
             else:
                 raise RuntimeError("watch owner transaction remains pending reconciliation")
             breadcrumb.clear_breadcrumb(self.journal.installation.run_root)
+            self.remaining()
             return result
         finally:
             for reference in self.references.values():

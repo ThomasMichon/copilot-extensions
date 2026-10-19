@@ -159,58 +159,13 @@ def refresh_management(api, status, durable, profile, *, version):
 
 def selection(api, status, durable):
     """No LKG/newest fallback: all selected metadata must describe one completed slot."""
-    require_active(status)
-    context = status["context"]
-    validated = api.validate_context_receipt(
-        context, durable, expected_marketplace_id=status["marketplaceId"],
-        expected_plugin_id=PLUGIN, expected_payload_root=PAYLOAD, environment={},
-    )
-    root = Path(validated["pluginRoot"])
-    current = api._read_runtime_marker(root / api.CURRENT_VERSION_FILE, "Current runtime")
-    lkg = api._read_runtime_marker(root / api.LAST_KNOWN_GOOD_FILE, "Last known good")
-    manifest_path = root / "deploy-manifest.json"
-    if current is None and lkg is None and not os.path.lexists(manifest_path):
-        return None
-    if current is None or lkg != current:
-        raise PermissionError(
-            "Selected runtime markers are incomplete or incoherent; repair required"
-        )
-    slot = Path(validated["versionsRoot"]) / current
-    owner = api.read_json(slot / api.RUNTIME_SLOT_OWNERSHIP_FILE)
-    snapshot = owner.get("snapshot") if isinstance(owner, dict) else None
-    snapshot_id = snapshot.get("id") if isinstance(snapshot, dict) else None
-    if not isinstance(snapshot_id, str) or not snapshot_id:
-        raise PermissionError("Selected slot lacks snapshot identity")
-    common = dict(
-        context=context, durable_home=durable, expected_plugin_id=PLUGIN,
-        expected_marketplace_id=status["marketplaceId"],
-        snapshot_id=snapshot_id, runtime_version=current, environment={},
-    )
-    ownership = api.validate_runtime_slot_ownership(**common)
-    provenance = api.read_json(ownership["snapshotProvenance"])
-    payload = provenance["payload"]
-    completed = api.validate_runtime_slot_completion(
-        **common, expected_payload_root=payload["root"],
-        expected_payload_version=payload["version"],
-    )
-    manifest = api.read_json(manifest_path)
-    source = manifest.get("source")
-    if (
-        manifest.get("schema_version") != 3 or manifest.get("service") != PLUGIN
-        or manifest.get("runtime") != "python" or not isinstance(source, dict)
-        or source.get("plugin") != PLUGIN or source.get("version") != payload["version"]
-        or source.get("snapshot_id") != snapshot_id
-        or source.get("content_hash") != completed["payloadSha256"]
-        or not isinstance(source.get("path"), str)
-        or not api.paths_equal(source["path"], payload["root"])
-        or not isinstance(manifest.get("venv"), str)
-        or not api.paths_equal(manifest["venv"], completed["slotRoot"])
-    ):
-        raise PermissionError("Selected manifest differs from the completed runtime")
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if not python.is_file():
-        raise PermissionError("Selected completed runtime lacks its interpreter")
-    return python, root
+    helper = Path(__file__).resolve().parents[1] / "src" / PLUGIN.replace("-", "_") / "_selected_runtime.py"
+    spec = importlib.util.spec_from_file_location("apr_selected_runtime", helper)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Owning selection helper is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.select_runtime(api, status, durable, payload_root=PAYLOAD)
 
 
 def execute(arguments, *, bootstrap=False):

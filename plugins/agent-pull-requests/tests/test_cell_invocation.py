@@ -79,6 +79,22 @@ def test_selection_requires_exact_complete_target_without_creating_owner(selecte
     assert not installation.run_root.exists()
 
 
+def test_running_selection_admission_reuses_the_same_completed_validation(selected, monkeypatch):
+    _, installation, runtime, _, _ = selected
+    validate = api.validate_runtime_slot_completion
+    calls = []
+
+    def capture(**kwargs):
+        calls.append(kwargs)
+        return validate(**kwargs)
+
+    monkeypatch.setattr(api, "validate_runtime_slot_completion", capture)
+    runtime.require_current(installation, environment={}, require_selected=True)
+    assert len(calls) == 1
+    assert not installation.state_root.exists()
+    assert not installation.run_root.exists()
+
+
 @pytest.mark.parametrize("damage", [
     "current", "lkg", "manifest", "manifest-runtime", "manifest-payload",
     "manifest-digest", "completion", "snapshot", "interpreter",
@@ -219,6 +235,47 @@ def test_native_mode_needs_no_python_and_never_mutates_legacy(tmp_path, enabled)
         assert "blocks invocation" in result.stderr
     assert not (profile / ".agent-pull-requests").exists()
     assert not (profile / ".local").exists()
+
+
+@pytest.mark.parametrize("overrides", ["absent", {}, {"fixture": {"enabled": True}}, None, "invalid"])
+def test_posix_legacy_admission_distinguishes_missing_and_invalid_marketplaces(tmp_path, overrides):
+    from test_source_install_transactions import _host, _quote
+
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    policy = profile / "installation-mode.json"
+    mode = {"enabled": False}
+    if overrides != "absent":
+        mode["marketplaces"] = overrides
+    policy.write_text(json.dumps({"installationMode": mode}), encoding="utf-8")
+    scripts = tmp_path / "payload" / "scripts"
+    primitives = scripts / "installation-context"
+    primitives.mkdir(parents=True)
+    shutil.copyfile(SCRIPTS / "payload-mode.sh", scripts / "payload-mode.sh")
+    shutil.copyfile(
+        SCRIPTS / "installation-context" / "json-query.awk", primitives / "json-query.awk",
+    )
+    # Isolate wrapper admission while retaining the actual shell and JSON query.
+    status = {
+        "status": "provenance-blocked", "reason": "fixture-unattributed-source",
+        "policy": {"state": "valid", "enabled": False, "path": policy.as_posix()},
+        "legacy": {"disposition": "active", "tombstone": None},
+    }
+    (primitives / "installation-context.sh").write_text(
+        "#!/usr/bin/env bash\nprintf '%s\\n' " + _quote(json.dumps(status), "bash") + "\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update(HOME=str(profile), USERPROFILE=str(profile))
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    result = subprocess.run(  # noqa: S603 -- owned wrapper and canonical query, status-only fixture
+        [_host("bash"), str(scripts / "payload-mode.sh")],
+        env=environment, capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    allowed = overrides == "absent" or overrides == {}
+    assert (result.returncode == 0) == allowed, (result.stdout, result.stderr)
+    assert (result.stdout.strip() == "legacy") == allowed
+    assert not (profile / ".agent-pull-requests").exists()
 
 
 @pytest.fixture

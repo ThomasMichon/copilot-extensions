@@ -45,7 +45,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
             -v query_path=$'installationMode\034marketplaces' \
             -f "$here/installation-context/json-query.awk" "$policy")" || {
             rc=$?
-            [[ "$rc" == 4 ]] || exit "$rc"
+            [[ "$rc" == 3 ]] || exit "$rc"
             overrides=0
         }
         [[ "$overrides" != 0 ]] || legacy_allowed=true

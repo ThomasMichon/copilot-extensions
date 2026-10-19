@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import ExitStack
 import json
 import os
+from time import monotonic
 from uuid import uuid4
 
 import pytest
@@ -12,7 +13,7 @@ from work_coalescing_singleton.client import request
 from zdd import process_exit, routing
 
 from agent_pull_requests.watch_storage import read_subscriptions_state
-from test_cell_payload_upgrade import _release, _run
+from test_cell_payload_upgrade import _release, _run, _scenario_remaining
 from test_cell_payload_upgrade import native_profile as native_profile  # noqa: F401 -- pytest fixture
 from test_cell_upgrade import _pending
 
@@ -50,6 +51,7 @@ def _cleanup(cell, environment, caller):
     reason="Native POSIX cells need an isolated OS account",
 )
 def test_two_normal_shipped_cells_isolate_state_endpoints_and_lifecycle(tmp_path_factory, native_profile):
+    scenario_deadline = monotonic() + 1140
     root = tmp_path_factory.mktemp("i")
     releases = []
     for name in ("a", "b"):
@@ -98,7 +100,10 @@ def test_two_normal_shipped_cells_isolate_state_endpoints_and_lifecycle(tmp_path
             cell = {"command": command, "reference": None, "stopped": False}
             # Register cleanup before attempting startup, including lost replies.
             cleanup.callback(_cleanup, cell, environment, caller)
-            result = _run(command, ["serve"], environment, caller, timeout=120)
+            result = _run(
+                command, ["serve"], environment, caller,
+                timeout=_scenario_remaining(scenario_deadline),
+            )
             assert result.returncode == 0, result.stderr
             health = _json(command, ["watch", "health", "--json"], environment, caller)
             owner = health["instance"]

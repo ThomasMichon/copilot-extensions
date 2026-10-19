@@ -186,6 +186,29 @@ def test_normal_payload_peer_roundtrip_uses_same_cell_and_immutable_boundary(
     )
     assert reverse.returncode == 1, reverse.stderr
     assert json.loads(reverse.stdout) == {"error": "no committed installation-local watch owner"}
+    for damage in ("current", "manifest"):
+        marker = installation.plugin_root / api.CURRENT_VERSION_FILE
+        manifest_path = installation.plugin_root / "deploy-manifest.json"
+        try:
+            if damage == "current":
+                marker.unlink()
+            else:
+                manifest = json.loads(protected[manifest_path])
+                manifest["source"]["content_hash"] = "0" * 64
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            refused = subprocess.run(  # noqa: S603 -- same actual peer entry, damaged owned metadata
+                [*prefix, "watch", "health", "--json"], env=environment,
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+                timeout=60, **no_window_kwargs(),
+            )
+            assert refused.returncode != 0
+            assert not refused.stdout
+            assert (
+                "markers are incomplete" if damage == "current" else "manifest differs"
+            ) in refused.stderr
+        finally:
+            marker.write_bytes(protected[marker])
+            manifest_path.write_bytes(protected[manifest_path])
     assert api._snapshot_content_sha256(snapshot) == digest
     runtime.require_current(installation, environment={})
     assert {path: path.read_bytes() for path in protected_paths} == protected

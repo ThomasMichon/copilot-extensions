@@ -38,7 +38,8 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT -and
     $status.policy.state -cin @('missing', 'valid') -and
     $status.policy.enabled -is [bool] -and -not $status.policy.enabled -and
     $status.legacy.disposition -ceq 'active' -and $null -eq $status.legacy.tombstone) {
-    # With no source identity, scoped overrides cannot be evaluated safely.
+    # Without source identity, only absent/empty overrides admit legacy mode.
+    # The native validator has already rejected invalid member types.
     $policy = Get-Item -LiteralPath $status.policy.path -Force -ErrorAction SilentlyContinue
     if (-not $policy) {
         $legacyAllowed = $status.policy.state -ceq 'missing'

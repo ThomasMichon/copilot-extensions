@@ -924,8 +924,10 @@ def main(argv: list[str] | None = None) -> int:
     from .watch_invocation import WatchInvocation
 
     global _WATCH_INVOCATION
-    _WATCH_INVOCATION = WatchInvocation.capture()
     args = build_parser().parse_args(argv)
+    _WATCH_INVOCATION = WatchInvocation.capture(
+        require_selected=not (args.command == "serve" and args.passive_instance),
+    )
     return args.handler(args)
 
 

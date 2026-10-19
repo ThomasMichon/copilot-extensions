@@ -15,6 +15,7 @@ from agent_procutil import no_window_kwargs
 
 from agent_pull_requests import __version__, _installation_context as api
 from agent_pull_requests import watch_invocation
+from agent_pull_requests.watch_install import _manifest
 from test_watch_installation import _installation, _policy
 from test_watch_runtime import _complete
 
@@ -201,6 +202,46 @@ assert prefix[1:5] == ["-B", "-I", "-X", "utf8"]
     })
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["runtime"] == installed[1].evidence()
+    assert not installation.state_root.exists()
+    assert not installation.run_root.exists()
+
+
+@pytest.mark.timeout(90)
+@pytest.mark.skipif(os.name != "nt", reason="OS-profile fixture; native POSIX peer coverage is separate")
+@pytest.mark.parametrize("damage", [None, "current", "manifest"])
+def test_actual_module_entry_requires_coherent_selected_runtime(installed, damage):
+    installation, runtime, _, _ = installed
+    root = installation.plugin_root
+    for marker in (api.CURRENT_VERSION_FILE, api.LAST_KNOWN_GOOD_FILE):
+        (root / marker).write_text(runtime.runtime_version + "\n", encoding="utf-8")
+    manifest = root / "deploy-manifest.json"
+    manifest.write_bytes(_manifest(
+        watch_invocation.WatchInvocation(installation, runtime, str(installation.receipt)),
+    ))
+    if damage == "current":
+        (root / api.CURRENT_VERSION_FILE).unlink()
+    elif damage == "manifest":
+        document = json.loads(manifest.read_text("utf-8"))
+        document["source"]["content_hash"] = "0" * 64
+        manifest.write_text(json.dumps(document), encoding="utf-8")
+    script = _PROBE[:_PROBE.index("print(json.dumps({")] + """
+from agent_pull_requests import __main__ as cli
+raise SystemExit(cli.main(["version"]))
+"""
+    result = _probe(installed, script=script, overrides={
+        "COPILOT_EXTENSIONS_CONTEXT": str(installation.receipt),
+        "AGENT_RT_ROOT": str(root), "COPILOT_PLUGIN_ROOT": str(installation.payload_root),
+        "USERPROFILE": str(installation.os_profile),
+    })
+    if damage is None:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == f"agent-pull-requests {runtime.runtime_version}"
+    else:
+        assert result.returncode != 0, result.stdout
+        assert not result.stdout
+        assert (
+            "markers are incomplete" if damage == "current" else "manifest differs"
+        ) in result.stderr
     assert not installation.state_root.exists()
     assert not installation.run_root.exists()
 

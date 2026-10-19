@@ -256,6 +256,45 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-19 - Address actual admission review findings
+
+- The operator subsequently selects `bounded-status-reconcile`: after a
+  post-commit activation timeout, verify the exact committed owner and permit
+  one bounded reconciliation of that same journal through the normal installer.
+  The original timeout remains visible. Unknown ownership, a changed
+  transaction, other errors or a failed reconciliation still fail; no second
+  daemon or relaxed validation is allowed. This implementation is the next
+  slice, not yet a completed defense or a waiver of current-head gates.
+- Exact candidate `2f6805616` passes required CI `39191708109` and native
+  acceptance `39191823054`: all 15 selected native jobs succeed, with only the
+  two unselected default diagnostic jobs skipped. Copilot review `5566485611`
+  nevertheless reports two concrete admission defects; those findings remain
+  merge gates independently of the green runs.
+- Reproduced the POSIX wrapper rejecting an absent optional marketplace map
+  while accepting invalid scalar/null maps, and physical completed-module
+  entry accepting missing current selection or a mismatched manifest.
+  Corrected the shell's missing-path return code and extracted the existing
+  owner selection check into one stdlib-only helper shared by payload dispatch
+  and completed peer entry. Ordinary handlers require coherent selected
+  metadata; journal-authorized reserved passive startup remains distinct.
+- The focused real-shell/JSON-query, physical-module entry and actual reserved
+  passive startup checks pass all ten selected cases in 48.51 seconds.
+  The shell branch fixture substitutes only native status, not its JSON query;
+  full native-account policy admission and the actual same-cell peer path
+  remain separate current-head acceptance obligations. Canonical receipt
+  validation and all lifecycle/CI deadlines are unchanged.
+- Full local peer rejection and real native-policy preflight pass, but the
+  normal live-upgrade composite reaches a separate post-commit timeout. Caller
+  CLI admission was also incorrectly timed against the owner's 120-second
+  cutover allowance: startup now consumes only the remaining existing
+  900/1,140-second scenario budget, never a reset window. The actual driver now
+  checks its unchanged deadline after terminal archival too; a real-child
+  late-archive control failed before that correction. Shared entry selection
+  uses its already-validated completion result rather than adding duplicate
+  full validation. These corrections do not make the remaining upgrade
+  timeout a successful operation; bounded status/reconciliation still needs
+  implementation and real proof.
+
 ### 2026-10-18 - Resume canonical installation adoption; stop receipt investigation
 
 - The operator explicitly selects `tracked-residual-with-defenses` for the

@@ -10,13 +10,14 @@ import re
 import shutil
 import subprocess
 import sys
+from time import monotonic
 
 import pytest
 from agent_procutil import no_window_kwargs
 from test_cell_installer_slice import PAYLOAD
 from test_cell_upgrade import _pending
 from test_watch_installation import _policy
-from zdd import process_exit, publication_history, routing
+from zdd import lifecycle, process_exit, publication_history, routing
 
 from agent_pull_requests import _installation_context as api
 from agent_pull_requests.watch_storage import read_subscriptions_state
@@ -127,6 +128,50 @@ def _run(script, arguments, environment, caller, *, timeout):
     )
 
 
+def _cutover_failure_details(run_root):
+    path = run_root / "watch-owner-transaction.json"
+    journal = {"state": "absent"}
+    if path.is_file():
+        try:
+            document = json.loads(path.read_text("utf-8"))
+            journal = {key: document.get(key) for key in ("phase", "exited")}
+        except (OSError, ValueError) as error:
+            journal = {"readError": type(error).__name__}
+    events = [
+        {key: event.get(key) for key in ("ts", "action", "outcome", "version")}
+        for event in lifecycle.read_events(run_root, limit=24)
+    ]
+    return {"journal": journal, "events": events}
+
+
+def _scenario_remaining(deadline):
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Native scenario deadline expired")
+    return remaining
+
+
+def test_scenario_remaining_preserves_the_original_deadline(monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "monotonic", lambda: 100)
+    assert _scenario_remaining(140) == 40
+    monkeypatch.setattr(sys.modules[__name__], "monotonic", lambda: 141)
+    with pytest.raises(TimeoutError, match="scenario deadline expired"):
+        _scenario_remaining(140)
+
+
+def test_cutover_failure_details_exclude_private_journal_and_event_fields(tmp_path):
+    (tmp_path / "watch-owner-transaction.json").write_text(json.dumps({
+        "phase": "committed", "exited": [], "authorization": "fixture-private-capability",
+    }), encoding="utf-8")
+    lifecycle.record(
+        tmp_path, "fixture", detail={"private": "fixture-private-detail"},
+    )
+    evidence = _cutover_failure_details(tmp_path)
+    assert evidence["journal"] == {"phase": "committed", "exited": []}
+    assert set(evidence["events"][0]) == {"ts", "action", "outcome", "version"}
+    assert "fixture-private" not in json.dumps(evidence)
+
+
 @pytest.mark.parametrize("parent,filename,expected", [
     ("scripts", "init.ps1", "init.sh"),
     ("bin", "agent-pull-requests.ps1", "agent-pull-requests"),
@@ -152,13 +197,14 @@ def test_posix_fixture_invokes_the_shipped_launcher_name(
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
 @pytest.mark.effect("network")
-# Normal cold install (300), start (120), upgrade (300), probes (60), stop (120).
+# CLI admission precedes the separate 120-second owner cutover budget.
 @pytest.mark.timeout(900)
 @pytest.mark.skipif(
     os.name != "nt" and os.environ.get("APR_NATIVE_OS_ACCOUNT_ACCEPTANCE") != "1",
     reason="Native POSIX upgrade needs an isolated OS account",
 )
 def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_factory, native_profile):
+    scenario_deadline = monotonic() + 900
     root = tmp_path_factory.mktemp("u")
     payload, profile = _release(root, profile=native_profile)
     caller = root / "caller"
@@ -171,6 +217,35 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         environment.update(HOME=str(profile), USERPROFILE=str(profile))
     init = payload / "scripts" / "init.ps1"
     command = payload / "bin" / "agent-pull-requests.ps1"
+    unattributed = root / "unattributed" / "scripts"
+    unattributed.mkdir(parents=True)
+    for name in ("payload-mode.ps1", "payload-mode.sh"):
+        shutil.copyfile(PAYLOAD / "scripts" / name, unattributed / name)
+    shutil.copytree(
+        PAYLOAD / "scripts" / "installation-context", unattributed / "installation-context",
+    )
+    policy = profile / ".copilot-extensions" / "installation-mode.json"
+    original_policy = policy.read_bytes()
+    try:
+        for overrides in ("absent", {}, None):
+            mode = {"enabled": False}
+            if overrides != "absent":
+                mode["marketplaces"] = overrides
+            policy.write_text(json.dumps({
+                "schema": api.POLICY_SCHEMA, "version": 1, "installationMode": mode,
+            }), encoding="utf-8")
+            admitted = _run(
+                unattributed / "payload-mode.ps1", [], environment, caller, timeout=30,
+            )
+            if overrides is None:
+                assert admitted.returncode != 0
+                assert admitted.stdout.strip() != "legacy"
+            else:
+                assert admitted.returncode == 0, admitted.stderr
+                assert admitted.stdout.strip() == "legacy"
+    finally:
+        policy.write_bytes(original_policy)
+    assert not (profile / ".agent-pull-requests").exists()
     initial = _run(init, [], environment, caller, timeout=300)
     assert initial.returncode == 0, initial.stderr
     receipt, = (profile / ".copilot-extensions" / "marketplaces").glob(
@@ -191,7 +266,15 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         # Once attempted, cleanup inspects/stops through the governed entry even
         # if a caller loses the startup response after the owner commits.
         started = True
-        result = _run(command, ["serve"], environment, caller, timeout=120)
+        try:
+            result = _run(
+                command, ["serve"], environment, caller,
+                timeout=_scenario_remaining(scenario_deadline),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise AssertionError(
+                f"Owned startup timed out: {_cutover_failure_details(run_root)}"
+            ) from error
         assert result.returncode == 0, result.stderr
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
         assert result.returncode == 0, result.stderr
@@ -207,8 +290,13 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         assert new_version != old_version
         _refresh_release(payload, new_version)
         # No direct stamp, activation CAS, manual snapshot or runtime edit.
-        result = _run(init, [], environment, caller, timeout=300)
-        assert result.returncode == 0, result.stderr
+        try:
+            result = _run(init, [], environment, caller, timeout=300)
+        except subprocess.TimeoutExpired as error:
+            raise AssertionError(
+                f"Owned upgrade timed out: {_cutover_failure_details(run_root)}"
+            ) from error
+        assert result.returncode == 0, (result.stderr, _cutover_failure_details(run_root))
         assert reference.wait(0)
         assert old_completion.read_bytes() == completed
         assert archive.read_bytes() == archived
