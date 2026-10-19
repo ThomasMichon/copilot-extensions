@@ -456,20 +456,20 @@ class SupervisorDaemon(BoundedReconciliation):
                     )
                     if snapshot is None:
                         try:
-                            snapshot = self._companion().selected_managed(rid)
-                        except (CompanionError, CompanionIndeterminate, OSError, ValueError) as error:
-                            log.error("cannot recover managed companion %s: %s", rid, error)
+                            snapshot = self._selected_managed(rid, authority)
+                        except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError, ValueError) as error:
+                            log.error("cannot recover managed companion %s: error_type=%s", rid, type(error).__name__)
                     if snapshot is not None and snapshot.authority == authority:
                         resolution = snapshot.resolution()
                         desired[rid] = resolution.registration
                         current[rid] = resolution
-                        log.warning("managed companion %s provider is indeterminate: %s", rid, exc)
+                        log.warning("managed companion %s provider is indeterminate: error_type=%s", rid, type(exc).__name__)
                     else:
                         desired.pop(rid, None)
                         self._last_companion_desired.pop(rid, None)
                         log.warning(
                             "managed companion %s provider is indeterminate with changed "
-                            "or unconfirmed authority; withholding it: %s", rid, exc,
+                            "or unconfirmed authority; withholding it: error_type=%s", rid, type(exc).__name__,
                         )
                     continue
                 previous = self._last_companion_desired.get(rid)
@@ -477,17 +477,17 @@ class SupervisorDaemon(BoundedReconciliation):
                     resolution = previous[1]
                     log.warning(
                         "companion %s configuration is indeterminate; "
-                        "retaining its last confirmed desired state: %s",
+                        "retaining its last confirmed desired state: error_type=%s",
                         rid,
-                        exc,
+                        type(exc).__name__,
                     )
                 else:
                     desired.pop(rid, None)
                     log.warning(
                         "companion %s configuration is indeterminate without "
-                        "matching confirmed authority; withholding it: %s",
+                        "matching confirmed authority; withholding it: error_type=%s",
                         rid,
-                        exc,
+                        type(exc).__name__,
                     )
                     continue
             except CompanionError as exc:
@@ -2143,6 +2143,8 @@ class SupervisorDaemon(BoundedReconciliation):
                         break
                 except KeyboardInterrupt:
                     break
+                except CompanionIndeterminate:
+                    log.warning("supervisor reconcile cycle is indeterminate")
                 except Exception as exc:  # pragma: no cover -- never die on a blip
                     log.exception("supervisor reconcile cycle failed")
                     # A connection-level failure most likely means the coordinator

@@ -349,6 +349,11 @@ function Write-PurgeFixturePhase([string]$Phase) {
 Write-PurgeFixturePhase 'script-started'
 . $args[0]
 Write-PurgeFixturePhase 'engine-sourced'
+function Add-Type {
+    Write-PurgeFixturePhase 'type-initialization-started'
+    try { Microsoft.PowerShell.Utility\Add-Type @args }
+    finally { Write-PurgeFixturePhase 'type-initialization-finished' }
+}
 $script:ReadInstallDirectoryIdentity = ${function:Get-InstallDirectoryIdentity}
 function Get-InstallDirectoryIdentity {
     param([string]$Path)
@@ -389,6 +394,8 @@ Write-PurgeFixturePhase 'runtime-purge-finished'
         )
         raise
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "purge-fixture: type-initialization-started" in result.stderr
+    assert "purge-fixture: type-initialization-finished" in result.stderr
     assert "purge-fixture: runtime-purge-finished" in result.stderr
     assert (home / "sentinel").read_text(encoding="utf-8") == "home"
     assert sorted(path.name for path in root.iterdir()) == [
@@ -408,6 +415,10 @@ def test_posix_purge_timeout_retains_native_phase_output_and_original_exception(
     def timeout(command: list[str], **kwargs: object) -> None:
         assert kwargs["timeout"] == 20
         assert "-NoProfile" in command and "-NonInteractive" in command
+        script = Path(command[command.index("-File") + 1]).read_text(encoding="utf-8")
+        assert "Microsoft.PowerShell.Utility\\Add-Type @args" in script
+        assert "type-initialization-started" in script
+        assert "type-initialization-finished" in script
         raise error
 
     monkeypatch.setattr(shutil, "which", lambda name: "synthetic-pwsh")

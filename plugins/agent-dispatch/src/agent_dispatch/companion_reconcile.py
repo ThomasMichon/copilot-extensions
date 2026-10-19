@@ -184,7 +184,11 @@ class ReceiptReconciliation:
 
     def _receipt_generation(self, registration_id: str) -> dict:
         path = self._selection_path(registration_id)
-        receipt = self._read_receipt(registration_id)
+        receipt_path = self._receipt_path(registration_id)
+        receipt = (
+            self._receipt_metadata(receipt_path)
+            if receipt_path.exists() or receipt_path.is_symlink() else None
+        )
         if receipt is not None:
             if type(receipt.get("schema_version")) is not int or receipt["schema_version"] != lifecycle._RECEIPT_VERSION:
                 raise lifecycle.CompanionIndeterminate("companion receipt version is unsupported")

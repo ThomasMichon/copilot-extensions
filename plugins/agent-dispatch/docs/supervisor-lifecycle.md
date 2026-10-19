@@ -107,6 +107,11 @@ budget; an existing cycle deadline, including an expired one, is not extended.
 Cycle deadline and admission-token references are cleared on both success and
 exception exits. A failed cycle retains its last phase for diagnosis rather
 than claiming completion; a later retry gets fresh cycle authority.
+Cold managed-selection fallback uses the same bounded provider pool and
+remaining cycle deadline as provider resolution. Pending reads remain tracked
+and indeterminate; withdrawal or changed declaration authority invalidates
+their eventual result. Corrupt selection metadata withholds that companion
+without aborting unrelated units or changing its evidence.
 Shutdown retires bounded executors and clears their active references even when
 work misses the grace window. A failed successor spawn can reclaim the singleton
 and create usable replacement pools; original futures and publication/receipt
@@ -152,6 +157,10 @@ Captured command failures expose a fixed unavailable message. Declaration
 discovery failures log only their error type, without exception text or
 tracebacks; confirmed declarations remain retained and cold discovery stays
 indeterminate.
+The outer serve loop also logs expected indeterminate failures without their
+exception chains. Process-receipt availability uses the same sanitized metadata
+reader as selection and operation records, including when provider resolution
+reports the failure.
 A controller without a callable progress observation reports
 `receipt-progress-unsupported`; only a completed observation may report `[]`.
 Data/state failures in the final summary follow the same classified best-effort

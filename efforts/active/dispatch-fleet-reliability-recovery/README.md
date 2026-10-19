@@ -2116,3 +2116,38 @@ requested contract.
   in its allowlist follows the existing one-shot helper to its extracted module.
   Contribution-scoped whitespace is clean. Neither these tests nor an older
   Lite review substitutes for the new full review and all current hosted CI.
+
+### 2026-10-19 - Full-review managed selection and privacy follow-through
+
+- Full Balanced review `5576387524` on #6487 identifies four actual Medium
+  defects. All four reproduce first through the real consuming boundary:
+  process-receipt availability discloses its path, cold selected-state fallback
+  blocks a sibling after the deadline, malformed selected state escapes as
+  `ManagedRuntimeError`, and the outer serve log discloses a chained declaration
+  error despite the inner warning being sanitized.
+- Process-receipt availability now uses the common sanitized metadata reader.
+  Provider and selected-state observations share bounded, authority-keyed
+  future handling in the existing provider pool. Pending selected reads stay
+  in shutdown accounting; withdrawal and authority changes invalidate their
+  result. Managed metadata errors withhold only that companion. Expected
+  indeterminate serve failures log a fixed category without a traceback while
+  preserving exception causality for callers.
+- Four fail-first consumer cases and two real pending-future authority controls
+  pass. Complete affected master/health/receipt/blocking/worker-instance
+  consumers pass 286 cases; remaining native lifecycle, scheduling, retention
+  and recovery consumers pass 228 with two platform skips. All selections
+  retain their original containment and deadlines.
+- Required CI also exposes the existing #7020 native POSIX PowerShell purge
+  timeout. Authorized native investigation reproduces a successful unchanged
+  test, then distinguishes actual type compilation from millisecond native
+  identity reads in diagnostic fixtures. A separate local post-body filesystem
+  wait is not the hosted identity-stall cause. No production repair is justified
+  by that different signature.
+- The existing fixture now frames the actual module-qualified `Add-Type`
+  invocation, preserving all source behavior, physical-home refusal,
+  sentinel/lock/stage assertions and the original twenty-second child bound.
+  Its real native test and original-exception diagnostic control both pass.
+  This is additional phase evidence for #7020, not a claimed fix, accepted
+  flake, retry permission or CI waiver. Fresh resulting-head full review and
+  every required hosted gate remain blocking; native recovery and adoption
+  obligations are unchanged.

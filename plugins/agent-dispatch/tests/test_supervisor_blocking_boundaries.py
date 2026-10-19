@@ -107,6 +107,145 @@ def test_declaration_failure_logs_only_sanitized_category(caplog, confirmed, err
         daemon.shutdown()
 
 
+def test_cold_declaration_failure_is_sanitized_at_serve_boundary(caplog):
+    def unavailable():
+        raise RuntimeError("private-declaration-path")
+
+    daemon = SupervisorDaemon(FakeClient([]), "host", declared_source=unavailable)
+    assert daemon.serve(once=True, single_instance=False) == 0
+    assert "private-declaration-path" not in caplog.text
+    records = [record for record in caplog.records if "supervisor reconcile cycle" in record.message]
+    assert any("indeterminate" in record.message for record in records)
+    assert all(record.exc_info is None for record in records)
+
+
+def test_blocked_managed_selection_fallback_does_not_block_sibling(monkeypatch):
+    controller = FakeCompanionController()
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def unavailable(*args, **kwargs):
+        raise CompanionIndeterminate("provider unavailable")
+
+    def selected(rid):
+        calls.append(rid)
+        entered.set()
+        assert release.wait(3)
+        return None
+
+    monkeypatch.setattr(controller, "resolve", unavailable)
+    monkeypatch.setattr(controller, "selected_managed", selected, raising=False)
+    registration = _companion_reg("pending")
+    registration["machine"] = "host"
+    registration["spec"]["managed_runtime"] = {"pending": True}
+    daemon = SupervisorDaemon(
+        FakeClient([registration, _reg("unrelated", machine="host")]), "host",
+        launcher=FakeLauncher(), companion_controller=controller, reconcile_call_budget=0.05,
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(daemon.reconcile_once)
+        try:
+            assert entered.wait(1)
+            assert future.result(timeout=0.5).started == ["unrelated"]
+            tracked = daemon._selection_futures["pending"][1]
+            assert tracked in daemon._probe_inflight and not tracked.done()
+            assert daemon.reconcile_once().running == ["unrelated"]
+            assert calls == ["pending"]
+        finally:
+            release.set()
+            future.result(timeout=1)
+            daemon.shutdown()
+
+
+def test_cold_corrupt_managed_selection_preserves_sibling_and_evidence(tmp_path, monkeypatch, caplog):
+    controller = DefaultCompanionController(tmp_path / "private-receipts")
+    controller.receipt_dir.mkdir()
+    damaged = controller._selection_path("damaged")
+    damaged.write_text("{", encoding="utf-8")
+
+    def unavailable(*args, **kwargs):
+        raise CompanionIndeterminate("provider unavailable")
+
+    monkeypatch.setattr(controller, "resolve", unavailable)
+    registration = _companion_reg("damaged")
+    registration["machine"] = "host"
+    registration["spec"]["managed_runtime"] = {"pending": True}
+    daemon = SupervisorDaemon(
+        FakeClient([registration, _reg("unrelated", machine="host")]), "host",
+        launcher=FakeLauncher(), companion_controller=controller, reconcile_call_budget=0.05,
+    )
+    try:
+        assert daemon.reconcile_once().started == ["unrelated"]
+        assert daemon.reconcile_once().running == ["unrelated"]
+        assert damaged.read_text(encoding="utf-8") == "{"
+        assert str(tmp_path) not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("replacement", ["withdrawn", "changed-authority"])
+def test_pending_managed_selection_cannot_cross_an_authority_boundary(monkeypatch, replacement):
+    controller = FakeCompanionController()
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def selected(rid):
+        calls.append(rid)
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(3)
+            return "stale"
+        return "current"
+
+    monkeypatch.setattr(controller, "selected_managed", selected, raising=False)
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", companion_controller=controller, reconcile_call_budget=0.01,
+    )
+    try:
+        daemon._reconcile_deadline = time.monotonic() + 0.01
+        with pytest.raises(CompanionIndeterminate, match="managed selection remains pending"):
+            daemon._selected_managed("unit", "original")
+        assert entered.wait(1)
+        future = daemon._selection_futures["unit"][1]
+        if replacement == "withdrawn":
+            daemon._invalidate_absent_companion_resolutions(set())
+            authority = "original"
+        else:
+            authority = "replacement"
+        with pytest.raises(CompanionIndeterminate, match="prior managed selection"):
+            daemon._selected_managed("unit", authority)
+        assert future in daemon._probe_inflight and not future.done()
+        assert calls == ["unit"]
+        release.set()
+        assert future.result(1) == "stale"
+        daemon._reconcile_deadline = time.monotonic() + 1
+        assert daemon._selected_managed("unit", authority) == "current"
+        assert calls == ["unit", "unit"]
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
+def test_unreadable_process_receipt_is_sanitized_through_provider_logging(tmp_path, caplog):
+    controller = DefaultCompanionController(tmp_path / "private-receipts")
+    controller.receipt_dir.mkdir()
+    damaged = controller._receipt_path("damaged")
+    damaged.write_text("{", encoding="utf-8")
+    registration = _companion_reg("damaged")
+    registration["machine"] = "host"
+    daemon = SupervisorDaemon(
+        FakeClient([registration, _reg("unrelated", machine="host")]), "host",
+        launcher=FakeLauncher(), companion_controller=controller, reconcile_call_budget=0.05,
+    )
+    try:
+        assert daemon.reconcile_once().started == ["unrelated"]
+        assert daemon.reconcile_once().running == ["unrelated"]
+        assert damaged.read_text(encoding="utf-8") == "{"
+        assert str(tmp_path) not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
 def test_confirmed_registry_snapshot_retains_nested_spec_isolation(monkeypatch):
     registration = _reg("unit", machine="host")
     registration["spec"]["nested"] = {"labels": ["original"]}

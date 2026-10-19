@@ -7,7 +7,7 @@ import logging
 import time
 import threading
 from collections.abc import Callable
-from concurrent.futures import CancelledError, Executor, ThreadPoolExecutor, TimeoutError
+from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor, TimeoutError
 from typing import Any
 
 from .companion import CompanionIndeterminate
@@ -39,6 +39,7 @@ class BoundedReconciliation:
         self._retired_bounded_executors = []
         self._declaration_publisher = None
         self._resolution_futures = {}
+        self._selection_futures = {}
         self._discovery_futures = {}
         self._last_store_registrations: list[dict] | None = None
         self._progress_callback = None
@@ -330,44 +331,59 @@ class BoundedReconciliation:
         return self._read_executor
 
     def _invalidate_absent_companion_resolutions(self, present: set[str]) -> None:
-        for rid in set(self._resolution_futures) - present:
-            _, future = self._resolution_futures[rid]
-            future.cancel()
-            if future.done():
-                self._resolution_futures.pop(rid)
-            else:
-                self._resolution_futures[rid] = (None, future)
+        for cache in (self._resolution_futures, self._selection_futures):
+            for rid in set(cache) - present:
+                _, future = cache[rid]
+                future.cancel()
+                if future.done():
+                    cache.pop(rid)
+                else:
+                    cache[rid] = (None, future)
 
     def _resolve_companion(self, rid: str, registration: dict, authority: str) -> Any:
-        if self._reconcile_deadline is None:
-            return self._companion().resolve(
+        return self._bounded_companion_read(
+            self._resolution_futures, rid, authority,
+            lambda: self._companion().resolve(
                 copy.deepcopy(registration), machine=self.machine, env=self.env,
-            )
-        entry = self._resolution_futures.get(rid)
+            ),
+            subject="companion provider",
+        )
+
+    def _selected_managed(self, rid: str, authority: str) -> Any:
+        return self._bounded_companion_read(
+            self._selection_futures, rid, authority,
+            lambda: self._companion().selected_managed(rid),
+            subject="managed selection",
+        )
+
+    def _bounded_companion_read(
+        self, cache: dict[str, tuple[str | None, Future]], rid: str, authority: str,
+        read: Callable[[], Any], *, subject: str,
+    ) -> Any:
+        if self._reconcile_deadline is None:
+            return read()
+        entry = cache.get(rid)
         if entry is not None and entry[0] != authority:
             entry[1].cancel()
             if not entry[1].done():
-                raise CompanionIndeterminate("prior companion provider remains pending")
-            self._resolution_futures.pop(rid)
+                raise CompanionIndeterminate(f"prior {subject} remains pending")
+            cache.pop(rid)
             entry = None
         if entry is None:
-            captured = copy.deepcopy(registration)
-            future = self._provider_pool().submit(lambda: self._companion().resolve(
-                captured, machine=self.machine, env=self.env,
-            ))
+            future = self._provider_pool().submit(read)
             self._probe_inflight.add(future)
-            self._resolution_futures[rid] = (authority, future)
+            cache[rid] = (authority, future)
         else:
             future = entry[1]
         try:
             return future.result(timeout=max(0.0, self._reconcile_deadline - time.monotonic()))
         except CancelledError as exc:
-            raise CompanionIndeterminate("companion provider observation was cancelled") from exc
+            raise CompanionIndeterminate(f"{subject} observation was cancelled") from exc
         except TimeoutError as exc:
-            raise CompanionIndeterminate("companion provider remains pending") from exc
+            raise CompanionIndeterminate(f"{subject} remains pending") from exc
         finally:
             if future.done():
-                self._resolution_futures.pop(rid, None)
+                cache.pop(rid, None)
 
     def _reconcile_companion_receipts(self, adopted: set[str]) -> None:
         controller = self._companion()
