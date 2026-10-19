@@ -199,6 +199,11 @@ during Phase 2; any material expansion returns through proposal review first.
   cases, including the real disabled-listener startup and actual synthetic
   credential command. Python lint passed. Final source attestation and fresh
   review/CI remain required; no rollout or live credential grant occurred.
+- Re-attested current HTTP41 metadata to committed source
+  `2ecd9cff2436e7abab212023ae17307a7a7823d8`, preserving the 35-source,
+  32-provenance closure and explicit source-only classifications. Independent
+  checking passed all 265 fixtures and the contract/provider consumer lane
+  passed 115 cases. Expected bodies, historical vectors and floors are unchanged.
 
 ### 2026-10-19 - Project composition before final snapshot assembly
 
