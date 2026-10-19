@@ -442,6 +442,24 @@ def test_usage_features_review_regression_model_change_accepts_model_id() -> Non
 
 
 @pytest.mark.guard
+def test_usage_features_review_regression_within_turn_model_change_not_relabeled() -> None:
+    """A model change mid-turn must attribute calls to the model active when each
+    was first observed, not retroactively relabel an earlier call."""
+    result = features_from_events([
+        event("session.start", model="model-a"),
+        event("assistant.turn_start"),
+        event("session.usage_record", usage={"apiCallId": "a", "inputTokens": 1}),
+        event("assistant.message", apiCallId="a", content="out-a"),
+        event("session.model_change", newModel="model-b"),
+        event("session.usage_record", usage={"apiCallId": "b", "inputTokens": 2}),
+        event("assistant.message", apiCallId="b", content="out-b"),
+    ], "s")
+    by_id = {call["api_call_id"]: call["model"] for call in result["calls"]}
+    assert by_id["a"] == "model-a"
+    assert by_id["b"] == "model-b"
+
+
+@pytest.mark.guard
 def test_usage_features_review_regression_anonymous_emissions_not_double_counted() -> None:
     """Two anonymous emissions in a turn with no named calls must not each
     replay the full prompt's input-character count."""

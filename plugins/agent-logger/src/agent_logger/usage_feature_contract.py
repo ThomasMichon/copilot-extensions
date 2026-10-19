@@ -61,9 +61,17 @@ def admit_sessions(documents: list[dict]) -> list[dict]:
         identity = document["session_id"].lower()
         document = dict(document, session_id=identity)
         digest = document["source_digest"]
-        if digest in digests and digests[digest] != identity:
-            raise UsageEvidenceError("transcript copy has conflicting original session identity")
-        digests[digest] = identity
+        has_calls = bool(document["calls"])
+        if has_calls:
+            # Two independent empty transcripts both hash to SHA-256(empty);
+            # exempt call-free documents (no calibration samples) from the
+            # cross-identity digest check, while still catching divergent
+            # same-identity resubmissions below.
+            if digest in digests and digests[digest] != identity:
+                raise UsageEvidenceError(
+                    "transcript copy has conflicting original session identity",
+                )
+            digests[digest] = identity
         if identity in admitted:
             previous = admitted[identity]
             if previous["source_digest"] != digest or previous["calls"] != document["calls"]:

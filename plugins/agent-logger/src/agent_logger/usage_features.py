@@ -110,11 +110,16 @@ class _Turn:
     input_chars: int
     model: str | None
     calls: dict[str, CallFeatures] = field(default_factory=dict)
-    unlinked: list[tuple[int, str | None]] = field(default_factory=list)
+    unlinked: list[tuple[int, str | None, str | None]] = field(default_factory=list)
 
-    def call(self, api: str, model: str | None) -> CallFeatures:
+    def call(self, api: str, model: str | None, active_model: str | None) -> CallFeatures:
         if api not in self.calls:
-            self.calls[api] = CallFeatures(self.index, api, model, self.input_chars)
+            # Attribute a new call to the model active when it was first
+            # observed, not the turn-start model, so a within-turn model
+            # change doesn't relabel it at finish() time.
+            self.calls[api] = CallFeatures(
+                self.index, api, model or active_model, self.input_chars,
+            )
         call = self.calls[api]
         if model and call.model and model != call.model:
             raise UsageEvidenceError("conflicting root-call model evidence")
@@ -128,10 +133,11 @@ class _Turn:
         if self.unlinked:
             if len(self.calls) == 1:
                 call = next(iter(self.calls.values()))
-                for count, model in self.unlinked:
-                    if model and call.model and model != call.model:
+                for count, model, active_model in self.unlinked:
+                    effective = model or active_model
+                    if effective and call.model and effective != call.model:
                         raise UsageEvidenceError("ambiguous root emission model")
-                    call.model = model or call.model
+                    call.model = call.model or effective
                     call.output_chars += count
                     call.emissions += 1
             elif len(self.calls) == 0:
@@ -140,17 +146,18 @@ class _Turn:
                 # every anonymous emission into one call rather than replaying
                 # the same prompt's input count once per ID-less emission.
                 merged = CallFeatures(self.index, None, None, self.input_chars)
-                for count, model in self.unlinked:
-                    if model and merged.model and model != merged.model:
+                for count, model, active_model in self.unlinked:
+                    effective = model or active_model
+                    if effective and merged.model and effective != merged.model:
                         raise UsageEvidenceError("ambiguous root emission model")
-                    merged.model = model or merged.model
+                    merged.model = merged.model or effective
                     merged.output_chars += count
                     merged.emissions += 1
                 extra.append(merged)
             else:
-                for count, model in self.unlinked:
+                for count, model, active_model in self.unlinked:
                     extra.append(CallFeatures(
-                        self.index, None, model or self.model, self.input_chars,
+                        self.index, None, model or active_model, self.input_chars,
                         output_chars=count, emissions=1,
                     ))
         for call in self.calls.values():
@@ -259,7 +266,7 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
                 original_id = candidate or original_id
             api = _identifier(usage.get("apiCallId"))
             if turn and api:
-                call = turn.call(api, _identifier(usage.get("model")))
+                call = turn.call(api, _identifier(usage.get("model")), model)
                 for source, target in (("inputTokens", "input_tokens"), ("outputTokens", "output_tokens")):
                     value = _tokens(usage.get(source))
                     old = getattr(call, target)
@@ -276,11 +283,11 @@ def features_from_events(events: list[dict], session_id: str) -> dict:
                 api = _identifier(data.get("apiCallId"))
                 observed_model = _identifier(data.get("model"))
                 if api:
-                    call = turn.call(api, observed_model)
+                    call = turn.call(api, observed_model, model)
                     call.output_chars += count
                     call.emissions += 1
                 else:
-                    turn.unlinked.append((count, observed_model))
+                    turn.unlinked.append((count, observed_model, model))
             else:
                 warnings.add("emission-outside-root-turn")
             for request in data.get("toolRequests", []):

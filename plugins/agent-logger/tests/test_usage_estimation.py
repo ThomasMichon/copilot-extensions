@@ -77,6 +77,20 @@ def test_usage_estimation_session_copy_disjointness_and_conflicting_identity() -
 
 
 @pytest.mark.guard
+def test_usage_estimation_review_regression_empty_transcripts_share_digest() -> None:
+    """Two independent call-free (empty) transcripts both hash to SHA-256(empty);
+    that must not be treated as a conflicting-copy identity collision."""
+    empty_a = document("empty-a")
+    empty_a["calls"] = []
+    empty_a["source_digest"] = hashlib.sha256(b"").hexdigest()
+    empty_b = document("empty-b")
+    empty_b["calls"] = []
+    empty_b["source_digest"] = hashlib.sha256(b"").hexdigest()
+    admitted = admit_sessions([empty_a, empty_b])
+    assert {item["session_id"] for item in admitted} == {"empty-a", "empty-b"}
+
+
+@pytest.mark.guard
 def test_usage_estimation_session_errors_not_call_percentiles() -> None:
     data = cohort()
     policy = CalibrationPolicy()
