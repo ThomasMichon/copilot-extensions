@@ -176,6 +176,25 @@ during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
 
+### 2026-10-19 - Global and project activation boundary
+
+- Fresh review after reconciling the contribution branch with `dev` identified
+  a combined global/project activation case: an unscoped request could infer
+  the current repository's project binding and expose it as a global target.
+- Global activation now requires an explicit project or a service binding
+  before selecting project-owned endpoint/auth policy. Project-only activation
+  retains repository inference; explicit project and service bindings retain
+  their intended precedence.
+- Four calibrated regressions failed before repair. The corrected catalog lane
+  passed 96 cases; independent catalog/cache/roster/HTTP/session validation
+  passed 141 cases. Strict size and Python lint checks passed.
+- Re-attested the same current generation-41 metadata to committed runtime
+  `ea573a4458a8e5d9c9b58ff54661245f48e11df4`, retaining independent expected
+  bodies, historical vectors and capability floors. Independent checking
+  passed all 265 fixtures and the combined contract/provider consumer lane
+  passed 115 cases. Fresh review and hosted CI on the published repair remain
+  required before merge.
+
 ### 2026-10-19 - Explicit-load and lifecycle review races
 
 - The next review confirmed the preceding eight code repairs and identified

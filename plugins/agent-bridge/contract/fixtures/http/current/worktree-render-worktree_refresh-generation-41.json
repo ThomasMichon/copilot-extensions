@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
+    "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
