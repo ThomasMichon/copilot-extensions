@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve transitive claim detail URLs with the shared reference policy while retaining original refs and ownership paths",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

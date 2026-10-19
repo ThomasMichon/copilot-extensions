@@ -292,14 +292,22 @@ class TestClaimsTransitiveCli:
         assert foreign_ref in out
         assert "could not check" in out
 
-    def test_json_mode_serializes_paths_as_lists(self, _tracking_d, monkeypatch):
+    @pytest.mark.parametrize("ref, url", [
+        ("o/r#2", "https://github.com/o/r/pull/2"),
+        ("cref1:pr:github:o/r#2", "https://github.com/o/r/pull/2"),
+        ("https://forge.example/o/r/pulls/2", "https://forge.example/o/r/pulls/2"),
+        ("#2", None),
+    ])
+    def test_json_mode_serializes_paths_and_resolved_links(
+        self, _tracking_d, monkeypatch, ref, url,
+    ):
         monkeypatch.setattr(cfg, "load_config", lambda: _config())
         b_ref = tracking.format_claim_ref(MACHINE, "proj", "wt-B")
         _save(_tracking_d, "wt-A", resources=[
             tracking.ResourceClaim(kind="worktree", ref=b_ref, state=ob.ACTIVE),
         ])
         _save(_tracking_d, "wt-B", resources=[
-            tracking.ResourceClaim(kind="pr", ref="o/r#2", state=ob.ACTIVE),
+            tracking.ResourceClaim(kind="pr", ref=ref, state=ob.ACTIVE),
         ])
         args = _ns(target=["wt-A"], json=True)
         # `_json_output` deliberately writes to `sys.__stdout__`, not
@@ -313,6 +321,9 @@ class TestClaimsTransitiveCli:
         assert payload["worktree_id"] == "wt-A"
         paths = {tuple(o["path"]) for o in payload["obligations"]}
         assert paths == {("wt-A",), ("wt-A", "wt-B")}
+        child = payload["obligations"][1]
+        assert child["ref"] == ref
+        assert child["url"] == url
 
 
 def _ns(**kwargs):

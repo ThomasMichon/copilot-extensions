@@ -189,3 +189,39 @@ def test_detail_keeps_unresolved_edges_visible(reason):
     assert details[0]["note"] == reason
     with pytest.raises(TypeError, match="descendant"):
         descendant_details({"obligations": []})
+
+
+@pytest.mark.parametrize("ref", ["example/leaf#3", "cref1:pr:github:example/leaf#3"])
+def test_descendant_detail_uses_producer_url_without_rewriting_ref_or_owner(ref: str) -> None:
+    from worktree_manager.production_picker.picker_tui.worktree_assets import descendant_details
+
+    rec = _record()
+    url = "https://github.com/example/leaf/pull/3"
+    details = descendant_details({
+        "obligations": [{
+            "kind": "pr", "ref": ref, "url": url, "state": "active",
+            "path": ["parent", "child", "grandchild"],
+        }],
+        "unresolved": [],
+    })
+    screen = WtDetailsScreen(rec)
+    screen._loading = False
+    screen._details = details
+    body = screen._body()
+    assert ref in body.plain
+    assert "owner parent -> child -> grandchild" in body.plain
+    assert any(url in str(span.style) for span in body.spans)
+    assert details[0]["ref"] == ref
+
+
+@pytest.mark.parametrize("url", ["javascript:alert(1)", "", None])
+def test_descendant_detail_does_not_link_unsupported_urls(url: str | None) -> None:
+    screen = WtDetailsScreen(_record())
+    screen._loading = False
+    screen._details = [{
+        "kind": "pr", "ref": "example/leaf#3", "url": url,
+        "path": ["parent", "child"],
+    }]
+    body = screen._body()
+    assert "example/leaf#3" in body.plain
+    assert not any("link " in str(span.style) for span in body.spans)

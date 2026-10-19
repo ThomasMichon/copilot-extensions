@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 
 from . import config as cfg, output, tracking
+from .claims_rank import claim_url
 
 
 def _is_safe_path_component(value: str) -> bool:
@@ -206,7 +207,10 @@ def cmd_claims_transitive(
     if args.json:
         json_output({
             "worktree_id": wt_id,
-            "obligations": [{**o, "path": list(o["path"])} for o in found],
+            "obligations": [
+                {**o, "path": list(o["path"]), "url": claim_url(o["kind"], o["ref"])}
+                for o in found
+            ],
             "unresolved": [{**u, "path": list(u["path"])} for u in unresolved],
         })
         return 0

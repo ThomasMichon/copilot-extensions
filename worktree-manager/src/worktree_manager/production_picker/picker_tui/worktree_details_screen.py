@@ -142,12 +142,12 @@ class WtDetailsScreen(ModalScreen[None]):
                 owner = " -> ".join(claim.get("path") or [])
                 if owner:
                     text.append(f"  owner {owner}\n", style=C_DIM)
-                ref = claim.get("ref") or ""
+                url = claim.get("url") or claim.get("ref") or ""
                 text.append(
                     f"  {claim.get('kind', 'resource')} [{claim.get('state') or 'active'}]"
                     f": {self._asset_label(claim)}\n",
                     style=C_WARN if claim.get("state") == "unresolved" else (
-                        f"underline link {ref}" if ref.startswith(("https://", "http://"))
+                        f"underline link {url}" if url.startswith(("https://", "http://"))
                         else C_DIM
                     ),
                 )

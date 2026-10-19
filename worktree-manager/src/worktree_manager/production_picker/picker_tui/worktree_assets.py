@@ -79,7 +79,7 @@ def descendant_details(payload: dict) -> list[dict]:
                 or any(not isinstance(part, str) for part in claim["path"])
                 or any(
                     claim.get(field) is not None and not isinstance(claim[field], str)
-                    for field in ("kind", "ref", "state", "note", "reason")
+                    for field in ("kind", "ref", "state", "note", "reason", "url")
                 )
             ):
                 raise ValueError("engine returned an invalid descendant claim")

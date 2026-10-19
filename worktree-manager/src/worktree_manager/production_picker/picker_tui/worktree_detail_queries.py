@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 
+def claims_argv(machine, env, worktree_id, *, transitive=False, **source_identity):
+    """Explicit full claim inspection through the selected remote source."""
+    return remote_argv(
+        machine, env, worktree_id, command="claims transitive" if transitive else "claims",
+        capability="claims", **source_identity,
+    )
+
+
 def remote_argv(
     machine, env, worktree_id, *, command, capability, source_id=None,
     expected_instance_id=None, expected_assignment=None, expected_transport_fingerprint=None,

@@ -41,6 +41,7 @@ from .. import project_config as cfg
 from . import data_local, derive, provider_sources, roster, source_identity
 from .loader_lazy import LazyLoadMixin, _lazy_loading_enabled, _ping_argv, _PING_TIMEOUT_SECS  # noqa: F401
 from .loader_current_feed import CurrentFeedMixin
+from .worktree_detail_queries import claims_argv as claims_argv
 
 # Shared display surface so the engine treats this exactly like ``data_local``.
 # ``LOCAL`` is resolved from the actual local source below (so it carries the
@@ -726,16 +727,6 @@ def list_sessions_argv(
         source_id=source_id, expected_instance_id=expected_instance_id,
         expected_assignment=expected_assignment,
         expected_transport_fingerprint=expected_transport_fingerprint,
-    )
-
-
-def claims_argv(machine, env, worktree_id, *, transitive=False, **source_identity):
-    """Explicit full claim inspection through the selected remote source."""
-    from .worktree_detail_queries import remote_argv
-
-    return remote_argv(
-        machine, env, worktree_id, command="claims transitive" if transitive else "claims",
-        capability="claims", **source_identity,
     )
 
 

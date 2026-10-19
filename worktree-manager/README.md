@@ -172,6 +172,9 @@ is partial. Older publications without sufficient evidence show **coverage
 unknown**, not a complete subtree. **View details** loads full held claims
 on demand and, when child claims are present, uses the engine's existing
 transitive inspection to show descendant owner paths and unresolved edges.
+The engine supplies resolved detail URLs for shorthand and canonical PR refs;
+the card retains the stored ref and owner path. Older engines without those
+URLs still show the original ref, linking it only when it is already HTTP(S).
 Those inspections run in the background only after opening the detail card;
 ordinary row rendering never walks a claim graph or performs network reads.
 Descendant claims remain owned by their original worktrees.
