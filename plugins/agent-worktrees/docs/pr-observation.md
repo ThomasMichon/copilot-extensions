@@ -63,6 +63,9 @@ Merge consent is separate. A native auto-completion request may already be
 armed while policies are pending. This does not establish `clear_to_merge`:
 when native gate evidence is available, that flag additionally requires every
 required gate to be satisfied.
+Direct-merge reports retain operation-specific review assessment and additionally
+require the native gates before claiming `ready_for_direct_merge` or eligibility.
+An armed consent request is not equivalent to either readiness predicate.
 
 ## Related-repository configuration
 

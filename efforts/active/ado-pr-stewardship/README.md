@@ -189,6 +189,20 @@ remain outside this proposal's authority.
 
 ## Journal
 
+### 2026-10-19 - Integrating current review-boundary contracts
+
+- Current `dev` advanced through the review-exception boundary and output-free
+  owner-bootstrap corrections while the source PR awaited reassessment.
+  Backed up the published source, consolidated only this PR's commits and
+  resolved its single readiness-contract conflict in one rebase.
+- Preserved operation-specific direct-merge and review-assessment fields while
+  retaining authoritative native gates. Pending human/native requirements
+  cannot become direct-merge readiness or eligibility; consent arming remains
+  separate. Four new operation/native-gate combinations exercise the seam.
+- The combined native driver, cursor, wait, review-policy, facade, CLI and
+  merge-boundary selection passes 447 cases. Updated-head publication, remote
+  review and CI still precede release and authorized adoption.
+
 ### 2026-10-19 - Remote review: nested peers share the outer lifetime
 
 - A deterministic callback regression reproduced both Bridge peers opening
