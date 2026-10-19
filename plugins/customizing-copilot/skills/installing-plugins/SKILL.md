@@ -55,6 +55,7 @@ Copilot stores availability and activation in separate places:
 | Installed inventory | `~/.copilot/config.json` `installedPlugins[]` | The payload is available locally. An inventory record, cache directory, or marketplace registration does **not** mean the plugin is active. |
 | User-global activation | `~/.copilot/settings.json` `enabledPlugins` | A source-qualified key set to `true` loads the plugin for the user across repositories. Absent and `false` are both not user-enabled and must remain distinct during updates. |
 | Repository activation | `<repo>/.github/copilot/settings.json` `enabledPlugins` | A source-qualified key set to `true` loads the plugin only for that repository when repository settings are trusted. |
+| Repository-local declaration | `<repo>/.github/copilot/settings.local.json` `enabledPlugins` | Machine-local overlay declaration, including knowledge-plugin composition; inspect it separately from committed repository settings. |
 | Repository trust | `~/.copilot/config.json` `trustedFolders` | Controls whether repository settings participate; it does not install or activate a plugin by itself. |
 
 Marketplace refresh and payload update should refresh available inventory
@@ -247,8 +248,14 @@ python <skill-directory>/scripts/plugin-activation.py remove-user-activation \
 ```
 
 `inspect` reports installed inventory, the legacy inventory `enabled` value,
-user activation, repository activation, trust, and whether the plugin is
-installed-but-not-user-enabled. `remove-user-activation` deletes only that
+user activation, base repository activation, repository-local declaration,
+trust, and whether the plugin is installed-but-not-user-enabled. The JSON
+`repositoryActivation` field retains the base `settings.json` value;
+`repositoryLocalActivation` separately reports `settings.local.json` as
+`true`, `false`, or `absent` when `--repo` is supplied. These are declarations,
+not proof of effective foreground loading or native attachment. Invalid local
+settings are an explicit inspection error, not an absent declaration.
+`remove-user-activation` deletes only that
 source-qualified key from user `enabledPlugins` and sets the matching
 inventory record's legacy `enabled` field to `false`. It preserves inventory,
 payload cache, marketplace registration, repository settings, trust, and every
