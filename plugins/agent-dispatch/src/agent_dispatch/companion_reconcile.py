@@ -322,6 +322,7 @@ class ReceiptReconciliation:
         if not self.receipt_dir.exists():
             return []
         progress = []
+        unavailable = None
         for path in sorted(self.receipt_dir.glob("*.reconcile-operation.json")):
             try:
                 raw = self._receipt_metadata(path)
@@ -333,10 +334,14 @@ class ReceiptReconciliation:
                     continue
             except (lifecycle.CompanionIndeterminate, OSError) as exc:
                 log.warning("receipt progress unavailable for %s: error_type=%s", path.name, type(exc).__name__)
+                if unavailable is None:
+                    unavailable = exc
                 continue
             progress.append({key: record[key] for key in (
                 "registration_id", "generation_digest", "state", "started_at", "observed_at",
             )})
+        if unavailable is not None:
+            raise lifecycle.CompanionIndeterminate("receipt operation progress is unavailable") from unavailable
         return progress
 
     def reconcile_receipts_bounded(

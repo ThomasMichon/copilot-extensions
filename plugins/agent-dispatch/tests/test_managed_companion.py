@@ -921,7 +921,6 @@ def test_failed_selected_recovery_does_not_block_ready_current_configuration(har
 
 
 def test_cold_recovery_uses_the_bounded_accepted_selection_without_a_second_read(harness, monkeypatch):
-    import threading
     from concurrent.futures import ThreadPoolExecutor
 
     h = harness
@@ -931,24 +930,16 @@ def test_cold_recovery_uses_the_bounded_accepted_selection_without_a_second_read
     h.controller = h.make_controller()
     h.daemon = h.make_daemon()
     h.daemon._provider_executor = ThreadPoolExecutor(max_workers=4)
-    release = threading.Event()
     reads = []
 
     def selected(rid):
         reads.append(rid)
-        if len(reads) > 1:
-            assert release.wait(3)
+        assert reads == [h.rid], "recovery reread the already accepted selection"
         return snapshot
 
     monkeypatch.setattr(h.controller, "selected_managed", selected)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(h.daemon.reconcile_once)
-        try:
-            future.result(timeout=0.5)
-            assert reads == [h.rid]
-        finally:
-            release.set()
-            future.result(timeout=1)
+    h.daemon.reconcile_once()
+    assert reads == [h.rid]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job ownership must be reacquired")

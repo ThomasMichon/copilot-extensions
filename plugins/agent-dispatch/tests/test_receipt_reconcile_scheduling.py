@@ -143,7 +143,12 @@ def test_corrupt_metadata_fences_only_its_identity(tmp_path, monkeypatch, caplog
     assert path.read_bytes() == before
     with pytest.raises(CompanionIndeterminate):
         controller._assert_receipt_available("a")
-    assert [record["registration_id"] for record in controller.receipt_operation_progress()] == ["z"]
+    if corruption.startswith("operation"):
+        with pytest.raises(CompanionIndeterminate, match="progress is unavailable") as error:
+            controller.receipt_operation_progress()
+        assert isinstance(error.value.__cause__, CompanionIndeterminate)
+    else:
+        assert [record["registration_id"] for record in controller.receipt_operation_progress()] == ["z"]
     assert "a" in caplog.text
 
 

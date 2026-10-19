@@ -48,6 +48,11 @@ confirmed by a scoped registry read started after publication withdrawal was
 confirmed. Earlier in-flight registry results are discarded, and cached registry
 rows remain suppressed during that wait. A changed declaration cannot submit a
 concurrent publication batch.
+Completed readback rows that arrive after the batch deadline remain in its
+detached per-ID ledger for a later budget, instead of triggering the same slow
+read on every cycle. Cached observations are consumed before another read,
+discarded when their captured target changes, and removed before any write.
+An unknown write still settles its original target before a new declaration.
 Only the master harvests completed batch ledgers. Workers return partial custody
 with any unexpected failure; the master records it before surfacing the original
 exception, so an uncertain earlier write cannot become unstarted work.
@@ -73,7 +78,10 @@ receipt identities so two unknown readbacks cannot starve a later withdrawal.
 Unsupported or missing process-receipt schema versions remain indeterminate and
 cannot authorize retirement. Corrupt metadata is logged per path or identity and
 retained, fencing that identity without aborting valid sibling scheduling or
-progress collection. Provider metadata failures use the same indeterminate contract.
+progress collection. If any operation-progress record is unreadable or invalid,
+the whole optional inventory observation is unavailable; valid sibling rows are
+not presented as a complete inventory, and record bytes remain unchanged.
+Provider metadata failures use the same indeterminate contract.
 Local operation-metadata readers and atomic writers share bounded per-path locks,
 so a Windows reader cannot reject a simultaneous local atomic replacement or
 hold an unrelated identity's lock. Lock entries are released when their last

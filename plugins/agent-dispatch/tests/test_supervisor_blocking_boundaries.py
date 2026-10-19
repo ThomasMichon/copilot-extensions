@@ -459,6 +459,50 @@ def test_indeterminate_optional_progress_is_already_classified(caplog, boundary)
     assert observed[-1]["phase"] == "next"
 
 
+@pytest.mark.parametrize("failure", ["corrupt", "mixed", "unsupported", "unreadable", "empty"])
+def test_receipt_progress_incomplete_inventory_is_not_published_as_empty(tmp_path, monkeypatch, caplog, failure):
+    import json
+    from tests.test_bounded_receipt_reconcile import _unknown_operation
+
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    controller.receipt_dir.mkdir()
+    if failure != "empty":
+        _unknown_operation(controller, "damaged")
+        path = controller._operation_path("damaged")
+        if failure in {"corrupt", "mixed"}:
+            path.write_text("{", encoding="utf-8")
+        elif failure == "unsupported":
+            record = json.loads(path.read_text(encoding="utf-8"))
+            path.write_text(json.dumps({**record, "schema_version": 99}), encoding="utf-8")
+        else:
+            read = controller._receipt_metadata
+
+            def unreadable(current):
+                if current == path:
+                    raise PermissionError("private/receipt/path")
+                return read(current)
+
+            monkeypatch.setattr(controller, "_receipt_metadata", unreadable)
+        if failure == "mixed":
+            _unknown_operation(controller, "valid")
+        before = path.read_bytes()
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", companion_controller=controller, launcher=FakeLauncher(),
+    )
+    frames = []
+    daemon._progress_callback = frames.append
+    daemon._progress_latest = {"phase": "complete", "cycle_id": 1}
+    try:
+        daemon._publish_progress()
+        assert frames[-1]["receipt_operations"] == ([] if failure == "empty" else None)
+        if failure != "empty":
+            assert frames[-1]["observation_error"] == "receipt-progress-unavailable"
+            assert path.read_bytes() == before
+        assert "private/receipt/path" not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
 @pytest.mark.parametrize("active_deadline", [None, 100.025, 0.0])
 def test_receipt_inventory_without_active_deadline_receives_forward_budget(monkeypatch, active_deadline):
     controller = FakeCompanionController()

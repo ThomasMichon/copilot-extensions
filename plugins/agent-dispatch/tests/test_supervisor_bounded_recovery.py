@@ -108,6 +108,177 @@ def test_inventory_priming_already_handles_indeterminate_runtime_subclass(monkey
         daemon.shutdown()
 
 
+def test_stopped_withdrawal_logs_only_error_type_and_retains_adopted_ids(monkeypatch, caplog):
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", launcher=FakeLauncher(),
+        companion_controller=FakeCompanionController(),
+    )
+    daemon._managed_uncertain.add("pending")
+    observed = []
+
+    def unavailable(adopted):
+        observed.append(adopted)
+        raise OSError("private/inventory/path")
+
+    monkeypatch.setattr(daemon, "_reconcile_companion_receipts", unavailable)
+    try:
+        daemon._withdraw_stopped_managed({"pending": object()})
+        assert observed == [{"pending"}]
+        assert daemon._managed_uncertain == {"pending"}
+        assert "error_type=OSError" in caplog.text
+        assert "private/inventory/path" not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("withdraw", [False, True])
+def test_slow_publication_readback_survives_deadline_and_settles_unknown(monkeypatch, withdraw):
+    from types import SimpleNamespace
+    from agent_dispatch import supervisor_daemon_registration_publish as publication
+
+    clock = [0.0]
+    monkeypatch.setattr(publication, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    registration = _reg("unit", machine="host")
+    target = None if withdraw else registration
+    wanted = {} if withdraw else {"unit": registration}
+
+    class Client:
+        def __init__(self):
+            self.rows = {"unit": registration} if withdraw else {}
+            self.reads, self.writes = 0, []
+
+        def list_registrations(self, **kwargs):
+            self.reads += 1
+            clock[0] += 4
+            return list(self.rows.values())
+
+        def register_registration(self, kind, spec, **kwargs):
+            self.writes.append(("register", kwargs["reg_id"]))
+            self.rows["unit"] = registration
+            raise TimeoutError("response lost after publication")
+
+        def remove_registration(self, rid):
+            self.writes.append(("remove", rid))
+            self.rows.pop(rid)
+            raise TimeoutError("response lost after withdrawal")
+
+    publisher, client = publication.BoundedDeclarationPublisher(), Client()
+    records = {"unit": {"target": target, "state": "pending"}}
+    for cycle in range(4):
+        records, error = publisher._advance(client, wanted, records, clock[0] + 3)
+        assert error is None
+        if cycle == 0:
+            assert client.writes == []
+            assert records["unit"]["state"] == "pending"
+        if cycle == 1:
+            assert len(client.writes) == 1
+            assert records["unit"]["state"] == "unknown"
+    assert client.reads == 2
+    assert len(client.writes) == 1
+    if withdraw:
+        assert records == {}
+    else:
+        assert records["unit"] == {"target": registration, "state": "confirmed"}
+
+
+def test_late_publication_observation_invalidated_when_target_changes(monkeypatch):
+    from types import SimpleNamespace
+    from agent_dispatch import supervisor_daemon_registration_publish as publication
+
+    clock = [0.0]
+    monkeypatch.setattr(publication, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    registration = _reg("unit", machine="host")
+
+    class Client:
+        reads = 0
+
+        def list_registrations(self, **kwargs):
+            self.reads += 1
+            clock[0] += 4
+            return [registration] if self.reads == 1 else []
+
+    publisher, client = publication.BoundedDeclarationPublisher(), Client()
+    records, error = publisher._advance(client, {"unit": registration}, {}, 3)
+    assert error is None
+    records, error = publisher._advance(client, {}, records, clock[0] + 3)
+    assert error is None
+    assert client.reads == 2
+    assert "unit" in records
+    records, error = publisher._advance(client, {}, records, clock[0] + 3)
+    assert error is None
+    assert records == {}
+
+
+def test_late_unknown_readback_settles_captured_target_before_changed_declaration(monkeypatch):
+    from types import SimpleNamespace
+    from agent_dispatch import supervisor_daemon_registration_publish as publication
+
+    clock = [0.0]
+    monkeypatch.setattr(publication, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    old = _reg("unit", machine="old-host")
+    new = _reg("unit", machine="new-host")
+
+    class Client:
+        reads = 0
+
+        def list_registrations(self, **kwargs):
+            self.reads += 1
+            clock[0] += 4
+            return [old]
+
+    publisher, client = publication.BoundedDeclarationPublisher(), Client()
+    records = {"unit": {"target": old, "state": "unknown"}}
+    records, error = publisher._advance(client, {"unit": old}, records, 3)
+    assert error is None
+    records, error = publisher._advance(client, {"unit": new}, records, clock[0] + 3)
+    assert error is None
+    assert client.reads == 1
+    assert records["unit"] == {"target": old, "state": "confirmed"}
+    records, error = publisher._advance(client, {"unit": new}, records, clock[0] + 3)
+    assert error is None
+    assert client.reads == 2
+    assert records["unit"]["readback"]["target"] == new
+
+
+def test_publication_poll_harvests_late_readback_without_another_rpc():
+    from agent_dispatch.supervisor_daemon_registration_publish import BoundedDeclarationPublisher
+
+    entered, release = threading.Event(), threading.Event()
+
+    class Client:
+        reads = 0
+        writes = []
+
+        def list_registrations(self, **kwargs):
+            self.reads += 1
+            entered.set()
+            assert release.wait(3)
+            return []
+
+        def register_registration(self, kind, spec, **kwargs):
+            self.writes.append(kwargs["reg_id"])
+
+    publisher, client = BoundedDeclarationPublisher(), Client()
+    registration = _reg("unit", machine="host")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        try:
+            started = time.monotonic()
+            publisher.poll(client, [registration], executor=pool, deadline=started + 0.05)
+            assert time.monotonic() - started < 0.5
+            assert entered.wait(1)
+            assert not publisher.future.done()
+            assert client.writes == []
+            release.set()
+            publisher.future.result(1)
+            assert publisher.records["unit"]["state"] == "pending"
+            publisher.poll(client, [registration], executor=pool, deadline=time.monotonic() + 1)
+            assert client.reads == 1
+            assert client.writes == ["unit"]
+            assert publisher.records["unit"]["state"] == "confirmed"
+        finally:
+            release.set()
+
+
 @pytest.mark.parametrize("progress,expected", [
     ({"cycle_id": 7, "observed_at": 399.0}, "progressing"),
     ({"cycle_id": 6, "observed_at": 399.0}, "stalled"),

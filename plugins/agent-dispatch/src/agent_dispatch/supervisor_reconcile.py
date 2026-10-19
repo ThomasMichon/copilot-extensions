@@ -441,4 +441,4 @@ class BoundedReconciliation:
         try:
             self._reconcile_companion_receipts(adopted)
         except (CompanionIndeterminate, OSError, ValueError, RuntimeError) as exc:
-            log.warning("stopped companion receipt withdrawal remains pending: %s", exc)
+            log.warning("stopped companion receipt withdrawal remains pending: error_type=%s", type(exc).__name__)

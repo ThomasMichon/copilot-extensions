@@ -113,20 +113,31 @@ class BoundedDeclarationPublisher:
     def _advance_batch(cls, client, wanted: dict[str, dict], records: dict[str, dict], deadline: float) -> dict:
         if time.monotonic() >= deadline:
             return records
-        try:
-            rows = {row["id"]: row for row in client.list_registrations(include_paused=True)}
-        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
-            log.warning("declaration publication readback unavailable: error_type=%s", type(exc).__name__)
-            return records
-        for rid in sorted(set(wanted) | set(records)):
+        targets = {
+            rid: prior["target"] if (prior := records.get(rid)) is not None and prior["state"] == "unknown"
+            else wanted.get(rid)
+            for rid in set(wanted) | set(records)
+        }
+        for rid, target in targets.items():
+            prior = records.setdefault(rid, {"target": target, "state": "pending"})
+            if "readback" in prior and prior["readback"]["target"] != target:
+                prior.pop("readback")
+        # Consume completed observations before another potentially slow RPC.
+        if not any("readback" in prior for prior in records.values()):
+            try:
+                rows = {row["id"]: row for row in client.list_registrations(include_paused=True)}
+            except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+                log.warning("declaration publication readback unavailable: error_type=%s", type(exc).__name__)
+                return records
+            for rid, target in targets.items():
+                records[rid]["readback"] = {"target": target, "row": rows.get(rid)}
+        for rid, target in sorted(targets.items()):
             if time.monotonic() >= deadline:
                 break
-            prior = records.get(rid)
-            target = (
-                prior["target"] if prior is not None and prior["state"] == "unknown"
-                else wanted.get(rid)
-            )
-            if cls._matches(rows.get(rid), target):
+            observation = records[rid].pop("readback", None)
+            if observation is None:
+                continue
+            if cls._matches(observation["row"], target):
                 if target is None:
                     records.pop(rid, None)
                 else:
