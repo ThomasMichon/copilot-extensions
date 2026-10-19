@@ -3205,6 +3205,9 @@ with a caller's `-k`; `--guards` remains an additional marker restriction.
 Non-Windows and unrelated suites retain their existing grouping.
 Exact-node selection manifests retain their existing collection plan and
 fail-closed missing-node admission rather than adding a keyword restriction.
+The Windows standalone snapshot fixture supplies a real pipless stdlib venv
+interpreter on its isolated PATH: a batch-only `py` shim cannot satisfy the
+installer's windowless native bootstrap invocation.
 
 This is automated partitioning, not a manual-selector or timeout exception.
 Each group retains the default 300-second ceiling, remaining plugin time

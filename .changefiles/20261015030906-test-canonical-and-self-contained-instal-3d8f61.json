@@ -1,5 +1,5 @@
 {
-  "comment": "Qualify canonical and materialized Codespaces contracts with complete bounded Windows partitions; preserve sticky assertion failures across runner groups (#6917)",
+  "comment": "Qualify canonical and materialized Codespaces contracts with complete bounded Windows partitions and a real native bootstrap interpreter; preserve sticky assertion failures across runner groups (#6917)",
   "changes": [
     {
       "plugin": "agent-codespaces",
