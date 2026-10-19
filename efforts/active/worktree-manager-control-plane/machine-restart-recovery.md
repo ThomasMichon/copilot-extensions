@@ -502,3 +502,12 @@ The umbrella effort remains Active independently of this slice's completion.
   three native skips, including an actual separate-loop private-bus late-FD
   reply after the real inhibitor timeout. Automatic restoration and resident-loop
   notification timing remain unqualified.
+- The subsequent review distinguished a native setup-cadence defect from that
+  disclosed blocking-work timing limit. A real private-bus daemon fixture first
+  failed at the production one-second sweep cadence. The existing idle wait now
+  services native I/O on the same loop in admission-fenced, at-most-50-ms
+  slices; default-off, absent and blocked adapters keep ordinary sleep without
+  busy pumping. No worker or scheduler was added. The expanded disconnected
+  lane passed 337 tests with three native skips, including actual daemon setup,
+  same-thread drain admission and no-spin contracts. Blocking owner/probe/status
+  work still prevents a qualified shutdown-latency claim.

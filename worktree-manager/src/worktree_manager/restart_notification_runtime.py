@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 from .manager_config import ManagerConfigError, RestartRecoveryConfig, load_config
@@ -80,7 +83,7 @@ class RestartNotificationRuntime:
         if self._blocker:
             log.warning("Restart notification admission blocked: %s", self._blocker)
 
-    def pump(self, *, admitted: bool) -> None:
+    def pump(self, *, admitted: bool, wait_s: float = 0.0) -> None:
         """Run only inside the owning daemon loop's current mutation admission."""
         if not admitted:
             self.pause()
@@ -90,7 +93,24 @@ class RestartNotificationRuntime:
         self._paused = False
         self._start()
         if self._adapter is not None:
-            self._adapter.pump()
+            if wait_s:
+                self._adapter.pump(wait_s=wait_s)
+            else:
+                self._adapter.pump()
+
+    def wait(
+        self, seconds: float, *, admitted: Callable[[], bool],
+        mutation: Callable[[], AbstractContextManager],
+    ) -> None:
+        """Service native I/O during the existing idle wait, on its owning loop."""
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            adapter = self._adapter
+            if adapter is None or adapter.status["status"] in {"blocked", "closed"}:
+                time.sleep(remaining)
+                return
+            with mutation():
+                self.pump(admitted=admitted(), wait_s=min(0.05, remaining))
 
     def pause(self) -> None:
         """Close native resources on the owning loop before releasing its lease."""

@@ -500,7 +500,10 @@ Permanent failure disconnects the bus and drains pending tasks and received
 descriptors before the adapter stops pumping, including a timed-out inhibitor
 request whose FD reply arrives late.
 Drain/pause and shutdown close native resources on the owning daemon loop
-before its active lease ends. The transport is **not timing-qualified**:
+before its active lease ends. The existing inter-sweep idle wait services native
+I/O on that same loop, rechecking active mutation/drain admission at most every
+50 ms. Disabled, blocked and absent adapters retain the ordinary idle wait
+without a busy loop or worker thread. The transport is **not timing-qualified**:
 other blocking daemon work can delay notification handling beyond logind's
 budget. Its health descriptor therefore retains `qualified: false`; automatic
 recovery cannot treat the transport alone as proof of shutdown coverage.

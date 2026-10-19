@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -163,3 +165,60 @@ def test_non_utf8_config_blocks_recovery_without_disabling_mux_daemon(tmp_path):
         assert runtime.accepting_requests() is True
     finally:
         runtime.shutdown()
+
+
+@pytest.mark.parametrize("status", [None, "blocked", "closed"])
+def test_idle_wait_without_usable_adapter_does_not_spin_or_enter_mutation(
+    tmp_path, monkeypatch, status,
+):
+    runtime = build_runtime(tmp_path)
+    if status is not None:
+        runtime._adapter = SimpleNamespace(status={"status": status})
+    sleeps = []
+    monkeypatch.setattr(restart_notification_runtime.time, "sleep", sleeps.append)
+
+    def forbidden():
+        pytest.fail("inactive native wait entered admission/mutation")
+
+    runtime.wait(1.0, admitted=forbidden, mutation=forbidden)
+    assert len(sleeps) == 1 and 0 < sleeps[0] <= 1.0
+
+
+def test_idle_wait_rechecks_admission_and_closes_before_leaving_mutation(tmp_path):
+    runtime = build_runtime(tmp_path)
+    runtime.activate()
+    admitted = True
+    mutating = False
+    events = []
+    owner = threading.get_ident()
+
+    @contextmanager
+    def mutation():
+        nonlocal mutating
+        assert not mutating
+        mutating = True
+        try:
+            yield
+        finally:
+            mutating = False
+
+    class Adapter:
+        status = {"status": "watching", "qualified": False}
+
+        def pump(self, *, wait_s):
+            nonlocal admitted
+            assert mutating and threading.get_ident() == owner
+            assert 0 < wait_s <= 0.05
+            events.append("pump")
+            time.sleep(wait_s)
+            admitted = False
+
+        def close(self):
+            assert mutating and threading.get_ident() == owner
+            events.append("close")
+
+    runtime._adapter = Adapter()
+    runtime.wait(0.15, admitted=lambda: admitted, mutation=mutation)
+    assert events == ["pump", "close"]
+    assert runtime.status["admitted"] is False
+    assert runtime._adapter is None and not mutating

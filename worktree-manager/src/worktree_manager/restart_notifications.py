@@ -322,12 +322,12 @@ class LogindShutdownAdapter:
         self._state("connecting")
         self._schedule(self._setup())
 
-    def pump(self) -> None:
+    def pump(self, *, wait_s: float = 0.0) -> None:
         """Advance only from the active lease holder's own mutation admission."""
         if self._loop is None or self._loop.is_closed():
             return
         if self.status["status"] != "blocked":
-            self._loop.run_until_complete(asyncio.sleep(0))
+            self._loop.run_until_complete(asyncio.sleep(wait_s))
         if self._bus is not None and not self._bus.connected and self._owner is not None:
             if self.status["status"] != "blocked":
                 self._block("Native notification bus disconnected.")

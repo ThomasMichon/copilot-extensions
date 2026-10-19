@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -233,3 +234,80 @@ def test_inhibit_timeout_closes_connection_before_late_fd_reply(tmp_path, privat
             os.close(service.pipe[0])
             if not writer_closed:
                 os.close(service.pipe[1])
+
+
+def test_real_dbus_setup_at_production_daemon_cadence(tmp_path, private_bus, monkeypatch):
+    from dbus_next import PropertyAccess
+    from dbus_next.aio import MessageBus
+    from dbus_next.service import ServiceInterface, dbus_property, method
+
+    from worktree_manager import mux_daemon, restart_observer, source_config
+    from worktree_manager.restart_notifications import LogindShutdownAdapter
+
+    class Logind(ServiceInterface):
+        def __init__(self):
+            super().__init__("org.freedesktop.login1.Manager")
+            self.pipes = []
+
+        @method()
+        def Inhibit(self, what: "s", who: "s", why: "s", mode: "s") -> "h":  # noqa: F821
+            reader, writer = os.pipe()
+            self.pipes.append((reader, writer))
+            return writer
+
+        @dbus_property(access=PropertyAccess.READ)
+        def InhibitDelayMaxUSec(self) -> "t":  # noqa: F821
+            return 5_000_000
+
+        @dbus_property(access=PropertyAccess.READ)
+        def PreparingForShutdown(self) -> "b":  # noqa: F821
+            return False
+
+    loop = asyncio.new_event_loop()
+    service = Logind()
+
+    async def serve():
+        bus = await MessageBus(bus_address=private_bus, negotiate_unix_fd=True).connect()
+        bus.export("/org/freedesktop/login1", service)
+        await bus.request_name("org.freedesktop.login1")
+        return bus
+
+    service_bus = loop.run_until_complete(serve())
+    final_states = []
+
+    class ObservedAdapter(LogindShutdownAdapter):
+        def __init__(self, journal, epoch):
+            super().__init__(
+                journal, epoch,
+                bus_factory=lambda: MessageBus(bus_address=private_bus, negotiate_unix_fd=True),
+                loop_factory=lambda: loop,
+            )
+
+        def close(self):
+            final_states.append(self.status.copy())
+            service_bus.disconnect()
+            super().close()
+
+    monkeypatch.setitem(sys.modules, "worktree_manager.restart_notifications", SimpleNamespace(
+        LogindShutdownAdapter=ObservedAdapter,
+    ))
+    monkeypatch.setattr(restart_observer, "native_epoch", lambda: HostEpoch(
+        "linux", "environment-one", "boot-one",
+    ))
+    root = tmp_path / "state"
+    root.mkdir()
+    source_config.config_path(root).write_text(
+        "[restart_recovery]\nshutdown_notifications = true\n", encoding="utf-8",
+    )
+    try:
+        assert mux_daemon.run_daemon_foreground(root, max_iterations=5) == 0
+        assert final_states and final_states[0]["status"] == "watching"
+        assert final_states[0]["qualified"] is False
+    finally:
+        service_bus.disconnect()
+        if not loop.is_closed():
+            loop.run_until_complete(service_bus.wait_for_disconnect())
+            loop.close()
+        for reader, writer in service.pipes:
+            os.close(reader)
+            os.close(writer)

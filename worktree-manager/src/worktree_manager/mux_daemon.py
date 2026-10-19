@@ -939,7 +939,10 @@ def run_daemon_foreground(
                 iterations += 1
                 if max_iterations is not None and iterations >= max_iterations:
                     break
-                time.sleep(poll_interval_s)
+                runtime.restart_notifications.wait(
+                    poll_interval_s, mutation=runtime.loop_mutation,
+                    admitted=lambda: lease is not None and runtime.republish_enabled and runtime.accepting_requests(),
+                )
         finally:
             runtime.shutdown()
             mux_daemon_cutover.clear_route_if_owner(os.getpid(), root=resolved_root)
