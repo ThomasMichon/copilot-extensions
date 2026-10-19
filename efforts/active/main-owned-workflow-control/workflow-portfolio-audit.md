@@ -163,6 +163,7 @@ No implementation starts against this amendment before its normal review.
 | A - Close the audit contract | Campaign driver, with component/portfolio owners: bind each candidate's helper closure, exact event/input tuple, contexts, call graph and repair owner | Record accepted non-overlapping scope and before/after cohort; unresolved equivalence remains a blocker, not a removal recommendation. |
 | B - First safe event reduction | #6237 driver proposes compatible PR metadata coalescing; CI/release controller approves overlapping integration/control seams | Unit and real event negatives pass; fewer invocations/check records for the affected comparable cohort, without missing refresh/scan/admission. Land through the correct Dev/control lane. |
 | C - Useful bounded Linux lane | Existing #7122 selector owner and CI/controller own exact guard/workflow/aggregate admission; capacity operator owns image/node qualification | Reviewed selector delivered to actual control, inactive/unknown/fork paths remain hosted, one real admitted Actions job reports complete scope and actual runner assignment. No second copy of equivalent production work. |
+| C2 - Bounded native review rescue | Existing #7122/#3336 owners accept the [rescue contract](bounded-review-rescue.md), control/scheduling seam and scoped authority; campaign driver coordinates | Hosted default; periodic positive runner-fault classification, checked-in switch, bounded native requeue, actual ARC review and verified hosted restoration. Qualify independent admission for total hosted outage or hold/escalate; no live enablement from plan approval. |
 | D - Source/release evidence reuse | #3336 controller and portfolio owner define authoritative source/recipe/coverage/platform/dependency/run/attempt identity | Negative stale/missing/skipped/failed/wrong-input cases block reuse; generated output and artifact publication retain independent proof. Preserve the single active promotion through verified merge. |
 | E - Deep/maintenance consolidation | Component, portfolio and remediation owners accept each separately bounded row | Full native/installation/stress selectors and failure escalation remain executed and attributable; scheduler sharing saves actual invocations without uncontrolled fanout. |
 | F - Close the loop | Campaign driver owns the measured report and current parent Plan/Validation Plan | Observe two release cycles plus comparable contribution events, rejection and rollback; refresh policy and as-is docs. Resolve or explicitly transfer every outstanding item before completion. |
@@ -181,6 +182,13 @@ scale set; it does not document ordered hosted-to-ARC overflow. Multiple labels
 are cumulative constraints, not a fallback list. A setup success or online pool
 does not prove a full review, workload compatibility or automatically shared
 cloud capacity.
+
+The operator subsequently requested a periodic, time-boxed rescue loop rather
+than transparent overflow. The [bounded rescue contract](bounded-review-rescue.md)
+uses existing literal hosted/ARC modes, preserves ordinary control/review
+authority, and names native re-request and restoration proof. It is proposed
+work, not an active fallback. Its own hosted control-gate dependency must be
+resolved or reported as an explicit full-outage blocker.
 
 The first structural candidate's source contract is the complete unmaterialized
 tree at the pinned Dev commit, executed as

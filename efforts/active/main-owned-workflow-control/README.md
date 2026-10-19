@@ -110,6 +110,17 @@ Only the implementation reference is generalized; the requested merge gates,
 label consent, automatic rebase and submitter conflict ownership are preserved.
 The implementation and activation decomposition below is agent-recommended.
 
+**2026-10-18 - Bounded review fallback (verbatim):**
+
+> Great. Continue the plan and figure out how to make fallback possible
+
+> So we'll need to periodically check Runner status, and if we start seeing long queue durations or failures for Copilot Code Review, and be able to admin-check-in a switchover to assign to our runners, then re-queue Copilot Review for some bounded duration, then release and check again.
+
+The operator selected a repository-wide bounded rescue design with hosted
+default and reviewed activation. The [rescue contract](bounded-review-rescue.md)
+contains **agent-recommended** lifecycle, authority and qualification details;
+this request does not itself authorize a live routing or credential change.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -135,6 +146,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   waves in [the shared roadmap](workflow-portfolio-audit.md#ordered-execution-plan).
 - [ ] Prove actual admitted self-hosted execution before claiming offload;
   preserve hosted review and distinct full/native qualification.
+- [ ] Design and qualify [bounded native review rescue](bounded-review-rescue.md)
+  with existing runner/controller owners: periodic observation, authorized
+  checked-in switch, bounded requeue window, hosted restoration and recheck.
+  Prove the control/admission path's availability or explicitly hold/escalate;
+  reviewed planning is not live enablement.
 - [ ] Observe the resulting release and contribution cycles, preserve rollback,
   and resolve the parent Plan/Validation Plan before declaring consolidation done.
 
@@ -331,6 +347,11 @@ enablement require their own explicit acceptance.)_
   scoped credentials only; no PR-code execution, Main/publisher bypass or
   review-runner route change. Actual canary proves new-head CI/review delivery,
   conflict return and managed local reconciliation before enablement.
+- [ ] Bounded review rescue: resolve every obligation in the
+  [rescue validation matrix](bounded-review-rescue.md#validation-obligations),
+  including fault classification, independent control availability or explicit
+  outage hold, restart/dedup, failed restoration and one authorized complete
+  native ARC-to-hosted cycle before periodic enablement.
 
 ## Proposal
 
@@ -349,3 +370,4 @@ this contract. New evidence belongs in its date file, not another peer effort.
 - [2026-10-15](journal/2026/10.15.md)
 - [2026-10-16](journal/2026/10.16.md)
 - [2026-10-18](journal/2026/10.18.md)
+- [2026-10-19](journal/2026/10.19.md)
