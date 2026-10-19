@@ -4,6 +4,17 @@ from pathlib import Path
 
 import yaml
 
+# Collect the partition and admission cases through this existing required-CI entrypoint.
+from test_metadata_consolidation_preflight import (
+    baseline_fixture as baseline_fixture,
+    metadata_snapshot as metadata_snapshot,
+    metadata_workflows as metadata_workflows,
+    test_actual_selected_main_gate_on_real_git_candidate as test_actual_selected_main_gate_on_real_git_candidate,
+    test_source_keeps_job_permissions_and_promotion_consumer as test_source_keeps_job_permissions_and_promotion_consumer,
+    test_source_partition_keeps_current_and_departed_head_obligations as test_source_partition_keeps_current_and_departed_head_obligations,
+    test_source_workflow_admission_counts as test_source_workflow_admission_counts,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -70,7 +81,7 @@ def test_departures_observe_retargets_without_skipped_required_contexts():
     workflow = load("source-attribution-departures.yml")
     trigger = workflow["on"]["pull_request_target"]
     assert "branches" not in trigger
-    assert set(trigger["types"]) == {"synchronize", "closed", "edited"}
+    assert set(trigger["types"]) == {"closed", "edited"}
     assert set(workflow["jobs"]) == {"refresh-departed-source-attribution"}
     job = workflow["jobs"]["refresh-departed-source-attribution"]
     assert "github.event.changes.base.ref.from == 'dev'" in job["if"]
@@ -85,6 +96,22 @@ def test_departures_observe_retargets_without_skipped_required_contexts():
     )
     assert job["steps"][2]["with"]["retries"] == "0"
     assert ".departed(" in job["steps"][2]["with"]["script"]
+
+
+def test_synchronize_refresh_shares_the_dev_entrypoint_without_changing_required_jobs():
+    workflow = load("workflow-lockdown-guard.yml")
+    job = workflow["jobs"]["refresh-departed-source-attribution"]
+    assert job["if"].split() == (
+        "github.event_name == 'pull_request_target' && "
+        "github.event.action == 'synchronize' && "
+        "github.event.pull_request.base.ref == 'dev'"
+    ).split()
+    original = load("source-attribution-departures.yml")["jobs"]["refresh-departed-source-attribution"]
+    assert {key: value for key, value in job.items() if key != "if"} == {
+        key: value for key, value in original.items() if key != "if"
+    }
+    assert workflow["jobs"]["source-attribution"]["if"] == "github.event_name == 'pull_request_target'"
+    assert workflow["jobs"]["workflow-lockdown-guard"]["if"] == "github.event_name == 'pull_request_target'"
 
 
 

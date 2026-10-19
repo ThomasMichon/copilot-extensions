@@ -401,6 +401,34 @@ jobs:
           script: |
             await require("./.github/actions/required-pr-attribution.cjs").enforce({github, context, core});
 
+  refresh-departed-source-attribution:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: source-departure-${{ github.repository }}-${{ github.event.before || github.event.pull_request.head.sha }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Install locked metadata parser without lifecycle scripts
+        run: python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions --health-module commonmark --health-module parse5
+      - name: Reevaluate remaining dev PRs on the departed head
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          retries: 0
+          script: |
+            await require("./.github/actions/required-pr-attribution.cjs").departed({github, context, core});
+
   refresh-source-attribution:
     if: >-
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&

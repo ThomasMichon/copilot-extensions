@@ -68,8 +68,17 @@ completion separately; neither alone completes the overall objective.
   read-only metadata workflow/helper/event closure and separately reviewed
   negatives/docs, reporting no active writer on the named workflows/helpers.
   [The bounded closure](metadata-event-closure.md) records the contract.
-  Production Wave B remains held for exact CI/release-controller integration
-  agreement; a public overlap scan does not clear unpublished custody.
+  Live integration remains subject to release/control acceptance; a public
+  overlap scan does not clear unpublished custody.
+- **October 19 single-driver decision:** following the operator's direction
+  below, the Campaign driver owns the source-only synchronize consolidation
+  and its directly related metadata tests/docs through Dev review. The scope
+  changes only the departure synchronize trigger and an isolated refresh job
+  in the trusted Dev entrypoint, reusing unchanged refresh helpers. Existing
+  release/publisher, pause, qualification, Main activation, runner selector
+  and PR-completion authorities remain with their current owners. Concrete
+  conflicting edits must be reconciled before landing; responsibility is not
+  handed off merely by sending another message.
 
 ## Context
 
@@ -152,6 +161,16 @@ inventory. Only repository-owner-delegated local providers may supply its
 backup runner set; provider/repository/workload admission must enforce that
 boundary before activation. This does not authorize a shared contributor pool.
 
+**2026-10-19 - One accountable driver (verbatim):**
+
+> Let's not stalemate. Make sure one of you drives it
+
+The Campaign driver retains delivery accountability. The bounded source-only
+metadata slice is the first execution step selected under that direction;
+this decomposition is **agent-recommended**. It neither transfers the existing
+release publisher nor authorizes a second controller, pause bypass, Main
+activation or live rescue configuration.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -179,6 +198,9 @@ authorizes critical main-path acceptance or a bounded administrative change.
   This does not close portfolio-wide equivalence or authorize production edits.
 - [ ] Accept non-overlapping implementation ownership and execute the ordered
   waves in [the shared roadmap](workflow-portfolio-audit.md#ordered-execution-plan).
+- [ ] Land the Campaign-driver-owned source synchronize consolidation and
+  its required metadata regressions, then obtain the separately owned
+  qualified Main activation and live event/rollback measurements.
 - [ ] Prove actual admitted self-hosted execution before claiming offload;
   preserve hosted review and distinct full/native qualification.
 - [ ] Design and qualify [bounded native review rescue](bounded-review-rescue.md)

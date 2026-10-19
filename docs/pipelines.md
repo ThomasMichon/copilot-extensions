@@ -716,14 +716,28 @@ CONTRIBUTING.md and failure output publish the accepted codename, workflow and
 native gh-aw origin forms and concrete manual repair steps. Encryption remains
 optional, and syntax validation is not proof of actual source ownership.
 
-`source-attribution-departures.yml` reevaluates remaining dev PRs on a head
-that another PR leaves by pushing, closing, or retargeting away from dev.
-Its trusted, checks-writing job has a distinct non-required name and publishes
-the actual source context only for current dev peers. It is not branch-filtered,
-so a retarget away from dev is observable; it never creates a skipped
+The source declarations coalesce Dev synchronize departure refresh into the
+existing `workflow-lockdown-guard.yml` invocation. Its isolated
+`refresh-departed-source-attribution` job reuses `.departed` to repair current
+Dev peers on the old `before` head; native enforcement independently validates
+the moving PR's new head. The departure-refresh job retains its own checks-write
+grant; native required-check jobs remain read-only. Existing review and Main
+push/manual refresh jobs retain their permissions and behavior.
+
+`source-attribution-departures.yml` retains closed and edited events, including
+retargeting away from Dev. Its trusted, checks-writing job has a distinct
+non-required name and publishes the actual source context only for current
+Dev peers. It is not branch-filtered, so retarget-away remains observable; the
+route never creates a skipped
 `source-attribution` or `workflow-lockdown-guard` result that could bless a peer.
 This clears collision failures without requiring an unrelated edit to the
 remaining PR. It uses the same validator, freshness checks and request budget.
+
+These source declarations become active only through qualified delivery to the
+trusted default branch. A Dev merge is not evidence of changed live routing.
+Sharing the synchronize invocation removes a workflow admission, not an
+allocated refresh job; non-synchronize events can gain a skipped non-required
+job record. Measure workflow runs, jobs and check records separately.
 
 Pushes to the default release branch and trusted manual dispatches refresh the
 distinct context on current open dev PR heads without editing their descriptions
@@ -802,8 +816,8 @@ validation. This policy changes no required inventory for the current head.
 |----------|---------|---------|
 | `ci.yml` | `pull_request` (all bases except `main`), `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) and `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. The base-branch exclusion prevents the whole redundant main-PR invocation, not just its jobs; main/dev push and manual validation remain unchanged. |
 | `copilot-code-review.yml` | `workflow_dispatch`; official Copilot Code Review setup after default-branch publication | The `copilot-setup-steps` job preserves hosted review capacity with literal `ubuntu-latest`, with no checkout or dependency setup; Copilot supplies its own checkout afterward. It does not change the coding-agent fallback. The independently guarded `copilot-extensions-review` ARC role remains available only for an explicit reviewed route change, not additive overflow. A default-branch selector change requires an activation decision and an observed managed-review canary. |
-| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, the separate `source-attribution` metadata check, and the Maintainer-only review fallback. Default-branch push/manual runs refresh source-attribution checks for already-open `dev` PRs; job-scoped permissions/concurrency preserve the review boundary. No PR code executes. |
-| `source-attribution-departures.yml` | `pull_request_target` (`synchronize`, `closed`, `edited`) | Trusted metadata-only refresh of remaining dev PRs on a departed shared head, including retargets away from dev. Publishes no required-context skipped jobs and never executes PR content. |
+| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, separate `source-attribution`, Maintainer-only review fallback, and synchronize-only departed-head refresh. Default-branch push/manual runs retain existing source refresh for open `dev` PRs; job-scoped permissions/concurrency preserve their boundaries. Source changes need qualified trusted-default delivery. No PR code executes. |
+| `source-attribution-departures.yml` | `pull_request_target` (`closed`, `edited`) | Trusted metadata-only refresh for closed dev PRs and retargets away from dev, without a new-base filter. Synchronize refresh shares the existing trusted Dev entrypoint. Publishes no required-context skipped jobs and never executes PR content. |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate`, the existing one-time retarget reminder, and identifier reporting for owner-authored PRs that pass admission. Gate permissions are contents-read only; any checkout is pinned trusted main, and PR commits are fetched only as Git data. No PR code executes. This replaces main-PR CI admission and post-CI scanning. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 

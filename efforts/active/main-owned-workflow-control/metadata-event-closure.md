@@ -13,19 +13,18 @@ their refresh helpers. This is not blanket production write clearance:
 unpublished CI/release-controller integration custody remains to be reconciled.
 Public open-PR overlap checks cannot establish that unpublished custody.
 
-This document closes the bounded current-source mapping below, not generic
-helper equivalence for the whole portfolio. Existing executable negatives
-already cover these contracts; this slice reuses them rather than adding
-duplicate tests or an unwired new suite. No production workflow/helper changes,
-new scheduler, credential, runner route or live event canary are included.
-Wave B needs its own accepted integration seam, review, Main activation and
-event-equivalence/rollback proof. CI/promotion, #7199, #7122, Maintainer
-stewardship, installation attribution and remediation scopes remain with their
-existing owners.
+The pinned Wave A mapping below is not generic helper equivalence for the whole
+portfolio. The source-only synchronize implementation and its required
+regressions are described separately below, under the Campaign driver's
+single-driver scope. No refresh helper implementation, scheduler, credential,
+runner route or live event canary changes. Main activation, live event
+equivalence and rollback remain separate gates. CI/promotion, #7199, #7122,
+Maintainer stewardship, installation attribution and remediation scopes remain
+with their existing owners.
 
-## Pinned source boundary
+## Pinned Wave A source boundary
 
-Source mapping uses Dev `94f32c6f19dc00f6719f89fb8c38dca2f78bc2b8` and Main
+The Wave A mapping uses Dev `94f32c6f19dc00f6719f89fb8c38dca2f78bc2b8` and Main
 `ff6773de1b539f5227b98634be13fcaaa75adac7`. These are explicit Git snapshots,
 not a claim that a later live default-control revision has been audited.
 
@@ -180,14 +179,16 @@ promotion negatives retain trusted checkout, all-base retarget visibility,
 required contexts and missing/skipped/wrong-identity consumer rejection.
 This audit adds no parallel suite merely to restate those passing cases.
 
-**Agent-recommended first Wave B candidate:** share only the Dev synchronize
-entrypoint, retaining both current-head enforcement and old-head refresh.
-Leave the all-base closed/edited route and Main push/manual consumer intact.
-This could reduce workflow invocations, not necessarily allocated jobs,
-check records or runtime. It is a proposed owner-review seam, not an approved
-production change or measured savings claim.
+**Source-only Wave B slice:** the Campaign driver owns the synchronize
+consolidation through ordinary Dev review, following the operator's
+single-driver direction. The source declarations share the Dev synchronize
+entrypoint while retaining both current-head enforcement and old-head refresh.
+All-base closed/edited departure handling and Main push/manual backfill remain.
+The existing release/controller owner retains publication, qualification,
+pause and Main activation. This is not a competing controller or an assertion
+that a message receipt supplied peer acceptance.
 
-Before that candidate can replace anything, its implementation must prove:
+Source delivery and separate live acceptance must prove:
 
 - Exact before/after event admission for Dev sync, close/merge and retarget in
   and away from Dev, plus body/label edits and unrelated bases.
@@ -198,28 +199,29 @@ Before that candidate can replace anything, its implementation must prove:
 - One accepted live event canary, comparable invocation/job/check measurements
   and rollback to the original affected entrypoint, under current Main control.
 
-Lightweight local fixtures ran; fresh-environment provisioning and a new live
-event cutover were not exercised because this is a read-only mapping and
-documentation change. Production coalescing, its prospective event equivalence,
-live activation and measured savings remain open.
+The declared Dev synchronize workflow admissions decrease from two to one;
+unrelated-base synchronize admissions decrease from one skipped invocation
+to none. Allocated metadata jobs do not decrease. The new isolated,
+non-required job can add skipped check records on other trusted-entrypoint
+events, so no overall check-count, compute or review-headroom saving is
+claimed without comparable live measurements.
 
-## Manual prospective preflight
+## Source regression and selected Main admission contracts
 
-`tools/test_metadata_consolidation_preflight.py` advances the accepted Wave A
-negative-case seam without editing a production workflow. It constructs the
-proposed synchronize-only partition in memory, retaining existing metadata
-jobs and moving a copy of the unchanged departure job under a synchronize-only
-condition. This is a candidate fixture, not a deployed router or permission
-to activate that shape.
+`tools/test_metadata_consolidation_preflight.py` reads the actual source
+workflow declarations under test, rather than generating a proposed router.
+Its cases are collected by the existing required
+`tools/test_required_source_attribution_workflow.py` entrypoint; no CI workflow,
+selector, extra job or test runner is added.
 
-The preflight reuses the existing bounded condition evaluator and real-Git
-Main-gate fixture. It checks 72 action/current-base/previous-base combinations,
-preservation of existing jobs/permissions/concurrency and the promotion refresh
-consumer, and the separately claimed workflow-admission counts. It then runs
-the actual selected gate body against synthetic Git commits containing the
-workflow-only overlay or rejected helper-mixed, outsider and unchanged shapes.
-These negatives assert the intended admission diagnostic, not just a nonzero
-exit that could hide a broken test harness.
+The tests reuse the bounded condition evaluator and real-Git Main-gate fixture.
+They check 72 action/current-base/previous-base combinations, unchanged
+required/promotion jobs and departure-job permissions/concurrency, and the
+separately specified workflow-admission counts. The actual selected gate body
+then evaluates synthetic Git commits carrying the source workflow declarations
+or rejected helper-mixed, outsider and unchanged shapes. These negatives assert
+the intended admission diagnostic, not just a nonzero exit that could hide a
+broken test harness.
 
 The full gate executes from a real LF step file, matching Actions rather than
 transporting a multiline heredoc through Windows Bash arguments.
@@ -227,27 +229,24 @@ transporting a multiline heredoc through Windows Bash arguments.
 Run it through the repository's existing bounded pytest environment:
 
 ```text
-python -m pytest -q tools/test_metadata_consolidation_preflight.py tools/test_required_source_attribution_workflow.py
+python -m pytest -q tools/test_required_source_attribution_workflow.py
 ```
 
-By default it reads production declarations from the immutable local `HEAD`,
-not uncommitted workflow edits. To qualify a particular retained Main control,
-set `METADATA_PREFLIGHT_SHA` to its available full 40-hex commit, run the
-preflight, and unset it afterward. An unavailable or malformed selected commit
-fails; it does not silently substitute another revision.
+Source routing is read from the checkout under test. The separate trusted
+admission snapshot defaults to immutable local `HEAD`; set
+`METADATA_PREFLIGHT_SHA` to an available full 40-hex Main commit to qualify that
+retained control, then unset it afterward. An unavailable or malformed selected
+commit fails rather than silently substituting another revision. Git blob
+contents retain trailing newlines so literal workflow bodies compare faithfully.
 
-The local source preflight plus existing wiring passed 87 tests. Selecting
-public Dev `e81a305c6056454971773c24d31e3a03e43184d0` separately passed 82
-preflight cases. Selecting
-unchanged Main `ff6773de1b539f5227b98634be13fcaaa75adac7` passed all 82
-preflight cases. This proves the tested declaration partition and workflow-only
-bootstrap gate shape, not full GitHub admission, helper execution under a new
-router, preserved-control activation, live concurrency or observed savings.
-The fixture deliberately does not change the preservation manifest.
+The source required-metadata entrypoint passed 88 tests. Explicit retained
+Main `a325f5063e7cc0a2b3276be81be3e4959f8f4651` passed all 82 partition and
+admission cases against the source declarations. This proves the tested source
+partition and workflow-only bootstrap gate shape, not full GitHub admission,
+qualified Main activation, live concurrency or observed savings. The fixture
+does not change the preservation manifest.
 
-This candidate preflight is an explicit manual lane, not a newly required CI
-job or a claim that the existing CI selector executes it. A production Wave B
-implementation must incorporate its final real routing regressions through
-the existing CI owner's accepted test-integration seam. Current production
-coverage and required contexts remain unchanged; owner agreement, prospective
-runtime/event equivalence, live canary, rollback and measurement remain open.
+Lightweight local Git/Bash consumers ran. Fresh-environment provisioning is
+inapplicable because no installer/runtime changes; the separately accepted live
+event cutover, rollback and measurements remain open. Source merge must not be
+reported as active trusted-default routing.

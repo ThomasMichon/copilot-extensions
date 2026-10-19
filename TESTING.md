@@ -39,6 +39,24 @@ ephemeral-worker qualification.
 Do not use a readiness expression or a hosted-label alias to select private
 capacity. Local pytest commands remain wrapped by the bounded test supervisor.
 
+## Trusted metadata event partition
+
+The existing required metadata entrypoint covers actual source routing for
+Dev synchronize, closed/retarget-away, body/label edits and unrelated bases:
+
+```text
+python -m pytest -q tools/test_required_source_attribution_workflow.py
+node --test .github/actions/required-pr-attribution.test.cjs tools/test_copilot_review_gate.cjs
+```
+
+The 72 event/base cases, job-boundary checks and real-Git admission shapes reuse
+the existing bounded fixtures, with no extra CI job. Source declarations come
+from the checkout under test; the separate admission body comes from immutable
+`HEAD` or an explicitly selected `METADATA_PREFLIGHT_SHA`. A selected available
+full Main commit qualifies that control's admission shape, not live routing or
+promotion. See [required source metadata](docs/pipelines.md#required-dev-source-metadata)
+for trusted-default activation and measurement boundaries.
+
 ## The turn-key runner
 
 The source and candidate Linux full-suite declarations use exactly two

@@ -1,8 +1,7 @@
-"""Local-only feasibility of the proposed synchronize entrypoint consolidation."""
+"""Production metadata partition and selected Main admission contracts."""
 
 from __future__ import annotations
 
-import copy
 import os
 from pathlib import Path
 import re
@@ -23,6 +22,21 @@ REFRESH = "refresh-departed-source-attribution"
 baseline_fixture = _baseline_fixture
 
 
+def workflow(text):
+    value = yaml.safe_load(text)
+    if True in value:
+        value["on"] = value.pop(True)
+    return value
+
+
+@pytest.fixture(scope="module")
+def metadata_workflows():
+    return {
+        name: workflow((ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8"))
+        for name in (LOCKDOWN, DEPARTURES)
+    }
+
+
 @pytest.fixture(scope="module")
 def metadata_snapshot():
     env = {key: value for key, value in os.environ.items() if not key.startswith(("GIT_", "GH_"))}
@@ -32,31 +46,15 @@ def metadata_snapshot():
             ["git", "-C", str(ROOT), "-c", "core.fsmonitor=false", *args],
             env=env, check=True, capture_output=True, text=True, timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        ).stdout.strip()
+        ).stdout
 
-    revision = os.environ.get("METADATA_PREFLIGHT_SHA") or git("rev-parse", "HEAD")
+    revision = os.environ.get("METADATA_PREFLIGHT_SHA") or git("rev-parse", "HEAD").strip()
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         pytest.fail("METADATA_PREFLIGHT_SHA must name one available immutable commit")
     workflows = {}
     for filename in (LOCKDOWN, DEPARTURES, "base-branch-reminder.yml"):
-        workflow = yaml.safe_load(git("show", f"{revision}:.github/workflows/{filename}"))
-        if True in workflow:
-            workflow["on"] = workflow.pop(True)
-        workflows[filename] = workflow
+        workflows[filename] = workflow(git("show", f"{revision}:.github/workflows/{filename}"))
     return revision, workflows
-
-
-def proposal(workflows):
-    candidate = copy.deepcopy(workflows)
-    candidate[DEPARTURES]["on"]["pull_request_target"]["types"].remove("synchronize")
-    moved = copy.deepcopy(workflows[DEPARTURES]["jobs"][REFRESH])
-    moved["if"] = (
-        "github.event_name == 'pull_request_target' && "
-        "github.event.action == 'synchronize' && "
-        "github.event.pull_request.base.ref == 'dev'"
-    )
-    candidate[LOCKDOWN]["jobs"][REFRESH] = moved
-    return candidate
 
 
 def admitted(workflow, action, base):
@@ -102,10 +100,9 @@ def handlers(workflows, action, base, old_base):
 ])
 @pytest.mark.parametrize("base", ["dev", "main", "feature/other"])
 @pytest.mark.parametrize("old_base", ["", "dev", "main"])
-def test_proposed_partition_keeps_current_and_departed_head_obligations(
-    metadata_snapshot, action, base, old_base,
+def test_source_partition_keeps_current_and_departed_head_obligations(
+    metadata_workflows, action, base, old_base,
 ):
-    revision, workflows = metadata_snapshot
     expected = []
     if base == "dev" and action != "closed":
         expected.append("enforce")
@@ -114,41 +111,35 @@ def test_proposed_partition_keeps_current_and_departed_head_obligations(
         or action == "edited" and old_base == "dev" and base != "dev"
     ):
         expected.append("departed")
-    for partition in (workflows, proposal(workflows)):
-        assert handlers(partition, action, base, old_base) == sorted(expected), revision
+    assert handlers(metadata_workflows, action, base, old_base) == sorted(expected)
 
 
-def test_proposal_keeps_existing_jobs_permissions_and_promotion_consumer(metadata_snapshot):
-    _, workflows = metadata_snapshot
-    candidate = proposal(workflows)
-    original = workflows[LOCKDOWN]
-    changed = candidate[LOCKDOWN]
-    assert {key: value for key, value in changed.items() if key != "jobs"} == {
+def test_source_keeps_job_permissions_and_promotion_consumer(metadata_snapshot, metadata_workflows):
+    _, snapshot = metadata_snapshot
+    original = snapshot[LOCKDOWN]
+    current = metadata_workflows[LOCKDOWN]
+    assert {key: value for key, value in current.items() if key != "jobs"} == {
         key: value for key, value in original.items() if key != "jobs"
     }
-    assert set(changed["jobs"]) == set(original["jobs"]) | {REFRESH}
-    for name, job in original["jobs"].items():
-        assert changed["jobs"][name] == job
-    assert {key: value for key, value in changed["jobs"][REFRESH].items() if key != "if"} == {
-        key: value for key, value in workflows[DEPARTURES]["jobs"][REFRESH].items() if key != "if"
+    for name in ("workflow-lockdown-guard", "source-attribution", "refresh-source-attribution"):
+        assert current["jobs"][name] == original["jobs"][name]
+    assert {key: value for key, value in current["jobs"][REFRESH].items() if key != "if"} == {
+        key: value for key, value in snapshot[DEPARTURES]["jobs"][REFRESH].items() if key != "if"
     }
-    assert candidate[DEPARTURES]["jobs"] == workflows[DEPARTURES]["jobs"]
-    assert candidate[LOCKDOWN]["jobs"]["refresh-source-attribution"] == (
-        workflows[LOCKDOWN]["jobs"]["refresh-source-attribution"]
-    )
+    assert metadata_workflows[DEPARTURES]["jobs"] == snapshot[DEPARTURES]["jobs"]
 
 
-@pytest.mark.parametrize("action,base,before,after", [
-    ("synchronize", "dev", 2, 1),
-    ("synchronize", "main", 1, 0),
-    ("closed", "dev", 1, 1),
-    ("edited", "dev", 2, 2),
-    ("edited", "feature/other", 1, 1),
+@pytest.mark.parametrize("action,base,expected", [
+    ("synchronize", "dev", 1),
+    ("synchronize", "main", 0),
+    ("closed", "dev", 1),
+    ("edited", "dev", 2),
+    ("edited", "feature/other", 1),
 ])
-def test_only_claimed_workflow_admissions_change(metadata_snapshot, action, base, before, after):
-    _, workflows = metadata_snapshot
-    for partition, expected in ((workflows, before), (proposal(workflows), after)):
-        assert sum(admitted(partition[name], action, base) for name in (LOCKDOWN, DEPARTURES)) == expected
+def test_source_workflow_admission_counts(metadata_workflows, action, base, expected):
+    assert sum(
+        admitted(metadata_workflows[name], action, base) for name in (LOCKDOWN, DEPARTURES)
+    ) == expected
 
 
 @pytest.mark.parametrize("shape,expected", [
@@ -156,25 +147,22 @@ def test_only_claimed_workflow_admissions_change(metadata_snapshot, action, base
     ("outsider", False), ("unchanged", False),
 ])
 def test_actual_selected_main_gate_on_real_git_candidate(
-    metadata_snapshot, baseline_fixture, shape, expected,
+    metadata_snapshot, metadata_workflows, baseline_fixture, shape, expected,
 ):
     revision, workflows = metadata_snapshot
     run, git, repository, _, _, _, temporary = baseline_fixture
     directory = repository / ".github" / "workflows"
     directory.mkdir(parents=True)
     for name in (LOCKDOWN, DEPARTURES):
-        (directory / name).write_text(
-            yaml.safe_dump(workflows[name], sort_keys=False), encoding="utf-8",
-        )
+        (directory / name).write_text("name: Prior metadata fixture\n", encoding="utf-8")
     git("add", ".")
     git("commit", "-qm", "original metadata workflows")
     base = git("rev-parse", "HEAD")
     if shape != "unchanged":
-        for name, workflow in proposal(workflows).items():
-            if name in (LOCKDOWN, DEPARTURES):
-                (directory / name).write_text(
-                    yaml.safe_dump(workflow, sort_keys=False), encoding="utf-8",
-                )
+        for name, declaration in metadata_workflows.items():
+            (directory / name).write_text(
+                yaml.safe_dump(declaration, sort_keys=False), encoding="utf-8",
+            )
         if shape == "helper-mixed":
             helper = repository / ".github" / "actions" / "unapproved.cjs"
             helper.parent.mkdir()
