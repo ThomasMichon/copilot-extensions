@@ -202,3 +202,54 @@ Lightweight local fixtures ran; fresh-environment provisioning and a new live
 event cutover were not exercised because this is a read-only mapping and
 documentation change. Production coalescing, its prospective event equivalence,
 live activation and measured savings remain open.
+
+## Manual prospective preflight
+
+`tools/test_metadata_consolidation_preflight.py` advances the accepted Wave A
+negative-case seam without editing a production workflow. It constructs the
+proposed synchronize-only partition in memory, retaining existing metadata
+jobs and moving a copy of the unchanged departure job under a synchronize-only
+condition. This is a candidate fixture, not a deployed router or permission
+to activate that shape.
+
+The preflight reuses the existing bounded condition evaluator and real-Git
+Main-gate fixture. It checks 72 action/current-base/previous-base combinations,
+preservation of existing jobs/permissions/concurrency and the promotion refresh
+consumer, and the separately claimed workflow-admission counts. It then runs
+the actual selected gate body against synthetic Git commits containing the
+workflow-only overlay or rejected helper-mixed, outsider and unchanged shapes.
+These negatives assert the intended admission diagnostic, not just a nonzero
+exit that could hide a broken test harness.
+
+The full gate executes from a real LF step file, matching Actions rather than
+transporting a multiline heredoc through Windows Bash arguments. An initial
+local argv-based harness failed parsing; changing the fixture's transport did
+not change the gate, candidate, production deadline or expected verdict.
+
+Run it through the repository's existing bounded pytest environment:
+
+```text
+python -m pytest -q tools/test_metadata_consolidation_preflight.py tools/test_required_source_attribution_workflow.py
+```
+
+By default it reads production declarations from the immutable local `HEAD`,
+not uncommitted workflow edits. To qualify a particular retained Main control,
+set `METADATA_PREFLIGHT_SHA` to its available full 40-hex commit, run the
+preflight, and unset it afterward. An unavailable or malformed selected commit
+fails; it does not silently substitute another revision.
+
+The local source preflight plus existing wiring passed 87 tests. Selecting
+public Dev `e81a305c6056454971773c24d31e3a03e43184d0` separately passed 82
+preflight cases. Selecting
+unchanged Main `ff6773de1b539f5227b98634be13fcaaa75adac7` passed all 82
+preflight cases. This proves the tested declaration partition and workflow-only
+bootstrap gate shape, not full GitHub admission, helper execution under a new
+router, preserved-control activation, live concurrency or observed savings.
+The fixture deliberately does not change the preservation manifest.
+
+This candidate preflight is an explicit manual lane, not a newly required CI
+job or a claim that the existing CI selector executes it. A production Wave B
+implementation must incorporate its final real routing regressions through
+the existing CI owner's accepted test-integration seam. Current production
+coverage and required contexts remain unchanged; owner agreement, prospective
+runtime/event equivalence, live canary, rollback and measurement remain open.
