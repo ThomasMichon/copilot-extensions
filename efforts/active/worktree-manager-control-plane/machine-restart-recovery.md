@@ -88,6 +88,9 @@ means of fulfilling the operator's request. They require normal source review.
 - [ ] Specify capability-gated, explicit local enrollment and report-only
   inspection. Unsupported or unprovable environments report a blocker rather
   than silently becoming a different launch mode.
+  Default-off configuration and report-only capability inspection landed in
+  [#7252](https://github.com/ThomasMichon/copilot-extensions/pull/7252);
+  supported startup enrollment and recovery admission remain unresolved.
 
 ### 2. Preserve the black box and exit evidence
 
@@ -109,6 +112,9 @@ means of fulfilling the operator's request. They require normal source review.
 - [ ] Handle native restart/shutdown notification by checkpointing the eligible
   generation before teardown. Reconcile cancelled shutdowns. Do not rely on
   this notification being delivered during a crash or sudden power loss.
+  The gated Linux transport and cancellation fixtures landed in #7252. Resident
+  blocking-work latency remains unqualified; Windows/WSL notifications remain
+  explicitly unsupported, so this item is not complete.
 - [ ] Surface failed, corrupt, stale or unavailable evidence explicitly.
   Ambiguous closure stays unconfirmed; absence of a clean-exit hook is not proof
   that automatic resurrection is authorized.
@@ -511,3 +517,52 @@ The umbrella effort remains Active independently of this slice's completion.
   lane passed 337 tests with three native skips, including actual daemon setup,
   same-thread drain admission and no-spin contracts. Blocking owner/probe/status
   work still prevents a qualified shutdown-latency claim.
+
+### 2026-10-19 - Notification increment landed; full restoration remains open
+
+- [#7252](https://github.com/ThomasMichon/copilot-extensions/pull/7252)
+  squash-merged to `dev` as `81b4186db8`. The exact published head
+  `20b25acc36` received a genuine Copilot approval with no open findings, then
+  passed required CI before managed merge. The final disconnected related lane
+  passed 337 tests with three platform skips.
+- This closes delivery of default-off preferences, read-only capability
+  reporting and the gated native Linux transport increment, not either full
+  enrollment or notification qualification. No full Plan or Validation Plan
+  item is newly checked solely by this merge. The umbrella remains Active.
+  Merged source is not a promoted release, installed runtime or enabled recovery.
+- The next bounded stretch is owner-mediated candidate admission and durable
+  attempt identity before any launch is permitted. The existing exact-head
+  bridge acquisition is unseeded; the normal seeded embodiment releases its
+  lifecycle fence before seed delivery. Recovery therefore needs an explicit
+  exact-head fenced request, current task/hold policy from its owner and a
+  separate native pickup acknowledgement. Neither immutable dispatch provenance
+  nor a ready prompt can substitute for those receipts.
+- Retain the separate notification timing obligation: the daemon's ordinary
+  attachment/owner probes, status publication and registry locks can block
+  despite the repaired inter-sweep I/O service. Automatic restoration stays
+  blocked until that capability and the owner/seed/startup gates are qualified.
+
+### 2026-10-19 - Frozen candidate identity before launch admission
+
+- The historical positive capture now retains the owner's existing worktree
+  creation nonce and asserted head revision through an additive capability.
+  Legacy nonce metadata is not allocated or guessed; its capture remains
+  explicitly unqualified for recovery. Both owner-emission and Manager-capture
+  regressions failed first. Adding metadata cannot reopen a cancelled execution.
+- With an explicit automatic-restore request and the existing active daemon
+  lease, startup durably freezes qualified previous-boot candidates before
+  ordinary reconciliation. The bounded private attempt store deduplicates the
+  exact source/target identity and preserves its original snapshot through a
+  same-boot daemon replacement or later observation. Default-off/passive paths
+  do not write it; inspection never creates absent state or resets corruption.
+- The integration first failed because startup had no durable attempt result;
+  the separate store contract initially reported its missing implementation.
+  The expanded disconnected lane passed 316 Manager tests with three native
+  skips and 28 owner tests, including real-process concurrent deduplication and
+  a child exiting after insert but before commit. Capacity rollback preserves
+  prior unresolved identities rather than evicting them.
+- This is a pre-admission identity, not a launch attempt outcome: `frozen` is
+  awaiting current owner/task/hold admission, and `automatic_eligible` remains
+  false. Native launch/crash reconciliation, acknowledgement, enrollment and
+  notification timing remain open. No full Plan/Validation item is closed by
+  this unmerged increment.

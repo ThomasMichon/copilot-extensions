@@ -29,6 +29,7 @@ def observe(
         "worktree_id": worktree_id, "confirmed": False,
         "automatic_eligible": False, "liveness": "unknown",
         "binding_proof": None,
+        "recovery_binding_capability": None, "worktree_incarnation": None,
         "activation_ordinal": 0, "source_identity": None, "lifecycle_qualified": False,
     }
     record = loader()
@@ -98,6 +99,15 @@ def _hosting(record: tracking.WorktreeRecord, result: dict) -> dict:
     if not sessions.session_has_conversation_data(native_id):
         return {**result, "reason": "missing-native-conversation"}
     result.update(native_session_id=native_id, head_revision=record.head_revision)
+    nonce = record.creation_nonce
+    if (
+        isinstance(nonce, str) and len(nonce) == 16
+        and all(character in "0123456789abcdef" for character in nonce)
+        and type(record.head_revision) is int and record.head_revision >= 0
+    ):
+        result.update(
+            recovery_binding_capability="worktree-head-v1", worktree_incarnation=nonce,
+        )
     state = session_liveness(native_id)
     binding = None
     if state == "live":

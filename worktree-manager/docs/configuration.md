@@ -36,6 +36,12 @@ delay budget while other work blocks it. This timing gate must close before
 automatic recovery can rely on that notification. `automatic_restore = true`
 currently reports a blocker because current-owner admission and acknowledged
 exact-conversation restart Resume are not qualified; it never launches.
+An explicit request lets the active daemon durably freeze only qualified
+previous-boot candidate identities before ordinary reconciliation. This uses
+private local attempt state, not host startup enrollment. Frozen records require
+the historical owner's existing worktree incarnation and head revision; missing
+legacy proof is not inferred or backfilled. Neither freezing nor enabling this
+preference admits a task, launches a conversation, or acknowledges a seed.
 
 `worktree-manager mux-daemon recovery-evidence` is read-only and includes the
 requested capability states. It does not connect to the system bus to establish
@@ -45,6 +51,9 @@ unconfirmed/blocked capabilities, invalid configuration and unavailable
 evidence produce a JSON blocker and nonzero exit. The resident daemon's
 authenticated health response additionally exposes `restart_recovery` with its
 actual notification transport state, admission and qualification.
+The report also reads retained attempts without creating absent storage.
+Attempt corruption and capacity failures remain explicit blockers; existing
+unresolved attempt identities are never discarded to permit a retry.
 
 ## Picker logical machine roster
 

@@ -83,6 +83,42 @@ def test_detached_live_session_is_checkpointed(tmp_path, observer_module, mappin
     assert row["automatic_eligible"] is False
 
 
+def test_checkpoint_preserves_qualified_worktree_incarnation_and_head_revision(
+    tmp_path, observer_module, mapping,
+):
+    owner = source_bound_owner(
+        recovery_binding_capability="worktree-head-v1",
+        worktree_incarnation="0123456789abcdef", head_revision=17,
+    )
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: owner)
+    observer.observe(mapping, now=10.0)
+    evidence = observer.journal.snapshot()[0]["last_positive"]
+    assert evidence["worktree_incarnation"] == "0123456789abcdef"
+    assert evidence["head_revision"] == 17
+
+
+def test_new_owner_binding_metadata_cannot_clear_cancelled_shutdown(
+    tmp_path, observer_module, mapping,
+):
+    owner = source_bound_owner()
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: owner)
+    observer.observe(mapping, now=10.0)
+    observer.journal.shutdown_pending(
+        "linux", "environment-one", "boot-one", notification_id="cancelled-one",
+    )
+    observer.journal.shutdown_cancelled(
+        "linux", "environment-one", "boot-one", notification_id="cancelled-one",
+    )
+    owner.update(
+        recovery_binding_capability="worktree-head-v1",
+        worktree_incarnation="0123456789abcdef", head_revision=17,
+    )
+    observer.observe(mapping, now=31.0)
+    row = observer.journal.snapshot()[0]
+    assert row["last_positive"]["head_revision"] == 17
+    assert row["detail"] == "shutdown-cancelled"
+
+
 def test_failed_owner_probe_preserves_last_positive(tmp_path, observer_module, mapping):
     result = owner_result()
     observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: result)

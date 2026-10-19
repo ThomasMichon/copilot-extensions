@@ -164,6 +164,20 @@ installed can run this fixture without changing the wrapper's filesystem,
 credential or network isolation. Neither fixture proves resident-loop latency,
 real host shutdown coverage, automatic enrollment or acknowledged Resume.
 
+Frozen restart-attempt identities and historical owner bindings use:
+
+```text
+python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_restart_attempts or test_restart_capabilities or test_restart_notification_runtime'
+```
+
+This bounded lane covers no-write default/passive/inspection paths, legacy
+binding refusal, original-snapshot retention, cancelled-shutdown fences, private
+storage, corruption/schema refusal and atomic capacity rollback. Two real
+processes prove concurrent freeze deduplication; a disposable child exiting
+after insert but before commit proves crash rollback without discarding prior
+attempts. These are metadata/transaction contracts, not owner/task admission,
+native launch, seed pickup or platform restart qualification.
+
 Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:
 

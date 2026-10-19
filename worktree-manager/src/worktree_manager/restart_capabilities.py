@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .manager_config import ManagerConfigError, RestartRecoveryConfig, load_config
 from .restart_observer import RestartObserver
+from .restart_attempts import RestartAttemptError, RestartAttempts
 
 
 def recovery_capabilities(config: RestartRecoveryConfig, platform: str | None) -> dict:
@@ -41,9 +42,13 @@ def inspect_recovery(root: Path) -> dict:
     observer = RestartObserver(root)
     result = observer.startup()
     try:
+        result["attempts"] = RestartAttempts(root).snapshot()
+    except RestartAttemptError as exc:
+        result["blocker"] = "; ".join(filter(None, [result.get("blocker"), str(exc)]))
+    try:
         config = load_config(root).restart_recovery
     except ManagerConfigError as exc:
-        result["blocker"] = str(exc)
+        result["blocker"] = "; ".join(filter(None, [result.get("blocker"), str(exc)]))
         return result
     capabilities = recovery_capabilities(
         config, observer.epoch.platform if observer.epoch is not None else None,

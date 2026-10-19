@@ -526,6 +526,26 @@ never assert intentional closure or recovery permission.
 Invalid configuration, including non-UTF-8 input, is a JSON inspection blocker
 and disables recovery admission without preventing ordinary mux service.
 
+An explicit `automatic_restore = true` request currently only freezes qualified
+previous-boot candidates before ordinary startup reconciliation, under the
+daemon's existing active lease. The private `restart-recovery/attempts.sqlite3`
+retains each original execution, worktree creation nonce, head revision and
+target epoch under a deduplicated attempt identity. A same-boot daemon restart
+or later evidence refresh does not overwrite that frozen snapshot. Legacy
+capture without the owner binding remains `capture_binding_qualified: false`;
+unknown/intentional closure, cancelled shutdown, same-boot and foreign evidence
+cannot become frozen candidates. No current owner/task/hold admission or native
+launch is implemented by freezing.
+
+Attempt inspection is read-only and included in `recovery-evidence`; absent state
+is not created and corrupt, foreign or torn state is not silently reset.
+Transactions preserve prior attempts across a crash before commit and serialize
+concurrent freezing. At most 4096 unresolved attempts are retained, each bounded
+to 32 KiB. Capacity refuses new freezing rather than evicting pending identities.
+`frozen` means **awaiting owner admission**, never launched or seed-acknowledged;
+it is not an exactly-once execution guarantee. Default-off and passive daemon
+paths do not create attempt state.
+
 Native Linux and WSL have evidence-epoch readers; WSL includes its init-process
 incarnation because a distro can restart without restarting the shared kernel.
 Native Windows, macOS and container epochs are explicitly unqualified, not

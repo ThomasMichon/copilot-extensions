@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .manager_config import ManagerConfigError, RestartRecoveryConfig, load_config
 from .restart_capabilities import recovery_capabilities
+from .restart_attempts import RestartAttemptError, RestartAttempts
 from .restart_observer import RestartObserver
 
 
@@ -27,6 +28,7 @@ class RestartNotificationRuntime:
         self._capabilities: dict = {}
         self._blocker: str | None = None
         self._paused = True
+        self._attempts: dict | None = None
 
     @property
     def status(self) -> dict:
@@ -44,6 +46,8 @@ class RestartNotificationRuntime:
         }
         if self._blocker:
             result["blocker"] = self._blocker
+        if self._attempts is not None:
+            result["attempts"] = self._attempts
         return result
 
     def activate(self) -> None:
@@ -59,6 +63,21 @@ class RestartNotificationRuntime:
         self._capabilities = recovery_capabilities(
             self._config, epoch.platform if epoch is not None else None,
         )
+        if self._config.automatic_restore:
+            try:
+                if epoch is None or self.observer.startup_result.get("blocker"):
+                    raise RestartAttemptError("Native restart epoch/evidence is unconfirmed.")
+                attempts = RestartAttempts(self.root).freeze(
+                    self.observer.startup_result["candidates"], epoch,
+                )
+                self._attempts = {
+                    "state": "awaiting-owner-admission",
+                    "ids": [item["attempt_id"] for item in attempts],
+                    "automatic_eligible": False,
+                }
+            except RestartAttemptError as exc:
+                self._blocker = str(exc)
+                log.warning("Restart attempt freezing blocked: %s", exc)
         self._paused = False
 
     def _start(self) -> None:

@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve exact historical owner bindings and freeze private restart candidate identities before admission; automatic restoration remains blocked",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

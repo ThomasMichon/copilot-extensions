@@ -1230,6 +1230,18 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - Restart recovery's default-off preferences, read-only
+  capability reporting and gated native Linux notification transport landed in
+  [#7252](https://github.com/ThomasMichon/copilot-extensions/pull/7252)
+  (`81b4186db8`) after exact-head Copilot approval and required CI. The
+  disconnected related lane passed 337 tests with three platform skips.
+  The focused [recovery plan](machine-restart-recovery.md) retains its full
+  restoration gate: blocking-work notification timing, startup enrollment,
+  current owner/task/hold admission, durable attempts and acknowledged
+  status-first exact-conversation Resume remain open. The next bounded stretch
+  is owner-mediated candidate admission and durable attempt identity, without
+  enabling launch. This umbrella stays Active; no release or rollout is claimed.
+
 - **2026-10-19** - The restart-recovery implementer landed source-bound native
   lifecycle observations and intentional-exit corroboration in
   [#7241](https://github.com/ThomasMichon/copilot-extensions/pull/7241)
