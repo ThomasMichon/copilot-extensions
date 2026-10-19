@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial, independently reviewed slices against `dev`
 - **Created:** 2026-10-19
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Declarative Fleet Gateway](../../../visions/machine-fleet/gateway/README.md), [Machine Fleet](../../../visions/machine-fleet/README.md)
 - **Umbrella issue:** #7257
 - **Parent effort:** [Fleet Control V2](../fleet-control-v2/README.md), #6236
@@ -94,14 +94,14 @@ or credential changes.
 ## Plan
 
 ### Phase 0 - Review the contract and preserve ownership
-- [ ] Land this finite plan and its governing vision through normal review.
-- [ ] Record baseline capabilities and exact non-overlapping source scopes;
-  agree any shared consumer integration before editing it.
-- [ ] Preserve the current static Gateway, index, credential and provider
+- [x] Land this finite plan and its governing vision through normal review.
+- [x] Record baseline capabilities and exact non-overlapping initial source
+  scopes. Shared consumer integration remains a Phase 2 agreement gate.
+- [x] Preserve the current static Gateway, index, credential and provider
   behavior as the compatibility baseline.
 
 ### Phase 1 - Desired manifest and coherent live publication
-- [ ] Implement strict bounded service-slot, API/UX route, role, trust-reference
+- [x] Implement strict bounded service-slot, API/UX route, role, trust-reference
   and declared-capability validation with explicit schema/version handling.
 - [ ] Add an explicit owner-selected configuration source and coherent,
   revisioned candidate validation/publication. Parsing, a digest or a Git
@@ -192,3 +192,27 @@ provider credentials and production placement with their existing owners.
   routes and controller polling, not general tunnels or hot role publication.
 - Reused the existing managed source worktree. No runtime, provider,
   deployment, trust-root or production configuration has changed.
+
+### 2026-10-19 - Reviewed plan and first implementation slice
+- Plan PR #7259 merged as `f9a0104081fc0f11ac91df1b0915aaad086d6e90`
+  after exact-head Copilot approval with no findings and successful CI.
+- Re-read the canonical plan and selected Phase 1, starting with new strict
+  manifest domain types and tests rather than editing retained server/auth files.
+- The bounded current Gateway/auth/fence/admission/transport baseline passed
+  197 tests. The owning runner prepared its missing declared test environment;
+  no runtime, timeout, credential or production fixture was changed.
+- Live configuration publication, service tunnels, container qualification and
+  adopter deployment remain open; plan merge is not their completion.
+
+### 2026-10-19 - Desired-state prerequisite implemented
+- Added strict stdlib-only role/route/reference domain records and canonical
+  normalization using the existing bounded JSON helpers.
+- Added an explicitly selected-source, process-local publication store.
+  Invalid/unavailable input preserves the previous desired snapshot; revision
+  rollback and same-revision conflicts refuse, no-ops reuse the snapshot, and
+  concurrent publications re-check the latest revision under one lock.
+- Bounded manifest/publication and existing Gateway compatibility validation
+  passed 483 cases. Independent read-only review found no significant issues.
+- This is not serving integration: the store does not authenticate its source,
+  persist a restart fence, replace verifier/admission state, rotate live trust,
+  or route service traffic. Those Plan and Validation gates remain open.

@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Gateway Role Tunnels](active/gateway-role-tunnels/README.md) | Draft; reviewed manifest/live-publication, outbound service-channel and isolated container phases before adoption | #7257; finite sub-effort of #6236, retained #6443/#5789 integration owners |
+| [Gateway Role Tunnels](active/gateway-role-tunnels/README.md) | Active; plan reviewed, strict manifest/publication slice first, outbound channel and container qualification open | #7257; finite sub-effort of #6236, retained #6443/#5789 integration owners |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Draft; reviewed host-worktree relationship and obligation plan before implementation | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
 | [Remote ACP Provider Contributions](active/remote-acp-provider-contributions/README.md) | Draft; URL/name/plugin targets and approved scoped-auth proposal before implementation | #7218; existing transport and dispatch-catalog owners retained |

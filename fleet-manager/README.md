@@ -107,6 +107,11 @@ not open the store, and no installed service or producer is enrolled by it.
 Explicit `auth` and `server` extras supply maintained cryptographic dependencies for the
 [new authenticated Gateway](docs/gateway-runtime.md).
 
+The optional stdlib-only [desired manifest and publication primitives](docs/gateway-manifests.md)
+validate role slots/namespaces and publish coherent process-local desired state.
+They do not replace startup Gateway configuration, authenticate sources or
+connectors, route service tunnels or establish restart-safe configuration custody.
+
 The explicit [runtime identity verifier](docs/runtime-authentication.md) adds
 optional maintained-library JWT/DPoP checks and a bounded single-owner replay
 fence. It is not enrollment, scoped policy authorization or a Gateway listener.
