@@ -192,8 +192,11 @@ rosters. Detail accepts the same `project` query. Plain and streaming CLI roster
 and remote detail pass their selected project; ordinary static/provider rows
 retain their behavior.
 Cached and uncached asynchronous roster paths compose repository-backed rows
-off the event loop. Discovery publication retains its generation guard, and
-cached namespace membership/freshness is rechecked after row composition.
+off the event loop. Cached project composition occurs before final namespace
+assembly and completeness checks, with no later composition await. Discovery
+publication retains its generation guard; namespace membership/freshness and
+the remote report identity are rechecked after composition. Superseded remote
+rows are omitted and reported incomplete rather than published as current.
 Disabled contributions withdraw; uncertain activation cannot retain runnable
 authority from a previous scan. Source-level discovery failures are reported,
 not treated as authoritative emptiness.

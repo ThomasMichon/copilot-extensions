@@ -910,7 +910,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
             "state": agent.state,
         }
 
-    def list_agents(self) -> list[dict[str, Any]]:
+    def list_agents(self, *, project: str | None = None) -> list[dict[str, Any]]:
         """List all agents with metadata for the API."""
         result = []
         for config in self._agents.values():
@@ -918,7 +918,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 continue
             result.append(self._agent_to_dict(config))
         if self.remote_acp_catalog is not None:
-            result.extend(self.remote_acp_catalog.rows(refresh=False))
+            result.extend(self.remote_acp_catalog.rows(project, refresh=False))
         return result
 
     async def list_agents_async(self) -> list[dict[str, Any]]:

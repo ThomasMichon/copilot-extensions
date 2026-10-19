@@ -123,6 +123,84 @@ def test_unbound_contribution_is_visible_without_connection_or_credential_lookup
         catalog.resolve("remote-acp:assistant", project="demo")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("require_complete", [False, True])
+@pytest.mark.parametrize("change", ["replacement", "removal", "remote-withdrawal", "remote-error"])
+async def test_project_route_reconciles_provider_replaced_during_binding_read(
+    contribution, monkeypatch, require_complete, change,
+):
+    import threading
+
+    import httpx
+    from fastapi import FastAPI
+
+    from agent_bridge.agent_registry import NamespaceAgentInfo
+    from agent_bridge.agent_registry_cache import AgentRosterCache
+    from agent_bridge.routes.agents import router
+
+    catalog = RemoteAcpCatalog({}, project_bindings=lambda project: {"assistant": binding()})
+    catalog.apply(discover_remote_contributions())
+    resolver = AgentResolver({}, {})
+    resolver.remote_acp_catalog = catalog
+    resolver.register_namespace_resolver(SimpleNamespace(
+        prefix="ns", list=AsyncMock(return_value=[NamespaceAgentInfo(name="old")]),
+        invalidate_list_cache=lambda: None,
+    ))
+    cache = AgentRosterCache(resolver, refresh_interval=60)
+    assert (await cache.get_snapshot()).complete
+    started, release = threading.Event(), threading.Event()
+    original = catalog.rows
+
+    def rows(project=None, *, refresh=True):
+        composed = original(project, refresh=refresh)
+        if project == "demo":
+            started.set()
+            assert release.wait(2)
+        return composed
+
+    monkeypatch.setattr(catalog, "rows", rows)
+    app = FastAPI()
+    app.state.resolver, app.state.agent_roster_cache = resolver, cache
+    app.include_router(router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://bridge.invalid",
+    ) as api:
+        pending = asyncio.create_task(api.get("/api/v1/agents", params={
+            "project": "demo", "require_complete": str(require_complete).lower(),
+        }))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            if change.startswith("remote-"):
+                catalog.apply(RemoteContributionReport(
+                    errors=["synthetic contribution unavailable"] if change == "remote-error" else [],
+                ))
+            else:
+                resolver.unregister_namespace_resolver("ns")
+                if change == "replacement":
+                    resolver.register_namespace_resolver(SimpleNamespace(
+                        prefix="ns", list=AsyncMock(return_value=[NamespaceAgentInfo(name="new")]),
+                        invalidate_list_cache=lambda: None,
+                    ))
+            release.set()
+            response = await pending
+            if require_complete and change != "removal":
+                assert response.status_code == 503
+            else:
+                assert response.status_code == 200
+                data = response.json()
+                assert len(data["incomplete_namespaces"]) == len(set(data["incomplete_namespaces"]))
+                if change.startswith("remote-"):
+                    assert "remote-acp" in data["incomplete_namespaces"]
+                    assert not any(row["target_type"] == "remote-acp" for row in data["agents"])
+                else:
+                    assert ("ns" in data["incomplete_namespaces"]) == (change == "replacement")
+                    assert not any(row["name"] == "ns:old" for row in data["agents"])
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+            await cache.stop()
+
+
 def test_binding_is_owned_project_qualified_and_url_uses_same_policy(contribution):
     catalog = RemoteAcpCatalog({}, bindings={"assistant": binding()})
     row = catalog.rows()[0]
@@ -559,19 +637,21 @@ async def test_project_roster_composes_bindings_before_filtering(contribution, s
     stale_rows = resolver.list_agents()
     assert stale_rows[0]["state"] == "requires-binding"
     state = SimpleNamespace(resolver=resolver, topology_ready=True)
+    cache = None
     if cached:
-        state.agent_roster_cache = SimpleNamespace(
-            resolver=resolver,
-            get_snapshot=AsyncMock(return_value=SimpleNamespace(
-                rows=stale_rows, complete=True, incomplete_namespaces=[],
-            )),
-        )
+        from agent_bridge.agent_registry_cache import AgentRosterCache
+
+        cache = state.agent_roster_cache = AgentRosterCache(resolver, refresh_interval=60)
     request = SimpleNamespace(app=SimpleNamespace(state=state))
-    rows = (await list_agents(request, project="demo"))["agents"]
-    assert rows[0]["state"] == "bound"
-    assert await get_agent("remote-acp:assistant", request, project="demo") == rows[0]
-    assert (await list_agents(request, project="other"))["agents"][0]["state"] == "requires-binding"
-    assert stale_rows[0]["state"] == "requires-binding"
+    try:
+        rows = (await list_agents(request, project="demo"))["agents"]
+        assert rows[0]["state"] == "bound"
+        assert await get_agent("remote-acp:assistant", request, project="demo") == rows[0]
+        assert (await list_agents(request, project="other"))["agents"][0]["state"] == "requires-binding"
+        assert stale_rows[0]["state"] == "requires-binding"
+    finally:
+        if cache is not None:
+            await cache.stop()
 
 
 def test_url_uniqueness_only_counts_policies_enabled_in_requested_project(contribution):

@@ -176,6 +176,25 @@ during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
 
+### 2026-10-19 - Project composition before final snapshot assembly
+
+- Fresh review confirmed off-thread row composition but found a later route
+  await: project-specific binding composition ran after cache reconciliation
+  and `require_complete` checks, allowing replaced-provider rows through.
+- Two route-level cases failed before repair. The cache now composes project
+  rows before final namespace assembly and completeness, with no later route
+  await. Replaced providers remain incomplete; definitively removed providers
+  disappear without making an otherwise complete snapshot incomplete.
+- Extended the same await boundary to remote contribution withdrawal: two
+  additional calibrated cases demonstrated stale remote rows. Composition now
+  fences the captured remote report identity, omits superseded rows and reports
+  `remote-acp` incomplete; simultaneous source errors do not duplicate that
+  namespace diagnostic.
+- The combined catalog/cache/HTTP roster/runtime/historical-route lane passed
+  138 cases before adding the explicit simultaneous-source-error cases.
+  Python lint passed; final validation and contract re-attestation follow.
+  No authority or deployment gate changes.
+
 ### 2026-10-19 - Roster binding reads off the event loop
 
 - Fresh review confirmed production HTTP-source registration and identified

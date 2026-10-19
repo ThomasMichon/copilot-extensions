@@ -812,7 +812,9 @@ class AgentRosterCache(_DiscoveryMixin):
 
     # -- read path ------------------------------------------------------------
 
-    async def get_snapshot(self, *, force_refresh: bool = False) -> AgentRosterSnapshot:
+    async def get_snapshot(
+        self, *, force_refresh: bool = False, project: str | None = None,
+    ) -> AgentRosterSnapshot:
         """Build this request's response. Any namespace that is currently
         uninitialized, failed, or past its freshness deadline
         opportunistically joins its single-flight refresh before the
@@ -920,12 +922,23 @@ class AgentRosterCache(_DiscoveryMixin):
         # without this recheck, its last-known-good rows would still
         # publish as current/complete even though the refresh this request
         # itself waited on never actually happened.
-        rows = list(await asyncio.to_thread(self._resolver.list_agents))
+        catalog = getattr(self._resolver, "remote_acp_catalog", None)
+        remote_report = getattr(catalog, "contribution_report", None)
+        if project is None:
+            rows = list(await asyncio.to_thread(self._resolver.list_agents))
+        else:
+            rows = list(await asyncio.to_thread(self._resolver.list_agents, project=project))
         # Row composition may read repository bindings; reconcile again after
         # that await so a replaced namespace cannot publish its old rows.
         self._reconcile_namespace_set()
         now = time.monotonic()
-        incomplete_namespaces: list[str] = []
+        remote_changed = (
+            getattr(self._resolver, "remote_acp_catalog", None) is not catalog
+            or getattr(catalog, "contribution_report", None) is not remote_report
+        )
+        if remote_changed:
+            rows = [row for row in rows if row.get("target_type") != "remote-acp"]
+        incomplete_namespaces: list[str] = ["remote-acp"] if remote_changed else []
         # Iterate the *live* resolver's own namespace-registration order
         # (not `self._entries`'s own dict order, which a namespace removed
         # and later re-added could leave reordered relative to its

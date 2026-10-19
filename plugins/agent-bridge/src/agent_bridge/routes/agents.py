@@ -92,18 +92,21 @@ async def list_agents(
             "incomplete_namespaces": getattr(resolver, "incomplete_namespaces", []),
         }
 
-    snapshot = await cache.get_snapshot(force_refresh=force_refresh)
+    if project is None:
+        snapshot = await cache.get_snapshot(force_refresh=force_refresh)
+    else:
+        snapshot = await cache.get_snapshot(force_refresh=force_refresh, project=project)
     remote_catalog = getattr(resolver, "remote_acp_catalog", None)
     remote_incomplete = bool(remote_catalog is not None and remote_catalog.errors)
     if require_complete and (not snapshot.complete or remote_incomplete):
         raise HTTPException(status_code=503, detail="agent roster incomplete")
     return {
-        "agents": await _project_rows(resolver, snapshot.rows, project),
+        "agents": snapshot.rows,
         "topology_errors": getattr(resolver, "topology_errors", []),
         "topology_warnings": getattr(resolver, "topology_warnings", []),
         "incomplete_namespaces": [
             *snapshot.incomplete_namespaces,
-            *(["remote-acp"] if remote_incomplete else []),
+            *(["remote-acp"] if remote_incomplete and "remote-acp" not in snapshot.incomplete_namespaces else []),
         ],
     }
 
