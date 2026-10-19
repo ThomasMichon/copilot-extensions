@@ -416,3 +416,64 @@ def test_control_plane_git_root_accepts_normal_and_bare_anchors(tmp_path, bare):
 def test_control_plane_git_root_rejects_stale_non_git_directory(tmp_path):
     with pytest.raises(RuntimeError, match="not a Git repository"):
         cp.validate_checkout(str(tmp_path))
+
+
+@pytest.mark.parametrize("name", ["123-knowledge", "123knowledge", "001-project", "1e3"])
+def test_matching_plain_digit_prefixed_yaml_strings_are_preserved(name):
+    assert bk._check_existing_binding(f"knowledge_repo: {name}\n", name)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{repo_name: harness, knowledge_repo: knowledge}\n",
+        "---\nknowledge_repo: knowledge\n",
+        "  repo_name: harness\n  knowledge_repo: knowledge\n",
+        "'knowledge_repo': knowledge\n",
+    ],
+)
+def test_unsupported_native_yaml_shapes_refuse_without_changing_configuration(pair, text):
+    home = pair[0]
+    config = home / ".harness" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(text, encoding="utf-8")
+    before = config.read_bytes(), config.stat().st_mtime_ns
+    with pytest.raises(RuntimeError, match="unsupported binding configuration shape"):
+        _resolve(pair)
+    with pytest.raises(RuntimeError, match="unsupported binding configuration shape"):
+        bk._binding_yaml.write_binding(config, "harness", "knowledge", preserve=True)
+    assert (config.read_bytes(), config.stat().st_mtime_ns) == before
+
+
+def test_differently_named_registrations_cannot_share_a_physical_checkout(pair):
+    pair[-2]["repos"][1]["paths"] = dict(pair[-2]["repos"][0]["paths"])
+    with pytest.raises(RuntimeError, match="same physical checkout"):
+        _resolve(pair)
+    assert not pair[0].exists()
+
+
+def _symlink(link, target, *, directory=False):
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as exc:
+        pytest.skip(f"native symlink creation unavailable: {exc}")
+
+
+def test_symlinked_topology_uses_the_same_native_resolved_source(pair):
+    link = pair[3].parent / "selected.yaml"
+    _symlink(link, pair[3])
+    selected = cp.resolve_binding(bk, str(link), "native-owner", home=pair[0])
+    assert selected["source"] == str(pair[3])
+    assert not pair[0].exists()
+
+
+def test_symlinked_registration_retains_its_canonical_spelling(pair, monkeypatch):
+    link = pair[2].parent / "registered-knowledge"
+    _symlink(link, pair[2], directory=True)
+    pair[-2]["repos"][1]["paths"] = {bk._current_platform_key(): str(link)}
+    monkeypatch.setattr(
+        bk, "knowledge_origin", lambda path: f"file:///example/{Path(path).resolve().name}"
+    )
+    selected = _resolve(pair)
+    assert selected["knowledge_path"] == str(link)
+    assert not pair[0].exists()

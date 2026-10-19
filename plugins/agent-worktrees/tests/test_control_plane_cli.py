@@ -110,7 +110,9 @@ def test_native_reader_reports_conflicting_or_missing_source(tmp_path, capsys, m
     assert "control_plane" not in result
 
 
-@pytest.mark.parametrize("name", ["123", "true", "NO", "on", "null", "2026-10-18"])
+@pytest.mark.parametrize(
+    "name", ["123", "true", "NO", "on", "null", "2026-10-18", "123-knowledge", "1e3"]
+)
 def test_binding_projection_preserves_repository_names_as_native_yaml_strings(name):
     script = (
         Path(__file__).resolve().parents[3]
@@ -124,3 +126,6 @@ def test_binding_projection_preserves_repository_names_as_native_yaml_strings(na
     parsed = yaml.safe_load(text)
     assert type(parsed["knowledge_repo"]) is str
     assert parsed["knowledge_repo"] == name
+    plain = f"knowledge_repo: {name}\n"
+    if isinstance(yaml.safe_load(plain)["knowledge_repo"], str):
+        assert owner._check_existing_binding(plain, name)

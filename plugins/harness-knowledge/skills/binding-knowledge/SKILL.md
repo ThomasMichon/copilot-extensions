@@ -217,6 +217,10 @@ python <this-skill>/scripts/bind_knowledge.py --control-plane <machines.yaml> \
 This path requires a current native pair reader, exact canonical registrations,
 usable repository/account identity and a native-validated stateless-harness
 configuration root. Explicit name/path arguments, if supplied, must match.
+`bind_knowledge.py --capabilities --json` is an effect-free capability probe;
+require version 1, both supported registration classes and
+`preserves_registration_class: true` before an older setup conductor invokes
+registration. An unsupported probe is a normal owning setup/update gate.
 Use the reader's native execution platform for registered paths, including
 home-relative paths; do not substitute an environment-variable platform guess.
 Registered roots must be actual Git roots; bare anchors remain supported.
@@ -231,6 +235,11 @@ or re-pointing selected by the operator; do not use it to bypass a refused pair.
 The declared knowledge role remains companion state and is never a Bridge
 launch target. Prefer existing agents in the selected/current harness for
 outreach unless the operator directs an explicit different repository target.
+The dependency-free preserving writer supports ordinary top-level block
+mappings; document markers, flow mappings and quoted or indented root keys
+refuse explicitly without modifying the file. Both explicit and preserving
+pointer writers share one cross-process lock and atomically replace changed
+configuration; a waiting preserving writer re-reads the winning selection.
 
 When both `--harness-path` and `--knowledge-path` are given, the bind **also
 assembles the personal-plugin overlay** (see step 3b) -- so the operator's

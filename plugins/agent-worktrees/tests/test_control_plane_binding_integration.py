@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from agent_procutil import no_window_kwargs
-from agent_worktrees import repos
+from agent_worktrees import config as cfg, repos, state_root, worktree_creation
 
 
 def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -30,7 +30,6 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 def _checkout(root: Path, name: str, config: str) -> Path:
     remote = root / f"{name}.git"
     checkout = root / name
-    _run(["git", "init", "--bare", "--initial-branch=main", str(remote)], root)
     _run(["git", "init", "--initial-branch=main", str(checkout)], root)
     settings = checkout / ".agent-worktrees"
     settings.mkdir()
@@ -56,8 +55,8 @@ def _checkout(root: Path, name: str, config: str) -> Path:
         ],
         checkout,
     )
+    _run(["git", "clone", "--bare", "--quiet", str(checkout), str(remote)], root)
     _run(["git", "remote", "add", "origin", str(remote)], checkout)
-    _run(["git", "push", "-q", "origin", "main"], checkout)
     return checkout
 
 
@@ -95,9 +94,6 @@ def test_first_touch_binds_declared_roles_then_creates_real_pair(
             ["config", "--unset", "core.bare"],
         ):
             _run(["git", *args], knowledge)
-
-    def native(args: list[str], *, cwd: Path = harness):
-        return _run([sys.executable, "-m", "agent_worktrees", *args], cwd)
 
     for name, checkout, repo_class in (
         ("example-harness", harness, "worktree"),
@@ -146,12 +142,19 @@ def test_first_touch_binds_declared_roles_then_creates_real_pair(
     assert summary["control_plane"]["knowledge"] == "example-knowledge"
     assert "knowledge_repo: example-knowledge" in config.read_text(encoding="utf-8")
 
-    created = json.loads(native(["-p", "example-harness", "create", "--no-owner", "--json"]).stdout)
-    workspace = Path(created["worktree"]["path"])
-    pair = json.loads(
-        native(["-p", "example-harness", "state-root", "--pair", "--json"], cwd=workspace).stdout
-    )
+    previous_project = cfg.active_project()
+    cfg.set_active_project("example-harness")
+    try:
+        config = cfg.load_config(project="example-harness")
+        created = worktree_creation._create_worktree_core(
+            config, inherit_parent_session=False,
+        )
+        workspace = Path(created["worktree"]["path"])
+        pair = state_root.resolve_pair(None, cwd=str(workspace)).as_dict()
+    finally:
+        cfg.set_active_project(previous_project)
     assert pair["paired"] is True
+    assert "error" not in pair
     assert pair["self"]["role"] == "harness"
     assert pair["sibling"]["role"] == "knowledge"
     assert pair["sibling"]["kind"] == "worktree"

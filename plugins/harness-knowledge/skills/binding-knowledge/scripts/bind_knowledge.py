@@ -792,19 +792,8 @@ def bind(
         )
     )
     base = config_root if config_root is not None else Path(home) / f".{harness}"
-    base.mkdir(parents=True, exist_ok=True)
-
     cfg = base / "config.yaml"
-    existing = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
-    matching = _check_existing_binding(existing, knowledge) if preserve_binding else False
-    if not existing.strip():
-        existing = (
-            f"# Machine-local config for {harness} (harness-knowledge managed pointer).\n"
-            f"repo_name: {_binding_yaml.render_yaml_scalar(harness)}\n"
-        )
-    updated = existing if matching else set_top_yaml_key(existing, "knowledge_repo", knowledge)
-    if not cfg.is_file() or updated != existing:
-        cfg.write_text(updated, encoding="utf-8")
+    _binding_yaml.write_binding(cfg, harness, knowledge, preserve=preserve_binding)
 
     legacy_fragments = (
         base / ".github" / "instructions" / "knowledge-binding.instructions.md",
@@ -874,6 +863,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--harness", default="", help="The stateless harness repo name.")
     p.add_argument("--knowledge", default="", help="The knowledge repo name.")
+    p.add_argument("--capabilities", action="store_true", help="Report binding support without effects.")
     p.add_argument(
         "--control-plane",
         default="",
@@ -906,6 +896,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--home", default=None, help="Home dir override (testing).")
     p.add_argument("--json", action="store_true", help="Emit the summary as JSON.")
     args = p.parse_args(argv)
+    if args.capabilities:
+        print(json.dumps({
+            "version": 1, "registration_classes": ["knowledge", "worktree"],
+            "preserves_registration_class": True, "control_plane_pair": True,
+        }))
+        return 0
     if not args.control_plane and not (args.harness and args.knowledge):
         p.error("--harness and --knowledge are required without --control-plane")
 

@@ -73,6 +73,7 @@ def resolve_binding(
     """Resolve an already-registered pair; never infer names, register or write."""
     if not command:
         raise RuntimeError("--control-plane requires the exact --agent-worktrees-path")
+    topology = str(Path(topology).expanduser().resolve())
     declaration = _json_result(
         owner,
         command,
@@ -133,8 +134,11 @@ def resolve_binding(
             raise RuntimeError(f"registered {role} does not support its declared lifecycle")
         if explicit and not owner._same_path(explicit, path):
             raise RuntimeError(f"--{role}-path conflicts with the canonical registration")
-        resolved[f"{role}_path"] = str(Path(path).expanduser().resolve())
+        resolved[f"{role}_path"] = os.path.abspath(os.path.expanduser(path))
         validate_checkout(resolved[f"{role}_path"])
+
+    if Path(resolved["harness_path"]).resolve() == Path(resolved["knowledge_path"]).resolve():
+        raise RuntimeError("control-plane roles cannot share the same physical checkout")
 
     destination = _json_result(
         owner,
