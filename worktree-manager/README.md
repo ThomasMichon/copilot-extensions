@@ -427,6 +427,11 @@ cutover generations do not sample. Last-positive evidence survives missing-mux
 display tombstones. The journal retains at most 16 events per worktree and
 refuses new subjects after 4,096 worktrees rather than growing without bound.
 Corrupt, unavailable or incompatible storage remains an explicit blocker.
+The active daemon lease holder allows SQLite to roll back an interrupted
+transaction while reading existing storage at startup. This neither creates a
+missing database nor resets an incompatible schema. Report-only inspection
+keeps a read-only connection: if SQLite needs that rollback, the report exposes
+the read-only blocker rather than repairing the database itself.
 
 ```bash
 worktree-manager mux-daemon recovery-evidence

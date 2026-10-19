@@ -857,7 +857,7 @@ def run_daemon_foreground(
             listen_port=listen_port,
         )
         if lease is not None:
-            runtime.recovery_observer.startup()
+            runtime.recovery_observer.startup(recover_existing=True)
         runtime.start()
         if runtime.server is None or runtime.port is None:
             return 1
@@ -886,7 +886,7 @@ def run_daemon_foreground(
                             lease = promoted
                             runtime.passive = False
                             runtime._self_retire_generation = generation
-                            runtime.recovery_observer.startup()
+                            runtime.recovery_observer.startup(recover_existing=True)
                 if lease is not None:
                     write_lock_data(lock, runtime.lock_extra())
                 runtime.sync_self_retire()

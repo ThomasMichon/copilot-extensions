@@ -176,7 +176,9 @@ class RecoveryJournal:
                 self._schema(conn, create=True)
                 yield conn
         except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
-            raise RecoveryEvidenceError("Could not persist restart recovery evidence.") from exc
+            raise RecoveryEvidenceError(
+                f"Could not persist restart recovery evidence ({type(exc).__name__}): {exc}"
+            ) from exc
 
     @staticmethod
     def _latest(conn: sqlite3.Connection, evidence: PositiveEvidence) -> dict | None:
@@ -322,14 +324,20 @@ class RecoveryJournal:
         """Cancel only the matching notification, never revive an explicit exit."""
         self._shutdown_event(platform, environment_id, boot_id, notification_id, cancelled=True)
 
-    def snapshot(self) -> list[dict]:
-        """Read latest evidence without creating absent storage or launch intent."""
+    def snapshot(self, *, recover_existing: bool = False) -> list[dict]:
+        """Read evidence without creating absent storage or launch intent.
+
+        Only the active daemon lease holder enables ``recover_existing``:
+        SQLite may then roll back a hot journal before the read transaction.
+        Report-only callers retain a genuinely read-only database connection.
+        """
         try:
             reject_links(self.path)
             if not self.path.exists():
                 return []
             self._protect()
-            uri = self.path.absolute().as_uri() + "?mode=ro"
+            mode = "rw" if recover_existing else "ro"
+            uri = self.path.absolute().as_uri() + f"?mode={mode}"
             with closing(sqlite3.connect(uri, uri=True, timeout=5)) as conn:
                 conn.execute("BEGIN")
                 self._schema(conn, create=False)
@@ -340,4 +348,6 @@ class RecoveryJournal:
                 ).fetchall()
                 return [{**_decode(row[0]), "automatic_eligible": False} for row in rows]
         except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
-            raise RecoveryEvidenceError("Could not read restart recovery evidence.") from exc
+            raise RecoveryEvidenceError(
+                f"Could not read restart recovery evidence ({type(exc).__name__}): {exc}"
+            ) from exc

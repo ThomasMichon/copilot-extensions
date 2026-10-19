@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import importlib
+import json
+import subprocess
+import sys
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from worktree_manager.mux_mapping_registry import MuxMappingRegistry
 
@@ -174,9 +178,9 @@ def test_startup_inspection_precedes_status_server(tmp_path, observer_module, mo
     ))
     startup = observer_module.RestartObserver.startup
 
-    def inspect(self):
+    def inspect(self, **kwargs):
         events.append("inspect")
-        return startup(self)
+        return startup(self, **kwargs)
 
     def start(*args, **kwargs):
         assert events == ["inspect"]
@@ -247,3 +251,96 @@ def test_native_epoch_uses_native_boot_and_distro_init(
     assert epoch.environment_id == "a" * 32
     assert epoch.platform == platform
     assert epoch.boot_id == (boot + ":321" if platform == "wsl" else boot)
+
+
+def test_active_daemon_recovers_hot_journal_before_sampling(
+    tmp_path, observer_module, mapping, monkeypatch, capsys,
+):
+    from worktree_manager import mux_daemon, self_install
+    from worktree_manager.__main__ import main
+
+    first = build_observer(
+        observer_module, tmp_path, owner_probe=lambda *_: owner_result(),
+    )
+    first.observe(mapping, now=10.0)
+    committed = first.journal.snapshot()[0]["last_positive"]
+    crash = subprocess.run(
+        [
+            sys.executable, "-c",
+            "import os,sqlite3,sys\n"
+            "connection=sqlite3.connect(sys.argv[1])\n"
+            "connection.execute('PRAGMA journal_mode=DELETE')\n"
+            "connection.execute('PRAGMA synchronous=FULL')\n"
+            "connection.execute('PRAGMA cache_size=1')\n"
+            "connection.execute('PRAGMA cache_spill=ON')\n"
+            "connection.execute('BEGIN IMMEDIATE')\n"
+            "connection.execute('UPDATE journal SET payload=?', ('x'*65536,))\n"
+            "for number in range(8):\n"
+            " connection.execute('INSERT INTO journal(project,worktree_id,payload) "
+            "VALUES (?,?,?)', ('uncommitted',str(number),'x'*65536))\n"
+            "os._exit(23)\n",
+            str(first.journal.path),
+        ],
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert crash.returncode == 23, crash.stderr
+    hot = first.journal.path.with_name(first.journal.path.name + "-journal")
+    assert hot.is_file()
+    readonly = build_observer(observer_module, tmp_path).startup()
+    assert readonly.get("blocker")
+    assert hot.is_file()
+    before_report = (first.journal.path.read_bytes(), hot.read_bytes())
+    monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
+    assert main(["mux-daemon", "recovery-evidence"]) == 1
+    assert "readonly" in json.loads(capsys.readouterr().out)["blocker"].lower()
+    assert (first.journal.path.read_bytes(), hot.read_bytes()) == before_report
+
+    observed = []
+
+    class CapturingObserver(observer_module.RestartObserver):
+        def __init__(self, root):
+            super().__init__(
+                root, epoch=observer_module.HostEpoch("linux", "environment-one", "boot-one"),
+                owner_probe=lambda *_: owner_result(),
+            )
+            observed.append(self)
+
+    monkeypatch.setattr(mux_daemon, "RestartObserver", CapturingObserver)
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: None)
+    monkeypatch.setattr(mux_daemon.AttachedClientObserver, "observe", lambda *_: None)
+    assert mux_daemon.run_daemon_foreground(
+        tmp_path, passive=True, max_iterations=1, poll_interval_s=0,
+    ) == 0
+    assert observed[0].startup_result == {"candidates": [], "automatic_eligible": False}
+    assert (first.journal.path.read_bytes(), hot.read_bytes()) == before_report
+    assert mux_daemon.run_daemon_foreground(
+        tmp_path, max_iterations=1, poll_interval_s=0,
+    ) == 0
+    assert not observed[1].startup_result.get("blocker")
+    assert observed[1].startup_result["candidates"][0]["last_positive"] == committed
+    latest = observed[1].journal.snapshot()
+    assert len(latest) == 1
+    assert latest[0]["last_positive"]["native_session_id"] == NATIVE_ID
+    assert latest[0]["last_positive"]["observation_sequence"] == 2
+
+
+def test_authorized_storage_recovery_is_retained_across_startup_retry(
+    tmp_path, observer_module, mapping, monkeypatch,
+):
+    observer = build_observer(
+        observer_module, tmp_path, owner_probe=lambda *_: owner_result(),
+    )
+    snapshot = observer.journal.snapshot
+    attempts = []
+
+    def interrupted(*, recover_existing=False):
+        attempts.append(recover_existing)
+        if len(attempts) == 1:
+            raise observer_module.RecoveryEvidenceError("temporarily unavailable")
+        return snapshot(recover_existing=recover_existing)
+
+    monkeypatch.setattr(observer.journal, "snapshot", interrupted)
+    assert observer.startup(recover_existing=True).get("blocker")
+    observer.observe(mapping, now=10.0)
+    assert attempts[:2] == [True, True]
+    assert observer.last_result["applied"] is True

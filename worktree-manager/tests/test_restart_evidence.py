@@ -278,10 +278,20 @@ def test_unrelated_sqlite_schema_is_not_reinitialized(tmp_path, recovery):
     journal.path.parent.mkdir()
     with sqlite3.connect(journal.path) as conn:
         conn.execute("CREATE TABLE unrelated(value TEXT)")
+    before = journal.path.read_bytes()
+    with pytest.raises(recovery.RecoveryEvidenceError):
+        journal.snapshot(recover_existing=True)
+    assert journal.path.read_bytes() == before
     with pytest.raises(recovery.RecoveryEvidenceError):
         journal.observe(positive(recovery))
     with sqlite3.connect(journal.path) as conn:
         assert conn.execute("SELECT name FROM sqlite_master").fetchall() == [("unrelated",)]
+
+
+def test_authorized_storage_recovery_never_creates_missing_database(tmp_path, recovery):
+    journal = recovery.RecoveryJournal(tmp_path)
+    assert journal.snapshot(recover_existing=True) == []
+    assert not journal.path.parent.exists()
 
 
 def test_symlink_storage_is_refused_without_touching_target(tmp_path, recovery):

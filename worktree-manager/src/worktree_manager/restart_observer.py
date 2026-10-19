@@ -86,16 +86,19 @@ class RestartObserver:
         self._next_attempt_at = 0.0
         self._last_key: tuple[str, str] | None = None
         self._startup_complete = False
+        self._storage_recovery = False
 
-    def startup(self) -> dict:
+    def startup(self, *, recover_existing: bool = False) -> dict:
         """Freeze previous-epoch evidence before ordinary mux reconciliation.
 
         Inspection creates no launch intent, claims or enrollment. Incomplete
         admission remains explicitly unconfirmed, including sudden power loss.
         """
+        self._startup_complete = False
+        self._storage_recovery = recover_existing
         rows = []
         try:
-            rows = self.journal.snapshot()
+            rows = self.journal.snapshot(recover_existing=recover_existing)
             if self.epoch is None:
                 self.epoch = native_epoch()
             candidates = []
@@ -130,7 +133,7 @@ class RestartObserver:
         self._next_attempt_at = started + 20.0
         try:
             if not self._startup_complete:
-                self.startup()
+                self.startup(recover_existing=self._storage_recovery)
             if not self._startup_complete or self.epoch is None:
                 self.last_result = {"applied": False, "reason": "startup-blocked"}
                 return

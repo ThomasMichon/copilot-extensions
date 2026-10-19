@@ -228,6 +228,11 @@ The umbrella effort remains Active independently of this slice's completion.
   reopen an intentional close or discard shutdown state. The canonical native
   binding helper supplies the current mux incarnation without introducing a
   second process-discovery implementation.
+- A further review identified SQLite hot rollback journals after an interrupted
+  write. A real disposable child now crashes during a spilled transaction; the
+  regression verifies report-only inspection preserves the files, then the
+  lease-holding daemon recovers the last committed evidence before sampling
+  resumes. Missing or incompatible databases are never recreated by this read.
 - Added report-only inspection and explicit unqualified-platform reporting.
   `automatic_eligible` remains false. The first source slice does not complete
   this plan: actual native notification/startup adapters, lifecycle producers,
