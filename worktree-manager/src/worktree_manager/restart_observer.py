@@ -14,7 +14,9 @@ from machine_transport import detect_platform
 
 from . import engine_client
 from .mux_mapping_registry import MuxMappingRegistry
-from .restart_evidence import PositiveEvidence, RecoveryEvidenceError, RecoveryJournal
+from .restart_evidence import (
+    NATIVE_BINDING_PROOF, PositiveEvidence, RecoveryEvidenceError, RecoveryJournal,
+)
 
 
 log = logging.getLogger(__name__)
@@ -162,6 +164,7 @@ class RestartObserver:
                 or owner.get("session_incarnation") != entry["session_incarnation"]
                 or owner.get("platform") != self.epoch.platform
                 or owner.get("liveness") != "live"
+                or owner.get("binding_proof") != NATIVE_BINDING_PROOF
             ):
                 raise ValueError("Native hosting owner returned incompatible evidence")
             current = registry.get(*key)
@@ -180,6 +183,7 @@ class RestartObserver:
                 worktree_path=entry["worktree_path"],
                 native_session_id=owner["native_session_id"],
                 native_incarnation=owner["native_incarnation"],
+                binding_proof=owner["binding_proof"],
                 owner_revision=owner["owner_revision"],
                 session_incarnation=entry["session_incarnation"],
                 mapping_revision=entry["mapping_revision"], platform=self.epoch.platform,

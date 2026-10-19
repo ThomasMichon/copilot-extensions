@@ -18,6 +18,9 @@ class RecoveryEvidenceError(RuntimeError):
     """Recovery evidence is unavailable or incompatible; never assume it empty."""
 
 
+NATIVE_BINDING_PROOF = "inuse-hold-v1"
+
+
 def _text(value: object, name: str, limit: int = 4096) -> None:
     if (
         not isinstance(value, str) or not value or len(value) > limit
@@ -35,6 +38,7 @@ class PositiveEvidence:
     worktree_path: str
     native_session_id: str
     native_incarnation: str
+    binding_proof: str
     owner_revision: int
     session_incarnation: str
     mapping_revision: int
@@ -54,6 +58,8 @@ class PositiveEvidence:
             raise ValueError("Recovery evidence requires a canonical native UUID")
         if self.platform not in {"linux", "wsl", "windows"}:
             raise ValueError("Unknown recovery evidence platform")
+        if self.binding_proof != NATIVE_BINDING_PROOF:
+            raise ValueError("Unconfirmed native UUID/process binding proof")
         if type(self.mapping_revision) is not int or self.mapping_revision < 0:
             raise ValueError("Invalid recovery mapping revision")
         if type(self.owner_revision) is not int or self.owner_revision < 0:

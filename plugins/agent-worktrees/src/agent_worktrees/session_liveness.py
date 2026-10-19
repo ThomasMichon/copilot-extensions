@@ -9,14 +9,19 @@ without a process-identity probe is ``unknown``, never ``dead``.
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import platform
+import stat
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
-from . import sessions
+from . import locks, sessions
 
 Liveness = Literal["live", "dead", "unknown"]
+NATIVE_BINDING_PROOF = "inuse-hold-v1"
+_MAX_BINDING_DESCRIPTORS = 1024
 
 _ERROR_INVALID_PARAMETER = 87  # OpenProcess on a PID that doesn't exist
 
@@ -85,3 +90,59 @@ def session_liveness(session_id: str | None) -> Liveness:
         if state is None:
             unknown = True
     return "unknown" if unknown else "dead"
+
+
+def session_process_owns_hold(session_id: str, pid: int, start_time: str) -> bool:
+    """Strict positive UUID/process proof, not a replacement death detector.
+
+    Linux/WSL native Copilot holds ``inuse.<pid>.hold`` open for its session.
+    Match the actual open-file inode and process birth, not a stale pathname.
+    Unsupported, inaccessible or over-budget observations remain unconfirmed.
+    """
+    if (
+        not isinstance(session_id, str) or str(UUID(session_id)) != session_id
+        or type(pid) is not int or pid <= 0
+        or not isinstance(start_time, str) or not start_time
+    ):
+        raise ValueError("Invalid native session process identity")
+    if platform.system() != "Linux":
+        return False
+    try:
+        directory = sessions._session_state_dir() / session_id
+        if not stat.S_ISDIR(directory.lstat().st_mode):
+            return False
+        hold = directory / f"inuse.{pid}.hold"
+        expected = hold.lstat()
+        if not stat.S_ISREG(expected.st_mode) or locks.process_start_time(pid) != start_time:
+            return False
+        identity = (expected.st_dev, expected.st_ino)
+        with os.scandir(f"/proc/{pid}/fd") as descriptors:
+            for index, descriptor in enumerate(descriptors):
+                if index >= _MAX_BINDING_DESCRIPTORS:
+                    logging.getLogger(__name__).warning(
+                        "Native session ownership probe exceeded its descriptor budget."
+                    )
+                    return False
+                try:
+                    opened = descriptor.stat()
+                except FileNotFoundError:
+                    continue
+                if (opened.st_dev, opened.st_ino) != identity:
+                    continue
+                # DirEntry.stat caches: re-query the descriptor itself to fence
+                # closure/reuse while checking the native ownership pathname.
+                fresh_descriptor = os.stat(descriptor.path)
+                fresh_hold = hold.lstat()
+                return (
+                    stat.S_ISREG(fresh_hold.st_mode)
+                    and (fresh_descriptor.st_dev, fresh_descriptor.st_ino) == identity
+                    and (fresh_hold.st_dev, fresh_hold.st_ino) == identity
+                    and locks.process_start_time(pid) == start_time
+                )
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        logging.getLogger(__name__).warning(
+            "Native session ownership could not be corroborated: %s", exc,
+        )
+    return False

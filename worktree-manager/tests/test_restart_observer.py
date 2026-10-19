@@ -38,6 +38,7 @@ def owner_result():
         "schema": "native-hosting-evidence", "version": 1,
         "confirmed": True, "native_session_id": NATIVE_ID,
         "native_incarnation": "native:original", "owner_revision": 1,
+        "binding_proof": "inuse-hold-v1",
         "session_incarnation": "mux:1:100",
         "worktree_id": "worktree-one", "worktree_path": "/path/to/worktree-one",
         "mux_session": "wt-worktree-one",
@@ -133,6 +134,8 @@ def test_owner_live_mux_incarnation_must_match_registry(tmp_path, observer_modul
     {"version": True},
     {"native_incarnation": ""},
     {"owner_revision": True},
+    {"binding_proof": None},
+    {"binding_proof": "pid-name-only"},
     {"liveness": "unknown"},
 ])
 def test_malformed_or_foreign_owner_evidence_is_visible(

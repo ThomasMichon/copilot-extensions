@@ -233,6 +233,13 @@ The umbrella effort remains Active independently of this slice's completion.
   regression verifies report-only inspection preserves the files, then the
   lease-holding daemon recovers the last committed evidence before sampling
   resumes. Missing or incompatible databases are never recreated by this read.
+- The next review identified PID reuse before a probe: stable birth checks alone
+  could pair a stale conversation lock with another Copilot process. The owner
+  now corroborates the native UUID through its actual open per-session hold-file
+  inode, with birth and descriptor/path revalidation. Real held-file fixtures
+  cover the wrong-session process and a valid positive control; unavailable
+  proof stays unconfirmed. This adds no secondary session registry and leaves
+  conservative general liveness semantics unchanged.
 - Added report-only inspection and explicit unqualified-platform reporting.
   `automatic_eligible` remains false. The first source slice does not complete
   this plan: actual native notification/startup adapters, lifecycle producers,

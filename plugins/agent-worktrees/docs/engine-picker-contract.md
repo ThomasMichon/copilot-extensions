@@ -377,6 +377,12 @@ exact native UUID, native process birth identity, owner lifecycle revision,
 worktree path, native platform, head revision and live mux/pane/incarnation
 identity from the same binding observation. Dotted worktree ids are matched
 using their canonical encoded mux name, not a lossy reverse-decoded id.
+Positive Linux/WSL proof also matches the exact native session's open
+`inuse.<pid>.hold` inode to that process and revalidates its birth identity.
+`binding_proof: "inuse-hold-v1"` identifies this mandatory positive capability;
+stale PID lock names, unavailable descriptors and unsupported native ownership
+formats remain unconfirmed. Ordinary conservative liveness/death-detector
+semantics are unchanged.
 Missing, uncertain, foreign, superseded or hosted-provider evidence
 returns `confirmed: false` with a reason; unreadable owner state is a JSON error.
 The mode requires an exact worktree id and never infers the daemon caller's

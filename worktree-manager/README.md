@@ -415,6 +415,12 @@ process cannot retire its replacement. The engine
 corroborates the current native head, conversation data, process identity and mux
 binding over its normal process boundary; stale or uncertain evidence is not
 recorded as live. A detached live session remains observable.
+On Linux/WSL, positive UUID/process binding additionally requires the exact
+native session's `inuse.<pid>.hold` inode to be open in that birth-identified
+process. A stale PID-shaped filename is insufficient. The descriptor probe is
+bounded; missing, inaccessible or unsupported native ownership evidence stays
+unconfirmed, never a new verdict that the process is dead. The journal records
+the explicit `inuse-hold-v1` proof capability and rejects weaker metadata.
 The live mux incarnation is corroborated alongside the native process binding,
 not copied from a possibly stale display mapping. Mapping revisions order
 refreshes but are not execution identity: rejoining the same execution cannot

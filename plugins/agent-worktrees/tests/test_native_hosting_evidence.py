@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
+import sys
 from dataclasses import replace
 
 import pytest
@@ -12,6 +14,7 @@ from agent_worktrees import session_metadata_cli, tracking
 
 
 NATIVE_ID = "00000000-0000-4000-8000-000000000001"
+OTHER_NATIVE_ID = "00000000-0000-4000-8000-000000000002"
 
 
 @pytest.fixture
@@ -23,6 +26,10 @@ def owner():
 def native_record(sample_record, tmp_path, monkeypatch):
     from agent_worktrees import sessions
 
+    monkeypatch.setattr(
+        importlib.import_module("agent_worktrees.native_hosting_evidence"),
+        "session_process_owns_hold", lambda *_: True,
+    )
     monkeypatch.setattr(sessions, "mux_binding_for_session", lambda *_args, **_kwargs: {
         "worktree_id": sample_record.worktree_id,
         "session_name": sessions.mux_session_name(sample_record.worktree_id),
@@ -49,6 +56,7 @@ def test_confirmed_native_head_uses_owners_exact_identity(owner, native_record, 
     assert result["confirmed"] is True
     assert result["native_session_id"] == NATIVE_ID
     assert result["native_incarnation"] == "101:native:100"
+    assert result["binding_proof"] == "inuse-hold-v1"
     assert result["liveness"] == "live"
     assert result["worktree_path"] == native_record.worktree_path
     assert result["automatic_eligible"] is False
@@ -161,3 +169,46 @@ def test_dotted_worktree_identity_compares_encoded_mux_name(owner, native_record
     result = owner.observe(record.worktree_id, loader=lambda: record)
     assert result["confirmed"] is True
     assert result["worktree_id"] == "host.example-linux"
+
+
+@pytest.mark.parametrize("held_session,confirmed", [
+    (NATIVE_ID, True), (OTHER_NATIVE_ID, False),
+])
+def test_pid_reuse_before_probe_cannot_pair_head_with_another_session(
+    owner, native_record, tmp_path, monkeypatch, held_session, confirmed,
+):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Exact held-file ownership proof requires native Linux procfs")
+    from agent_worktrees import locks
+
+    liveness = importlib.import_module("agent_worktrees.session_liveness")
+    monkeypatch.setattr(owner, "session_process_owns_hold", liveness.session_process_owns_hold)
+    pid = os.getpid()
+    born = locks.process_start_time(pid)
+    assert born
+    state_root = tmp_path / "native-state"
+    old = state_root / NATIVE_ID
+    current = state_root / OTHER_NATIVE_ID
+    old.mkdir(parents=True)
+    current.mkdir()
+    (old / f"inuse.{pid}.lock").touch()
+    (old / f"inuse.{pid}.hold").touch()
+    (old / "events.jsonl").touch()
+    monkeypatch.setattr(owner.sessions, "_session_state_dir", lambda: state_root)
+    monkeypatch.setattr(owner.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(liveness, "copilot_pid_state", lambda candidate: candidate == pid)
+    monkeypatch.setattr(owner.sessions, "mux_binding_for_session", lambda *_args, **_kwargs: {
+        "worktree_id": native_record.worktree_id,
+        "session_name": owner.sessions.mux_session_name(native_record.worktree_id),
+        "pane_id": "%1", "copilot_pid": pid, "copilot_start_time": born,
+        "pane_start_time": "pane:100", "session_incarnation": "mux:1:100",
+    })
+    # Stale A pathnames alone cannot prove ownership when this incarnation holds B.
+    with (state_root / held_session / f"inuse.{pid}.hold").open("w"):
+        assert liveness.session_liveness(NATIVE_ID) == "live"
+        result = owner.observe(native_record.worktree_id, loader=lambda: native_record)
+    assert result["confirmed"] is confirmed
+    assert result["binding_proof"] == ("inuse-hold-v1" if confirmed else None)
+    if not confirmed:
+        assert result["reason"] == "native-session-process-unconfirmed"
+        assert result["liveness"] == "unknown"

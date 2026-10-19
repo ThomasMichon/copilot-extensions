@@ -8,7 +8,7 @@ from typing import Callable
 from uuid import UUID
 
 from . import config as cfg, sessions, tracking
-from .session_liveness import session_liveness
+from .session_liveness import NATIVE_BINDING_PROOF, session_liveness, session_process_owns_hold
 from .worktree_status_daemon import _is_safe_identity_token
 
 
@@ -22,6 +22,7 @@ def observe(
         "schema": "native-hosting-evidence", "version": 1,
         "worktree_id": worktree_id, "confirmed": False,
         "automatic_eligible": False, "liveness": "unknown",
+        "binding_proof": None,
     }
     record = loader()
     if record is None or record.worktree_id != worktree_id:
@@ -64,23 +65,28 @@ def observe(
             native_id, expected_session_name=sessions.mux_session_name(worktree_id),
             include_incarnation=True,
         )
+        if (
+            not binding or binding.get("session_name") != sessions.mux_session_name(worktree_id)
+            or not binding.get("copilot_start_time") or not binding.get("pane_start_time")
+            or not isinstance(binding.get("session_incarnation"), str)
+            or not binding["session_incarnation"]
+            or type(binding.get("copilot_pid")) is not int or binding["copilot_pid"] <= 0
+        ):
+            return {**result, "reason": "native-host-unconfirmed", "liveness": "unknown"}
+        if not session_process_owns_hold(
+            native_id, binding["copilot_pid"], binding["copilot_start_time"],
+        ):
+            return {**result, "reason": "native-session-process-unconfirmed", "liveness": "unknown"}
     current = loader()
     if current is None or dataclasses.asdict(current) != before:
         return {**result, "reason": "owner-changed"}
-    if state == "live" and (
-        not binding or binding.get("session_name") != sessions.mux_session_name(worktree_id)
-        or not binding.get("copilot_start_time") or not binding.get("pane_start_time")
-        or not isinstance(binding.get("session_incarnation"), str)
-        or not binding["session_incarnation"]
-        or type(binding.get("copilot_pid")) is not int or binding["copilot_pid"] <= 0
-    ):
-        return {**result, "reason": "native-host-unconfirmed", "liveness": state}
     if binding:
         result.update(
             mux_session=binding["session_name"], pane_id=binding["pane_id"],
             session_incarnation=binding["session_incarnation"],
             native_incarnation=f"{binding['copilot_pid']}:{binding['copilot_start_time']}",
             owner_revision=record.lifecycle_revision,
+            binding_proof=NATIVE_BINDING_PROOF,
         )
     return {
         **result, "liveness": state, "confirmed": state == "live",
