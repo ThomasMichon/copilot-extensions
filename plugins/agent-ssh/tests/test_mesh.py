@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -278,6 +280,27 @@ def test_strict_source_keeps_optional_null_transport_blocks(tmp_path: Path) -> N
     source.write_text("machines: {host-a: {ssh: null, dtssh: null}}\n", encoding="utf-8")
     mesh = mesh_mod.load_mesh(source, strict=True)
     assert [machine.key for machine in mesh.machines] == ["host-a"]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO regression")
+@pytest.mark.parametrize("via_symlink", [False, True])
+@pytest.mark.parametrize("command", ["mesh-status", "refresh-mesh"])
+def test_explicit_fifo_source_fails_without_blocking(
+    tmp_path: Path, via_symlink: bool, command: str,
+) -> None:
+    source = tmp_path / "machines.yaml"
+    os.mkfifo(source)
+    if via_symlink:
+        link = tmp_path / "linked.yaml"
+        link.symlink_to(source)
+        source = link
+
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_ssh", command, "--path", str(source), "--json"],
+        capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+    )
+    assert result.returncode == 1
+    assert "not a regular file" in result.stdout
 
 
 @pytest.mark.parametrize("json_output", [False, True])

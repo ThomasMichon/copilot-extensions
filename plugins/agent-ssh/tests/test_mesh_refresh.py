@@ -140,6 +140,11 @@ def test_refresh_mesh_absent_conventional_source_is_noop(monkeypatch) -> None:
     "machines: {host-a: {ssh: {environments: invalid}}}",
     "machines: {host-a: {ssh: {environments: ''}}}",
     "machines: {host-a: {ssh: {environments: 0}}}",
+    "machines: {host-a: {dtssh: {alias: []}}}",
+    "machines: {host-a: {dtssh: {alias: {}}}}",
+    "machines: {host-a: {dtssh: {alias: false}}}",
+    "machines: {host-a: {ssh: {environments: [{name: linux, alias: []}]}}}",
+    "machines: {host-a: {ssh: {environments: [{name: linux, alias: {}}]}}}",
 ])
 def test_refresh_mesh_invalid_source_does_not_actuate(
     tmp_path: Path, body: str,
@@ -168,6 +173,7 @@ def test_refresh_mesh_confirmed_empty_source_is_noop(tmp_path: Path) -> None:
 
 def test_refresh_mesh_unreadable_source_is_not_empty(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "machines.yaml"
+    path.write_text(SAMPLE, encoding="utf-8")
 
     def unreadable(_path, **_kwargs):
         raise PermissionError("source read denied")

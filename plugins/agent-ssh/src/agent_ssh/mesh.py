@@ -135,6 +135,8 @@ def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
     Legacy context consumers remain tolerant. CLI and mutating consumers use
     strict loading so an unavailable or malformed source cannot look empty.
     """
+    if strict and not stat.S_ISREG(path.stat().st_mode):
+        raise ValueError(f"machines.yaml source is not a regular file: {path}")
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -166,6 +168,9 @@ def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
             for block in ("ssh", "dtssh"):
                 if entry.get(block) is not None and not isinstance(entry[block], dict):
                     raise ValueError(f"machine '{key}' {block} at {path} must be a mapping")
+            dtssh_alias = (entry.get("dtssh") or {}).get("alias")
+            if dtssh_alias is not None and not isinstance(dtssh_alias, str):
+                raise ValueError(f"machine '{key}' dtssh alias at {path} must be a string")
             environments = (entry.get("ssh") or {}).get("environments", [])
             if environments is None:
                 environments = []
@@ -173,6 +178,10 @@ def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
                 not isinstance(environment, dict) for environment in environments
             ):
                 raise ValueError(f"machine '{key}' SSH environments at {path} must be mappings in a list")
+            for environment in environments:
+                alias = environment.get("alias")
+                if alias is not None and not isinstance(alias, str):
+                    raise ValueError(f"machine '{key}' SSH alias at {path} must be a string")
     return doc or {}
 
 
