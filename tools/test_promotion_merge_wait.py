@@ -352,6 +352,9 @@ def test_missing_write_authority_cannot_fall_back_to_ambient_auth(waiter, monkey
 ])
 def test_source_unit_provider_binding_cannot_drift(waiter, monkeypatch, endpoint, field, value):
     code, output = waiter
+    selected = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    if "source-units" not in selected["jobs"]:
+        pytest.skip("source-unit provider bindings do not apply to the selected legacy controller")
     assert "QUALIFICATION_UNIT_JOB" in code
 
     def run(argv, **kwargs):
