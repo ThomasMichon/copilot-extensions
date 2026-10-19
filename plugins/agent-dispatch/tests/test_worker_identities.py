@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from agent_dispatch.registrar import RegistrarError
-from agent_dispatch.worker_identities import _BUILTIN_DIR, load_worker_identity
+from agent_dispatch.worker_identities import (
+    _BUILTIN_DIR,
+    describe_worker_identity,
+    list_worker_identities,
+    load_worker_identity,
+)
 
 
 def test_builtin_identity_resolves():
@@ -130,3 +136,119 @@ def test_empty_body_raises(tmp_path: Path):
     )
     with pytest.raises(RegistrarError, match="body .the rules. must not be empty"):
         load_worker_identity("empty", cwd=tmp_path)
+
+
+def _write_identity(directory: Path, name: str, description: str, rules: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.identity.md"
+    path.write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n\n{rules}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _packaged_names() -> set[str]:
+    return {p.name[: -len(".identity.md")] for p in _BUILTIN_DIR.glob("*.identity.md")}
+
+
+@pytest.fixture
+def no_overlay(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+
+
+def test_list_packaged_only(tmp_path: Path, no_overlay):
+    entries = list_worker_identities(cwd=tmp_path)
+    assert [e.name for e in entries] == sorted(_packaged_names())
+    for entry in entries:
+        assert entry.source == "packaged"
+        assert entry.shadows == ()
+        assert entry.error is None
+        assert entry.identity is not None and entry.identity.description
+
+
+def test_list_repo_override_shadows_packaged(tmp_path: Path, no_overlay):
+    packaged = sorted(_packaged_names())[0]
+    local = _write_identity(
+        tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities",
+        packaged, "Repo override.", "Repo rules.",
+    )
+    entries = {e.name: e for e in list_worker_identities(cwd=tmp_path)}
+    entry = entries[packaged]
+    assert entry.source == "repository"
+    assert entry.path == str(local)
+    assert entry.identity.description == "Repo override."
+    assert [s for s, _ in entry.shadows] == ["packaged"]
+    # Parity with runtime resolution.
+    assert load_worker_identity(packaged, cwd=tmp_path).source_path == entry.path
+
+
+def test_list_legacy_dir_and_malformed_entry(tmp_path: Path, no_overlay):
+    _write_identity(tmp_path / ".agent-dispatch" / "identities", "legacy", "Legacy.", "Rules.")
+    broken_dir = tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities"
+    broken_dir.mkdir(parents=True)
+    (broken_dir / "broken.identity.md").write_text("no frontmatter", encoding="utf-8")
+    entries = {e.name: e for e in list_worker_identities(cwd=tmp_path)}
+    assert entries["legacy"].source == "legacy-repository"
+    assert entries["legacy"].identity.rules == "Rules."
+    assert entries["broken"].identity is None
+    assert "frontmatter" in entries["broken"].error
+
+
+def test_describe_returns_rules_and_provenance(tmp_path: Path, no_overlay):
+    _write_identity(tmp_path / ".agent-dispatch" / "identities", "custom", "Legacy one.", "Old rules.")
+    path = _write_identity(
+        tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities",
+        "custom", "Current one.", "New rules.",
+    )
+    data = describe_worker_identity("custom", cwd=tmp_path).to_dict(include_rules=True)
+    assert data == {
+        "name": "custom",
+        "description": "Current one.",
+        "source": "repository",
+        "path": str(path),
+        "shadows": [
+            {
+                "source": "legacy-repository",
+                "path": str(tmp_path / ".agent-dispatch" / "identities" / "custom.identity.md"),
+            }
+        ],
+        "error": None,
+        "rules": "New rules.",
+    }
+
+
+def test_cli_identities_list_and_show(tmp_path: Path, no_overlay, capsys):
+    from agent_dispatch.__main__ import main
+
+    _write_identity(
+        tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities",
+        "custom", "Custom.", "Custom rules.",
+    )
+    assert main(["identities", "list", "--repo-root", str(tmp_path)]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    names = [entry["name"] for entry in listed]
+    assert names == sorted(_packaged_names() | {"custom"})
+    assert set(listed[0]) == {"name", "description", "source", "path", "shadows", "error"}
+
+    assert main(["identities", "show", "custom", "--repo-root", str(tmp_path)]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["source"] == "repository"
+    assert shown["rules"] == "Custom rules."
+
+
+def test_cli_identities_show_unknown_name_fails(tmp_path: Path, no_overlay, capsys):
+    from agent_dispatch.__main__ import main
+
+    assert main(["identities", "show", "no-such-identity", "--repo-root", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "no identity file found" in captured.err
+
+
+def test_cli_identities_list_rejects_missing_repo_root(tmp_path: Path, capsys):
+    from agent_dispatch.__main__ import main
+
+    missing = tmp_path / "missing"
+    assert main(["identities", "list", "--repo-root", str(missing)]) == 2
+    assert "is not a directory" in capsys.readouterr().err

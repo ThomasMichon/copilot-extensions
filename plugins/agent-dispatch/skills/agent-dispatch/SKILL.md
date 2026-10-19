@@ -581,6 +581,12 @@ is derived from the recipe + params, so re-kicking the same target collides rath
 than forking. Use `--dry-run` to preview the create call. See the plugin README
 (**Recipes**) and `visions/plugins/agent-dispatch` (§*The recipe*).
 
+**Discover worker identities read-only.** `identities list [--repo-root PATH]`
+emits every effective named identity (`name`, `description`, `source` =
+`overlay|repository|legacy-repository|packaged`, `path`, `shadows`, `error`)
+resolved exactly as a declaration's `worker_identity` would; `identities show
+<name>` adds the full `rules` body and exits non-zero for an unknown name.
+
 **Route a kicked loop onto a supervisor pool with `--label`.** `kick` accepts a
 repeatable `--label` (merged after, and de-duplicated with, the recipe's own
 labels). This is how you feed a **standing, label-gated supervisor pool** instead

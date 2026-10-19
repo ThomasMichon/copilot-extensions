@@ -1,0 +1,9 @@
+{
+  "comment": "Add read-only 'identities list/show' CLI to discover worker identities with resolver-parity provenance",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

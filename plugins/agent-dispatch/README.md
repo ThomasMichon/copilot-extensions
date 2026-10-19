@@ -1434,6 +1434,20 @@ named `effort-driver` validates the repo's concrete archive-state evidence
 shape (for example which archive path, which merged-PR proof, and how the
 effort demonstrates its constituent issues are resolved or transferred).
 
+To discover the worker identities a declaration can select -- the packaged
+built-ins above plus any repository overrides -- use the read-only
+`identities` verbs. They resolve through the same tiers as `worker_identity`
+itself (marketplace overlay, repo-local, legacy repo-local, packaged), so the
+reported `source`/`path` is exactly what a declaration would load:
+
+```bash
+agent-dispatch identities list [--repo-root PATH]         # JSON: [{name, description, source, path, shadows, error}]
+agent-dispatch identities show <name> [--repo-root PATH]  # the same fields plus the full markdown `rules` body
+```
+
+See [`docs/repository-issue-loop-adoption.md`](docs/repository-issue-loop-adoption.md)
+§2 for the field meanings and the resolution order.
+
 **Adoption boundary and provider matrix.** The shipped recipe library gives a
 consumer the shared loop shape and lifecycle contract; it does not erase the
 remaining provider boundaries:

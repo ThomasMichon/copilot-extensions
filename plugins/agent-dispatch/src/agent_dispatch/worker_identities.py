@@ -20,6 +20,10 @@ Resolution order for a named identity (first hit wins):
    ``agent_dispatch/identities/<name>.identity.md`` -- included as package
    data so they resolve the same way from an editable checkout and an
    installed wheel/venv.
+
+``list_worker_identities`` and ``describe_worker_identity`` expose the same
+tiers read-only (backing ``agent-dispatch identities list|show``), so
+introspection reports exactly what a declaration would resolve.
 """
 
 from __future__ import annotations
@@ -104,21 +108,37 @@ def _parse_identity_file(path: Path) -> WorkerIdentity:
     )
 
 
-def _candidate_paths(name: str, *, cwd: Path | None = None) -> list[Path]:
-    filename = f"{name}.identity.md"
+SOURCE_OVERLAY = "overlay"
+SOURCE_REPOSITORY = "repository"
+SOURCE_LEGACY_REPOSITORY = "legacy-repository"
+SOURCE_PACKAGED = "packaged"
+_IDENTITY_SUFFIX = ".identity.md"
+
+
+def _candidate_tiers(*, cwd: Path | None = None) -> list[tuple[str, Path]]:
+    """The identity directories in resolution order (first hit wins).
+
+    The single source of precedence truth for both ``load_worker_identity``
+    and the read-only ``list_worker_identities`` introspection.
+    """
     base = cwd if cwd is not None else Path.cwd()
     overlay = repo_config.overlay_repo_surface_dir(base, "identities")
-    paths: list[Path] = []
+    tiers: list[tuple[str, Path]] = []
     if overlay is not None:
-        paths.append(overlay / filename)
-    paths.extend(
+        tiers.append((SOURCE_OVERLAY, overlay))
+    tiers.extend(
         [
-            base / _REPO_LOCAL_SUBDIR / filename,
-            base / _LEGACY_REPO_LOCAL_SUBDIR / filename,
-            _BUILTIN_DIR / filename,
+            (SOURCE_REPOSITORY, base / _REPO_LOCAL_SUBDIR),
+            (SOURCE_LEGACY_REPOSITORY, base / _LEGACY_REPO_LOCAL_SUBDIR),
+            (SOURCE_PACKAGED, _BUILTIN_DIR),
         ]
     )
-    return paths
+    return tiers
+
+
+def _candidate_paths(name: str, *, cwd: Path | None = None) -> list[Path]:
+    filename = f"{name}{_IDENTITY_SUFFIX}"
+    return [directory / filename for _, directory in _candidate_tiers(cwd=cwd)]
 
 
 def load_worker_identity(name: str, *, cwd: Path | None = None) -> WorkerIdentity:
@@ -135,4 +155,93 @@ def load_worker_identity(name: str, *, cwd: Path | None = None) -> WorkerIdentit
     raise RegistrarError(
         f"worker_identity {name!r}: no identity file found (looked for "
         f"{[str(p) for p in _candidate_paths(name, cwd=cwd)]})"
+    )
+
+
+@dataclass(frozen=True)
+class WorkerIdentityEntry:
+    """One effective identity as resolution would see it (read-only view).
+
+    ``name`` is the selector a declaration's ``worker_identity`` uses (the
+    file stem). ``shadows`` lists lower-precedence files of the same name that
+    the effective one overrides, as ``(source, path)`` pairs. ``identity`` is
+    ``None`` and ``error`` is set when the effective file is malformed.
+    """
+
+    name: str
+    source: str
+    path: str
+    shadows: tuple[tuple[str, str], ...]
+    identity: WorkerIdentity | None
+    error: str | None
+
+    def to_dict(self, *, include_rules: bool = False) -> dict:
+        out: dict = {
+            "name": self.name,
+            "description": self.identity.description if self.identity else None,
+            "source": self.source,
+            "path": self.path,
+            "shadows": [{"source": s, "path": p} for s, p in self.shadows],
+            "error": self.error,
+        }
+        if include_rules:
+            out["rules"] = self.identity.rules if self.identity else None
+        return out
+
+
+def _entry(name: str, hits: list[tuple[str, Path]]) -> WorkerIdentityEntry:
+    (source, path), rest = hits[0], hits[1:]
+    identity: WorkerIdentity | None = None
+    error: str | None = None
+    try:
+        identity = _parse_identity_file(path)
+    except (RegistrarError, OSError, UnicodeDecodeError) as exc:
+        error = str(exc)
+    return WorkerIdentityEntry(
+        name=name,
+        source=source,
+        path=str(path),
+        shadows=tuple((s, str(p)) for s, p in rest),
+        identity=identity,
+        error=error,
+    )
+
+
+def list_worker_identities(*, cwd: Path | None = None) -> list[WorkerIdentityEntry]:
+    """Every identity name resolvable from ``cwd``, each at its effective tier.
+
+    Uses the same tiers as ``load_worker_identity``, so the reported source
+    and path are exactly what a declaration selecting that name resolves.
+    A malformed effective file is reported via ``error`` rather than raising,
+    so one bad override does not hide the rest of the listing. Read-only.
+    """
+    hits: dict[str, list[tuple[str, Path]]] = {}
+    for source, directory in _candidate_tiers(cwd=cwd):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob(f"*{_IDENTITY_SUFFIX}")):
+            if path.is_file():
+                name = path.name[: -len(_IDENTITY_SUFFIX)]
+                hits.setdefault(name, []).append((source, path))
+    return [_entry(name, hits[name]) for name in sorted(hits)]
+
+
+def describe_worker_identity(name: str, *, cwd: Path | None = None) -> WorkerIdentityEntry:
+    """Resolve ``name`` exactly as ``load_worker_identity`` does, plus provenance.
+
+    Raises ``RegistrarError`` for an unknown or malformed identity.
+    """
+    identity = load_worker_identity(name, cwd=cwd)
+    hits = [
+        (source, directory / f"{name}{_IDENTITY_SUFFIX}")
+        for source, directory in _candidate_tiers(cwd=cwd)
+    ]
+    hits = [(source, path) for source, path in hits if path.is_file()]
+    return WorkerIdentityEntry(
+        name=name,
+        source=hits[0][0],
+        path=identity.source_path,
+        shadows=tuple((s, str(p)) for s, p in hits[1:]),
+        identity=identity,
+        error=None,
     )

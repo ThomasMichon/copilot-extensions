@@ -132,7 +132,8 @@ sub-agent. Resolution order (first hit wins), from
 2. The packaged built-in identities shipped inside this package
    (`agent_dispatch/identities/<name>.identity.md`).
 
-**Built-in library (tier 2) today:**
+**Built-in library (tier 2) today** (run `agent-dispatch identities list` for
+the complete current set, including the shared specializations' identities):
 
 - `repository-issue-loop-default` -- a generic identity that reads the target
   repository's own contribution docs, triages each eligible issue for scope
@@ -146,6 +147,23 @@ sub-agent. Resolution order (first hit wins), from
 Authoring your own repo-local identity means writing a new
 `<name>.identity.md` at the tier-1 path above -- no engine change is needed,
 and it takes effect the next time the declaration resolves `worker_identity`.
+
+To discover what a declaration in a given repository would resolve, use the
+read-only introspection verbs (JSON output; no coordinator required):
+
+```bash
+agent-dispatch identities list [--repo-root PATH]         # every effective identity
+agent-dispatch identities show <name> [--repo-root PATH]  # one identity + its full rules
+```
+
+`--repo-root` defaults to the current directory, matching runtime resolution.
+Each `list` entry is `{name, description, source, path, shadows, error}`,
+sorted by `name`: `source` is `overlay`, `repository`, `legacy-repository`, or
+`packaged`; `shadows` lists the lower-precedence `{source, path}` files of the
+same name the effective one overrides; `error` is a parse error for a
+malformed effective file (then `description` is `null`) and is otherwise
+`null`. `show` adds `rules` (the markdown body) and exits `2` for an unknown
+or malformed name.
 
 ## 3. Worked example: a new repository from scratch
 

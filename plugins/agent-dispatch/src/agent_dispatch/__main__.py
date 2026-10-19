@@ -952,6 +952,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_stop_coordinator)
 
     register_recipes_commands(sub)
+    from .identities_cli import register_identities_commands
+    register_identities_commands(sub)
 
     register_execution_commands(sub)
 
