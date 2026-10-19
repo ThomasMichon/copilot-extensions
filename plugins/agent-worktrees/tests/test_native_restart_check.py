@@ -201,7 +201,7 @@ policy = {
     "schema": "native-restart-task-policy", "version": 1, "task_id": "task-1",
     "repo": record.repo, "state": "started", "owner": record.machine + "/" + record.worktree_id,
     "owner_session_id": expected["native_session_id"], "generation": 7,
-    "awaiting_steer": False, "resume_requested": False, "hold_reason": None,
+    "awaiting_steer": False, "pending_steer": False, "resume_requested": False, "hold_reason": None,
     "hold_actor": None, "hold_at": None, "run_waiter": False, "task_qualified": True,
     "launch_authorized": False, "automatic_eligible": False, "reason": "current-task-matches",
 }
@@ -267,7 +267,7 @@ def task_policy(subject, monkeypatch):
         "schema": "native-restart-task-policy", "version": 1,
         "task_id": "task-1", "repo": record.repo, "state": "started",
         "owner": f"{record.machine}/{record.worktree_id}", "owner_session_id": NATIVE,
-        "generation": 7, "awaiting_steer": False, "resume_requested": False,
+        "generation": 7, "awaiting_steer": False, "pending_steer": False, "resume_requested": False,
         "hold_reason": None, "hold_actor": None, "hold_at": None, "run_waiter": False,
         "task_qualified": True, "launch_authorized": False, "automatic_eligible": False,
         "reason": "current-task-matches",
@@ -301,6 +301,7 @@ def test_current_task_binds_original_native_owner_without_granting_launch(task_p
     {"awaiting_steer": True}, {"resume_requested": True}, {"hold_reason": "hold"},
     {"hold_actor": "operator"}, {"hold_at": 1}, {"run_waiter": True},
     {"task_qualified": 1}, {"launch_authorized": True}, {"automatic_eligible": True},
+    {"pending_steer": True}, {"pending_steer": 0},
 ])
 def test_task_owner_or_policy_changes_refuse_even_if_provider_says_qualified(task_policy, change):
     owner, record, expected, policy, calls = task_policy
@@ -313,7 +314,7 @@ def test_task_owner_or_policy_changes_refuse_even_if_provider_says_qualified(tas
 
 @pytest.mark.parametrize("field", [
     "generation", "hold_reason", "hold_actor", "hold_at", "awaiting_steer", "run_waiter",
-    "launch_authorized", "automatic_eligible",
+    "launch_authorized", "automatic_eligible", "pending_steer",
 ])
 def test_incomplete_task_policy_never_qualifies(task_policy, field):
     owner, record, expected, policy, calls = task_policy

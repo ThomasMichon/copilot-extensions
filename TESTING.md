@@ -240,7 +240,12 @@ python tools/run_tests_in_devcontainer.py agent-dispatch agent-worktrees -k 'tes
 
 This lane covers the opt-in owner API's reduced SQLite snapshot, explicit
 writer/native owner/generation/hold/steer/waiter checks, old-coordinator and
-missing-field refusal, and unchanged default callback output. An actual CLI
+missing-field refusal, and unchanged default callback output.
+Submitting two steering instructions while `awaiting_steer` and
+`resume_requested` are false must block qualification; partial consumption
+keeps the blocker, and consuming the final entry restores only a provisional
+match. Missing or non-Boolean inbox evidence also refuses.
+An actual CLI
 child makes only the task-policy HTTP GET; another child reads persisted
 worktree YAML and invokes its registered callback process with the exact writer,
 opt-in flag and no-self-provision environment. These are disposable protocol

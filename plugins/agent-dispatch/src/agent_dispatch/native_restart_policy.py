@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 _FIELDS = {
     "repo", "owner", "owner_session_id", "generation", "awaiting_steer",
-    "resume_requested", "hold_reason", "hold_actor", "hold_at",
+    "resume_requested", "hold_reason", "hold_actor", "hold_at", "pending_steer",
 }
 
 
@@ -38,6 +38,10 @@ def read_snapshot(queue: TaskQueue, task_id: str) -> dict | None:
             (task_id,),
         ).fetchone()
         task["run_waiter"] = {} if waiter is not None else None
+        task["pending_steer"] = conn.execute(
+            "SELECT 1 FROM task_steer WHERE task_id = ? AND taken IS NOT 1 LIMIT 1",
+            (task_id,),
+        ).fetchone() is not None
         return snapshot(task, task_id=task_id)
     finally:
         conn.rollback()
@@ -72,6 +76,7 @@ def snapshot(task: object, *, task_id: str) -> dict:
         type(reduced["generation"]) is not int or not 1 <= reduced["generation"] <= 2**63 - 1
         or type(reduced["awaiting_steer"]) is not bool
         or type(reduced["resume_requested"]) is not bool
+        or type(reduced["pending_steer"]) is not bool
         or (
             reduced["hold_at"] is not None
             and (
@@ -95,6 +100,7 @@ def snapshot(task: object, *, task_id: str) -> dict:
         and isinstance(owner, str)
         and re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", owner) is not None
         and canonical_native and not reduced["awaiting_steer"] and not reduced["resume_requested"]
+        and not reduced["pending_steer"]
         and all(reduced[key] is None for key in ("hold_reason", "hold_actor", "hold_at"))
         and not reduced["run_waiter"]
     )

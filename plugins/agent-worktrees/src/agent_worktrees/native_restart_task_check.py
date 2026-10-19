@@ -8,6 +8,7 @@ from . import claim_providers, tracking
 _FIELDS = {
     "schema", "version", "task_id", "repo", "state", "owner", "owner_session_id", "generation",
     "awaiting_steer", "resume_requested", "hold_reason", "hold_actor", "hold_at", "run_waiter",
+    "pending_steer",
     "task_qualified", "launch_authorized", "automatic_eligible", "reason",
 }
 _NAMESPACES = {"dispatch-local-task", "dispatch-central-task"}
@@ -59,7 +60,8 @@ def check(record: tracking.WorktreeRecord, expected: dict) -> tuple[str | None, 
         or policy["state"] != "started"
         or type(policy["generation"]) is not int or not 1 <= policy["generation"] <= 2**63 - 1
         or any(policy[key] is not False for key in (
-            "awaiting_steer", "resume_requested", "run_waiter", "launch_authorized", "automatic_eligible",
+            "awaiting_steer", "pending_steer", "resume_requested", "run_waiter",
+            "launch_authorized", "automatic_eligible",
         ))
         or any(policy[key] is not None for key in ("hold_reason", "hold_actor", "hold_at"))
         or policy["task_qualified"] is not True or policy["reason"] != "current-task-matches"

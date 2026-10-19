@@ -721,3 +721,12 @@ The umbrella effort remains Active independently of this slice's completion.
   exact-head fenced native Resume, durable launch/outcome reconciliation,
   status-first seed acknowledgement, startup enrollment and notification timing
   remain owed. Automatic recovery remains blocked; no rollout is implied.
+- Provider review of #7280 found a real steering-inbox gap: answering a form
+  clears `awaiting_steer` even while submitted instructions remain unread.
+  The new regression failed first. The policy now reads unconsumed inbox
+  presence in the same SQL snapshot, requires explicit Boolean `pending_steer`
+  evidence at the worktree boundary, and refuses until the last instruction
+  is consumed; no steering content leaves the owner. The final disconnected
+  lane passed 365 dispatch and 198 owner tests; unchanged Manager source
+  retains its 16-test receipt. The fix still awaits a new exact-head verdict
+  and required CI; the full restoration gate remains open.

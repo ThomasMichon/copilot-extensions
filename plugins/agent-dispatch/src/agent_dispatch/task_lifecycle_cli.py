@@ -115,6 +115,7 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
                     or type(policy.get("version")) is not int or policy["version"] != 1
                     or policy.get("task_id") != args.task_id
                     or type(policy.get("task_qualified")) is not bool
+                    or policy["task_qualified"] and policy.get("pending_steer") is not False
                     or policy.get("launch_authorized") is not False
                     or policy.get("automatic_eligible") is not False
                 ):

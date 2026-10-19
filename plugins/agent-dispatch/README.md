@@ -549,6 +549,9 @@ hold/steer/resume/waiter fields. Only a started task with a canonical native
 owner, no hold, no pending steer/resume and no waiter can match. Missing,
 malformed or oversized fields refuse; task prompts and results are not returned.
 An older coordinator that ignores the opt-in query cannot satisfy the contract.
+`pending_steer` reports unconsumed inbox entries in that same SQL read snapshot:
+an answered form can clear `awaiting_steer` while its submitted instructions
+still block qualification. Partial consumption does not clear that blocker.
 
 This callback never starts a coordinator, probes/opens SSH failover, changes
 tasks or fetches credentials through configured token commands. It uses only

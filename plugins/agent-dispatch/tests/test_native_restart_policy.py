@@ -25,7 +25,7 @@ def task():
         "id": "task-1", "repo": "project", "status": "started", "owner": "machine/worktree",
         "owner_session_id": NATIVE, "generation": 7, "awaiting_steer": False,
         "resume_requested": False, "hold_reason": None, "hold_actor": None, "hold_at": None,
-        "run_waiter": None,
+        "run_waiter": None, "pending_steer": False,
     }
 
 
@@ -61,7 +61,7 @@ def test_explicit_policy_snapshot_is_bounded_and_not_launch_permission(monkeypat
         "schema": "native-restart-task-policy", "version": 1,
         "task_id": "task-1", "repo": "project", "state": "started",
         "owner": "machine/worktree", "owner_session_id": NATIVE, "generation": 7,
-        "awaiting_steer": False, "resume_requested": False,
+        "awaiting_steer": False, "pending_steer": False, "resume_requested": False,
         "hold_reason": None, "hold_actor": None, "hold_at": None, "run_waiter": False,
         "task_qualified": True, "launch_authorized": False, "automatic_eligible": False,
         "reason": "current-task-matches",
@@ -81,6 +81,7 @@ def test_explicit_policy_snapshot_is_bounded_and_not_launch_permission(monkeypat
     {"id": "different-task"}, {"hold_at": float("inf")}, {"hold_at": float("nan")},
     {"hold_at": 10**400}, {"hold_at": True},
     {"repo": "x" * 4097}, {"repo": "\u2603" * 4096},
+    {"pending_steer": True}, {"pending_steer": 0},
 ])
 def test_unqualified_current_task_never_grants_launch(monkeypatch, capsys, task, change):
     result = invoke(monkeypatch, capsys, {**task, **change})
@@ -90,7 +91,7 @@ def test_unqualified_current_task_never_grants_launch(monkeypatch, capsys, task,
 
 @pytest.mark.parametrize("field", [
     "owner_session_id", "generation", "awaiting_steer", "resume_requested",
-    "hold_reason", "hold_actor", "hold_at", "run_waiter", "repo",
+    "hold_reason", "hold_actor", "hold_at", "run_waiter", "repo", "pending_steer",
 ])
 def test_missing_fields_are_not_assumed_safe(monkeypatch, capsys, task, field):
     del task[field]
@@ -192,6 +193,34 @@ def test_actual_owner_hold_is_not_replaced_by_historical_provenance(owner_api):
     policy = client.get(f"/tasks/{task_id}?native_restart_policy=true").json()["native_restart_policy"]
     assert policy["task_qualified"] is False
     assert policy["hold_reason"] == "operator hold"
+
+
+def test_unconsumed_operator_steering_blocks_until_the_inbox_is_empty(owner_api):
+    client, queue, task_id = owner_api
+
+    def current():
+        return client.get(
+            f"/tasks/{task_id}?native_restart_policy=true",
+        ).json()["native_restart_policy"]
+
+    assert current()["task_qualified"] is True
+    for index in range(2):
+        queue.submit_steer(task_id, fields={"direction": f"check status {index}"})
+    task = queue.get(task_id)
+    assert task.status == "started"
+    assert task.awaiting_steer is False
+    assert task.resume_requested is False
+    pending = current()
+    assert pending["task_qualified"] is False
+    assert pending["pending_steer"] is True
+    assert "direction" not in json.dumps(pending)
+    queue.take_steer(task_id, "machine/worktree")
+    assert current()["task_qualified"] is False
+    queue.take_steer(task_id, "machine/worktree", all_pending=True)
+    consumed = current()
+    assert consumed["pending_steer"] is False
+    assert consumed["task_qualified"] is True
+    assert consumed["launch_authorized"] is False
 
 
 @pytest.mark.parametrize("state", ["active", "preparing"])

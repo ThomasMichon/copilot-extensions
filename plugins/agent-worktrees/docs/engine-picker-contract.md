@@ -423,6 +423,8 @@ retries without the opt-in. There is no default-writer inference.
 The versioned task snapshot must bind the exact task id, machine/worktree,
 project lane and original native UUID to a started, positive-generation task
 with no hold, steer, requested resume or active/preparing waiter.
+Both `awaiting_steer` and the required Boolean `pending_steer` must be false;
+an answered form with unread instructions is not an empty steering inbox.
 Optional `task_policies` retains the matching ref and reduced owner snapshot.
 Current generation is evidence for a future fence, not a generation reservation
 or proof of continuity with an earlier task incarnation.
