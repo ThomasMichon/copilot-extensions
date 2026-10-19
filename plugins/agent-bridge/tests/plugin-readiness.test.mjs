@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { observePluginReadiness } from "../extensions/agent-bridge/plugin-readiness.mjs";
 import { controlPlan, drainControls, drainInbox, InFlightMessages } from "../extensions/agent-bridge/delivery.mjs";
@@ -17,6 +17,42 @@ function fixture(t, rows = [{ name: "hooks-only", marketplace: "alias", enabled:
   } };
   return { cwd, request, session };
 }
+
+test("protocol-41 golden task is held until its declared native loadout registers", async (t) => {
+  const golden = JSON.parse(readFileSync(new URL(
+    "../contract/fixtures/http/current/startup-plugin-readiness-generation-41.json", import.meta.url,
+  ), "utf8"));
+  const f = fixture(t, []);
+  const queued = structuredClone(golden.queued_message);
+  const expected = queued.plugin_readiness;
+  expected.cwd = f.cwd;
+  expected.plugins[0].live_marketplace_root = f.cwd;
+  f.session.rpc.metadata.snapshot = async () => ({
+    sessionId: expected.expected_session_id, workingDirectory: f.cwd,
+  });
+  const sent = [], acknowledged = [];
+  f.session.send = async (options) => sent.push(options);
+  const dependencies = {
+    getJson: async () => ({ messages: [queued] }),
+    post: async (_method, _path, body) => acknowledged.push(body),
+    session: f.session, inFlight: new InFlightMessages(), pluginReadiness: true,
+  };
+  assert.deepEqual(await drainInbox(expected.expected_session_id, dependencies), []);
+  assert.deepEqual(sent, []);
+  assert.deepEqual(acknowledged, []);
+  const [name, marketplace] = expected.plugins[0].projected_source.split("@");
+  f.session.rpc.plugins.list = async () => ({ plugins: [{
+    name, marketplace, enabled: true, installed: true,
+    version: expected.plugins[0].version, installedFrom: f.cwd,
+  }] });
+  const observed = await observePluginReadiness(f.session, expected);
+  const { control_id: _controlId, ...nativeResult } = golden.readiness_response;
+  assert.deepEqual(observed, { ...nativeResult, cwd: f.cwd });
+  assert.deepEqual(await drainInbox(expected.expected_session_id, dependencies), [queued.id]);
+  assert.equal(sent.length, 1);
+  assert.ok(sent[0].prompt.includes(golden.request.body));
+  assert.deepEqual(acknowledged, [{ ids: [queued.id] }]);
+});
 
 for (const change of ["none", "disabled", "cwd"]) {
   test(`owned autopilot rechecks ${change} at application, not only admission`, async (t) => {

@@ -139,3 +139,12 @@ Legacy provider/mux seed forwarding is not silently rewritten by this feature.
 Those launch owners must carry typed ownership plus the compiled expectation and
 withhold their seed before claiming this startup gate. No opaque CLI flags are
 stripped and no additional launcher, profile or service is introduced.
+
+The integrated detached Codespace/container owners consume that compiled context
+and deliver owned seeds through the version-gated Bridge queue, not terminal
+input. Admission can be admitted, refused or unknown; unknown delivery retains
+the original operation, native identity and recovery ownership rather than
+stopping a possibly productive session. Pending container delivery journals are
+independent of disposable forwarding-keeper state. See
+[detached provider readiness](../../agent-codespaces/docs/detached-plugin-readiness.md)
+for retry, reconciliation and creation-receipt settlement.

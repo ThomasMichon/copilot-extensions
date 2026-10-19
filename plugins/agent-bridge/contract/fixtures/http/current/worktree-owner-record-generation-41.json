@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "2ecd9cff2436e7abab212023ae17307a7a7823d8",
+    "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
@@ -32,10 +32,5 @@
     "requires_roster_publication": false,
     "warms_inventory": false,
     "metadata_is_execution_admission": false
-  },
-  "reattested_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-40.json",
-    "sha256": "35fba64451766a681429df168a5f79b75f4a2e5519de675b3cb7e2cd519556fa",
-    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 41. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; the target vector separately covers the new selection and binding contract."
   }
 }

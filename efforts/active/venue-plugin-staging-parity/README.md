@@ -266,6 +266,25 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-19 - Admission ambiguity correction and contract evidence
+
+- Admission now distinguishes admitted, refused and unknown outcomes. An
+  identical operation retries against its original native session and input;
+  unknown admission retains the session, connection ownership and recovery
+  journal instead of stopping a session that may already be executing.
+- Pending container delivery journals survive replacement of disposable keeper
+  state, including replacement spawn failure and another worktree's release.
+  Creation receipts settle only after confirmed admission. Independent review
+  verified both named safety findings resolved; the coordinator independently
+  reran the 58 detached-container tests.
+- Protocol-41 evidence retains historical packets and capability floors, adds
+  typed readiness/task/mode and legacy-omission vectors, and records actual
+  committed source blobs. Focused contract/readiness consumers and the registry
+  checker's full regression suite passed. Extracted cohesive startup helpers
+  without widening module limits; the integrated Bridge guard suite passed
+  under the same Python generation used by CI. Publication, current-head
+  review, required CI and external-venue acceptance remain open.
+
 ### 2026-10-18 - Detached seed integration and admission ambiguity review
 
 - Detached Codespace/container owners now carry the writer-produced context,
