@@ -1,16 +1,6 @@
 name: Payload CWD contract
 
 on:
-  pull_request:
-    branches-ignore:
-      - dev
-    paths:
-      - "plugins/*/scripts/install.*"
-      - "plugins/*/scripts/init.*"
-      - "plugins/*/scripts/bootstrap-check.*"
-      - "libs/payload-invocation/**"
-      - "tools/test_payload_cwd_contract.py"
-      - ".github/workflows/payload-cwd-contract.yml"
   workflow_dispatch:
   schedule:
     - cron: "27 11 * * 3"
@@ -19,7 +9,14 @@ permissions:
   contents: read
 
 jobs:
+  routing-status:
+    name: Routing inventory only - no native validation evidence
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Payload CWD integration is unenrolled pending a hardened root-tools container route; portfolio issue 1303 owns it."
   linux:
+    name: Unenrolled Linux root-tools integration
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -28,19 +25,14 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Focused PR smoke
-        if: github.event_name == 'pull_request'
-        run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest &&
-          python -m pytest tools/test_payload_cwd_contract.py -q
-          -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or launch_survives"
       - name: Full contract matrix
-        if: github.event_name != 'pull_request'
         run: >-
           python tools/seasoned_uv.py --uv uv -- --system pytest &&
           python -m pytest tools/test_payload_cwd_contract.py -q
 
   windows:
+    name: Unenrolled native Windows integration
+    if: false
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -49,14 +41,7 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Focused PR smoke
-        if: github.event_name == 'pull_request'
-        run: >-
-          python tools/seasoned_uv.py --uv uv -- --system pytest &&
-          python -m pytest tools/test_payload_cwd_contract.py -q
-          -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
       - name: Full contract matrix
-        if: github.event_name != 'pull_request'
         run: >-
           python tools/seasoned_uv.py --uv uv -- --system pytest &&
           python -m pytest tools/test_payload_cwd_contract.py -q

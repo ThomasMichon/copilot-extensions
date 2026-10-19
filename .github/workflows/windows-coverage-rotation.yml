@@ -1,34 +1,15 @@
-# Fills a real coverage gap: every "full suite" CI job in this repo (the
-# per-PR `smoke` matrix in ci.yml, and the dev->main `full` promotion
-# matrix in validate-and-promote.yml -- itself a fixed 9-plugin list that
-# doesn't even include agent-machines/agent-index) runs on `ubuntu-latest`
-# only. Narrow windows-latest jobs exist (windows-hooks,
-# windows-python-artifact-builder, test-runner-windows,
-# bootstrap-killswitch-powershell-5-1), but none run a whole plugin's test
-# suite on Windows -- so a Windows-only regression can land and never be
-# caught by CI at all. Confirmed empirically (coverage-guided-ci effort,
-# Phase 3.5 follow-up, 2026-10-07): a Windows-only os.kill(pid, 0)
-# process-killing crash in agent-machines, and Windows MAX_PATH/PATH-
-# resolution issues in agent-ssh/agent-vault, were found only by a manual
-# local Windows full-matrix run -- no existing CI gate would ever have
-# caught any of them.
-#
-# Rather than duplicating every plugin's full suite on both OSes every run
-# (true 2x wall-clock cost, for near-zero marginal benefit on OS-agnostic
-# plugins -- and moot as a dollar-cost concern anyway, since this repo is
-# public and GitHub-hosted runners, including windows-latest, are free
-# regardless of OS on public repos), this runs a small, weighted, DAILY
-# ROTATING subset of plugins' full suites on windows-latest: see
-# tools/select_windows_rotation.py for the selection logic and the Tier
-# A/B rationale. Detection-only: a failure here files/updates a tracking
-# issue (same shape as module-health-watchdog.yml) rather than blocking
-# anything, since this is new, exploratory coverage -- the existing
-# Linux-side full matrix remains the actual promotion gate.
+# Detection-only periodic validation, never a promotion or required-PR gate.
+# Linux runs the nine displaced default full plugin suites through the canonical
+# hardened container wrapper. Windows execution is disabled until a native
+# container route is enrolled; a skipped job is not validation evidence.
+# Explicit-tier/environment-gated families are not implied exercised; see
+# the residual inventory at
+# tools/periodic-integration-inventory.json.
 #
 # The scheduled daily run always validates `dev`. A manual
 # `workflow_dispatch` may additionally target any other ref via its `ref`
-# input -- e.g. to get real hosted Windows full-suite evidence for a
-# specific PR branch's exact head before merge, without waiting for the
+# input -- e.g. to inspect Linux integration at an exact reviewed ref
+# without making that execution a required PR gate or waiting for the
 # next `dev` rotation. A manual run against a non-`dev` ref never files
 # the shared tracking issue (see the `report` job) -- that stays reserved
 # for genuine `dev`-rotation findings, not one-off PR validation noise.
@@ -36,9 +17,7 @@ name: Windows coverage rotation
 
 on:
   schedule:
-    # Once a day; this is additional coverage layered on top of the
-    # existing Linux-side full matrix, not a replacement for a tighter
-    # per-PR cadence.
+    # One existing daily event owns both the Linux portfolio and Windows rotation.
     - cron: "41 9 * * *"
   workflow_dispatch:
     inputs:
@@ -50,8 +29,8 @@ on:
         description: >-
           Branch/ref to validate (defaults to dev). Manual dispatch only --
           the scheduled daily rotation always runs against dev regardless
-          of this input. Use this to get real hosted Windows full-suite
-          evidence for a specific PR branch's exact head before merge.
+          of this input. Non-dev inspection supplies Linux evidence only;
+          native Windows execution remains unenrolled.
         required: false
         type: string
         default: dev
@@ -70,12 +49,10 @@ jobs:
     name: select today's rotation
     runs-on: ubuntu-latest
     # The scheduled daily rotation always targets dev (the active
-    # integration branch regressions should be caught on, mirroring
-    # validate-and-promote.yml's own choice of branch for its full
-    # matrix). A manual workflow_dispatch may instead target any ref via
-    # the `ref` input (default dev) -- e.g. to get real hosted Windows
-    # full-suite evidence for a specific PR branch's exact head, which
-    # this workflow's own validation history has relied on before.
+    # integration branch regressions should be caught on, independently
+    # of the release's unit-only portfolio). A manual dispatch may target a ref via
+    # the `ref` input (default dev) for Linux integration inspection.
+    # The retained Windows command is disabled, not a validation witness.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     outputs:
       plugins: ${{ steps.select.outputs.plugins }}
@@ -135,11 +112,22 @@ jobs:
           else
             python tools/select_windows_rotation.py --format github-output >> "$GITHUB_OUTPUT"
           fi
+      - name: Publish routing status, not validation or platform qualification
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### Periodic integration routing status (not qualification)'
+            echo '- Linux: canonical hardened-container route enrolled; execution outcomes and evidence belong to the per-plugin Linux jobs.'
+            echo '- Windows: UNAVAILABLE / container capacity unenrolled. The preserved hosted Windows job is disabled by a literal false condition.'
+            echo '- No Windows validation evidence is produced. Skipped Windows execution is not a pass; Linux success cannot qualify Windows or all platforms.'
+            echo '- Residual owners and unavailable/not-enrolled tiers: tools/periodic-integration-inventory.json. None is a promotion or required-PR dependency.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   test:
-    name: full (Windows) - ${{ matrix.plugin }}
+    name: Windows UNAVAILABLE - container capacity unenrolled - ${{ matrix.plugin }}
     needs: select
-    if: needs.select.outputs.plugins != '[]' && needs.select.outputs.plugins != ''
+    if: ${{ false }}
     runs-on: windows-latest
     timeout-minutes: 30
     strategy:
@@ -161,21 +149,125 @@ jobs:
       - name: Full suite - ${{ matrix.plugin }} (windows-latest)
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
 
+  linux-full:
+    name: full (Linux isolated) - ${{ matrix.plugin }}
+    needs: select
+    if: needs.select.outputs.sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - agent-bridge
+          - agent-codespaces
+          - agent-containers
+          - agent-dispatch
+          - agent-logger
+          - agent-mcp
+          - agent-ssh
+          - agent-vault
+          - agent-worktrees
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.select.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run default full suite in the canonical hardened container
+        id: full
+        shell: bash
+        env:
+          PLUGIN: ${{ matrix.plugin }}
+        run: |
+          directory="$RUNNER_TEMP/periodic-integration/$PLUGIN"
+          mkdir -p "$directory"
+          set +e
+          {
+            command -v docker &&
+            command -v devcontainer &&
+            docker info --format '{{.ServerVersion}}' &&
+            touch "$directory/wrapper-invoked" &&
+            python tools/run_tests_in_devcontainer.py "$PLUGIN"
+          } 2>&1 | tee "$directory/execution.log"
+          statuses=("${PIPESTATUS[@]}")
+          status=${statuses[0]}
+          if [ "$status" -eq 0 ] && [ "${statuses[1]}" -ne 0 ]; then
+            status=${statuses[1]}
+          fi
+          set -e
+          printf '%s\n' "$status" > "$directory/exit-code"
+          exit "$status"
+      - name: Record exact execution scope and outcome
+        if: always()
+        shell: bash
+        env:
+          PLUGIN: ${{ matrix.plugin }}
+          TESTED_SHA: ${{ needs.select.outputs.sha }}
+          EXECUTION_OUTCOME: ${{ steps.full.outcome }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          directory = Path(os.environ["RUNNER_TEMP"]) / "periodic-integration" / os.environ["PLUGIN"]
+          directory.mkdir(parents=True, exist_ok=True)
+          profile = Path(".devcontainer/test-isolation/devcontainer.json")
+          inventory = Path("tools/periodic-integration-inventory.json")
+          exit_code = directory / "exit-code"
+          record = {
+              "version": 1,
+              "plugin": os.environ["PLUGIN"],
+              "tested_sha": os.environ["TESTED_SHA"],
+              "platform": "linux",
+              "qualification_scope": "Linux default-full only; Windows execution unavailable and not validated",
+              "command": ["python", "tools/run_tests_in_devcontainer.py", os.environ["PLUGIN"]],
+              "outcome": os.environ["EXECUTION_OUTCOME"],
+              "exit_code": int(exit_code.read_text()) if exit_code.is_file() else None,
+              "wrapper_invoked": (directory / "wrapper-invoked").is_file(),
+              "declared_container_profile": str(profile),
+              "profile_sha256": hashlib.sha256(profile.read_bytes()).hexdigest() if profile.is_file() else None,
+              "inventory": str(inventory),
+              "inventory_sha256": hashlib.sha256(inventory.read_bytes()).hexdigest() if inventory.is_file() else None,
+              "scope": "default full plugin invocation; explicit-tier/environment-gated skips are not passes",
+              "failure_owner": "Test Portfolio Rationalization #1303",
+              "release_dependency": False,
+          }
+          if profile.is_file():
+              (directory / "container-profile.jsonc").write_bytes(profile.read_bytes())
+          if inventory.is_file():
+              (directory / "inventory.json").write_bytes(inventory.read_bytes())
+          (directory / "execution.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Retain full execution log and scope evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: periodic-linux-${{ matrix.plugin }}-${{ needs.select.outputs.sha }}
+          path: ${{ runner.temp }}/periodic-integration/${{ matrix.plugin }}/
+          if-no-files-found: error
+
   report:
-    name: file a tracking issue on failure
-    needs: [select, test]
+    name: track periodic failures, not platform qualification
+    needs: [select, test, linux-full]
     # Only a genuine `dev`-rotation failure (scheduled, or a manual
     # dispatch explicitly validating `dev`) files/updates the shared
     # tracking issue -- a manual dispatch validating some other PR
     # branch's candidate head is one-off evidence-gathering, not a signal
     # about `dev`'s own health, and must not pollute that issue.
-    if: always() && needs.test.result == 'failure' && needs.select.outputs.ref == 'dev'
+    if: always() && (needs.test.result == 'failure' || needs.linux-full.result == 'failure') && needs.select.outputs.ref == 'dev'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
     steps:
       - name: Ensure the tracking label exists
+        if: needs.test.result == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
@@ -184,6 +276,7 @@ jobs:
           --description "A plugin's full suite failed on windows-latest in the daily rotation"
           --force
       - name: File or update the tracking issue
+        if: needs.test.result == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -194,4 +287,27 @@ jobs:
             gh issue comment "$existing" --repo "${{ github.repository }}" --body "$body"
           else
             gh issue create --repo "${{ github.repository }}" --title "Windows coverage rotation: a plugin failed on windows-latest" --body "$body" --label windows-rotation-failure
+          fi
+      - name: Ensure the Linux periodic failure label exists
+        if: needs.linux-full.result == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh label create periodic-linux-integration-failure --repo "${{ github.repository }}"
+          --color B60205
+          --description "Detection-only Linux integration failure; portfolio owner #1303"
+          --force
+      - name: File or update the Linux portfolio tracking issue
+        if: needs.linux-full.result == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TESTED_SHA: ${{ needs.select.outputs.sha }}
+        run: |
+          existing=$(gh issue list --repo "${{ github.repository }}" --label periodic-linux-integration-failure --state open --json number --jq '.[0].number // empty')
+          body="The periodic default-full Linux container portfolio failed at $TESTED_SHA. Run and per-plugin execution artifacts: $RUN_URL. Failure owner: Test Portfolio Rationalization #1303; assign the affected plugin specialist during triage. This is not a promotion or required-PR gate. Windows execution is disabled pending container enrollment and supplies no validation evidence. Unprovided explicit-tier, native-platform and filesystem prerequisites remain tracked in tools/periodic-integration-inventory.json, not claimed as passes."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "${{ github.repository }}" --body "$body"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "Periodic Linux integration: plugin portfolio failure" --body "$body" --label periodic-linux-integration-failure
           fi
