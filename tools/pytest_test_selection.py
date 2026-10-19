@@ -1,4 +1,8 @@
-"""Apply an exact selection after collection, unioning guards and changed files."""
+"""Union exact nodes, guards and whole changed files after collection.
+
+A whole-file request covers every current item, including replacements for
+retired baseline node IDs. Missing nodes outside those files still fail closed.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,10 +30,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     except (OSError, ValueError) as error:
         raise pytest.UsageError(f"invalid exact test selection: {error}") from error
     available = {item.nodeid for item in items}
-    missing = set(selection.nodes) - available
+    files = set(selection.files)
+    missing = {
+        node for node in set(selection.nodes) - available
+        if node.split("::", 1)[0] not in files
+    }
     if missing:
         raise pytest.UsageError(selection_diagnostic("selected test nodes were not collected", missing))
-    files = set(selection.files)
     empty_files = files - {item.nodeid.split("::", 1)[0] for item in items}
     if empty_files:
         raise pytest.UsageError(selection_diagnostic("selected test files collected no tests", empty_files))

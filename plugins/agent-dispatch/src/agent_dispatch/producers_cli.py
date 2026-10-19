@@ -242,13 +242,17 @@ def _cmd_emitter(args: argparse.Namespace) -> int:
 
 def _cmd_webhook(args: argparse.Namespace) -> int:
     from .producers import webhook
+    from .client_authority import client_authority
 
     config = webhook.load_config(args.config) if args.config else {}
     if args.url:
         config["url"] = args.url
     if args.token:
         config["coordinator_token"] = args.token
-    webhook.serve(config, host=args.host, port=args.port)
+    kwargs = {}
+    if client_authority(args) != "legacy":
+        kwargs["client_factory"] = lambda: _client(args)
+    webhook.serve(config, host=args.host, port=args.port, **kwargs)
     return 0
 
 

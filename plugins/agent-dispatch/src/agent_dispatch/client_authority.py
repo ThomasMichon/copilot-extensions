@@ -6,7 +6,7 @@ import argparse
 import os
 from typing import Any, Literal
 
-from .client import DispatchError
+from .client_errors import DispatchError
 
 DefaultAuthority = Literal["legacy", "local", "central"]
 Authority = Literal["legacy", "local", "central", "pinned_url"]

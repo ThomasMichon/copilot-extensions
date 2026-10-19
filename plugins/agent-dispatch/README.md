@@ -2764,6 +2764,10 @@ for credentials, references, lifecycle and migration limits.
 The stdio MCP client uses the same authority and credential selection as the
 CLI. Attention action/page hints, ensured supervisor daemons, their registered
 lane/producer children and script workers preserve explicit target overrides.
+Reactive webhook producers, interactive worker seeds and detached waiters
+retain that selection too; waiter re-exec arguments never contain credentials.
+The Picker's board reads and live relay honor the same environment default and
+use the corresponding local or central bearer, without loading the full CLI.
 Strict-local script workers ignore an inherited remote `AGENT_DISPATCH_URL`;
 unconfigured legacy script routes retain their existing discovery behavior.
 

@@ -229,6 +229,75 @@ def test_script_route_distinguishes_legacy_from_strict_local(monkeypatch, route,
         assert client._http.headers["Authorization"].endswith("local-reader")
 
 
+@pytest.mark.parametrize("flags,selector,prefix", [
+    (["--local"], "--local", ""), ([], "--shared", "SHARED_"),
+])
+def test_detached_waiter_keeps_selected_writer_without_secrets_in_argv(
+    monkeypatch, flags, selector, prefix,
+):
+    from types import SimpleNamespace
+    from agent_dispatch import execution_cli, hibernation, procutil
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setenv("AGENT_DISPATCH_URL", "http://foreign:8787")
+    invocation = core.build_parser().parse_args([
+        *flags, "--token", "explicit-reader", "--control-token", "explicit-control",
+        "run", "--resume", "owned-worktree", "--", "owned-wait",
+    ])
+    monkeypatch.setattr(execution_cli, "_DETACHED_CLI_ARGS", invocation)
+    monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "owned-python")
+    observed = []
+    monkeypatch.setattr(
+        execution_cli.subprocess, "Popen",
+        lambda argv, **kwargs: observed.append((argv, kwargs)) or SimpleNamespace(pid=123),
+    )
+    spec = hibernation.RunSpec(command=("owned-wait",), resume_worktree="owned-worktree")
+    execution_cli._spawn_detached_waiter(spec)
+    argv, kwargs = observed[0]
+    assert argv[:5] == ["owned-python", "-m", "agent_dispatch", selector, "run"]
+    assert "explicit-reader" not in argv and "explicit-control" not in argv
+    assert kwargs["env"]["AGENT_DISPATCH_" + prefix + "TOKEN"] == "explicit-reader"
+    assert kwargs["env"]["AGENT_DISPATCH_" + prefix + "CONTROL_TOKEN"] == "explicit-control"
+
+
+@pytest.mark.parametrize("authority,url,token", [
+    ("central", "http://central:8787", "central-reader"),
+    ("local", "http://127.0.0.1:19847", "local-reader"),
+])
+def test_picker_board_and_relay_follow_the_same_environment_authority(
+    monkeypatch, authority, url, token,
+):
+    from agent_dispatch import board_cli, board_relay
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", authority)
+    monkeypatch.setenv("AGENT_DISPATCH_URL", "http://foreign:8787")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "http://central:8787")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "central-reader")
+    monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "local-reader")
+    assert board_cli._endpoint() == url
+    assert board_cli._token() == token
+    with board_relay._build_client(args()) as client:
+        assert client.base_url == url
+        assert client._http.headers["Authorization"].endswith(token)
+
+
+def test_central_picker_board_keeps_its_stdlib_only_cold_import(monkeypatch):
+    import subprocess
+    import sys
+    from agent_procutil import no_window_kwargs
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "http://central:8787")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "central-reader")
+    result = subprocess.run([
+        sys.executable, "-c",
+        "import sys;from agent_dispatch import board_cli;"
+        "assert board_cli._endpoint()=='http://central:8787';"
+        "assert board_cli._token()=='central-reader';assert 'httpx' not in sys.modules",
+    ], capture_output=True, text=True, timeout=10, **no_window_kwargs())
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("role", ["coordinator", "standby", "peeer", ""])
 def test_central_mode_local_server_cannot_promote_its_independent_database(tmp_path, monkeypatch, role):
     monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")

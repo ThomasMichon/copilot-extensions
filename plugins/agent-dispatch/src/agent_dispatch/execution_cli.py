@@ -110,23 +110,19 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     )
     env = dict(os.environ)
     cli_args = _DETACHED_CLI_ARGS
+    from .client_authority import client_authority, target_cli_args
+
+    target = cli_args if cli_args is not None else argparse.Namespace()
+    argv[3:3] = target_cli_args(target, credentials=False)
     if cli_args is not None:
-        if getattr(cli_args, "shared", False):
-            shared_url = os.environ.get("AGENT_DISPATCH_SHARED_URL")
-            if shared_url:
-                env["AGENT_DISPATCH_URL"] = shared_url
-            if os.environ.get("AGENT_DISPATCH_SHARED_TOKEN"):
-                env["AGENT_DISPATCH_TOKEN"] = os.environ["AGENT_DISPATCH_SHARED_TOKEN"]
-            if os.environ.get("AGENT_DISPATCH_SHARED_CONTROL_TOKEN"):
-                env["AGENT_DISPATCH_CONTROL_TOKEN"] = os.environ[
-                    "AGENT_DISPATCH_SHARED_CONTROL_TOKEN"
-                ]
-        elif getattr(cli_args, "url", None):
-            env["AGENT_DISPATCH_URL"] = str(cli_args.url)
+        authority = client_authority(cli_args)
         if getattr(cli_args, "token", None):
-            env["AGENT_DISPATCH_TOKEN"] = str(cli_args.token)
+            name = "SHARED_TOKEN" if authority == "central" else "TOKEN"
+            env["AGENT_DISPATCH_" + name] = str(cli_args.token)
         if getattr(cli_args, "control_token", None):
-            env["AGENT_DISPATCH_CONTROL_TOKEN"] = str(cli_args.control_token)
+            shared = authority == "central" or getattr(cli_args, "shared", False)
+            name = "SHARED_CONTROL_TOKEN" if shared else "CONTROL_TOKEN"
+            env["AGENT_DISPATCH_" + name] = str(cli_args.control_token)
     # NOT windowless_python()/detached_kwargs(): this waiter runs an
     # operator-supplied blocking ``<cmd>`` (spec.command) as its own child --
     # that inner command is itself usually a console-subsystem program (git,

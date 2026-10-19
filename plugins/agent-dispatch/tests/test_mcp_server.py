@@ -88,6 +88,45 @@ def test_stdio_cli_authority_reaches_real_coordinator(server_url, monkeypatch, f
     assert observed[0]["title"] == "stdio authority proof"
 
 
+@pytest.mark.parametrize("flags", [[], ["--local"]])
+def test_reactive_webhook_cli_uses_selected_real_writer(server_url, monkeypatch, flags):
+    from fastapi.testclient import TestClient
+    from agent_dispatch import __main__ as core, config
+    from agent_dispatch.producers import webhook
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", server_url)
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "central-reader")
+    monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "local-reader")
+    monkeypatch.setenv("AGENT_DISPATCH_URL", "http://127.0.0.1:1")
+    monkeypatch.setenv("AGENT_DISPATCH_NO_AUTOSTART", "1")
+    monkeypatch.setattr(config, "_routing_url", lambda: server_url)
+    observed = []
+
+    def serve(cfg, **kwargs):
+        factory = kwargs["client_factory"]
+        with factory() as selected:
+            assert selected.base_url == server_url
+            expected = "local-reader" if flags else "central-reader"
+            assert selected._http.headers["Authorization"].endswith(expected)
+        app = webhook.build_app(cfg, client_factory=factory)
+        response = TestClient(app).post("/webhook/pr", json={
+            "action": "closed", "number": 42,
+            "pull_request": {"number": 42, "title": "proof", "merged": True,
+                             "base": {"ref": "main"}},
+            "repository": {"clone_url": "https://example.com/acme/widget.git"},
+        })
+        assert response.status_code == 200, response.text
+        observed.append(response.json()["created"])
+
+    monkeypatch.setattr(webhook, "serve", serve)
+    invocation = core.build_parser().parse_args([*flags, "webhook"])
+    assert invocation.func(invocation) == 0
+    assert len(observed) == 1
+    with DispatchClient(server_url) as reader:
+        assert reader.get(observed[0]["id"])["origin_ref"] == "pr/42"
+
+
 def test_create_find_show(tools):
     t = tools.create(
         "do a thing",

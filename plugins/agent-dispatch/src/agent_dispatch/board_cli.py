@@ -71,6 +71,17 @@ def _local_machine() -> str | None:
 
 
 def _endpoint() -> str:
+    from .client_authority import default_authority
+    from .config import client_url, shared_url
+
+    authority = default_authority()
+    if authority == "central":
+        endpoint = shared_url()
+        if not endpoint:
+            raise RuntimeError("central task authority requires AGENT_DISPATCH_SHARED_URL")
+        return endpoint.rstrip("/")
+    if authority == "local":
+        return client_url(local=True).rstrip("/")
     explicit = os.environ.get("AGENT_DISPATCH_URL")
     if explicit:
         return explicit.rstrip("/")
@@ -102,6 +113,19 @@ def _endpoint() -> str:
         value = str(endpoint).rstrip("/")
         return value if "://" in value else f"http://{value}"
     raise RuntimeError("agent-dispatch coordinator endpoint is unavailable")
+
+
+def _token() -> str | None:
+    from .client_authority import default_authority
+    from .config import client_token, shared_token
+
+    authority = default_authority()
+    if authority == "central":
+        token = shared_token()
+        if not token:
+            raise RuntimeError("central task authority requires a shared coordinator bearer")
+        return token
+    return client_token() if authority == "local" else os.environ.get("AGENT_DISPATCH_TOKEN")
 
 
 def _group(task: dict) -> str:
@@ -348,7 +372,7 @@ def _relay_fetch(repo: str, worktree_id: str) -> dict | None:
         f"{endpoint}/worktree-status-relay?"
         f"{urllib.parse.urlencode({'repo': repo, 'worktree_id': worktree_id})}"
     )
-    token = os.environ.get("AGENT_DISPATCH_TOKEN")
+    token = _token()
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
@@ -381,7 +405,7 @@ def _relay_fetch_many(
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    token = os.environ.get("AGENT_DISPATCH_TOKEN")
+    token = _token()
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=5) as response:
@@ -583,10 +607,10 @@ def _fetch_raw_tasks_direct(
         query["label"] = args.label
     endpoint = endpoint or _endpoint()
     from .client_categories import require_endpoint_categories
-    require_endpoint_categories(endpoint)
+    require_endpoint_categories(endpoint, token=_token())
     url = f"{endpoint}/tasks?{urllib.parse.urlencode(query)}"
     request = urllib.request.Request(url)
-    token = os.environ.get("AGENT_DISPATCH_TOKEN")
+    token = _token()
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=3) as response:
@@ -609,7 +633,7 @@ def _fetch_run_waiters_direct(endpoint: str | None = None) -> dict[str, dict]:
     try:
         endpoint = endpoint or _RELAY_ENDPOINT or _endpoint()
         request = urllib.request.Request(f"{endpoint}/run-waiters")
-        token = os.environ.get("AGENT_DISPATCH_TOKEN")
+        token = _token()
         if token:
             request.add_header("Authorization", "******")
         with urllib.request.urlopen(request, timeout=3) as response:
@@ -880,10 +904,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         endpoint = _endpoint()
         from .client_categories import require_endpoint_categories
-        require_endpoint_categories(endpoint)
+        require_endpoint_categories(endpoint, token=_token())
         url = f"{endpoint}/tasks?{urllib.parse.urlencode(query)}"
         request = urllib.request.Request(url)
-        token = os.environ.get("AGENT_DISPATCH_TOKEN")
+        token = _token()
         if token:
             request.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(request, timeout=3) as response:

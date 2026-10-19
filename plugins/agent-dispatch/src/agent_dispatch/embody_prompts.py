@@ -157,6 +157,7 @@ def interactive_worker_prompt(
     task_id: str,
     *,
     status: str | None = None,
+    route: str = "",
 ) -> str:
     """Build the lightweight seed for Phase 1 item 3's interactive-embodiment
     transaction -- a CLI-backed session an OPERATOR watches/drives, not an
@@ -193,6 +194,7 @@ def interactive_worker_prompt(
     task.
     """
     status_note = f" (current status: `{status}`)" if status else ""
+    ad = "agent-dispatch" + validate_fleet_route(route)
     return (
         f"You are driving agent-dispatch task {task_id}{status_note} in this "
         f"worktree, with auto-approved access and SDK extensions enabled "
@@ -200,32 +202,32 @@ def interactive_worker_prompt(
         f"is interactive -- an operator may be watching or will check in -- "
         f"not an unattended autopilot worker: you are NOT a named worker "
         f"identity and this task was NOT assigned to you through a pool. "
-        f"Start by reading the task with `agent-dispatch show {task_id}` to see "
+        f"Start by reading the task with `{ad} show {task_id}` to see "
         f"its prompt/payload, phase, and any durable **goal**/**done_criteria** "
         f"plus accumulated **progress log**. If it carries a goal, RESUME from "
         f"the recorded progress rather than restarting. Work toward the task's "
-        f"next phase, reporting progress as you go with `agent-dispatch progress "
+        f"next phase, reporting progress as you go with `{ad} progress "
         f"{task_id} --phase <phase> --summary \"<one line>\"` at real "
         f"transitions (plan settled, implementation done, a PR opened, a "
         f"blocker hit). If you need the operator's input, do not just pause "
         f"and ask in this pane and leave it at that -- the operator may not "
         f"be attached to see it. First record the block with a tool call: "
-        f"`agent-dispatch card set {task_id} --title \"<question>\" "
+        f"`{ad} card set {task_id} --title \"<question>\" "
         f"--request-input <field>:<kind>` for a real decision, or at minimum "
-        f"`agent-dispatch progress {task_id} --blocker \"<question>\"`, so the "
+        f"`{ad} progress {task_id} --blocker \"<question>\"`, so the "
         f"task's own status tells the operator to come open this session "
         f"rather than relying on them noticing the pane. Only THEN pause and "
         f"wait for the operator's reply; that is expected, not an escape "
         f"hatch. The OPERATOR decides when this session wraps up, not a "
         f"done-criteria check alone. Whenever this session ends -- whether "
         f"you judge the goal met or the operator says to stop -- leave the "
-        f"task's recorded state honest before finishing: `agent-dispatch "
+        f"task's recorded state honest before finishing: `{ad} "
         f"complete {task_id} --result-ref <ref>` only if the goal is "
-        f"genuinely met; `agent-dispatch suspend {task_id} --reason \"<why>\"` "
+        f"genuinely met; `{ad} suspend {task_id} --reason \"<why>\"` "
         f"to pause and preserve this worktree/session identity for a later "
         f"resume (the default if you are simply pausing mid-work); or, only "
         f"if the task itself is a duplicate/obsolete/permanently blocked, "
-        f"`agent-dispatch abandon {task_id} --permit --reason \"<why>\"` "
+        f"`{ad} abandon {task_id} --permit --reason \"<why>\"` "
         f"(`--duplicate-of <ref>` when citing an existing task/PR/issue) to "
         f"retire it terminally rather than leaving it silently stalled. "
         f"Never keep working unattended after the session ends -- that is the "

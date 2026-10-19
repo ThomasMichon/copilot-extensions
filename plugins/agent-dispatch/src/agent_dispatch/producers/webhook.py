@@ -327,6 +327,13 @@ def build_app(
     issue_rules = cfg.get("issues") or []
 
     if client_factory is None:
+        from ..client_authority import default_authority
+        if default_authority() != "legacy":
+            import argparse
+            from ..loop_commands import _resolve_cli_module
+
+            client_factory = lambda: _resolve_cli_module()._client(argparse.Namespace())
+    if client_factory is None:
         _default_url = "http://127.0.0.1:9847"  # marketplace-isolation: allow legacy-compatibility
         coord_url = cfg.get("url") or os.environ.get("AGENT_DISPATCH_URL") or _default_url
         coord_token = cfg.get("coordinator_token") or os.environ.get("AGENT_DISPATCH_TOKEN")
@@ -578,8 +585,9 @@ def serve(
     *,
     host: str = "127.0.0.1",
     port: int = 9331,
+    client_factory: ClientFactory | None = None,
 ) -> None:
     """Bind and serve the webhook app (blocking)."""
     import uvicorn
 
-    uvicorn.run(build_app(config), host=host, port=port, log_level="info")
+    uvicorn.run(build_app(config, client_factory=client_factory), host=host, port=port, log_level="info")

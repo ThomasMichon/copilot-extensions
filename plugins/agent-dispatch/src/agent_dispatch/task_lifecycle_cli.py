@@ -289,6 +289,7 @@ def _cmd_embody_interactive(args: argparse.Namespace) -> int:
                 args.task_id,
                 machine=machine,
                 project=args.project,
+                route=_core()._spawn_route(args),
             )
         except InteractiveEmbodimentError as exc:
             print(f"agent-dispatch: {exc}", file=sys.stderr)

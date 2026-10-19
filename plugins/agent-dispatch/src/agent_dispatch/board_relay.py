@@ -34,7 +34,6 @@ call stack.
 
 from __future__ import annotations
 
-import os
 import queue
 import threading
 import time
@@ -161,7 +160,7 @@ def _build_client(args) -> DispatchClient:
     from . import board_cli
 
     endpoint = board_cli._endpoint()
-    token = os.environ.get("AGENT_DISPATCH_TOKEN")
+    token = board_cli._token()
     return DispatchClient(endpoint, token=token)
 
 
