@@ -3,7 +3,8 @@
 Parent: [Dev/Main Release Pipeline](README.md). Related portfolio:
 [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md).
 
-**Status:** policy amendment awaiting normal review; production remains paused.
+**Status:** policy reviewed and merged in #7255; unit-packet implementation in
+progress. Production remains paused.
 This governs the next recovery slice. It supersedes the earlier requirement to
 preserve full, generated, native and installation integration suites as
 promotion prerequisites.
@@ -54,10 +55,10 @@ private worktree paths and session locators are intentionally omitted.
 
 | ID | Priority | Issue / next action | State |
 |---|---|---|---|
-| PB-00 | P0 | Review the unit-only policy and supersede contradictory effort/vision gates. | This amendment |
+| PB-00 | P0 | Review the unit-only policy and supersede contradictory effort/vision gates. | Done: #7255 |
 | PB-13 | P0 | Rework or supersede the old full-corpus proposal; retain code, evidence and claims. | Existing proposal held as draft |
-| PB-01 | P0 | Inventory every gating job/step/test as `KEEP_UNIT`, `MOVE_PERIODIC` or `REMOVE_DUPLICATE`, with cost and owner. | Pending |
-| PB-03 | P0 | Establish the small positive unit manifest; exclude hidden integration and slow/unclassified cases. | Pending |
+| PB-01 | P0 | Inventory every gating job/step/test as `KEEP_UNIT`, `MOVE_PERIODIC` or `REMOVE_DUPLICATE`, with cost and owner. | Inventoried; closure edges identified |
+| PB-03 | P0 | Establish the small positive unit manifest; exclude hidden integration and slow/unclassified cases. | Extracting audited in-process starter |
 | PB-02 | P0 | Remove full/native/integration tasks and indirect dependency edges from promotion. | Pending |
 | PB-04 | P0 | Produce unit coverage once; verify every admitted file/chunk/node and outcome, with a distinct unit-profile identity. | Reusable correctness work preserved |
 | PB-05 | P0 | Replace general-purpose candidate CI admission with the compact exact unit-evidence contract and aggregate. | Pending |
@@ -128,7 +129,7 @@ not a new per-stage allowance or permission to exceed the overall limit.
 
 ## Validation and closure
 
-- [ ] Capture matches the operator's request without softening the exclusion
+- [x] Capture matches the operator's request without softening the exclusion
       of integration or the under-thirty-minute objective.
 - [ ] Every actual promotion test and transitive test dependency maps to an
       admitted unit; no real-Git, multi-process, native, service, installer,

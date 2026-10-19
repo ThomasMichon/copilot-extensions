@@ -42,7 +42,7 @@ when their only distinction is setup duplication or an implementation detail.
 |------|------|---------------|----------------|
 | T0 | Guard/static | schema, generated-file, manifest, AST, and repository invariants without importing runtime code | routine default |
 | T1 | Hermetic unit | in-process logic with memory or temporary-filesystem collaborators; no child process or network | routine default |
-| T2 | Contained component | subprocess, shell, executable-resolution, IPC, or service-boundary behavior inside runner-owned limits | default only after containment |
+| T2 | Contained component | subprocess, shell, executable-resolution, IPC, or service-boundary behavior inside runner-owned limits | periodic containers only; never required PR CI or promotion |
 | T3 | Clean room | install, bootstrap, provision, and assembled behavior on a disposable fresh system | explicit scenario |
 | T4 | End to end | real external provider or operator-supplied target | opt-in only |
 

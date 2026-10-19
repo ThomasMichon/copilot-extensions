@@ -1,0 +1,105 @@
+{
+  "schema": "copilot-extensions.periodic-integration-inventory",
+  "version": 1,
+  "workflow": ".github/workflows/windows-coverage-rotation.yml",
+  "events": ["schedule", "workflow_dispatch"],
+  "release_dependency": false,
+  "required_pr_dependency": false,
+  "failure_owner": {
+    "role": "Test Portfolio Rationalization maintainer",
+    "tracker": "#1303",
+    "plugin_assignment": "Affected plugin specialist assigned during failure triage"
+  },
+  "linux_default_full": {
+    "job": "linux-full",
+    "plugins": [
+      "agent-bridge",
+      "agent-codespaces",
+      "agent-containers",
+      "agent-dispatch",
+      "agent-logger",
+      "agent-mcp",
+      "agent-ssh",
+      "agent-vault",
+      "agent-worktrees"
+    ],
+    "source_identity": "select.outputs.sha",
+    "entrypoint": "tools/run_tests_in_devcontainer.py",
+    "container_profile": ".devcontainer/test-isolation/devcontainer.json",
+    "selection": "Default full plugin invocation; no guards-only, expression, or exact-node filtering",
+    "evidence": "Per-plugin execution.log and execution.json retained even on failure",
+    "failure_label": "periodic-linux-integration-failure",
+    "prerequisites": ["Existing Docker daemon", "Existing devcontainer CLI"],
+    "prerequisite_failure": "Fail and retain/report evidence; never install, skip or substitute a less isolated runner"
+  },
+  "existing_windows_rotation": {
+    "job": "test",
+    "status": "unavailable",
+    "execution_enabled": false,
+    "capacity": "unknown; native container route not enrolled",
+    "selector": "tools/select_windows_rotation.py",
+    "failure_label": "windows-rotation-failure",
+    "owner": "Windows platform specialist coordinated by portfolio #1303",
+    "scope": "Hosted Windows test commands retained but disabled by a literal false job condition. No Windows validation evidence is produced; skipped execution is not a pass and Linux success is not all-platform qualification."
+  },
+  "residuals": [
+    {
+      "id": "explicit-t3-t4",
+      "status": "not-enrolled",
+      "scope": "Explicit-tier and environment-gated cases are not implied exercised by default full runs",
+      "destination": "Existing dedicated periodic workflows or tools/clean-room scenario enrollment",
+      "owner": "Portfolio #1303 and the relevant plugin/scenario specialist"
+    },
+    {
+      "id": "network-installers",
+      "status": "not-enrolled",
+      "scope": "Cold first-use provisioning and installer cases requiring network during execution",
+      "destination": "Existing tools/clean-room/scenarios with separately approved feed/network declarations",
+      "owner": "Installer/scenario specialist coordinated by portfolio #1303"
+    },
+    {
+      "id": "windows-native-container",
+      "status": "unavailable",
+      "capacity": "unknown; no native Windows container enrollment supplied",
+      "scope": "Native Windows container, signature, OS-account and kernel/process behavior",
+      "destination": "Existing Windows lanes and tools/clean-room/run.ps1 Windows arm, subject to capacity verification",
+      "owner": "Windows platform specialist coordinated by portfolio #1303"
+    },
+    {
+      "id": "standalone-manager-chat",
+      "status": "not-enrolled",
+      "scope": "Standalone Worktree Manager/chat installed-runtime and platform acceptance",
+      "destination": "Existing standalone runner and tools/clean-room/scenarios/worktree-manager-bootstrap",
+      "owner": "Worktree Manager specialist coordinated by portfolio #1303"
+    },
+    {
+      "id": "root-tools-artifact-contracts",
+      "status": "not-enrolled",
+      "scope": "Root tools actual-Git artifact export, materialization, CRLF, archive and retry families",
+      "destination": "Periodic tools-corpus container enrollment; no generic target claimed by this plugin route",
+      "owner": "Release-tooling specialist coordinated by portfolio #1303"
+    },
+    {
+      "id": "dedicated-native-stress",
+      "status": "not-enrolled",
+      "scope": "PowerShell race opt-ins, exhaustive Node process races, ZDD native stress and native-account acceptance",
+      "destination": "Existing dedicated schedule/dispatch workflows; their container enrollment remains separate",
+      "owner": "Dispatch, Handoff, ZDD and native-account specialists coordinated by portfolio #1303"
+    },
+    {
+      "id": "non-ram-fixture-tier",
+      "status": "unavailable",
+      "scope": "Dedicated writable non-RAM negative-fixture tier is not supplied by the default read-only/tmpfs profile",
+      "destination": "Separately approved periodic filesystem tier",
+      "owner": "Agent Containers specialist coordinated by portfolio #1303",
+      "handling": "If encountered in the default full run, preserve the actual failure; do not exclude cases or claim a pass"
+    },
+    {
+      "id": "plugins-outside-nine",
+      "status": "not-enrolled",
+      "scope": "Plugins and independent library portfolios outside the explicitly listed Linux matrix",
+      "destination": "Existing rotation/dedicated workflows or later reviewed periodic enrollment",
+      "owner": "Portfolio #1303 and the relevant plugin/library specialist"
+    }
+  ]
+}

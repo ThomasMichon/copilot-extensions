@@ -26,6 +26,18 @@ The campaign starts with safety. No full-suite measurement or mutation campaign
 runs on a developer host until the runner owns and bounds every descendant
 process and other declared side effect.
 
+### Current release and PR boundary
+
+The reviewed [unit-only promotion burndown](../dev-branch-release-pipeline/promotion-burndown.md)
+governs required CI: positively admitted in-process units with coverage only.
+Tier labels, including contained T2, do not grant admission. Integration moves
+to periodic containers without waiting for full-corpus equivalence; its source
+and failure ownership remain here. `tools/periodic-integration-inventory.json`
+records the default Linux route and explicitly unenrolled native, explicit-tier
+and standalone residuals. Unavailable capacity supplies no passing evidence and
+is not a release dependency. The replacement tournament follows stable
+under-thirty-minute release operation, not the reverse.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -253,6 +265,19 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-19 - Accept periodic-container residual ownership
+
+Policy #7255 supersedes integration-as-required-CI and full-corpus equivalence
+as release prerequisites. The recovery implementation reuses the existing
+schedule/manual rotation for hardened default-full Linux plugin containers,
+with immutable source/log evidence and deduplicated failure ownership. Hosted
+Windows execution is quiesced until Windows containers are available; standalone
+and explicit-tier residuals remain named in the machine-readable inventory.
+This is routing and ownership, not a claim that those integrations passed.
+The release owner retains Source/Main control and timed release/resume; this
+portfolio retains periodic enrollment, failures and the later value-for-cost
+replacement tournament.
 
 ### 2026-08-28 — Kickoff
 

@@ -205,6 +205,30 @@ def validate_workflow(path: Path = WORKFLOW) -> list[str]:
     workflow, errors = _load(path)
     if workflow is None:
         return errors
+    ci_workflow, ci_errors = _load(path.parent / "ci.yml")
+    errors.extend(ci_errors)
+    ci_env = _mapping(ci_workflow.get("env")) if ci_workflow else None
+    if ci_env and ci_env.get("PROMOTION_UNIT_PROFILE") == "copilot-extensions.promotion-units/v1":
+        retired = {
+            "name": "Trusted CI periodic routing",
+            "on": {"workflow_dispatch": ""},
+            "permissions": {},
+            "jobs": {
+                "periodic-route": {
+                    "runs-on": "ubuntu-latest",
+                    "permissions": {},
+                    "steps": [{
+                        "name": "Identify the containerized integration destination",
+                        "run": 'echo "Integration runs in windows-coverage-rotation.yml; PR CI admits units only."',
+                    }],
+                },
+            },
+        }
+        if workflow != retired:
+            errors.append("unit-only CI must retire the self-hosted PR integration route")
+        errors.extend(_validate_no_other_runner_routes(path))
+        errors.extend(_validate_ci(path))
+        return errors
     if set(workflow) != {"name", "on", "concurrency", "permissions", "jobs"}:
         errors.append("workflow top-level keys do not match the reviewed contract")
     if workflow.get("name") != "Trusted self-hosted CI":
@@ -308,6 +332,12 @@ def validate_workflow(path: Path = WORKFLOW) -> list[str]:
         if not re.fullmatch(r"[0-9a-f]{40}", match.group(1)):
             errors.append("all actions must be pinned to full commit SHAs")
     errors.extend(_validate_no_other_runner_routes(path))
+    errors.extend(_validate_ci(path))
+    return errors
+
+
+def _validate_ci(path: Path) -> list[str]:
+    errors: list[str] = []
     ci_path = path.parent / "ci.yml"
     ci_workflow, ci_errors = _load(ci_path)
     errors.extend(ci_errors)
@@ -322,6 +352,14 @@ def validate_workflow(path: Path = WORKFLOW) -> list[str]:
         ):
             errors.append("ci.yml must exclude only main-base pull requests and include retarget edits")
         ci_jobs = _mapping(ci_workflow.get("jobs"))
+        unit_profile = _mapping(ci_workflow.get("env"))
+        unit_profile = (
+            unit_profile is not None
+            and unit_profile.get("PROMOTION_UNIT_PROFILE") == "copilot-extensions.promotion-units/v1"
+        )
+        expected_guard = "python tools/check-trusted-ci.py"
+        if not unit_profile:
+            expected_guard += " && python -m pytest -q tools/test_check_trusted_ci.py"
         guard_found = False
         if ci_jobs is not None:
             checks = _mapping(ci_jobs.get("checks"))
@@ -339,16 +377,46 @@ def validate_workflow(path: Path = WORKFLOW) -> list[str]:
                     if (
                         step.get("name") == "Trusted self-hosted CI contract"
                         and _normalized(step.get("run"))
-                        == (
-                            "python tools/check-trusted-ci.py && "
-                            "python -m pytest -q tools/test_check_trusted_ci.py"
-                        )
+                        == expected_guard
                         and "if" not in step
                         and "continue-on-error" not in step
                     ):
                         guard_found = True
         if not guard_found:
-            errors.append("ci.yml must invoke the ungated trusted CI guard and tests")
+            errors.append(
+                "ci.yml must invoke the ungated trusted CI guard"
+                + ("" if unit_profile else " and tests")
+            )
+        if unit_profile and ci_jobs is not None:
+            if set(ci_jobs) != {"checks", "unit-plan", "unit-tests", "pr-gate"}:
+                errors.append("unit-only CI must contain only guards, impact, units and aggregate")
+            units = _mapping(ci_jobs.get("unit-tests"))
+            if (
+                units is None or units.get("needs") != "unit-plan"
+                or units.get("if") != "needs.unit-plan.outputs.run == 'true'"
+                or units.get("runs-on") != "ubuntu-latest"
+                or units.get("timeout-minutes") != "5"
+                or "continue-on-error" in units
+            ):
+                errors.append("unit packet must have the reviewed conditional hosted five-minute job")
+            unit_steps = units.get("steps", []) if units else []
+            runner = [
+                step for step in unit_steps if isinstance(step, dict)
+                and step.get("run") == (
+                    'python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" '
+                    '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
+                )
+                and not any(key in step for key in ("if", "continue-on-error"))
+            ]
+            if len(runner) != 1:
+                errors.append("unit-only CI must execute the exact admitted packet once")
+            for job in ci_jobs.values():
+                if not isinstance(job, dict):
+                    continue
+                for step in job.get("steps", []):
+                    command = step.get("run", "") if isinstance(step, dict) else ""
+                    if re.search(r"(?:-m\s+pytest|node\s+--test|run-plugin-tests|run-standalone-tests)", command):
+                        errors.append("unit-only CI must not invoke a generic or integration test runner")
     return errors
 
 

@@ -1078,6 +1078,60 @@ proposal.
 
 ## Journal
 
+### 2026-10-19 - Positive unit packet and transitive gate inventory
+
+The unit-only policy merged normally in #7255. Inventoried the actual Main and
+Source CI/promotion declarations: four workflow records, 196 test or selector
+steps and 232 lexical command calls. No existing whole invocation was certified
+as unit-only: 194 mixed or unaudited steps default to periodic disposition and
+two duplicate steps are removed, without claiming every individual case in
+those suites is an integration test. Source-CI workflow conclusions, hard-coded
+candidate aggregate rows and independent nine-plugin baseline ingestion are
+transitive dependencies that must change with the visible job graph.
+
+Implemented a separate positive unit packet instead of selecting nodes from
+mixed test modules. Of 55 statically matched starter cells, 28 lifecycle,
+dispatch and coverage-selection cells have an eligible import closure. The
+other 27 artifact/source-identity/digest cells reach a native-loader import;
+they remain unenrolled rather than preloading native code outside the guard.
+Their original integration assertions remain preserved. With initial
+enrollment/phase/effect negatives, 72 eligible cells completed locally in
+0.512 seconds, each contributing production call coverage in the same pass.
+This is development evidence, not immutable hosted qualification.
+
+The integrated packet now contains 224 eligible parameter cells, including
+strict packet, provider, archive, receipt and CI-data negatives. Its actual
+one-pass output completed locally in 2.168 seconds: 672 passing phase records,
+27 admitted source files and 2,599,010 bytes of contextual coverage. The real
+packet verifier accepted that emitted output against the same source bytes.
+An earlier collector produced 18.8 MB of repeated per-function/class context
+expansions and correctly failed the sixteen-MiB input bound. Removed that
+redundancy from emission while retaining all file/line/context evidence; the
+bound was not raised.
+
+The dedicated runner executes one in-process pytest/coverage pass, binds source
+bytes and exact parameter nodes, excludes conftest/plugin-autoload selection,
+and rejects missing, unexpected, skipped or failing evidence. Native import
+closure is audited as part of enrollment, not excused by a unit-like test name.
+
+Main's inline `main source gate` does not call the legacy trusted-CI recipe
+validator; its literal guard-plus-pytest requirement belongs to CI's selfguard.
+The reviewed workflow migration can therefore replace that obsolete test
+recipe without weakening Main PR source admission or introducing an
+administrative bypass.
+
+Periodic integration reuses the existing schedule/manual rotation and hardened
+Linux wrapper rather than creating a second release controller. Windows-native,
+explicit-tier and standalone residual enrollment remains separately owned in
+the portfolio. Non-container Windows and root-tools execution is explicitly
+quiesced: skipped or unavailable work supplies no passing evidence and is not a
+new release dependency.
+
+This implementation is not activated qualification. Main remains paused; the
+next slice removes the old test edges, integrates the compact byte-equivalent
+unit receipt, lands the reviewed Source/Main control pair and measures the
+actual release through publication, merge and tag under thirty minutes.
+
 ### 2026-10-19 - Unit-only promotion burndown replaces full-corpus gating
 
 Captured the operator's new request verbatim in

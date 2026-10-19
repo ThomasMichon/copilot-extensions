@@ -1,0 +1,17 @@
+name: CI
+on:
+  pull_request:
+    branches-ignore: [main]
+    # Retargeting main -> dev emits edited, not synchronize.
+    types: [opened, reopened, synchronize, edited]
+permissions:
+  contents: read
+jobs:
+  checks:
+    name: guards + lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trusted self-hosted CI contract
+        run: >-
+          python tools/check-trusted-ci.py &&
+          python -m pytest -q tools/test_check_trusted_ci.py

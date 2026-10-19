@@ -339,6 +339,12 @@ the docs honest; run it before publishing doc changes.)
 
 ### Test Before PR Publication
 
+Required PR/promotion testing is unit-only with coverage; see `TESTING.md` and
+the reviewed `efforts/active/dev-branch-release-pipeline/promotion-burndown.md`.
+The on-demand integration recipes below are periodic-container development
+tools, not an additional required-PR or promotion gate. Do not restore actual
+Git, multi-process, native or installer suites as a smoke fallback.
+
 > **Full testing guide: `TESTING.md`** — the runner reference, the
 > lint/contract gates, and the **opt-in end-to-end smoke tests** (real-infra,
 > caller-supplied targets, skipped by default).
@@ -355,13 +361,13 @@ python tools/run-plugin-tests.py agent-worktrees --guards  # just the fast guard
 python tools/run-plugin-tests.py agent-worktrees -k picker  # filter
 ```
 
-Fast structural/contract checks are marked `@pytest.mark.guard` (marketplace +
+Legacy structural/contract checks are marked `@pytest.mark.guard` (marketplace +
 picker integrity: overlay-registry, palette, shipped-manifest contract, key
-canonicalization, F3 binding invariants) so `--guards` runs them in
-sub-second-per-plugin. Copilot review is non-blocking, so run the relevant suite
-yourself before publishing a plugin change.
+canonicalization, F3 binding invariants). That marker is not unit eligibility:
+required PR testing uses the positively admitted packet, not a whole marked
+suite. Retain real integration assertions in their periodic container lane.
 
-**Prefer the devcontainer-isolated runner for any pre-PR validation when
+**Use the devcontainer-isolated runner for periodic integration when
 available (Linux, Docker + the devcontainers CLI present)** — not just after
 a bug fix; any agent that genuinely has Docker + the devcontainers CLI
 should default to it over the bare runner:

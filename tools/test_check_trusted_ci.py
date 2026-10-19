@@ -19,11 +19,12 @@ SPEC.loader.exec_module(MODULE)
 
 
 def _workflow(tmp_path: Path, transform: Callable[[str], str]) -> Path:
-    text = MODULE.WORKFLOW.read_text(encoding="utf-8")
+    fixtures = Path(__file__).with_name("fixtures")
+    text = (fixtures / "trusted-ci-legacy.yml").read_text(encoding="utf-8")
     path = tmp_path / "trusted-ci.yml"
     path.write_text(transform(text), encoding="utf-8")
     (tmp_path / "ci.yml").write_text(
-        (MODULE.WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"),
+        (fixtures / "ci-legacy-trusted-guard.yml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     return path

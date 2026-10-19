@@ -1117,16 +1117,16 @@ enable `--strict` until the producing phases in #1096 have removed the baseline.
 
 ### Test Portfolio Discipline
 
-Treat required pull-request CI as a fast, change-scoped contract gate. Do not
-add exhaustive cross-products or repeated subprocess setup directly to that
-lane. Subprocess-heavy suites must provide a focused smoke lane selected by
-markers and path gating, with the complete portfolio retained in a scheduled or
-manually dispatched workflow. Prefer broad canonical implementation coverage
-plus representative adapter checks at real divergence seams; never pool the
-process boundaries that a concurrency or lifecycle test exists to verify.
+Required pull-request testing is impact-conditional, positively admitted
+in-process units with coverage. Promotion uses the same unit-only policy.
+Actual-Git, multi-process, native, installer, service and end-to-end integration
+belongs to periodic containers, not a smoke fallback or publication prerequisite.
+Unknown impact selects admitted units only; unknown test eligibility starts
+outside the gate.
 
-`TESTING.md` is the canonical source for the portfolio invariants, runner
-mechanics, and the current smoke/exhaustive split.
+`TESTING.md` owns the packet, evidence and periodic-routing mechanics. The
+[promotion burndown](efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
+owns the reviewed migration and under-thirty-minute release acceptance.
 
 ### Windows Background-Launch Review
 

@@ -110,6 +110,7 @@ def test_real_cli_writes_exact_digest_bytes_and_all_bound_workflow_outputs(
 ) -> None:
     receipt, output = tmp_path / "receipt.json", tmp_path / "output"
     assert qualification.main([
+        "--profile", "legacy-ci-v1",
         "--repository", "example/project", "--candidate-ref", REF, "--candidate-sha", SHA,
         "--dev-sha", DEV, "--main-before", MAIN, "--control-sha", MAIN, "--promotion-run", RUN,
         "--candidate-root", str(ROOT), "--dev-root", str(ROOT),

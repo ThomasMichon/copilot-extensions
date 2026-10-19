@@ -7,6 +7,51 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Unit-only promotion packet
+
+The reviewed [promotion burndown](efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
+supersedes the historical full-suite promotion requirement below. Source CI
+implements this packet; the active Main controller has not yet migrated.
+No local packet result means Main is qualified.
+
+`tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
+`tools/promotion-unit-manifest.json`, in one Python process with coverage.
+The packet lives in `tools/promotion_unit_tests/`, independent of mixed
+integration test modules and their conftests. The manifest binds source and
+test bytes, the expected parameter nodes, production coverage targets and a
+whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
+or phase rejects the result. The runner rejects process, network, native-loader,
+Git-storage, thread and sleep effects, including attempted effects caught by a
+test. Test writes are confined to synthetic temporary storage.
+
+Use the bounded test supervisor around:
+
+```text
+python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-evidence-directory>
+```
+
+The command requires the existing `pytest` and `coverage` test dependencies.
+It emits a profile-bound `unit-proof.json` and contextual `coverage.json` from
+that same execution. It neither starts general plugin suites nor widens
+selection on unknown inputs. Enrollment changes require review of the exact
+test/import/fixture closure and refreshed declared hashes; tier labels and
+test names alone do not establish eligibility. Real-Git, installer, native,
+multi-process and end-to-end cases remain source-preserved for periodic
+containerized validation, not fallback promotion tests.
+
+Coverage preserves file/line/context attribution directly from coverage.py.
+Redundant per-function/class expansions are intentionally omitted, not unit
+outcomes or line evidence. Packet verification retains the sixteen-MiB per-file
+bound and requires every admitted unit to contribute production call coverage.
+`promotion_unit_packet.py` verifies the actual three-file output; synthetic
+fixture success alone is not collector acceptance.
+
+The explicit `source-units-v2` candidate receipt reuses this execution only
+after immutable Dev/candidate byte equivalence and independent provider
+run/attempt/job/upload/archive checks. Main's metadata-only CI supplies no test
+proof. Historical `legacy-ci-v1` verification remains separate and is never an
+implicit fallback for missing unit evidence.
+
 ## Copilot Code Review setup staging
 
 The dedicated `copilot-code-review.yml` setup stays on literal `ubuntu-latest`
@@ -1304,21 +1349,20 @@ Environment setup failures are recorded per target without aborting later
 targets; genuine busy contention retains exit code 3. Junction detection is
 guarded for Python versions without `Path.is_junction`.
 
-The existing Linux/Windows runner-contract CI jobs are path-gated to runner
-sources, supporting libraries, tests, and their workflow/documentation. Required
-PR/push runs exclude the `runner_exhaustive` marker, retaining representative
-real-process contention, cleanup, missing-executable, and uv rebuild checks.
-The same jobs run every marked scenario on `workflow_dispatch`, with no
-additional matrix. `tools/test_environment_admission.py` is present in both
-platforms' selectors.
+The former Linux/Windows runner-contract and payload-CWD jobs no longer run
+in Source PR/push CI. Their real-process, actual-Git, uv rebuild and native
+assertions remain integration source, not eligible units. The standalone
+`payload-cwd-contract.yml` retains weekly/manual routing metadata, with its
+execution jobs explicitly disabled until a hardened root-tools/native container
+route is enrolled. A skipped job is not validation evidence.
 
-Those native jobs also host the existing focused payload-CWD smoke for relevant
-dev PRs. `tools/test_payload_cwd_ci_scope.py` proves their checked-in selectors
-and executes the actual changed-path Bash step against real Git fixtures,
-including invalid refs and unrelated base advances. The standalone
-`payload-cwd-contract.yml` retains non-dev PR coverage and its weekly/manual
-full matrix; this consolidation adds no job or check and leaves both native
-job budgets at five minutes.
+`windows-coverage-rotation.yml` reuses its existing schedule/manual entrypoints
+for all nine Linux plugin suites through `run_tests_in_devcontainer.py`, with
+immutable source selection, execution logs and named failure ownership.
+Its former hosted Windows execution is explicitly unavailable pending Windows
+container capacity. Linux success does not qualify Windows, explicit-tier
+families or other unenrolled residuals; `tools/periodic-integration-inventory.json`
+records those boundaries under portfolio issue #1303.
 
 Tests may declare `@pytest.mark.portfolio_tier("T0" ... "T4")` and repeatable
 `@pytest.mark.effect(...)` markers. The injected policy rejects effects that do

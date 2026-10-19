@@ -11,40 +11,26 @@ of — link here rather than restating any of it.
 
 ## Standalone PR job admission
 
-The existing CI discovery job runs `tools/ci_job_admission.py` against explicit
-PR base/head commits before allocating fleet's twelve partition runners and
-the standalone Manager/Dispatch/Chat runners. Shared libraries, repository tooling
-and workflow changes widen admission conservatively; unknown inputs run all
-four families. Missing/malformed Git evidence fails discovery instead of
-claiming an empty selection.
+Source CI now contains four jobs: operational `checks`, `unit-plan`,
+`unit-tests` and the fixed-name `PR gate (required check)`. The plan reads the
+actual PR base/head diff. Known narrative-only changes may skip testing; unknown,
+code or configuration impact runs only the positively admitted unit packet.
+It never falls back to standalone services, fleet, native or general plugin
+suites. The aggregate requires successful guards and impact admission, and
+actual unit success whenever selected.
 
-Manager also consumes engine sources and plugin-owned pivot data. Plugin changes
-therefore conservatively admit Manager; Dispatch plugin changes admit its
-standalone service too. This first slice does not assume those distribution
-boundaries isolate their source dependencies.
+Push CI performs source-policy admission without repeating promotion's unit
+execution. Manual CI runs the same admitted packet, not the old full portfolio.
+The retired self-hosted PR workflow is a manual routing pointer; payload-CWD
+native execution is explicitly unenrolled pending a container route.
 
-Chat source changes select separate, statically routed Linux and Windows jobs
-for the bounded conversation-core contracts. No dynamic runner route or policy
-exception is used. This does not qualify hosted transport or managed service lifecycle.
-Materialized-consumer qualification includes both Chat platforms when the
-validated standalone roster registers `services/chat`; the supported older
-roster remains usable without it. Each row runs the same bounded standalone
-recipe. Trusted Main-owned validator support must be delivered through the
-existing release owner's qualified tooling path before promoting the expanded
-roster; a Dev source merge alone does not activate that trusted support.
-
-An effort/document-only selection can skip those jobs without omitting the
-fixed `PR gate (required check)`. That aggregate requires successful discovery,
-validated boolean outputs and success from every selected standalone family;
-missing discovery or an unexpectedly skipped selected job fails.
-Non-PR push, full manual and promotion invocations retain their prior full
-standalone coverage, including manual runs where discovery deliberately skips.
-Required-context identity, cancellation controls, permissions and promotion
-gates are unchanged. This does not alter the other native/platform job lanes.
-
-See [the testing guide](../TESTING.md#the-turn-key-runner) for the contract
-selectors. A dev source merge does not activate governed main-owned control;
-its owner must review rollout and inspect actual job admission separately.
+See [the unit packet reference](../TESTING.md#unit-only-promotion-packet).
+The [reviewed burndown](../efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
+owns the migration and completion gate. Source CI implementation does not
+activate Main's separately reviewed controller: Main remains paused until the
+unit-reuse control is reviewed, qualified, published and resumed. Historical
+full-candidate descriptions below are not instructions to reactivate those
+integration gates.
 
 ## Python artifact-builder toolchain policy
 
@@ -804,7 +790,7 @@ rationale and any known limitations.
 **PR-related gating** (not all run on every PR — `ci.yml` runs on every
 PR except those targeting `main`; trusted review, lockdown, and source-attribution PR checks target `dev`,
 with source-attribution refreshes on `main` push/manual dispatch; the reminder
-targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
+targets only `main`; `trusted-ci.yml` is now manual routing metadata only):
 
 CI explicitly includes `edited` alongside the default PR activities so a
 main-to-dev retarget immediately creates the required contribution checks.
@@ -814,22 +800,19 @@ release-candidate invocation.
 
 Within each PR ref, a new head's `synchronize` event supersedes the older head's
 executing CI. Metadata-only edits still trigger CI, but do not cancel and
-restart an in-progress run. Standalone Index predicates deliberately preserve
-their prior non-PR `always()` semantics; the cancellation exclusion is PR-only.
-Cancelled PRs do not continue standalone Index jobs or allocate the final PR
-aggregate; an uncancelled dependency failure still reaches that required
-aggregate and reports failure. Dev pushes and manual qualification keep rolling
-queue semantics, so frequent contributions do not restart an executing release
-validation. This policy changes no required inventory for the current head.
+restart an in-progress run. Cancellation stops the compact unit path and its
+aggregate; an uncancelled dependency failure still reaches the aggregate and
+reports failure. Dev pushes retain rolling queue semantics, so frequent
+contributions do not restart an executing source-admission run.
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | `pull_request` (all bases except `main`), `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) and `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. The base-branch exclusion prevents the whole redundant main-PR invocation, not just its jobs; main/dev push and manual validation remain unchanged. |
+| `ci.yml` | `pull_request` (all bases except `main`), `push` (`main`/`dev`), `workflow_dispatch` | Operational source guards, impact-conditional admitted units with single-pass coverage, and the fixed-name required PR aggregate. Pushes do not duplicate promotion's unit execution; manual CI remains unit-only. |
 | `copilot-code-review.yml` | `workflow_dispatch`; official Copilot Code Review setup after default-branch publication | The `copilot-setup-steps` job preserves hosted review capacity with literal `ubuntu-latest`, with no checkout or dependency setup; Copilot supplies its own checkout afterward. It does not change the coding-agent fallback. The independently guarded `copilot-extensions-review` ARC role remains available only for an explicit reviewed route change, not additive overflow. A default-branch selector change requires an activation decision and an observed managed-review canary. |
 | `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, separate `source-attribution`, Maintainer-only review fallback, and synchronize-only departed-head refresh. Default-branch push/manual runs retain existing source refresh for open `dev` PRs; job-scoped permissions/concurrency preserve their boundaries. Source changes need qualified trusted-default delivery. No PR code executes. |
 | `source-attribution-departures.yml` | `pull_request_target` (`closed`, `edited`) | Trusted metadata-only refresh for closed dev PRs and retargets away from dev, without a new-base filter. Synchronize refresh shares the existing trusted Dev entrypoint. Publishes no required-context skipped jobs and never executes PR content. |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate`, the existing one-time retarget reminder, and identifier reporting for owner-authored PRs that pass admission. Gate permissions are contents-read only; any checkout is pinned trusted main, and PR commits are fetched only as Git data. No PR code executes. This replaces main-PR CI admission and post-CI scanning. |
-| `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
+| `trusted-ci.yml` | `workflow_dispatch` | Routing metadata only: the old self-hosted PR integration route is retired; hardened periodic Linux integration belongs to `windows-coverage-rotation.yml`. |
 
 The dedicated review setup is independently guarded: only its exact filename,
 official job identity, minimal permissions and setup step may select literal
@@ -875,7 +858,8 @@ already-merged PRs' branches):
 | `context-handoff-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | The real-git/child-process/lock-race exhaustive suite for `context-handoff`'s exhaustive test tree — deliberately its own workflow so its `schedule` trigger doesn't apply to the rest of `ci.yml`'s matrix. |
 | `crash-diagnostics-stress.yml` | `schedule` (daily), `workflow_dispatch` | Stress-tests `context-handoff` crash-diagnostics paths. |
 | `agent-dispatch-pwsh-race-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | Runs `agent-dispatch`'s multi-process `pwsh` mutex-race tests (self-skipped by default in `ci.yml`'s smoke lane) on both `ubuntu-latest` and `windows-latest` — deliberately its own workflow for the same reason as `context-handoff-exhaustive.yml`. |
-| `payload-cwd-contract.yml` | Path-filtered non-dev `pull_request`, `schedule` (weekly), `workflow_dispatch` | Proves installer/watchdog payload replaceability and HOME CWD on Linux and Windows. Relevant dev PRs run the identical platform smoke in CI's existing native runner jobs and required aggregate, avoiding one workflow and two check records; non-dev PRs retain this standalone smoke, and scheduled/manual runs retain the full inherited-staging-flag matrix. |
+| `payload-cwd-contract.yml` | `schedule` (weekly), `workflow_dispatch` | Routing inventory only until hardened root-tools/native containers are enrolled. Native commands are preserved but explicitly disabled; no PR tests or passing native-evidence claim. |
+| `windows-coverage-rotation.yml` | Existing daily `schedule`, `workflow_dispatch` | Immutable-source hardened Linux full-plugin containers, with logs and portfolio-owned failure tracking. Windows execution is explicitly unavailable pending container capacity; Linux success does not qualify other platforms or unenrolled tiers. |
 | `ci-failure-fix-attempt.lock.yml` | `issues: [labeled]`, `workflow_dispatch` | Generated agentic-workflow (`gh-aw` compiled) that reacts to a labeled CI-failure tracking issue; also manually dispatchable with inputs. |
 
 The release reporter checks the optional fixer's workflow state once before

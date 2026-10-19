@@ -354,6 +354,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--promotion-run")
     parser.add_argument("--candidate-root", type=Path)
     parser.add_argument("--qualification-receipt", type=Path)
+    parser.add_argument(
+        "--qualification-profile", choices=("legacy-ci-v1", "source-units-v2"), default="legacy-ci-v1",
+    )
+    parser.add_argument("--unit-packet-dir", type=Path)
+    parser.add_argument("--unit-manifest")
+    parser.add_argument("--dev-root", type=Path)
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args(argv)
@@ -368,6 +374,12 @@ def main(argv: list[str] | None = None) -> int:
         args.candidate_root, args.qualification_receipt,
     )):
         parser.error("publish-candidate requires candidate, source, base and qualification identities")
+    unit_inputs = (args.unit_packet_dir, args.unit_manifest, args.dev_root)
+    if args.qualification_profile == "source-units-v2":
+        if args.operation != "publish-candidate" or any(value is None for value in unit_inputs):
+            parser.error("source-units-v2 publication requires candidate publication, unit packet, manifest and Dev checkout")
+    elif any(value is not None for value in unit_inputs):
+        parser.error("legacy qualification cannot consume source-unit packet inputs")
     try:
         qualification_digest = None
         if args.operation == "publish-candidate":
@@ -375,12 +387,24 @@ def main(argv: list[str] | None = None) -> int:
                 raise PromotionArtifactError("candidate publication requires independent consumer read authority")
             from qualify_promotion_candidate import verify_receipt
 
-            receipt = json.loads(args.qualification_receipt.read_text(encoding="utf-8"))
+            if args.qualification_profile == "source-units-v2":
+                from promotion_unit_contract import decode_json
+
+                receipt = decode_json(args.qualification_receipt.read_bytes())
+            else:
+                receipt = json.loads(args.qualification_receipt.read_text(encoding="utf-8"))
+            unit_arguments = {}
+            if args.qualification_profile == "source-units-v2":
+                unit_arguments = {
+                    "dev_root": args.dev_root, "unit_packet_dir": args.unit_packet_dir,
+                    "unit_manifest": args.unit_manifest,
+                }
             qualification_digest = verify_receipt(
                 receipt, repository=args.repository, candidate_sha=args.candidate_commit,
                 dev_sha=args.dev_head, main_before=args.main_before,
                 control_sha=args.signer_digest, promotion_run=args.promotion_run,
                 candidate_root=args.candidate_root,
+                expected_profile=args.qualification_profile, **unit_arguments,
             )
         verify_attestations(
             args.directory, repository=args.repository, signer_digest=args.signer_digest,
