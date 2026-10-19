@@ -5133,18 +5133,6 @@ def test_yielded_attempt_does_not_end_bridge_when_identity_checkpoint_fails(
     assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
 
 
-def test_retired_cleanup_plan_retains_checkpointed_identity(client):
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, nudge=False)
-    state, payload = sup._retired_cleanup_plan({
-        "worktree": "wt-created",
-        "worktree_ownership": "created",
-        "conclusion_detail": json.dumps({"acp_session_id": "session-exact"}),
-    }, local_session_id="bridge-retired")
-    assert state == "pending"
-    assert payload["acp_session_id"] == "session-exact"
-    assert payload["session_end"]["session_id"] == "bridge-retired"
-
-
 def test_failed_attempt_cleanup_retries_after_body_release(q, client):
     task = q.create("work")
     reservation, _ = q.reserve_spawn(task.id)

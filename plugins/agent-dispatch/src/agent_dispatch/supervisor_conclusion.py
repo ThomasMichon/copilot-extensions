@@ -199,6 +199,74 @@ def _conclusion_retry_payload(reservation: dict) -> dict:
     return payload
 
 
+def _retired_cleanup_plan(
+    reservation: dict,
+    *,
+    local_session_id: str | None = None,
+    conclusion_session: str | None = None,
+    target_missing: bool = False,
+    cleanup_kind: str = "attempt",
+) -> tuple[str, dict]:
+    prior = _conclusion_retry_payload(reservation)
+    if conclusion_session is None:
+        conclusion_session = prior.get("acp_session_id")
+    if target_missing:
+        worktree_cleanup = {
+            "state": _CONCLUSION_COMPLETE,
+            "outcome": {
+                "action": "already-removed",
+                "reason": "recorded-target-directory-missing",
+            },
+        }
+    elif reservation.get("conclusion_state") in {
+        _CONCLUSION_COMPLETE,
+        _CONCLUSION_HELD,
+    }:
+        worktree_cleanup = {
+            "state": reservation.get("conclusion_state"),
+            "outcome": prior,
+        }
+    elif reservation.get("worktree_ownership") in {"targeted", "reused"}:
+        worktree_cleanup = {
+            "state": _CONCLUSION_COMPLETE,
+            "outcome": {
+                "action": "preserved",
+                "reason": f"{reservation.get('worktree_ownership')}-worktree",
+            },
+        }
+    elif reservation.get("worktree"):
+        worktree_cleanup = {"state": _CONCLUSION_PENDING}
+    else:
+        worktree_cleanup = {
+            "state": _CONCLUSION_COMPLETE,
+            "outcome": {
+                "action": "skipped",
+                "reason": "reservation-has-no-worktree",
+            },
+        }
+    payload: dict[str, object] = {
+        "action": "pending",
+        "reason": "retired-body-cleanup",
+        "cleanup_kind": cleanup_kind,
+        "worktree_cleanup": worktree_cleanup,
+    }
+    states = [worktree_cleanup["state"]]
+    if local_session_id is not None:
+        payload["session_end"] = {
+            "state": _CONCLUSION_PENDING,
+            "session_id": local_session_id,
+        }
+        states.append(_CONCLUSION_PENDING)
+    if conclusion_session:
+        payload["acp_session_id"] = conclusion_session
+    state = (
+        _CONCLUSION_PENDING
+        if _CONCLUSION_PENDING in states
+        else (_CONCLUSION_HELD if _CONCLUSION_HELD in states else _CONCLUSION_COMPLETE)
+    )
+    return state, payload
+
+
 def _conclusion_retry_meta(reservation: dict) -> tuple[int, float]:
     payload = _conclusion_retry_payload(reservation)
     try:

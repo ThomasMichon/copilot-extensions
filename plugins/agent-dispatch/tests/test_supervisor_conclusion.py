@@ -27,6 +27,7 @@ from agent_dispatch.supervisor_conclusion import (
     _conclusion_retry_payload,
     _conclusion_state,
     _hold_pending_cleanup,
+    _retired_cleanup_plan,
 )
 
 
@@ -202,6 +203,17 @@ def test_conclusion_retry_payload_defaults_for_malformed_json():
     assert _conclusion_retry_payload({}) == {}
 
 
+def test_retired_cleanup_plan_retains_checkpointed_identity():
+    state, payload = _retired_cleanup_plan({
+        "worktree": "wt-created",
+        "worktree_ownership": "created",
+        "conclusion_detail": json.dumps({"acp_session_id": "session-exact"}),
+    }, local_session_id="bridge-retired")
+    assert state == "pending"
+    assert payload["acp_session_id"] == "session-exact"
+    assert payload["session_end"]["session_id"] == "bridge-retired"
+
+
 def test_conclusion_retry_meta_reads_attempts_and_next_attempt_at():
     reservation = {"conclusion_detail": '{"attempts": 4, "next_attempt_at": 55}'}
     assert _conclusion_retry_meta(reservation) == (4, 55.0)
@@ -219,3 +231,4 @@ def test_supervisor_re_exposes_every_helper_as_a_static_method():
     assert Supervisor._bounded_cleanup_failure({}, attempts=0, now=0.0)[0] == "pending"
     assert Supervisor._bounded_component_failure({}, now=0.0)[0] == "pending"
     assert Supervisor._conclusion_retry_meta({}) == (0, 0.0)
+    assert Supervisor._retired_cleanup_plan({}) == _retired_cleanup_plan({})
