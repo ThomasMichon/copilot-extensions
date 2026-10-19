@@ -130,6 +130,25 @@ losing their target or confusing one subscriber's outcome with another's.
 This complements ordinary status queries and synchronous waits; it does not
 make a durable subscription service a prerequisite for every PR operation.
 
+### repository-declared-pr-requirements
+
+A related repository declares the PR features, review and discussion
+requirements, human-only completion gates and supplemental agent guidance its
+workflows need. The provider supplies authoritative native evidence through the
+same central PR operations. Persistent approval, approval after the latest
+source push, overlapping required reviewer sets and revision-bound discussion
+resolution remain separate facts rather than being flattened into a
+GitHub-shaped verdict or an exact-head approval assumption.
+
+Status and observation distinguish actionable feedback, running validation,
+dependent policies, human-only requirements and unavailable evidence. A policy
+that aggregates other requirements remains visible without being mistaken for
+an independent code failure. Agents can drive the actionable work and wait for
+external transitions through the existing observation owner; they never need a
+repository-specific polling program. Unknown evidence cannot establish that
+only human completion gates remain, and configuration cannot waive a native
+gate or grant authority to perform a human action.
+
 ### operator-authorized-pr-recovery
 
 An operator can deliberately recover an existing PR when historical worktree

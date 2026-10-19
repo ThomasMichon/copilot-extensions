@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [ADO PR Stewardship](active/ado-pr-stewardship/README.md) | Draft; centralized provider/configuration/observation proposal before implementation | #7203; preserves #7051/#6007/#6818 owners |
 | [Dispatch Extension Catalog](active/dispatch-extension-catalog/README.md) | Active; execution authorized, amended-plan review precedes templates, mapped sources and client semantic parity | #7091; preserves #6379/#4959/#6283 owners |
 | [Trusted Linux CI Offload](active/trusted-linux-ci-offload/README.md) | Active; pure existing-row backend selector/tests implemented; CI integration after #7164 and qualification/activation pending | #7122; preserves #6237/#3336/#1303 owners |
 | [Bridge Derived Execution Identity](active/bridge-derived-execution-identity/README.md) | Draft; reviewed derivation contract before implementation | #7069; preserves #6987/#5839/#7057 owners |
