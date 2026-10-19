@@ -40,6 +40,7 @@ class GitHubFixture:
             "ruleset_id": 42,
             "parameters": {
                 "require_code_owner_review": True,
+                "allowed_merge_methods": ["merge", "squash", "rebase"],
                 "required_approving_review_count": 1,
                 "required_review_thread_resolution": False,
                 "require_last_push_approval": False,
@@ -385,6 +386,9 @@ def test_review_exception_requires_complete_clean_codeowner_evidence():
     (lambda f: f.rules.__setitem__(1, {"type": "pull_request", "ruleset_id": 42,
                                       "parameters": {
                                           "require_code_owner_review": False,
+                                          "allowed_merge_methods": [
+                                              "merge", "squash", "rebase",
+                                          ],
                                           "required_approving_review_count": 0,
                                           "required_review_thread_resolution": False,
                                           "require_last_push_approval": False,
@@ -561,6 +565,20 @@ def test_required_deployment_prevents_admin_retry(monkeypatch):
     monkeypatch.setattr(github, "run_cli", fixture.invoke)
     result = github.GitHubProvider().merge_pull("owner/project", 7, admin=True)
     assert "required_deployments" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+def test_merge_method_restriction_prevents_admin_squash_retry(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.rules[1]["parameters"]["allowed_merge_methods"] = ["merge"]
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, squash=True, expected_head_sha=HEAD,
+    )
+    assert "does not allow squash merges" in result
     assert not any("--admin" in argv for argv in fixture.calls)
 
 

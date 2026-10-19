@@ -151,6 +151,7 @@ def merge_pull(
         review_evidence = review_exception_evidence(
             repo, number, host=host, expected_head_sha=expected_head_sha,
             hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
+            requested_merge_method="squash" if squash else "merge",
             invoke=invoke,
         )
         verified_merge_head(
@@ -174,6 +175,7 @@ def review_exception_evidence(
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
     host: str, expected_head_sha: str = "",
     hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
+    requested_merge_method: str = "squash",
 ) -> ReviewExceptionEvidence:
     """Prove the narrow missing-CODEOWNER-approval admin exception.
 
@@ -309,6 +311,17 @@ def review_exception_evidence(
                     f"additional unverified merge requirement is active: {kind or 'unknown'}"
                 )
             params = obj(rule.get("parameters"), "pull-request rule")
+            allowed_methods = params.get("allowed_merge_methods")
+            if (
+                not isinstance(allowed_methods, list)
+                or any(method not in ("merge", "squash", "rebase")
+                       for method in allowed_methods)
+            ):
+                raise ReviewSafetyError("allowed merge methods are incomplete or invalid")
+            if requested_merge_method not in allowed_methods:
+                raise ReviewExceptionIneligible(
+                    f"pull-request rule does not allow {requested_merge_method} merges"
+                )
             codeowner = params.get("require_code_owner_review")
             count = params.get("required_approving_review_count")
             threads = params.get("required_review_thread_resolution")
