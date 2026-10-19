@@ -116,6 +116,13 @@ bounds. Conversation waits do not starve health, ordinary posts or unrelated
 service routes. Durable overload is visible, not silently repaired by dropping
 unread history.
 
+### resident-cost-does-not-scale-with-recipients
+
+Existing host and service owners multiplex whole-session notification work.
+Adding agents or worktrees does not add persistent polling/helper workers.
+Extension callbacks remain bounded; an unavailable host capability is explicit,
+not a reason to weaken the service model.
+
 ### lifecycle-preserves-conversations
 
 Normal installation, update, cutover, rollback and removal preserve the

@@ -38,6 +38,9 @@ to reconcile with the existing standalone-system owners before code is moved.
   and command availability are not service or native-listening readiness.
 - Enabling static guidance must not silently enroll a fleet, fetch credentials,
   join a channel, install a hosted role or start a watcher.
+- The native adapter consumes the installed client's versioned, bounded
+  notification contract through its owning host/service seam. It does not
+  acquire credentials or reimplement transport, installation or service lifecycle.
 - Use existing immutable runtime/assembly and installation-cell ownership.
   Do not add an ambient PATH fallback, sibling-runtime import or copy of the
   generic installer. An explicitly adopted integrated product uses its declared
@@ -68,6 +71,12 @@ than a silently advanced cursor.
 
 ## Notification progress is not reading
 
+Whole-session notification work is multiplexed by existing host/service owners,
+not a persistent polling/helper process per recipient. Extension callbacks
+register or consume bounded work and return. A missing supported multiplexing
+seam is a named host/service dependency, not permission to start another
+per-session worker or weaken the parent service-process invariant.
+
 A body-free discovery/scan feed reports conversation identity, eligible
 channels and returned-only high-water positions. It does not advance semantic
 cursors or certify that a model saw a body. Epoch changes and unavailable
@@ -96,7 +105,10 @@ Do not claim exactly-once display or unconditionally reinject full history.
 First qualify the normally selected published plugin's effective enablement,
 host discovery and actual foreground attachment. A task-time command catalog
 from another source does not establish any of those states. Retained authoring
-work and unrelated healthy activations must remain unchanged.
+work and unrelated healthy activations must remain unchanged. Whole-overlay
+projection or process-wide restart is a changed scope, not selective hot-load.
+Status distinguishes attached, listening, disconnected, muted, unsupported and
+uncertain rather than reducing all of them to an enabled flag.
 
 The native host is the authority for extension membership. A host-only scoped
 reconciliation primitive may be used only through its supported host path.
@@ -108,6 +120,8 @@ Explicit subscription intent establishes the channels/selectors and lifetime.
 Resolve actual foreground/workspace identity and the rightful current head;
 do not substitute the extension process's working directory or invent an
 identity from an event. Record the pending delivery nonce before enqueue.
+Retain one pending aggregate and at most one admitted wake per recipient,
+with its generation, exact correlation and positive admission receipt.
 
 Positive enqueue/admission is not completion. Correlate the actual native run
 through the host's supported primary-origin mapping. Busy, batched, steered or
@@ -119,7 +133,9 @@ abort unrelated work or fabricate an acknowledgement.
 Mute/unsubscribe before leave. Fence changed foreground/head, session
 succession and restarted attachments against stale sends. Pending data and
 uncertain effects retain their original attribution until a supported recovery
-or accepted ownership transition resolves them.
+or accepted ownership transition resolves them. Quiesce new delivery during
+teardown, preserve unresolved generations and disclose already-admitted late
+hints; muting does not retrospectively retract an accepted native message.
 
 Bounded installed waits remain a useful manual fallback, not native listening
 proof. A quiet timeout never creates a recurring AI wake/rearm loop.

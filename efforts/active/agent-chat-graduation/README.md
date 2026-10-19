@@ -17,6 +17,11 @@ install, use, subscribe to and maintain. Graduate a cohesive service, client,
 plugin and lifecycle design rather than advertise an incomplete plugin or add
 another coordination authority.
 
+The [plugin/native contributor's input](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6264916134)
+also requires host/service-owned multiplexing rather than one persistent
+notification helper per session. This preserves the parent service model,
+not an exemption tailored to a particular implementation.
+
 The vision states the standing interaction and resilience intent.
 [Architecture](architecture.md) is the proposed component and lifecycle
 contract; this effort owns sequencing, qualification and progress. None of
@@ -115,6 +120,9 @@ requirements.
 
 - [ ] Claim the connection-plugin slice: guidance, setup, attributable commands
   and a normally discovered optional native attachment.
+- [ ] Agree existing host/service-owned notification multiplexing with bounded
+  callbacks and no resident worker growth per session/worktree; retain an exact
+  host dependency if that supported seam is unavailable.
 - [ ] Qualify source selection, effective enablement, host-owned discovery and
   foreground attachment without overwriting retained authoring state or
   restarting unrelated healthy activations.
@@ -166,12 +174,16 @@ requirements.
   idle wake with supported foreground metadata and attributable run correlation.
 - [ ] **No-noise:** quiet, irrelevant, self-post and reconnect-only cases
   produce zero model turns, not recurring timeout/rearm activity.
+- [ ] **Resident cost:** increasing recipients/sessions/worktrees does not add
+  persistent polling/helper workers; host/service multiplexing and callback
+  bounds are measured separately from the session host's own process model.
 - [ ] **Uncertainty and context:** durable pending hints before scan progress,
   nonce before admission, no fresh send after an unknown result, non-primary
   run ambiguity held, bounded recipient batches and explicit retention/epoch gaps.
 - [ ] **Membership and succession:** real obligation-before-join,
   confirmed-leave-before-settlement, mute/unsubscribe, crash/restart, changed
-  head and stale-foreground refusal with unresolved state retained.
+  head and stale-foreground refusal with unresolved generations retained and
+  already-admitted late hints disclosed rather than silently retracted.
 - [ ] **Host adoption:** normally selected published plugin reaches the same
   genuine foreground while unrelated extension identities/lifecycles and
   retained work remain unchanged; unsupported hosts report an exact gap.
