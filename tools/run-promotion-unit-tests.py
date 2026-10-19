@@ -88,6 +88,7 @@ def main() -> int:
         with (
             patch.object(tempfile, "tempdir", temporary),
             patch.object(sys, "pycache_prefix", temporary),
+            patch.object(os, "open", run.guarded_open),
             patch.object(threading.Thread, "start", lambda *_a, **_k: run.refuse("thread start")),
             patch.object(_thread, "start_new_thread", lambda *_a, **_k: run.refuse("thread start")),
             patch.object(time, "sleep", lambda *_a, **_k: run.refuse("sleep")),

@@ -25,6 +25,8 @@ class UnitRun(CoveragePlugin):
         self.active = False
         self.call_code = None
         self.call_node = None
+        self._os_open = os.open
+        self._open_paths: list[tuple[str, Path]] = []
 
     def refuse(self, effect: str) -> None:
         self.effects.append(effect)
@@ -43,6 +45,17 @@ class UnitRun(CoveragePlugin):
                 self.refuse("unavailable directory-relative mutation identity")
             path = directory / path
         return path.resolve()
+
+    def guarded_open(self, name, flags, mode=0o777, *, dir_fd=None):
+        if not self.active:
+            return self._os_open(name, flags, mode, dir_fd=dir_fd)
+        path = self.mutation_path(name, dir_fd)
+        self.audit("open", (str(path), None, flags))
+        self._open_paths.append((os.fsdecode(name), path))
+        try:
+            return self._os_open(name, flags, mode, dir_fd=dir_fd)
+        finally:
+            self._open_paths.pop()
 
     def audit(self, event: str, args: tuple) -> None:
         if not self.active:
@@ -74,10 +87,17 @@ class UnitRun(CoveragePlugin):
                 if not self.mutation_path(args[index], directory_fd).is_relative_to(self.temporary):
                     self.refuse("mutation outside synthetic unit temporary storage")
         if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
-            path = Path(os.fsdecode(args[0])).resolve()
+            name = os.fsdecode(args[0])
+            mode, flags = args[1:3]
+            if self._open_paths and self._open_paths[-1][0] == name:
+                path = self._open_paths[-1][1]
+            else:
+                path = Path(name)
+                if not path.is_absolute() and mode is None:
+                    self.refuse("unattributable descriptor-relative open")
+                path = path.resolve()
             if ".git" in (part.casefold() for part in path.parts):
                 self.refuse("actual Git storage access")
-            mode, flags = args[1:3]
             writing = (
                 isinstance(mode, str) and any(flag in mode for flag in "wax+")
                 or isinstance(flags, int) and flags & (

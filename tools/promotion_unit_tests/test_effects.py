@@ -84,6 +84,48 @@ def test_directory_relative_cleanup_is_bound_to_the_actual_private_descriptor(tm
         run.audit("os.remove", ("host.json", 41))
 
 
+@pytest.mark.parametrize("flags", [os.O_RDONLY, os.O_WRONLY | os.O_TRUNC])
+def test_unattributed_relative_low_level_opens_are_refused(tmp_path, flags):
+    run = UnitRun(Mock(), tmp_path, {}, tmp_path)
+    run.active = True
+    with pytest.raises(UnitEvidenceError, match="unattributable descriptor-relative open"):
+        run.audit("open", ("data.txt", None, flags))
+
+
+def test_descriptor_relative_open_validates_the_actual_target_before_execution(tmp_path, monkeypatch):
+    temporary = tmp_path / "synthetic"
+    original = Mock()
+    monkeypatch.setattr(os, "open", original)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "readlink", lambda path: str(tmp_path))
+    run = UnitRun(Mock(), tmp_path, {}, temporary)
+    run.active = True
+    with pytest.raises(UnitEvidenceError, match="write outside"):
+        run.guarded_open("data.txt", os.O_WRONLY | os.O_TRUNC, dir_fd=41)
+    original.assert_not_called()
+    assert run.effects == ["write outside synthetic unit temporary storage"]
+    assert run._open_paths == []
+
+
+def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context(tmp_path, monkeypatch):
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "readlink", lambda path: str(tmp_path))
+    run = UnitRun(Mock(), tmp_path, {}, tmp_path)
+    run.active = True
+
+    def original(name, actual_flags, mode, *, dir_fd):
+        assert name == "data.txt" and actual_flags == flags and mode == 0o640 and dir_fd == 41
+        run.audit("open", (name, None, actual_flags))
+        raise OSError("synthetic open refusal")
+
+    run._os_open = original
+    with pytest.raises(OSError, match="synthetic open refusal"):
+        run.guarded_open("data.txt", flags, 0o640, dir_fd=41)
+    assert run.effects == []
+    assert run._open_paths == []
+
+
 def test_framework_activity_outside_execution_does_not_claim_a_unit_effect(tmp_path):
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.audit("subprocess.Popen", ())
