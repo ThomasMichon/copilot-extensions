@@ -186,6 +186,31 @@ fleet without becoming controller hosts implicitly.
 
 ## Features
 
+### shared-operator-surfaces
+
+Conversational agents, thin CLI clients and web surfaces operate the same
+qualified fleet relationships and authorized controls. An at-a-glance index
+connects objectives, tasks and dependencies, efforts, worktrees, bridge sessions,
+contributions and service health, exposing current responsibility, blockers,
+progress, freshness and coverage. Operators and agents can locate and steer the
+rightful owner without opening each console or maintaining their own remote
+polling inventories.
+
+### portable-service-and-presentation-extensions
+
+The Gateway offers general-purpose service API adapters and reusable UX
+components through explicit capability and authorization boundaries.
+Adopter-owned drivers supply forge integrations, identity policy, branding,
+interaction presentation and custom service views without forking the portable
+coordination core. A wrapper preserves its service's supported semantics,
+ownership and unavailable capabilities; registration is not permission to
+invent control or widen data access.
+
+Generalized capabilities can move from an adopter implementation into the shared
+product, while private policy, inventories and presentation remain extensions.
+Convergence replaces duplicated responsibilities deliberately, preserving
+accepted work and existing consumers rather than installing a second authority.
+
 ### single-operator-fleet
 
 The entire fleet serves one operator, including its controller, service roles,
@@ -257,6 +282,11 @@ Connection recovery restores a coherent view through replay or an authoritative
 snapshot, with explicit stale/disconnected states. Subscription machinery
 augments the owning services' observation contracts rather than replacing their
 durable records.
+
+Fleet activity is incrementally consumable through resumable cursors without
+repeated full-fleet scans. Events retain origin and work relationships, and
+coverage gaps remain visible; a combined feed does not invent global causal
+ordering or treat silence from an offline origin as inactivity.
 
 The shared backing store accepts attributable push updates and serves coherent
 current queries and subscriptions from the same committed view. Machines and

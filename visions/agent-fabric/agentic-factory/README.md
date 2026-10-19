@@ -13,6 +13,11 @@ reactive work while keeping authorization, responsibility, evidence, and human
 control legible. Independent capabilities compose; adopting the factory does not
 require one central stack.
 
+The operator can work through one primary conversational agent, or a small set
+of planning agents, instead of personally managing every implementor's console.
+Conversation develops intent; explicit handover makes accepted execution the
+fleet's durable responsibility.
+
 ## Concepts & Components
 
 These four layers describe responsibilities, not new stores or deployment units.
@@ -79,6 +84,27 @@ Planning conversations can remain ephemeral. Not every question, exploration,
 report, or draft becomes a task. Accepted standing intent belongs in visions or
 decisions; accepted execution belongs in durable goals with explicit acceptance.
 
+### conversational-operator-front-door
+
+A planning agent can develop an idea over several rounds, inspect existing work,
+or receive a bug report, then arrange explicit handover through
+[worktree stewardship](worktree-stewardship/README.md#explicit-conversation-handover).
+It can report health, relay questions and steering, and reprioritize within
+delegated authority without requiring the operator to visit each worker console.
+The planner and portfolio Orchestrator are distinct responsibilities even when
+one agent performs both; conversation alone grants neither a standing charter
+nor broader execution authority.
+
+### durable-portfolio-handles
+
+Accepted work remains discoverable from its originating conversation through
+qualified objective, task, effort, worktree, session and contribution
+relationships. Conversational, CLI and visual clients consume the same
+[fleet observation and control surface](../../machine-fleet/README.md#shared-operator-surfaces).
+The front door retains decisions and durable references rather than becoming
+the sole repository of worker transcripts or progress. A new planning session
+can recover truthful status without reconstructing every execution leg.
+
 ## Behaviors
 
 ### reconcile-the-corpus
@@ -96,6 +122,12 @@ eligible agents and venues. They can take over and directly drive the same agent
 then explicitly return its agreed charter or withdraw it. Control ownership and
 its revision fence autonomous wakes and reassignment: no silent autonomous
 resumption while the operator owns control.
+
+The primary conversational agent can mediate this interaction or direct the
+operator to the exact worker when hands-on control is useful. Reaching that
+worker does not require browsing unrelated consoles. Routine execution and
+dependency waits stay with their owners; decisions requiring operator judgment
+return as bounded, evidence-backed proposals.
 
 ### canonical-authority-through-partitions
 
