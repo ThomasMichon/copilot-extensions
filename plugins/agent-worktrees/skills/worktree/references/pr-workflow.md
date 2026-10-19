@@ -244,6 +244,25 @@ proof of merge. Both text and `--json` expose the same result; text also prints
 the follow-up command. Timeout remains **124**, provider/auth failure **3**, and
 usage failure **2**. The native hibernation waiter composing this command wakes
 on exit 0 without needing to reinterpret a review transition.
+
+An interrupted or unexpectedly completed wait is a wake-up to reconcile, not
+evidence that its requested condition or the PR's completion gate passed. Run
+`pr-status` for that exact repository and PR, inspect any returned events and
+consent update, and re-arm only if the intended condition remains unmet and the
+previous wait has exited. Preserve the original review cursor after an
+interruption with no usable result; use a returned cursor only after handling
+its events/update. Do not fetch a new cursor merely to restart, which can skip a
+transition during the interruption.
+
+Keep the original finite deadline: a re-arm gets only its remaining timeout,
+not a fresh full window. An elapsed deadline is a timeout, not a spurious wake.
+Transient failures may use bounded backoff; repeated immediate exits need
+diagnosis rather than a tight restart loop. Explicit cancellation, usage/auth
+failures and installation-identity refusals remain visible failures, not
+permission to restart a daemon or create a second subscription. This is
+caller-side recovery discipline; it does not change valid transition/consent
+wakes, the existing transient-provider retry, or supported unbounded waits.
+
 `pr-merge` applies consent by default through its existing checked provider
 path; `--dry-run` instead reports `merge.needs_consent`,
 `merge.consent_action`, and `merge.consent_command`, without waiting or labeling.

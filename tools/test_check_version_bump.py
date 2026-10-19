@@ -9,6 +9,7 @@ Run:  python -m pytest tools/test_check_version_bump.py
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -90,6 +91,61 @@ def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         [sys.executable, str(repo / "tools" / SCRIPT.name), *extra],
         cwd=repo, capture_output=True, text=True,
     )
+
+
+@pytest.fixture
+def guard_module():
+    spec = importlib.util.spec_from_file_location("version_bump_diff_contract", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_revision_diff_is_unambiguously_separated_from_paths(guard_module, monkeypatch):
+    calls = []
+
+    def git(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "plugins/alpha/feature.py\n", "")
+
+    monkeypatch.setattr(guard_module, "_git", git)
+    assert guard_module._changed_files("a" * 40, "b" * 40) == ["plugins/alpha/feature.py"]
+    assert calls == [("diff", "--name-only", "a" * 40 + ".." + "b" * 40, "--")]
+
+
+def test_revision_blob_reads_are_unambiguously_separated_from_paths(guard_module, monkeypatch):
+    calls = []
+
+    def git(*args):
+        calls.append(args)
+        text = '{"version":"1.0.0"}' if args[1].endswith(".json") else (
+            '[project]\nversion="2.0.0"\n'
+        )
+        return subprocess.CompletedProcess(args, 0, text, "")
+
+    monkeypatch.setattr(guard_module, "_git", git)
+    ref = "a" * 40
+    assert guard_module._plugin_json_version_at(ref, "alpha") == "1.0.0"
+    assert guard_module._pyproject_project_version_at(ref, "worktree-manager/pyproject.toml") == "2.0.0"
+    assert calls == [
+        ("show", ref + ":plugins/alpha/plugin.json", "--"),
+        ("show", ref + ":worktree-manager/pyproject.toml", "--"),
+    ]
+
+
+def test_diff_failure_is_not_reported_as_no_changes(guard_module, monkeypatch, capsys):
+    monkeypatch.setattr(guard_module, "_rev_parse", lambda ref: ref)
+    monkeypatch.setattr(guard_module, "_merge_base", lambda base, _head: base)
+    monkeypatch.setattr(
+        guard_module, "_git",
+        lambda *args: subprocess.CompletedProcess(args, 128, "", "fixture diff refused"),
+    )
+    monkeypatch.setattr(sys, "argv", ["check-version-bump.py"])
+    assert guard_module.main() == 1
+    captured = capsys.readouterr()
+    assert "fixture diff refused" in captured.err
+    assert "no changes" not in captured.out
 
 
 @pytest.fixture()

@@ -3,8 +3,10 @@
 Back to the [canonical effort](README.md). Coordination: #7188 under #6007;
 the installation-cell and governed-cutover prerequisite remains #6286.
 
-This is a proposed scope amendment, not a shipped service, accepted deployment,
-or waiver of the existing Windows receipt-read blocker.
+This is a reviewed scope amendment, not a shipped service or accepted deployment.
+The operator subsequently stopped the separate Windows receipt investigation and
+accepted #7208 as a tracked residual. Canonical installation alignment, strict
+validation and the remaining adoption/review gates still apply.
 
 ## Operator-required outcome
 
@@ -138,7 +140,9 @@ upgrade contracts where those runtimes are used.
    [consumer contract proposal](pr-service-contract.md). Its logical operations
    are not implemented routes or an owner-agreement receipt. Reconcile the saved dispatch
    integration against the broadened contract without enabling it prematurely.
-2. Finish the existing governed owner prerequisite and original reader diagnosis.
+2. Finish the existing governed owner prerequisite and canonical installation
+   alignment, retaining #7208 as the explicitly accepted reader residual rather
+   than continuing its recording investigation.
    Extend the PR-facing client/service seam and provider conformance without
    regressing native behavior or worktree publication policy.
 3. Build the independent service artifact/container and fleet role consumer.

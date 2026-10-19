@@ -39,9 +39,10 @@ waiters and supported native PR operation remain working alternatives.
   and PR-conformance ownership. This effort consumes their contracts rather
   than taking over those campaigns.
 - **Review sequencing:** Land the fleet vision/plan amendment before its runtime
-  implementation. Keep this proposal separate from the existing installer and
-  Windows receipt-read investigation; neither scope expansion nor a passing
-  rerun waives that prerequisite.
+  implementation. Keep the fleet scope separate from the installer prerequisite.
+  The later operator disposition accepts reader residual #7208 and stops its
+  investigation; it does not relax canonical installation validation, current
+  checks or review.
 - **Handoff:** Continue from this README, its next unchecked item, and the current PR state. Do not replay the preserved branch wholesale.
 
 ## Context
@@ -254,6 +255,53 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-18 - Resume canonical installation adoption; stop receipt investigation
+
+- The operator explicitly selects `tracked-residual-with-defenses` for the
+  unexplained Windows in-handle reader observation, superseding the earlier
+  cause-investigation merge hold. #7208 records the residual, missing original
+  metadata and distinction from the cross-API report #1423. Passing reruns are
+  not a claimed fix. No further recording investigation is requested.
+- Follow-up direction, verbatim: "The installation-receipt stuff can just be
+  improved by aligned install to be consistent with all other plugins; I'd move
+  on from trying to investigate the receipt thing". Keep the canonical shared
+  installer, generated validators and strict ownership checks; do not add a
+  PR-specific receipt workaround.
+- The caller recovery defense is a fresh scoped `pr-status` read after an
+  interrupted wait, followed by re-arming only an unmet condition with the
+  original cursor/remaining deadline and no duplicate wait owner. Actual
+  transitions and consent updates still need handling; auth, usage,
+  cancellation and installation-identity failures are not spurious wakes.
+  The owning Worktrees PR workflow now states this discipline.
+- Reconciled the adopter with current `dev`, preserving the reviewed fleet
+  scope/consumer-contract intake and upstream CI backend-selection policy.
+  Adoption still requires canonical-copy/install-contract checks, current-head
+  CI/native acceptance and actual review before merge. Release, authorized
+  rollout, saved dispatch integration and fleet-owner agreement remain open.
+- Canonical generation now confirms all 12 plugin and one standalone-payload
+  installation-context adopters, every peer vendor and the 13-plugin install
+  contract. No canonical reader or PR-specific validator change was needed.
+- The selected native installer check exposed a separate fixture timeout:
+  synthetic legacy-source tests copied and repeatedly fingerprinted the entire
+  newly expanded cell-bootstrap payload. Retained the real complete canonical
+  `versioned_runtime*` family while excluding unrelated cell inputs from that
+  synthetic fixture; the full-payload cell acceptance remains separate and
+  unchanged. A byte-for-byte family regression and both native PowerShell
+  construction/reuse cases pass, together with a real pipe-inheriting-child
+  timeout cleanup case: four passes and one explicit POSIX-layout skip in
+  49.28 seconds. Native query, item and suite budgets are unchanged. Fixture
+  subprocesses now use owned Job/process-group teardown rather than leaving
+  descendants holding capture pipes after timeout.
+- The complete selected installer wiring, native source-transaction and real
+  completed-slot construction slice now passes 103 cases with one explicit
+  Windows/POSIX-layout skip in 318.69 seconds. Rebased partition/admission
+  contracts pass 186 cases. Their accompanying version-guard tests exposed Git
+  treating a long SHA range/blob expression as a Windows path and silently
+  reporting a failed diff as no changes. Explicit revision/path separators and
+  a visible failed-diff result correct that guard; its complete 30-case suite
+  and 52 changefile/accumulation consumer cases pass. No test or CI deadline
+  was increased.
 
 ### 2026-10-18 - Concrete PR-service contract intake
 

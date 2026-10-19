@@ -8,11 +8,14 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
@@ -73,7 +76,13 @@ def _python_code(text: str) -> str:
 
 def _payload(root: Path) -> Path:
     payload = root / "payload"
-    shutil.copytree(SCRIPTS, payload / "scripts")
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    # These synthetic legacy-source transactions use the real shared runtime
+    # family, not the unrelated cell bootstrap/validator payload.
+    for helper in SCRIPTS.glob("versioned_runtime*"):
+        if helper.is_file():
+            shutil.copyfile(helper, scripts / helper.name)
     package = payload / "src" / PLUGIN.name.replace("-", "_")
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("from vendored_fixture import VALUE\n")
@@ -100,6 +109,20 @@ def _payload(root: Path) -> Path:
     )
     (payload / "runtime-source.json").write_text(json.dumps(identity.document()))
     return payload
+
+
+def test_native_source_fixture_retains_complete_shared_runtime_family(tmp_path):
+    payload = _payload(tmp_path)
+    canonical = PLUGIN.parents[1] / "libs" / "versioned-runtime"
+    expected = {
+        helper.name: helper.read_bytes()
+        for helper in canonical.glob("versioned_runtime*") if helper.is_file()
+    }
+    actual = {
+        helper.name: helper.read_bytes() for helper in (payload / "scripts").iterdir()
+    }
+    assert actual == expected
+    assert not (payload / "scripts" / "installation-context").exists()
 
 
 def _setup(root: Path, payload: Path, shell: str) -> str:
@@ -178,7 +201,9 @@ function Deploy-SelfProvisioningBinstub {{ }}
 """
 
 
-def _run(root: Path, shell: str, text: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    root: Path, shell: str, text: str, *, timeout: float = 90,
+) -> subprocess.CompletedProcess[str]:
     host = _host(shell)
     harness = root / ("transaction.sh" if shell == "bash" else "transaction.ps1")
     harness.write_text(text, encoding="utf-8", newline="\n")
@@ -193,15 +218,57 @@ def _run(root: Path, shell: str, text: str) -> subprocess.CompletedProcess[str]:
             str(harness),
         ]
     )
-    return subprocess.run(  # noqa: S603 - trusted native host and isolated fixture script
+    process, job = spawn_sync_in_kill_on_close_job(
         argv,
+        require_job=os.name == "nt",
+        allow_breakaway=False,
         cwd=root,
-        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=90,
-        check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **no_window_kwargs(),
+        **({"start_new_session": True} if os.name != "nt" else {}),
     )
+    try:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            if job is not None:
+                job.terminate_and_wait(5)
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = process.communicate(timeout=5)
+            raise subprocess.TimeoutExpired(argv, timeout, stdout, stderr) from error
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    finally:
+        if job is not None:
+            job.close()
+        elif process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+
+
+@pytest.mark.timeout(20)
+def test_native_harness_timeout_reaps_pipe_inheriting_descendant(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_host", lambda _shell: sys.executable)
+    text = """
+import subprocess, sys
+subprocess.Popen(
+    [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+    stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr,
+    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+)
+print("fixture parent exited while its child retains the pipes", flush=True)
+"""
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired) as refused:
+        _run(tmp_path, "bash", text, timeout=1)
+    assert time.monotonic() - started < 10
+    assert "child retains the pipes" in refused.value.output
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])

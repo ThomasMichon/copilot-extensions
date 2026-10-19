@@ -203,6 +203,12 @@ canonical assets. Both language variants must use the same layout; materialized
 engines and their required support files must exist locally and match the
 canonical bytes. Missing or modified assets and mixed source/local references
 remain failures, not accepted release-layout variations.
+Its separate synthetic legacy-source transaction fixture carries the complete,
+byte-checked canonical `versioned_runtime*` family rather than unrelated cell
+bootstrap inputs. Native construction/reuse and installed-closure retention
+remain real; full cell payloads stay in their own acceptance lane. Each native
+harness owns its child tree and reaps pipe-inheriting descendants on timeout
+within the unchanged query/item deadlines.
 
 Bridge's native PowerShell/Bash completed-slot admission and serving-reconcile refusal
 matrices use a minimal plugin payload. Both setup and admission still compute
