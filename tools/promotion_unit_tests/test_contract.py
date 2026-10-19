@@ -6,7 +6,7 @@ import hashlib
 import pytest
 
 from promotion_unit_contract import (
-    PROFILE, UnitEvidenceError, admit_manifest, decode_json, manifest_digest, relative_file,
+    PROFILE, UnitEvidenceError, admit_manifest, changed_paths, decode_json, manifest_digest, relative_file,
     requires_units, source_sha, verify_observations, verify_sources,
 )
 
@@ -124,3 +124,18 @@ def test_only_known_narrative_changes_can_skip_the_admitted_packet():
     assert requires_units([])
     with pytest.raises(UnitEvidenceError):
         requires_units(["../unsafe"])
+
+
+def test_source_to_document_rename_preserves_the_deleted_source_for_impact():
+    commands = []
+
+    def read(arguments):
+        commands.append(arguments)
+        return b"tools/deleted.py\0docs/example.md\0"
+
+    paths = changed_paths("a" * 40, "b" * 40, read)
+    assert paths == ["tools/deleted.py", "docs/example.md"]
+    assert commands == [[
+        "git", "diff", "--no-renames", "--name-only", "-z", "a" * 40, "b" * 40,
+    ]]
+    assert requires_units(paths)

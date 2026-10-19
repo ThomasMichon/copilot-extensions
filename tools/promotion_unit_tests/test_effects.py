@@ -1,6 +1,8 @@
 """Negative effect admission uses synthetic audit events, never real actors."""
 
 from pathlib import Path
+import os
+import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -47,6 +49,14 @@ def test_writes_are_limited_to_synthetic_temporary_storage(tmp_path):
         run.audit("open", (str(tmp_path / "host-data.json"), "w", 0))
 
 
+@pytest.mark.parametrize("flags", [os.O_RDONLY | os.O_TRUNC, os.O_RDONLY | os.O_APPEND])
+def test_readonly_mutating_open_flags_are_refused_before_any_file_open(tmp_path, flags):
+    run = UnitRun(Mock(), tmp_path, {}, tmp_path / "synthetic")
+    run.active = True
+    with pytest.raises(UnitEvidenceError, match="write outside"):
+        run.audit("open", (str(tmp_path / "host-data.json"), "r", flags))
+
+
 def test_fixture_alias_cannot_escape_synthetic_temporary_storage(tmp_path):
     temporary = tmp_path / "synthetic"
     run = UnitRun(Mock(), tmp_path, {}, temporary)
@@ -56,6 +66,24 @@ def test_fixture_alias_cannot_escape_synthetic_temporary_storage(tmp_path):
         run.audit("os.symlink", ("../../host", str(temporary / "fixture-current"), -1))
 
 
+def test_hardlink_relative_source_is_resolved_against_its_own_directory(tmp_path):
+    run = UnitRun(Mock(), tmp_path, {}, tmp_path)
+    run.active = True
+    with pytest.raises(UnitEvidenceError, match="indirection outside"):
+        run.audit("os.link", ("host-file.txt", str(tmp_path / "alias"), -1, -1))
+
+
+def test_directory_relative_cleanup_is_bound_to_the_actual_private_descriptor(tmp_path, monkeypatch):
+    run = UnitRun(Mock(), tmp_path, {}, tmp_path)
+    run.active = True
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "readlink", lambda path: str(tmp_path))
+    run.audit("os.remove", ("fixture.json", 41))
+    monkeypatch.setattr(os, "readlink", lambda path: str(tmp_path.parent))
+    with pytest.raises(UnitEvidenceError, match="mutation outside"):
+        run.audit("os.remove", ("host.json", 41))
+
+
 def test_framework_activity_outside_execution_does_not_claim_a_unit_effect(tmp_path):
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.audit("subprocess.Popen", ())
@@ -63,9 +91,23 @@ def test_framework_activity_outside_execution_does_not_claim_a_unit_effect(tmp_p
     assert run.effects == []
 
 
-def test_xpass_cannot_be_serialized_as_unqualified_passing_evidence(tmp_path):
+@pytest.mark.parametrize("reason", ["known failure", ""])
+def test_xpass_cannot_be_serialized_as_unqualified_passing_evidence(tmp_path, reason):
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)
     run.pytest_runtest_logreport(SimpleNamespace(
-        nodeid="test.py::test_case", when="call", outcome="passed", wasxfail="known failure",
+        nodeid="test.py::test_case", when="call", outcome="passed", wasxfail=reason,
     ))
     assert run.effects == ["xfail/xpass outcome is not positive unit evidence"]
+
+
+def test_only_the_actual_python_test_frame_starts_a_call_context(tmp_path):
+    def body():
+        pass
+
+    run = UnitRun(Mock(), tmp_path, {}, tmp_path)
+    item = SimpleNamespace(obj=body, nodeid="test.py::test_case")
+    run.pytest_runtest_call(item)
+    assert run.dynamic_context(SimpleNamespace(f_code=body.__code__)) == item.nodeid + "|call"
+    assert run.dynamic_context(SimpleNamespace(f_code=UnitRun.pytest_runtest_logreport.__code__)) is None
+    run.pytest_runtest_teardown(item)
+    assert run.dynamic_context(SimpleNamespace(f_code=body.__code__)) is None

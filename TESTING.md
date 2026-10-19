@@ -40,11 +40,15 @@ multi-process and end-to-end cases remain source-preserved for periodic
 containerized validation, not fallback promotion tests.
 
 Coverage preserves file/line/context attribution directly from coverage.py.
+Call contexts start at the actual Python test-function frame and end when it
+returns; observer/reporting bookkeeping cannot keep a completed call active.
 Redundant per-function/class expansions are intentionally omitted, not unit
 outcomes or line evidence. Packet verification retains the sixteen-MiB per-file
 bound and requires every admitted unit to contribute production call coverage.
-`promotion_unit_packet.py` verifies the actual three-file output; synthetic
-fixture success alone is not collector acceptance.
+The runner applies `promotion_unit_packet.py` to its actual three-file output
+before returning success. An in-process adversarial collector fixture proves
+that a passing assertion without production calls is refused by both paths;
+synthetic packet fixtures alone are not collector acceptance.
 
 The explicit `source-units-v2` candidate receipt reuses this execution only
 after immutable Dev/candidate byte equivalence and independent provider

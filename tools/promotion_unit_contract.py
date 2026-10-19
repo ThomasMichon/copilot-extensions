@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 PROFILE = "copilot-extensions.promotion-units/v1"
@@ -150,3 +151,15 @@ def requires_units(changed_paths: list[str]) -> bool:
         if not narrative:
             return True
     return False
+
+
+def changed_paths(base: str, head: str, read_diff: Callable[[list[str]], bytes]) -> list[str]:
+    """Preserve deletions as well as additions, including source-to-doc renames."""
+    arguments = [
+        "git", "diff", "--no-renames", "--name-only", "-z",
+        source_sha(base), source_sha(head),
+    ]
+    raw = read_diff(arguments)
+    if not isinstance(raw, bytes):
+        raise UnitEvidenceError("changed-input evidence must contain raw Git path bytes")
+    return [path for path in raw.decode("utf-8").split("\0") if path]

@@ -8,8 +8,8 @@
 #
 # The scheduled daily run always validates `dev`. A manual
 # `workflow_dispatch` may additionally target any other ref via its `ref`
-# input -- e.g. to get real hosted Windows full-suite evidence for a
-# specific PR branch's exact head before merge, without waiting for the
+# input -- e.g. to inspect Linux integration at an exact reviewed ref
+# without making that execution a required PR gate or waiting for the
 # next `dev` rotation. A manual run against a non-`dev` ref never files
 # the shared tracking issue (see the `report` job) -- that stays reserved
 # for genuine `dev`-rotation findings, not one-off PR validation noise.
@@ -29,8 +29,8 @@ on:
         description: >-
           Branch/ref to validate (defaults to dev). Manual dispatch only --
           the scheduled daily rotation always runs against dev regardless
-          of this input. Use this to get real hosted Windows full-suite
-          evidence for a specific PR branch's exact head before merge.
+          of this input. Non-dev inspection supplies Linux evidence only;
+          native Windows execution remains unenrolled.
         required: false
         type: string
         default: dev
@@ -49,12 +49,10 @@ jobs:
     name: select today's rotation
     runs-on: ubuntu-latest
     # The scheduled daily rotation always targets dev (the active
-    # integration branch regressions should be caught on, mirroring
-    # validate-and-promote.yml's own choice of branch for its full
-    # matrix). A manual workflow_dispatch may instead target any ref via
-    # the `ref` input (default dev) -- e.g. to get real hosted Windows
-    # full-suite evidence for a specific PR branch's exact head, which
-    # this workflow's own validation history has relied on before.
+    # integration branch regressions should be caught on, independently
+    # of the release's unit-only portfolio). A manual dispatch may target a ref via
+    # the `ref` input (default dev) for Linux integration inspection.
+    # The retained Windows command is disabled, not a validation witness.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     outputs:
       plugins: ${{ steps.select.outputs.plugins }}

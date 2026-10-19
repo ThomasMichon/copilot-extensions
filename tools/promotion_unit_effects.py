@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 from pathlib import Path
+
+from coverage import CoveragePlugin
 
 from promotion_unit_contract import UnitEvidenceError
 
 
-class UnitRun:
+class UnitRun(CoveragePlugin):
     def __init__(self, coverage, root: Path, sources: dict, temporary: Path):
         self.coverage = coverage
         self.root = root
@@ -20,10 +23,26 @@ class UnitRun:
         self.reports: list[dict] = []
         self.effects: list[str] = []
         self.active = False
+        self.call_code = None
+        self.call_node = None
 
     def refuse(self, effect: str) -> None:
         self.effects.append(effect)
         raise UnitEvidenceError(f"not an eligible unit effect: {effect}")
+
+    def mutation_path(self, name, directory_fd=None) -> Path:
+        if not isinstance(name, (str, bytes, os.PathLike)):
+            self.refuse("unattributable filesystem mutation")
+        path = Path(os.fsdecode(name))
+        if not path.is_absolute() and directory_fd not in (None, -1):
+            if type(directory_fd) is not int or directory_fd < 0 or sys.platform != "linux":
+                self.refuse("unattributable directory-relative mutation")
+            try:
+                directory = Path(os.readlink(f"/proc/self/fd/{directory_fd}"))
+            except OSError:
+                self.refuse("unavailable directory-relative mutation identity")
+            path = directory / path
+        return path.resolve()
 
     def audit(self, event: str, args: tuple) -> None:
         if not self.active:
@@ -34,21 +53,25 @@ class UnitRun:
         ):
             self.refuse(event)
         mutations = {
-            "os.mkdir": 1, "os.remove": 1, "os.rmdir": 1, "os.rename": 2,
-            "os.chmod": 1, "os.chown": 1, "os.truncate": 1, "os.utime": 1,
+            "os.mkdir": ((0, 2),), "os.remove": ((0, 1),), "os.rmdir": ((0, 1),),
+            "os.rename": ((0, 2), (1, 3)), "os.chmod": ((0, 2),),
+            "os.chown": ((0, 3),), "os.truncate": ((0, None),), "os.utime": ((0, 3),),
         }
         if event in ("os.link", "os.symlink"):
-            source, destination = (Path(os.fsdecode(value)) for value in args[:2])
-            destination = destination.resolve()
-            if not source.is_absolute():
-                source = destination.parent / source
+            if event == "os.symlink":
+                destination = self.mutation_path(args[1], args[2] if len(args) > 2 else None)
+                source = Path(os.fsdecode(args[0]))
+                if not source.is_absolute():
+                    source = destination.parent / source
+            else:
+                source = self.mutation_path(args[0], args[2] if len(args) > 2 else None)
+                destination = self.mutation_path(args[1], args[3] if len(args) > 3 else None)
             if not all(path.resolve().is_relative_to(self.temporary) for path in (source, destination)):
                 self.refuse("filesystem indirection outside synthetic temporary storage")
         if event in mutations:
-            for name in args[:mutations[event]]:
-                if not isinstance(name, (str, bytes, os.PathLike)):
-                    self.refuse("unattributable filesystem mutation")
-                if not Path(os.fsdecode(name)).resolve().is_relative_to(self.temporary):
+            for index, directory_index in mutations[event]:
+                directory_fd = args[directory_index] if directory_index is not None and len(args) > directory_index else None
+                if not self.mutation_path(args[index], directory_fd).is_relative_to(self.temporary):
                     self.refuse("mutation outside synthetic unit temporary storage")
         if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
             path = Path(os.fsdecode(args[0])).resolve()
@@ -57,7 +80,9 @@ class UnitRun:
             mode, flags = args[1:3]
             writing = (
                 isinstance(mode, str) and any(flag in mode for flag in "wax+")
-                or isinstance(flags, int) and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT)
+                or isinstance(flags, int) and flags & (
+                    os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+                )
             )
             if writing and not path.is_relative_to(self.temporary):
                 self.refuse("write outside synthetic unit temporary storage")
@@ -76,16 +101,27 @@ class UnitRun:
         self.collected = [item.nodeid for item in session.items]
 
     def pytest_runtest_setup(self, item):
-        self.coverage.switch_context(item.nodeid + "|setup")
+        self.call_code = None
+        self.call_node = None
 
     def pytest_runtest_call(self, item):
-        self.coverage.switch_context(item.nodeid + "|call")
+        function = getattr(item.obj, "__func__", item.obj)
+        self.call_code = getattr(function, "__code__", None)
+        self.call_node = item.nodeid
+        if self.call_code is None:
+            self.refuse("unit case must be a direct Python test function")
 
     def pytest_runtest_teardown(self, item):
-        self.coverage.switch_context(item.nodeid + "|teardown")
+        self.call_code = None
+        self.call_node = None
+
+    def dynamic_context(self, frame):
+        if frame.f_code is self.call_code:
+            return self.call_node + "|call"
+        return None
 
     def pytest_runtest_logreport(self, report):
-        if getattr(report, "wasxfail", False):
+        if hasattr(report, "wasxfail"):
             self.effects.append("xfail/xpass outcome is not positive unit evidence")
         self.reports.append({
             "node": report.nodeid, "phase": report.when, "outcome": report.outcome,

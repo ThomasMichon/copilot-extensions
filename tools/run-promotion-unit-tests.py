@@ -20,6 +20,7 @@ from promotion_unit_contract import (
     verify_observations, verify_sources,
 )
 from promotion_unit_effects import UnitRun
+from promotion_unit_packet import verify_packet
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKET = ROOT / "tools/promotion_unit_tests"
@@ -75,12 +76,14 @@ def main() -> int:
     import coverage
     import pytest
 
-    cov = coverage.Coverage(
-        data_file=None, config_file=False,
-        include=[str(ROOT / name) for name in manifest["coverage_targets"]],
-    )
     with tempfile.TemporaryDirectory(prefix="promotion-units-") as temporary:
-        run = UnitRun(cov, ROOT, manifest["sources"], Path(temporary))
+        run = UnitRun(None, ROOT, manifest["sources"], Path(temporary))
+        cov = coverage.Coverage(
+            data_file=None, config_file=False,
+            include=[str(ROOT / name) for name in manifest["coverage_targets"]],
+            plugins=[lambda registry: registry.add_dynamic_context(run)],
+        )
+        run.coverage = cov
         sys.addaudithook(run.audit)
         with (
             patch.object(tempfile, "tempdir", temporary),
@@ -146,6 +149,12 @@ def main() -> int:
     (args.output_dir / "unit-manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8",
     )
+    verify_packet(
+        args.output_dir, expected_source_sha=args.source_sha,
+        expected_manifest=manifest, source_root=ROOT,
+    )
+    if time.monotonic() - started >= manifest["max_seconds"]:
+        raise UnitEvidenceError("unit packet verification exceeded the whole-execution budget")
     print(f"Unit packet complete: {len(run.collected)} passed in {elapsed:.3f}s; coverage recorded once.")
     return 0
 

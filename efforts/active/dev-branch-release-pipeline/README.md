@@ -1109,6 +1109,17 @@ expansions and correctly failed the sixteen-MiB input bound. Removed that
 redundancy from emission while retaining all file/line/context evidence; the
 bound was not raised.
 
+Review then exposed four admission defects: rename destinations could hide a
+deleted source path, read-only truncating opens were not classified as writes,
+observer reporting could contaminate call attribution, and empty xfail reasons
+could evade rejection. Fixed the classes rather than accepting the initial
+proof: rename-free path inventory, mutating-open flags, automatic test-frame
+context boundaries plus mandatory final packet admission, and xfail attribute
+presence. A real in-process no-production-call collector case is rejected.
+The revised 232-cell development packet passes in about 6.4 seconds; its extra
+collector fixture uses no child process, Git or live service. Earlier local
+packets are retained development evidence, not replacement qualification.
+
 The dedicated runner executes one in-process pytest/coverage pass, binds source
 bytes and exact parameter nodes, excludes conftest/plugin-autoload selection,
 and rejects missing, unexpected, skipped or failing evidence. Native import
