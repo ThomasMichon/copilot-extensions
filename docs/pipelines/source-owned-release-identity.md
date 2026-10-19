@@ -133,13 +133,17 @@ drain already-green changes without another push. Successful no-ops with no merg
 dispatch loop; an unmerged retired candidate does not automatically retry its
 unchanged source. Stale completion events do not take responsibility back from
 a newer generation, including one whose real failure still needs recovery.
-The trusted Gate issues one immutable admission artifact for the exact Dev SHA
-and freshly admitted Main base after ancestry and ownership checks. Its name
+For a publication-intending invocation, the trusted Gate issues one immutable
+admission artifact for the exact Dev SHA and freshly admitted Main base after
+ancestry and ownership checks. Its name
 binds those inputs; provider workflow identity and the successful trusted Gate
 upload step bind the original attempt and creation window. The artifact is an
 ownership record, not a substitute for qualification or publication proof.
 Existing repository artifact inventory discovers only the selected input pair,
 without scanning every historical workflow run.
+An explicit manual `push=false` preview keeps its existing validation behavior
+but emits no publication-ownership record. It cannot strand a later real
+promotion behind a dry-run generation that has no publication job to resume.
 
 CI, closure, completion and queued automatic admission all consult that same
 record. A failed publication before PR creation still retains its admitted

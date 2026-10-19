@@ -55,7 +55,10 @@ def lifecycle_contract(workflow: dict[str, Any]) -> None:
     record = next(step for step in gate_steps if step.get("name") == "Record immutable admitted source")
     upload = next(step for step in gate_steps if step.get("name") == "Upload immutable admitted source")
     assert gate_steps.index(retirement) < gate_steps.index(record) < gate_steps.index(upload)
-    assert record["if"] == upload["if"] == "steps.check.outputs.is_dev == 'true'"
+    assert record["if"] == upload["if"] == (
+        "steps.check.outputs.is_dev == 'true' && "
+        "(github.event_name != 'workflow_dispatch' || inputs.push != 'false')"
+    )
     assert record["env"] == {
         "ADMITTED_SOURCE": "${{ steps.check.outputs.sha }}",
         "ADMITTED_MAIN": "${{ steps.pause.outputs.main_base }}",
@@ -107,11 +110,13 @@ def minimal_contract() -> dict[str, Any]:
              "env": {"GH_TOKEN": "${{ github.token }}",
                      "AUTOMATIC_SOURCE": "${{ steps.check.outputs.sha }}",
                      "AUTOMATIC_MAIN": "${{ steps.pause.outputs.main_base }}"}},
-            {"name": "Record immutable admitted source", "if": "steps.check.outputs.is_dev == 'true'",
+            {"name": "Record immutable admitted source",
+             "if": "steps.check.outputs.is_dev == 'true' && (github.event_name != 'workflow_dispatch' || inputs.push != 'false')",
              "env": {"ADMITTED_SOURCE": "${{ steps.check.outputs.sha }}",
                      "ADMITTED_MAIN": "${{ steps.pause.outputs.main_base }}",
                      "ADMISSION_PATH": "${{ runner.temp }}/promotion-admission.json"}},
-            {"name": "Upload immutable admitted source", "if": "steps.check.outputs.is_dev == 'true'",
+            {"name": "Upload immutable admitted source",
+             "if": "steps.check.outputs.is_dev == 'true' && (github.event_name != 'workflow_dispatch' || inputs.push != 'false')",
              "uses": "actions/upload-artifact@v4", "with": {
                  "name": "promotion-admission-${{ steps.check.outputs.sha }}-${{ steps.pause.outputs.main_base }}",
                  "path": "${{ runner.temp }}/promotion-admission.json", "if-no-files-found": "error",
@@ -148,7 +153,7 @@ class ContractFixtureTests(unittest.TestCase):
         for mutation in (
             "early-pr", "pr-dependent-qualification", "no-origin", "no-admission",
             "no-final-admission", "early-open", "wrong-pr", "merge-secret", "no-retirement",
-            "no-admission-record",
+            "no-admission-record", "dry-run-admission",
         ):
             with self.subTest(mutation=mutation):
                 workflow = copy.deepcopy(original)
@@ -171,6 +176,9 @@ class ContractFixtureTests(unittest.TestCase):
                     jobs["gate"]["steps"][3]["run"] = "no automatic retirement check"
                 elif mutation == "no-admission-record":
                     jobs["gate"]["steps"].pop()
+                elif mutation == "dry-run-admission":
+                    for step in jobs["gate"]["steps"][-2:]:
+                        step["if"] = "steps.check.outputs.is_dev == 'true'"
                 else:
                     jobs["merge-promotion"]["steps"][0]["env"]["GH_TOKEN"] = "${{ secrets.UNEXPECTED }}"
                 with self.assertRaises((AssertionError, KeyError, StopIteration)):
@@ -327,6 +335,31 @@ class QualifiedPRLifecycleTests(boundary._ShellFixture):
                     ):
                         exec(compile(code, "<literal-source-admission>", "exec"), {})
                     self.assertFalse(invalid_path.exists())
+
+    def test_manual_dry_run_does_not_reserve_publication_ownership(self) -> None:
+        from test_post_ci_policy import _boolean_expression
+
+        for step in self.workflow["jobs"]["gate"]["steps"]:
+            if step.get("name") not in (
+                "Record immutable admitted source", "Upload immutable admitted source",
+            ):
+                continue
+            expression = step["if"]
+            for source, target in (
+                ("steps.check.outputs.is_dev", "is_dev"), ("github.event_name", "event"),
+                ("inputs.push", "push"), ("&&", "and"), ("||", "or"),
+            ):
+                expression = expression.replace(source, target)
+            for is_dev, event, push, expected in (
+                ("true", "workflow_dispatch", "false", False),
+                ("true", "workflow_dispatch", "true", True),
+                ("true", "repository_dispatch", "", True),
+                ("false", "repository_dispatch", "", False),
+            ):
+                with self.subTest(step=step["name"], event=event, push=push, is_dev=is_dev):
+                    self.assertEqual(_boolean_expression(
+                        "(" + expression + ")", {"is_dev": is_dev, "event": event, "push": push},
+                    ), expected)
 
     def test_literal_queued_admission_rechecks_retirement_using_the_real_cli(self) -> None:
         root = Path(__file__).resolve().parents[1]

@@ -1049,6 +1049,41 @@ proposal.
 
 ## Journal
 
+### 2026-10-18 - Lifecycle source merged; activate preserved Main control next
+
+#7201 merged as `103c42811b50b8c16e66a07852d56f2aadec64fa` after current-head
+Copilot review and all three original CI gates succeeded. The source now owns
+cursor-safe active/retired promotion inventory, immutable exact-source/admitted
+Main-base scheduling evidence, deferred push/manual-CI recovery and original
+qualification-owner output. A coupled CI selector contract now checks behavior
+rather than one regex spelling, and distinguishes recorded Dev policy from
+independently retained Main control.
+
+The changed-source portfolio passes 468 cases with ten explicit legacy-controller
+skips and twenty subtests; the additional partition/source-layout module passes
+120 cases. Exact prepared Main data passes thirteen lifecycle cases and the
+existing twenty-four publication/freshness boundary cases, including the real
+admission-record writer and queued ownership refusal. These are source and
+prepared-data results, not deployed qualification or a cadence measurement.
+
+The next stretch applies only the separately reviewed Main CI/controller
+workflow changes, pinned to that actual merged helper source. The preservation
+manifest and pause remain unchanged; Main's Bridge budget remains eight minutes.
+One fresh changed-input qualification must then prove the generated consumer,
+publication/readback and exact Main merge before canonical resume. All live
+ownership/reuse, natural-cycle, latency and client-acceptance obligations above
+remain open. Maintainer stewardship and owner-only review rescue are not enabled
+by this source merge.
+
+A final preactivation check reproduced a dry-run ownership gap in both literal
+Gate record steps: manual `push=false` still validates source but has no
+publication job to resume. Its admission record would block a later real
+promotion of unchanged inputs. Record writing and upload are now guarded by
+publication intent; expensive preview validation and the no-push output path
+remain unchanged. The source contract rejects the old condition and exercises
+both literal steps across preview, real manual publication and automatic
+dispatch before the Main activation PR.
+
 ### 2026-10-18 - Repair lifecycle event ordering before control activation
 
 The current-head review of #7201 identified four real scheduling gaps. A
