@@ -390,3 +390,12 @@ The umbrella effort remains Active independently of this slice's completion.
   retain bound-source protection. A stale save cannot erase the replacement,
   and idempotent rebinding does not advance revision. The isolated Worktrees
   lane passed 517 tests with 12 platform skips; Manager remains at 239.
+- Review identified that warm End had not transported its original scoped
+  bare-resume binding. End now carries only the three project/worktree/session
+  binding variables, alongside native source metadata, without a terminal probe
+  or environment dump. A real resident-IPC regression uses two records with the
+  same native UUID, outside-worktree cwd and an explicit binding to the later
+  record; it first failed by selecting the earlier record and leaving the
+  intended claim open. The repaired path closes only the bound activation and
+  leaves the unrelated record byte-for-byte unchanged. The isolated Worktrees
+  lane passed 518 tests with 12 platform skips; Manager remains at 239.

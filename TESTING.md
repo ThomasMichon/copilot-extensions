@@ -131,6 +131,8 @@ without title mutation,
 same-UUID replacement before or after title input is read,
 source-aware legacy End cleanup without fabricated proof and a source-changing
 already-linked handoff surviving a stale save,
+warm End over real resident IPC with two same-UUID records and an explicit
+binding outside cwd,
 history-pruning ambiguity, pre-dispatch old-daemon refusal with a real legacy
 peer whose mutation handler stays uncalled, installed-bin helper loading,
 the 256-entry retained-history boundary, tombstone-visible closure and

@@ -2409,6 +2409,14 @@ def test_session_end_transports_original_source_without_terminal_or_env_probe(mo
     monkeypatch.setattr(
         hook_client, "_probe_terminal", lambda: pytest.fail("End must not attach/probe consoles"),
     )
+    binding = {
+        "AGENT_WORKTREES_BIND_PROJECT": "example",
+        "AGENT_WORKTREES_BIND_WORKTREE_ID": "original-worktree",
+        "AGENT_WORKTREES_BIND_SESSION_ID": "old-session",
+    }
+    for key, value in binding.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("UNRELATED_ENVIRONMENT_VALUE", "not-transported")
     seen = {}
     monkeypatch.setattr(
         hook_client, "_request",
@@ -2417,7 +2425,7 @@ def test_session_end_transports_original_source_without_terminal_or_env_probe(mo
     payload = {"sessionId": "old-session", "reason": "user_exit"}
     assert hook_client.decide("sessionEnd", payload, home=tmp_path) == {}
     assert seen["payload"] == {
-        **payload, "_agentWorktrees": {"nativeSource": origin},
+        **payload, "_agentWorktrees": {"nativeSource": origin, "environment": binding},
     }
 
 

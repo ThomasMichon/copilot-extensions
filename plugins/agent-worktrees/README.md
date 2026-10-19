@@ -427,6 +427,10 @@ Original Start bindings come only from the transported hook environment, not the
 resident's inherited environment. No End path runs the terminal attachment
 probe. Windows native End remains visibly unqualified; a missing new warm-hook
 capability does not introduce a new console helper or fallback spawn.
+End transports only the original scoped project/worktree/session binding
+variables alongside native source metadata, not an environment dump. A warm
+bare Resume therefore targets its bound record even when cwd is outside it and
+the same UUID appears in several records.
 
 The shell, PowerShell and Python installers deploy both lifecycle transport and
 the canonical stdlib source-capture helper beside the installed hook client.

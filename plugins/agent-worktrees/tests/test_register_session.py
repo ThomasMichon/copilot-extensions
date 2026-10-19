@@ -1092,6 +1092,62 @@ class TestDeregisterSessionStdin:
         )
         assert next(item for item in record.resources if item.ref == ref).state == obligations.ACTIVE
 
+    def test_warm_end_uses_original_binding_with_same_uuid_in_two_records(
+        self, tmp_path, tmp_tracking_dir, monkeypatch_config, monkeypatch,
+    ):
+        import importlib.util
+        from types import SimpleNamespace
+        from agent_worktrees import native_source_context, obligations, session_binding_cli
+        from agent_worktrees.hook_ipc import HookIpcServer
+
+        sid = "00000000-0000-4000-8000-000000000001"
+        epoch = {"platform": "linux", "environment_id": "a" * 32, "boot_id": sid}
+        origin = {
+            "version": 1, "qualified": True, **epoch,
+            "ancestors": [{"pid": 101, "start_time": "100"}],
+        }
+        monkeypatch.setattr(native_source_context, "epoch", lambda: epoch)
+        monkeypatch.setattr(m.sys, "platform", "linux")
+        monkeypatch.setattr(session_binding_cli, "_resolve_active_project", lambda project: (project, None))
+        for wt_id, source in (
+            ("aaa-other", "native:other"),
+            ("zzz-bound", native_source_context.identity(sid, 101, "100", epoch)),
+        ):
+            _save_record(tmp_tracking_dir, wt_id, f"/path/to/{wt_id}")
+            tracking.register_session(wt_id, sid, source_identity=source)
+        unrelated = tmp_tracking_dir / "aaa-other.yaml"
+        before = unrelated.read_bytes()
+        for key, value in (
+            (session_binding_cli._session_bind_session_key(), sid),
+            (session_binding_cli._session_bind_worktree_key(), "zzz-bound"),
+            (session_binding_cli._session_bind_project_key(), "test-repo"),
+        ):
+            monkeypatch.setenv(key, value)
+        script = Path(__file__).resolve().parents[1] / "scripts" / "hook_client.py"
+        spec = importlib.util.spec_from_file_location("bound_end_client", script)
+        client = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(client)
+        monkeypatch.setattr(client, "_capture_native_source", lambda: origin)
+        monkeypatch.setattr(client, "_probe_terminal", lambda: pytest.fail("End terminal probe"))
+        server = HookIpcServer(lambda kind, payload, deadline: m._resident_hook_decision(
+            kind, payload, segment_cache=SimpleNamespace(), policy=SimpleNamespace(),
+        ))
+        server.start()
+        try:
+            runtime = tmp_path / ".agent-worktrees"
+            runtime.mkdir()
+            (runtime / "status-monitor.lock").write_text(json.dumps(server.rendezvous()))
+            result = client.decide("sessionEnd", {
+                "sessionId": sid, "reason": "user_exit", "cwd": str(tmp_path / "outside"),
+            }, home=tmp_path)
+        finally:
+            server.close()
+        assert result["lifecycle"] == "ended"
+        assert unrelated.read_bytes() == before
+        record = tracking.load_record(tmp_tracking_dir / "zzz-bound.yaml")
+        assert record.sessions[0].ended_at is not None
+        assert next(item for item in record.resources if item.kind == "session").state == obligations.RELEASED
+
     @pytest.mark.parametrize("resident", [False, True])
     @pytest.mark.parametrize("source_identity", [None, "native:qualified"])
     def test_source_aware_end_defers_legacy_and_bound_authority_to_writer(

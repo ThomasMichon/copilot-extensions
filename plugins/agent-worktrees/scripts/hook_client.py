@@ -230,7 +230,15 @@ def _capture_native_source() -> dict:
 def _enrich_session_end_payload(payload: dict) -> dict:
     return {
         **payload,
-        "_agentWorktrees": {"nativeSource": _capture_native_source()},
+        "_agentWorktrees": {
+            "nativeSource": _capture_native_source(),
+            "environment": {
+                key: os.environ[key] for key in (
+                    "AGENT_WORKTREES_BIND_PROJECT", "AGENT_WORKTREES_BIND_WORKTREE_ID",
+                    "AGENT_WORKTREES_BIND_SESSION_ID",
+                ) if key in os.environ
+            },
+        },
     }
 
 
