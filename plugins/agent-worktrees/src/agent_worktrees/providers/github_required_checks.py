@@ -26,9 +26,33 @@ query($owner:String!,$name:String!,$ref:String!) {
 }
 """
 
+_REVIEW_POLICY_QUERY = """
+query($owner:String!,$name:String!,$ref:String!) {
+  repository(owner:$owner,name:$name) {
+    ref(qualifiedName:$ref) {
+      branchProtectionRule {
+        requiresApprovingReviews
+        requiredApprovingReviewCount
+        requiresCodeOwnerReviews
+        requiresConversationResolution
+        requiresLastPushApproval
+      }
+    }
+  }
+}
+"""
+
 
 class RequiredChecksError(RuntimeError):
     pass
+
+
+class ReviewExceptionIneligible(RequiredChecksError):
+    """The PR is safe for ordinary provider enforcement, but not admin fallback."""
+
+
+class ReviewSafetyError(RequiredChecksError):
+    """Mutation evidence is unsafe or incomplete; no merge write is permitted."""
 
 
 def _target_parts(repo: str, number: int) -> list[str]:
@@ -56,7 +80,7 @@ def _protected_merge_head(
         return expected_head_sha
     result = invoke(["gh", "api", f"/repos/{repo}/pulls/{number}", "--hostname", host])
     if result.returncode:
-        raise RequiredChecksError(
+        raise ReviewSafetyError(
             "normal merge head lookup failed: " + (result.stderr.strip() or result.stdout.strip())
         )
     try:
@@ -130,7 +154,7 @@ def review_exception_evidence(
     atomic review-version CAS, so this re-read minimizes but cannot eliminate a
     provider lifecycle race after the evidence read.
     """
-    _target_parts(repo, number)
+    parts = _target_parts(repo, number)
 
     def read_json(args: list[str]) -> object:
         argv = ["gh", *args]
@@ -145,18 +169,18 @@ def review_exception_evidence(
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
-            raise RequiredChecksError("review-exception verification returned invalid JSON") from exc
+            raise ReviewSafetyError("review-exception verification returned invalid JSON") from exc
 
     def obj(value: object, label: str) -> dict:
         if not isinstance(value, dict):
-            raise RequiredChecksError(f"{label} is unavailable or invalid")
+            raise ReviewSafetyError(f"{label} is unavailable or invalid")
         return value
 
     decision = obj(read_json([
         "pr", "view", str(number), "--repo", repo, "--json", "reviewDecision",
     ]), "review decision").get("reviewDecision")
     if decision != "REVIEW_REQUIRED":
-        raise RequiredChecksError(
+        raise ReviewExceptionIneligible(
             "GitHub does not report missing required approval as the current review block"
         )
 
@@ -172,22 +196,22 @@ def review_exception_evidence(
             or not isinstance(base, str) or not base or not isinstance(title, str)
             or not isinstance(labels, list)
         ):
-            raise RequiredChecksError("open, non-draft PR identity is unavailable or invalid")
+            raise ReviewSafetyError("open, non-draft PR identity is unavailable or invalid")
         if expected_head_sha and head != expected_head_sha:
-            raise RequiredChecksError("PR head differs from the expected commit")
+            raise ReviewSafetyError("PR head differs from the expected commit")
         names = {
             label.get("name", "").casefold() for label in labels
             if isinstance(label, dict) and isinstance(label.get("name"), str)
         }
         if len(names) != len(labels):
-            raise RequiredChecksError("PR labels are unavailable or invalid")
+            raise ReviewSafetyError("PR labels are unavailable or invalid")
         held = names & {label.casefold() for label in hold_labels}
         if held:
-            raise RequiredChecksError("hold label present: " + ", ".join(sorted(held)))
+            raise ReviewSafetyError("hold label present: " + ", ".join(sorted(held)))
         lowered = title.strip().casefold()
         if any(lowered.startswith(prefix.strip().casefold())
                for prefix in wip_title_prefixes if prefix.strip()):
-            raise RequiredChecksError("WIP title prefix is present")
+            raise ReviewSafetyError("WIP title prefix is present")
         return head, base
 
     head, base = identity()
@@ -195,11 +219,11 @@ def review_exception_evidence(
         "api", f"/repos/{repo}/pulls/{number}/reviews", "--paginate", "--slurp",
     ])
     if not isinstance(pages, list) or not pages:
-        raise RequiredChecksError("complete review history is unavailable")
+        raise ReviewSafetyError("complete review history is unavailable")
     reviews: list[ReviewEvidence] = []
     for page in pages:
         if not isinstance(page, list):
-            raise RequiredChecksError("review history page is unavailable or invalid")
+            raise ReviewSafetyError("review history page is unavailable or invalid")
         for raw in page:
             review = obj(raw, "review")
             rid = review.get("id")
@@ -209,7 +233,7 @@ def review_exception_evidence(
                 type(rid) is not int or not isinstance(user, dict)
                 or not isinstance(user.get("login"), str) or not isinstance(state, str)
             ):
-                raise RequiredChecksError("review history is incomplete or invalid")
+                raise ReviewSafetyError("review history is incomplete or invalid")
             reviews.append(ReviewEvidence(
                 id=rid, state=state, reviewer=user["login"],
                 submitted_at=str(review.get("submitted_at") or ""),
@@ -219,44 +243,90 @@ def review_exception_evidence(
     author = obj(read_json(["api", f"/repos/{repo}/pulls/{number}"]), "PR metadata")
     author_login = obj(author.get("user"), "PR author").get("login")
     if not isinstance(author_login, str):
-        raise RequiredChecksError("PR author identity is unavailable")
+        raise ReviewSafetyError("PR author identity is unavailable")
     asking = outstanding_change_requests(reviews, author_login)
     if asking:
-        raise RequiredChecksError("active change request by " + ", ".join(asking))
+        raise ReviewSafetyError("active change request by " + ", ".join(asking))
 
     pages = read_json([
         "api", f"/repos/{repo}/rules/branches/{quote(base, safe='')}",
         "--paginate", "--slurp",
     ])
     if not isinstance(pages, list) or not pages:
-        raise RequiredChecksError("effective branch rules are unavailable")
+        raise ReviewSafetyError("effective branch rules are unavailable")
     codeowner_rulesets: set[int] = set()
     for page in pages:
         if not isinstance(page, list):
-            raise RequiredChecksError("effective branch rules page is invalid")
+            raise ReviewSafetyError("effective branch rules page is invalid")
         for raw in page:
             rule = obj(raw, "branch rule")
             if rule.get("type") != "pull_request":
                 continue
             params = obj(rule.get("parameters"), "pull-request rule")
-            if params.get("require_code_owner_review") is not True:
+            codeowner = params.get("require_code_owner_review")
+            count = params.get("required_approving_review_count")
+            threads = params.get("required_review_thread_resolution")
+            last_push = params.get("require_last_push_approval")
+            if (
+                not isinstance(codeowner, bool) or type(count) is not int
+                or not isinstance(threads, bool) or not isinstance(last_push, bool)
+            ):
+                raise ReviewSafetyError("pull-request rule requirements are incomplete")
+            if not codeowner:
+                if count or threads or last_push:
+                    raise ReviewExceptionIneligible(
+                        "another pull-request review requirement is active"
+                    )
                 continue
+            if count not in (0, 1) or threads or last_push:
+                raise ReviewExceptionIneligible(
+                    "CODEOWNER approval is not the only remaining review requirement"
+                )
             ruleset_id = rule.get("ruleset_id")
             if type(ruleset_id) is not int or ruleset_id <= 0:
-                raise RequiredChecksError("CODEOWNER review rule has no ruleset identity")
+                raise ReviewSafetyError("CODEOWNER review rule has no ruleset identity")
             codeowner_rulesets.add(ruleset_id)
     if not codeowner_rulesets:
-        raise RequiredChecksError("a missing CODEOWNER approval rule was not positively identified")
+        raise ReviewExceptionIneligible(
+            "a missing CODEOWNER approval rule was not positively identified"
+        )
+
+    classic = obj(read_json([
+        "api", "graphql", "-f", f"query={_REVIEW_POLICY_QUERY}",
+        "-f", f"owner={parts[0]}", "-f", f"name={parts[1]}",
+        "-f", f"ref=refs/heads/{base}",
+    ]), "classic branch-protection response")
+    if classic.get("errors"):
+        raise ReviewSafetyError("classic review policy could not be read completely")
+    protection = obj(obj(obj(classic.get("data"), "classic policy data")
+                         .get("repository"), "repository").get("ref"), "base branch").get(
+        "branchProtectionRule"
+    )
+    if protection is not None:
+        protection = obj(protection, "classic branch protection")
+        fields = (
+            "requiresApprovingReviews", "requiresCodeOwnerReviews",
+            "requiresConversationResolution", "requiresLastPushApproval",
+        )
+        if any(not isinstance(protection.get(field), bool) for field in fields):
+            raise ReviewSafetyError("classic review requirements are incomplete")
+        count = protection.get("requiredApprovingReviewCount")
+        if type(count) is not int or count < 0:
+            raise ReviewSafetyError("classic approval requirement is invalid")
+        if any(protection[field] for field in fields) or count:
+            raise ReviewExceptionIneligible(
+                "classic branch protection adds a review requirement without actor-scoped evidence"
+            )
     for ruleset_id in codeowner_rulesets:
         ruleset = obj(read_json([
             "api", f"/repos/{repo}/rulesets/{ruleset_id}",
         ]), "ruleset")
         if ruleset.get("current_user_can_bypass") not in ("always", "pull_requests_only"):
-            raise RequiredChecksError(
+            raise ReviewExceptionIneligible(
                 f"acting identity is not authorized to bypass CODEOWNER ruleset {ruleset_id}"
             )
     if identity() != (head, base):
-        raise RequiredChecksError("PR head/base or mutation gates changed during review verification")
+        raise ReviewSafetyError("PR head/base or mutation gates changed during review verification")
     return head
 
 

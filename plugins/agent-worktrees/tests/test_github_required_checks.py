@@ -35,7 +35,12 @@ class GitHubFixture:
         }, {
             "type": "pull_request",
             "ruleset_id": 42,
-            "parameters": {"require_code_owner_review": True},
+            "parameters": {
+                "require_code_owner_review": True,
+                "required_approving_review_count": 1,
+                "required_review_thread_resolution": False,
+                "require_last_push_approval": False,
+            },
         }]
         self.later_pages = []
         self.runs = [{
@@ -59,6 +64,7 @@ class GitHubFixture:
         }]
         self.review_decision = "REVIEW_REQUIRED"
         self.bypass = "pull_requests_only"
+        self.classic_review_rule = None
 
     def invoke(self, argv, **kwargs):
         self.calls.append(argv)
@@ -87,9 +93,17 @@ class GitHubFixture:
             kind, data = "reviews", [self.reviews]
         elif argv[2] == "graphql":
             assert f"ref=refs/heads/{self.base}" in argv
-            kind, data = "policy", {
-                "data": {"repository": {"ref": {"branchProtectionRule": self.protection}}},
-            }
+            query = next(value for value in argv if value.startswith("query="))
+            if "requiresApprovingReviews" in query:
+                kind, data = "review_policy", {
+                    "data": {"repository": {"ref": {
+                        "branchProtectionRule": self.classic_review_rule,
+                    }}},
+                }
+            else:
+                kind, data = "policy", {
+                    "data": {"repository": {"ref": {"branchProtectionRule": self.protection}}},
+                }
         elif "/rules/branches/" in argv[2]:
             assert "--paginate" in argv
             assert "--slurp" in argv
@@ -347,7 +361,12 @@ def test_review_exception_requires_complete_clean_codeowner_evidence():
     (lambda f: setattr(f, "review_decision", "APPROVED"), "missing required approval"),
     (lambda f: setattr(f, "bypass", "never"), "not authorized"),
     (lambda f: f.rules.__setitem__(1, {"type": "pull_request", "ruleset_id": 42,
-                                      "parameters": {"require_code_owner_review": False}}),
+                                      "parameters": {
+                                          "require_code_owner_review": False,
+                                          "required_approving_review_count": 0,
+                                          "required_review_thread_resolution": False,
+                                          "require_last_push_approval": False,
+                                      }}),
      "not positively identified"),
     (lambda f: f.reviews.insert(0, {
         "id": 0, "state": "CHANGES_REQUESTED", "user": {"login": "human"},
@@ -373,6 +392,32 @@ def test_later_other_approval_does_not_hide_human_negative():
          "submitted_at": "2026-10-18T00:00:00Z", "commit_id": HEAD},
     ]
     with pytest.raises(RequiredChecksError, match="active change request"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+            expected_head_sha=HEAD,
+        )
+
+
+def test_extra_required_approval_prevents_codeowner_exception():
+    fixture = GitHubFixture()
+    fixture.rules[1]["parameters"]["required_approving_review_count"] = 2
+    with pytest.raises(RequiredChecksError, match="not the only remaining"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+            expected_head_sha=HEAD,
+        )
+
+
+def test_classic_review_requirement_prevents_ruleset_exception():
+    fixture = GitHubFixture()
+    fixture.classic_review_rule = {
+        "requiresApprovingReviews": True,
+        "requiredApprovingReviewCount": 1,
+        "requiresCodeOwnerReviews": False,
+        "requiresConversationResolution": False,
+        "requiresLastPushApproval": False,
+    }
+    with pytest.raises(RequiredChecksError, match="classic branch protection"):
         review_exception_evidence(
             "owner/project", 7, invoke=fixture.invoke, host="github.com",
             expected_head_sha=HEAD,

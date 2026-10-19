@@ -404,13 +404,17 @@ def _pr_merge_now(
     # providers' auto-merge already means what it says.
     bypass_review_gate = False
     if prefer_auto and hasattr(provider, "pull_review_exception"):
-        bypass_review_gate, _ = provider.pull_review_exception(
+        bypass_review_gate, unsafe_exception, exception_reason = provider.pull_review_exception(
             args.repo, args.pr,
             expected_head_sha=expected_head_sha,
             hold_labels=hold_labels,
             wip_title_prefixes=wip_title_prefixes,
             api_base=base, token=tok,
         )
+        if unsafe_exception:
+            return refuse_mutation(
+                f"review-exception evidence refused mutation ({exception_reason})"
+            )
 
     auto_armed = False
     if prefer_auto and not bypass_review_gate:
@@ -472,6 +476,12 @@ def _pr_merge_now(
             err = f"GitHub merge head lookup failed ({type(exc).__name__}); no merge was requested"
     if not err:
         try:
+            merge_kwargs = {}
+            if getattr(provider, "name", "") == "github":
+                merge_kwargs = {
+                    "hold_labels": hold_labels,
+                    "wip_title_prefixes": wip_title_prefixes,
+                }
             err = provider.merge_pull(
                 args.repo,
                 args.pr,
@@ -481,8 +491,7 @@ def _pr_merge_now(
                 api_base=base,
                 token=tok,
                 expected_head_sha=expected_head_sha,
-                hold_labels=hold_labels,
-                wip_title_prefixes=wip_title_prefixes,
+                **merge_kwargs,
             )
         except ProviderError as exc:
             err = str(exc)

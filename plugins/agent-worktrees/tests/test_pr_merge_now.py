@@ -126,7 +126,7 @@ class _FakeProvider:
         required, bypassable = (
             self._review_gate if self._review_gate is not None else (False, None)
         )
-        return bool(required and bypassable), ""
+        return bool(required and bypassable), False, ""
 
     def pull_review_gate(self, repo, number, *, api_base="", token=None):
         self.review_gate_calls.append(dict(repo=repo, number=number))
@@ -823,6 +823,19 @@ def test_unreadable_mutation_evidence_blocks_every_write(monkeypatch):
         _args(), _prcfg(prefer_auto_merge=True), _self_merge_flow(), apply=True,
     ) == 1
     assert fake.auto_calls == fake.calls == fake.review_gate_calls == []
+
+
+def test_new_unsafe_evidence_after_snapshot_blocks_every_write(monkeypatch):
+    fake = _FakeProvider(auto_err="", review_gate=(True, True))
+    fake.pull_review_exception = lambda *args, **kwargs: (
+        False, True, "hold label present: hold",
+    )
+    _patch_provider(monkeypatch, fake)
+    assert m._pr_merge_now(
+        _args(), _prcfg(prefer_auto_merge=True), _self_merge_flow(), apply=True,
+    ) == 1
+    assert fake.auto_calls == []
+    assert fake.calls == []
 
 
 def test_ado_self_merge_uses_native_completion(monkeypatch, capsys):

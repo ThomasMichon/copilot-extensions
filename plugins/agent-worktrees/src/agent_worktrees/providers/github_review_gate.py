@@ -6,14 +6,18 @@ import json
 from collections.abc import Callable
 from urllib.parse import quote
 
-from .github_required_checks import RequiredChecksError, review_exception_evidence
+from .github_required_checks import (
+    RequiredChecksError,
+    ReviewExceptionIneligible,
+    review_exception_evidence,
+)
 
 
 def pull_review_exception(
     provider, repo: str, number: int, *, expected_head_sha: str,
     hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
     api_base: str = "", token: str | None = None, invoke: Callable,
-) -> tuple[bool, str]:
+) -> tuple[bool, bool, str]:
     host = provider.authority_endpoint(api_base)
     try:
         review_exception_evidence(
@@ -21,9 +25,11 @@ def pull_review_exception(
             hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
             invoke=lambda argv: invoke(argv, env=provider._env(token, host=host)),
         )
+    except ReviewExceptionIneligible as exc:
+        return False, False, str(exc)
     except RequiredChecksError as exc:
-        return False, str(exc)
-    return True, ""
+        return False, True, str(exc)
+    return True, False, ""
 
 
 def pull_review_gate(

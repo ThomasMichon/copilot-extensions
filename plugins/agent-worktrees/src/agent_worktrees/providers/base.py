@@ -229,7 +229,6 @@ class PRProvider(Protocol):
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
         delete_source_branch: bool = True, expected_head_sha: str = "",
-        hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
     ) -> str:
         """Directly merge a PR **now** (the submitter-direct merge primitive).
 
