@@ -411,21 +411,80 @@ def test_generated_powershell_preserves_actual_python_stdout_args_cwd_and_failur
     assert Path(value["cwd"]) == Path.cwd()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Native POSIX policy needs an isolated OS account")
+@pytest.mark.skipif(
+    os.name != "nt" and os.environ.get("APR_NATIVE_OS_ACCOUNT_ACCEPTANCE") != "1",
+    reason="Native POSIX policy needs an isolated OS account",
+)
 @pytest.mark.parametrize("enabled", [True, "malformed"])
 def test_session_start_never_runs_legacy_reconciler_for_governed_or_invalid_policy(
-    tmp_path, enabled,
+    tmp_path, native_profile, enabled,
 ):
-    _policy(tmp_path, enabled)
+    profile = native_profile or tmp_path
+    _policy(profile, enabled)
     environment = os.environ.copy()
-    environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path))
+    environment.update(HOME=str(profile), USERPROFILE=str(profile))
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    result = native(SCRIPTS / "bootstrap-check-admission", environment=environment)
-    assert result.returncode == (0 if enabled is True else 126)
-    assert json.loads(result.stdout) == {}
-    assert not (tmp_path / ".agent-pull-requests").exists()
-    assert not (tmp_path / ".local").exists()
-    assert not (tmp_path / ".copilot-extensions" / "marketplaces").exists()
+    try:
+        result = native(SCRIPTS / "bootstrap-check.admission.ps1", environment=environment)
+        assert result.returncode == (0 if enabled is True else 126)
+        assert result.stdout == "{}"
+        assert not (profile / ".agent-pull-requests").exists()
+        assert not (profile / ".local").exists()
+        assert not (profile / ".copilot-extensions" / "marketplaces").exists()
+    finally:
+        if native_profile is not None:
+            policy = profile / ".copilot-extensions" / "installation-mode.json"
+            policy.unlink()
+            policy.parent.rmdir()
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("mode", ["cell", "legacy", "legacy-fails", "refused", "unknown"])
+def test_bootstrap_admission_always_emits_one_empty_json_and_preserves_failures(tmp_path, shell, mode):
+    from test_source_install_transactions import _host
+
+    suffix = "sh" if shell == "bash" else "ps1"
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    entry = scripts / f"bootstrap-check.admission.{suffix}"
+    shutil.copyfile(SCRIPTS / entry.name, entry)
+    selected = "legacy" if mode.startswith("legacy") else mode
+    status = 19 if mode == "legacy-fails" else 0
+    if shell == "bash":
+        admission = (
+            "printf 'native admission refused\\n' >&2\nexit 1\n" if mode == "refused"
+            else f"printf '%s\\n' '{selected}'\n"
+        )
+        bootstrap = (
+            f"printf '{{}}unexpected context\\n'\n"
+            f"printf 'legacy bootstrap diagnostic\\n' >&2\nexit {status}\n"
+        )
+        command = [_host(shell), str(entry)]
+    else:
+        admission = (
+            "throw 'native admission refused'\n" if mode == "refused"
+            else f"'{selected}'\n"
+        )
+        bootstrap = (
+            "[Console]::Out.Write('{}')\nWrite-Output 'unexpected context'\n"
+            f"[Console]::Error.WriteLine('legacy bootstrap diagnostic')\nexit {status}\n"
+        )
+        command = [_host(shell), "-NoProfile", "-NonInteractive", "-File", str(entry)]
+    (scripts / f"payload-mode.{suffix}").write_text(admission, encoding="utf-8")
+    (scripts / f"bootstrap-check.{suffix}").write_text(bootstrap, encoding="utf-8")
+    result = subprocess.run(  # noqa: S603 -- actual wrapper with bounded native policy/delegate fixtures
+        command, capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.stdout == "{}"
+    expected = 126 if mode == "refused" else status
+    if mode == "unknown":
+        assert result.returncode != 0
+    else:
+        assert result.returncode == expected, result.stderr
+    if mode.startswith("legacy"):
+        assert "legacy bootstrap diagnostic" in result.stderr
+    elif mode == "refused":
+        assert "native admission refused" in result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native POSIX policy needs an isolated OS account")

@@ -385,7 +385,10 @@ def test_watch_owner_acceptance_is_opt_in_native_and_separately_contained() -> N
     assert workflow["permissions"] == {"contents": "read"}
     jobs = workflow["jobs"]
     expected_scenarios = {
-        "normal-upgrade": "test_normal_payload_init_refreshes_receipt or legacy_staging",
+        "normal-upgrade": (
+            "test_normal_payload_init_refreshes_receipt or legacy_staging "
+            "or bootstrap_admission or session_start_never_runs_legacy_reconciler"
+        ),
         "two-shipped-cells": "test_two_normal_shipped_cells",
         "peer-roundtrip": "test_normal_payload_peer_roundtrip",
         "lease-only-endpoint-live": "native_account_lease_only_owner and endpoint_live",

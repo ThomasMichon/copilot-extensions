@@ -1130,10 +1130,10 @@ def test_changed_plugins_always_includes_cross_plugin_contract_testers(monkeypat
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: next(calls))
     monkeypatch.setattr(
         runner, "_has_suite",
-        lambda name: name in {"foo", "copilot-extensions-harness"},
+        lambda name: name in {"foo", "copilot-extensions-harness", "customizing-copilot"},
     )
     result = runner.changed_plugins("origin/main")
-    assert result == sorted({"foo", "copilot-extensions-harness"})
+    assert result == sorted({"foo", "copilot-extensions-harness", "customizing-copilot"})
 
 
 def test_changed_plugins_empty_diff_schedules_nothing(monkeypatch) -> None:

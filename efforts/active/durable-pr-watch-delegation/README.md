@@ -141,20 +141,20 @@ _Agent-recommended design and validation, explicitly selected for review._
 - [x] Land the canonical pre-adoption drain, full-transaction borrowed authority and custody-preserving rollback prerequisite before the owner adapter (confirmed by #6396).
 - [x] Land inactive watch-state construction, final read-ready reload and bounded complete quiescence as internal groundwork, without enabling a production service or installation-cell adapter (confirmed by #6714).
 - [x] Land non-signaling native process-exit references captured before graceful control, without granting receipt, installation or retirement authority (confirmed by #6720).
-- [ ] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery.
-- [ ] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery.
-- [ ] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and refusal of lease-only owners without verifiable same-cell ownership on Windows and Linux before landing the cutover prerequisite.
-- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation.
+- [x] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery (source landed in #7160).
+- [x] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery (source landed in #7160).
+- [x] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and refusal of lease-only owners without verifiable same-cell ownership on Windows and Linux before landing the cutover prerequisite (exact-head native acceptance `39226209682`).
+- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation. Source landed in #7160; release and authorized deployment remain pending.
 
 ### Installation-cell prerequisite
 
 _Agent-recommended prerequisite, explicitly selected by the operator._
 
 - [x] Review and merge the installation-cell plan amendment before adoption implementation (confirmed by #6146; the lifecycle amendment above remains a separate review gate).
-- [ ] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback.
-- [ ] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer.
-- [ ] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract.
-- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Keep the saved dispatch integration resumable while this prerequisite clears.
+- [x] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback (source landed in #7160).
+- [x] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer (source landed in #7160).
+- [x] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract (exact-head native acceptance `39226209682`).
+- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Source landed in #7160; keep the saved dispatch integration resumable and inactive until release and authorized deployment clear.
 
 ### Phase 1 - Review the recovery contract
 
@@ -255,6 +255,71 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-19 - Fix the post-merge native bootstrap composition regression
+
+- Post-merge Dev CI `39232925741` blocks release of #7160. Its only failing
+  root job is `customizing-copilot`: the actual whole-suite session-start
+  contract sees the new admission wrapper as a possible context producer.
+  Reproduce the same assertion through the contained consumer suite before
+  editing; this is not a transient or permission to retry promotion.
+- The wrapper now follows the existing `bootstrap-check.*` naming and native
+  exit/finally JSON-finalizer contract. It emits one empty JSON value for
+  cell, legacy and refused admission, suppresses only delegated stdout, and
+  preserves stderr and failure status. Hook registrations and packaged-payload
+  coverage follow the renamed internal entry. The generic scanner, trust
+  markers and assertion remain unchanged.
+- Add the existing whole-suite consumer to changed-plugin CI selection so
+  future cross-plugin hook regressions cannot first appear after merge.
+  Native wrapper controls cover both shells, cold/legacy/refused/unknown
+  admission and a failing legacy delegate. They catch direct PowerShell
+  `Console.Out` bypassing pipeline suppression; the wrapper now drains a
+  contained same-host child's stdout without a console window, inheriting
+  stderr and retaining the actual exit code.
+- Preserve the post-merge journal tail while pulling forward: managed sync
+  safely aborts a squash-history conflict; after verifying that only the
+  single journal commit follows the merged PR head, replay that tail onto
+  current `origin/dev`. No reset, stash, force-push or foreign work is used.
+- Complete invocation coverage passes 78 cases with one explicit-tier cold-build
+  skip in 209.49 seconds; the unchanged complete customization consumer passes
+  515 cases in 78.20 seconds. Runner/partition/native-scope contracts pass
+  250 cases with two explicit skips in 29.52 seconds. The actual CI foundation
+  recipe passes all 15 packaged-hook/stamp cases in 144.56 seconds, retaining
+  each native child's original 60-second deadline; a first local probe's extra
+  30-second wrapper limit was not the consumer's CI contract. No production,
+  test-source or CI deadline is increased.
+- Existing fifteen-job native acceptance also selects the new wrapper/error
+  controls and actual disposable-account governance checks. Current-head native
+  proof, ordinary PR review/CI, merge and release remain owed. No install,
+  update, rollout or dispatch activation is authorized; the parent remains
+  Active.
+
+### 2026-10-19 - Merge the reviewed installation-cell adoption source
+
+- #7160 actually merges at `3c62c9442c5944640d2c13385d7ff00db614c1aa`
+  after exact tested head `30df6e50c1410b2689ae1e6d375b6657815f8aa5`
+  clears actual automated review `5569218963`, all three resolved review
+  threads, required CI `39226193526` and native acceptance `39226209682`.
+  The managed source-owner merge uses the resolved `pr-self-merge` flow;
+  no CI bypass, review waiver or hold dismissal is used.
+- All fifteen selected native jobs pass; only the two unselected diagnostics
+  skip. The actual hosted PR-owner partitions execute all assigned cases:
+  first partition 99/136/152 passes in 26.04/105.25/92.44-second groups;
+  second partition 188/121 passes in 106.20/160.83-second groups.
+  Their explicit skips remain visible and every group is below the unchanged
+  300-second cap. The index suite successfully sets up and executes
+  320/366/420/118 passing cases; no setup retry exception or test omission
+  substitutes for required green CI.
+- Re-read the parent plan after merge and close only the implemented and
+  proven source-adoption/cutover items. Combined land-and-deploy, release,
+  installed proof, dispatch delegation and the expanded fleet service remain
+  unchecked. The accepted reader residual #7208 remains tracked, not
+  cause-fixed.
+- Next stretch is release qualification and coordination with the retained
+  unified-updater owner, without installing, updating, replacing a shared
+  owner or activating dispatch. Fleet Gateway/credential/placement agreement
+  remains with its existing owners. The effort stays Active; this component
+  merge is not whole-adoption completion.
 
 ### 2026-10-19 - Retain strict CI limits with smaller PR-owner test groups
 

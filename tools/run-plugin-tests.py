@@ -85,7 +85,7 @@ TOOLS_DIR = REPO / "tools"
 # repo-wide contract, not something scoped to their own diff) -- see
 # ``changed_plugins``'s own docstring for why these must always be scheduled
 # alongside any change, not merely when their own files are touched.
-_CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
+_CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness", "customizing-copilot"}
 
 # The PR owner's complete watch contracts outgrew a single 300-second group.
 # Use smaller sequential groups, not a wider item, group, or plugin deadline.

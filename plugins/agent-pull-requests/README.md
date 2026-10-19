@@ -43,6 +43,11 @@ payload command and `scripts/init.ps1` / `scripts/init.sh` resolve native
 governance before touching a runtime. Missing/false policy retains legacy
 bootstrap, including first use before Python is installed. Namespaced requests
 never fall back to that legacy root.
+The native `bootstrap-check.admission` session-start wrapper owns exactly one
+empty JSON response through the suite-standard exit/finally contract. It keeps
+admission and legacy-bootstrap failures visible on stderr with their original
+exit status; only the delegated bootstrap's stdout is suppressed to prevent a
+second JSON response.
 For an unattributed legacy payload, a valid disabled policy may omit the
 `marketplaces` map or leave it empty. Invalid member types still refuse; a
 nonempty scoped map requires resolvable source identity.

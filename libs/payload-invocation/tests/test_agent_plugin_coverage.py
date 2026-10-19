@@ -93,7 +93,7 @@ def test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary() -> N
             ]
             if name == "agent-pull-requests":
                 required_scripts.append(
-                    plugin / "scripts" / f"bootstrap-check-admission.{suffix}"
+                    plugin / "scripts" / f"bootstrap-check.admission.{suffix}"
                 )
             if name != "agent-worktrees":
                 required_scripts.append(
@@ -128,7 +128,7 @@ def test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary() -> N
         ]
         if data["sessionStartBootstrap"]:
             required_hook_names.insert(
-                0, "bootstrap-check-admission" if name == "agent-pull-requests" else "bootstrap-check",
+                0, "bootstrap-check.admission" if name == "agent-pull-requests" else "bootstrap-check",
             )
         for shell_field, required_hooks in (
             (

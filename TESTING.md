@@ -862,6 +862,11 @@ and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
+Changed-plugin selection always includes both `copilot-extensions-harness` and
+`customizing-copilot`, whose suites inspect other plugins' session-context
+contracts. An admission-wrapper change must therefore pass the real whole-suite
+hook-composition consumer before merge, not first encounter it in post-merge
+CI. This scheduling adds no new policy exception or scanner allowlist.
 
 Full dispatch execution in the CI smoke matrix (push, manual and promotion)
 distributes its complete file inventory across three independent jobs.
