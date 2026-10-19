@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "d9081f44ce18740676e78b8d9f932b263336f5cf",
+    "commit": "822a11b99a95bc5012c4360c737c3a0865ce2b48",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
-    "source_git_blob": "3c8384d120a70f8dab2f2736816ac50e0842fc80",
-    "source_sha256": "df1e7df80cb4b9383cf2e5ce36a0541818dddb93651e8df575c0c2b1f23d8ce9"
+    "source_git_blob": "0e98cda7ee8dcc3dceda02dc02fac6b848472cde",
+    "source_sha256": "94e0f29a16a2051f57f02c8914354dd307d783a297b148f37ae1e30c9c5f3664"
   },
   "request": {
     "method": "GET",
