@@ -746,6 +746,18 @@ class TestMergeReadiness:
         assert readiness["needs_consent"] is True
         assert readiness["clear_to_merge"] is True
 
+    def test_direct_unknown_mergeability_names_the_actual_blocker(self):
+        snap = _approved(mergeable=None)
+        readiness = pc.merge_readiness(snap, operation="direct")
+        assert readiness["ready_for_direct_merge"] is False
+        assert readiness["eligible"] is False
+        assert readiness["needs_consent"] is False
+        assert readiness["clear_to_merge"] is False
+        assert readiness["occupancy"] == "needs-mergeability"
+        assert readiness["reason"] == (
+            "mergeability is unknown; re-read before direct merge"
+        )
+
     def test_review_blocking_false_reports_comment_verdict(self):
         snap = _approved(reviews=(_rev(1, "COMMENT"),))
         m = pc.merge_readiness(snap, review_blocking=False, **_BINDING)

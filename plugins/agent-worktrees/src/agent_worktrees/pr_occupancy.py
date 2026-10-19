@@ -61,6 +61,9 @@ def occupancy_from_readiness(readiness: dict) -> dict:
     """Copy ``readiness`` and set ``occupancy`` from its classification fields."""
     out = dict(readiness)
     if readiness.get("operation") == "direct":
+        if readiness.get("mergeable") is None:
+            out["occupancy"] = "needs-mergeability"
+            return out
         if readiness.get("ready_for_direct_merge"):
             out["occupancy"] = "needs-merge"
             return out

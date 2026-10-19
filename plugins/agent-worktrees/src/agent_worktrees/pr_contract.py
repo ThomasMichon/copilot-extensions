@@ -838,7 +838,7 @@ def merge_readiness(
     )
     operation_fields = operation_readiness(
         st, operation=operation, automerge_label=automerge_label,
-        approval_required=approval_required,
+        approval_required=approval_required, mergeable=snap.mergeable,
     )
     return occupancy_from_readiness({
         "verdict": st.verdict,

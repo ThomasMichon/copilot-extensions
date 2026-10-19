@@ -5,10 +5,12 @@ from __future__ import annotations
 
 def operation_readiness(
     state, *, operation: str, automerge_label: str, approval_required: bool,
+    mergeable: bool | None,
 ) -> dict:
     direct_candidate = operation == "direct"
     direct_safe = bool(
         direct_candidate
+        and mergeable is True
         and state.merge_state == "clean"
         and not state.wip
         and not state.held
@@ -32,6 +34,8 @@ def operation_readiness(
         )
     elif assessment:
         reason = "commented review requires findings assessment before direct merge"
+    elif direct_candidate and mergeable is None:
+        reason = "mergeability is unknown; re-read before direct merge"
     elif direct_candidate and state.reason in (
         "no auto-merge label configured (binding absent)",
         "auto-merge already present",
