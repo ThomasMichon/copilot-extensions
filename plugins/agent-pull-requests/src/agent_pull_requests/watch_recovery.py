@@ -40,10 +40,13 @@ def reconcile(journal: WatchJournal, *, timeout: float) -> None:
         journal.finish(read_health=read_health)
         journal.archive()
         breadcrumb.clear_breadcrumb(journal.installation.run_root)
+        remaining()
 
     document = journal._current()
     if document["phase"] in {"complete", "rolled-back"}:
         journal.archive()
+        breadcrumb.clear_breadcrumb(journal.installation.run_root)
+        remaining()
         return
     metadata_only = (
         document["predecessor"] is None and document["successor"] is None

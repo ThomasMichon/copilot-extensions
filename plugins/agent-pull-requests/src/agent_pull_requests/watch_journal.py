@@ -559,11 +559,14 @@ class WatchJournal:
     def recover(
         cls, installation: WatchInstallation, guard: CutoverLock, *,
         environment: Mapping[str, str] | None = None,
+        expected_document: dict | None = None,
     ) -> WatchJournal:
         journal = cls(installation, guard, {}, environment=environment)
         journal._guard()
         installation.require_current(environment=environment)
         journal._document = _read_identity(installation, environment=environment)
+        if expected_document is not None and journal._document != expected_document:
+            raise PermissionError("watch recovery journal changed before controller rotation")
         document = dict(journal._document)
         document.update(controller=_controller(), authorization=secrets.token_hex(32))
         journal._write(document)

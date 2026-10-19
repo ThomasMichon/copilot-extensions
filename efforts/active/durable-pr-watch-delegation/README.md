@@ -256,6 +256,55 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-19 - Implement the selected bounded installer reconciliation
+
+- The completed-target installer now retains one original 300-second activation
+  envelope, including physical target binding. The first owner attempt and
+  canonical reconciliation each retain an at-most-120-second operation limit.
+  Only a timeout captured under the initial attempt's own held guard, after
+  commit with an exact successor, admits one status/reconciliation attempt.
+  Unscoped timeouts and identity, governance, rollback or other failures do not.
+- The recovery path reports the original timeout, holds a fresh same-installation
+  native guard, checks the exact transaction/installation/target/successor and
+  coherent selection, and obtains authenticated native-bracketed writer health.
+  Normal journal recovery additionally compares the complete just-verified
+  document before rotating controller custody. Changed status evidence cannot
+  rotate another transaction. No recovery branch begins a journal, spawns an
+  owner or advances a route generation.
+- Canonical reconciliation must finish and archive the same transaction, prove
+  original predecessor exit, clear its breadcrumb and retain final exact-owner
+  health within the original envelope. Both reconciliation archive-return paths
+  now check the unchanged operation deadline. The whole native upgrade CLI uses
+  the remaining original 900-second scenario budget rather than treating its
+  earlier 300-second build-plus-activation proxy as the owner deadline; owner,
+  native-exit, scenario, group and plugin limits are not increased.
+- The initial focused run passes 36 cases, including actual completed-prefix,
+  private IPC and native same-owner reconciliation at committed and complete
+  phases, and unchanged-journal refusal for foreign comparison evidence and
+  governance. Its one failure is a test cleanup attempting a prohibited
+  terminal retire, corrected to its existing test-owned graceful stdin cleanup.
+  Current full affected contracts, the post-status change refusal, actual
+  normal full-payload upgrade, current-head CI/native acceptance and fresh
+  review remain owed. Injected lost-result controls are not evidence that an
+  actual production timeout has recovered. The effort remains Active.
+- The corrected affected owner/runtime admission batch passes 154 cases with
+  two explicit skips in 1,176.91 seconds. After adding the final complete-document
+  fence, all 44 journal/fence cases pass in 322.60 seconds, including a real
+  completed-prefix owner whose journal changes after authenticated status:
+  recovery refuses before controller rotation and preserves the changed bytes.
+  Fatal Python lint, the 961-line journal module cap and all 13 install contracts
+  pass. The actual normal full-payload upgrade is now running separately; those
+  unit/native-boundary controls do not substitute for that consumer.
+- The actual normal full-payload cold install and live-owner upgrade now pass
+  in 533.09 seconds through the shipped native installer and completed runtime.
+  The scenario requires the original predecessor's native exit, complete
+  same-successor journal/archive, coherent metadata/native route and unchanged
+  pending subscription state; no timeout waiver or conditional success was
+  added. This passing run does not by itself identify whether the initial
+  attempt needed reconciliation. The injected interruption cases separately
+  prove that recovery path. Publication, fresh review/current-head CI/native
+  acceptance, merge, release and authorized rollout remain open.
+
 ### 2026-10-19 - Address actual admission review findings
 
 - The operator subsequently selects `bounded-status-reconcile`: after a

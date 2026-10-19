@@ -1,6 +1,7 @@
 """Pending owner custody recovers without interpreting a miss as absence."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from single_instance_lease import AlreadyRunningError
@@ -9,12 +10,35 @@ from zdd import routing
 from agent_pull_requests.watch_control import WatchControlClient
 from agent_pull_requests.watch_journal import WatchJournal
 from agent_pull_requests.watch_recovery import reconcile
+from agent_pull_requests import watch_recovery
 from test_watch_control import _receiver
 from test_watch_driver import _begin
 from test_watch_invocation import installed as installed  # noqa: F401 -- pytest fixture
 from test_watch_journal import _select
 
 pytestmark = pytest.mark.timeout(180)
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+def test_reconciliation_late_archive_never_reports_success(installed, monkeypatch, terminal):
+    installation = installed[0]
+    with installation.transaction(timeout=1, environment={}) as guard:
+        journal = _begin(installed, guard)
+        if terminal:
+            reconcile(journal, timeout=120)
+        clock = [0.0]
+        monkeypatch.setattr(watch_recovery, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        archive = journal.archive
+
+        def late_archive():
+            result = archive()
+            clock[0] = 121.0
+            return result
+
+        monkeypatch.setattr(journal, "archive", late_archive)
+        with pytest.raises(TimeoutError, match="reconciliation deadline expired"):
+            reconcile(journal, timeout=120)
+        assert journal._document["phase"] == "complete"
 
 
 def test_cold_metadata_recovery_never_launches_or_adopts_watch_state(installed):

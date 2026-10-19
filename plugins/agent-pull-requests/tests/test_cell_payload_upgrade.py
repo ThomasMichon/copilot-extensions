@@ -291,12 +291,20 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         _refresh_release(payload, new_version)
         # No direct stamp, activation CAS, manual snapshot or runtime edit.
         try:
-            result = _run(init, [], environment, caller, timeout=300)
+            result = _run(
+                init, [], environment, caller,
+                timeout=_scenario_remaining(scenario_deadline),
+            )
         except subprocess.TimeoutExpired as error:
             raise AssertionError(
                 f"Owned upgrade timed out: {_cutover_failure_details(run_root)}"
             ) from error
-        assert result.returncode == 0, (result.stderr, _cutover_failure_details(run_root))
+        if result.returncode != 0:
+            pytest.fail(
+                f"Owned upgrade refused:\n{result.stderr}\n"
+                f"{json.dumps(_cutover_failure_details(run_root), sort_keys=True)}",
+                pytrace=False,
+            )
         assert reference.wait(0)
         assert old_completion.read_bytes() == completed
         assert archive.read_bytes() == archived
@@ -307,6 +315,12 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
         assert result.returncode == 0, result.stderr
         health = json.loads(result.stdout)
+        transaction = json.loads((run_root / "watch-owner-transaction.json").read_text("utf-8"))
+        assert transaction["phase"] == "complete"
+        assert transaction["exited"] == ["predecessor"]
+        assert transaction["predecessor"] == old
+        assert transaction["successor"] == health["instance"]
+        assert (run_root / "watch-owner-history" / f'{transaction["transactionId"]}.json').is_file()
         assert health["instance"]["pid"] != old["pid"]
         assert health["instance"]["runtimeVersion"] == new_version
         assert all(health[field] for field in ("writerHeld", "readReady", "effectsEnabled"))

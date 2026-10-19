@@ -498,6 +498,21 @@ whole native owner guard before metadata locks. With verified writer absence,
 it selects only target markers and a matching manifest and archives the cold
 transaction; it publishes no route and creates no watch state. A known live
 incumbent uses the same governed cutover driver as on-demand startup.
+The installer captures one 300-second activation envelope before binding its
+physical target. The initial owner cutover retains its 120-second limit. Only
+a timeout from that attempt's own committed or complete transaction with an
+exact recorded successor permits one reconciliation attempt. The original
+timeout remains visible on stderr. Under a fresh native transaction guard, the
+installer checks the unchanged transaction, installation, target, selection
+and authenticated live writer before rotating controller custody through the
+normal journal recovery path. Reconciliation retains its own at-most-120-second
+limit and consumes the original envelope; it never begins a transaction,
+spawns a daemon or invents a generation. Ready requires terminal archive,
+native predecessor exit and final exact-owner health before that original
+deadline. Changed identity, unconfirmed health, failed recovery and all other
+activation errors still fail. Successful recovery adds `reconciled: true` and
+`initialOutcome: "activation-timeout"` to the existing ready result.
+
 Normal payload bootstrap uses native installation status before selecting
 Python. With enabled governance and genuinely absent legacy state, canonical
 receipt stamping and generation-pinned activation establish the fresh cell.

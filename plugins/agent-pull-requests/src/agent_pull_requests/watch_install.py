@@ -6,15 +6,37 @@ import argparse
 import json
 import os
 import sys
+import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import _installation_context as api
-from .watch_entry import incumbent, run_target
+from .watch_entry import _client, incumbent, run_target
 from .watch_installation import PLUGIN_ID, WatchInstallation
 from .watch_invocation import WatchInvocation, capture_running
-from .watch_journal import WatchJournal
+from .watch_journal import WatchJournal, _target_selection, read_known_owner
+from .watch_notification import positive_seconds
+from .watch_recovery import reconcile
 from .watch_selection import WatchSelection
+
+
+_INTENT_FIELDS = ("transactionId", "installation", "target", "successor")
+
+
+class _PendingActivationTimeout(TimeoutError):
+    """Comparison evidence from this attempt, never a recovery capability."""
+
+    def __init__(self, error: TimeoutError, document: dict):
+        super().__init__(str(error))
+        self.intent = {key: deepcopy(document[key]) for key in _INTENT_FIELDS}
+
+
+def _remaining(deadline: float) -> float:
+    budget = deadline - time.monotonic()
+    if budget <= 0:
+        raise TimeoutError("watch installer activation deadline expired")
+    return budget
 
 
 def invocation(context: Path, payload: Path, snapshot_id: str, runtime_version: str) -> WatchInvocation:
@@ -70,16 +92,90 @@ def activate(target: WatchInvocation, *, timeout: float = 120.0) -> dict:
             installation, guard, target=target.runtime, target_manifest=_manifest(target),
             predecessor=None if owner is None else owner.instance, environment={},
         )
-        if owner is None:
-            WatchSelection(journal).publish()
-            journal.commit()
-            journal.finish()
-            journal.archive()
-        else:
-            result = run_target(journal, target, poll_interval=30.0, timeout=timeout)
-            if not result.ok or journal._document["phase"] != "complete":
-                raise RuntimeError("watch installer activation rolled back")
+        try:
+            if owner is None:
+                WatchSelection(journal).publish()
+                journal.commit()
+                journal.finish()
+                journal.archive()
+            else:
+                result = run_target(journal, target, poll_interval=30.0, timeout=timeout)
+                if not result.ok or journal._document["phase"] != "complete":
+                    raise RuntimeError("watch installer activation rolled back")
+        except TimeoutError as error:
+            document = journal._current()
+            if document["phase"] in {"committed", "complete"} and document["successor"] is not None:
+                raise _PendingActivationTimeout(error, document) from error
+            raise
         return {"status": "ready", "activated": True, "ownerStarted": owner is not None}
+
+
+def _require_intent(target: WatchInvocation, document: dict, expected: dict) -> None:
+    if (
+        document["phase"] not in {"committed", "complete"}
+        or document["successor"] is None
+        or any(document[key] != expected[key] for key in _INTENT_FIELDS)
+        or document["installation"] != target.installation.evidence()
+        or document["target"] != target.runtime.evidence()
+    ):
+        raise PermissionError("watch installer reconciliation intent changed")
+
+
+def _reconcile_committed(target: WatchInvocation, expected: dict, *, deadline: float) -> dict:
+    target.require_current()
+    installation = target.fresh_installation()
+    with installation.transaction(timeout=_remaining(deadline), environment={}) as guard:
+        target.require_current()
+        document = read_known_owner(installation, environment={})
+        _require_intent(target, document, expected)
+        _target_selection(installation, document)
+        owner = _client(target, document, "successor")
+        status = owner.health(timeout=_remaining(deadline))
+        if (
+            status.get("writerHeld") is not True or status.get("readReady") is not True
+            or type(status.get("effectsEnabled")) is not bool
+        ):
+            raise PermissionError("watch installer reconciliation owner is unconfirmed")
+        _remaining(deadline)
+        journal = WatchJournal.recover(
+            installation, guard, environment={}, expected_document=document,
+        )
+        _require_intent(target, journal._current(), expected)
+        reconcile(journal, timeout=min(120.0, _remaining(deadline)))
+        document = journal._current()
+        _require_intent(target, document, expected)
+        if document["phase"] != "complete":
+            raise PermissionError("watch installer reconciliation remains pending")
+        _target_selection(installation, document)
+        status = _client(target, document, "successor").health(timeout=_remaining(deadline))
+        if not all(status.get(key) is True for key in (
+            "writerHeld", "readReady", "effectsEnabled",
+        )):
+            raise PermissionError("watch installer reconciled owner is unconfirmed")
+        _remaining(deadline)
+        return {
+            "status": "ready", "activated": True, "ownerStarted": False,
+            "reconciled": True, "initialOutcome": "activation-timeout",
+        }
+
+
+def activate_with_reconciliation(target: WatchInvocation, *, timeout: float = 300.0) -> dict:
+    """One initial attempt and one exact-owner reconciliation share a deadline."""
+    return _activate_until(target, time.monotonic() + positive_seconds(timeout))
+
+
+def _activate_until(target: WatchInvocation, deadline: float) -> dict:
+    try:
+        result = activate(target, timeout=min(120.0, _remaining(deadline)))
+    except _PendingActivationTimeout as error:
+        print(
+            f"Watch activation timed out: {error}; checking the exact committed owner "
+            "before one bounded reconciliation.",
+            file=sys.stderr,
+        )
+        result = _reconcile_committed(target, error.intent, deadline=deadline)
+    _remaining(deadline)
+    return result
 
 
 def main(argv=None) -> int:
@@ -90,8 +186,9 @@ def main(argv=None) -> int:
     parser.add_argument("--runtime-version", required=True)
     args = parser.parse_args(argv)
     try:
+        deadline = time.monotonic() + 300.0
         target = invocation(args.context, args.payload_root, args.snapshot_id, args.runtime_version)
-        print(json.dumps(activate(target)))
+        print(json.dumps(_activate_until(target, deadline)))
     except (OSError, ValueError, RuntimeError) as error:
         print(f"Watch activation refused: {error}", file=sys.stderr)
         return 1
