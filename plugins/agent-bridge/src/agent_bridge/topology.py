@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from machine_transport import normalize_machine_entries
+from machine_transport import ControlPlaneError, load_control_plane, normalize_machine_entries
 from machine_transport import parse_machines_yaml as parse_machine_entries
 
 log = logging.getLogger("agent-bridge")
@@ -216,25 +216,12 @@ def load_machines_yaml(
 
 
 def load_control_plane_project(path: str | Path) -> str | None:
-    """Return the control-plane project declared in machines.yaml, if any.
-
-    ``control_plane.project`` names the repo whose binstub backs the
-    per-machine control-plane agents synthesized from each machine's SSH
-    environments (e.g. ``dev6`` / ``dev6-wsl`` / ``cloud1``). Accepts either
-    ``control_plane: {project: <name>}`` or a bare ``control_plane: <name>``.
-    """
+    """Select only the executable harness, retaining legacy declarations."""
     p = Path(path).expanduser()
     if not p.exists():
         return None
     try:
-        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    except Exception as exc:
-        log.error("Failed to parse control_plane from %s: %s", p, exc)
-        return None
-    cp = data.get("control_plane")
-    if isinstance(cp, dict):
-        proj = cp.get("project")
-        return str(proj) if proj else None
-    if isinstance(cp, str) and cp.strip():
-        return cp.strip()
-    return None
+        declaration = load_control_plane(p)
+    except ControlPlaneError as exc:
+        raise TopologyLoadError(str(exc)) from exc
+    return declaration.harness if declaration else None

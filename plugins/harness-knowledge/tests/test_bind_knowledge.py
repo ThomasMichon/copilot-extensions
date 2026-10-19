@@ -8,6 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 _MOD = Path(__file__).resolve().parents[1] / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
 _spec = importlib.util.spec_from_file_location("bind_knowledge", _MOD)
 bk = importlib.util.module_from_spec(_spec)
@@ -136,9 +138,11 @@ def _completed(
     return subprocess.CompletedProcess(args, returncode, stdout, stderr)
 
 
-def test_registered_worktree_reports_canonical_readiness(
+@pytest.mark.parametrize("repo_class", ["worktree", "knowledge"])
+def test_registered_worktree_capable_repo_reports_canonical_readiness(
     tmp_path: Path,
     monkeypatch,
+    repo_class: str,
 ):
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
@@ -158,7 +162,7 @@ def test_registered_worktree_reports_canonical_readiness(
                         "repos": [
                             {
                                 "name": "knowledge",
-                                "class": "worktree",
+                                "class": repo_class,
                                 "remote": "https://github.com/example/knowledge.git",
                                 "default_branch": "main",
                                 "resolved_account": "example",
@@ -194,7 +198,7 @@ def test_registered_worktree_reports_canonical_readiness(
     assert registration["status"] == "ready"
     assert registration["canonical"] is True
     assert registration["path_source"] == "canonical_registry"
-    assert registration["class"] == "worktree"
+    assert registration["class"] == repo_class
     assert registration["resolved_path"] == str(knowledge)
     assert registration["remote"] == "https://github.com/example/knowledge.git"
     assert registration["default_branch"] == "main"
@@ -246,7 +250,7 @@ def test_unregistered_fallback_is_not_canonical_readiness(
         "knowledge",
         str(knowledge),
         "--class",
-        "worktree",
+        "knowledge",
         "--remote",
         "https://github.com/example/knowledge.git",
         "--default-branch",
@@ -296,7 +300,7 @@ def test_registered_path_and_class_mismatch_has_repair_command(
 
     assert registration["status"] == "mismatch"
     assert registration["canonical"] is True
-    assert "expected worktree" in registration["reason"]
+    assert "expected knowledge or worktree" in registration["reason"]
     assert str(wrong) in registration["reason"]
     assert registration["registration_argv"] == [
         "repos",
@@ -304,7 +308,7 @@ def test_registered_path_and_class_mismatch_has_repair_command(
         "knowledge",
         str(knowledge),
         "--class",
-        "worktree",
+        "knowledge",
     ]
 
 

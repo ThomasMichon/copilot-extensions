@@ -274,13 +274,13 @@ onboarded merely because its source is published.
 
 ## Validation Plan
 
-- [ ] Pair/schema: explicit roles, matching legacy projection, malformed and
+- [x] Pair/schema: explicit roles, matching legacy projection, malformed and
   conflicting declarations, unchanged legacy scalar/project-only behavior,
   and no knowledge-only executable target.
-- [ ] Fresh native setup with registered repositories but no local harness
+- [x] Fresh native setup with registered repositories but no local harness
   config; actual binding/pair creation, matching-binding no-op and
   conflicting-binding refusal through the existing owner.
-- [ ] Old/new consumer compatibility: an older daemon reads the same scalar
+- [x] Old/new consumer compatibility: an older daemon reads the same scalar
   harness target, while new consumers retain the knowledge companion and
   separately report unsupported binding/projection capabilities.
 - [ ] Unit/schema: controller/provider selection, mutually exclusive canonical
@@ -352,3 +352,36 @@ takeover or implementation completion is asserted.
 - Reserved #7195 for the additive declaration and binding-projection contract.
   This amendment must clear the normal review gate before implementation;
   existing routing, configuration, lifecycle and operation owners remain.
+
+### 2026-10-19 - Paired declaration implementation qualification
+
+- Amendment #7198 actually merged as
+  `1e313d5ee1f3cd688c95d53de56d7548878ee878` before implementation.
+  The shared typed reader retains the legacy scalar launch target and both
+  repository roles. Bridge derives only the executable harness.
+- The new native read-only front door works without local binding state and
+  reports the shared native execution platform. The existing binding writer
+  consumes it, validates canonical classes, Git roots and the native config
+  namespace, refuses inherited or local binding conflicts, and preserves a
+  matching pointer's bytes and timestamp. Ambiguous YAML names remain strings.
+- Contained qualification: shared-library suite 321 passed, Bridge selection
+  and legacy regression 223 passed, binding suite 113 passed, native reader
+  and actual first-touch integration 15 passed. The latter uses actual local
+  Git repositories, the installed native CLI entry point, the normal binding
+  script, actual harness creation and companion common-dir checks. It covers
+  ordinary and conventional `.git`-backed bare anchors with worktree-local
+  `core.bare`; no AI process is launched.
+- Unit and simple native consumer tiers ran. Fresh temporary configuration
+  provides a first-touch integration lane, not a full stock-OS installation
+  proof. No Linux container engine or admitted live external target is
+  available in this source workspace; hosted Linux CI and separately owned
+  live adoption remain explicit gates. No target runtime update, service
+  restart or fleet configuration deployment is implied.
+- One independent read-only implementation review found no high-confidence
+  defect. Its bare-anchor qualification question led to the additional
+  actual conventional bare-anchor consumer lane. The unchanged item timeout
+  remains enforced; native registry setup uses its real owner API rather than
+  paying for repeated setup-only CLI startups.
+- Implementation publication and release remain pending. These focused
+  validation items do not complete the parent integration, provider, setup,
+  admission, lifecycle or controlled-adoption plans.

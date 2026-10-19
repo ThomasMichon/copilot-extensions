@@ -23,6 +23,12 @@ resolved -- network call to reach a host that is actually the caller itself.
 
 ## What this library owns
 
+- **`control_plane`** -- immutable `ControlPlaneRepositories`,
+  `parse_control_plane()` and `load_control_plane()` read an explicitly selected
+  harness/knowledge declaration. They preserve legacy self-hosted project
+  declarations, reject conflicting launch projections, and report whether a
+  pair includes the scalar projection that older daemons consume. They do not
+  discover, register, bind or launch repositories.
 - **`registry`** -- `MachineEntry`/`SSHEnvironment` dataclasses,
   `parse_machines_yaml()` (resolved raw data), `parse_machines_yaml_file()` (one file),
   `merge_machines_yaml()` (additive

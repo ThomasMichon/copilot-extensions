@@ -105,6 +105,47 @@ back up the profile stanza in `~/.agent-bridge/config.yaml`, including any
 `default_copilot_args` and `default_env`, then restore those spawn defaults
 after re-adoption.
 
+### Paired harness and knowledge repositories
+
+An adopter that separates executable agency from companion knowledge declares
+both roles together:
+
+```yaml
+control_plane:
+  project: example-harness
+  harness: example-harness
+  knowledge: example-knowledge
+```
+
+`harness` is the machine-agent launch project. `knowledge` is companion state,
+not a second agent target. `project` is the matching scalar compatibility
+projection for older daemons; it must equal `harness`. Do not put an object or
+tuple into `project`: older readers convert that value into a project string.
+New readers reject incomplete roles, malformed names and conflicting projections
+instead of falling back to a different executable repository.
+
+Legacy `control_plane: example-control` and
+`control_plane: {project: example-control}` remain self-hosted declarations.
+They do not imply a knowledge companion. A pair without `project` is readable
+by a new consumer but is explicitly not reported legacy-compatible.
+
+Topology adoption only projects the Bridge profile. It does not establish the
+machine-local knowledge binding, register or clone repositories, or install
+another plugin. For paired first-touch setup, use the optional
+`harness-knowledge` binding owner and its `--control-plane <machines.yaml>`
+front door, with the exact native Worktrees command. Its native read-only
+`knowledge control-plane --path <machines.yaml> --json` reader works before a
+machine-local harness configuration exists. Canonical registrations and the
+normal binding writer still own path/account validation and local state.
+An unsupported old binding reader is an explicit setup gate, not evidence that
+ignored knowledge metadata was applied.
+
+For outreach, select existing matching agents in the caller's own harness
+unless explicitly directed to a qualified repository target. Preserve those
+explicit targets. The declared pair supplies the selected setup/default
+relationship; it does not replace caller/parent routing under #6300 or grant
+knowledge-repository dispatch.
+
 ### Verify
 
 ```bash

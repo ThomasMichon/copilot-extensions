@@ -10,6 +10,12 @@ mechanism.
 
 from __future__ import annotations
 
+from .control_plane import (
+    ControlPlaneError,
+    ControlPlaneRepositories,
+    load_control_plane,
+    parse_control_plane,
+)
 from .execution_identity import (
     IdentityError,
     Resolution,
@@ -48,6 +54,8 @@ from .transport import (
 
 __all__ = [
     "AmbiguousMachineError",
+    "ControlPlaneError",
+    "ControlPlaneRepositories",
     "IdentityError",
     "MachineEntry",
     "MachineEnvironment",
@@ -68,6 +76,7 @@ __all__ = [
     "is_local_machine",
     "is_observed_local_name",
     "local_execution_platform",
+    "load_control_plane",
     "machine_entries_to_topology",
     "machine_name",
     "machine_identity_names",
@@ -75,6 +84,7 @@ __all__ = [
     "merge_machines_yaml",
     "parse_machines_yaml",
     "parse_machines_yaml_file",
+    "parse_control_plane",
     "qualify_guest",
     "resolve_identity",
     "resolve_machine_identity",

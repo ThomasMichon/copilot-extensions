@@ -357,6 +357,33 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `compose_knowledge_plugins` | bool | `true` | When false, never graft the paired knowledge repo's marketplaces/plugins into the harness session overlay. |
 | `knowledge_only` | bool | `false` | This repo is a **knowledge-only companion**: it exists solely to be carved as another project's paired `-k` knowledge worktree, never driven directly. `create` (and the interactive new-worktree flow) refuses a standalone worktree for it; binstub reconcile skips/reclaims its `<repo>` binstub; the Worktree Manager excludes it from implicit-default/ambiguous-selection project listings. The internal pairing carve is unaffected. Set the matching registry `repos add/update --class knowledge` too so `repos list`/the Manager's repo view reflect it. See the `knowledge-only-repos` effort. |
 
+An adopter's selected `machines.yaml` may declare a paired control plane:
+
+```yaml
+control_plane:
+  project: example-harness
+  harness: example-harness
+  knowledge: example-knowledge
+```
+
+`agent-worktrees knowledge control-plane --path <machines.yaml> --json` is a
+read-only, no-project front door. It returns a version-1 object containing the
+source path, native execution `platform`, declared roles, `paired`, `legacy_project` and
+`legacy_compatible`. It needs neither a pre-existing machine-local harness
+config nor a running Bridge. It does not register, bind or launch anything.
+Missing, malformed and conflicting declarations return an explicit error.
+The platform comes from the shared execution-root classifier, not a caller's
+`WSL_DISTRO_NAME`; containers on a WSL kernel remain Linux.
+Legacy scalar/project-only declarations retain their executable project and
+report no companion.
+
+The optional `harness-knowledge` setup writer consumes this declaration to
+establish the existing machine-local `knowledge_repo` pointer after native
+canonical-registration and configuration-root validation. Keep the selected
+pair in the adopter's configuration, never in a shared harness's committed
+configuration. Existing knowledge-class registrations support the paired
+worktree lifecycle without becoming standalone agent projects.
+
 **Platform-keyed maps** (`launch`, `launch_recovery`, `validate_hook`,
 `post_install_hook`) use the keys `windows`, `wsl`, `linux`, each mapping to a
 command expressed as a list of arguments:

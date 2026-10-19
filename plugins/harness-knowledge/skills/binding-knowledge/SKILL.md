@@ -61,7 +61,9 @@ null), it needs binding -- proceed. If it already resolves to a knowledge path,
 continue with the configurator's canonical registration check anyway:
 `state-root` may have succeeded through fallback checkout discovery. Only the
 configurator's `registration.status: ready` proves that the named repo has the
-required canonical `class: worktree` record.
+required canonical worktree-capable `class: knowledge` or legacy `class: worktree`
+record. Never convert a valid knowledge-class registration into an executable
+project merely to satisfy an older reader's class check.
 
 Fail loud on the chosen knowledge checkout before invoking the configurator:
 verify the path exists and is a git repo (or clone/create it first). The
@@ -70,8 +72,31 @@ does not prove that a missing checkout is valid.
 
 ## 1. Decide the knowledge repo (ask, don't assume)
 
+When the operator already selected a paired `machines.yaml`, use its explicit
+roles rather than asking again or replacing the pair with only its launch
+project:
+
+```yaml
+control_plane:
+  project: example-harness
+  harness: example-harness
+  knowledge: example-knowledge
+```
+
+The native read-only front door is:
+
+```text
+<agent-worktrees catalog argv[0]> knowledge control-plane --path <machines.yaml> --json
+```
+
+It works before a local harness binding exists. Require the returned source,
+roles and `paired: true`; `project`, when supplied for older daemons, must
+match `harness`. Legacy project-only declarations do not choose a knowledge
+repo. An unsupported command is a visible version/capability gate, never
+permission to guess names or silently discard the knowledge role.
+
 Ask the operator (use the ask-user affordance) for the knowledge repo, offering
-three ways:
+three ways only when no explicit pair or prior selection supplies it:
 
 | Option | What you need | Then |
 |--------|---------------|------|
@@ -127,7 +152,8 @@ python skills/binding-knowledge/scripts/bind_knowledge.py \
   --register
 ```
 
-`--register` creates or repairs the canonical record as `class: worktree`,
+`--register` creates a missing companion as `class: knowledge` and preserves an
+existing valid knowledge or legacy worktree class when repairing metadata,
 including the checkout's effective origin and reliably detected default branch.
 The resulting canonical record reports the effective GitHub account mapping.
 The configurator does not persist a repository owner fallback as an explicit
@@ -179,6 +205,32 @@ Run this configurator check even when the initial `state-root` command already
 resolved a path.
 When the exact agent-worktrees command is unavailable, the configurator remains
 usable but reports `unverified`; it never claims the registration is missing.
+
+For an explicit pair whose two repositories are already canonically
+registered, the same writer can resolve both names and paths directly:
+
+```text
+python <this-skill>/scripts/bind_knowledge.py --control-plane <machines.yaml> \
+  --agent-worktrees-path "<agent-worktrees catalog argv[0]>" --json
+```
+
+This path requires a current native pair reader, exact canonical registrations,
+usable repository/account identity and a native-validated stateless-harness
+configuration root. Explicit name/path arguments, if supplied, must match.
+Use the reader's native execution platform for registered paths, including
+home-relative paths; do not substitute an environment-variable platform guess.
+Registered roots must be actual Git roots; bare anchors remain supported.
+It refuses a conflicting effective knowledge binding (including an inherited
+global default) before effects and checks
+again at the normal pointer writer; a matching pointer retains its exact bytes
+and timestamp. A YAML number, boolean or date is not a repository-name string;
+the writer quotes ambiguous names. Missing registrations are a normal setup prerequisite, not
+fallback-discovered readiness or permission to clone a second checkout.
+The ordinary explicit-name flow remains available for deliberate registration
+or re-pointing selected by the operator; do not use it to bypass a refused pair.
+The declared knowledge role remains companion state and is never a Bridge
+launch target. Prefer existing agents in the selected/current harness for
+outreach unless the operator directs an explicit different repository target.
 
 When both `--harness-path` and `--knowledge-path` are given, the bind **also
 assembles the personal-plugin overlay** (see step 3b) -- so the operator's
