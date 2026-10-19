@@ -1,0 +1,17 @@
+{
+  "comment": "Carry the shared typed control-plane repository reader in consuming runtimes",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
