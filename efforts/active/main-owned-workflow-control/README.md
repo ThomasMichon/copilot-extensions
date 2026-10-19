@@ -28,6 +28,14 @@ continues through dev. A safe reduction under existing proven gates does not
 wait for the entire ownership migration. Record ownership and consolidation
 completion separately; neither alone completes the overall objective.
 
+The October 19 test-portfolio direction makes reliable, speedy promotion and PR
+CI the immediate priority: parallel unit suites with coverage baselines,
+conservative impact selection for PRs, and every unit-level test run for every
+Main release. Integration and multiprocess coverage moves to scheduled Dev
+execution with accountable repair ownership, not silent deletion. Reduced
+promotion frequency or integration-gated promotion remains a later
+dev-backed-deployment consideration.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -171,6 +179,15 @@ this decomposition is **agent-recommended**. It neither transfers the existing
 release publisher nor authorizes a second controller, pause bypass, Main
 activation or live rescue configuration.
 
+**2026-10-19 - Test-portfolio burndown (summary):**
+
+Assist the existing Main agent by sweeping promotion and PR CI history for
+flaky and overlong tests, reducing validation count and critical-path time
+without losing unit release coverage. The full operator request and the
+agent-recommended evidence and implementation decomposition are recorded in
+[Test validation burndown](test-validation-burndown.md). This extends the
+existing portfolio audit, not the release writer's ownership or authority.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -198,9 +215,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   This does not close portfolio-wide equivalence or authorize production edits.
 - [ ] Accept non-overlapping implementation ownership and execute the ordered
   waves in [the shared roadmap](workflow-portfolio-audit.md#ordered-execution-plan).
-- [ ] Land the Campaign-driver-owned source synchronize consolidation and
-  its required metadata regressions, then obtain the separately owned
-  qualified Main activation and live event/rollback measurements.
+- [x] Land the Campaign-driver-owned source synchronize consolidation and
+  its required metadata regressions (#7236).
+- [ ] Obtain the separately owned qualified Main activation and live
+  synchronize/close/retarget, rollback and comparable measurements.
 - [ ] Prove actual admitted self-hosted execution before claiming offload;
   preserve hosted review and distinct full/native qualification.
 - [ ] Design and qualify [bounded native review rescue](bounded-review-rescue.md)
@@ -288,6 +306,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 5 - Finish validation and automation consolidation
 
+- [ ] Complete the [test validation burndown](test-validation-burndown.md):
+  measured promotion/PR CI history, reliable parallel unit suites, per-suite
+  coverage baselines and conservative PR selection, full unit execution on
+  every Main release, and scheduled Dev integration/multiprocess runs with a
+  named repair owner. Coordinate the implementation with the existing release
+  and test-portfolio owners; do not activate a superseded full-corpus profile.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
@@ -410,6 +434,18 @@ regressions, retained-owner seams and the completion gate.
 
 ## Validation Plan
 
+- [ ] Test-portfolio routing: compare collected unit identities with the
+  release execution manifest; every unit runs for every Main release.
+  Missing/stale/incompatible coverage baselines select full affected suites
+  rather than silently omitting unknown coverage.
+- [ ] Scheduled Dev integration: prove the retained integration/multiprocess
+  inventory is scheduled, its exact Dev input and outcomes remain visible,
+  and a failure reaches an accountable agent that initiates repair or
+  explicitly escalates. A schedule declaration alone is not acceptance.
+- [ ] Test-portfolio timing: report comparable before/after queue and execution
+  measurements, sample sizes and reliable failure signatures; distinguish
+  cancellation, infrastructure failure and confirmed flakiness. Do not
+  manufacture a passing budget by increasing deadlines or deleting witnesses.
 - [ ] Unit: exact allowlist, invalid/case-equivalent paths, traversal, symlinks,
   executable modes, submodules, missing files and collisions fail closed.
 - [ ] Real Git integration: materialization, preservation, rename/deletion,
@@ -476,3 +512,4 @@ this contract. New evidence belongs in its date file, not another peer effort.
 - [2026-10-16](journal/2026/10.16.md)
 - [2026-10-18](journal/2026/10.18.md)
 - [2026-10-19](journal/2026/10.19.md)
+- [2026-10-19 - Metadata source delivery](journal/2026/10.19-metadata-source.md)
