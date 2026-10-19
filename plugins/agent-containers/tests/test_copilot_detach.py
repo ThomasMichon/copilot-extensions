@@ -67,7 +67,106 @@ def test_pending_delivery_roundtrips_in_existing_keeper_state(monkeypatch, tmp_p
     forward_keeper._holds().write_self_state("synthetic", {"connected": True}, pid=os.getpid())
     assert forward_keeper.read_state("synthetic")["pending_deliveries"]["scope"] == pending
     forward_keeper.record_pending_delivery("synthetic", "scope", None)
-    assert forward_keeper.read_state("synthetic")["pending_deliveries"] == {}
+    assert forward_keeper.read_state("synthetic").get("pending_deliveries", {}) == {}
+
+
+@pytest.mark.parametrize("cause", ["dead", "changed-forward"])
+@pytest.mark.parametrize("replacement_fails", [False, True])
+def test_scope_a_unknown_delivery_survives_scope_b_keeper_replacement_and_failure(
+    monkeypatch, tmp_path, cause, replacement_fails,
+):
+    import time
+    from ssh_manager.forward_keeper import KeeperStore
+    from venue_copilot.refs import reconcile_owned_delivery, settle_deferred_seed
+
+    queue = sqlite3.connect(tmp_path / "queue.sqlite")
+    queue.execute("CREATE TABLE messages (key TEXT PRIMARY KEY, body TEXT)")
+    attempts, settlements = [], []
+    lost = [True]
+    def send(argv, **kwargs):
+        key = argv[argv.index("--idempotency-key") + 1]
+        attempts.append((list(argv), kwargs["input"]))
+        queue.execute("INSERT OR IGNORE INTO messages VALUES (?,?)", (key, kwargs["input"]))
+        queue.commit()
+        if lost[0]:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps({
+            "accepted": True, "session_id": "native-A", "message_id": 1, "duplicate": True,
+            "receipt": {"session_id": "native-A", "stage": "admitted"},
+        }))
+    context = {"version": 1, "cwd": "/workspace/A", "plugins": [], "logical_payloads": {}}
+    result = _real_deliver_note(
+        "native-A", "task A", run=send, operation="operation-A", prepared_context=context,
+    )
+    assert result.status == "unknown"
+    receipt = {"seed": {"text": "task A", "handoff_id": "bridge-operation-A"}}
+    pending = {
+        **result.recovery(), "envelope": {"prompt": "task A", "plugin_context": context},
+        "creation_receipt": receipt, "remote_env": "/private/launch-input-A", "reservation_id": "reservation-A",
+    }
+    store = KeeperStore(tmp_path / "keepers")
+    monkeypatch.setattr(forward_keeper, "_STORE", store)
+    store.write("shared", {
+        "keeper_protocol": forward_keeper._KEEPER_PROTOCOL, "pid": 987654321,
+        "container": "shared", "venue_port": 4000, "relay_port": 4001, "host_relay_port": 4002,
+        "holds": {"scope-A": {"mux": "wt-A", "updated_at": time.time()}},
+        # Exercise migration of the unreleased, embedded workflow format.
+        "pending_deliveries": {"scope-A": pending},
+    })
+    monkeypatch.setattr(store, "alive", lambda name: cause == "changed-forward")
+    stopped = []
+    def stop(name):
+        assert forward_keeper.pending_delivery_path(name).is_file()
+        stopped.append(name)
+        store.remove(name)
+        return cause == "changed-forward"
+    monkeypatch.setattr(store, "stop", stop)
+    def spawn(argv, env, payload, **kwargs):
+        assert forward_keeper.pending_delivery_path("shared").is_file()
+        assert "pending_deliveries" not in (store.read("shared") or {})
+        assert "scope-A" in forward_keeper.read_state("shared")["holds"]
+        if replacement_fails:
+            raise OSError("replacement process creation failed")
+        return {**payload, "pid": 987654322}
+    monkeypatch.setattr(forward_keeper, "spawn_keeper", spawn)
+    def replace():
+        return forward_keeper.ensure_running(
+            "shared", venue_port=5000 if cause == "changed-forward" else 4000,
+            mux="wt-B", hold_id="scope-B", mux_alive=lambda mux: True,
+        )
+    if replacement_fails:
+        with pytest.raises(OSError, match="replacement process"):
+            replace()
+    else:
+        assert replace()["started"] is True
+    assert stopped == ["shared"]
+    loaded = forward_keeper.read_state("shared")["pending_deliveries"]["scope-A"]
+    assert loaded == pending
+    assert set(forward_keeper.read_state("shared")["holds"]) == {"scope-A", "scope-B"}
+    assert not settlements
+    assert forward_keeper.stop_keeper(
+        "shared", hold_id="scope-B", mux_alive=lambda mux: True,
+    ) is False
+    assert set(forward_keeper.read_state("shared")["holds"]) == {"scope-A"}
+    assert forward_keeper.read_state("shared")["pending_deliveries"]["scope-A"] == pending
+    # Ordinary process-state removal also cannot erase an unresolved workflow.
+    store.stop("shared")
+    assert forward_keeper.read_state("shared")["pending_deliveries"]["scope-A"] == pending
+    lost[0] = False
+    admitted = reconcile_owned_delivery(loaded, run=send)
+    assert admitted.status == "admitted" and admitted.message_id == 1
+    assert settle_deferred_seed(
+        lambda command, stdin: settlements.append((command, stdin)) or (0, "", ""),
+        "worktree-A", context["cwd"], receipt,
+    )
+    assert len(settlements) == 1 and "bridge-seed-settle" in settlements[0][0]
+    assert queue.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
+    assert all(value == attempts[0] for value in attempts)
+    # Recovery may finish after the disposable keeper state has disappeared.
+    forward_keeper.record_pending_delivery("shared", "scope-A", None)
+    assert forward_keeper.read_state("shared") is None
+    assert not forward_keeper.pending_delivery_path("shared").exists()
+    queue.close()
 
 
 def test_preparation_runs_under_the_existing_keeper_before_native_launch(seams, monkeypatch):

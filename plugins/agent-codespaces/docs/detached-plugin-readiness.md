@@ -82,7 +82,8 @@ erase that uncertainty. Only an authoritative admitted receipt resolves it.
 Unresolved delivery returns a pending/busy result, never `seeded` or a
 success-shaped “no task”. The mux, connection/relay/keeper, supervisor venue and
 CLI reservation remain owned. A private `pending_delivery` record lives in the
-existing CodeSpace connection tenant or container forward-keeper state. It holds
+existing CodeSpace connection tenant or an independent container workflow journal
+alongside the forward-keeper store. It holds
 the exact envelope, native SID, operation, input digest and creation receipt.
 It contains no authentication snapshot. Rejoining first reconciles that record
 without starting another mux or changing its input. Successful reconciliation
@@ -93,3 +94,12 @@ Raw reference-note calls without prepared metadata keep their legacy Boolean
 contract. Consumed per-launch authentication inputs retain their normal cleanup;
 the container's outer generic launch inputs are retained while admission is
 pending and cleaned only after reconciliation.
+
+Container workflow journals are not disposable keeper process state. Keeper
+replacement migrates the unreleased embedded format under the existing lock
+before pruning or stopping the old keeper. A failed replacement, another scope's
+forward change, or ordinary keeper-state removal cannot erase an unresolved
+delivery. Public keeper-state reads still expose `pending_deliveries` for
+recovery, even without a running keeper. Reconciliation removes an empty journal
+only after confirmed admission and creation-receipt settlement; stopping a
+forward is not an implicit abandonment of that workflow.
