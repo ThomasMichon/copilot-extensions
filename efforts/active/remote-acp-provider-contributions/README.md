@@ -176,6 +176,38 @@ during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
 
+### 2026-10-19 - Explicit-load and lifecycle review races
+
+- The next review confirmed the preceding eight code repairs and identified
+  three remaining cases. Concurrent first-time explicit loads now match the
+  requested native ID while it is still unconfirmed, rather than creating
+  another bridge attachment to the same conversation.
+- Stopped caller reuse acquires the same lifecycle lock as explicit resume/
+  stop. After lock acquisition, it resolves policy again and rechecks the
+  registered session's binding and state; an in-flight explicit resume is not
+  replaced or shut down by an ordinary start.
+- Named-target clients retain legacy reuse with generation-38 through
+  generation-40 daemons, which cannot perform binding-aware reuse. Generation
+  41 delegates that decision to the daemon. Direct URL capability floors stay
+  unchanged.
+- Calibrated the three defects before fixing them: five new cases failed while
+  54 passed. The corrected session/CLI lane passed all 59 cases, with strict
+  module-size and Python lint checks passing. Expanded native TLS/peer/HTTP
+  isolation/session/historical-route validation passed 223 cases, before
+  generation-41 re-attestation to committed source
+  `aa2723309669097da9d30c04377d63802c53b4c4`. Current-head review and hosted
+  CI remain open.
+- Extended the lifecycle race to explicit stop, which may hold the lock while
+  status still reads idle. That added case failed before repair; all settled
+  reuse candidates now wait for the lock and revalidate, while an already
+  reserved STARTING attachment remains immediately identifiable. The final
+  session/CLI/historical-route lane passed 117 cases and strict size/lint checks
+  passed. Final source is `bef972393d699a64dbc06e6049577efb74979cd1`.
+- Refreshed current generation-41 provenance to that final committed source;
+  independent checking passed all 265 fixtures and the contract/provider lane
+  passed 115 cases. Historical expected bodies and capability floors remain
+  unchanged.
+
 ### 2026-10-19 - Second review repairs and conversation identity
 
 - Corrected project-aware `agent-show` admission in the real CLI parser guard.

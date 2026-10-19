@@ -250,7 +250,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-          "sha256": "e1090883f0e34203f5239cc44ab6707ef045d11d413a657a7d829b2fca64492a",
+          "sha256": "32b02a91924538ac07bc7ba98d2fd98df91fee299f498a8c4f57ff6ce4470a56",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1590,247 +1590,247 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol-generation-41.json",
-          "sha256": "b426798b2fabfe904965893a93b262be6a320f045f4eadf9b4b72396d4b20614",
+          "sha256": "35597fb9fbff4ea55bf257e9aeff469ed5206d39a3d8517d170e29020d4cb89c",
           "role": "Generation-41 independent expected-vector re-attestation: acquisition-protocol-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt-generation-41.json",
-          "sha256": "a1f92e00984f8eae6af126e83038f7cca12d0c268d954b3d4cf71874a09c61f0",
+          "sha256": "73c2ca3023a01126ffd05bf94fc55b172094fbfba8900268f4f1b191c2c9afee",
           "role": "Generation-41 independent expected-vector re-attestation: live-message-receipt-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-41.json",
-          "sha256": "996cab0c86db19756b0f6cf80916fcb9da4ed1c232347bea7a20f21ece3a3915",
+          "sha256": "7c88eb086e01877e7f8a52b0deb646f77fc792398ce4d351314df94e821cf562",
           "role": "Generation-41 independent expected-vector re-attestation: peer-replies-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-41.json",
-          "sha256": "e2dd3bc9b3ffd250b63d5a9e4dad2130f1801f66259f9e3a2c87e207c05ccd90",
+          "sha256": "98dbea33b180e2c8ad22e693089c500fe70ee7a4f969eed6a659d5df48d0210b",
           "role": "Generation-41 independent expected-vector re-attestation: workspace-creation-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-41.json",
-          "sha256": "0837b627a4b6cd536cb624f87782e13b30c06fbb1c2da0dc7e33b02ba42776c6",
+          "sha256": "ecfad81d53e10d2b8e21647801b7c7faca627415e2494eca8dbda1e028e8bb3a",
           "role": "Generation-41 independent expected-vector re-attestation: remote-message-receipt-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-41.json",
-          "sha256": "7abce035d7f5e13d807fd7e5320c75c405ba0a3a6b51cc9d8e7da0504fce4008",
+          "sha256": "b26fbde6f75c7520c69617da553ac49f82238af3e92a663c19497acc10e824db",
           "role": "Generation-41 independent expected-vector re-attestation: remote-zero-reply-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-41.json",
-          "sha256": "d8c629c3a502c735e81f59ecfbe2977a193348105d36b8f503371dfdc3aa48ca",
+          "sha256": "5ee73cd75e3c401bae2261bc6ac74f44747d493fb173f302d26a734e1c46a223",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-41.json",
-          "sha256": "66dba877bfb93504c44e5cf53a8f58796263c6325f7e6fe03970aec64deb2111",
+          "sha256": "9f2456a73b23734a719c16a461521068ee3de133c0b29c55dd7368c961c81ca8",
           "role": "Generation-41 independent expected-vector re-attestation: workspace-creation-routes-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-41.json",
-          "sha256": "401dfe70018d445671e52a667e660c501cb5063a1a4a8c46cd595889b0c26de1",
+          "sha256": "834f81772b383b99eebd36cc613fa3a66108b8ec43403a4c578418df36746001",
           "role": "Generation-41 independent expected-vector re-attestation: remote-peer-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-41.json",
-          "sha256": "15ed519bcfd00cfecb751be072712a1b87251ffdf0b4d15ea8fb4ddc9294a196",
+          "sha256": "f499df517dd01b0eddf7b9ea4c426dafa86943b2e7705c1b998039468aa05935",
           "role": "Generation-41 independent expected-vector re-attestation: agents-list-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-41.json",
-          "sha256": "c32d8d34fac1995a2d97682db317dc9660e8052875cb2ae1076a0f2e9cf96cad",
+          "sha256": "7925e0d147ccff615ea5720b48a13d5a155389e64da65325520451b43d8711cc",
           "role": "Generation-41 independent expected-vector re-attestation: native-bound-extracted-prompt_models-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-41.json",
-          "sha256": "22283fc02236ad11d2d3969b4d7bc5cb8c1fc8dca492ee74f34d51f56a954c2e",
+          "sha256": "c82a2e4ebdb9f23007aa3f8b7879293ee37d072d2e2617d41418de9a7eba6586",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-models-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-41.json",
-          "sha256": "d44e627e66e21858e5faa48eb95402f75bc7ef3bfef112efea330cd787833ea0",
+          "sha256": "f2bcd10e68b31c82b0c7d5b6de9d2e938722974d6081f99de2a1134a64ce0ab1",
           "role": "Generation-41 independent expected-vector re-attestation: native-bound-extracted-routes-prompts-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-41.json",
-          "sha256": "e93479ca2a618fb77042dcabf1de61b31b98c830cd39a298d868bbe934fee445",
+          "sha256": "4e39d26262e498f8c09a0dcf31b4ce35161671aeac4787381ac3420bcd7b004b",
           "role": "Generation-41 independent expected-vector re-attestation: live-registration-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-41.json",
-          "sha256": "2ae045925a328442606d4724571674540211ea3c70e41075d3ebc7206990ca4d",
+          "sha256": "5f3912ee0a09a7fac0c472645d0657bad40b2b79623c1c77cc7780cb1a2102cd",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-admission-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-41.json",
-          "sha256": "ada4fcba3545c91d120cf23eb0d640bec214d308d5f39f00883880716a8e4234",
+          "sha256": "7e812a70366dd75e8644ae128d43963655b88c6f8ddfbed2ac20426a42f1fc8e",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-native-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-41.json",
-          "sha256": "60d516452c5c8bcc60b61401fdaf528ef89059b0bec16b720ac6ca4b65b31349",
+          "sha256": "ccabdaf43146948e37cde47769f09ea439917628319de8c1f5116f2060c54881",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-resume-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-41.json",
-          "sha256": "ccbcf4236eed289920ca667c6419e860e89b34580dcb8de10118bd43485bdde2",
+          "sha256": "257b4c2bcff00a3e2cce53e0b6e062cffcd14b05998c5de9dd0fa0702790ea4b",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-refresh-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-41.json",
-          "sha256": "06526d632818db698a1902c1eb7fd9d7fa167b285d6509eb65f23554daa578e3",
+          "sha256": "3321374b91262d8db7dc85481ec688ada2c85a8214b70cc6f754baf96f0f4c42",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-41.json",
-          "sha256": "975f800ab9692ecf158c58d870bffdf1630c96d561b648cfc2322b33c7cb776c",
+          "sha256": "16e8bbb7d223134602598fa1ec045bd6f88f992a8a303db363170abd8235b231",
           "role": "Generation-41 independent expected-vector re-attestation: workspace-creation-models-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-41.json",
-          "sha256": "eefc05dfc269a06b95225ddce65ec4292e484c503057abb2f6d4ad7dd58fc35b",
+          "sha256": "f544ad1f27f6386812b6794bda7b450e21173c92ed7e722df46647ca7e630f4f",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-worktrees-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-41.json",
-          "sha256": "73cf8db5cff4730d896e2c67c27a467f4006343f20cbc264dea0d78153354e5e",
+          "sha256": "c762eb6d6ece8208af10194c583910dc654531653864aba6d58729e7ab833a83",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-worktree_refresh-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-41.json",
-          "sha256": "d0705d87ff9f53f7157be158380adc6c1fe602fda36090ad241708977e0e5532",
+          "sha256": "3cc0646c038e7429b7b928ca182d29b038ef608c0c92f324733fe2b4e775facc",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-client_worktrees-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-41.json",
-          "sha256": "9c18631368f04dc7e806b10065f4eb0bf8a83ee727ab1da4a1edb82c73e5e41b",
+          "sha256": "55b8926314beba9c4305c16b6b23e52582c8ba8bce3f335265e98f2b87925468",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-worktree_entry-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-41.json",
-          "sha256": "006ec967f405ba43b35fe24917f795e03fc7567c6c6e2ddf37da4af687f8763a",
+          "sha256": "5f53e0a44c6271d1ab8193f074dba7010f85c9f4b89b0902de1dfd551cc6c5bb",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-models-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-41.json",
-          "sha256": "9736e2a470ff9b19b93567761ea61054d4ddebcf4ccc4279bd328b206c6c784c",
+          "sha256": "2e75d8ce26bc791f94f39ca0c3542140bfc19ba5ef65d28d27e3ab7bea598376",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-client_session_start-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-41.json",
-          "sha256": "1cf38a589c8aa1237b92593dc9b9402a9c7f1a801e7a1918595a8585218a53f1",
+          "sha256": "c6200c558d1246c099a77fe47bb879788ae2281134c7548a09f5cd8387e2bd11",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-client_answers-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-41.json",
-          "sha256": "ceaee2cab664e533af326be29eb1211f30a3d2e0004b579eaba957b57a522a7e",
+          "sha256": "67e2c2277963e59b029e239afb7c4659c3a319cae9d2a9527ed52f4249af080b",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-routes-answers-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-41.json",
-          "sha256": "15362032df76a7be1a47d52b05991612672d0fd9a0a8d3cb33b46bd97848d84e",
+          "sha256": "76f27270844600a42dc5c10ec633e6854510eb454893d1aa7af545f8768df347",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-remote_acp_sessions-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-41.json",
-          "sha256": "c2118dab3086fca17384160b0de4f87470d8299f5ea15714773ce66c93fc64df",
+          "sha256": "32a7e58195525cc74e39022dacb202ef8cfe64a8e2bc908041e98514b05ec2b8",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-progress-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-41.json",
-          "sha256": "df7d863374db0d3f990bbbd855ee97ec4f128c5184d5bdfef99624df17d2a974",
+          "sha256": "dcb342f0257dd21dacf6f26a3746007e3aae84dd04278e69a2a5421bb95d54f0",
           "role": "Generation-41 independent expected-vector re-attestation: remote-operation-versions-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-41.json",
-          "sha256": "a4987d349b04b0cd955fcd480a309cbc8e3ee86ae69f093ff756e8a36a3028b6",
+          "sha256": "6507faa2594bd44107dfe85ddbf6606fdb5f14a335639573f46465b4d83b49b2",
           "role": "Generation-41 independent expected-vector re-attestation: native-worktree-resume-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-41.json",
-          "sha256": "294c32693e55e37749b30a3066cf8ba20d2a070a17eb78c5e9a6c8950e9a4107",
+          "sha256": "6d653e94af28a10cc03fb6ed4d7da4a6c15eec185edec655413cc25404a6ce31",
           "role": "Generation-41 independent expected-vector re-attestation: native-worktree-resume-client-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-41.json",
-          "sha256": "1ab46b7685cc8ae0aac5cd838214e6853e66f1e007b484b6c3aba33c9fadc432",
+          "sha256": "241f38e76eec60e77933b465306ee7c9fc5d82100e80866d17439eb1024c9efa",
           "role": "Generation-41 independent expected-vector re-attestation: native-singleton-resume-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-41.json",
-          "sha256": "1e73cb59263d484d0f4ee535f5f2a0f90e334997a1a7c3b887ade41238449825",
+          "sha256": "09eb690b4532d0e3409532a70dcdf5dd72e01d940d0d7e6e0d4f5a1f96f7f267",
           "role": "Generation-41 independent expected-vector re-attestation: native-worktree-confirmation-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-41.json",
-          "sha256": "40696449d88c32c48ba1514789d1bcefa82bd6d1b96e7661eea8280e5645f537",
+          "sha256": "fb24f7eed2baea4d602c56e7009c19ebd3874afdb7689b94730e9d1d6eac2d79",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-owner-record-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-41.json",
-          "sha256": "de33262c4a95e04addeb8c7a24edf995713b39a7f98002abcdf514949e1ab302",
+          "sha256": "a73dab5a74d6f4e02650170083e0604b61010dc5d7b55de0c4d833075cc05c72",
           "role": "Generation-41 independent expected-vector re-attestation: native-worktree-reconciliation-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-41.json",
-          "sha256": "2b8d8c02247124a25ec1622cfef24e6a544f06ec36ecf3214883130ec1a8dc1f",
+          "sha256": "465cd6b5f15a5516453321d9cb2c7ce043107b08b73f6925e13e4a50d296930c",
           "role": "Generation-41 independent expected-vector re-attestation: native-singleton-liveness-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-ssh-profile-generation-41.json",
-          "sha256": "dec06b922b807c47f46633abb901b54917c5bb870bee84c35ff0fab5ef04e1c3",
+          "sha256": "30d7f7c22ea4c92c9bb0869a7bf49d43893334e2b131d47c0d623d55cacd81d7",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-worktrees-ssh-profile-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-ssh-profile-generation-41.json",
-          "sha256": "3576771f2f11add6db7ae24b383b1c1da2f6db409895af3f9be95bdbac780b02",
+          "sha256": "c338fc01524d3c73d77caec8b98d763353bedcaac9e8b1825ca40f96c36a0542",
           "role": "Generation-41 independent expected-vector re-attestation: remote-message-receipt-ssh-profile-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-targets-generation-41.json",
-          "sha256": "9eef1eaa4fc04b40bf0631486b639cfdf4ec6e09c351e92ae0602683fef4f6f8",
+          "sha256": "6bab8df1882555fc773960f6e44219275437211c047e530ea3ae2c75244d024e",
           "role": "Independent hand-authored HTTP-41 URL floor, ordinary roster, exact binding/source approval and fail-closed target vectors",
           "generation": 41
         }
@@ -4357,228 +4357,228 @@
           "capture_method": "Re-attest unchanged HTTP-40 wire vectors after clearing the retained completed task and cancel-requested flag on a periodic-to-on-demand restart; the capture/restore/wire contract is unaffected."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
           "source_git_blob": "b158083b99f4d9972456d7eac0a2090f146595cd",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
           "source_git_blob": "251580fbf91a17a8bddda74f9b2a8f00ff2e7269",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "69524f64f093ebaf14e0d095c4681b3960231fa9",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
           "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
           "source_git_blob": "0e98cda7ee8dcc3dceda02dc02fac6b848472cde",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
           "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
           "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
           "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
           "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
           "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
           "source_git_blob": "6f789f626eb69b882a79e3a336fa8ba443be29fe",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
           "source_git_blob": "337327675392254d076f9e99d4f1cfaba1609504",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
           "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
           "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
           "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
           "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
           "source_git_blob": "b5ebdc87ddb649573fb0d2b5578a0bc00edb368d",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
           "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
           "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-          "source_git_blob": "0a54635fa2ee3918c8e7fc1532c20b8184854d22",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "source_git_blob": "89c419a8af26d2954754ed53b256098da3e6b985",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
           "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
           "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
           "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
           "source_git_blob": "479172e6483513d6ecd60652ac2c995c94603a2e",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
           "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
           "source_git_blob": "4cc342a43aa7c4b648150ebf3a8be30379577ba2",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+          "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
           "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed local binding, source-isolation, discovery/readiness, session-reuse/continuation, reservation and caller-qualified reuse-forwarding fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, explicit native-load reservation, named-reuse compatibility and settled-session lifecycle locking/revalidation across explicit resume and stop. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
         }
       ],
       "support_window": "HTTP generations 1 through 41 remain supported. Direct URL endpoint targets require generation 41; named remote ACP retains floor 38, receipts retain 39, and exact-native worktree resume retains 40. Historical independent fixtures remain immutable; generation-41 re-attestations retain their original capability floors.",

@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "feed1caefa7f06811bd53d83125428afc4b25568",
+    "commit": "bef972393d699a64dbc06e6049577efb74979cd1",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
