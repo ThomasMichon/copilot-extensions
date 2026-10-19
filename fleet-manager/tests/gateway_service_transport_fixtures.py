@@ -37,11 +37,18 @@ class Backend:
         self.release = asyncio.Event()
         self.stream = asyncio.Queue()
         self.writes = 0
+        self.mutations = 0
         self.runner = None
 
     async def handle(self, request):
         body = await request.read()
         self.requests.append((request.method, request.raw_path, dict(request.headers), body))
+        if request.path == "/conditional":
+            if (request.headers.get("If-Match", '"current"') != '"current"'
+                    or request.headers.get("If-Unmodified-Since", "current") != "current"):
+                return web.json_response({"error": "stale-precondition"}, status=412)
+            self.mutations += 1
+            return web.json_response({"mutations": self.mutations})
         if request.path == "/events":
             response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
             await response.prepare(request)

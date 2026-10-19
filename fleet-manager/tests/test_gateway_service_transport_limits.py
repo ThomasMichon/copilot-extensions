@@ -124,6 +124,66 @@ def test_host_headers_cannot_select_authenticated_origin(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("header,value", [
+    ("If-Match", '"stale"'),
+    ("If-Unmodified-Since", "Wed, 21 Oct 2015 07:28:00 GMT"),
+])
+def test_conditional_mutation_reaches_backend_with_precondition(
+    tmp_path, method, header, value,
+):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            rig.h.document["manifest"]["slots"][0]["routes"][0]["methods"].append(method)
+            rig.h.document["callers"][0]["methods"].append(method)
+            await rig.update()
+            await rig.connect()
+            async with await rig.request(
+                "/api/conditional", method, headers={header: value},
+            ) as response:
+                assert response.status == 412
+                assert await response.json() == {"error": "stale-precondition"}
+            forwarded = {key.lower(): item
+                         for key, item in rig.backends[0].requests[-1][2].items()}
+            assert forwarded[header.lower()] == value
+            assert rig.backends[0].mutations == 0
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("header", [
+    "If-Match", "If-Unmodified-Since", "If-None-Match", "If-Modified-Since",
+])
+def test_connection_nominated_precondition_refuses_instead_of_being_dropped(tmp_path, header):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            async with await rig.request("/api/conditional", "POST", headers={
+                header: "stale", "Connection": header,
+            }) as response:
+                assert response.status == 400
+                assert await response.json() == {"error": "invalid-headers"}
+            assert not rig.backends[0].requests
+    asyncio.run(scenario())
+
+
+def test_buffered_head_omits_unknown_representation_length(tmp_path):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            rig.h.document["manifest"]["slots"][1]["routes"][0]["methods"].append("HEAD")
+            rig.h.document["callers"][0]["methods"].append("HEAD")
+            await rig.update()
+            await rig.connect(1)
+            async with await rig.request("/assets/index.html") as response:
+                assert response.status == 200
+                assert len(await response.read()) > 0
+                assert int(response.headers["Content-Length"]) > 0
+            async with await rig.request("/assets/index.html", "HEAD") as response:
+                assert response.status == 200
+                assert await response.read() == b""
+                assert "Content-Length" not in response.headers
+    asyncio.run(scenario())
+
+
 def test_refusals_do_not_log_access_proof_or_cookie_values(tmp_path, caplog):
     async def scenario():
         async with running(tmp_path) as rig:

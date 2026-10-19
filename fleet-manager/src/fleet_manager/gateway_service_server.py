@@ -300,7 +300,8 @@ class ServiceRuntime:
                 self.checkpoint(channel, pending)
                 if frame["type"] == "end":
                     if not streaming:
-                        response.content_length = len(buffered)
+                        if request.method != "HEAD":
+                            response.content_length = len(buffered)
                         await response.prepare(request)
                         self.checkpoint(channel, pending)
                         await response.write(bytes(buffered))

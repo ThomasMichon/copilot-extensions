@@ -111,6 +111,11 @@ request/response bodies and unsupported forwarding refuse explicitly. Request
 credentials, cookies, client identity headers and hop-by-hop metadata are not
 forwarded. Backend response headers use a narrow allowlist; authentication and
 cookies are not passed through.
+Conditional request headers (`If-Match`, `If-Unmodified-Since`, `If-None-Match`
+and `If-Modified-Since`) reach the backend unchanged. Nominating a condition as
+hop-by-hop refuses rather than silently turning conditional work unconditional.
+Buffered `HEAD` replies omit an unknown representation length rather than
+reporting the empty transmitted body's length as the corresponding asset size.
 
 | Resource | Bound |
 |---|---|

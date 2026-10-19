@@ -34,6 +34,7 @@ DEADLINE = 60
 SEND_TIMEOUT = 5
 REQUEST_HEADERS = frozenset({
     "accept", "accept-language", "content-type", "if-none-match", "if-modified-since",
+    "if-match", "if-unmodified-since",
 })
 RESPONSE_HEADERS = frozenset({
     "content-type", "cache-control", "etag", "last-modified", "content-disposition",
@@ -100,6 +101,8 @@ def headers(items: Iterable[tuple[str, str]], allowed: frozenset[str],
     result: dict[str, str] = {}
     for key, value in pairs:
         name = key.lower()
+        check(not (name in allowed and name.startswith("if-") and name in nominated),
+              "invalid-headers")
         if name not in allowed or name in nominated:
             check(not strict, "invalid-headers")
             continue
