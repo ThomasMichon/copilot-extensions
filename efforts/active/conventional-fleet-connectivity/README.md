@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Plan PR, then serial independently reviewed slices against `dev`
 - **Created:** 2026-10-18
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** agent-ssh `conventional-repository-connectivity`, `derived-agent-roster`; agent-bridge `conventional-repository-discovery`; agent-fabric `derive-dont-duplicate`, `unattended-tiered-self-convergence`
 - **Umbrella issue:** #7206 (bounded campaign under #63)
 
@@ -94,7 +94,7 @@ context redacted; no private transcript is published or linked:
 ## Plan
 
 ### Phase 1 - Review the source and authority contract
-- [ ] Obtain operator review, then satisfy the normal plan PR review/merge gate.
+- [x] Obtain operator review, then satisfy the normal plan PR review/merge gate (#7217).
 - [ ] Confirm supported topology fields, conventional locations, package discovery,
   source-machine key-path references, provider selection and explicit override
   priority against the peer-owned configuration contract before coding. Reuse
@@ -184,3 +184,15 @@ execution structure for the requested outcome, not authorization to implement.
   configuration-consolidation owner before publication. Provider-specific
   registry emission remains provider-owned; generic refresh must compose those
   recipes rather than introduce a parallel profile inventory.
+- Proposal #7217 received an approving review and passing required checks,
+  merged to `dev`, and the source worktree was reconciled through `pr-complete`.
+  The next slice is the source-resolution contract and direct-profile mapping;
+  the maintenance-safety primitive remains separately owned by #7213.
+  No runtime capability or deployment is claimed by the proposal merge.
+- Began the bounded conventional-source slice under #7206: reuse Bridge's
+  existing repository candidate order in agent-ssh, honor the calling Git
+  boundary, and fail explicit/selected invalid sources before transport
+  discovery or profile writes. The direct-profile/client-identity mapping,
+  state-root composition, Bridge cold-start discovery and rollout gates remain
+  open. No schema, provider inventory or configuration authority is introduced
+  by this slice.

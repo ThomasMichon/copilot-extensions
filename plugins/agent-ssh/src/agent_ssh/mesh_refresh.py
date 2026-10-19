@@ -176,14 +176,24 @@ def refresh_mesh(
        except an alias whose declared ``hostname`` matches this machine's own
        raw hostname, which is never dialed over SSH (see module docstring).
     """
-    path = machines_yaml or mesh_mod.find_machines_file()
-    if path is None or not path.is_file():
+    path = machines_yaml
+    try:
+        if path is None:
+            path = mesh_mod.find_machines_file()
+        if path is not None:
+            mesh = mesh_mod.load_mesh(path, strict=True)
+    except (OSError, UnicodeError, ValueError) as exc:
+        return MeshRefreshResult(
+            ok=False,
+            machines_yaml=str(path) if path is not None else None,
+            detail=f"cannot load mesh source: {exc}",
+        )
+    if path is None:
         return MeshRefreshResult(
             ok=True,
             machines_yaml=None,
             detail="no machines.yaml found for this repo",
         )
-    mesh = mesh_mod.load_mesh(path)
     alias_hostnames: dict[str, str] = {}
     for m in mesh.machines:
         if m.dtssh_alias and m.dtssh_alias not in alias_hostnames:

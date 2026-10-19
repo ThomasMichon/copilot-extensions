@@ -139,9 +139,19 @@ def _cmd_explore(args: argparse.Namespace) -> int:
 def _cmd_mesh_status(args: argparse.Namespace) -> int:
     fragment_registry.FragmentRegistry(args.config_d).refresh()
     path = args.path
+    try:
+        if path is None:
+            path = mesh_mod.find_machines_file()
+        if path is not None:
+            mesh = mesh_mod.load_mesh(Path(path), strict=True)
+    except (OSError, UnicodeError, ValueError) as exc:
+        msg = f"cannot load mesh source: {exc}"
+        if args.json:
+            print(json.dumps({"error": msg, "source": str(path) if path is not None else ""}))
+        else:
+            print(f"agent-ssh mesh-status: {msg}", file=sys.stderr)
+        return 1
     if path is None:
-        path = mesh_mod.find_machines_file()
-    if path is None or not Path(path).is_file():
         msg = "no machines.yaml found for this repo"
         if args.json:
             print(json.dumps({"project": "", "source": "", "machines": []}))
@@ -150,7 +160,6 @@ def _cmd_mesh_status(args: argparse.Namespace) -> int:
         else:
             print(f"agent-ssh mesh-status: {msg}")
         return 0
-    mesh = mesh_mod.load_mesh(Path(path))
     if args.json:
         print(json.dumps(mesh.to_dict(), indent=2))
     elif args.summary:
