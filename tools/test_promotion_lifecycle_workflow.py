@@ -197,6 +197,9 @@ elif mode=="current":
     backend.main=state(DEV)
 elif mode=="resume":
     backend.pr["head"]["ref"]="release-pipeline/state-123"
+elif mode in ("failed-merged","cancelled-merged","failed-unmerged"):
+    backend.promotion["conclusion"]="cancelled" if mode=="cancelled-merged" else "failure"
+    backend.pr["merged"]=mode!="failed-unmerged"
 def api(path,**kwargs):
     with open(os.environ["API_TRACE"],"a",encoding="utf-8") as log:
         log.write(path+"\\n")
@@ -227,6 +230,9 @@ git() {
                 ("active", "workflow_run", "CI", False, "0"),
                 ("current", "workflow_run", "CI", False, "0"),
                 ("ready", "workflow_run", "Validate and promote dev to main", True, "0"),
+                ("failed-merged", "workflow_run", "Validate and promote dev to main", True, "0"),
+                ("cancelled-merged", "workflow_run", "Validate and promote dev to main", True, "0"),
+                ("failed-unmerged", "workflow_run", "Validate and promote dev to main", False, "0"),
                 ("resume", "pull_request_target", "", True, "0"),
                 ("ready", "workflow_run", "CI", False, "1"),
             ):

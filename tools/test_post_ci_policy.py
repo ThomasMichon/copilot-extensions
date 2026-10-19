@@ -387,10 +387,25 @@ def test_only_committed_same_repo_dev_ci_can_refresh_baseline(
     ("pull_request", "failure", False),
     ("push", "success", True),
     ("push", "failure", False),
+    ("push", "cancelled", False),
     ("workflow_dispatch", "success", True),
 ])
 def test_only_committed_or_manual_success_can_enter_the_filter(event, conclusion, expected):
     assert _filter_can_run(event=event, conclusion=conclusion) is expected
+
+
+@pytest.mark.parametrize("name,event,conclusion,expected", [
+    ("Validate and promote dev to main", "workflow_dispatch", "success", True),
+    ("Validate and promote dev to main", "workflow_dispatch", "failure", True),
+    ("Validate and promote dev to main", "repository_dispatch", "cancelled", True),
+    ("Validate and promote dev to main", "pull_request", "success", False),
+    ("CI", "push", "cancelled", False),
+    ("unrelated", "push", "success", False),
+])
+def test_promoter_completion_can_reconcile_a_merge_after_failed_confirmation(
+    name: str, event: str, conclusion: str, expected: bool,
+) -> None:
+    assert _filter_can_run(workflow_name=name, event=event, conclusion=conclusion) is expected
 
 
 def _filter_can_run(**changes: str) -> bool:
@@ -398,6 +413,7 @@ def _filter_can_run(**changes: str) -> bool:
     condition = workflow["jobs"]["filter-and-dispatch"]["if"]
     replacements = {
         "github.event.workflow_run.conclusion": "conclusion",
+        "github.event.workflow_run.name": "workflow_name",
         "github.event.workflow_run.event": "event",
         "github.event.pull_request.head.repo.full_name": "head_repo",
         "github.event.pull_request.user.login": "author",
@@ -412,6 +428,7 @@ def _filter_can_run(**changes: str) -> bool:
     executable = "(" + condition.replace("&&", "and").replace("||", "or") + ")"
     context: dict[str, str | bool] = {
         "trigger": "workflow_run", "event": "", "conclusion": "", "action": "",
+        "workflow_name": "CI",
         "author": "", "owner": "owner", "base": "", "head_repo": "", "repo": "owner/project",
         **changes,
     }

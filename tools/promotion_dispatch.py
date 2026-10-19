@@ -192,12 +192,13 @@ def retired_source(
             raise PromotionDispatchError("closed Main PR branch is unavailable")
         if not _PROMOTION.fullmatch(branch):
             continue
-        if (
-            not isinstance(repo, dict) or not isinstance(repo.get("nameWithOwner"), str)
-            or not isinstance(user, dict) or not isinstance(user.get("login"), str)
-        ):
+        if not isinstance(user, dict) or not isinstance(user.get("login"), str):
+            raise PromotionDispatchError("closed promotion publisher is unavailable")
+        if user["login"].casefold() != owner:
+            continue
+        if not isinstance(repo, dict) or not isinstance(repo.get("nameWithOwner"), str):
             raise PromotionDispatchError("closed promotion provenance is unavailable")
-        if repo["nameWithOwner"].casefold() != repository.casefold() or user["login"].casefold() != owner:
+        if repo["nameWithOwner"].casefold() != repository.casefold():
             continue
         detail = request(f"pulls/{row['number']}")
         head = detail.get("head") if isinstance(detail, dict) else None
@@ -351,8 +352,13 @@ def pending_source(
             or run["head_repository"].get("full_name") != repository
         ):
             raise PromotionDispatchError("completion is not the canonical trusted Main promoter")
-        if run.get("status") != "completed" or run.get("conclusion") != "success":
+        if run.get("status") != "completed":
             return DispatchDecision(None, "promotion-not-complete")
+        if run.get("conclusion") not in (
+            "success", "failure", "cancelled", "timed_out", "action_required",
+            "neutral", "skipped", "stale", "startup_failure",
+        ):
+            raise PromotionDispatchError("completed promotion conclusion is unavailable or invalid")
         branch = f"release/promote-{completed_promotion_run}"
         rows = request(
             "pulls?state=closed&base=main&head="

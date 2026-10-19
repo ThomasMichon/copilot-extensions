@@ -114,6 +114,32 @@ def test_actual_merge_completion_recovers_a_ci_advance_suppressed_while_pr_was_o
     assert any("pulls/123" in path for path in backend.calls)
 
 
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out"])
+@pytest.mark.parametrize("merged", [True, False])
+def test_terminal_promoter_reconciles_actual_merge_even_after_failed_confirmation(
+    conclusion: str, merged: bool,
+) -> None:
+    backend = Backend()
+    backend.promotion["conclusion"] = conclusion
+    backend.pr["merged"] = merged
+    result = dispatch.pending_source(REPO, completed_promotion_run=500, api=backend)
+    assert result.source_sha == (DEV if merged else None)
+    assert result.reason == ("deferred-source-ci-succeeded" if merged else "no-merged-promotion")
+    if not merged:
+        assert not any("contents/" in path for path in backend.calls)
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_failed_promoter_without_a_candidate_or_current_green_ci_cannot_retry(conclusion: str) -> None:
+    backend = Backend()
+    backend.promotion["conclusion"] = conclusion
+    backend.closed = []
+    assert dispatch.pending_source(REPO, completed_promotion_run=500, api=backend).source_sha is None
+    backend.closed = [{"number": 123}]
+    backend.cis = [ci(conclusion="failure")]
+    assert dispatch.pending_source(REPO, completed_promotion_run=500, api=backend).source_sha is None
+
+
 def test_successful_noop_without_a_merged_pr_cannot_create_a_dispatch_loop() -> None:
     backend = Backend()
     backend.closed = []
@@ -501,3 +527,28 @@ def test_automatic_source_rejects_invalid_input_without_api_calls(
 
     with pytest.raises(dispatch.PromotionDispatchError):
         dispatch.require_automatic_source(repository, source, api=api, wait_seconds=wait)
+
+
+@pytest.mark.parametrize("author,allowed", [("outside", True), ("example", False)])
+def test_deleted_fork_cannot_block_other_sources_but_owner_provenance_stays_strict(
+    author: str, allowed: bool,
+) -> None:
+    backend = Backend()
+    row = {
+        **retirement_row(backend.pr), "number": 124,
+        "headRepository": None, "author": {"login": author},
+    }
+
+    def api(path: str, *, timeout: float, body: dict | None = None) -> object:
+        if path == "graphql":
+            return retirement_page([row])
+        return backend(path, timeout=timeout, body=body)
+
+    if allowed:
+        result = dispatch.pending_source(REPO, source_ci_run=600, api=api)
+        assert result.source_sha == DEV
+        dispatch.require_automatic_source(REPO, DEV, api=api)
+        assert not any(path.endswith("/pulls/124") for path in backend.calls)
+    else:
+        with pytest.raises(dispatch.PromotionDispatchError, match="provenance"):
+            dispatch.pending_source(REPO, source_ci_run=600, api=api)

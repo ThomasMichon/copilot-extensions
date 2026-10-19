@@ -1074,6 +1074,14 @@ for both an allowed advance and a retired unchanged source. No additional
 permission, writer, workflow, CI waiver or qualification retry is introduced.
 Main activation and all parent release/client acceptance gates remain pending.
 
+A subsequent review found two related boundary cases. Known non-owner authors
+are now excluded before requiring repository provenance for a deleted fork.
+Terminal promoter events reconcile an actual merged PR even if the run was
+cancelled or failed after the Actions-token merge; that token suppresses the
+ordinary PR-closure event. Source CI still requires success, and no merged PR
+means no deferred retry. Focused unit and literal dispatcher regressions retain
+strict owner provenance and cover both successful recovery and refusal.
+
 ### 2026-10-18 - Reviewed lifecycle charter implemented locally; Main activation pending
 
 Plan amendment #7199 merged as

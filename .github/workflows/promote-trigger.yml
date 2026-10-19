@@ -154,8 +154,10 @@ jobs:
     name: filter (dev-ancestry) and dispatch
     if: >-
       (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event != 'pull_request') ||
+       github.event.workflow_run.event != 'pull_request' &&
+       ((github.event.workflow_run.name == 'CI' &&
+         github.event.workflow_run.conclusion == 'success') ||
+        github.event.workflow_run.name == 'Validate and promote dev to main')) ||
       (github.event_name == 'pull_request_target' &&
        github.event.action == 'closed' &&
        github.event.pull_request.base.ref == 'main' &&
