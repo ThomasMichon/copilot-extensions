@@ -1376,6 +1376,12 @@ route is enrolled. A skipped job is not validation evidence.
 `windows-coverage-rotation.yml` reuses its existing schedule/manual entrypoints
 for all nine Linux plugin suites through `run_tests_in_devcontainer.py`, with
 immutable source selection, execution logs and named failure ownership.
+Each Linux job provisions the exact CLI in `tools/devcontainer-cli/package-lock.json`
+through the existing configured-registry age/integrity admission helper, with
+dependency scripts disabled and a matching `devcontainer --version` health
+check. The CLI is job-local, not a global install; Docker and CLI prerequisite
+checks remain before the hardened wrapper. CLI readiness alone is not a
+container-suite or platform qualification.
 Its former hosted Windows execution is explicitly unavailable pending Windows
 container capacity. Linux success does not qualify Windows, explicit-tier
 families or other unenrolled residuals; `tools/periodic-integration-inventory.json`
@@ -1463,8 +1469,9 @@ path write or a privilege a job object doesn't restrict. See
 `efforts/active/devcontainer-test-isolation/README.md` for the full design
 rationale and the findings (Phase 0) that shaped it.
 
-Requires the [devcontainers CLI](https://github.com/devcontainers/cli)
-(`npm i -g @devcontainers/cli`) and a working Docker daemon. Linux only --
+Requires a seasoned [devcontainers CLI](https://github.com/devcontainers/cli)
+on `PATH` and a working Docker daemon. The scheduled lane provisions the locked
+CLI described above; it does not assume the hosted image supplies one. Linux only --
 this repo's CI already runs a dedicated `windows-latest` job covering the
 Windows-specific containment paths described above, so a devcontainer adds
 nothing there.

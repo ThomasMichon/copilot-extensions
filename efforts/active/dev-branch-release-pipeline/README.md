@@ -1117,6 +1117,15 @@ Post-squash local reconciliation encountered an aborted conflict; the merged
 checkout is retained unchanged and the next slice is isolated on merged Dev.
 Its remaining cleanup stays with this campaign, not with a forced reset.
 
+Independent Main review then found that the standard Linux runner lacks the
+Dev Containers CLI, so the declared periodic route would fail before entering
+its wrapper. Added a dedicated exact CLI lock and job-local provisioning through
+the existing seven-day configured-registry integrity/age helper. The selected
+CLI has no external npm dependency closure beyond its locked bundled package.
+Actual provisioning and `--version` verification pass without starting Docker;
+that is prerequisite readiness, not periodic execution or release evidence.
+The existing Docker/CLI checks and explicit unavailable Windows scope remain.
+
 ### 2026-10-19 - Positive unit packet and transitive gate inventory
 
 The unit-only policy merged normally in #7255. Inventoried the actual Main and

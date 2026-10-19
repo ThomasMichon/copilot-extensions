@@ -177,6 +177,60 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Provision the locked seasoned Dev Containers CLI
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          helper = Path("worktree-manager/scripts/picker-snapshot/install.py")
+          spec = importlib.util.spec_from_file_location("periodic_npm_admission", helper)
+          admission = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(admission)
+          source = Path("tools/devcontainer-cli")
+          project = Path(os.environ["RUNNER_TEMP"]) / "periodic-devcontainer-cli"
+          project.mkdir()
+          retained = {name: (source / name).read_bytes() for name in ("package.json", "package-lock.json")}
+          expected_version = json.loads(retained["package.json"])["dependencies"]["@devcontainers/cli"]
+          for name, body in retained.items():
+              (project / name).write_bytes(body)
+          command = admission.npm_command()
+          replacement = subprocess.run(
+              [*command, "config", "get", "replace-registry-host"], cwd=source,
+              check=True, capture_output=True, text=True, timeout=15,
+          ).stdout.strip()
+          registry = subprocess.run(
+              [*command, "config", "get", "registry"], cwd=source,
+              check=True, capture_output=True, text=True, timeout=15,
+          ).stdout.strip()
+          if not registry:
+              raise RuntimeError("configured npm registry is unavailable")
+          environment = {**os.environ, "npm_config_registry": registry}
+          metadata = lambda name, version: admission.read_metadata(command, source, name, version)
+          admitted = admission.audit_lock(
+              json.loads(retained["package-lock.json"]), metadata,
+              replace_default_registry=replacement == "npmjs",
+          )
+          subprocess.run(
+              [*command, "ci", "--ignore-scripts", "--strict-peer-deps", "--no-audit", "--fund=false"],
+              cwd=project, env=environment, check=True, timeout=120,
+          )
+          if any((project / name).read_bytes() != body for name, body in retained.items()):
+              raise RuntimeError("Dev Containers manifests changed after dependency admission")
+          binary = project / "node_modules/.bin/devcontainer"
+          version = subprocess.run(
+              [str(binary), "--version"], check=True, capture_output=True, text=True, timeout=30,
+          ).stdout.strip()
+          if version != expected_version:
+              raise RuntimeError("installed Dev Containers CLI does not match its reviewed version")
+          with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
+              output.write(str(binary.parent) + "\n")
+          print(f"Admitted {admitted} seasoned locked dependency; Dev Containers CLI {version} is ready.")
+          PY
       - name: Run default full suite in the canonical hardened container
         id: full
         shell: bash
