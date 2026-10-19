@@ -63,6 +63,25 @@ def occupancy_from_readiness(readiness: dict) -> dict:
     if readiness.get("merge_state") in ("merged", "closed"):
         out["occupancy"] = str(readiness["merge_state"])
         return out
+    if readiness.get("wip"):
+        out["occupancy"] = "wip"
+        return out
+    if readiness.get("held"):
+        out["occupancy"] = "held"
+        return out
+    if readiness.get("conflict"):
+        out["occupancy"] = "author-conflict"
+        return out
+    if (
+        readiness.get("approval_stale")
+        and not readiness.get("approval_stale_authorized")
+        and readiness.get("verdict") != "APPROVED"
+    ):
+        out["occupancy"] = "needs-review"
+        return out
+    if readiness.get("verdict") == "CHANGES_REQUESTED":
+        out["occupancy"] = "needs-revision"
+        return out
     if readiness.get("operation") == "direct":
         if readiness.get("mergeable") is None:
             out["occupancy"] = "needs-mergeability"

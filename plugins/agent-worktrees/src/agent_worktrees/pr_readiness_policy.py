@@ -8,14 +8,22 @@ def operation_readiness(
     mergeable: bool | None,
 ) -> dict:
     direct_candidate = operation == "direct"
+    known_blocker = bool(
+        state.merge_state in ("merged", "closed")
+        or state.wip
+        or state.held
+        or state.conflict
+        or state.verdict == "CHANGES_REQUESTED"
+        or (
+            state.approval_stale
+            and not state.approval_stale_authorized
+            and state.verdict != "APPROVED"
+        )
+    )
     direct_safe = bool(
         direct_candidate
         and mergeable is True
-        and state.merge_state == "clean"
-        and not state.wip
-        and not state.held
-        and not state.conflict
-        and state.verdict != "CHANGES_REQUESTED"
+        and not known_blocker
     )
     assessment = bool(
         direct_safe and not approval_required and state.verdict == "COMMENTED"
@@ -37,6 +45,7 @@ def operation_readiness(
     elif (
         direct_candidate
         and mergeable is None
+        and not known_blocker
         and state.merge_state not in ("merged", "closed")
     ):
         reason = "mergeability is unknown; re-read before direct merge"

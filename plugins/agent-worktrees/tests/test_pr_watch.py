@@ -270,6 +270,50 @@ class TestDecorateEvents:
         assert merge["needs_consent"] is False
         assert merge["occupancy"] == "needs-merge"
 
+    def test_self_merge_payload_preserves_known_blockers_before_mergeability(self):
+        cases = (
+            (
+                _snap(
+                    pr_state="open", mergeable=None, head_sha="head",
+                    reviews=(pc.Review(2, "CHANGES_REQUESTED", "reviewer",
+                                       commit_id="head"),),
+                ),
+                {},
+                ("needs-revision", "changes requested"),
+            ),
+            (
+                _snap(
+                    pr_state="open", mergeable=None, head_sha="head",
+                    reviews=(pc.Review(1, "APPROVED", "reviewer",
+                                       commit_id="head"),),
+                    labels=("hold",),
+                ),
+                {"hold_labels": ("hold",)},
+                ("held", "hold label present: hold"),
+            ),
+            (
+                _snap(
+                    pr_state="open", mergeable=None, head_sha="head",
+                    reviews=(pc.Review(1, "APPROVED", "reviewer",
+                                       commit_id="head"),),
+                    draft=True,
+                ),
+                {},
+                ("wip", "draft"),
+            ),
+        )
+        for snap, kwargs, expected in cases:
+            payload = prw.decorate_events(
+                [], "o/r", 7, snap,
+                flow_profile=pc.PROFILE_PR_SELF_MERGE,
+                **kwargs,
+            )
+            merge = payload["merge"]
+            assert (merge["occupancy"], merge["reason"]) == expected
+            assert merge["eligible"] is False
+            assert merge["needs_consent"] is False
+            assert merge["clear_to_merge"] is False
+
     def test_merge_block_consent_already_present(self):
         snap = _snap(pr_state="open", mergeable=True, head_sha="abc",
                      reviews=(pc.Review(3, "APPROVED", "bob"),),

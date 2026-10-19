@@ -773,6 +773,57 @@ class TestMergeReadiness:
         assert closed["occupancy"] == "closed"
         assert closed["reason"] == "closed without merging"
 
+    def test_direct_known_blocker_precedence_matrix(self):
+        blockers = (
+            (
+                lambda mergeable: _approved(
+                    mergeable=mergeable,
+                    reviews=(_rev(2, "CHANGES_REQUESTED", commit_id="head"),),
+                ),
+                {},
+                {None: ("needs-revision", "changes requested"),
+                 True: ("needs-revision", "changes requested"),
+                 False: ("author-conflict", "not mergeable (conflict -> needs rebase)")},
+            ),
+            (
+                lambda mergeable: _approved(
+                    mergeable=mergeable, labels=("hold",),
+                ),
+                {"hold_labels": ("hold",)},
+                {value: ("held", "hold label present: hold")
+                 for value in (None, True, False)},
+            ),
+            (
+                lambda mergeable: _approved(
+                    mergeable=mergeable, title="WIP: unfinished",
+                ),
+                {"wip_title_prefixes": ("WIP:",)},
+                {value: ("wip", "WIP title prefix")
+                 for value in (None, True, False)},
+            ),
+            (
+                lambda mergeable: _approved(
+                    mergeable=mergeable, head_sha="new",
+                    reviews=(_rev(1, "APPROVED", commit_id="old"),),
+                ),
+                {},
+                {None: ("needs-review", "not yet approved"),
+                 True: ("needs-review", "not yet approved"),
+                 False: ("author-conflict", "not mergeable (conflict -> needs rebase)")},
+            ),
+        )
+        for make_snapshot, kwargs, expected in blockers:
+            for mergeable in (None, True, False):
+                readiness = pc.merge_readiness(
+                    make_snapshot(mergeable), operation="direct", **kwargs,
+                )
+                occupancy, reason = expected[mergeable]
+                assert readiness["occupancy"] == occupancy
+                assert readiness["reason"] == reason
+                assert readiness["eligible"] is False
+                assert readiness["needs_consent"] is False
+                assert readiness["clear_to_merge"] is False
+
     def test_review_blocking_false_reports_comment_verdict(self):
         snap = _approved(reviews=(_rev(1, "COMMENT"),))
         m = pc.merge_readiness(snap, review_blocking=False, **_BINDING)
