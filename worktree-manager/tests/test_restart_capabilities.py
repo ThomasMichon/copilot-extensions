@@ -80,3 +80,15 @@ def test_invalid_config_is_reported_as_json_blocker(inspection_root, capsys):
 
 def test_manager_config_can_remain_independent_of_runtime():
     assert manager_config.ManagerConfig().restart_recovery.automatic_restore is False
+
+
+def test_non_utf8_config_is_reported_as_json_blocker(inspection_root, capsys):
+    source_config.config_path(inspection_root).write_bytes(
+        "[restart_recovery]\n".encode("utf-16"),
+    )
+
+    assert main(["mux-daemon", "recovery-evidence"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert "could not read" in report["blocker"]
+    assert report["automatic_eligible"] is False
+    assert not (inspection_root / "restart-recovery").exists()

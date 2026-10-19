@@ -238,6 +238,16 @@ def test_disconnect_blocks_without_retry(active_adapter):
     assert bus.calls == calls
 
 
+def test_permanent_failure_closes_transport_in_same_pump(active_adapter):
+    adapter, bus, journal = active_adapter
+    bus.connected = False
+    adapter.pump()
+    assert adapter.status["status"] == "blocked"
+    assert adapter._loop.is_closed()
+    assert bus.handler is None
+    assert not bus.connected
+
+
 def test_close_prevents_new_events_and_releases_owned_fd(active_adapter):
     adapter, bus, journal = active_adapter
     original = journal.snapshot()

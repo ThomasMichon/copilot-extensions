@@ -152,3 +152,84 @@ def test_real_dbus_fd_checkpoint_cancellation_and_owner_loss(
             os.close(reader)
             if index not in closed_writer_indices:
                 os.close(writer)
+
+
+def test_inhibit_timeout_closes_connection_before_late_fd_reply(tmp_path, private_bus):
+    from dbus_next import PropertyAccess
+    from dbus_next.aio import MessageBus
+    from dbus_next.service import ServiceInterface, dbus_property, method
+
+    from worktree_manager.restart_notifications import LogindShutdownAdapter
+
+    class DelayedLogind(ServiceInterface):
+        def __init__(self):
+            super().__init__("org.freedesktop.login1.Manager")
+            self.release_reply = asyncio.Event()
+            self.pipe = None
+            self.replied = False
+
+        @method()
+        async def Inhibit(self, what: "s", who: "s", why: "s", mode: "s") -> "h":  # noqa: F821
+            self.pipe = os.pipe()
+            os.set_blocking(self.pipe[0], False)
+            await self.release_reply.wait()
+            self.replied = True
+            return self.pipe[1]
+
+        @dbus_property(access=PropertyAccess.READ)
+        def InhibitDelayMaxUSec(self) -> "t":  # noqa: F821
+            return 5_000_000
+
+    service_loop = asyncio.new_event_loop()
+    service = DelayedLogind()
+
+    async def serve():
+        bus = await MessageBus(bus_address=private_bus, negotiate_unix_fd=True).connect()
+        bus.export("/org/freedesktop/login1", service)
+        await bus.request_name("org.freedesktop.login1")
+        return bus
+
+    service_bus = service_loop.run_until_complete(serve())
+    client_bus = None
+
+    def connect():
+        nonlocal client_bus
+        client_bus = MessageBus(bus_address=private_bus, negotiate_unix_fd=True)
+        return client_bus
+
+    adapter = LogindShutdownAdapter(
+        RecoveryJournal(tmp_path / "state"),
+        HostEpoch("linux", "environment-one", "boot-one"), bus_factory=connect,
+    )
+    writer_closed = False
+    try:
+        adapter.start()
+        deadline = time.monotonic() + 5
+        while adapter.status["status"] != "blocked" and time.monotonic() < deadline:
+            service_loop.run_until_complete(asyncio.sleep(0))
+            adapter.pump()
+            time.sleep(0.001)
+        assert adapter.status["status"] == "blocked"
+        assert service.pipe is not None
+        service.release_reply.set()
+        service_loop.run_until_complete(asyncio.sleep(0.05))
+        assert service.replied
+        reader, writer = service.pipe
+        os.close(writer)
+        writer_closed = True
+        # Let the private broker either forward the FD or discard the dead recipient.
+        service_loop.run_until_complete(asyncio.sleep(0.05))
+        assert not client_bus.connected
+        assert adapter._loop.is_closed()
+        assert os.read(reader, 1) == b""
+        adapter.pump()
+        assert adapter.status["status"] == "blocked"
+    finally:
+        adapter.close()
+        service_bus.disconnect()
+        service_loop.run_until_complete(service_bus.wait_for_disconnect())
+        service_loop.close()
+        if service.pipe is not None:
+            os.close(service.pipe[0])
+            if not writer_closed:
+                os.close(service.pipe[1])

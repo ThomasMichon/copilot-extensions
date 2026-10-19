@@ -82,6 +82,7 @@ class LogindShutdownAdapter:
             os.close(self._received_fds.pop())
 
     def _block(self, error: object) -> None:
+        error = str(error) or type(error).__name__
         try:
             self._release()
             self._release_unclaimed()
@@ -89,6 +90,8 @@ class LogindShutdownAdapter:
             error = f"{error}; inhibitor release failed: {exc}"
         self._state("blocked", blocker=str(error))
         log.warning("Native shutdown notification blocked: %s", error)
+        if self._bus is not None:
+            self._bus.disconnect()
 
     async def _call(
         self, destination: str, path: str, interface: str, member: str,
@@ -321,17 +324,25 @@ class LogindShutdownAdapter:
 
     def pump(self) -> None:
         """Advance only from the active lease holder's own mutation admission."""
-        if self._loop is None or self._loop.is_closed() or self.status["status"] == "blocked":
+        if self._loop is None or self._loop.is_closed():
             return
-        self._loop.run_until_complete(asyncio.sleep(0))
+        if self.status["status"] != "blocked":
+            self._loop.run_until_complete(asyncio.sleep(0))
         if self._bus is not None and not self._bus.connected and self._owner is not None:
-            self._block("Native notification bus disconnected.")
+            if self.status["status"] != "blocked":
+                self._block("Native notification bus disconnected.")
+        if self.status["status"] == "blocked":
+            self._cleanup()
 
     def close(self) -> None:
         """Release owned resources before the active daemon lease can end."""
         if self._loop is None or self._loop.is_closed():
             return
         self._state("closed")
+        self._cleanup()
+
+    def _cleanup(self) -> None:
+        # Called only outside run_until_complete, never from a bus/task callback.
         try:
             self._release()
             self._release_unclaimed()

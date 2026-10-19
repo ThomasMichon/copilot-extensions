@@ -492,3 +492,13 @@ The umbrella effort remains Active independently of this slice's completion.
   atomic batch cancellation. Foreign epochs, replacement executions and
   explicit operator closures retain their fences. A denied cancellation write
   leaves the adapter blocked rather than reporting readiness.
+- A further provider pass identified three failure paths: a server-thread health
+  read racing adapter teardown, non-UTF-8 configuration escaping recovery
+  admission, and a timed-out inhibitor request leaving its connection open.
+  Six new regressions failed first. Health retains a local adapter snapshot;
+  shared configuration normalizes decoding failures; permanent transport
+  failure disconnects immediately and drains its tasks/descriptors outside the
+  running event-loop callback. The expanded isolated lane passed 332 tests with
+  three native skips, including an actual separate-loop private-bus late-FD
+  reply after the real inhibitor timeout. Automatic restoration and resident-loop
+  notification timing remain unqualified.

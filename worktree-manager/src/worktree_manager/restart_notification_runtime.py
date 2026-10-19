@@ -28,12 +28,13 @@ class RestartNotificationRuntime:
     @property
     def status(self) -> dict:
         """Return an immutable-by-publication snapshot for server-thread health."""
+        adapter = self._adapter
         result = {
             "capabilities": {
                 **self._capabilities,
                 **({"shutdown_notifications": {
-                    "requested": True, **self._adapter.status,
-                }} if self._adapter is not None else {}),
+                    "requested": True, **adapter.status,
+                }} if adapter is not None else {}),
             },
             "automatic_eligible": False,
             "admitted": not self._paused,

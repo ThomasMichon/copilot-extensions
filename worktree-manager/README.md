@@ -496,6 +496,9 @@ budget waiting for SQLite, and a progress deadline can roll back an expired
 checkpoint. This is not a hard bound on operating-system filesystem stalls.
 Owner loss, bus disconnect, malformed messages, denied permissions and failed
 writes stay visible; no elevation or busy reconnect loop is attempted.
+Permanent failure disconnects the bus and drains pending tasks and received
+descriptors before the adapter stops pumping, including a timed-out inhibitor
+request whose FD reply arrives late.
 Drain/pause and shutdown close native resources on the owning daemon loop
 before its active lease ends. The transport is **not timing-qualified**:
 other blocking daemon work can delay notification handling beyond logind's
@@ -517,6 +520,8 @@ configure boot startup, deliver a restart seed, or grant operational permission.
 The journal's reasoned exit/shutdown APIs do not independently prove native
 notification coverage. Missing hooks, generic tombstones and exit codes alone
 never assert intentional closure or recovery permission.
+Invalid configuration, including non-UTF-8 input, is a JSON inspection blocker
+and disables recovery admission without preventing ordinary mux service.
 
 Native Linux and WSL have evidence-epoch readers; WSL includes its init-process
 incarnation because a distro can restart without restarting the shared kernel.

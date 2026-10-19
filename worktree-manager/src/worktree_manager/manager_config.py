@@ -46,7 +46,7 @@ def _load(path: Path) -> dict:
         value = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
         raise ManagerConfigError(f"could not read {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise ManagerConfigError(f"{path} must contain TOML tables")

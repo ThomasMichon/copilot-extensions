@@ -13,6 +13,12 @@ def test_restart_recovery_defaults_off_without_creating_config(tmp_path):
     assert not source_config.config_path(tmp_path).exists()
 
 
+def test_non_utf8_config_raises_normalized_configuration_error(tmp_path):
+    source_config.config_path(tmp_path).write_bytes(b"\xff\xfe")
+    with pytest.raises(manager_config.ManagerConfigError, match="could not read"):
+        manager_config.load_config(tmp_path)
+
+
 def test_restart_recovery_loads_explicit_local_preferences(tmp_path):
     source_config.config_path(tmp_path).write_text(
         "[restart_recovery]\nshutdown_notifications = true\nautomatic_restore = true\n",

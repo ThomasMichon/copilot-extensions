@@ -102,7 +102,64 @@ def test_invalid_config_blocks_recovery_without_disabling_mux_daemon(tmp_path):
     runtime = MuxDaemonRuntime(tmp_path / "mux.json", root=tmp_path)
     runtime.recovery_observer.epoch = HostEpoch("linux", "example-environment", "example-boot")
     runtime.restart_notifications.activate()
+    runtime.start()
+    assert runtime.server is not None and runtime.port is not None
     runtime.restart_notifications.pump(admitted=True)
+    assert runtime.health()["status"] == "ready"
     assert "must be a boolean" in runtime.health()["restart_recovery"]["blocker"]
     assert runtime.accepting_requests() is True
     runtime.shutdown()
+
+
+def test_health_keeps_adapter_snapshot_during_concurrent_pause(tmp_path):
+    runtime = build_runtime(tmp_path)
+    reading = threading.Event()
+    paused = threading.Event()
+    adapter = SimpleNamespace(status={"status": "watching", "qualified": False}, close=lambda: None)
+    runtime._adapter = adapter
+
+    class InterleavedRuntime(type(runtime)):
+        def __getattribute__(self, name):
+            value = super().__getattribute__(name)
+            if name == "_adapter" and threading.current_thread() is reader:
+                reading.set()
+                assert paused.wait(3)
+            return value
+
+    runtime.__class__ = InterleavedRuntime
+    results = []
+    errors = []
+
+    def health():
+        try:
+            results.append(runtime.status)
+        except Exception as exc:
+            errors.append(exc)
+
+    reader = threading.Thread(target=health)
+    reader.start()
+    try:
+        assert reading.wait(3)
+        runtime.pause()
+    finally:
+        paused.set()
+        reader.join(3)
+    assert not reader.is_alive()
+    assert not errors
+    assert results[0]["capabilities"]["shutdown_notifications"]["status"] == "watching"
+    assert runtime.status["admitted"] is False
+
+
+def test_non_utf8_config_blocks_recovery_without_disabling_mux_daemon(tmp_path):
+    from worktree_manager.mux_daemon import MuxDaemonRuntime
+
+    source_config.config_path(tmp_path).write_bytes("[restart_recovery]\n".encode("utf-16"))
+    runtime = MuxDaemonRuntime(tmp_path / "mux.json", root=tmp_path)
+    try:
+        runtime.recovery_observer.epoch = HostEpoch("linux", "example-environment", "example-boot")
+        runtime.restart_notifications.activate()
+        runtime.restart_notifications.pump(admitted=True)
+        assert "could not read" in runtime.health()["restart_recovery"]["blocker"]
+        assert runtime.accepting_requests() is True
+    finally:
+        runtime.shutdown()
