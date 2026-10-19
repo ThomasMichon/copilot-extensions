@@ -26,7 +26,8 @@ Discovery is not connection, authorization or evidence of readiness.
 
 - **Topology:** Serial, independent PRs targeting `dev`; proposal merges before implementation.
 - **Host (owns PRs):** drowsy-piston.
-- **Delegates:** None assigned implementation ownership.
+- **Delegates:** Bounded authentication, discovery and contract-evidence repairs;
+  the host retains integration and publication ownership.
 - **Handoff:** Record the current slice, evidence and unresolved gates here and transfer the public issue claim explicitly.
 - Existing remote transport/session owners and dispatch-catalog efforts retain
   their scopes. This effort consumes the transport from #6908/#6997, not a new
@@ -174,6 +175,38 @@ Schema details must reconcile with current configuration and provider patterns
 during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
+
+### 2026-10-19 - Second review repairs and conversation identity
+
+- Corrected project-aware `agent-show` admission in the real CLI parser guard.
+  Remote named and URL starts now bypass unqualified CLI reuse and resolve the
+  canonical target, selected project, current binding and credential approval
+  in the daemon before reuse or a busy-session takeover is offered.
+- Reuse requires caller, project, remote cwd and the complete binding snapshot.
+  Matching URLs and names share a conversation; stopped sessions load the
+  retained native ID. Changed bindings refuse until an explicit new attachment,
+  while another project's binding and anonymous requests cannot select the old
+  conversation. Starting reservations precede asynchronous connection/shutdown
+  so simultaneous requests do not duplicate a remote attachment.
+- Isolated built-in Git credential fills between remote authentication
+  instances. Discovery repairs preserve unrelated daemon startup readiness,
+  activation-derived scope on invalid bindings, known unavailable detail and
+  alternate `.claude-plugin/plugin.json` contribution declarations.
+- Independent combined review regressions passed (188); expanded native
+  transport, TLS peer, HTTP isolation and CLI cases passed (218). The final
+  conflict-owner extraction passed 77 session/CLI cases, Python lint and the
+  strict module-size guard without widening a ceiling. Install contracts passed
+  for all 13 runtime plugins. These counts overlap, not additive coverage.
+- Independent historical route vectors exposed an unnecessary internal reuse
+  keyword for anonymous requests. Omit that inert default without changing
+  their wire expectations; the historical contract and session lane passed
+  84 cases. Runtime evidence is pinned at
+  `feed1caefa7f06811bd53d83125428afc4b25568` before refreshed generation-41
+  metadata. Independent contract checking passed all 265 fixtures; the
+  contract/provider lane passed 115 cases. Current-head review and hosted CI
+  remain gates.
+  Qualified host-worktree conversation ownership is a separate proposal,
+  tracked in #7237; this contribution does not claim to implement it.
 
 ### 2026-10-19 - First implementation review and CI repairs
 
