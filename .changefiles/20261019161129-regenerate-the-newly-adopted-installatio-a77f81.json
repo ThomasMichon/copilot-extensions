@@ -1,0 +1,9 @@
+{
+  "comment": "Regenerate the newly adopted installation-context PowerShell copy with canonical fresh governance checks.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
