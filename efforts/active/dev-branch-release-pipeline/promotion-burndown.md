@@ -3,8 +3,9 @@
 Parent: [Dev/Main Release Pipeline](README.md). Related portfolio:
 [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md).
 
-**Status:** policy reviewed and merged in #7255; unit-packet implementation in
-progress. Production remains paused.
+**Status:** policy #7255 and Source unit-packet/PR-CI implementation #7269 are
+reviewed and merged. The source controller mirror and independent Main
+activation are the next slice. Production remains paused.
 This governs the next recovery slice. It supersedes the earlier requirement to
 preserve full, generated, native and installation integration suites as
 promotion prerequisites.
@@ -58,14 +59,14 @@ private worktree paths and session locators are intentionally omitted.
 | PB-00 | P0 | Review the unit-only policy and supersede contradictory effort/vision gates. | Done: #7255 |
 | PB-13 | P0 | Rework or supersede the old full-corpus proposal; retain code, evidence and claims. | Existing proposal held as draft |
 | PB-01 | P0 | Inventory every gating job/step/test as `KEEP_UNIT`, `MOVE_PERIODIC` or `REMOVE_DUPLICATE`, with cost and owner. | Inventoried; closure edges identified |
-| PB-03 | P0 | Establish the small positive unit manifest; exclude hidden integration and slow/unclassified cases. | Extracting audited in-process starter |
-| PB-02 | P0 | Remove full/native/integration tasks and indirect dependency edges from promotion. | Pending |
-| PB-04 | P0 | Produce unit coverage once; verify every admitted file/chunk/node and outcome, with a distinct unit-profile identity. | Reusable correctness work preserved |
-| PB-05 | P0 | Replace general-purpose candidate CI admission with the compact exact unit-evidence contract and aggregate. | Pending |
-| PB-06 | P0 | Make required PR testing impact-conditional and unit-only; migrate aggregate/selector requirements coherently. | Pending |
-| PB-07 | P1 | Route removed integration to periodic containers with named failure ownership, never a release dependency. | Pending |
-| PB-08 | P0 | Preserve fail-closed configuration admission, including quoted/merged keys, if reused by the unit gate. | Reusable correctness work preserved |
-| PB-09 | P0 | Keep bounded production build/signing/provenance/freshness/publication/merge safeguards. | Pending integration audit |
+| PB-03 | P0 | Establish the small positive unit manifest; exclude hidden integration and slow/unclassified cases. | Starter merged in #7269: 236 cells; wider corpus classification stays open |
+| PB-02 | P0 | Remove full/native/integration tasks and indirect dependency edges from promotion. | Eleven-job source mirror prepared; Main activation pending |
+| PB-04 | P0 | Produce unit coverage once; verify every admitted file/chunk/node and outcome, with a distinct unit-profile identity. | Source engine merged in #7269; hosted promotion proof pending |
+| PB-05 | P0 | Replace general-purpose candidate CI admission with the compact exact unit-evidence contract and aggregate. | Explicit v2 helpers merged; controller integration prepared |
+| PB-06 | P0 | Make required PR testing impact-conditional and unit-only; migrate aggregate/selector requirements coherently. | Source four-job CI and required aggregate merged in #7269 |
+| PB-07 | P1 | Route removed integration to periodic containers with named failure ownership, never a release dependency. | Source routing/inventory merged; actual enrollment/execution still unproven |
+| PB-08 | P0 | Preserve fail-closed configuration admission, including quoted/merged keys, if reused by the unit gate. | Explicit unit profile and strict evidence admission merged in #7269 |
+| PB-09 | P0 | Keep bounded production build/signing/provenance/freshness/publication/merge safeguards. | Source controller retains safeguards; offline decision checks pass, Main review pending |
 | PB-10 | P0 | Measure the whole flow under thirty minutes; remove long tasks rather than increasing deadlines. | Pending |
 | PB-11 | P0 | Land reviewed control, prove the unit-only release, resume canonically and observe stable natural cycles. | Blocked on preceding items |
 | PB-12 | P1 | Run the first value-for-cost replacement tournament after stable operation. | Deferred until PB-11 |

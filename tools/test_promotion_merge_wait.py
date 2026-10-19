@@ -71,6 +71,17 @@ def waiter(monkeypatch, tmp_path):
         assert "needs.materialized-candidate-plan.result == 'success'" in merge_job["if"]
         assert "needs.materialized-candidate-consumers.result == 'success'" in merge_job["if"]
         assert "needs.materialized-candidate-windows.result == 'success'" in merge_job["if"]
+    if "source-units" in workflow["jobs"]:
+        for key, value in {
+            "QUALIFICATION_PROFILE": "source-units-v2",
+            "QUALIFICATION_RUN": "1", "QUALIFICATION_ATTEMPT": "1",
+            "QUALIFICATION_UNIT_JOB": "456", "QUALIFICATION_UNIT_ARTIFACT": "789",
+            "QUALIFICATION_UNIT_ARTIFACT_DIGEST": "sha256:" + "a" * 64,
+            "QUALIFICATION_PACKET_DIGEST": "b" * 64,
+            "QUALIFICATION_UNIT_MANIFEST_DIGEST": "c" * 64,
+            "QUALIFICATION_UNIT_INPUTS_DIGEST": "d" * 64,
+        }.items():
+            monkeypatch.setenv(key, value)
     assert merge_job["permissions"]["contents"] == "write"
     assert merge_job["permissions"]["pull-requests"] == "write"
     assert "secrets." not in json.dumps(merge_job)
@@ -148,7 +159,9 @@ def test_pending_checks_wait_then_merge_only_the_exact_head_with_scoped_write_au
 
     monkeypatch.setattr(subprocess, "run", run)
     exec(compile(code, str(WORKFLOW), "exec"), {})
-    assert len(calls) == (8 if "QUALIFICATION_RUN" in code else 7)
+    assert len(calls) == (
+        10 if "QUALIFICATION_UNIT_JOB" in code else 8 if "QUALIFICATION_RUN" in code else 7
+    )
     assert len([argv for argv in calls if argv[2] == "merge"]) == 1
     assert output.read_text() == f"merge_sha={SHA}\n"
 
@@ -318,6 +331,44 @@ def test_missing_write_authority_cannot_fall_back_to_ambient_auth(waiter, monkey
     monkeypatch.setenv("PROMOTION_MERGE_TOKEN", "")
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("unexpected backend call"))
     with pytest.raises(RuntimeError, match="authority is unavailable"):
+        exec(compile(code, str(WORKFLOW), "exec"), {})
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("endpoint,field,value", [
+    ("jobs", "id", True), ("jobs", "id", 457), ("jobs", "run_id", 2),
+    ("jobs", "run_attempt", True), ("jobs", "run_attempt", 2),
+    ("jobs", "head_sha", "f" * 40), ("jobs", "name", "full"),
+    ("jobs", "status", "in_progress"), ("jobs", "conclusion", "skipped"),
+    ("jobs", "steps", []),
+    ("jobs", "steps", [{"name": "Upload promotion unit evidence", "status": "completed",
+                       "conclusion": "failure"}]),
+    ("artifacts", "id", True), ("artifacts", "id", 790),
+    ("artifacts", "name", "unrelated"), ("artifacts", "expired", True),
+    ("artifacts", "digest", "sha256:" + "f" * 64),
+    ("artifacts", "workflow_run", {"id": 2, "head_branch": "main", "head_sha": "c" * 40}),
+    ("artifacts", "workflow_run", {"id": 1, "head_branch": "dev", "head_sha": "c" * 40}),
+    ("artifacts", "workflow_run", {"id": 1, "head_branch": "main", "head_sha": "f" * 40}),
+])
+def test_source_unit_provider_binding_cannot_drift(waiter, monkeypatch, endpoint, field, value):
+    code, output = waiter
+    assert "QUALIFICATION_UNIT_JOB" in code
+
+    def run(argv, **kwargs):
+        if argv[1] == "api":
+            result = json.loads(api_response(argv, strict_rules()))
+            if f"/actions/{endpoint}/" in argv[-1]:
+                result[field] = value
+        elif argv[2] == "view":
+            result = response("OPEN")
+        elif argv[2] == "checks":
+            result = [{"name": "main source gate", "bucket": "pass", "link": ""}]
+        else:
+            pytest.fail("invalid provider evidence must never reach a merge write")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(result), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(RuntimeError):
         exec(compile(code, str(WORKFLOW), "exec"), {})
     assert not output.exists()
 

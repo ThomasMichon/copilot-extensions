@@ -1078,6 +1078,45 @@ proposal.
 
 ## Journal
 
+### 2026-10-19 - Source unit engine merged; controller reuse is the next slice
+
+Source #7269 merged as `ce77da58017442f83bf3d82a5f80b111b63b9737` after
+a current-head Copilot review with no open issues and successful required
+PR, attribution and workflow-lockdown checks. The final 236-cell packet
+completes locally in about 8.1 seconds including coverage and actual packet
+verification. Review also exposed descriptor-relative opens whose audit event
+omits the directory descriptor. The runner now validates that actual target
+before execution, preserves native flags/descriptor semantics, and refuses
+unattributable relative low-level events; pure regressions cover refusal and
+context cleanup without mutating host files.
+
+One observed current-head Source CI run took 10m14s including queueing:
+guards executed for 1m44s, impact planning for 13s, units for 23s and the
+aggregate for two seconds. This narrowly misses the ordinary-PR target and
+is not a promotion timing witness. A description edit queued another CI
+suite on the same head: an older green aggregate did not waive that newer
+required check. The normal merge succeeded only after its actual completion.
+
+Re-read the Phase 7/9 Plan and Validation Plan; both remain Active. The next
+substantive slice replaces the old promotion graph with an eleven-job Source
+mirror using the merged helper pin and explicit `source-units-v2` evidence.
+The unprivileged build may run alongside units, but signing waits for both.
+Qualification/publication reuse the original successful job, producing
+attempt and immutable packet only after candidate input equivalence. The
+checkout-free merger retains required checks, strict base freshness and the
+exact-head nonadministrator write; it no longer waits on duplicate candidate
+CI. Offline mocked-provider decisions are not hosted release qualification.
+
+Main remains paused. Its independent workflow-only transaction, actual
+unit-only canary under thirty minutes, canonical resume, two natural cycles,
+periodic integration acceptance and client compatibility remain owned here.
+The small positive manifest is a starter, not a claim that every historical
+unit has already been classified. Preserve excluded source and accountable
+periodic enrollment rather than blocking initial recovery on that census.
+Post-squash local reconciliation encountered an aborted conflict; the merged
+checkout is retained unchanged and the next slice is isolated on merged Dev.
+Its remaining cleanup stays with this campaign, not with a forced reset.
+
 ### 2026-10-19 - Positive unit packet and transitive gate inventory
 
 The unit-only policy merged normally in #7255. Inventoried the actual Main and

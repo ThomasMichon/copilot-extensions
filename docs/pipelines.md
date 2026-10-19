@@ -32,6 +32,31 @@ unit-reuse control is reviewed, qualified, published and resumed. Historical
 full-candidate descriptions below are not instructions to reactivate those
 integration gates.
 
+### Source-unit promotion receipt
+
+The Source promotion declaration now mirrors an eleven-job controller proposal.
+It is not activated on Main merely by merging this source declaration. The
+independently reviewed Main transaction must pin the reviewed helpers and retain
+the pause until real qualification succeeds.
+
+After source admission, `source-units` runs the full admitted packet once with
+coverage while the credential-free artifact build proceeds independently.
+Attestation requires both successful units and the unsigned build. Candidate
+preparation retains the source/version, package/lock, signer, source-byte and
+freshness safeguards, but no longer downloads separate full-suite baselines.
+`qualify-candidate` requires the explicit `source-units-v2` profile and proves
+Dev/candidate input equivalence against the original successful unit job,
+upload step and immutable archive. It never dispatches candidate CI.
+
+Job-only retries retain the original producing attempt and archive rather than
+rerunning units or demanding that the still-executing controller already be
+complete. Publication revalidates that exact packet and source composition.
+The checkout-free, nonadministrator merger rechecks the trusted Main generation,
+original successful job/upload/archive and required checks before its exact-head
+write. Existing publication/readback, active-PR ownership and source tagging
+remain separate production operations. Main's proposed CI is metadata-only;
+neither that status nor a skipped integration lane is unit qualification.
+
 ## Python artifact-builder toolchain policy
 
 `tools/build_python_artifacts.py` can run standalone and is also invoked by

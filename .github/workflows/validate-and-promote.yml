@@ -1,136 +1,139 @@
+# Unit-only controller proposal; activation requires its independently reviewed Main transaction.
 name: Validate and promote dev to main
-
-# Phase 3 of the dev-branch-release-pipeline effort
-# (ThomasMichon/copilot-extensions#3336): once CI goes green on `dev`, run
-# the broader (target 10-30 min) steady test-suite validation, then --
-# only if that validation genuinely passed for a genuine dev commit --
-# generate a single wholesale-replace commit and land it on `main` -- never
-# a merge of `dev` into `main` -- via tools/promote_release.py. See that
-# effort's README (Plan > Phase 3/5) for the full design.
-#
-# Merged from two separate files (`validation-gate.yml` + `promote.yml`,
-# ThomasMichon/copilot-extensions#3592) after #3567 and a same-day follow-up
-# regression: the only reason `promote.yml` needed a fragile artifact
-# upload/download hand-off for the validated commit SHA was that the two
-# stages were separate workflows connected by `workflow_run`, which has no
-# native way to pass job outputs across that boundary. As one workflow, the
-# `promote` job below reads `needs.gate.outputs.sha` directly -- an ordinary
-# same-run job output, always present, never subject to the `head_sha`/
-# `head_branch` unreliability `workflow_run` events are documented to have.
-# That whole failure class is now structurally impossible for this hop, not
-# merely worked around.
-#
-# Trigger (redesigned 2026-09-29, see `promote-trigger.yml`): this workflow
-# is now entered via `repository_dispatch` (from a separate, cheap,
-# unthrottled outer workflow) or a human `workflow_dispatch` -- never
-# directly by `workflow_run` any more. The direct `workflow_run:
-# workflows: ["CI"]` trigger this workflow used to declare fired on every
-# "CI" completion repo-wide (`ci.yml` runs on non-main-base `pull_request`, not
-# just `dev` pushes, and `head_branch` can't be trusted to filter -- see
-# `gate` below), which under this repo's real concurrent-PR volume starved
-# the single-pending-slot concurrency group below: 10+ consecutive runs in
-# a ~20 minute window all declined to promote, confirmed live 2026-09-29
-# while chasing why a merged PR hadn't reached `main`.
-#
-# A first attempt fixed the starvation by moving concurrency down to just
-# the `promote` job, letting `full`/`worktree-manager`/`guards-full-sweep`
-# run unrestricted -- but review correctly caught that this reopened two
-# real invariants the ORIGINAL whole-run serialization existed to provide:
-# (1) two different `dev` commits' validations could now finish out of
-# order, and `tools/promote_release.py` has no monotonic stale-candidate
-# guard -- an older, slower-validating commit's `promote` step could run
-# AFTER a newer one's and silently regress `main`; (2) `report-failure`'s
-# watchdog does a non-atomic issue lookup-then-create, and the former
-# whole-run group was the only thing preventing duplicate tracking issues /
-# duplicate fix-agent dispatches on concurrent failures (see
-# efforts/active/promotion-failure-reactive-fix-agent/README.md:713-728).
-#
-# A second attempt tried moving the whole trigger to `workflow_dispatch`
-# and having the outer gate call `gh workflow run` -- also wrong, and more
-# dangerous: per GitHub's own docs (Events that trigger workflows table),
-# `workflow_dispatch` resolves `GITHUB_SHA`/the workflow YAML itself from
-# WHICHEVER REF IS DISPATCHED, not the default branch -- unlike
-# `workflow_run` (and `repository_dispatch`), which both always resolve
-# from `main` regardless of what triggered them. Making this workflow
-# `workflow_dispatch`-only would have meant a `dev`-branch copy of this
-# very file (a zero-review-required branch) became fully executable,
-# including the `promote` job's `APERTURE_RELEASE_TOKEN` secret access --
-# exactly the untrusted-YAML risk `report-failure`'s own comment already
-# flags for a narrower case, reopened for the whole workflow.
-#
-# The actual fix: `repository_dispatch` shares `workflow_run`'s
-# default-branch-only YAML resolution (confirmed against GitHub's docs,
-# not assumed), so `promote-trigger.yml` -- itself still `workflow_run`-
-# triggered and cheap/unrestricted -- does the ancestry filter and fires a
-# `repository_dispatch` event carrying the validated sha only once it's
-# confirmed. This fixes the starvation at its actual source (the raw
-# CI-completion firehose never reaches this workflow's own concurrency
-# group at all any more) while leaving every job and invariant below
-# completely unchanged: `gate` still independently re-verifies ancestry
-# (defense-in-depth -- never trust the dispatch payload alone, and a human
-# `workflow_dispatch` still needs the same proof against whatever ref they
-# ran it on), and the SAME single workflow-level concurrency group still
-# serializes the entire validate+promote+report run, preserving both the
-# promote-ordering guarantee and `report-failure`'s dedup invariant.
-#
-# Concurrency: a single top-level group (see below) makes the ENTIRE run --
-# validation AND promotion together -- one atomic unit in GitHub's queue.
-# With `cancel-in-progress: false`, this is GitHub's documented
-# `queue: single` default: at most one (validate+promote) tuple running, at
-# most one pending, and a newer trigger only ever cancels the *pending*
-# tuple -- never the one currently running. A currently-running tuple always
-# runs to completion (success or failure) before the next queued one starts;
-# nothing is ever restarted mid-flight. This is a genuine rolling build, not
-# the previous split design's "cancel and restart from zero" (`ci.yml`) or
-# "full parallelism, no debounce" (the old per-commit validation-gate
-# group) -- see the effort Journal entry that proposed this for the full
-# reasoning. Now that only `promote-trigger.yml`'s already-filtered
-# dispatches (or a human) ever enter this queue, the volume contending for
-# it is low enough that this semantics is exactly right again.
 on:
   repository_dispatch:
-    types: [dev-advanced]
+    types:
+      - dev-advanced
   workflow_dispatch:
     inputs:
       push:
-        description: "Push the generated commit + tag to main (default: true)"
+        description: Publish and land the exact candidate only after all release gates succeed
         required: false
-        default: "true"
-
+        default: 'true'
+      qualification_only:
+        description: Manually qualify a replacement while preserving paused pipeline state
+        required: false
+        type: boolean
+        default: false
 concurrency:
   group: validate-and-promote-dev-to-main
   cancel-in-progress: false
-
 permissions:
   contents: write
   pull-requests: write
   actions: read
-
+env:
+  RELEASE_HELPERS_SHA: ce77da58017442f83bf3d82a5f80b111b63b9737
 jobs:
   gate:
     name: gate (confirm this is a dev commit)
-    # This workflow is now `repository_dispatch`/`workflow_dispatch`-only
-    # (see the header comment for the 2026-09-29 trigger redesign) --
-    # `promote-trigger.yml` is the only automated caller, always
-    # dispatching after its own `git merge-base --is-ancestor` proof
-    # against `origin/dev`. This job re-proves the identical ancestry fact
-    # rather than trusting that caller: a human can also dispatch this
-    # workflow directly against any ref, and giving that path special trust
-    # `promote-trigger.yml`'s own dispatches don't get would reopen the
-    # exact "unreviewed branch promotes straight to main" gap this job's
-    # own history (see below) already closed once.
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
-      is_dev: ${{ steps.check.outputs.is_dev }}
+      is_dev: ${{ steps.pause.outputs.normal_paused == 'true' && 'false' || steps.check.outputs.is_dev }}
       sha: ${{ steps.check.outputs.sha }}
+      qualification_only: ${{ steps.mode.outputs.qualification_only }}
     steps:
+      - name: Admit paused qualification only from a manual trusted-Main dispatch
+        id: mode
+        env:
+          REQUESTED_QUALIFICATION_ONLY: ${{ inputs.qualification_only }}
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+          RUN_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          case "$REQUESTED_QUALIFICATION_ONLY" in
+            true)
+              if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] ||
+                 [ "$DEFAULT_REF" != "refs/heads/main" ] ||
+                 [ "$GITHUB_REF" != "$DEFAULT_REF" ] ||
+                 [ "$RUN_SHA" != "$WORKFLOW_SHA" ] ||
+                 ! [[ "$RUN_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::Paused qualification requires a manual dispatch of trusted Main."
+                exit 1
+              fi
+              echo "qualification_only=true" >> "$GITHUB_OUTPUT"
+              ;;
+            false|"") echo "qualification_only=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Invalid qualification-only request."; exit 1 ;;
+          esac
+      - name: Require an immutable reviewed release-helper pin
+        run: |
+          [[ "$RELEASE_HELPERS_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+          [ "$RELEASE_HELPERS_SHA" != "0000000000000000000000000000000000000000" ] || {
+            echo "::error::A reviewed release-helper commit must be pinned before activation."
+            exit 1
+          }
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - id: check
+          fetch-depth: '0'
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          path: reviewed-helpers
+          persist-credentials: false
+      - name: Respect paused Main before expensive source validation
+        id: pause
+        env:
+          QUALIFICATION_ONLY: ${{ steps.mode.outputs.qualification_only }}
+        run: |
+          git fetch --no-tags origin main
+          ADMITTED_MAIN="$(git rev-parse --verify refs/remotes/origin/main)"
+          export ADMITTED_MAIN
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          main_base = os.environ["ADMITTED_MAIN"]
+          if not re.fullmatch(r"[0-9a-f]{40}", main_base):
+              raise RuntimeError("invalid admitted Main identity")
+          result = subprocess.run(
+              ["git", "show", f"{main_base}:.github/release-pipeline-state.json"],
+              check=True, capture_output=True, text=True, timeout=30,
+          )
+          state = json.loads(result.stdout)
+          if (
+              not isinstance(state, dict)
+              or state.get("schema") != "copilot-extensions.release-pipeline-state"
+              or type(state.get("version")) is not int or state["version"] != 1
+              or type(state.get("paused")) is not bool
+          ):
+              raise RuntimeError("invalid trusted Main pause state")
+          qualification_only = os.environ["QUALIFICATION_ONLY"]
+          if qualification_only not in ("true", "false"):
+              raise RuntimeError("invalid qualification-only admission")
+          normal_paused = state["paused"] and qualification_only == "false"
+          promotion = state.get("last_promotion")
+          released = promotion.get("dev_head") if isinstance(promotion, dict) else None
+          if promotion is not None and (
+              not isinstance(released, str) or not re.fullmatch(r"[0-9a-f]{40}", released)
+          ):
+              raise RuntimeError("invalid trusted Main source identity")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"normal_paused={str(normal_paused).lower()}\n")
+              output.write(f"released_source={released or ''}\n")
+              output.write(f"main_base={main_base}\n")
+          if normal_paused:
+              print("::notice::Main is paused; automatic source validation and promotion are deferred.")
+          PY
+      - name: Require the previous promotion PR to be terminal before new validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        if: steps.pause.outputs.normal_paused != 'true'
+        run: python -I -B reviewed-helpers/tools/promotion_lifecycle.py --repository "$GITHUB_REPOSITORY" --require-idle
+      - name: Confirm the admitted source belongs to Dev
+        id: check
+        if: steps.pause.outputs.normal_paused != 'true'
         env:
           DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+          QUALIFICATION_ONLY: ${{ steps.mode.outputs.qualification_only }}
+          RELEASED_SOURCE: ${{ steps.pause.outputs.released_source }}
         run: |
           # Resolve the candidate sha per trigger type, then apply the
           # IDENTICAL ancestor proof to all of them -- never trust a
@@ -175,269 +178,157 @@ jobs:
             sha="${{ github.sha }}"
           fi
           if git merge-base --is-ancestor "$sha" origin/dev; then
+            if [ "$QUALIFICATION_ONLY" != "true" ] && [ "$sha" = "$RELEASED_SOURCE" ]; then
+              echo "is_dev=false" >> "$GITHUB_OUTPUT"
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              echo "::notice::This Dev source is already recorded on Main; no duplicate validation or promotion."
+              exit 0
+            fi
             echo "is_dev=true" >> "$GITHUB_OUTPUT"
             echo "sha=$sha" >> "$GITHUB_OUTPUT"
           else
             echo "is_dev=false" >> "$GITHUB_OUTPUT"
             echo "::notice::$sha is not on origin/dev's history -- skipping (workflow_dispatch was run against a non-dev ref, or an unexpected repository_dispatch payload)."
           fi
+      - name: Recheck automatic source retirement after queued admission
+        if: github.event_name == 'repository_dispatch' && steps.check.outputs.is_dev == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOMATIC_SOURCE: ${{ steps.check.outputs.sha }}
+          AUTOMATIC_MAIN: ${{ steps.pause.outputs.main_base }}
+        run: python -I -B reviewed-helpers/tools/promotion_lifecycle.py --repository "$GITHUB_REPOSITORY" --require-idle --automatic-source "$AUTOMATIC_SOURCE" --automatic-main "$AUTOMATIC_MAIN"
+      - name: Record immutable admitted source
+        if: steps.check.outputs.is_dev == 'true' && (github.event_name != 'workflow_dispatch' || inputs.push != 'false')
+        env:
+          ADMITTED_SOURCE: ${{ steps.check.outputs.sha }}
+          ADMITTED_MAIN: ${{ steps.pause.outputs.main_base }}
+          ADMISSION_PATH: ${{ runner.temp }}/promotion-admission.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
 
-  full:
-    name: full - ${{ matrix.plugin }}
-    needs: gate
-    if: needs.gate.outputs.is_dev == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        plugin:
-          - agent-bridge
-          - agent-codespaces
-          - agent-containers
-          - agent-dispatch
-          - agent-logger
-          - agent-mcp
-          - agent-ssh
-          - agent-vault
-          - agent-worktrees
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.gate.outputs.sha }}
-      - name: Ensure full history is actually present
-        # actions/checkout's fetch-depth: 0 is unreliable when combined with
-        # an explicit detached-commit-sha ref (as this job needs, to pin to
-        # the exact commit `gate` already validated rather than whatever
-        # dev's tip has moved to since) -- confirmed live: agent-bridge's
-        # test_session_host_fixture_matches_generation_one (a `git show
-        # <historical-sha>:path` test) still failed with the same shallow-
-        # clone error even with fetch-depth: 0 set (actions/checkout#1515:
-        # an explicit SHA ref can silently produce a single-commit shallow
-        # clone regardless of fetch-depth). The prior fix here
-        # (`git fetch --prune --unshallow || true`) was itself broken: run
-        # against an already-complete clone, `--unshallow` errors out
-        # ("does not make sense on a complete repository") and the bare
-        # `|| true` silently swallowed that, so the step never actually did
-        # anything. Only unshallow when the clone genuinely is shallow, and
-        # always also register every remote branch explicitly -- an SHA-ref
-        # checkout may leave `origin/*` remote-tracking refs entirely
-        # unpopulated, which an unshallow alone would not fix either.
-        run: |
-          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-            git fetch --prune --unshallow
-          fi
-          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
-      - name: Full suite - ${{ matrix.plugin }}
-        env:
-          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-worktrees' && '-n 2 --dist=worksteal' || '' }}
-        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
-      - name: Coverage baseline - ${{ matrix.plugin }} (pilot plugins only)
-        # Phase 1 pilot (efforts/active/coverage-guided-ci): coverage
-        # collection is wired for a growing subset of this matrix, starting
-        # with agent-ssh (smallest, 16 test files, but still a real
-        # dependency-having plugin -- proves the `project_dir`
-        # editable-install path, not just a dependency-free script
-        # plugin), then agent-codespaces, agent-containers, agent-vault,
-        # agent-logger, agent-mcp, agent-bridge, agent-worktrees (the
-        # largest: 265 test files, 6451 collected tests), and finally
-        # agent-dispatch -- completing this pilot's full 9-plugin matrix.
-        # `baseline.py`
-        # chunks a suite larger than its own `--max-files-per-chunk`
-        # (default 5) into independent pytest processes and merges the
-        # results, rather than collecting an entire suite in one process
-        # -- needed for agent-mcp's own 54-file suite, whose real
-        # process/watchdog-management tests otherwise exceeded a
-        # process-count ceiling an unchunked collection pass has no way to
-        # bound; confirmed it also scales to agent-bridge's own much
-        # larger 8-chunk suite cleanly. agent-worktrees' own real
-        # cross-process file-lock tests (spawning a genuine
-        # `multiprocessing.get_context("spawn")` child) additionally
-        # needed `_DRIVER_SCRIPT` to guard its `pytest.main(...)` call
-        # behind `if __name__ == "__main__":` -- spawn re-imports that
-        # script as a plain module to bootstrap, and an unguarded call
-        # re-executed pytest.main() during that bootstrap, tripping
-        # multiprocessing's own safety check and corrupting the real
-        # coverage data file in the process. agent-dispatch's own
-        # instrumented runs additionally exposed a real async-cancellation
-        # race: its verification-drain background loop's synchronous DB
-        # calls run via `asyncio.to_thread`, and cancelling the task that's
-        # awaiting one only cancels the awaiting coroutine -- the
-        # underlying thread keeps running regardless, racing a test's own
-        # temp-dir teardown under coverage instrumentation's slower
-        # execution. Fixed by replacing that shutdown's `task.cancel()`
-        # with a cooperative `stop_event` the loop checks between
-        # `to_thread` calls, so the awaited task only returns once the
-        # loop's current synchronous work has actually finished.
-        # Independent
-        # of, and in addition to, the trusted `run-plugin-tests.py` run
-        # above. Every enrolled baseline is required: a collector or upload
-        # failure must fail this source job, not leave a success-shaped
-        # result for missing evidence. The `promote` job also verifies the
-        # complete artifact set independently. Keep this `if:` condition's
-        # plugin list in exact sync with that step's own list. Expand both
-        # lists together as later pilots prove out. `--cov-source` is
-        # derived from `matrix.plugin` (every plugin's own `src/` package
-        # name is its plugin name with hyphens swapped for underscores --
-        # confirmed for every plugin enrolled so far) rather than
-        # hardcoded per plugin, so enrolling the next one only ever touches
-        # this `if:` list and the `promote` job's matching one below.
-        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees","agent-dispatch"]'), matrix.plugin)
-        env:
-          BASELINE_WORKERS: ${{ (matrix.plugin == 'agent-worktrees' || matrix.plugin == 'agent-dispatch') && '2' || '1' }}
-        run: |
-          plugin="${{ matrix.plugin }}"
-          python tools/coverage_guided_selection/baseline.py \
-            "plugins/${plugin}/tests" \
-            --cov-source "plugins/${plugin}/src/${plugin//-/_}" \
-            --plugin "${plugin}" \
-            --project-dir "plugins/${plugin}" \
-            --measured-commit "${{ needs.gate.outputs.sha }}" \
-            --workers "$BASELINE_WORKERS" \
-            --out "${plugin}.json"
-      - name: Upload coverage baseline - ${{ matrix.plugin }}
-        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees","agent-dispatch"]'), matrix.plugin)
+          source, main = os.environ["ADMITTED_SOURCE"], os.environ["ADMITTED_MAIN"]
+          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (source, main)):
+              raise RuntimeError("invalid immutable admission inputs")
+          record = {
+              "schema": "copilot-extensions.promotion-source-admission", "version": 1,
+              "source": source, "main_base": main,
+              "run": int(os.environ["GITHUB_RUN_ID"]),
+              "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+          }
+          if record["run"] <= 0 or record["attempt"] <= 0:
+              raise RuntimeError("invalid immutable admission execution")
+          Path(os.environ["ADMISSION_PATH"]).write_text(
+              json.dumps(record, sort_keys=True) + "\n", encoding="utf-8",
+          )
+          PY
+      - name: Upload immutable admitted source
+        if: steps.check.outputs.is_dev == 'true' && (github.event_name != 'workflow_dispatch' || inputs.push != 'false')
         uses: actions/upload-artifact@v4
         with:
-          # The ARTIFACT's own name carries the `coverage-baseline-` prefix
-          # `download-artifact`'s own `pattern:` matches against below; the
-          # uploaded FILE's name is deliberately just `<plugin>.json` --
-          # `download-artifact --merge-multiple` preserves each artifact's
-          # own uploaded file name verbatim, and `promote_release.py`'s own
-          # `_write_coverage_baselines_into_scratch` keys each plugin by
-          # that file's name (`<plugin>.json`), so the two must match
-          # exactly, or verification below silently fails every run.
-          name: coverage-baseline-${{ matrix.plugin }}
-          path: ${{ matrix.plugin }}.json
+          name: promotion-admission-${{ steps.check.outputs.sha }}-${{ steps.pause.outputs.main_base }}
+          path: ${{ runner.temp }}/promotion-admission.json
           if-no-files-found: error
-          retention-days: 7
-
-  worktree-manager:
-    name: worktree-manager (out-of-plugin, full)
+  source-units:
+    name: Eligible source units with coverage
     needs: gate
     if: needs.gate.outputs.is_dev == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      attempt: ${{ steps.producer.outputs.attempt }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: astral-sh/setup-uv@v9.0.0
-      - name: Test worktree-manager
-        working-directory: worktree-manager
-        run: uv run --extra dev pytest -q
-
-  agent-index-service-linux:
-    name: agent-index-service (ubuntu-latest, standalone full)
-    needs: gate
-    if: needs.gate.outputs.is_dev == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
           fetch-depth: 0
-          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
-      - name: Test standalone controller with installed core and host containment
-        run: python tools/run-standalone-tests.py services/index --prepare --admission-wait 60
-
-  agent-index-service-windows:
-    name: agent-index-service (windows-latest, standalone full)
-    needs: gate
-    if: needs.gate.outputs.is_dev == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.gate.outputs.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
-      - name: Test standalone controller with installed core and host containment
-        run: python tools/run-standalone-tests.py services/index --prepare --admission-wait 60
-
-  guards-full-sweep:
-    name: guards (full-tree, non-PR-scoped)
-    needs: gate
-    if: needs.gate.outputs.is_dev == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.gate.outputs.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          python-version: '3.12'
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
-      - run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml ruff
-      - name: Module size (full sweep, unconditional)
-        run: python tools/check-module-size.py
-      - name: Version consistency
-        run: python tools/check-version-consistency.py
-      - name: Vendored library synchronization
-        run: python tools/check-vendored-libs-sync.py
-      - name: Docs consistency
-        run: python tools/check-docs-consistency.py
-      - name: Large files (full sweep, unconditional)
-        run: python tools/check-large-files.py --all
-
+          version: 0.12.6
+      - name: Install seasoned unit tooling
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest "coverage>=7.7" packaging pyyaml
+      - name: Retain source version and library policy admission
+        run: |
+          python tools/check-version-consistency.py
+          python tools/check-vendored-libs-sync.py
+      - id: producer
+        name: Record the actual unit-producing attempt
+        run: printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Execute only the admitted source units once
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+        run: python tools/run-promotion-unit-tests.py --source-sha "$SOURCE_SHA" --output-dir "$RUNNER_TEMP/promotion-unit-evidence"
+      - id: upload
+        name: Upload promotion unit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: promotion-unit-evidence
+          path: ${{ runner.temp }}/promotion-unit-evidence/*
+          if-no-files-found: error
+          retention-days: 2
   build-python-artifacts:
     name: Build first-party Python artifacts without signing authority
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep]
-    if: >-
-      needs.gate.outputs.is_dev == 'true' &&
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs:
+      - gate
+    if: needs.gate.outputs.is_dev == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
+      actions: read
+      attestations: read
     outputs:
       exported: ${{ steps.build.outputs.exported }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: '0'
           ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Provision hash-pinned metadata validator tooling for export validation
         run: |
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
-          python tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+          python reviewed-helpers/tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
-            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
+            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r reviewed-helpers/tools/artifact_validation_requirements.txt
       - name: Build the composed, versioned promotion candidate without release authority
         id: build
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
+          QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_VERIFY_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin dev main
-          "$RUNNER_TEMP/artifact-validator/bin/python" tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
-            --build-python-artifacts-dir "$ARTIFACT_DIR" \
-            --toolchain-source seasoned-public --toolchain-min-age-days 7
+          args=(--repo "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main
+            --build-python-artifacts-dir "$ARTIFACT_DIR"
+            --reuse-artifacts-repository "$GITHUB_REPOSITORY"
+            --toolchain-source seasoned-public --toolchain-min-age-days 7)
+          if [ "$QUALIFICATION_ONLY" = "true" ]; then args+=(--qualification-only); fi
+          "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/promote_release.py "${args[@]}"
           if [ -f "$ARTIFACT_DIR/python-artifacts.json" ]; then
             echo "exported=true" >> "$GITHUB_OUTPUT"
           else
@@ -449,14 +340,14 @@ jobs:
           name: unsigned-promotion-python-artifacts
           path: ${{ runner.temp }}/python-artifacts/*
           if-no-files-found: error
-          retention-days: 2
-
+          retention-days: '2'
   python-artifacts:
     name: Validate and attest first-party Python artifacts
-    needs: [gate, build-python-artifacts]
-    if: >-
-      needs.gate.outputs.is_dev == 'true' &&
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs:
+      - gate
+      - build-python-artifacts
+      - source-units
+    if: needs.gate.outputs.is_dev == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -468,73 +359,77 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: '0'
           ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Provision hash-pinned metadata validator tooling from trusted sources
         run: |
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
-          python tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+          python reviewed-helpers/tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
-            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
+            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r reviewed-helpers/tools/artifact_validation_requirements.txt
       - uses: actions/download-artifact@v4
         if: needs.build-python-artifacts.outputs.exported == 'true'
         with:
           name: unsigned-promotion-python-artifacts
           path: ${{ runner.temp }}/python-artifacts
-      - name: Validate untrusted bundles using only trusted default-branch code
+      - name: Validate untrusted bundles using only pinned reviewed helpers
         if: needs.build-python-artifacts.outputs.exported == 'true'
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
+          QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
           git fetch origin main
-          # Bootstrap the canonical checkout until the repaired trusted CLI is promoted.
-          "$RUNNER_TEMP/artifact-validator/bin/python" - "$DEV_SHA" "$(git rev-parse origin/main)" "$ARTIFACT_DIR" <<'PY'
-          import os
+          "$RUNNER_TEMP/artifact-validator/bin/python" - "$GITHUB_WORKSPACE" "$RELEASE_HELPERS_SHA" "$DEV_SHA" "$(git rev-parse origin/main)" "$ARTIFACT_DIR" "$QUALIFICATION_ONLY" <<'PY'
           import re
           import sys
-          import tempfile
           from pathlib import Path
 
-          sys.path.insert(0, str(Path("tools").resolve()))
+          repo, helper_sha, dev, main, directory, qualification_only = sys.argv[1:]
+          repo = Path(repo).resolve(strict=True)
+          helpers = repo / "reviewed-helpers"
+          sys.path.insert(0, str(helpers / "tools"))
           import promote_release as promotion
           import promotion_python_artifacts as artifacts
 
-          dev, main, directory = sys.argv[1:]
-          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (dev, main)):
+          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (helper_sha, dev, main)):
               raise artifacts.PromotionArtifactError("invalid expected candidate commit identity")
-          repo = Path.cwd()
+          if qualification_only not in ("true", "false"):
+              raise artifacts.PromotionArtifactError("invalid qualification-only admission")
+          if promotion._git(["rev-parse", "HEAD"], cwd=helpers) != helper_sha:
+              raise artifacts.PromotionArtifactError("release helpers do not match their reviewed pin")
           scratch = promotion.add_scratch_worktree(dev, repo=repo)
           try:
               state = promotion._read_pipeline_state(main, repo=repo)
+              if state.get("paused") and qualification_only != "true":
+                  raise promotion.PromotionPaused("normal artifact validation cannot bypass the pause")
               summary = promotion.consume_pending_changes(
                   scratch, main_head=main, repo=repo,
                   last_dev_head=(state.get("last_promotion") or {}).get("dev_head"),
-                  trusted_source=repo,
+                  trusted_source=helpers,
               )
-              control = {"control": summary["control_preserved"]} if "control_preserved" in summary else {}
-              tree = promotion.build_promotion_tree(scratch, **control)
-              with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
-                  candidate = Path(temporary).resolve()
-                  promotion._git(
-                      ["checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
-                  )
-                  artifacts.validate_artifacts(
-                      Path(directory), content_tree=tree, dev_head=dev, main_before=main,
-                      projects=artifacts.candidate_projects(candidate), candidate_root=candidate,
-                      source_policy="seasoned-public", min_age_days=7,
-                  )
+              tree = promotion.build_promotion_tree(scratch, control=summary.get("control_preserved"))
+              artifacts.validate_composed_artifacts(
+                  Path(directory), scratch=scratch, content_tree=tree,
+                  dev_head=dev, main_before=main,
+                  source_policy="seasoned-public", min_age_days=7,
+              )
           finally:
               promotion.remove_scratch_worktree(scratch, repo=repo)
           PY
       - name: Attest the validated index and every first-party bundle
         if: needs.build-python-artifacts.outputs.exported == 'true'
-        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
         with:
           subject-path: ${{ runner.temp }}/python-artifacts/*
       - uses: actions/upload-artifact@v4
@@ -543,120 +438,39 @@ jobs:
           name: promotion-python-artifacts
           path: ${{ runner.temp }}/python-artifacts/*
           if-no-files-found: error
-          retention-days: 2
-
+          retention-days: '2'
   report-failure:
     name: report failure (Phase 1 watchdog; detection + dedup only, no fix attempt)
-    # Phase 1 of the promotion-failure-reactive-fix-agent effort
-    # (efforts/active/promotion-failure-reactive-fix-agent/README.md):
-    # detect + dedup a red dev validation run and file/comment a tracking
-    # issue -- never attempts a fix.
-    #
-    # `always()` is REQUIRED here, not optional: GitHub Actions silently ANDs
-    # an implicit `success()` onto any job's `if:` unless the expression
-    # itself calls a status-check function (`always()`/`failure()`/
-    # `success()`/`cancelled()`) -- confirmed via review, this job would
-    # otherwise never fire on the exact red run it exists to report, since
-    # `full`/`worktree-manager`/`guards-full-sweep` genuinely failing is
-    # precisely the case the implicit success() check would skip. This
-    # mirrors why `promote` below needs its own `always()` for the same
-    # reason.
-    #
-    # `repository_dispatch`-only, deliberately: `workflow_dispatch` loads
-    # the ENTIRE workflow YAML from the dispatched ref (unlike
-    # `repository_dispatch`, which -- per GitHub's own docs -- always
-    # resolves the workflow file from the default branch, same as the
-    # `workflow_run` trigger this job originally relied on before the
-    # 2026-09-29 trigger redesign) -- so allowing a dispatch against `dev`
-    # would make the whole job definition itself untrusted, not merely the
-    # checked-out script. This job doesn't need manual triggering (it
-    # exists to react automatically to real validation runs), so the fix is
-    # to just never offer that path, rather than trying to harden a job
-    # whose own YAML could be attacker-controlled.
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, promote, materialized-candidate-plan, materialized-candidate-consumers, materialized-candidate-windows, merge-promotion, publish-python-artifacts, postmerge-workflows]
-    if: >-
-      always() &&
-      github.event_name == 'repository_dispatch' &&
-      needs.gate.outputs.is_dev == 'true' &&
-      (needs.full.result == 'failure' ||
-       needs.worktree-manager.result == 'failure' ||
-       needs.agent-index-service-linux.result == 'failure' ||
-       needs.agent-index-service-windows.result == 'failure' ||
-       needs.guards-full-sweep.result == 'failure' ||
-       needs.build-python-artifacts.result == 'failure' ||
-       needs.python-artifacts.result == 'failure' ||
-       needs.promote.result == 'failure' ||
-       needs.materialized-candidate-plan.result == 'failure' ||
-       needs.materialized-candidate-consumers.result == 'failure' ||
-       needs.materialized-candidate-windows.result == 'failure' ||
-       needs.merge-promotion.result == 'failure' ||
-       needs.publish-python-artifacts.result == 'failure' ||
-       needs.postmerge-workflows.result == 'failure')
+    needs:
+      - gate
+      - source-units
+      - build-python-artifacts
+      - python-artifacts
+      - promote
+      - qualify-candidate
+      - publish-python-artifacts
+      - merge-promotion
+    if: "always() && github.event_name == 'repository_dispatch' && needs.gate.outputs.is_dev == 'true' && (\n \n \n \n \n needs.source-units.result == 'failure' || needs.build-python-artifacts.result == 'failure' ||\n needs.python-artifacts.result == 'failure' ||\n needs.promote.result == 'failure' ||\n needs.qualify-candidate.result == 'failure' ||\n needs.publish-python-artifacts.result == 'failure' ||\n needs.merge-promotion.result == 'failure')"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       actions: write
       issues: write
-    # `actions: write` (widened from `actions: read`) is required for the
-    # final "Fire the fix-attempt agent" step below -- see that step's own
-    # comment and the Phase 2 draft's leading comment block (blocking
-    # issue #1) for why an explicit `workflow_dispatch` call, not the
-    # watchdog's own `issues: labeled` event, is what actually invokes
-    # `ci-failure-fix-attempt.md`'s compiled workflow.
     steps:
       - uses: actions/checkout@v4
-        # Deliberately NOT `ref: needs.gate.outputs.sha`: that's the
-        # dev commit being diagnosed -- the very thing that just failed
-        # validation -- and this job holds `issues: write` + `GH_TOKEN`.
-        # Executing `tools/ci_failure_watchdog.py` FROM that untrusted
-        # checkout would defeat the whole repository_dispatch/workflow_run
-        # trust boundary (the same class of mistake `trusted-ci.yml` was
-        # hardened against earlier this session): a compromised dev
-        # commit's own copy of this very script could exfiltrate the
-        # token or file arbitrary issues/comments.
-        #
-        # An EXPLICIT `ref:` naming the default branch is required, not
-        # merely omitting `ref:` -- a bare checkout resolves differently
-        # per trigger type: for `repository_dispatch`/`workflow_run` it
-        # lands on the default branch, but a bare checkout under
-        # `workflow_dispatch` would resolve to whichever ref was manually
-        # dispatched -- moot for this job specifically now that its own
-        # `if:` is `repository_dispatch`-only (see above), but naming the
-        # default branch explicitly is correct and harmless defense-in-
-        # depth regardless of trigger.
         with:
-          fetch-depth: 1
+          fetch-depth: '1'
           ref: ${{ github.event.repository.default_branch }}
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
       - name: Ensure the tracking label exists
-        # `gh issue create --label` fails outright if the label is missing;
-        # `label create --force` is idempotent, matching
-        # module-health-watchdog.yml's own pattern. GitHub label
-        # descriptions are capped at 100 characters -- keep this one
-        # under that or the step (and everything after it) fails outright.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh label create ci-failure-signature
-          --color 5319E7
-          --description "Red dev validation failure signature; report-only watchdog (no fix attempted)"
-          --force
+        run: gh label create ci-failure-signature --color 5319E7 --description "Red dev validation failure signature; report-only watchdog (no fix attempted)" --force
       - name: Detect + dedup + report
         id: watchdog
-        # Bootstrap gap: this is a NEW script, so it does not exist on the
-        # default branch yet at the moment this PR first merges -- and
-        # (unlike a workflow-file change) it cannot ride main-gate's
-        # workflow-only bootstrap lane, since it isn't a workflow file.
-        # It only reaches the default branch the normal way: the next
-        # ordinary green dev->main promotion (any promotion, not
-        # necessarily one about this script) carries the whole tree
-        # across, same as every other file. Until then, degrade
-        # gracefully instead of hard-failing the job on a missing file --
-        # this is also a permanent safety net against any future
-        # main/dev script-presence mismatch, not just this one-time gap.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -669,37 +483,6 @@ jobs:
             --sha "${{ needs.gate.outputs.sha }}" \
             --file-issue
       - name: Fire the fix-attempt agent for any newly filed issue
-        # Phase 2 (efforts/active/promotion-failure-reactive-fix-agent,
-        # `.github/workflows/ci-failure-fix-attempt.md`) is triggered by
-        # `label_command: ci-failure-signature`, which compiles to BOTH an
-        # `issues: labeled` event trigger AND a `workflow_dispatch` trigger
-        # with an `item_number` input. The `issues: labeled` event is the
-        # one the watchdog's own `gh issue create --label` call above
-        # produces -- but GitHub suppresses new workflow-triggering events
-        # for content created by the default `GITHUB_TOKEN` (the same
-        # anti-recursion class the `promote` job below already documents),
-        # so that event will NEVER actually fire the fix-attempt workflow.
-        # An explicit `gh workflow run` dispatch call, by contrast, is a
-        # deliberate API invocation, not an automatically-generated event
-        # -- gh-aw's own FAQ documents third parties (Jira, PagerDuty)
-        # dispatching workflows this exact way -- so it is NOT subject to
-        # that suppression. This step is that explicit dispatch.
-        #
-        # Only newly FILED issues are dispatched (never a dedup comment on
-        # an already-tracked one -- `ci_failure_watchdog.py`'s own
-        # `FILED_ISSUE_NUMBERS` list enforces this), so a recurring
-        # in-window failure never re-triggers a fix attempt that may
-        # already be in flight against the same issue.
-        #
-        # `always()` is REQUIRED here (real review finding, PR #3916): this
-        # step's own default `if:` would otherwise implicitly AND in
-        # `success()`, skipping the dispatch whenever the watchdog step
-        # itself exits nonzero -- which `main()` can do for reasons
-        # unrelated to the signature this step cares about (e.g. a LATER
-        # failed job's log fetch failing) even after an EARLIER signature
-        # was genuinely filed and its number already written to
-        # `GITHUB_OUTPUT`. Losing the dispatch in that case would silently
-        # strand a real new issue with no fix attempt.
         if: always() && steps.watchdog.outputs.filed_issue_numbers != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -758,12 +541,12 @@ jobs:
             echo "::error::Fix-attempt dispatch failed; workflow state is $STATE."
             exit "$DISPATCH_EXIT"
           done
-
   promote:
     name: Promote dev -> main
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, python-artifacts]
-    # Keep failed validation visible to `decide`, but do not allocate a runner
-    # when the gate failed or declined the source (including a paused normal run).
+    needs:
+      - gate
+      - source-units
+      - python-artifacts
     if: always() && needs.gate.result == 'success' && needs.gate.outputs.is_dev == 'true'
     runs-on: ubuntu-latest
     environment: main-promotion
@@ -774,97 +557,17 @@ jobs:
       pull-requests: read
       checks: read
       statuses: read
-    timeout-minutes: 330
+    timeout-minutes: 15
     outputs:
       candidate_sha: ${{ steps.promote.outputs.candidate_sha }}
       candidate_branch: ${{ env.CANDIDATE_BRANCH }}
       main_before: ${{ steps.ready.outputs.main_before }}
-      pr_number: ${{ steps.land.outputs.pr_number }}
-    # Environment gating (configured 2026-09-25, repo Settings, not this
-    # file): `main-promotion` restricts its deployment_branch_policy to
-    # protected branches only (`dev`/`main`) and deliberately carries NO
-    # required reviewer -- a required reviewer would pause every real,
-    # fully-unattended promotion run waiting on a manual click, which
-    # would defeat the whole point of this pipeline.
-    #
-    # **Migration complete (confirmed live, 2026-09-29):**
-    # `APERTURE_RELEASE_TOKEN` is now an ENVIRONMENT secret scoped to
-    # `main-promotion` (the repository-level copy has been removed;
-    # `gh secret list` no longer shows it) -- the scratch-branch variant of
-    # the risk described below is closed: a job that doesn't declare this
-    # `environment:` genuinely cannot read the secret at all (confirmed by
-    # the exact failure this caused in a sibling workflow,
-    # `module-size-baseline-widen.yml`, until it also declared this same
-    # `environment:`).
-    #
-    # **Still open -- the through-`dev` variant:** `dev` is
-    # itself one of the two branches this policy allows (it has to be --
-    # that's this job's own real ref), and `dev`'s ruleset requires zero
-    # approving reviews to merge. A Write collaborator could still merge
-    # an ordinary PR into `dev` adding a job that declares this same
-    # `environment:` and reach the secret that way. Closing that fully
-    # needs either a required reviewer here (ruled out -- breaks
-    # unattended promotion) or `require_code_owner_review` on `dev`
-    # itself (ruled out -- self-locks every workflow PR in this
-    # single-operator repo). See the dev-branch-release-pipeline journal
-    # for the full trade-off; this is a named, accepted residual risk,
-    # not an oversight.
-    #
-    # Main requires a PR and its source-shape gate. The owner PAT pushes the
-    # exact generated candidate and opens the PR so that gate is triggered.
-    # A separate checkout-free job merges with the non-admin Actions token;
-    # strict server-side base freshness and expected-head matching apply.
-    # Preserve the human administrator escape for shape-validated control
-    # repair; it is never the routine promotion merge authority.
-    #
-    # Candidate/publication writes use the `APERTURE_RELEASE_TOKEN` environment secret (scoped to
-    # `main-promotion`; a fine-grained PAT scoped to this repo, Contents:
-    # Read and write + Pull requests: Read and write), NOT the default
-    # `github.token`. Other steps use the read-only job token; the PAT is
-    # neither a job-wide environment value nor a persisted checkout credential. GitHub
-    # never fires other workflow events (including `pull_request`) for
-    # content pushed/authored with the default `GITHUB_TOKEN` -- a
-    # documented anti-recursion safeguard -- so a `GITHUB_TOKEN`-authored
-    # candidate PR never triggers `base-branch-reminder.yml`'s required `main source gate`
-    # check and `gh pr merge --auto` sits permanently blocked (confirmed
-    # live on the very first real --push run, #3533 -- had to be merged
-    # with a manual admin bypass). A PAT-authored push/PR does trigger
-    # downstream workflows normally, making the merge genuinely turn-key.
-    # The Actions-token MERGE does suppress push workflows, so the separate
-    # postmerge-workflows job explicitly dispatches and verifies both consumers.
-    #
-    # Emergency rollback: `python tools/rollback_release.py pause --reason
-    # "..." --push` BEFORE `revert --reason "..." --push` -- run by a human
-    # operator with their own `gh` credentials (see
-    # tools/rollback_release.py's own docstring), not from this workflow.
-    # `tools/promote_release.py` itself refuses to run while paused, and
-    # refuses to re-promote the exact `dev` state a rollback just reverted
-    # (the non-incremental-update guard) unless `--force` is passed after
-    # `dev` has moved forward with a real fix.
     env:
       GH_TOKEN: ${{ github.token }}
       CANDIDATE_BRANCH: release/promote-${{ github.run_id }}
     steps:
       - name: Decide whether this run should actually promote
         id: decide
-        # Replaces both the artifact hand-off (#3567/#3578) and the old
-        # cross-workflow "did Validation Gate's whole run succeed" check --
-        # `needs.<job>.result`/`.outputs` are ordinary same-run facts, not
-        # event metadata, so there is nothing left here to be unreliable.
-        #
-        # Deliberately NO `workflow_dispatch` special case any more: it
-        # used to fast-path straight to `proceed=true`, skipping both
-        # `gate.outputs.is_dev` and the `full`/`worktree-manager`/
-        # `guards-full-sweep` result checks below entirely -- meaning a
-        # manual dispatch could promote even when those validation jobs
-        # failed (or, once `gate` started requiring ancestor proof for
-        # dispatch too, ran with an EMPTY `sha`, since `full`/
-        # `worktree-manager`/`guards-full-sweep` are skipped by their own
-        # `if: needs.gate.outputs.is_dev == 'true'` whenever `gate` finds a
-        # non-`dev` ref, but `decide` never checked that). Every trigger
-        # now goes through the identical checks below -- manual dispatch
-        # is for forcing a promotion RUN, never for bypassing what that
-        # run validates.
         run: |
           if [ "${{ needs.gate.result }}" != "success" ]; then
             echo "proceed=false" >> "$GITHUB_OUTPUT"
@@ -876,10 +579,9 @@ jobs:
             echo "::notice::Not a validated dev commit -- skipping promotion."
             exit 0
           fi
-          # is_dev was true, so full/worktree-manager/guards-full-sweep were
-          # NOT skipped by their own `if:` above -- they must have genuinely
-          # run and succeeded, or we refuse to promote unvalidated content.
-          for r in "${{ needs.full.result }}" "${{ needs.worktree-manager.result }}" "${{ needs.agent-index-service-linux.result }}" "${{ needs.agent-index-service-windows.result }}" "${{ needs.guards-full-sweep.result }}" "${{ needs.python-artifacts.result }}"; do
+          # Both the admitted unit packet and signed artifact validation
+          # must genuinely succeed; integration is not a release prerequisite.
+          for r in "${{ needs.source-units.result }}" "${{ needs.python-artifacts.result }}"; do
             if [ "$r" != "success" ]; then
               echo "proceed=false" >> "$GITHUB_OUTPUT"
               echo "::error::Validation did not pass ($r) -- refusing to promote."
@@ -889,12 +591,17 @@ jobs:
           echo "proceed=true" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: '0'
           ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
       - name: Configure git identity for the generated commit
         run: |
           git config user.name "github-actions[bot]"
@@ -910,9 +617,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
-          python tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+          python reviewed-helpers/tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
-            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
+            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r reviewed-helpers/tools/artifact_validation_requirements.txt
       - name: Download this run's signed Python artifacts
         if: steps.decide.outputs.proceed == 'true' && needs.python-artifacts.outputs.exported == 'true'
         uses: actions/download-artifact@v4
@@ -924,73 +631,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python tools/publish_python_artifacts.py verify --directory python-artifacts \
+          "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/publish_python_artifacts.py verify \
+            --repo "$GITHUB_WORKSPACE" --directory python-artifacts \
             --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF"
-      - name: Download coverage baselines (pilot plugins only; best-effort)
-        if: steps.decide.outputs.proceed == 'true'
-        # Only enrolled plugins produce baselines. Tolerate a failed pattern
-        # download here so the NEXT step reports the exact missing plugin set.
-        # Collection/upload already fail their source jobs; this separate gate
-        # also refuses missing evidence after download.
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          pattern: coverage-baseline-*
-          path: coverage-baselines
-          merge-multiple: true
-      - name: Verify enrolled coverage baselines were actually collected
-        if: steps.decide.outputs.proceed == 'true'
-        # Independently require the complete enrolled set after download,
-        # including when the best-effort download step itself failed.
-        # An enrolled baseline is never optional; only plugins outside this
-        # list may have none.
-        #
-        # Keep this list in exact sync with `full` job's own
-        # `if: matrix.plugin == '...'` collection-step condition above --
-        # that's the single other place a plugin gets "enrolled".
-        run: |
-          missing=()
-          for plugin in agent-ssh agent-codespaces agent-containers agent-vault agent-logger agent-mcp agent-bridge agent-worktrees agent-dispatch; do
-            if [ ! -f "coverage-baselines/${plugin}.json" ]; then
-              missing+=("$plugin")
-            fi
-          done
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Enrolled plugin(s) missing a collected coverage baseline this run: ${missing[*]} -- refusing to promote without the evidence these plugins are supposed to produce."
-            exit 1
-          fi
-      - name: Prepare temporary trusted-main promoter adapter
-        if: steps.decide.outputs.proceed == 'true'
-        run: |
-          cat > "$RUNNER_TEMP/trusted-promoter.py" <<'PY'
-          import os
-          import sys
-          import tempfile
-          from pathlib import Path
-
-          repo = Path(sys.argv[1]).resolve(strict=True)
-          sys.path.insert(0, str(repo / "tools"))
-          import promote_release as promotion
-          import promotion_python_artifacts as artifacts
-
-          # Remove this adapter after the repaired CLI has reached trusted main.
-          if not hasattr(artifacts, "validate_composed_artifacts"):
-              validate = artifacts.validate_artifacts
-
-              def validate_canonical(directory, *, candidate_root, **kwargs):
-                  with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
-                      candidate = Path(temporary).resolve()
-                      artifacts._run(
-                          ["git", "checkout-index", "--all", f"--prefix={candidate}{os.sep}"],
-                          cwd=candidate_root,
-                      )
-                      return validate(directory, candidate_root=candidate, **kwargs)
-
-              artifacts.validate_artifacts = validate_canonical
-
-          raise SystemExit(promotion.main(sys.argv[2:]))
-          PY
       - name: Pin the immutable workflow creation time for deterministic candidate retries
         id: candidate-clock
         if: steps.decide.outputs.proceed == 'true'
@@ -1003,158 +647,32 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           PUSH_INPUT: ${{ github.event.inputs.push }}
-          # Pin to the EXACT commit `gate` validated as a real `dev`
-          # ancestor -- the same commit `full`/`worktree-manager`/
-          # `guards-full-sweep` checked out and tested -- never a fresh
-          # re-resolve of `origin/dev`. This job's own checkout above only
-          # fetches (`ref: main` + full history); it never re-runs gate's
-          # ancestor check. `full`/`worktree-manager`/`guards-full-sweep`
-          # are a genuine 10-30 min validation window by this workflow's
-          # own design (see top-of-file comment) -- if new commits (and
-          # new changefiles) land on `dev` while those are still running,
-          # a bare `origin/dev` re-resolved at THIS checkout would
-          # silently be newer than what was validated, sweeping
-          # never-validated changefiles into this promotion's consumed/
-          # deleted set. Confirmed live: PR #4397 ("clear changefiles
-          # consumed by promotion 36394331795") was initially misdiagnosed
-          # as deleting two unconsumed changefiles -- that specific alarm
-          # was a false positive (the wrong promotion commit was used for
-          # comparison), but it surfaced this real structural gap: nothing
-          # here actually pinned promotion to what `gate` validated.
           DEV_SHA: ${{ needs.gate.outputs.sha }}
-          # `promote_release.py`'s own `measured_commit` consistency check
-          # (see `_write_coverage_baselines_into_scratch`) refuses any
-          # baseline not measured against this exact `DEV_SHA` -- a stale
-          # artifact from a superseded run can never be silently checked
-          # in by passing this directory, whether or not it's empty.
-          COVERAGE_BASELINES_DIR: coverage-baselines
           PROMOTION_TIME: ${{ steps.candidate-clock.outputs.prepared_at }}
+          QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
+          args=(--repo "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main
+            --python-artifacts-dir python-artifacts)
+          if [ "$QUALIFICATION_ONLY" = "true" ]; then args+=(--qualification-only); fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            output=$("$RUNNER_TEMP/artifact-validator/bin/python" -I -B "$RUNNER_TEMP/trusted-promoter.py" "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
-              --python-artifacts-dir python-artifacts)
-            echo "$output"
-            echo "land=false" >> "$GITHUB_OUTPUT"
+            land=false
           else
-            output=$("$RUNNER_TEMP/artifact-validator/bin/python" -I -B "$RUNNER_TEMP/trusted-promoter.py" "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --push --candidate-branch "$CANDIDATE_BRANCH" \
-              --promotion-time "$PROMOTION_TIME" \
-              --github-output "$GITHUB_OUTPUT" \
-              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
-              --python-artifacts-dir python-artifacts)
-            echo "$output"
-            echo "land=true" >> "$GITHUB_OUTPUT"
-            # Consumed changefiles are no longer swept off `dev` by this
-            # run: `purge-consumed-changefiles.yml` does that once daily
-            # instead, reading `.github/release-pipeline-state.json` off
-            # `main` after this run's own "Tag the real post-merge commit"
-            # step below updates it -- see that workflow's top-of-file
-            # comment for why decoupling the two is safe (bump computation
-            # already ignores a changefile that existed at the last
-            # recorded promotion's `dev_head`, regardless of whether it's
-            # still physically present on `dev`).
+            land=true
+            args+=(--push --candidate-branch "$CANDIDATE_BRANCH"
+              --promotion-time "$PROMOTION_TIME" --github-output "$GITHUB_OUTPUT")
           fi
-          # `land`/exit-code-0 alone doesn't mean a baseline was actually
-          # validated and checked in this round: `promote_release.py`
-          # also exits 0 (printing a short message, never reaching its
-          # own coverage-baseline validation at all) for a paused
-          # pipeline, a stale/out-of-order candidate, AND a "no real dev
-          # content change" no-op -- every one of those must NOT authorize
-          # the next step to publish (and potentially --clobber) a
-          # Release's assets. `coverage-baseline-checked-in: <plugin>` is
-          # only ever printed once `_write_coverage_baselines_into_scratch`
-          # has itself already validated and written a pointer for that
-          # plugin -- the one precise signal this run actually produced
-          # real, validated baseline evidence.
-          if echo "$output" | grep -q '^  coverage-baseline-checked-in: '; then
-            echo "baselines_written=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "baselines_written=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)
-        # Runs AFTER "Promote" (not before): `promote_release.py`'s own
-        # `_write_coverage_baselines_into_scratch` is the one step that
-        # actually validates each baseline's `measured_commit` and
-        # `plugin` fields against this run's real `DEV_SHA` -- publishing
-        # (and potentially `--clobber`-ing an already-published release's
-        # assets) BEFORE that validation ran meant a run with invalid or
-        # mis-targeted baseline data could silently overwrite a prior,
-        # still-valid release's evidence before its own data was ever
-        # checked.
-        #
-        # Gated on `steps.promote.outputs.baselines_written` AND
-        # `steps.promote.outputs.land == 'true'` -- NOT merely the
-        # "Promote" step's own exit code. `promote_release.py` exits 0 for
-        # several paths that never reach baseline validation at all (a
-        # paused pipeline, a stale/out-of-order candidate, a "no real dev
-        # content change" no-op); `baselines_written` (the "Promote"
-        # step's own bash grepping its captured stdout for the
-        # `coverage-baseline-checked-in: <plugin>` line that function
-        # prints only once it has itself already validated and written a
-        # pointer) rules those out. But `_write_coverage_baselines_into_scratch`
-        # itself runs unconditionally whenever there IS a real content
-        # change -- including a `workflow_dispatch --push=false` **dry
-        # run**, which validates and writes a pointer into its own
-        # never-pushed scratch tree purely for reporting. `land` is false
-        # in exactly that case (see the "Promote" step above) -- requiring
-        # it too keeps this step from publishing a REAL Release (a side
-        # effect no dry run should ever have) off a report-only pass.
-        #
-        # The full per-line coverage-baseline JSON for a large plugin
-        # suite can exceed GitHub's 100MB per-file git push limit, so the
-        # full payload is published here, as a Release asset, instead of
-        # ever entering a git tree; `promote_release.py`'s own
-        # `_write_coverage_baselines_into_scratch` checks in only a small
-        # correlation POINTER (a few hundred bytes) referencing this
-        # release -- see `tools/coverage_guided_selection/correlation.py`'s
-        # module docstring for the full design.
-        #
-        # Tagged on `DEV_SHA` itself (via `release_tag_for`'s formula, not
-        # the promotion's own eventual `main`-side tag) -- deliberately
-        # decoupled from whether/when/how this `dev` commit's promotion
-        # actually lands (a real post-merge `main` tag isn't knowable yet
-        # at this point in the job; see the "Tag the real post-merge
-        # commit" step below) -- the baseline evidence for a `dev` commit
-        # is a fact about that commit alone. Idempotent: a retried run for
-        # the exact same (now-validated) `DEV_SHA` uploads over (never
-        # duplicates) an already-published release's assets.
-        if: >-
-          steps.decide.outputs.proceed == 'true' &&
-          steps.promote.outputs.land == 'true' &&
-          steps.promote.outputs.baselines_written == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
-          DEV_SHA: ${{ needs.gate.outputs.sha }}
-        run: |
-          # Mirrors `correlation.release_tag_for` -- duplicated here (not
-          # imported; this step has no Python dependency at all otherwise)
-          # -- keep in sync by hand if that formula ever changes. Uses the
-          # FULL `DEV_SHA`, never a truncated prefix -- see that
-          # function's own docstring for why a shortened prefix risks a
-          # release-tag collision between two distinct commits.
-          release_tag="coverage-baselines-${DEV_SHA}"
-          # Attempt the upload directly first, rather than `gh release
-          # view` then branching on its result: a separate check-then-act
-          # is a real TOCTOU race against anything else that can touch
-          # this release between the two calls -- confirmed live (a run
-          # whose `view` found the release, then whose own very next
-          # `upload` 404'd because it had already vanished by then).
-          # `gh release upload` itself fails loudly (and meaningfully,
-          # not just "not found") if the release doesn't exist yet, so
-          # that single failure is the only signal this needs: fall back
-          # to `create` exactly then, never speculatively.
-          if ! upload_err=$(gh release upload "$release_tag" coverage-baselines/*.json --clobber 2>&1); then
-            echo "$upload_err"
-            if echo "$upload_err" | grep -qi "release not found\|404"; then
-              gh release create "$release_tag" --target "$DEV_SHA" \
-                --title "Coverage baselines @ ${DEV_SHA:0:12}" \
-                --notes "Per-plugin coverage baselines measured against dev commit $DEV_SHA. Correlated via the small pointer files promote_release.py checks into .github/coverage-baselines/ on main -- see tools/coverage_guided_selection/correlation.py." \
-                coverage-baselines/*.json
-            else
-              exit 1
-            fi
-          fi
+          output=$("$RUNNER_TEMP/artifact-validator/bin/python" -I -B - "$GITHUB_WORKSPACE/reviewed-helpers/tools" "${args[@]}" <<'PY'
+          import runpy
+          import sys
+          from pathlib import Path
+
+          tools = Path(sys.argv.pop(1)).resolve(strict=True)
+          sys.path.insert(0, str(tools))
+          runpy.run_path(str(tools / "promote_release.py"), run_name="__main__")
+          PY
+          )
+          echo "$output"
+          echo "land=$land" >> "$GITHUB_OUTPUT"
       - name: Publish and read back exact-candidate artifacts before enabling merge
         id: ready
         if: steps.promote.outputs.land == 'true' && steps.promote.outputs.candidate_sha != ''
@@ -1163,6 +681,7 @@ jobs:
           ARTIFACT_VERIFY_TOKEN: ${{ github.token }}
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           CANDIDATE_SHA: ${{ steps.promote.outputs.candidate_sha }}
+          QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
           remote_ref=$(git ls-remote --heads origin "refs/heads/$CANDIDATE_BRANCH")
           if [ "$(printf '%s\n' "$remote_ref" | cut -f1)" != "$CANDIDATE_SHA" ]; then
@@ -1171,72 +690,71 @@ jobs:
           fi
           git fetch origin "refs/heads/$CANDIDATE_BRANCH"
           test "$(git rev-parse FETCH_HEAD)" = "$CANDIDATE_SHA"
-          "$RUNNER_TEMP/artifact-validator/bin/python" tools/publish_python_artifacts.py prepare --directory python-artifacts \
+          python - "$CANDIDATE_SHA" "$QUALIFICATION_ONLY" <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          candidate, mode = sys.argv[1:]
+          if mode not in ("true", "false"):
+              raise RuntimeError("invalid qualification-only admission")
+          expected_paused = mode == "true"
+          for commit in (candidate, candidate + "^"):
+              shown = subprocess.run(
+                  ["git", "show", f"{commit}:.github/release-pipeline-state.json"],
+                  check=True, capture_output=True, text=True, timeout=30,
+              )
+              state = json.loads(shown.stdout)
+              if not isinstance(state, dict) or state.get("paused") is not expected_paused:
+                  raise RuntimeError("candidate must preserve the admitted pipeline pause state")
+          PY
+          "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/publish_python_artifacts.py prepare \
+            --repo "$GITHUB_WORKSPACE" --directory python-artifacts \
             --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF" \
             --candidate-commit "$CANDIDATE_SHA" --dev-head "$DEV_SHA"
           echo "candidate_pushed=true" >> "$GITHUB_OUTPUT"
           printf 'main_before=%s\n' "$(git rev-parse "$CANDIDATE_SHA^")" >> "$GITHUB_OUTPUT"
-      - name: Land the candidate branch on main via PR + squash-merge
-        id: land
-        if: steps.ready.outputs.candidate_pushed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
-          CANDIDATE_SHA: ${{ steps.promote.outputs.candidate_sha }}
-        run: |
-          echo "candidate_pushed=true" >> "$GITHUB_OUTPUT"
-          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$CANDIDATE_BRANCH" \
-            --base main --state all --json number,headRefOid,isCrossRepository,state --limit 100)
-          pr_number=$(PR_CANDIDATES="$existing" python - <<'PY'
-          import json
-          import os
-
-          candidates = json.loads(os.environ["PR_CANDIDATES"])
-          if not isinstance(candidates, list) or len(candidates) > 1:
-              raise RuntimeError("ambiguous existing promotion PR")
-          if candidates:
-              pr = candidates[0]
-              if (
-                  not isinstance(pr, dict)
-                  or pr.get("headRefOid") != os.environ["CANDIDATE_SHA"]
-                  or pr.get("isCrossRepository") is not False
-                  or pr.get("state") not in ("OPEN", "MERGED")
-                  or type(pr.get("number")) is not int or pr["number"] <= 0
-              ):
-                  raise RuntimeError("existing promotion PR does not match the exact candidate")
-              print(pr["number"])
-          PY
-          )
-          if [ -z "$pr_number" ]; then
-            pr_url=$(gh pr create --base main --head "$CANDIDATE_BRANCH" \
-              --title "release: promote dev to main ($CANDIDATE_BRANCH)" \
-              --body "Generated by tools/promote_release.py. Do not edit by hand. Verified candidate artifacts: https://github.com/$GITHUB_REPOSITORY/releases/tag/python-artifacts-$CANDIDATE_SHA")
-            pr_number=$(basename "$pr_url")
-          fi
-          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
-
-  materialized-candidate-plan:
-    name: Resolve exact materialized consumer inventory
-    needs: [gate, promote]
-    if: needs.promote.outputs.pr_number != ''
+  qualify-candidate:
+    name: Require exact source-unit reuse at the immutable candidate
+    needs:
+      - gate
+      - promote
+      - source-units
+    if: needs.promote.outputs.candidate_sha != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
+      actions: read
     outputs:
-      matrix: ${{ steps.inventory.outputs.matrix }}
-      windows_matrix: ${{ steps.inventory.outputs.windows_matrix }}
+      qualification_run: ${{ steps.qualify.outputs.qualification_run }}
+      qualification_attempt: ${{ steps.qualify.outputs.qualification_attempt }}
+      qualification_digest: ${{ steps.qualify.outputs.qualification_digest }}
+      qualification_promotion_run: ${{ steps.qualify.outputs.qualification_promotion_run }}
+      candidate_sha: ${{ steps.qualify.outputs.candidate_sha }}
+      dev_sha: ${{ steps.qualify.outputs.dev_sha }}
+      main_before: ${{ steps.qualify.outputs.main_before }}
+      control_sha: ${{ steps.qualify.outputs.control_sha }}
+      tree: ${{ steps.qualify.outputs.tree }}
+      qualification_profile: ${{ steps.qualify.outputs.qualification_profile }}
+      qualification_unit_job_id: ${{ steps.qualify.outputs.qualification_unit_job_id }}
+      qualification_unit_artifact_id: ${{ steps.qualify.outputs.qualification_unit_artifact_id }}
+      qualification_unit_artifact_digest: ${{ steps.qualify.outputs.qualification_unit_artifact_digest }}
+      qualification_packet_digest: ${{ steps.qualify.outputs.qualification_packet_digest }}
+      qualification_unit_manifest_digest: ${{ steps.qualify.outputs.qualification_unit_manifest_digest }}
+      qualification_unit_inputs_digest: ${{ steps.qualify.outputs.qualification_unit_inputs_digest }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.workflow_sha }}
-          path: trusted
+          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          path: reviewed-helpers
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.promote.outputs.candidate_sha }}
           path: candidate
-          fetch-depth: 2
+          fetch-depth: '0'
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -1245,132 +763,59 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - id: inventory
+          python-version: '3.12'
+      - name: Download the unit packet for exact-ID and archive verification
+        uses: actions/download-artifact@v4
+        with:
+          name: promotion-unit-evidence
+          path: ${{ runner.temp }}/promotion-unit-evidence
+      - name: Verify the original successful unit execution and all candidate source bytes
+        id: qualify
         env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_BRANCH: ${{ needs.promote.outputs.candidate_branch }}
           CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
+          CONTROL_SHA: ${{ github.workflow_sha }}
+          UNIT_PRODUCER_ATTEMPT: ${{ needs.source-units.outputs.attempt }}
+          UNIT_ARTIFACT_ID: ${{ needs.source-units.outputs.artifact_id }}
+          UNIT_ARTIFACT_DIGEST: ${{ needs.source-units.outputs.artifact_digest }}
         run: |
-          inventory=$(python -I -B trusted/tools/validate_materialized_candidate.py \
-            --root candidate --candidate-sha "$CANDIDATE_SHA" \
-            --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --matrix)
-          matrix=$(printf '%s' "$inventory" | jq -c '{include: [.include[] | select(.os == "ubuntu-latest")]}')
-          windows_matrix=$(printf '%s' "$inventory" | jq -c '{include: [.include[] | select(.os == "windows-latest")]}')
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          echo "windows_matrix=$windows_matrix" >> "$GITHUB_OUTPUT"
-
-  materialized-candidate-consumers:
-    name: Materialized consumer (${{ matrix.component }}, ${{ matrix.os }})
-    needs: [gate, promote, materialized-candidate-plan]
-    if: >-
-      needs.promote.outputs.pr_number != '' &&
-      needs.materialized-candidate-plan.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.job_minutes }}
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.materialized-candidate-plan.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v4
+          python -I -B reviewed-helpers/tools/qualify_promotion_candidate.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --candidate-ref "$CANDIDATE_BRANCH" --candidate-sha "$CANDIDATE_SHA" \
+            --candidate-root candidate --dev-root validated-dev \
+            --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --control-sha "$CONTROL_SHA" \
+            --promotion-run "$GITHUB_RUN_ID-$UNIT_PRODUCER_ATTEMPT" \
+            --profile source-units-v2 --unit-packet-dir "$RUNNER_TEMP/promotion-unit-evidence" \
+            --unit-manifest tools/promotion-unit-manifest.json \
+            --unit-artifact-id "$UNIT_ARTIFACT_ID" --unit-artifact-digest "sha256:${UNIT_ARTIFACT_DIGEST#sha256:}" \
+            --receipt "$RUNNER_TEMP/qualification.json" --github-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
         with:
-          ref: ${{ github.workflow_sha }}
-          path: trusted
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.promote.outputs.candidate_sha }}
-          path: candidate
-          fetch-depth: ${{ matrix.component == 'plugin:agent-bridge' && '0' || '2' }}
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.gate.outputs.sha }}
-          path: validated-dev
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
-      - name: Execute actual candidate consumer and recheck immutable inputs
-        shell: bash
-        env:
-          CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
-          DEV_SHA: ${{ needs.gate.outputs.sha }}
-          MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
-          COMPONENT: ${{ matrix.component }}
-        run: |
-          python -I -B trusted/tools/validate_materialized_candidate.py \
-            --root candidate --candidate-sha "$CANDIDATE_SHA" \
-            --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component "$COMPONENT"
-
-  materialized-candidate-windows:
-    name: Materialized consumer (${{ matrix.component }}, windows-latest)
-    needs: [gate, promote, materialized-candidate-plan]
-    if: >-
-      needs.promote.outputs.pr_number != '' &&
-      needs.materialized-candidate-plan.result == 'success'
-    runs-on: windows-latest
-    timeout-minutes: ${{ matrix.job_minutes }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.materialized-candidate-plan.outputs.windows_matrix) }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: trusted
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.promote.outputs.candidate_sha }}
-          path: candidate
-          fetch-depth: 2
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.gate.outputs.sha }}
-          path: validated-dev
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
-      - name: Execute native Windows consumer and recheck immutable inputs
-        shell: bash
-        env:
-          CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
-          DEV_SHA: ${{ needs.gate.outputs.sha }}
-          MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
-          COMPONENT: ${{ matrix.component }}
-        run: |
-          python -I -B trusted/tools/validate_materialized_candidate.py \
-            --root candidate --candidate-sha "$CANDIDATE_SHA" \
-            --dev-root validated-dev --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --component "$COMPONENT"
-
+          name: promotion-candidate-qualification
+          path: ${{ runner.temp }}/qualification.json
+          if-no-files-found: error
+          retention-days: '2'
   merge-promotion:
     name: Merge the exact ready candidate without administrator authority
-    needs: [promote, materialized-candidate-plan, materialized-candidate-consumers, materialized-candidate-windows]
-    if: >-
-      needs.promote.outputs.pr_number != '' &&
-      needs.materialized-candidate-plan.result == 'success' &&
-      needs.materialized-candidate-consumers.result == 'success' &&
-      needs.materialized-candidate-windows.result == 'success'
+    needs:
+      - gate
+      - promote
+      - qualify-candidate
+      - publish-python-artifacts
+    if: needs.publish-python-artifacts.outputs.pr_number != '' && needs.qualify-candidate.result == 'success' && needs.publish-python-artifacts.result == 'success' && needs.qualify-candidate.outputs.qualification_run != '' && needs.qualify-candidate.outputs.qualification_attempt != '' && needs.qualify-candidate.outputs.qualification_digest != '' && needs.qualify-candidate.outputs.qualification_promotion_run != '' && needs.publish-python-artifacts.outputs.publication_digest != '' && needs.publish-python-artifacts.outputs.source_release != '' && needs.qualify-candidate.outputs.qualification_profile == 'source-units-v2'
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 8
     permissions:
       contents: write
       pull-requests: write
+      actions: read
       checks: read
       statuses: read
     outputs:
       merge_sha: ${{ steps.merged.outputs.merge_sha }}
-    # This fresh runner executes only the literal merge waiter. No checkout,
-    # setup action, downloaded artifact or repository code sees its write token.
     env:
       GH_TOKEN: ${{ github.token }}
       CANDIDATE_BRANCH: ${{ needs.promote.outputs.candidate_branch }}
@@ -1378,10 +823,30 @@ jobs:
       - name: Wait for required checks and merge only the exact ready candidate
         id: merged
         env:
-          PROMOTION_PR: ${{ needs.promote.outputs.pr_number }}
+          PROMOTION_PR: ${{ needs.publish-python-artifacts.outputs.pr_number }}
           CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
           MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
           PROMOTION_MERGE_TOKEN: ${{ github.token }}
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          CONTROL_SHA: ${{ github.workflow_sha }}
+          QUALIFIED_CANDIDATE: ${{ needs.qualify-candidate.outputs.candidate_sha }}
+          QUALIFIED_DEV: ${{ needs.qualify-candidate.outputs.dev_sha }}
+          QUALIFIED_MAIN_BEFORE: ${{ needs.qualify-candidate.outputs.main_before }}
+          QUALIFIED_CONTROL: ${{ needs.qualify-candidate.outputs.control_sha }}
+          QUALIFIED_TREE: ${{ needs.qualify-candidate.outputs.tree }}
+          QUALIFICATION_RUN: ${{ needs.qualify-candidate.outputs.qualification_run }}
+          QUALIFICATION_ATTEMPT: ${{ needs.qualify-candidate.outputs.qualification_attempt }}
+          QUALIFICATION_DIGEST: ${{ needs.qualify-candidate.outputs.qualification_digest }}
+          QUALIFICATION_PROMOTION_RUN: ${{ needs.qualify-candidate.outputs.qualification_promotion_run }}
+          PUBLICATION_DIGEST: ${{ needs.publish-python-artifacts.outputs.publication_digest }}
+          SOURCE_RELEASE: ${{ needs.publish-python-artifacts.outputs.source_release }}
+          QUALIFICATION_PROFILE: ${{ needs.qualify-candidate.outputs.qualification_profile }}
+          QUALIFICATION_UNIT_JOB: ${{ needs.qualify-candidate.outputs.qualification_unit_job_id }}
+          QUALIFICATION_UNIT_ARTIFACT: ${{ needs.qualify-candidate.outputs.qualification_unit_artifact_id }}
+          QUALIFICATION_UNIT_ARTIFACT_DIGEST: ${{ needs.qualify-candidate.outputs.qualification_unit_artifact_digest }}
+          QUALIFICATION_PACKET_DIGEST: ${{ needs.qualify-candidate.outputs.qualification_packet_digest }}
+          QUALIFICATION_UNIT_MANIFEST_DIGEST: ${{ needs.qualify-candidate.outputs.qualification_unit_manifest_digest }}
+          QUALIFICATION_UNIT_INPUTS_DIGEST: ${{ needs.qualify-candidate.outputs.qualification_unit_inputs_digest }}
         run: |
           python - <<'PY'
           import json
@@ -1391,13 +856,43 @@ jobs:
           import sys
           import time
 
-          WAIT_SECONDS = 5 * 60 * 60
+          WAIT_SECONDS = 8 * 60
           POLL_SECONDS = 30
+          qualification_owner = os.environ["QUALIFICATION_PROMOTION_RUN"]
+          owner = re.fullmatch(r"([1-9][0-9]{0,19})-([1-9][0-9]{0,9})", qualification_owner)
+          execution_attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+          if (
+              owner is None or owner[1] != os.environ["GITHUB_RUN_ID"]
+              or not re.fullmatch(r"[1-9][0-9]{0,9}", execution_attempt)
+              or int(owner[2]) > int(execution_attempt)
+          ):
+              raise RuntimeError("qualification does not belong to this promotion generation")
+          for qualified, expected in (
+              ("QUALIFIED_CANDIDATE", "CANDIDATE_SHA"),
+              ("QUALIFIED_DEV", "DEV_SHA"),
+              ("QUALIFIED_MAIN_BEFORE", "MAIN_BEFORE"),
+              ("QUALIFIED_CONTROL", "CONTROL_SHA"),
+          ):
+              value = os.environ[qualified]
+              if not re.fullmatch(r"[0-9a-f]{40}", value) or value != os.environ[expected]:
+                  raise RuntimeError(f"premerge qualification identity mismatch: {qualified}")
+          if not re.fullmatch(r"[0-9a-f]{40}", os.environ["QUALIFIED_TREE"]):
+              raise RuntimeError("premerge qualification has no immutable payload tree")
+          for field in ("QUALIFICATION_RUN", "QUALIFICATION_ATTEMPT"):
+              if not re.fullmatch(r"[1-9][0-9]{0,19}", os.environ[field]):
+                  raise RuntimeError(f"premerge qualification has no valid {field}")
+          for field in ("QUALIFICATION_DIGEST", "PUBLICATION_DIGEST"):
+              if not re.fullmatch(r"[0-9a-f]{64}", os.environ[field]):
+                  raise RuntimeError(f"premerge release has no valid {field}")
+          if os.environ["SOURCE_RELEASE"] != f"python-artifacts-{os.environ['DEV_SHA']}":
+              raise RuntimeError("published release does not name the qualified source Dev commit")
           merge_token = os.environ.pop("PROMOTION_MERGE_TOKEN")
           if not merge_token:
               raise RuntimeError("promotion merge authority is unavailable")
           read_env = os.environ.copy()
           merge_attempted = False
+          merge_error = None
+          reconciliation_reads = 0
           identity = f"{os.environ['GITHUB_REPOSITORY']}#{os.environ['PROMOTION_PR']}"
           expected = f"{os.environ['CANDIDATE_BRANCH']} -> main"
           observed = "not yet queried"
@@ -1442,6 +937,13 @@ jobs:
                   raise RuntimeError(f"{identity} closed without merging; observed {observed}")
               if pr["baseRefOid"] != os.environ["MAIN_BEFORE"]:
                   raise RuntimeError(f"{identity} main advanced after candidate preparation; rebuild required")
+              if merge_error is not None:
+                  reconciliation_reads += 1
+                  if reconciliation_reads >= 2:
+                      raise merge_error
+                  print(f"{identity}: reconciling an uncertain merge response without another write", flush=True)
+                  time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic())))
+                  continue
               remaining = deadline - time.monotonic()
               if remaining <= 0:
                   raise TimeoutError(f"{identity} exceeded the merge-wait deadline")
@@ -1504,11 +1006,97 @@ jobs:
                   )
                   if not strict:
                       raise RuntimeError("main source gate requires strict server-enforced base freshness")
-                  merge_env = read_env.copy()
-                  merge_env["GH_TOKEN"] = merge_token
                   remaining = deadline - time.monotonic()
                   if remaining <= 0:
                       raise TimeoutError(f"{identity} exceeded the merge-wait deadline")
+                  qualification = subprocess.run(
+                      ["gh", "api",
+                       f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['QUALIFICATION_RUN']}"],
+                      check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                      timeout=min(60, remaining),
+                      env=read_env,
+                  )
+                  qualified_run = json.loads(qualification.stdout)
+                  if os.environ["QUALIFICATION_PROFILE"] != "source-units-v2":
+                      raise RuntimeError("the controller requires an explicit source-unit v2 receipt")
+                  for field in ("QUALIFICATION_UNIT_JOB", "QUALIFICATION_UNIT_ARTIFACT"):
+                      if not re.fullmatch(r"[1-9][0-9]{0,19}", os.environ[field]):
+                          raise RuntimeError(f"invalid source-unit provider identity: {field}")
+                  for field in (
+                      "QUALIFICATION_PACKET_DIGEST", "QUALIFICATION_UNIT_MANIFEST_DIGEST",
+                      "QUALIFICATION_UNIT_INPUTS_DIGEST",
+                  ):
+                      if not re.fullmatch(r"[0-9a-f]{64}", os.environ[field]):
+                          raise RuntimeError(f"invalid source-unit byte binding: {field}")
+                  if not re.fullmatch(r"sha256:[0-9a-f]{64}", os.environ["QUALIFICATION_UNIT_ARTIFACT_DIGEST"]):
+                      raise RuntimeError("invalid immutable unit archive digest")
+                  if (
+                      not isinstance(qualified_run, dict)
+                      or type(qualified_run.get("id")) is not int
+                      or qualified_run["id"] != int(os.environ["QUALIFICATION_RUN"])
+                      or qualified_run["id"] != int(os.environ["GITHUB_RUN_ID"])
+                      or type(qualified_run.get("run_attempt")) is not int
+                      or qualified_run["run_attempt"] < int(os.environ["QUALIFICATION_ATTEMPT"])
+                      or qualified_run.get("event") not in ("workflow_dispatch", "repository_dispatch")
+                      or qualified_run.get("head_sha") != os.environ["CONTROL_SHA"]
+                      or qualified_run.get("head_branch") != "main"
+                      or qualified_run.get("path") != ".github/workflows/validate-and-promote.yml"
+                  ):
+                      raise RuntimeError("unit producer no longer matches its trusted Main generation")
+                  remaining = deadline - time.monotonic()
+                  if remaining <= 0:
+                      raise TimeoutError("source-unit provider recheck exceeded the merge deadline")
+                  job_result = subprocess.run(
+                      ["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/jobs/{os.environ['QUALIFICATION_UNIT_JOB']}"],
+                      check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                      timeout=min(60, remaining), env=read_env,
+                  )
+                  unit_job = json.loads(job_result.stdout)
+                  if (
+                      not isinstance(unit_job, dict)
+                      or type(unit_job.get("id")) is not int
+                      or unit_job["id"] != int(os.environ["QUALIFICATION_UNIT_JOB"])
+                      or unit_job.get("name") != "Eligible source units with coverage"
+                      or type(unit_job.get("run_id")) is not int
+                      or unit_job["run_id"] != int(os.environ["QUALIFICATION_RUN"])
+                      or type(unit_job.get("run_attempt")) is not int
+                      or unit_job["run_attempt"] != int(os.environ["QUALIFICATION_ATTEMPT"])
+                      or unit_job.get("head_sha") != os.environ["CONTROL_SHA"]
+                      or unit_job.get("status") != "completed" or unit_job.get("conclusion") != "success"
+                  ):
+                      raise RuntimeError("the original source-unit job is not completed successfully")
+                  uploads = [
+                      step for step in unit_job.get("steps", [])
+                      if isinstance(step, dict) and step.get("name") == "Upload promotion unit evidence"
+                  ]
+                  if len(uploads) != 1 or uploads[0].get("status") != "completed" or uploads[0].get("conclusion") != "success":
+                      raise RuntimeError("source-unit upload no longer matches the successful receipt")
+                  remaining = deadline - time.monotonic()
+                  if remaining <= 0:
+                      raise TimeoutError("source-unit archive recheck exceeded the merge deadline")
+                  artifact_result = subprocess.run(
+                      ["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/artifacts/{os.environ['QUALIFICATION_UNIT_ARTIFACT']}"],
+                      check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                      timeout=min(60, remaining), env=read_env,
+                  )
+                  artifact = json.loads(artifact_result.stdout)
+                  origin = artifact.get("workflow_run") if isinstance(artifact, dict) else None
+                  if (
+                      not isinstance(artifact, dict) or type(artifact.get("id")) is not int
+                      or artifact["id"] != int(os.environ["QUALIFICATION_UNIT_ARTIFACT"])
+                      or artifact.get("name") != "promotion-unit-evidence"
+                      or artifact.get("expired") is not False
+                      or artifact.get("digest") != os.environ["QUALIFICATION_UNIT_ARTIFACT_DIGEST"]
+                      or not isinstance(origin, dict) or type(origin.get("id")) is not int
+                      or origin["id"] != int(os.environ["QUALIFICATION_RUN"])
+                      or origin.get("head_branch") != "main" or origin.get("head_sha") != os.environ["CONTROL_SHA"]
+                  ):
+                      raise RuntimeError("the immutable source-unit archive no longer matches its receipt")
+                  remaining = deadline - time.monotonic()
+                  if remaining <= 0:
+                      raise TimeoutError(f"{identity} exceeded the merge-wait deadline")
+                  merge_env = read_env.copy()
+                  merge_env["GH_TOKEN"] = merge_token
                   try:
                       subprocess.run(
                           ["gh", "pr", "merge", os.environ["PROMOTION_PR"],
@@ -1518,25 +1106,22 @@ jobs:
                           timeout=min(60, remaining),
                           env=merge_env,
                       )
-                  except subprocess.CalledProcessError as error:
+                  except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
                       if error.stderr:
                           print(error.stderr, file=sys.stderr, end="")
-                      raise
+                      merge_error = error
                   merge_attempted = True
               time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic())))
           PY
-      # Note: consumed changefiles are no longer cleared here. See
-      # `purge-consumed-changefiles.yml` (a standalone daily workflow) --
-      # `promote_release.py`'s bump computation already ignores a
-      # changefile that existed at the last recorded promotion's
-      # `dev_head` in `.github/release-pipeline-state.json` on `main`,
-      # regardless of whether it's still physically present on `dev`, so
-      # decoupling deletion cadence from promotion cadence is safe.
-
   publish-python-artifacts:
-    name: Publish attested first-party Python artifacts
-    needs: [gate, python-artifacts, promote, merge-promotion]
-    if: needs.merge-promotion.outputs.merge_sha != '' && needs.python-artifacts.outputs.exported == 'true'
+    name: Publish and read back the qualified source release before merge
+    needs:
+      - gate
+      - python-artifacts
+      - promote
+      - qualify-candidate
+      - source-units
+    if: needs.qualify-candidate.result == 'success' && needs.qualify-candidate.outputs.qualification_digest != '' && needs.python-artifacts.outputs.exported == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: main-promotion
@@ -1544,76 +1129,256 @@ jobs:
       contents: read
       actions: read
       attestations: read
+      pull-requests: read
     outputs:
-      promotion_tag: ${{ steps.tag.outputs.promotion_tag }}
+      publication_digest: ${{ steps.publish.outputs.publication_digest }}
+      source_release: ${{ steps.publish.outputs.source_release }}
+      pr_number: ${{ steps.land.outputs.pr_number }}
     env:
-      MERGE_SHA: ${{ needs.merge-promotion.outputs.merge_sha }}
       CANDIDATE_SHA: ${{ needs.promote.outputs.candidate_sha }}
       DEV_SHA: ${{ needs.gate.outputs.sha }}
+      MAIN_BEFORE: ${{ needs.promote.outputs.main_before }}
+      CANDIDATE_BRANCH: ${{ needs.promote.outputs.candidate_branch }}
+      QUALIFICATION_PROMOTION_RUN: ${{ needs.qualify-candidate.outputs.qualification_promotion_run }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: '0'
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          path: reviewed-helpers
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.promote.outputs.candidate_sha }}
+          path: candidate
+          fetch-depth: '2'
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: validated-dev
+          persist-credentials: false
+      - name: Download the unit packet for exact-ID and archive verification
+        uses: actions/download-artifact@v4
+        with:
+          name: promotion-unit-evidence
+          path: ${{ runner.temp }}/promotion-unit-evidence
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Provision hash-pinned metadata validator tooling without release credentials
         run: |
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
-          python tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+          python reviewed-helpers/tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
-            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
+            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r reviewed-helpers/tools/artifact_validation_requirements.txt
       - uses: actions/download-artifact@v4
         with:
           name: promotion-python-artifacts
           path: python-artifacts
-      - name: Verify the actual merge and publish without replacing any prior asset
+      - uses: actions/download-artifact@v4
+        with:
+          name: promotion-candidate-qualification
+          path: qualification
+      - name: Require the exact qualification receipt from this run
+        env:
+          QUALIFICATION_DIGEST: ${{ needs.qualify-candidate.outputs.qualification_digest }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import re
+          from pathlib import Path
+
+          expected = os.environ["QUALIFICATION_DIGEST"]
+          receipt = Path("qualification/qualification.json")
+          if not re.fullmatch(r"[0-9a-f]{64}", expected) or receipt.is_symlink():
+              raise RuntimeError("invalid candidate qualification receipt")
+          if hashlib.sha256(receipt.read_bytes()).hexdigest() != expected:
+              raise RuntimeError("candidate qualification receipt digest mismatch")
+          PY
+      - name: Publish immutable source assets and verify all raw bytes before merge
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           ARTIFACT_VERIFY_TOKEN: ${{ github.token }}
         run: |
           git fetch origin main
           git fetch origin "$CANDIDATE_SHA"
-          git merge-base --is-ancestor "$MERGE_SHA" origin/main
-          "$RUNNER_TEMP/artifact-validator/bin/python" tools/publish_python_artifacts.py publish --directory python-artifacts \
+          "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/publish_python_artifacts.py publish-candidate \
+            --repo "$GITHUB_WORKSPACE" --directory python-artifacts \
             --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF" \
-            --merged-commit "$MERGE_SHA" --candidate-commit "$CANDIDATE_SHA" --dev-head "$DEV_SHA"
-      - name: Tag the real post-merge commit
-        id: tag
+            --candidate-commit "$CANDIDATE_SHA" --dev-head "$DEV_SHA" --main-before "$MAIN_BEFORE" \
+            --candidate-root candidate --promotion-run "$QUALIFICATION_PROMOTION_RUN" \
+            --qualification-profile source-units-v2 \
+            --unit-packet-dir "$RUNNER_TEMP/promotion-unit-evidence" \
+            --unit-manifest tools/promotion-unit-manifest.json --dev-root validated-dev \
+            --qualification-receipt qualification/qualification.json --github-output "$GITHUB_OUTPUT"
+      - name: Recheck active promotion ownership before opening the qualified PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I -B reviewed-helpers/tools/promotion_lifecycle.py --repository "$GITHUB_REPOSITORY" --require-idle --candidate-branch "$CANDIDATE_BRANCH" --candidate-sha "$CANDIDATE_SHA"
+      - name: Open the already qualified and published candidate PR
+        id: land
         env:
           GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+          PUBLICATION_DIGEST: ${{ steps.publish.outputs.publication_digest }}
+          SOURCE_RELEASE: ${{ steps.publish.outputs.source_release }}
+          QUALIFICATION_DIGEST: ${{ needs.qualify-candidate.outputs.qualification_digest }}
+          QUALIFICATION_RUN: ${{ needs.qualify-candidate.outputs.qualification_run }}
+          QUALIFICATION_ATTEMPT: ${{ needs.qualify-candidate.outputs.qualification_attempt }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          gh auth setup-git --hostname github.com
-          python tools/tag_promotion.py --merge-sha "$MERGE_SHA" --dev-sha "$DEV_SHA" \
-            --github-output "$GITHUB_OUTPUT" \
-            --message "release: promote dev to main ($MERGE_SHA)"
+          acting_user=$(gh api user --jq '.login')
+          if [ "$acting_user" != "$GITHUB_REPOSITORY_OWNER" ]; then
+            echo "::error::Release PR authority does not name the expected repository owner."
+            exit 1
+          fi
+          remote_main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$remote_main" != "$MAIN_BEFORE" ]; then
+            echo "::error::Main advanced after qualification; refusing to open a stale promotion PR."
+            exit 1
+          fi
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$CANDIDATE_BRANCH" \
+            --base main --state all \
+            --json number,headRefOid,headRefName,baseRefName,isCrossRepository,state,author --limit 100)
+          pr_number=$(PR_CANDIDATES="$existing" python - <<'PY'
+          import json
+          import os
+          import re
 
-  postmerge-workflows:
-    name: Verify required workflows at the immutable merged release
-    needs: [merge-promotion, publish-python-artifacts]
-    if: needs.publish-python-artifacts.outputs.promotion_tag != ''
+          for field in ("CANDIDATE_SHA", "MAIN_BEFORE", "DEV_SHA"):
+              if not re.fullmatch(r"[0-9a-f]{40}", os.environ[field]):
+                  raise RuntimeError(f"qualified PR has an invalid {field}")
+          for field in ("PUBLICATION_DIGEST", "QUALIFICATION_DIGEST"):
+              if not re.fullmatch(r"[0-9a-f]{64}", os.environ[field]):
+                  raise RuntimeError(f"qualified PR has no complete {field}")
+          for field in ("QUALIFICATION_RUN", "QUALIFICATION_ATTEMPT", "GITHUB_RUN_ATTEMPT"):
+              if not re.fullmatch(r"[1-9][0-9]{0,19}", os.environ[field]):
+                  raise RuntimeError(f"qualified PR has an invalid {field}")
+          owner = re.fullmatch(
+              r"([1-9][0-9]{0,19})-([1-9][0-9]{0,9})", os.environ["QUALIFICATION_PROMOTION_RUN"],
+          )
+          if (
+              owner is None or owner[1] != os.environ["GITHUB_RUN_ID"]
+              or int(owner[2]) > int(os.environ["GITHUB_RUN_ATTEMPT"])
+              or os.environ["CANDIDATE_BRANCH"] != f"release/promote-{owner[1]}"
+              or os.environ["SOURCE_RELEASE"] != f"python-artifacts-{os.environ['DEV_SHA']}"
+          ):
+              raise RuntimeError("qualified PR does not bind this exact promotion generation")
+          candidates = json.loads(os.environ["PR_CANDIDATES"])
+          if not isinstance(candidates, list) or len(candidates) > 1:
+              raise RuntimeError("ambiguous existing promotion PR")
+          if candidates:
+              pr = candidates[0]
+              if (
+                  not isinstance(pr, dict)
+                  or pr.get("headRefOid") != os.environ["CANDIDATE_SHA"]
+                  or pr.get("headRefName") != os.environ["CANDIDATE_BRANCH"]
+                  or pr.get("baseRefName") != "main"
+                  or not isinstance(pr.get("author"), dict)
+                  or pr["author"].get("login") != os.environ["GITHUB_REPOSITORY_OWNER"]
+                  or pr.get("isCrossRepository") is not False
+                  or pr.get("state") not in ("OPEN", "MERGED")
+                  or type(pr.get("number")) is not int or pr["number"] <= 0
+              ):
+                  raise RuntimeError("existing promotion PR does not match the exact candidate")
+              print(pr["number"])
+          PY
+          )
+          if [ -z "$pr_number" ]; then
+            pr_url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$CANDIDATE_BRANCH" \
+              --title "release: promote dev to main ($CANDIDATE_BRANCH)" \
+              --body "Intent: publish already qualified Dev $DEV_SHA. Changes: wholesale generated candidate $CANDIDATE_SHA; do not edit by hand. Validation: exact source-unit evidence from https://github.com/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN (original producing attempt $QUALIFICATION_ATTEMPT), candidate input equivalence, immutable source assets and full raw readback have succeeded before opening this PR. Source artifacts: https://github.com/$GITHUB_REPOSITORY/releases/tag/$SOURCE_RELEASE. Documentation impact: source documentation is included in the generated snapshot. The workflow retains ownership until actual Main merge.")
+            pr_number="${pr_url##*/}"
+          fi
+          [[ "$pr_number" =~ ^[1-9][0-9]{0,19}$ ]] || {
+            echo "::error::Qualified promotion PR has no valid provider number."
+            exit 1
+          }
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+  refresh-promotion-attribution:
+    name: Refresh Dev attribution checks after an already qualified landing
+    needs:
+      - merge-promotion
+    if: needs.merge-promotion.outputs.merge_sha != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 5
+    continue-on-error: true
     permissions:
       contents: read
       actions: write
     steps:
-      - name: Dispatch and verify both required main-push consumers
+      - name: Dispatch the bounded idempotent attribution refresh without release qualification
         env:
           GH_TOKEN: ${{ github.token }}
-          TRUSTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
           MERGE_SHA: ${{ needs.merge-promotion.outputs.merge_sha }}
-          PROMOTION_TAG: ${{ needs.publish-python-artifacts.outputs.promotion_tag }}
           PROMOTION_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          [[ "$TRUSTED_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
-          gh api "repos/$GITHUB_REPOSITORY/contents/tools/verify_promotion_workflows.py?ref=$TRUSTED_WORKFLOW_SHA" \
-            --header "Accept: application/vnd.github.raw+json" > "$RUNNER_TEMP/verify-promotion-workflows.py"
-          python -I -B "$RUNNER_TEMP/verify-promotion-workflows.py" --repository "$GITHUB_REPOSITORY" \
-            --merge-sha "$MERGE_SHA" --tag "$PROMOTION_TAG" --promotion-run "$PROMOTION_RUN"
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          merged = os.environ["MERGE_SHA"]
+          promotion_run = os.environ["PROMOTION_RUN"]
+          if not re.fullmatch(r"[0-9a-f]{40}", merged):
+              raise RuntimeError("invalid landed promotion snapshot")
+          if not re.fullmatch(r"[0-9]{1,20}-[0-9]{1,10}", promotion_run):
+              raise RuntimeError("invalid promotion run identity")
+          subprocess.run(
+              ["gh", "api", "--method", "POST",
+               f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/workflow-lockdown-guard.yml/dispatches",
+               "--input", "-"],
+              input=json.dumps({"ref": "main", "inputs": {
+                  "promotion_sha": merged, "promotion_run": promotion_run,
+              }}),
+              text=True, check=True, timeout=60,
+          )
+          PY
+  record-promotion:
+    name: Record the landed commit for an already qualified and published Dev release
+    needs:
+      - merge-promotion
+      - publish-python-artifacts
+    if: needs.merge-promotion.outputs.merge_sha != '' && needs.publish-python-artifacts.outputs.source_release != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    environment: main-promotion
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: '0'
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          path: reviewed-helpers
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Idempotently record the landed source release without qualifying or publishing it
+        env:
+          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+          MERGE_SHA: ${{ needs.merge-promotion.outputs.merge_sha }}
+          SOURCE_RELEASE: ${{ needs.publish-python-artifacts.outputs.source_release }}
+        run: |
+          DEV_SHA="${SOURCE_RELEASE#python-artifacts-}"
+          [[ "$DEV_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          gh auth setup-git --hostname github.com
+          python -B reviewed-helpers/tools/tag_promotion.py \
+            --repo "$GITHUB_WORKSPACE" --merge-sha "$MERGE_SHA" --dev-sha "$DEV_SHA" \
+            --message "release: record landed main commit for dev $DEV_SHA"

@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from _promotion_workflow_test_support import api_response, qualification_response
+
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/validate-and-promote.yml"
 BASE_WORKFLOW: Path | None = None
 EXPLICIT = False
@@ -215,11 +217,13 @@ class PromotionJobAdmissionTests(_ShellFixture):
                 self.assertEqual(admitted, gate.casefold() == "success" and is_dev.casefold() == "true")
 
     def test_admitted_source_still_requires_every_validation_result(self) -> None:
+        template = script(step(self.promote, "decide"))
         validation = [
             "full", "worktree-manager", "agent-index-service-linux",
             "agent-index-service-windows", "guards-full-sweep", "python-artifacts",
         ]
-        template = script(step(self.promote, "decide"))
+        if "needs.source-units.result" in template:
+            validation = ["source-units", "python-artifacts"]
         fields = {"needs.gate.result": "success", "needs.gate.outputs.is_dev": "true"}
         fields.update({f"needs.{name}.result": "success" for name in validation})
         scenarios = [
@@ -260,7 +264,7 @@ def controller(text: str, marker: str) -> None:
 
 
 def environment() -> dict[str, str]:
-    return {
+    result = {
         "GITHUB_REPOSITORY": "example/project", "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "4",
         "PROMOTION_PR": "456", "CANDIDATE_BRANCH": "release/promote-123",
         "CANDIDATE_SHA": CANDIDATE, "MAIN_BEFORE": BASE, "DEV_SHA": DEV, "CONTROL_SHA": CONTROL,
@@ -273,6 +277,17 @@ def environment() -> dict[str, str]:
         "GITHUB_OUTPUT": "fixture-output",
         "ADMITTED_MAIN": BASE,
     }
+    if "  source-units:" in WORKFLOW.read_text(encoding="utf-8"):
+        result.update({
+            "QUALIFICATION_PROFILE": "source-units-v2", "QUALIFICATION_RUN": "123",
+            "QUALIFICATION_PROMOTION_RUN": "123-2",
+            "QUALIFICATION_UNIT_JOB": "900", "QUALIFICATION_UNIT_ARTIFACT": "901",
+            "QUALIFICATION_UNIT_ARTIFACT_DIGEST": "sha256:" + "a" * 64,
+            "QUALIFICATION_PACKET_DIGEST": "b" * 64,
+            "QUALIFICATION_UNIT_MANIFEST_DIGEST": "c" * 64,
+            "QUALIFICATION_UNIT_INPUTS_DIGEST": "d" * 64,
+        })
+    return result
 
 
 @dataclass
@@ -317,17 +332,19 @@ class Provider:
                 "strict_required_status_checks_policy": self.strict,
                 "required_status_checks": [{"context": "main source gate"}],
             }}]
-        elif argv[1:] == ["api", "repos/example/project/actions/runs/789"]:
+        elif argv[1:] == ["api", f"repos/example/project/actions/runs/{os.environ['QUALIFICATION_RUN']}"]:
             if self.api_error:
                 raise subprocess.CalledProcessError(1, argv, stderr="qualification unavailable")
-            result = {
-                "id": 789, "run_attempt": 2, "event": "workflow_dispatch", "head_sha": CANDIDATE,
-                "head_branch": "release/promote-123", "path": ".github/workflows/ci.yml",
-                "status": "completed", "conclusion": "success",
-                "display_title": f"CI promotion 123-4 at {CANDIDATE}", **self.changes,
-            }
+            result = {**qualification_response(), **self.changes}
+        elif argv[1] == "api" and os.environ.get("QUALIFICATION_PROFILE") == "source-units-v2":
+            result = json.loads(api_response(argv, []))
         elif merging:
-            assert self.calls[-2][1:] == ["api", "repos/example/project/actions/runs/789"]
+            last = (
+                f"repos/example/project/actions/artifacts/{os.environ['QUALIFICATION_UNIT_ARTIFACT']}"
+                if os.environ.get("QUALIFICATION_PROFILE") == "source-units-v2"
+                else "repos/example/project/actions/runs/789"
+            )
+            assert self.calls[-2][1:] == ["api", last]
             assert "--admin" not in argv and "--auto" not in argv and "--squash" in argv
             assert argv[argv.index("--match-head-commit") + 1] == CANDIDATE
             assert kwargs["check"] is True
@@ -380,10 +397,16 @@ class BoundaryTests(_ShellFixture):
             self.assertIn(f"needs.{dependency}.result == 'success'", self.jobs["merge-promotion"])
         self.assertRegex(self.jobs["merge-promotion"], r"(?m)^      actions: read$")
         ci = jobs((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
-        excluded = {"promotion-gate", "pr-gate", "coverage-guided-selection-integration"}
-        self.assertEqual(needs(ci["promotion-gate"]), set(ci) - excluded)
-        self.assertIn("inputs.promotion_phase == 'candidate'", ci["full"])
-        self.assertEqual(len(re.findall(r"^          - [a-z][a-z0-9-]*$", ci["full"], re.M)), 9)
+        if "source-units" in self.jobs:
+            self.assertEqual(set(ci), {"checks", "unit-plan", "unit-tests", "pr-gate"}
+                             if "unit-tests" in ci else {"main-metadata"})
+            self.assertNotIn("full", self.jobs)
+            self.assertNotIn("promotion-gate", ci)
+        else:
+            excluded = {"promotion-gate", "pr-gate", "coverage-guided-selection-integration"}
+            self.assertEqual(needs(ci["promotion-gate"]), set(ci) - excluded)
+            self.assertIn("inputs.promotion_phase == 'candidate'", ci["full"])
+            self.assertEqual(len(re.findall(r"^          - [a-z][a-z0-9-]*$", ci["full"], re.M)), 9)
 
     def test_postlanding_attribution_refresh_is_bounded_and_not_release_qualification(self) -> None:
         body = self.jobs["refresh-promotion-attribution"]
@@ -530,6 +553,12 @@ class BoundaryTests(_ShellFixture):
             ("event", "push"), ("status", "in_progress"), ("conclusion", "failure"),
             ("conclusion", "cancelled"), ("conclusion", None), ("display_title", "unrelated"),
         ]
+        if "source-units" in self.jobs:
+            cases = [
+                (key, value) for key, value in cases
+                if key not in ("status", "conclusion", "display_title")
+                and (key, value) != ("run_attempt", 3)
+            ] + [("run_attempt", 1)]
         for key, value in cases:
             with self.subTest(field=key, value=value):
                 provider = Provider(changes={key: value})
@@ -540,6 +569,18 @@ class BoundaryTests(_ShellFixture):
         with self.assertRaises(subprocess.CalledProcessError):
             self.execute(provider)
         self.unmerged(provider)
+
+    def test_unit_receipt_reuses_the_original_job_without_waiting_for_the_controller(self) -> None:
+        if "source-units" not in self.jobs:
+            self.skipTest("legacy candidate-CI profile requires a whole completed run")
+        for key, value in (
+            ("run_attempt", 3), ("status", "in_progress"), ("conclusion", None),
+            ("display_title", "unrelated"),
+        ):
+            with self.subTest(field=key, value=value):
+                provider = Provider(changes={key: value})
+                self.execute(provider)
+                self.assertTrue(provider.merged)
 
     def test_stale_base_head_required_checks_and_policy_refuse_without_owner_pat(self) -> None:
         cases = [

@@ -28,7 +28,10 @@ def source_workflow(root: Path, name: str) -> dict[str, Any]:
 
 def source_owned_controller(root: Path) -> bool:
     controller = (root / ".github/workflows/validate-and-promote.yml").read_text("utf-8")
-    return re.search(r"^  qualify-candidate:\s*$", controller, re.M) is not None
+    return (
+        (root / ".github/promotion-control.json").is_file()
+        and re.search(r"^  qualify-candidate:\s*$", controller, re.M) is not None
+    )
 
 
 def source_workflow_text(root: Path, name: str) -> str:
@@ -59,6 +62,14 @@ def heredoc(script: str) -> str:
 
 
 def qualification_response() -> dict[str, Any]:
+    if os.environ.get("QUALIFICATION_PROFILE") == "source-units-v2":
+        return {
+            "id": int(os.environ["QUALIFICATION_RUN"]),
+            "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+            "event": "workflow_dispatch", "head_sha": os.environ["CONTROL_SHA"],
+            "head_branch": "main", "path": ".github/workflows/validate-and-promote.yml",
+            "status": "in_progress", "conclusion": None,
+        }
     return {
         "id": int(os.environ["QUALIFICATION_RUN"]),
         "run_attempt": int(os.environ["QUALIFICATION_ATTEMPT"]),
@@ -75,6 +86,27 @@ def qualification_response() -> dict[str, Any]:
 def api_response(argv: list[str], rules: list[dict[str, Any]]) -> str:
     if argv[-1].endswith("/rules/branches/main"):
         return json.dumps(rules)
+    if os.environ.get("QUALIFICATION_PROFILE") == "source-units-v2":
+        if argv[-1].endswith("/actions/jobs/" + os.environ["QUALIFICATION_UNIT_JOB"]):
+            return json.dumps({
+                "id": int(os.environ["QUALIFICATION_UNIT_JOB"]),
+                "run_id": int(os.environ["QUALIFICATION_RUN"]),
+                "run_attempt": int(os.environ["QUALIFICATION_ATTEMPT"]),
+                "head_sha": os.environ["CONTROL_SHA"], "name": "Eligible source units with coverage",
+                "status": "completed", "conclusion": "success", "steps": [{
+                    "name": "Upload promotion unit evidence", "status": "completed", "conclusion": "success",
+                }],
+            })
+        if argv[-1].endswith("/actions/artifacts/" + os.environ["QUALIFICATION_UNIT_ARTIFACT"]):
+            return json.dumps({
+                "id": int(os.environ["QUALIFICATION_UNIT_ARTIFACT"]),
+                "name": "promotion-unit-evidence", "expired": False,
+                "digest": os.environ["QUALIFICATION_UNIT_ARTIFACT_DIGEST"],
+                "workflow_run": {
+                    "id": int(os.environ["QUALIFICATION_RUN"]),
+                    "head_branch": "main", "head_sha": os.environ["CONTROL_SHA"],
+                },
+            })
     assert argv[-1] == (
         f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['QUALIFICATION_RUN']}"
     ), "unexpected API operation"
@@ -97,8 +129,22 @@ def assert_source_owned_boundary(jobs: dict[str, Any]) -> None:
     qualifier, publisher, record = (jobs[name] for name in (
         "qualify-candidate", "publish-python-artifacts", "record-promotion",
     ))
-    assert set(qualifier["needs"]) == {"gate", "promote"}
-    assert set(publisher["needs"]) == {"gate", "python-artifacts", "promote", "qualify-candidate"}
+    units = {"source-units"} if "source-units" in jobs else set()
+    assert set(qualifier["needs"]) == {"gate", "promote"} | units
+    assert set(publisher["needs"]) == {"gate", "python-artifacts", "promote", "qualify-candidate"} | units
+    if units:
+        assert jobs["source-units"]["needs"] == "gate"
+        assert set(jobs["build-python-artifacts"]["needs"]) == {"gate"}
+        assert "source-units" in jobs["python-artifacts"]["needs"]
+        assert "source-units-v2" in merge["if"]
+        qualify_step = next(step for step in qualifier["steps"] if step.get("id") == "qualify")
+        assert "--profile source-units-v2" in qualify_step["run"]
+        assert qualify_step["env"]["UNIT_PRODUCER_ATTEMPT"] == "${{ needs.source-units.outputs.attempt }}"
+        assert '--promotion-run "$GITHUB_RUN_ID-$UNIT_PRODUCER_ATTEMPT"' in qualify_step["run"]
+        assert not any(name in jobs for name in (
+            "full", "worktree-manager", "agent-index-service-linux", "agent-index-service-windows",
+            "guards-full-sweep", "postmerge-workflows",
+        ))
     assert "needs.qualify-candidate.result == 'success'" in publisher["if"]
     assert set(record["needs"]) == {"merge-promotion", "publish-python-artifacts"}
     assert record["continue-on-error"] is True
@@ -120,6 +166,8 @@ def assert_source_owned_boundary(jobs: dict[str, Any]) -> None:
     ):
         assert argument in publication["run"]
     assert "--merged-commit" not in publication["run"]
+    if units:
+        assert "--qualification-profile source-units-v2" in publication["run"]
     assert not any("publish_python_artifacts.py" in step.get("run", "") for step in record["steps"])
     assert "verify_promotion_workflows.py" not in json.dumps(record)
 
