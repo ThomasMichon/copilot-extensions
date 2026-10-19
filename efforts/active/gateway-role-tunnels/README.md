@@ -118,29 +118,31 @@ This settles that source-scope decision, not production trust or deployment.
 ### Phase 1 - Desired manifest and coherent live publication
 - [x] Implement strict bounded service-slot, API/UX route, role, trust-reference
   and declared-capability validation with explicit schema/version handling.
-- [ ] Add an explicit owner-selected configuration source and coherent,
+- [x] Add an explicit owner-selected configuration source and coherent,
   revisioned candidate validation/publication. Parsing, a digest or a Git
   commit alone must never confer publication authority.
-- [ ] Preserve last-known-good state on invalid/stale/conflicting input;
+- [x] Preserve last-known-good state on invalid/stale/conflicting input;
   readers see one complete desired/admission snapshot, not mixed revisions.
-- [ ] Specify and prove no-op reload, withdrawal, trust rotation and revocation
+- [x] Specify and prove no-op reload, withdrawal, trust rotation and revocation
   at current request/connection admission and execution checkpoints.
-- [ ] Expose bounded non-secret desired/applied/per-slot evidence without
+- [x] Expose bounded non-secret desired/applied/per-slot evidence without
   presenting this prerequisite as a complete service Gateway.
 
 ### Phase 2 - Authenticated outbound role service channels
-- [ ] Review the [service-profile integration contract](service-profile.md)
+- [x] Review the [service-profile integration contract](service-profile.md)
   before implementing the operator-assigned narrow adapter/CLI seam.
-- [ ] Wire the reviewed opt-in serving profile through the same Gateway role,
+- [x] Wire the reviewed opt-in serving profile through the same Gateway role,
   reusing compatible identity/admission and current-policy owners.
-- [ ] Add a service connector that initiates an authenticated outbound channel,
+- [x] Add a service connector that initiates an authenticated outbound channel,
   proves an assigned identity and cannot choose another slot or namespace.
-- [ ] Route declared bounded HTTP API/UX traffic and streaming through that
+- [x] Route declared bounded HTTP API/UX traffic and streaming through that
   channel; advertise supported capabilities and explicitly refuse unsupported
   upgrades/transports instead of using a direct-backend fallback.
 - [ ] Prove replacement/reconnect generation fencing, cancellation, policy
   withdrawal, bounded backpressure and truthful uncertain-effect outcomes.
-- [ ] Preserve real existing static/index/credential paths and their
+  Real in-process TLS/socket witnesses cover these paths. Independently
+  isolated container/process qualification remains a Phase 3 gate.
+- [x] Preserve real existing static/index/credential paths and their
   authorization, deadlines, credential custody and error semantics.
 
 ### Phase 3 - Reusable packaging and isolated adoption proof
@@ -248,3 +250,22 @@ provider credentials and production placement with their existing owners.
 - The next slice reviews the service-profile contract, then implements actual
   current-role admission and coherent context publication. Service channels,
   streaming, container and live-adoption gates remain open.
+
+### 2026-10-19 - Opt-in service adapter and actual channel implementation
+- Service-profile contract PR #7267 merged as
+  `aead93314929b0c111b1f7ef4711d8e24215e349` after clean exact-head
+  review and successful CI; implementation follows that contract.
+- Added coherent current service/caller policy using the existing JWT/PoP
+  verifier, with public key-reference resolution, explicit scoped callers,
+  retained grant custody, live trust epochs and invalid-candidate preservation.
+- Added the explicitly selected foreground TLS profile and actual outbound
+  WebSocket connector SDK. Real socket tests route two services, API/HTML,
+  opaque queries and bounded SSE without replacing the Gateway on policy reload.
+- Independent review identified candidate preparation prematurely evicting an
+  active channel, an incorrect buffered response bound, and reconnect budget
+  reset before attachment. Candidate/active custody is now separate, response
+  budgets are independent and only actual attached lifetime resets retries;
+  focused regressions cover each correction.
+- Qualification remains in-process, with synthetic issuer/provider fixtures.
+  Proxy/Cloudflare compatibility, container/ARM64 evidence, durable restart
+  revision custody and live adoption are not claimed by these tests.

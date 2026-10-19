@@ -153,7 +153,10 @@ class Admission:
         return AuthContext(peer, min(identity.expires_at, peer.expires_at), identity)
 
 
-def make_proof(key: Any, access: str, *, target_uri: str, nonce: str) -> str:
+def make_proof(key: Any, access: str, *, target_uri: str, nonce: str,
+               method: str = "POST") -> str:
+    require(method in ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"),
+            "invalid-proof-method")
     try:
         public = key.public_key().public_bytes(
             serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
@@ -163,7 +166,7 @@ def make_proof(key: Any, access: str, *, target_uri: str, nonce: str) -> str:
         token_hash = base64.urlsafe_b64encode(
             hashlib.sha256(access.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
         return jwt.encode(
-            {"htm": "POST", "htu": target_uri, "iat": int(time.time()),
+            {"htm": method, "htu": target_uri, "iat": int(time.time()),
              "jti": secrets.token_hex(16), "ath": token_hash, "nonce": text(nonce, 43)},
             key, algorithm="ES256", headers={"typ": "dpop+jwt", "jwk": proof_key},
         )

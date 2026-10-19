@@ -112,6 +112,12 @@ validate role slots/namespaces and publish coherent process-local desired state.
 They do not replace startup Gateway configuration, authenticate sources or
 connectors, route service tunnels or establish restart-safe configuration custody.
 
+The explicitly selected [outbound service profile](docs/gateway-service-profile.md)
+adds coherent live service policy and actual TLS HTTP/UX/response-stream routing
+over authenticated outbound connectors. Its optional `service-gateway` extra
+does not change default client dependencies or the legacy serving profile.
+Container, protected-proxy/provider and production adoption remain separate gates.
+
 The explicit [runtime identity verifier](docs/runtime-authentication.md) adds
 optional maintained-library JWT/DPoP checks and a bounded single-owner replay
 fence. It is not enrollment, scoped policy authorization or a Gateway listener.
