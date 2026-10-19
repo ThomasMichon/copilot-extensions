@@ -139,6 +139,10 @@ def apply_session_deregister(args: dict) -> dict:
                             "duplicate" if not changed
                             else "ended" if retires_current else "historical"
                         ),
+                        "activation": {
+                            "ordinal": matches[0].ordinal,
+                            "source_identity": source_identity,
+                        },
                     }
                 break
     except TimeoutError as exc:

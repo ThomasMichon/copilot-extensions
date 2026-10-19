@@ -404,6 +404,9 @@ claim. A hook cannot reactivate its ended physical source without a usable event
 timestamp; uncertain replay is refused before claim acquisition. Duplicate End
 observations do not capture a workspace title. Both lifecycle writes require the version-3 owner verb, including legacy
 requests, so an older resident cannot silently discard the new fields.
+Current source-bound End returns its exact activation source and ordinal. Title
+persistence revalidates that receipt against the latest ended activation under
+the record lock, so a same-UUID replacement cannot receive a stale End's title.
 PID-only catalog reconciliation can fill process metadata but cannot replace or
 reopen a source-bound activation. Its matching End still closes the current
 interval and releases that interval's claim and filesystem monitor.

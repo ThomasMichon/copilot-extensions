@@ -193,6 +193,7 @@ def test_current_source_end_releases_only_its_claim_and_is_idempotent(record_pat
     }
     result = tracking_session_deregistration_write.apply_session_deregister(args)
     assert result["lifecycle"] == "ended"
+    assert result["activation"] == {"ordinal": 1, "source_identity": "native:current"}
     updated = tracking.load_record(record_path)
     assert updated.sessions[0].ended_at == "exit"
     assert updated.sessions[0].activations[0].end_reason == "user_exit"

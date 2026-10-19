@@ -128,6 +128,7 @@ PID/birth mismatch, delayed historical End versus a replacement self-claim,
 source-bound Start through PID-only catalog refresh and matching End cleanup,
 timestamp-less Start replay with released claims and duplicate historical End
 without title mutation,
+same-UUID replacement before or after title input is read,
 history-pruning ambiguity, pre-dispatch old-daemon refusal with a real legacy
 peer whose mutation handler stays uncalled, installed-bin helper loading,
 the 256-entry retained-history boundary, tombstone-visible closure and

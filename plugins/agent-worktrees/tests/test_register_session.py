@@ -1092,6 +1092,67 @@ class TestDeregisterSessionStdin:
         )
         assert next(item for item in record.resources if item.ref == ref).state == obligations.ACTIVE
 
+    @pytest.mark.parametrize("replacement_at", [None, "before-read", "after-read"])
+    def test_title_persistence_revalidates_same_uuid_ended_activation(
+        self, tmp_tracking_dir, tmp_session_state_dir, monkeypatch_config,
+        monkeypatch, replacement_at,
+    ):
+        from agent_worktrees import native_lifecycle_source, obligations, session_binding_cli, session_title
+
+        sid = "00000000-0000-4000-8000-000000000001"
+        wt_id = "wt-title-fence"
+        _save_record(tmp_tracking_dir, wt_id, "/path/to/worktree")
+        tracking.register_session(
+            wt_id, sid, started_at="2026-10-19T10:00:00", source_identity="native:original",
+        )
+        session_dir = tmp_session_state_dir / sid
+        session_dir.mkdir()
+        workspace = session_dir / "workspace.yaml"
+        workspace.write_text("summary: Original execution title\n")
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_session_state_dir)
+        monkeypatch.setattr(native_lifecycle_source, "end_identity", lambda *_: "native:original")
+        original_capture = session_title.capture_session_title
+        original_read = session_title.yaml.safe_load
+
+        def replace():
+            tracking.register_session(
+                wt_id, sid, started_at="2026-10-19T12:00:00",
+                source_identity="native:replacement",
+            )
+            workspace.write_text("summary: Replacement execution title\n")
+
+        def capture(worktree_id, session_id, **kwargs):
+            if replacement_at == "before-read":
+                replace()
+            return original_capture(worktree_id, session_id, **kwargs)
+
+        def read(stream):
+            data = original_read(stream)
+            if replacement_at == "after-read" and getattr(stream, "name", None) == str(workspace):
+                replace()
+            return data
+
+        monkeypatch.setattr(session_binding_cli, "_capture_session_title", capture)
+        monkeypatch.setattr(session_title.yaml, "safe_load", read)
+        holder = []
+        assert m.cmd_deregister_session(argparse.Namespace(
+            worktree_id=wt_id, session_id=None, cwd=None, stdin=False,
+            resident_environment=True, source_bound=True, result_holder=holder,
+            hook_payload={"sessionId": sid, "reason": "user_exit", "timestamp": "2026-10-19T11:00:00Z"},
+        )) == 0
+        assert holder[-1]["lifecycle"] == "ended"
+        record = tracking.load_record(tmp_tracking_dir / f"{wt_id}.yaml")
+        ref = tracking.format_claim_ref(record.machine, record.repo, wt_id, session=sid)
+        claim = next(item for item in record.resources if item.ref == ref)
+        if replacement_at is None:
+            assert record.title == "Original execution title"
+            assert claim.state == obligations.RELEASED
+        else:
+            assert record.title is None
+            assert record.sessions[0].activations[-1].source_identity == "native:replacement"
+            assert record.sessions[0].activations[-1].ended_at is None
+            assert claim.state == obligations.ACTIVE
+
     def test_session_end_emits_stage_12_via_the_existing_session_ended_event(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

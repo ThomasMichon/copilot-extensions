@@ -7,8 +7,10 @@ import yaml
 from . import config as cfg, output, sessions, tracking
 
 
-def capture_session_title(worktree_id: str, session_id: str) -> bool:
-    """Read a native title, re-authorizing the current head before persistence."""
+def capture_session_title(
+    worktree_id: str, session_id: str, *, ended_activation: dict | None = None,
+) -> bool:
+    """Read a native title, re-authorizing head and ended activation at persistence."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return False
@@ -57,6 +59,27 @@ def capture_session_title(worktree_id: str, session_id: str) -> bool:
             if fresh.title and fresh.title != "null":
                 return False
             if fresh.resolved_head_session not in (None, session_id):
+                return False
+            entry = fresh.session_entry(session_id)
+            if ended_activation is not None:
+                if (
+                    not isinstance(ended_activation, dict)
+                    or type(ended_activation.get("ordinal")) is not int
+                    or ended_activation["ordinal"] <= 0
+                    or not isinstance(ended_activation.get("source_identity"), str)
+                ):
+                    output.err(f"Invalid ended-activation title receipt for {worktree_id}")
+                    return False
+                latest = max(entry.activations, key=lambda item: item.ordinal, default=None) if entry else None
+                if (
+                    entry is None or latest is None or latest.ordinal != ended_activation["ordinal"]
+                    or latest.source_identity != ended_activation["source_identity"]
+                    or latest.source_ambiguous or latest.ended_at is None
+                    or entry.ended_at != latest.ended_at
+                ):
+                    return False
+            elif entry and any(item.source_identity is not None for item in entry.activations):
+                output.err(f"Ended-activation title receipt is unavailable for {worktree_id}")
                 return False
             fresh.title = display_text
             tracking.save_record(fresh, yaml_path)

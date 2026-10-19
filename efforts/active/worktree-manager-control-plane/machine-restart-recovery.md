@@ -369,3 +369,13 @@ The umbrella effort remains Active independently of this slice's completion.
   missing/invalid-timestamp cases failed before the fix. The expanded isolated
   Worktrees lane passed 509 tests with 12 platform skips; Manager remains at
   its unchanged 239-test receipt.
+- Review then exposed a distinct title-persistence interleaving after current
+  End had already released its lock. The source-bound End result now carries
+  the exact activation source and ordinal. The title writer rechecks that
+  receipt against the latest ended interval under the record lock, alongside
+  current-head authority. Missing receipts cannot authorize source-bound title
+  writes. Both same-UUID replacement windows failed before the fix: replacement
+  before title input and replacement after the old input had been read. The
+  unchanged-generation positive control still captures its title. The expanded
+  isolated Worktrees lane passed 512 tests with 12 platform skips; Manager
+  remains unchanged from its 239-test receipt.
