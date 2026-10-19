@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Sequential proposal, implementation and completion PRs against `dev`.
 - **Created:** 2026-10-13
-- **Status:** Draft
+- **Status:** Blocked
 - **Vision:** Closes the existing verified-delivery and rollback-safety intent of `visions/installer/README.md`; preserves the governed artifact contract of `efforts/active/governed-python-artifact-promotion/README.md`.
 - **Umbrella issue:** #6639
 - **Sub-issues:** Primary repair dependencies #6535 and #6632 retain their existing owner.
@@ -68,7 +68,7 @@ below are agent-recommended means of realizing that requested scope.
 ## Plan
 
 ### Phase 1 - Review the follow-up and admit the repair baseline
-- [ ] Merge the proposal through the normal review and check gates.
+- [x] Merge the proposal through the normal review and check gates (#6641).
 - [ ] Verify the primary repairs are on `main`, successful hosted artifact
       publication is recorded, and the primary owner has no overlapping
       remaining implementation assigned to this follow-up.
@@ -131,6 +131,20 @@ not an extension of installer architecture or coverage-selection policy. It
 follows the existing patterns' fail-loud principle and scoped ownership rules.
 
 ## Journal
+
+### 2026-10-19 - Proposal landed; publication entry gate retained
+
+- Proposal #6641 merged as `88a48acb5`; proposal review is no longer pending.
+  The next entry gate is still the primary repair owner's containing `main`
+  source and successful hosted, attested artifact publication.
+- Next: coordinate with the existing #6535/#6632 owner to verify exact repair
+  containment, asset inventory/hash binding and attestation before admitting
+  implementation. A newly listed release or existing assets alone do not
+  establish that proof. Preserve the unpublished journal receipt for review.
+- After admission, inventory already-satisfied recommendations and implement
+  only the missing hardening delta. Phase 2/3 and the full Validation Plan
+  remain open; installation stays consumer-owned. No competing publisher,
+  repeated workflow dispatch, replacement upload or rollout is authorized.
 
 ### 2026-10-13 - Requested follow-up
 - The operator confirmed the slug and requested execution after the primary

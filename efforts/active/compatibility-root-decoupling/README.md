@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-slice feature branches (independent per-slice PRs)
 - **Created:** 2026-10-05
-- **Status:** Draft
+- **Status:** Active
 - **Umbrella issue:** #5293
 
 ## Guiding Intent
@@ -420,6 +420,21 @@ Any change that makes these files slightly smaller is a win."
 _Pending._
 
 ## Journal
+
+### 2026-10-19 - Reconcile completed slices and remaining migration
+
+- The completed implementation slices below supersede the original Draft
+  status. PRs #5515, #5516 and #5569 are merged; they do not close retirement.
+  The last recorded aggregate is **39 accessors, 209 call sites, 156 distinct
+  monkeypatched names and 992 patch-site occurrences**. This is historical
+  measurement, not a fresh census of the current contribution branch.
+- Next: the migration driver must review the preserved, unpublished
+  `_apply_tracking_override` extraction into `worktree_identity.py`, reconcile
+  it against current source, then re-run the per-name and aggregate census.
+  Do not discard that work or start a duplicate migration from an old summary.
+- Retain the existing per-slice review, bounded validation and final
+  zero-dependency acceptance gates. A landed helper slice or finalized child
+  workspace is not completion of the parent Plan and Validation Plan.
 
 ### 2026-10-05 — Kickoff
 - Effort created from a design-invariant discussion that started as a
@@ -1153,4 +1168,3 @@ _Pending._
   relative to call sites -- may be higher-value despite lower rank, per
   the effort's own Plan note) -- re-measure with `--progress` before
   picking exact order for the next slice.
-

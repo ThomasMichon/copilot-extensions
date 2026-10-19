@@ -24,12 +24,12 @@ that pattern to this repository.
 | [PR Lifecycle Conformance](active/pr-lifecycle-conformance/README.md) | Active; Phase 1 evidence and contract proposed, adapter implementation and acceptance open | #7051; existing #2357 lifecycle ownership retained |
 | [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; alias/locality repair, empty-mux readiness and installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
-| [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Draft; follow-up gated on primary repairs and hosted publication | #6639; #6535/#6632 owners retained |
+| [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Blocked; proposal merged, containing primary repairs and attested hosted publication still required | #6639; #6535/#6632 owners retained |
 | [Continuous Worktree Reclamation](active/continuous-worktree-reclamation/README.md) | Draft; vision and implementation/performance plan only, execution separately authorized | #6620; preserves #1488/#1918/#3114, #6060 and #6471 |
 | [Installer Transaction Admission Repair](active/installer-transaction-admission-repair/README.md) | Active; local repair validated, review/landing/released-source proof pending | #6463 |
 | [Seasoned Dependencies and Transactional Installs](active/seasoned-dependencies-and-transactional-installs/README.md) | Draft; seven-day declarations/resolution and failed-build cleanup | #6476 |
 | [Dispatch Fleet Reliability and Recovery](active/dispatch-fleet-reliability-recovery/README.md) | Active; maintenance categories, bounded supervision and registry-rooted recovery | #6466, #6467, #6470, #6471; existing #6407/#6421 repair owner retained |
-| [Runtime Operational Contracts](active/review-pipeline-operational-contracts/README.md) | Draft; proposal review before implementation | #6274; existing Windows regression #6266 |
+| [Runtime Operational Contracts](active/review-pipeline-operational-contracts/README.md) | Active; proposal/prerequisites merged, activation/readiness/Windows contracts and adoption open | #6274; existing Windows regression #6266 |
 | [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Active; proposal reviewed, section and instance contracts | #6379 |
 | [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; shared consolidation roadmap and owner-only local-provider review rescue proposed, gated implementation open | #6237; canonical audit/coordination lead, existing release/runner/portfolio owners retained |
 | [Fleet Control V2](active/fleet-control-v2/README.md) | Active; identity/admission prerequisites merged; provider/enrollment/integration/lifecycle open | #6236, #6240, #6241, #6443, #5862; existing #3761/#352/#5789/#6030/#6424 owners retained |
@@ -59,7 +59,7 @@ that pattern to this repository.
 | [Operator Attention Contract ("what needs you")](active/operator-attention-contract/README.md) | Active (Phases 1-3 built; `bridge` + `pr` sources in review) | #5668 (core + `dispatch`, merged), #5813 (`bridge` + `pr` with their sibling commands); clients separately |
 | [Supervised-Lane Process Discipline](active/supervised-lane-process-discipline/README.md) | Draft | #5301 |
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
-| [Compatibility-Root Decoupling](active/compatibility-root-decoupling/README.md) | Draft | #5293 |
+| [Compatibility-Root Decoupling](active/compatibility-root-decoupling/README.md) | Active; completed helper slices landed, remaining migration/census and full acceptance open | #5293 |
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
 | [ai-attribution Audience-Based Disclosure Policy](active/ai-attribution-audience-policy/README.md) | Active (Phase 1 done) | #2965 |
 | [Devcontainer Test Isolation](active/devcontainer-test-isolation/README.md) | Done; pending archive | #5040 |
@@ -119,7 +119,7 @@ that pattern to this repository.
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
 | [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
-| [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Draft; native Windows/Linux execution proof before preference inheritance | #5708; preserves #7069/#6987/#5839/#7057 owners |
+| [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Active; proposal merged, native adapters and Windows/Linux execution proof before inheritance remain open | #5708; preserves #7069/#6987/#5839/#7057 owners |
 
 
 ## Completed effort index

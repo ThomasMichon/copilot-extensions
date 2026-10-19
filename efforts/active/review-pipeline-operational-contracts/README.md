@@ -10,7 +10,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-slice PRs against dev
 - **Created:** 2026-10-12
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** Existing bridge lifecycle and dispatch authority/readiness intent
 - **Umbrella issue:** [#6274](https://github.com/ThomasMichon/copilot-extensions/issues/6274)
 - **Sub-issues:** [#6266](https://github.com/ThomasMichon/copilot-extensions/issues/6266)
@@ -69,7 +69,8 @@ the operator's requested outcomes. [Design contract](design.md) pins interfaces
 and negative controls before implementation.
 
 ### Phase 0 - Reviewed proposal
-- [ ] Land this effort and contract through normal review before implementation.
+- [x] Land this effort and contract through normal review before implementation
+      (#6457).
 - [ ] Reconcile relevant existing lifecycle/auth/process patterns and active
       issue ownership. Keep every publication self-contained and neutral.
 
@@ -129,6 +130,21 @@ authority-readiness and Windows process boundaries for review before
 implementation.
 
 ## Journal
+
+### 2026-10-19 - Reviewed proposal and prerequisite source reconciled
+
+- Proposal #6457 merged as `4ec7f4c5d`; the original Draft/proposal-review
+  status is superseded. Adjacent receipt support #6420 (`66423aed2`) and
+  backed publication recovery #7089 (`c81ed22bb`) are also merged.
+  Their former review waits are historical, not current blockers.
+- Next: the Contracts coordinator must reconcile the retained source/journal
+  responsibilities with the receipt and lifecycle owners, verify containing
+  releases separately, then select the truthful serving-activation slice.
+  Do not repeat the completed prerequisite changes or absorb another owner's
+  operational recovery.
+- Truthful activation, read-only control readiness, the unchanged Windows
+  process/window boundary and all contract-adoption validation remain open.
+  Source merge establishes neither serving activation nor authorized rollout.
 
 ### 2026-10-12 - Proposal
 

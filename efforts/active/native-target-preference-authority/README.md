@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Serial plan, implementation and completion PRs targeting `dev`
 - **Created:** 2026-10-16
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Agent Bridge](../../../visions/plugins/agent-bridge/README.md), ownership clarity and negotiated contracts; [Agent Fabric](../../../visions/agent-fabric/README.md), derive-don't-duplicate and proportionate trusted cooperation
 - **Umbrella issue:** #5708
 - **Sub-issues:** None
@@ -70,8 +70,8 @@ No live rollout or credential operation is included.
 
 ### Phase 1 - Reviewed native contract
 
-- [ ] Claim the remaining native slice under #5708 and land this plan before
-  implementation.
+- [x] Claim the remaining native slice under #5708 and land this plan before
+  implementation (#7107).
 - [ ] Trace the existing native/SSH Host acquisition, execution-space selection,
   process creation and preference application seams against current source.
 - [ ] Specify the smallest explicit native launch declaration, authority fields,
@@ -170,6 +170,22 @@ accepts Windows or arbitrary platform claims. Negotiate the native capability
 explicitly before accepting its Host-bound proof.
 
 ## Journal
+
+### 2026-10-19 - Native proposal landed; implementation still open
+
+- Proposal #7107 merged as `ae5e09a6e`; the plan-review gate is satisfied,
+  not the native authority implementation or acceptance gate.
+  Adjacent CI-admission repair #7140 (`0d465b4b7`) also merged and does not
+  demonstrate preference inheritance.
+- Next: the Native authority driver must reconcile the existing qualification
+  and adjacent identity/locality owners, then trace current Host acquisition,
+  owned process creation and preference application before implementing the
+  reviewed native adapters. Preserve the same-user direct Windows boundary
+  and guest-local Linux/WSL authority; do not fabricate container proof.
+- Real contained unequal-settings/ACP acceptance, required source review,
+  covering release and separately authorized installed-runtime proof remain
+  unresolved. No configuration, credential operation, paid probe or rollout
+  is authorized by this documentation reconciliation.
 
 ### 2026-10-16 - Native continuation proposed
 
