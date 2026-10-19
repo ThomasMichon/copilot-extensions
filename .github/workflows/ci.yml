@@ -380,6 +380,9 @@ jobs:
         run: python -m pytest -q tools/test_pre_push_ref_scope.py
       - name: Promotion exact-PR merge wait regression tests
         run: python -m pytest -q tools/test_promotion_merge_wait.py
+      - name: Qualified promotion lifecycle contracts at the generated candidate
+        if: inputs.promotion_run != ''
+        run: python -m pytest -q tools/test_promotion_lifecycle.py tools/test_promotion_lifecycle_workflow.py tools/test_promotion_dispatch.py
       - name: Trusted PR policy contract tests
         run: python -m pytest -q tools/test_trusted_pr_policy.py tools/test_post_ci_policy.py tools/test_identifier_guard_workflow.py tools/test_check_no_internal_identifiers.py
       - name: Payload invocation generated files
@@ -793,6 +796,12 @@ jobs:
           python -m pytest -q --durations=10
           tools/test_promotion_control.py tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
           tools/test_promotion_workflow_adapter.py
+
+      - name: Qualified promotion lifecycle contracts at the generated candidate (Windows)
+        if: inputs.promotion_run != ''
+        run: >-
+          python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml &&
+          python -m pytest -q tools/test_promotion_lifecycle.py tools/test_promotion_lifecycle_workflow.py tools/test_promotion_dispatch.py
 
   promotion-candidate-windows:
     name: Native promotion candidate contracts (Windows)
@@ -1464,6 +1473,8 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test ${{ matrix.plugin }}
+        env:
+          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-bridge' && inputs.promotion_run != '' && '-n 2 --dist=worksteal' || '' }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
       - name: Test shared SSH proxy contracts
         if: matrix.plugin == 'agent-bridge'
