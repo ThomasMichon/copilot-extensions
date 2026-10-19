@@ -644,8 +644,8 @@ async def start_session(req: StartSessionRequest, request: Request):
             remote = await remote_api.connect_remote_session(
                 mgr, agent_name.removeprefix("remote-acp:"),
                 cwd=req.target_dir or "/", caller_id=req.caller_id,
-                caller_session_id=req.caller_session_id,
-                remote_session_id=req.remote_session_id, reuse=not req.force_new,
+                caller_session_id=req.caller_session_id, remote_session_id=req.remote_session_id,
+                **({"reuse": True} if req.caller_id and not req.force_new else {}),
                 **({"project": req.sender_repo} if req.sender_repo is not None else {}),
             )
         except remote_api.RemoteSessionBusy as exc:
