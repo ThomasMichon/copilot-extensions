@@ -1711,3 +1711,12 @@ requested contract.
 - Preserve the prior source and recovery refs, ownership snapshots and optional
   child-only repository authentication. Release/adoption, fleet operations and
   runtime changes remain outside this authorization.
+- Current-base issue-loop/source/CLI/recipe coverage passes 584 tests, including
+  real child-authentication and timeout custody contracts. Native census,
+  durable-lifetime and exact cutover consumers pass 12 tests. Fatal lint,
+  module-size and install-contract checks pass; CI workflows, tooling and
+  pipeline policy are byte-identical to the current dev base.
+- Managed publication preview retains the original PR and its exact recorded
+  head lease. Neither the older successful CI attempt nor the earlier
+  agent-start-timeout Lite review replaces current-head CI and a genuine full
+  review after this rebase.
