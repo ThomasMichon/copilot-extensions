@@ -1092,6 +1092,52 @@ class TestDeregisterSessionStdin:
         )
         assert next(item for item in record.resources if item.ref == ref).state == obligations.ACTIVE
 
+    @pytest.mark.parametrize("resident", [False, True])
+    @pytest.mark.parametrize("source_identity", [None, "native:qualified"])
+    def test_source_aware_end_defers_legacy_and_bound_authority_to_writer(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch, resident, source_identity,
+    ):
+        from agent_worktrees import native_source_context, obligations, tracking_session_deregistration_write
+
+        sid = "00000000-0000-4000-8000-000000000001"
+        epoch = {"platform": "linux", "environment_id": "a" * 32, "boot_id": sid}
+        monkeypatch.setattr(native_source_context, "epoch", lambda: epoch)
+        _save_record(tmp_tracking_dir, "wt-legacy-end", "/path/to/worktree")
+        tracking.register_session(
+            "wt-legacy-end", sid, started_at="2026-10-19T10:00:00",
+            source_identity=source_identity,
+        )
+        path = tmp_tracking_dir / "wt-legacy-end.yaml"
+        before = path.read_bytes()
+        stops = []
+        monkeypatch.setattr(tracking_session_deregistration_write, "stop_fsmonitor_daemon", stops.append)
+        holder = []
+        assert m.cmd_deregister_session(argparse.Namespace(
+            worktree_id="wt-legacy-end", session_id=None, cwd=None, stdin=False,
+            resident_environment=resident, source_bound=True, result_holder=holder,
+            hook_payload={
+                "sessionId": sid, "reason": "user_exit", "timestamp": "2026-10-19T11:00:00Z",
+                "_agentWorktrees": {"nativeSource": {
+                    "version": 1, "qualified": True, **epoch,
+                    "ancestors": [{"pid": 101, "start_time": "100"}],
+                }},
+            },
+        )) == 0
+        record = tracking.load_record(path)
+        entry = record.session_entry(sid)
+        claim = next(item for item in record.resources if item.kind == "session")
+        if source_identity is None:
+            assert entry.ended_at is not None
+            assert entry.activations[0].source_identity is None
+            assert entry.activations[0].end_reason is None
+            assert claim.state == obligations.RELEASED
+            assert stops == [record.worktree_path]
+        else:
+            assert holder[-1]["lifecycle"] == "unconfirmed"
+            assert path.read_bytes() == before
+            assert claim.state == obligations.ACTIVE
+            assert stops == []
+
     @pytest.mark.parametrize("replacement_at", [None, "before-read", "after-read"])
     def test_title_persistence_revalidates_same_uuid_ended_activation(
         self, tmp_tracking_dir, tmp_session_state_dir, monkeypatch_config,

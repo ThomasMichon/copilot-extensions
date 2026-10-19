@@ -251,6 +251,8 @@ def _apply_session_register_locked(args: dict) -> dict:
                         tracking._next_lifecycle_revision(record, session_id)
                     tracking.save_record(record, yaml_path)
                     return {"error": "lifecycle", "message": str(exc)}
+                if activation_added and linked_handoff is None:
+                    tracking._next_lifecycle_revision(record, session_id)
                 tracking.save_record(record, yaml_path)
                 if linked_handoff is not None:
                     tracking.record_pr_claims_reassigned(

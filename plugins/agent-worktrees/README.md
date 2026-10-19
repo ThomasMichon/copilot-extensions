@@ -407,6 +407,12 @@ requests, so an older resident cannot silently discard the new fields.
 Current source-bound End returns its exact activation source and ordinal. Title
 persistence revalidates that receipt against the latest ended activation under
 the record lock, so a same-UUID replacement cannot receive a stale End's title.
+Source-aware hook transport still delegates source-less End to the version-3
+writer: legacy cleanup remains supported, while any source-bound history is
+protected under the same record lock. No source proof or qualified exit reason
+is invented for legacy records. A source-changing bind also advances lifecycle
+revision when its handoff token was already linked, preserving replacement
+history against stale saves.
 PID-only catalog reconciliation can fill process metadata but cannot replace or
 reopen a source-bound activation. Its matching End still closes the current
 interval and releases that interval's claim and filesystem monitor.

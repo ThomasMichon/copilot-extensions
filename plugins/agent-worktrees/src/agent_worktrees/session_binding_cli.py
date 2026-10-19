@@ -969,14 +969,10 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
             native_lifecycle_source.witness(payload, resident=resident_environment),
             record.session_entry(session_id),
         )
-        if getattr(args, "source_bound", False) and source_identity is None:
-            output.err("Native session end source is unconfirmed; retaining the activation.")
-            result = {"ok": True, "lifecycle": "unconfirmed", "reason": "source-unavailable"}
-        else:
-            result = tracking.deregister_session(
-                wt_id, session_id, ended_at=event_at, source=source,
-                source_identity=source_identity, end_reason=end_reason,
-            )
+        result = tracking.deregister_session(
+            wt_id, session_id, ended_at=event_at, source=source,
+            source_identity=source_identity, end_reason=end_reason,
+        )
         lifecycle = (result or {}).get("lifecycle")
         if lifecycle in (None, "ended"):
             _capture_session_title(

@@ -230,6 +230,36 @@ def test_timestamped_same_source_logical_resume_remains_explicitly_ambiguous(rec
     assert all(claim.state == obligations.ACTIVE for claim in record.resources)
 
 
+def test_source_changing_linked_handoff_advances_revision_and_survives_stale_save(record_path):
+    assert tracking_session_registration_write.apply_session_register({
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "old", "source_identity": "native:old",
+    })["ok"]
+    record = tracking.load_record(record_path)
+    tracking.open_handoff(record, "old", "token", save=False)
+    tracking.save_record(record, record_path)
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-1",
+        "source": "bind", "handoff_token": "token", "source_identity": "native:first",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["linked_handoff"] is not None
+    stale = tracking.load_record(record_path)
+    result = tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:replacement",
+    })
+    assert result["ok"] and result["linked_handoff"] is None
+    current = tracking.load_record(record_path)
+    assert current.lifecycle_revision > stale.lifecycle_revision
+    assert current.sessions[-1].activations[-1].source_identity == "native:replacement"
+    tracking.save_record(stale, record_path)
+    retained = tracking.load_record(record_path)
+    assert retained.sessions[-1].activations[-1].source_identity == "native:replacement"
+    assert tracking_session_registration_write.apply_session_register({
+        **args, "source_identity": "native:replacement",
+    })["ok"]
+    assert tracking.load_record(record_path).lifecycle_revision == retained.lifecycle_revision
+
+
 @pytest.mark.parametrize("source_identity", [None, "native:replacement"])
 def test_v2_daemon_cannot_downgrade_registration(
     record_path, monkeypatch, monkeypatch_config, source_identity,

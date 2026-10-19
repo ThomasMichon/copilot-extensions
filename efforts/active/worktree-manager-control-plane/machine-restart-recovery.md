@@ -379,3 +379,14 @@ The umbrella effort remains Active independently of this slice's completion.
   unchanged-generation positive control still captures its title. The expanded
   isolated Worktrees lane passed 512 tests with 12 platform skips; Manager
   remains unchanged from its 239-test receipt.
+- Review found two remaining compatibility branches: source-aware End had
+  bypassed legacy cleanup before reaching the authoritative writer, and a new
+  activation reusing an already-linked handoff token had not advanced lifecycle
+  revision. End now always delegates to the version-3 writer, which decides
+  legacy versus protected history under its lock without inventing source
+  proof. The reused-token branch advances revision only when activation changes
+  without a new handoff transition. Three failing-first cases cover both
+  resident and cold legacy cleanup plus replacement revision; negative controls
+  retain bound-source protection. A stale save cannot erase the replacement,
+  and idempotent rebinding does not advance revision. The isolated Worktrees
+  lane passed 517 tests with 12 platform skips; Manager remains at 239.
