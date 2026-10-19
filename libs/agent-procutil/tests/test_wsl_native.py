@@ -21,6 +21,23 @@ pytestmark = pytest.mark.skipif(
 
 _TARGET = """
 import ctypes,json,os,pathlib,subprocess,sys,time
+from ctypes import wintypes
+kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+kernel.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+kernel.OpenProcess.restype=wintypes.HANDLE
+kernel.GetProcessTimes.argtypes=[wintypes.HANDLE]+[ctypes.POINTER(wintypes.FILETIME)]*4
+kernel.GetProcessTimes.restype=wintypes.BOOL
+kernel.CloseHandle.argtypes=[wintypes.HANDLE]
+def identity(pid):
+    handle=kernel.OpenProcess(0x1000,False,pid)
+    if not handle:raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        times=[wintypes.FILETIME() for _ in range(4)]
+        if not kernel.GetProcessTimes(handle,*[ctypes.byref(value) for value in times]):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return {'pid':pid,'created':(times[0].dwHighDateTime<<32)|times[0].dwLowDateTime}
+    finally:
+        kernel.CloseHandle(handle)
 leaf=subprocess.Popen(
     [sys.executable,'-c','import time;time.sleep(120)'],
     creationflags=0x08000000,
@@ -28,7 +45,7 @@ leaf=subprocess.Popen(
 ready=pathlib.Path(sys.argv[1])
 stage=ready.with_suffix('.staging')
 stage.write_text(json.dumps({
-    'pid':os.getpid(),'leaf':leaf.pid,'owner':os.getppid(),
+    'pid':identity(os.getpid()),'leaf':identity(leaf.pid),'owner':identity(os.getppid()),
     'console':ctypes.windll.kernel32.GetConsoleWindow(),
 }))
 stage.replace(ready)
@@ -44,7 +61,7 @@ def _linux_path(path: Path, distro: str) -> str:
     return result.stdout.strip()
 
 
-def _open_owned(pid: int):
+def _process_api():
     from ctypes import wintypes
 
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -54,9 +71,38 @@ def _open_owned(pid: int):
     kernel.WaitForSingleObject.restype = wintypes.DWORD
     kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = kernel.OpenProcess(0x100000 | 0x1000 | 0x0001, False, pid)
+    kernel.GetProcessTimes.argtypes = [
+        wintypes.HANDLE, *[ctypes.POINTER(wintypes.FILETIME)] * 4,
+    ]
+    kernel.GetProcessTimes.restype = wintypes.BOOL
+    return kernel
+
+
+def _creation_time(kernel, handle) -> int:
+    from ctypes import wintypes
+
+    times = [wintypes.FILETIME() for _ in range(4)]
+    if not kernel.GetProcessTimes(handle, *[ctypes.byref(value) for value in times]):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+
+
+def _open_owned(identity: dict):
+    if (
+        type(identity.get("pid")) is not int or identity["pid"] <= 0
+        or type(identity.get("created")) is not int or identity["created"] <= 0
+    ):
+        raise ValueError("Fixture process identity is incomplete")
+    kernel = _process_api()
+    handle = kernel.OpenProcess(0x100000 | 0x1000 | 0x0001, False, identity["pid"])
     if not handle:
         raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if _creation_time(kernel, handle) != identity["created"]:
+            raise RuntimeError("Fixture process creation identity changed")
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
     return kernel, handle
 
 
@@ -91,7 +137,8 @@ def _exercise_case(tmp_path, case):
         assert ready.exists(), "Windows fixture did not establish its owned identities"
         identity = json.loads(ready.read_text())
         assert identity["console"] == 0
-        handles = [_open_owned(identity[name]) for name in ("pid", "leaf", "owner")]
+        for name in ("pid", "leaf", "owner"):
+            handles.append(_open_owned(identity[name]))
         assert all(kernel.WaitForSingleObject(handle, 0) == 258 for kernel, handle in handles)
         if case not in {"timeout", "stdin-stall"}:
             gate.write_text("interrupt")

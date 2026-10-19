@@ -84,6 +84,42 @@ def test_timeout_and_refused_owner_are_errors_not_completed_commands():
         wsl._completed(["synthetic.exe"], 1, b'{"version":1,"error":"owner-job-unavailable"}', 1)
 
 
+def test_mismatched_native_fixture_identity_never_obtains_cleanup_authority(monkeypatch):
+    import test_wsl_native as fixture
+
+    events = []
+    kernel = SimpleNamespace(
+        OpenProcess=lambda *args: 41,
+        CloseHandle=lambda handle: events.append(("close", handle)),
+        TerminateProcess=lambda *args: pytest.fail("unrelated process terminated"),
+    )
+    monkeypatch.setattr(fixture, "_process_api", lambda: kernel)
+    monkeypatch.setattr(fixture, "_creation_time", lambda *args: 200)
+    with pytest.raises(RuntimeError, match="creation identity"):
+        fixture._open_owned({"pid": 123, "created": 100})
+    assert events == [("close", 41)]
+
+
+def test_failed_fixture_identity_read_closes_handle_without_cleanup_authority(monkeypatch):
+    import test_wsl_native as fixture
+
+    events = []
+    kernel = SimpleNamespace(
+        OpenProcess=lambda *args: 41,
+        CloseHandle=lambda handle: events.append(("close", handle)),
+        TerminateProcess=lambda *args: pytest.fail("unrelated process terminated"),
+    )
+
+    def failed(*args):
+        raise OSError("synthetic unavailable creation identity")
+
+    monkeypatch.setattr(fixture, "_process_api", lambda: kernel)
+    monkeypatch.setattr(fixture, "_creation_time", failed)
+    with pytest.raises(OSError):
+        fixture._open_owned({"pid": 123, "created": 100})
+    assert events == [("close", 41)]
+
+
 def test_owner_job_precedes_request_and_target(monkeypatch):
     import agent_procutil
 
