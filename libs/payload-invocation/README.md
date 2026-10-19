@@ -54,6 +54,9 @@ canonical checkout libraries. The Worktrees import/version regression also runs
 without Python site initialization, loading only the external YAML dependency
 explicitly; missing staged transport dependencies cannot be hidden by an ambient
 editable installation.
+Dispatch-only fixtures may omit runtime sources only when execution is refused
+before dispatch or the test supplies its own explicit CLI stub. Tests invoking
+the real Worktrees CLI retain the complete copied runtime and staged dependencies.
 
 ### Source-qualified command binding
 
@@ -106,6 +109,26 @@ A timeout returns exit code 124. Failed cancellation or an unverified empty Job
 is reported and leaves a fail-closed durable lock, not a ready-looking runtime;
 callers must not hard-kill the admitting parent as their normal deadline
 mechanism.
+
+Standalone Worktrees `install` and `update` explicitly request
+`--human-operation install|update` from this existing admission parent.
+PowerShell keeps its case-insensitive action contract and forwards the original
+native action unchanged; only the human-operation label is normalized.
+It uses the canonical human formatter and redactor copied into a small
+payload-local `_lifecycle_human` package. All three assets, including the
+entrypoint-bound capability probe, come from `libs/update-telemetry`, not
+another plugin's runtime source; no installed runtime, extra Python
+process or formatter process is needed. Native output is merged onto the
+human diagnostic stream with UTC prefixes and monotonic elapsed time, followed
+by the child's actual success/failure duration and exit code. PowerShell
+capture requires the existing entrypoint-bound UTF-8 declaration. The parent
+retains the same lease, argument vector, execution deadline and Job cleanup.
+An admitted but unattributed source is classified as a warning in human mode,
+not as selectable ownership; its ordinary unframed stderr contract is unchanged.
+Without explicit opt-in, child stdout and stderr remain inherited separately;
+catalogs, protocol callers and other lifecycle actions do not infer human mode
+from their output or environment. Structured-context installers retain their
+separate native owner; this does not wrap those entrypoints.
 
 Legacy `uninstall` uses the same ownership-validated transaction without a
 runtime-build reservation. The shared lock is a sibling of the canonical

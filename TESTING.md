@@ -900,6 +900,13 @@ preparation/identity/native-consumer contracts in `libs/versioned-runtime/tests`
 The payload suite's PowerShell contracts require a real `pwsh`; when it is absent
 from the isolation container, run that target through the host's contained runner
 rather than counting skipped PowerShell contracts as validation.
+On native Windows, the generator file's complete portfolio can run in two
+complementary bounded selections: `-k "agent_machines"` and
+`-k "not agent_machines"`. Account for both test/skip totals; neither alone
+is complete coverage. These keep the repeated native governance contracts
+within the existing per-run budget without extending any item deadline.
+Disposable Worktrees copies retain the complete runtime/dependency graph
+where consumed, but do not write bytecode that no later fixture reuses.
 
 > **A cached venv is not editable.** A vendored path dependency (e.g.
 > `agent-ssh-manager` under `plugins/<p>/libs/<lib>/`) installs into
@@ -935,6 +942,11 @@ Changed-plugin selection always includes both `copilot-extensions-harness` and
 contracts. An admission-wrapper change must therefore pass the real whole-suite
 hook-composition consumer before merge, not first encounter it in post-merge
 CI. This scheduling adds no new policy exception or scanner allowlist.
+
+Temporary-storage accounting uses a fresh `scandir` walk per check and retains
+each entry's native metadata instead of issuing repeated path-stat calls.
+Symlinks remain excluded; counting and process-tree termination at the storage
+ceiling are covered by native containment tests.
 
 Full dispatch execution in the CI smoke matrix (push, manual and promotion)
 distributes its complete file inventory across three independent jobs.

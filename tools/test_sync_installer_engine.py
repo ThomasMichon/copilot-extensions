@@ -5,6 +5,8 @@ import json
 import os
 import shutil
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "tools" / "sync-installer-engine.py"
+HUMAN_CAPABILITY_PATH = (
+    REPO / "libs" / "update-telemetry" / "src" / "update_telemetry" / "capabilities.py"
+)
 
 _SPEC = importlib.util.spec_from_file_location("sync_installer_engine", MODULE_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
@@ -20,11 +25,29 @@ _SPEC.loader.exec_module(sync_installer_engine)
 
 
 def _human_admission():
-    path = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "installer_capabilities.py"
-    spec = importlib.util.spec_from_file_location("native_human_capability", path)
+    spec = importlib.util.spec_from_file_location("native_human_capability", HUMAN_CAPABILITY_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.powershell_human_utf8_supported
+
+
+def test_human_capability_probe_does_not_require_an_installed_runtime():
+    program = """
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("bare_human_capability", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+assert "agent_worktrees" not in sys.modules
+assert "update_telemetry" not in sys.modules
+assert module.powershell_human_utf8_supported(pathlib.Path(sys.argv[2]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", program, str(HUMAN_CAPABILITY_PATH),
+         str(REPO / "plugins/agent-worktrees/scripts/install.ps1")],
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_human_output_declarations_bind_real_packaged_entrypoints():

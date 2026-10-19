@@ -14,6 +14,9 @@ cells. Mutation remains explicit and non-automatic:
 - `installation-context.ps1` provides the PowerShell 5.1+/pwsh bootstrap.
   Missing native types compile in one batch to bound cold diagnostic startup;
   re-entry retains already-loaded types rather than recompiling them.
+  Canonical path existence checks use uncached native positive probes, retaining
+  the PowerShell provider check for negative results and errors. Final-path,
+  receipt, policy, ownership, and pre/post-provision validation are unchanged.
 - `legacy-entrypoint-probe.sh` and `legacy-entrypoint-probe.ps1` derive
   conservative legacy-footprint evidence from `payload-invocation.json` and
   gate installer/bootstrap mutation through the read-only `probe-legacy`
@@ -71,6 +74,22 @@ of Windows device basenames.
 
 All successful actions emit one JSON object. Ambiguous or mismatched evidence
 writes an actionable error to stderr and exits nonzero.
+
+PowerShell callers may opt into `status -WithContextValidation`, with both
+`-ExpectedPluginId` and `-ExpectedPayloadRoot`. For an eligible namespaced
+installation, the runner performs the independent context validation **after**
+status resolution and adds its result as `contextValidation`. It does not reuse
+the earlier validated receipt or skip any file, identity, policy, or ownership
+checks. This lets a native caller retain separate status/generation comparisons
+without starting a second interpreter and recompiling its native helpers.
+Ordinary status JSON is unchanged; legacy and blocked statuses do not include
+a validation result. The enabled option is refused on other actions;
+an explicitly false switch, including a splatted value, behaves as omitted.
+
+The Worktrees Windows dispatcher invokes this runner in a child script scope
+of its existing host. Every invocation resets receipt-validation state and
+rereads governance; only the compiled native helper types survive between
+the initial, pre-provision and post-provision checks.
 
 ### WSL guest identity
 

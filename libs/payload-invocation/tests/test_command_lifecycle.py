@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,14 +44,14 @@ def test_command_binding_deadline_stops_tree_before_releasing_admission(
     )
     parent = (
         "import subprocess,sys,time; from pathlib import Path; "
-        f"subprocess.Popen([sys.executable,'-c',{worker!r}]); "
+        f"subprocess.Popen([sys.executable,'-I','-S','-B','-c',{worker!r}]); "
         f"marker=Path({str(marker)!r})\n"
         "while not marker.exists(): time.sleep(0.01)\n"
         + ("" if parent_exits else "time.sleep(30)")
     )
     result = lifecycle.run_lifecycle(
         binding_fixture["binding"], binding_fixture["primitive"],
-        [sys.executable, "-c", parent], deferred_runtime=True, timeout=3,
+        [sys.executable, "-I", "-S", "-B", "-c", parent], deferred_runtime=True, timeout=3,
         **binding_fixture["arguments"],
     )
     assert result == (0 if parent_exits else 124)
@@ -533,6 +534,9 @@ def test_command_binding_real_installer_refuses_before_self_staging(
     suffix = "sh" if shell == "bash" else "ps1"
     installer = payload / f"scripts/install.{suffix}"
     shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/install.{suffix}", installer)
+    if shell == "powershell":
+        for name in ("installer-human-output.ps1", "install.human-output.json"):
+            shutil.copyfile(ROOT / "plugins/agent-worktrees/scripts" / name, installer.parent / name)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     if location == "local-copy":
         copied_payload = binding_fixture["home"] / "local-payload"
@@ -594,22 +598,67 @@ def test_command_binding_real_installer_refuses_before_self_staging(
             assert Path(smoke["ran_from"]) == installer.parent
             assert Path(smoke["staged_from"]) == payload
             lease.lock.assert_owned()
-    # The unchanged self-stage block still runs under the admitted parent lease.
+@pytest.mark.parametrize("shell", [
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
+    pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
+])
+@pytest.mark.parametrize("action", [
+    "stamp", "install", "update",
+    pytest.param("Install", marks=pytest.mark.skipif(os.name != "nt", reason="Windows action casing")),
+    pytest.param("uPdAtE", marks=pytest.mark.skipif(os.name != "nt", reason="Windows action casing")),
+])
+@pytest.mark.parametrize("windows_powershell", [False, pytest.param(
+    True, marks=pytest.mark.skipif(
+        os.name != "nt" or shutil.which("powershell.exe") is None,
+        reason="Windows PowerShell unavailable",
+    ),
+)])
+def test_command_binding_native_selfstage_preserves_human_optin(
+    binding_fixture: dict, shell: str, action: str, windows_powershell: bool,
+) -> None:
+    _prepare_catalog(binding_fixture)
+    payload = binding_fixture["payload"]
+    suffix = "sh" if shell == "bash" else "ps1"
     installer = payload / f"scripts/install.{suffix}"
+    shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/install.{suffix}", installer)
+    if shell == "powershell":
+        for name in ("installer-human-output.ps1", "install.human-output.json"):
+            shutil.copyfile(ROOT / "plugins/agent-worktrees/scripts" / name, installer.parent / name)
+    _write(payload / "plugin.json", {"name": PLUGIN_ID})
+    environment = {
+        **_catalog_environment(binding_fixture),
+        "COPILOT_PLUGIN_INSTALL_SMOKE": "1", "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "0",
+    }
+    host = shutil.which("powershell.exe") if windows_powershell else POWERSHELL
     command = (
-        ["bash", str(installer), "stamp"] if shell == "bash" else
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
+        ["bash", str(installer), action] if shell == "bash" else
+        [host, "-NoLogo", "-NoProfile", "-File", str(installer), action]
     )
     completed = subprocess.run(
         command, env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.stdout == ""
+    operation = action.lower()
+    if action == "stamp":
+        assert "[elapsed " not in completed.stderr
+    else:
+        assert f"agent-worktrees/{operation} starting [elapsed " in completed.stderr
+        assert f"agent-worktrees/{operation} done exit 0 [duration " in completed.stderr
+        assert all(re.fullmatch(
+            rf"\[\d{{2}}:\d{{2}}:\d{{2}}\.\d{{3}}Z\] agent-worktrees/{operation} .+ "
+            r"\[(?:elapsed|duration) \d+\.\d+s\]", line,
+        ) for line in completed.stderr.splitlines()), completed.stderr
     smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text())
     assert smoke["staged"] is True
     assert Path(smoke["staged_from"]) == payload
     assert ".install-stage" in smoke["ran_from"]
     assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+    # The smoke seam does not build/publish a runtime, so success is not ownership.
+    assert _resolve(binding_fixture)["reason"] == (
+        "legacy-ownership-missing" if action == "stamp" else "legacy-lifecycle-incomplete"
+    )
 
 
 @pytest.mark.parametrize("shell", [

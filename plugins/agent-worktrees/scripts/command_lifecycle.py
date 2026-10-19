@@ -8,7 +8,7 @@ import math
 import os
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -143,7 +143,7 @@ def borrowed_lease(binding: Any, primitive: Any, **arguments: Any) -> LifecycleL
 @contextmanager
 def legacy_lifecycle(
     binding: Any, primitive: Any, *, reserve: bool = True, teardown: bool = False,
-    **arguments: Any,
+    diagnostic: Any = None, **arguments: Any,
 ) -> Iterator[LifecycleLease]:
     """Reserve the existing manifest before the first shared-runtime write."""
     borrowed = borrowed_lease(binding, primitive, **arguments)
@@ -166,11 +166,14 @@ def legacy_lifecycle(
         owner = _owner(binding, primitive, arguments)
         manifest = _reservation(binding, primitive, root, owner)
         if owner.get("unattributed"):
-            print(
+            message = (
                 "Runtime source is unavailable; legacy mutation is admitted by the "
-                "canonical default-policy probe, but command ownership remains unresolved.",
-                file=sys.stderr,
+                "canonical default-policy probe, but command ownership remains unresolved."
             )
+            if diagnostic is None:
+                print(message, file=sys.stderr)
+            else:
+                diagnostic(message)
         if reserve:
             primitive._atomic_write_json(root / "deploy-manifest.json", manifest, lock=lock)
         ticket = {
@@ -202,10 +205,28 @@ def _procutil(payload_root: Path) -> Any:
     return module
 
 
+def _human_output() -> Any:
+    name = f"{__package__}._lifecycle_human" if __package__ else "_payload_lifecycle_human"
+    if name in sys.modules:
+        return sys.modules[name]
+    helper = Path(__file__).with_name("_lifecycle_human") / "__init__.py"
+    spec = importlib.util.spec_from_file_location(name, helper)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Lifecycle human-output helper is unavailable: {helper}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        del sys.modules[name]
+        raise
+    return module
+
+
 def run_lifecycle(
     binding: Any, primitive: Any, command: list[str], *,
     deferred_runtime: bool = False, teardown: bool = False,
-    timeout: float | None = None, **arguments: Any,
+    timeout: float | None = None, human_operation: str | None = None, **arguments: Any,
 ) -> int:
     """Keep the native installer child contained under its admitting parent."""
     if not command or not Path(command[0]).is_absolute():
@@ -214,37 +235,64 @@ def run_lifecycle(
         raise ValueError("A lifecycle deadline must be finite and positive.")
     if timeout is not None and os.name != "nt":
         raise ValueError("A lifecycle deadline requires Windows Job containment.")
+    if human_operation is not None and (human_operation not in {"install", "update"} or teardown):
+        raise ValueError("Human lifecycle output requires install/update without teardown.")
     if teardown:
         root = Path(arguments["legacy_root"]).resolve()
         if any(Path(path).resolve().is_relative_to(root) for path in (sys.executable, command[0])):
             raise ValueError("Teardown requires parent and child interpreters outside the runtime.")
-    with legacy_lifecycle(
-        binding, primitive, reserve=not (deferred_runtime or teardown),
-        teardown=teardown, **arguments,
-    ) as lease:
-        environment = {**os.environ, TICKET_ENV: json.dumps(lease.ticket)}
+    with ExitStack() as stack:
+        human = _human_output() if human_operation else None
+        operation = None
+        environment = dict(os.environ)
+        if human is not None:
+            from importlib import import_module
+
+            capabilities = import_module(f"{human.__name__}.capabilities")
+            target = capabilities.powershell_file_target(command)
+            if target is not None:
+                if not capabilities.powershell_human_utf8_supported(target):
+                    raise ValueError("Lifecycle human output requires declared PowerShell UTF-8 support.")
+                environment[capabilities.HUMAN_UTF8_ENV] = "1"
+            operation = stack.enter_context(human.HumanOperation(
+                f"{arguments['plugin_id']}/{human_operation}",
+            ))
+        def diagnostic(message: str) -> None:
+            if operation is None:
+                print(message, file=sys.stderr)
+            else:
+                operation.progress(message, state="warning")
+
+        # Sample elapsed at child exit, before Job cleanup and output draining.
+        # Finish cleanup and verify/release the lease before reporting completion.
+        work = stack.enter_context(ExitStack())
+        lease = work.enter_context(legacy_lifecycle(
+            binding, primitive, reserve=not (deferred_runtime or teardown),
+            teardown=teardown, diagnostic=diagnostic if operation else None, **arguments,
+        ))
+        environment[TICKET_ENV] = json.dumps(lease.ticket)
+        output = work.enter_context(human.native_output()) if human is not None else None
+        stdout = sys.stdout if output is None else output
+        stderr = sys.stderr if output is None else output
         job = None
         if timeout is not None and os.name == "nt":
             child, job = _procutil(Path(arguments["payload_root"])).spawn_sync_in_kill_on_close_job(
                 command, require_job=True, allow_breakaway=False,
-                env=environment, stdout=sys.stdout, stderr=sys.stderr, **no_window_kwargs(),
+                env=environment, stdout=stdout, stderr=stderr, **no_window_kwargs(),
             )
         else:
             child = subprocess.Popen(
-                command, env=environment, stdout=sys.stdout, stderr=sys.stderr, **no_window_kwargs(),
+                command, env=environment, stdout=stdout, stderr=stderr, **no_window_kwargs(),
             )
         while True:
             try:
                 result = child.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                print(
-                    "Runtime lifecycle deadline exceeded; stopping the admitted installer tree.",
-                    file=sys.stderr,
-                )
+                diagnostic("Runtime lifecycle deadline exceeded; stopping the admitted installer tree.")
                 try:
                     job.terminate_and_wait(2)
                 except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-                    print(f"Runtime lifecycle cancellation failed: {error}", file=sys.stderr)
+                    diagnostic(f"Runtime lifecycle cancellation failed: {error}")
                     # Without an empty-Job witness, preserve the durable
                     # reservation even if this parent can no longer wait.
                     lease.lock.acquired = False
@@ -252,15 +300,25 @@ def run_lifecycle(
                     child.wait()
                     raise
                 child.wait()
+                elapsed = operation.monotonic() - operation.started if operation is not None else None
+                work.close()
+                if operation is not None:
+                    operation.complete("failed", "deadline exceeded (exit 124)", elapsed=elapsed)
                 return 124
             except KeyboardInterrupt:
                 continue
+            elapsed = operation.monotonic() - operation.started if operation is not None else None
             if job is not None:
                 try:
                     job.terminate_and_wait(2)
                 except (OSError, RuntimeError) as error:
-                    print(f"Runtime lifecycle containment cleanup failed: {error}", file=sys.stderr)
+                    diagnostic(f"Runtime lifecycle containment cleanup failed: {error}")
                     lease.lock.acquired = False
                     job.close()
                     raise
+            work.close()
+            if operation is not None:
+                operation.complete(
+                    "done" if result == 0 else "failed", f"exit {result}", elapsed=elapsed,
+                )
             return result
