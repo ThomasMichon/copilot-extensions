@@ -202,6 +202,13 @@ during Phase 2; any material expansion returns through proposal review first.
   refusal, malformed declarations, duplicate sources and sanitized failures.
   Python lint passed. Contract re-attestation, fresh review and hosted CI
   remain required; no live deployment or credential grant occurred.
+- Re-attested the current generation-41 metadata to committed runtime
+  `862f3f48f8fd0af32344cbf148c9228726c6bc27`, with 35 source hashes and 32
+  provenance records. The four production registration/command dependencies
+  are source-only non-HTTP closure entries, not invented HTTP captures.
+  Independent checking passed 265 fixtures and the combined contract/provider
+  consumer lane passed 115 cases. Expected bodies, historical vectors and
+  capability floors are unchanged.
 
 ### 2026-10-19 - Global and project activation boundary
 

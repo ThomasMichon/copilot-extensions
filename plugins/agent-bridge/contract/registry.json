@@ -295,6 +295,30 @@
           "sha256": "1f0ee4f1599af18cdf3f1184af115eb660a2f8d1ff23db812cfac342667132f5",
           "semantic": true,
           "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/http_provider_sources.py",
+          "sha256": "c29bad0dc0af5938dcd364018c8c05cb857114be01022dfe47aeb696ab0739fb",
+          "semantic": false,
+          "non_semantic_reason": "Local adapter registers explicitly advertised native provider HTTP credential sources and lazily invokes their fixed native command. It does not produce agent-bridge HTTP request/response fields. This source-only transitive closure evidence does not claim the HTTP fixtures capture relay-profile or http-credential native-command semantics."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/provider_process.py",
+          "sha256": "fd8a6f23400b55e9810744dd1a1d16b9a148001504dc3ed5f8002c03f99008e8",
+          "semantic": false,
+          "non_semantic_reason": "Local bounded native-command subprocess helper adds optional stdin bytes and captures output; it is not an agent-bridge HTTP wire producer. Its exact source is pinned as the HTTP credential adapter execution dependency, not as an independently captured native-command protocol vector."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/agent_registry_relay.py",
+          "sha256": "734a026677704eb565d801bf33ae775d946388d12dd87f14d378eb5490760b52",
+          "semantic": false,
+          "non_semantic_reason": "Local startup registration connects the relay builder to the opted-in native HTTP credential-source adapter; it does not add HTTP request/response fields. The pinned startup source is closure evidence only; HTTP fixture execution does not establish native provider discovery or command execution."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/provider_sources.py",
+          "sha256": "2acfba87cca0cd6c08dbc42765a5b1cfe048e402ed8c088b784c7c9b5eadb8ec",
+          "semantic": false,
+          "non_semantic_reason": "Local native provider manifest discovery validates attribution, activation and the http_credentials_version opt-in. These on-disk/native-command declarations are not agent-bridge HTTP payload fields. Pin the actual adapter discovery dependency without presenting unchanged HTTP fixtures as native provider protocol captures."
         }
       ],
       "fixtures": [
@@ -1590,247 +1614,247 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol-generation-41.json",
-          "sha256": "8409b2778956de1d15de036aaf7e01a2508bad1e18bef98054480ef605566b70",
+          "sha256": "085f795ed5d273fb71fbd17612820a0a069f24e72bd6ed1476ee6d194c60495e",
           "role": "Generation-41 independent expected-vector re-attestation: acquisition-protocol-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt-generation-41.json",
-          "sha256": "736d25fa126337f58cfc76a636f1472ef92b77834b7b717ece65b387be65f2d8",
+          "sha256": "851b344deefd0b83589600268103b394b95604cbd4c092cbff790f352fff0573",
           "role": "Generation-41 independent expected-vector re-attestation: live-message-receipt-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-41.json",
-          "sha256": "f8312cda893b7280d6f3d341123320fb8c03455c072034409d7437aa0933c2c6",
+          "sha256": "b0fb1c89c9d226942f317bb5fa49c7d1b8a2d7b28eaea5b9d13e8b6b237e3a4f",
           "role": "Generation-41 independent expected-vector re-attestation: peer-replies-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-41.json",
-          "sha256": "29527a1dc9cd250d13b5955d3d3de7d0851a04fbca3c5fedf2da50699e023bca",
+          "sha256": "723123cc9cf2d32b93dbef54434171c363815d611c5b850d21861f0c23db11cf",
           "role": "Generation-41 independent expected-vector re-attestation: workspace-creation-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-41.json",
-          "sha256": "3d4d89904ff968f444209dd29c254d113688bf47b3ca20bf48a279f309d90a99",
+          "sha256": "c5a33c176fecb4c099405e32f76ca7377ad3b3df7644f0c3818faf3d4b1d0e72",
           "role": "Generation-41 independent expected-vector re-attestation: remote-message-receipt-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-41.json",
-          "sha256": "e42cb6c7558998ae735ee90507b0cf2b9f200cbd1db03c7381e2c5df71b51bd2",
+          "sha256": "c0f63cd461f519282063399263e393dfe1b02067139942d91f16fd62a6c6073f",
           "role": "Generation-41 independent expected-vector re-attestation: remote-zero-reply-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-41.json",
-          "sha256": "1250853087f6d9888e76bfc44b44abd264c77764a1302c611eeef1ae7f871451",
+          "sha256": "3a97a9582628c63074ce944b72338fef71f34558dc384e034c9cf322b65df022",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-41.json",
-          "sha256": "63b9a793ecb3f8599e87dc63ce8258baa9c1dcf11747278109397acb758ca297",
+          "sha256": "3639a87f58b8ea0775e3037fb16791fd0b5cc89a9a73cb097f4493f85e666d95",
           "role": "Generation-41 independent expected-vector re-attestation: workspace-creation-routes-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-41.json",
-          "sha256": "1f9c7d9356b0e783f25e70eb09e64efd263fd5813f2adfbfa0d0a4d142ab8a3b",
+          "sha256": "1f74f4da0071fa28d14e456a0658a59e512dbb046bbf44cae91087d6b735fcb0",
           "role": "Generation-41 independent expected-vector re-attestation: remote-peer-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-41.json",
-          "sha256": "9d65001ef13b110d6a835f0950dedbb86e2370a9cc4094d87923886ecc5d0e76",
+          "sha256": "a1a8822f9a92143fa6b7248921cd3715e97c68ed4b5c72e8b1881ce10dab2796",
           "role": "Generation-41 independent expected-vector re-attestation: agents-list-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-41.json",
-          "sha256": "cf7ab8a0b391598f41ba179ca4f4539aef4466060c9451f2d419609ffcf5454a",
+          "sha256": "1aaafabc1d072d1e1af05c1be85c416401124dd79dd3d9816a6eb1c1bf1e953a",
           "role": "Generation-41 independent expected-vector re-attestation: native-bound-extracted-prompt_models-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-41.json",
-          "sha256": "b57ba3df2693951a4cbbd7d26d1fa0380884bd391f8ed6053b309df0dbbcb880",
+          "sha256": "71168815b840a440280d3de0674fdf02f6e979745b177a1fed954a9662dff1ab",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-models-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-41.json",
-          "sha256": "87b8ee4dc0eb9c38268fb889588cf8d333554495696350c70e68977791181777",
+          "sha256": "62f6652d87b7076cd5b6c87fff8a7eca93f942604c451506aa380298edffddcd",
           "role": "Generation-41 independent expected-vector re-attestation: native-bound-extracted-routes-prompts-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-41.json",
-          "sha256": "4042265622193ddf35d0bc88df7baf21a2257514ea82e19626b2b8f4b745e3de",
+          "sha256": "d1106dfd85724d0b6f55110e36b29b15e92452c400ebec6b8a1055f564c0ddfe",
           "role": "Generation-41 independent expected-vector re-attestation: live-registration-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-41.json",
-          "sha256": "e5d2761d655b1dc0b62a85b67f076559535fc86fb2b0313b65c2cef8f1c0fffa",
+          "sha256": "418ada8ee7d56e3a7892fd65db17877a0a4ef5f3b9b88fa48d999d1a706ff22d",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-admission-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-41.json",
-          "sha256": "67c408fa69896ecbe61146b30478de7db1cc1855b5ba01cc99d7c076867eba9a",
+          "sha256": "0947c18a13e03c9e6fb7bbc84365ad0a163a5c286eea81e79161c8cbb6847532",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-native-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-41.json",
-          "sha256": "870b7da3c32816cea3e44cd5f1d92bdd44eeceec8da092614b690980a9d523b8",
+          "sha256": "b5c296a607dcd6fbbca2633930fd82927cbadbd02b117cc00366a17bef32541d",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-resume-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-41.json",
-          "sha256": "ed29e0b8b048bf7536e01ea70e79443db58a909c9ba53ccf7a732eeac815b67d",
+          "sha256": "2b369c671a00471ec1cf2664d68873decaac7dde7b9c3ce695f66d09bfa1b0ee",
           "role": "Generation-41 independent expected-vector re-attestation: provider-creation-refresh-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-41.json",
-          "sha256": "a8419f94cac63161580f64d540a96e95766b16a5a919d5990a277ebb4eaa2c0a",
+          "sha256": "85122cd695d8794b382e3eb3ad0fb4e9d468d227a3a5381e336329fb6232f403",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-41.json",
-          "sha256": "711d14d5eabe660ab223b9cedd00710c65a418b948a8e86e6187c3fbb064615b",
+          "sha256": "728651eea39eb862033c356fd201728e27a3c7223c8d5e525e29eb47b5b41350",
           "role": "Generation-41 independent expected-vector re-attestation: workspace-creation-models-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-41.json",
-          "sha256": "9ee3d333c9ab1ad72f08d0623efec0dcdfeb5d6e2564a387e726b07cd3668683",
+          "sha256": "1b85a9600ededbe2a74ca899ec958c9a8ec0e17cd5ac9705c9f8922e65f3c9ef",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-worktrees-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-41.json",
-          "sha256": "518968fcc67bc279acc3fef77157b2c6e5d577e1402088bc76555dec936f4216",
+          "sha256": "0cc3f5846eb40cad98933327587840bfe4748ba8b96f92fef23b6c6aa9a60741",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-worktree_refresh-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-41.json",
-          "sha256": "f6cd0a5fcfb6ec3e8bb9cb47d25ba66ae9415196b785c89cb20c8a598f6f54c2",
+          "sha256": "30790125ae65fdc6309ebbf3c4e5224444a80a66c33b0850671e6b1fd00fda8c",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-client_worktrees-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-41.json",
-          "sha256": "5760303f4b7780f51b1010c9e7b2ab35528d865bd4ed1dcbb7d2462c1ef12ab2",
+          "sha256": "3d8f6b151159b52ea9bb56cb011f2ed0fa5b797e2095813fca9ffe19588706ef",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-worktree_entry-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-41.json",
-          "sha256": "515f1bd5bc2127256558e05f1bc484ee22695d5817f4af920afccde16a005f74",
+          "sha256": "4b8ba56a8bfcd588be849a08b5c9a2629b5e5acb2fa877ee7ccef62425061e47",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-models-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-41.json",
-          "sha256": "08ef474aae0c5cb6eb4c11f99f5a02ed94cef94b11f855b40ba6ae7178750e64",
+          "sha256": "c4cccc11689a5425606b8cb62a3b033528e6e75ab776cbb3f13b3476ceffed7f",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-client_session_start-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-41.json",
-          "sha256": "36eed06cce899a1af6aa409a765253f56df5b99c2a98c6edeff2c4a6958654fb",
+          "sha256": "a379c8b9022c88103fd309345a33482d7981414186e1f0eedfdcd549d5505943",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-client_answers-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-41.json",
-          "sha256": "03a292fc02708a445415733a9552f040a6376327deae88e1c4e9a71d85f5f176",
+          "sha256": "5d59eb5be8535007566b8fd5cf6137efef574d1cecc832079968f49620c88566",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-routes-answers-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-41.json",
-          "sha256": "71d54303717727ddc5789ede0b7dd166b87b4ec0a5e2004a22970d509a79916a",
+          "sha256": "f07ea3b37caf639120a32f90e5feec65a269326212179e7e2c15f2112069c811",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-remote_acp_sessions-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-41.json",
-          "sha256": "9f1f2aebcf613315bef8ca2bff06e32e36cf0ab18fd5ea4c4e3045c9c5d1bea5",
+          "sha256": "e8d3b82ca7874d8d1c445ef75f852a4ca28a3cd11b32003b15d26b83471c09a5",
           "role": "Generation-41 independent expected-vector re-attestation: remote-acp-progress-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-41.json",
-          "sha256": "0d89876997c4f4acd3e5b3052c0062724c2fb899355d9e87736da87d704812ff",
+          "sha256": "6d51c19ff39e8a63e2cb997538cc8c777100412fd08ceb3b66d4b58a625a49f8",
           "role": "Generation-41 independent expected-vector re-attestation: remote-operation-versions-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-41.json",
-          "sha256": "f972159847d16a7ad0b983d51275b461f84216175cc218b70255656cbcd7217a",
+          "sha256": "b39ae60229225a63b0c9ce5e13859b2ed8d948b2ad81d08199e9e48d6ea48b2f",
           "role": "Generation-41 independent expected-vector re-attestation: native-worktree-resume-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-41.json",
-          "sha256": "7e8b1793c04359988ad98cb71ccb8d2995f237cc337c1756940115f3cfae6a3b",
+          "sha256": "1760ea2e791822c1b777e2424b253693246cfc9af6994e707bf48a3ec9e9a36c",
           "role": "Generation-41 independent expected-vector re-attestation: native-worktree-resume-client-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-41.json",
-          "sha256": "20d641c2d8688a871fb3efff739de2e7e49ec01a642af0cab6c65e0ebb527cb3",
+          "sha256": "15dd288c2e8c0f56ea4352c412ef99fcf3fbbd73c847badcb3b37ebcfef6a856",
           "role": "Generation-41 independent expected-vector re-attestation: native-singleton-resume-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-41.json",
-          "sha256": "f70c22055df3cd23d780b475388d6f22429e4be0e14384646957770a4437fa5e",
+          "sha256": "198a11210ac626fbf11d5930d5899f71a9789bcc6a2a0850defb28acaa43dbcc",
           "role": "Generation-41 independent expected-vector re-attestation: native-worktree-confirmation-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-41.json",
-          "sha256": "18f34036d1def6bf716c172df085a811403279c611f7cc7486d3f79bcb78318b",
+          "sha256": "4b6c3ef802a4feedfc8509d4f6ff9b9b33ba6e92a653e6cdd259538eed3c7a84",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-owner-record-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-41.json",
-          "sha256": "b155d2ce36db737287305e0aa27b790cfbe7da759fc1da95dc4e321cf9884c05",
+          "sha256": "ee498af5ebbd2a57412a148fb19727f83591d02b37542c5a9eccb9171a82e945",
           "role": "Generation-41 independent expected-vector re-attestation: native-worktree-reconciliation-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-41.json",
-          "sha256": "854ace38372df53be4d11accfd929be95120fc881f6f5dd4256100a2e403bd20",
+          "sha256": "25de4c2b33123f296de19f6b06795eef88f0aea64e7247934b2628cb4aac41f4",
           "role": "Generation-41 independent expected-vector re-attestation: native-singleton-liveness-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-ssh-profile-generation-41.json",
-          "sha256": "2cb9da67fc43181f38b70d396fdce62d1be33071d88737c06c38df17ec159a69",
+          "sha256": "3f4fa5c2ea13bce6ada0f4d5c626d14aadc5a8b3c813da010103ebe4639c306a",
           "role": "Generation-41 independent expected-vector re-attestation: worktree-render-worktrees-ssh-profile-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-ssh-profile-generation-41.json",
-          "sha256": "38a496061eea50c04ac2b408751ffad2cf27917f8e470ce77d44b7042ef28b52",
+          "sha256": "d44e5676607984b7ad0d610262ab71e9a522af24ea383d1e6d7ec1678c04af82",
           "role": "Generation-41 independent expected-vector re-attestation: remote-message-receipt-ssh-profile-generation-41.json",
           "generation": 41
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-targets-generation-41.json",
-          "sha256": "aa54a0c54ca35cf59252de3e15686a9ee42dc3828043471922b8755c0197c554",
+          "sha256": "6fd12d4c7b18ae037476e996b1ebc06443e59765b1fa5d0f9198e5113685ffd7",
           "role": "Independent hand-authored HTTP-41 URL floor, ordinary roster, exact binding/source approval and fail-closed target vectors",
           "generation": 41
         }
@@ -4357,228 +4381,260 @@
           "capture_method": "Re-attest unchanged HTTP-40 wire vectors after clearing the retained completed task and cancel-requested flag on a periodic-to-on-demand restart; the capture/restore/wire contract is unaffected."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
           "source_git_blob": "b158083b99f4d9972456d7eac0a2090f146595cd",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
           "source_git_blob": "251580fbf91a17a8bddda74f9b2a8f00ff2e7269",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "69524f64f093ebaf14e0d095c4681b3960231fa9",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
           "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
           "source_git_blob": "0e98cda7ee8dcc3dceda02dc02fac6b848472cde",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
           "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
           "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
           "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
           "source_git_blob": "791bd10ae066e32201f8edb17af3a5e498159e6c",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
           "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
           "source_git_blob": "6f789f626eb69b882a79e3a336fa8ba443be29fe",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
           "source_git_blob": "337327675392254d076f9e99d4f1cfaba1609504",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
           "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
           "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
           "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
           "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
           "source_git_blob": "b5ebdc87ddb649573fb0d2b5578a0bc00edb368d",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
           "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
           "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
           "source_git_blob": "89c419a8af26d2954754ed53b256098da3e6b985",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
           "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
           "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
           "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
           "source_git_blob": "479172e6483513d6ecd60652ac2c995c94603a2e",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
           "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
           "source_git_blob": "4cc342a43aa7c4b648150ebf3a8be30379577ba2",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
         },
         {
-          "commit": "ea573a4458a8e5d9c9b58ff54661245f48e11df4",
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
           "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
-          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, source isolation, discovery/readiness, lifecycle locking/revalidation, named-reuse compatibility and global-versus-project activation scoping fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained contract tests exercise the real model, client and HTTP route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. Historical generations and capability floors are unchanged."
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification after reviewed target binding, lifecycle, activation scoping and production native HTTP credential-source registration fixes. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots. Contained HTTP contract tests exercise model, client and route entry points, retained named-remote wire identity, health 41, URL floor 41, named floor 38, ordinary binding-state roster and exact local endpoint/source-approval policy without live network or secret access. The additional local native registration/command dependencies are recorded separately as source-only closure evidence, not as native credential-command captures. Historical generations and capability floors are unchanged."
+        },
+        {
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 41,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/http_provider_sources.py",
+          "source_git_blob": "2fa57c43fae342ae1e709ca6115844923a6d6b62",
+          "capture_method": "Source-only transitive closure attestation: verify exact committed Git blob and LF-normalized source SHA-256 for the production native HTTP credential registration path. Local adapter registers explicitly advertised native provider HTTP credential sources and lazily invokes their fixed native command. It does not produce agent-bridge HTTP request/response fields. This source-only transitive closure evidence does not claim the HTTP fixtures capture relay-profile or http-credential native-command semantics. No native command is executed, no credential is obtained, and no producer snapshot is used as an expected HTTP body."
+        },
+        {
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 41,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_process.py",
+          "source_git_blob": "50b484ded1ed7b18292562bd384865c5bbf2cbd8",
+          "capture_method": "Source-only transitive closure attestation: verify exact committed Git blob and LF-normalized source SHA-256 for the production native HTTP credential registration path. Local bounded native-command subprocess helper adds optional stdin bytes and captures output; it is not an agent-bridge HTTP wire producer. Its exact source is pinned as the HTTP credential adapter execution dependency, not as an independently captured native-command protocol vector. No native command is executed, no credential is obtained, and no producer snapshot is used as an expected HTTP body."
+        },
+        {
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 41,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/agent_registry_relay.py",
+          "source_git_blob": "7202464c964f810d44ff9aa5f83e6abf10086528",
+          "capture_method": "Source-only transitive closure attestation: verify exact committed Git blob and LF-normalized source SHA-256 for the production native HTTP credential registration path. Local startup registration connects the relay builder to the opted-in native HTTP credential-source adapter; it does not add HTTP request/response fields. The pinned startup source is closure evidence only; HTTP fixture execution does not establish native provider discovery or command execution. No native command is executed, no credential is obtained, and no producer snapshot is used as an expected HTTP body."
+        },
+        {
+          "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 41,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_sources.py",
+          "source_git_blob": "e69f697fb799e830677ab2aee51f6a0c6c93f541",
+          "capture_method": "Source-only transitive closure attestation: verify exact committed Git blob and LF-normalized source SHA-256 for the production native HTTP credential registration path. Local native provider manifest discovery validates attribution, activation and the http_credentials_version opt-in. These on-disk/native-command declarations are not agent-bridge HTTP payload fields. Pin the actual adapter discovery dependency without presenting unchanged HTTP fixtures as native provider protocol captures. No native command is executed, no credential is obtained, and no producer snapshot is used as an expected HTTP body."
         }
       ],
       "support_window": "HTTP generations 1 through 41 remain supported. Direct URL endpoint targets require generation 41; named remote ACP retains floor 38, receipts retain 39, and exact-native worktree resume retains 40. Historical independent fixtures remain immutable; generation-41 re-attestations retain their original capability floors.",
