@@ -112,6 +112,9 @@ remaining cycle deadline as provider resolution. Pending reads remain tracked
 and indeterminate; withdrawal or changed declaration authority invalidates
 their eventual result. Corrupt selection metadata withholds that companion
 without aborting unrelated units or changing its evidence.
+Managed recovery consumes that accepted persisted snapshot rather than reading
+the same selection again on the master. A later cold lookup also uses the
+bounded observation path.
 Shutdown retires bounded executors and clears their active references even when
 work misses the grace window. A failed successor spawn can reclaim the singleton
 and create usable replacement pools; original futures and publication/receipt
@@ -119,6 +122,10 @@ operations remain tracked rather than resubmitted. This is not native custody pr
 Changed receipts are superseded rather than retired. The existing crash-safe OS
 lock primitive serializes the exact receipt operation. No new reservation store,
 force-release policy or automatic recovery scheduler is introduced.
+A generation with neither managed selection metadata nor a managed snapshot in
+its process receipt does not scan unrelated transition groups before retirement.
+Managed generations retain their selection/integrity validation, and every
+retirement still checks matching root selection pins before reporting completion.
 
 Selection integrity is verified while its durable root pin remains published,
 outside the root-wide bookkeeping lock. Before withdrawal the same scope and
@@ -161,6 +168,8 @@ The outer serve loop also logs expected indeterminate failures without their
 exception chains. Process-receipt availability uses the same sanitized metadata
 reader as selection and operation records, including when provider resolution
 reports the failure.
+Receipt progress, inventory, worker completion and scheduling logs expose only
+the exception category, not its underlying path or provider message.
 A controller without a callable progress observation reports
 `receipt-progress-unsupported`; only a completed observation may report `[]`.
 Data/state failures in the final summary follow the same classified best-effort

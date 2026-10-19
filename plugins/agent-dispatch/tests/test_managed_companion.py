@@ -688,7 +688,8 @@ def test_materializer_result_for_another_authority_is_rejected(harness, caplog):
     summary = h.daemon.reconcile_once()
     assert summary.restarted == []
     assert h.unit.proc is old
-    assert "does not match" in caplog.text
+    assert "error_type=CompanionError" in caplog.text
+    assert "does not match" not in caplog.text
 
 
 def test_restart_uses_exact_selected_snapshot_before_provider_churn(harness):
@@ -917,6 +918,37 @@ def test_failed_selected_recovery_does_not_block_ready_current_configuration(har
     assert summary.running == [h.rid]
     assert h.unit.companion_resolution.environment["MODE"] == "new"
     assert h.controller.selected_managed(h.rid) == h.unit.companion_resolution.managed_snapshot
+
+
+def test_cold_recovery_uses_the_bounded_accepted_selection_without_a_second_read(harness, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    h = harness
+    h.daemon.reconcile_once()
+    snapshot = h.unit.companion_resolution.managed_snapshot
+    h.provider = CompanionIndeterminate("provider unavailable")
+    h.controller = h.make_controller()
+    h.daemon = h.make_daemon()
+    h.daemon._provider_executor = ThreadPoolExecutor(max_workers=4)
+    release = threading.Event()
+    reads = []
+
+    def selected(rid):
+        reads.append(rid)
+        if len(reads) > 1:
+            assert release.wait(3)
+        return snapshot
+
+    monkeypatch.setattr(h.controller, "selected_managed", selected)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(h.daemon.reconcile_once)
+        try:
+            future.result(timeout=0.5)
+            assert reads == [h.rid]
+        finally:
+            release.set()
+            future.result(timeout=1)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job ownership must be reacquired")

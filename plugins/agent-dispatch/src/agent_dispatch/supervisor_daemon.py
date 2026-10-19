@@ -1343,7 +1343,11 @@ class SupervisorDaemon(BoundedReconciliation):
                     self._companion().retire_crashed(unit.companion_resolution, unit.proc)
                     unit.proc = None
                 if previous is None and unit is None:
-                    previous = self._companion().selected_managed(rid)
+                    accepted = self._companion_resolutions.get(rid)
+                    if rid in self._managed_uncertain and accepted is not None:
+                        previous = accepted.managed_snapshot
+                    if previous is None:
+                        previous = self._selected_managed(rid, authority)
                 if previous is not None and not self._rollback_allowed(previous, registration):
                     previous = None
                     if unit is not None:
@@ -1384,7 +1388,7 @@ class SupervisorDaemon(BoundedReconciliation):
                             previous, summary, bucket="started", precondition_confirmed=True
                         )
                     except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
-                        log.error("managed companion %s selected recovery failed: %s", rid, exc)
+                        log.error("managed companion %s selected recovery failed: error_type=%s", rid, type(exc).__name__)
                         failure = (
                             previous.fingerprint,
                             self.clock() + max(self.restart_backoff, self.poll_interval),
@@ -1448,7 +1452,7 @@ class SupervisorDaemon(BoundedReconciliation):
                     self._managed_launch_failures[rid] = (
                         snapshot.fingerprint, self.clock() + max(self.restart_backoff, self.poll_interval),
                     )
-                    log.error("managed companion %s launch failed: %s", rid, exc)
+                    log.error("managed companion %s launch failed: error_type=%s", rid, type(exc).__name__)
                     summary.skipped.append(rid)
                     if previous is not None and previous.fingerprint != snapshot.fingerprint:
                         # Same bounded/off-thread precondition as the primary
@@ -1469,7 +1473,7 @@ class SupervisorDaemon(BoundedReconciliation):
                 CompanionError, CompanionIndeterminate, ManagedRuntimeError,
                 OSError, ValueError, subprocess.SubprocessError,
             ) as exc:
-                log.error("managed companion %s cannot safely reconcile: %s", rid, exc)
+                log.error("managed companion %s cannot safely reconcile: error_type=%s", rid, type(exc).__name__)
                 summary.skipped.append(rid)
                 if isinstance(exc, (ManagedRuntimeError, CompanionError)):
                     self._managed_runtime_authorities.pop(rid, None)

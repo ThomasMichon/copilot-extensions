@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import pytest
 
@@ -56,11 +56,65 @@ def test_receipt_metadata_failure_does_not_disclose_paths(tmp_path, monkeypatch,
     assert str(tmp_path) not in caplog.text
 
 
+@pytest.mark.parametrize("site", ["worker", "scheduling"])
+def test_receipt_operation_error_logs_keep_only_error_type(tmp_path, monkeypatch, caplog, site):
+    controller = DefaultCompanionController(tmp_path / "receipts")
+    _receipt(controller, "orphan")
+    private = str(tmp_path / "private-operation-detail")
+    error = ManagedRuntimeError(private) if site == "worker" else PermissionError(private)
+    if site == "worker":
+        future = Future()
+        future.set_exception(error)
+        controller._receipt_operations["orphan"] = future
+        adopted = {"orphan"}
+    else:
+        def fail(*args, **kwargs):
+            raise error
+
+        monkeypatch.setattr(controller, "_schedule_receipt", fail)
+        adopted = set()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        controller.reconcile_receipts_bounded(adopted, executor=pool, deadline=time.monotonic() + 1)
+    assert private not in caplog.text
+    assert f"error_type={type(error).__name__}" in caplog.text
+
+
+def test_unmanaged_orphan_ignores_unrelated_malformed_transition_group(tmp_path, monkeypatch):
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    receipt = _receipt(controller, "orphan")
+    group = controller.receipt_dir / "unrelated.managed-transition-group.json"
+    group.write_text("{", encoding="utf-8")
+    retired, pin_checks = [], []
+    retention = controller._managed_retention()
+    original = retention.selection_withdrawn
+
+    def pin_check(*args, **kwargs):
+        pin_checks.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(retention, "selection_withdrawn", pin_check)
+    monkeypatch.setattr(controller, "_retire_receipt", lambda value, **kwargs: retired.append(value))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        controller._schedule_receipt(
+            "orphan", set(), pool, time.monotonic() + 2, set(),
+        )
+        controller._receipt_operations["orphan"].result(2)
+    assert retired == [receipt]
+    assert controller._read_receipt("orphan") is None
+    assert controller._operation_record("orphan")["state"] == "complete"
+    assert pin_checks and group.read_text(encoding="utf-8") == "{"
+
+
 def test_receipt_integrity_pending_does_not_block_unrelated_units(tmp_path, monkeypatch):
     entered, release = threading.Event(), threading.Event()
-    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
-    _receipt(controller)
-    monkeypatch.setattr(controller, "selected_managed", lambda rid: object())
+    harness = RetentionHarness(tmp_path)
+    snapshot = harness.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    controller = DefaultCompanionController(
+        harness.state, retention=harness.retention, token_source=lambda pid: "owner",
+    )
+    controller._publish_selection(snapshot)
+    _receipt(controller, rid)
 
     class Retention:
         def validate_withdrawal(self, *args, **kwargs):
@@ -85,25 +139,25 @@ def test_receipt_integrity_pending_does_not_block_unrelated_units(tmp_path, monk
             assert time.monotonic() - cycle_started < 0.5
             entered.wait(0.01)
         assert entered.is_set()
-        future = controller._receipt_operations["withdrawn"]
+        future = controller._receipt_operations[rid]
         time.sleep(0.06)
         started = time.monotonic()
         daemon.reconcile_once()
         elapsed = time.monotonic() - started
         print(f"pending-receipt cycle elapsed={elapsed:.3f}s")
         assert elapsed < 0.5
-        assert controller._receipt_operations["withdrawn"] is future
+        assert controller._receipt_operations[rid] is future
         inventory = controller._receipt_inventory_future
         if inventory is not None:
             inventory.result(timeout=1)
         daemon._progress_future.result(timeout=1)
-        assert controller._operation_record("withdrawn")["state"] == "timeout"
-        assert controller._receipt_path("withdrawn").exists()
+        assert controller._operation_record(rid)["state"] == "timeout"
+        assert controller._receipt_path(rid).exists()
         assert len(launcher.launched) == 1
     finally:
         release.set()
         daemon.shutdown()
-    assert controller._operation_record("withdrawn")["state"] == "unknown"
+    assert controller._operation_record(rid)["state"] == "unknown"
     milestones = [
         json.loads(path.read_text(encoding="utf-8"))
         for path in (controller.receipt_dir / "reconcile-history").glob("*.json")

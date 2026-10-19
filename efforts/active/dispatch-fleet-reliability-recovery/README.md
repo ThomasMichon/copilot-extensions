@@ -2151,3 +2151,35 @@ requested contract.
   flake, retry permission or CI waiver. Fresh resulting-head full review and
   every required hosted gate remain blocking; native recovery and adoption
   obligations are unchanged.
+
+### 2026-10-19 - Address body-only full-review findings
+
+- Review `5577100006` on #6487 labels its inline list empty but contains four
+  Medium findings in its overview body. Treat those as blocking, not as a
+  clean verdict. Two raw operation/scheduling log cases, an unmanaged orphan
+  alongside an unrelated malformed transition group, and the second cold
+  selected-state read all fail before correction.
+- Every receipt reconciliation log now exposes only its exception type.
+  Generations with no managed selection or process-snapshot evidence do not
+  discover unrelated managed groups before orphan retirement; all managed
+  selection validation, root-pin checks, exact generations and unknown-outcome
+  fences remain. Managed recovery carries the accepted persisted snapshot
+  instead of synchronously reading it again. Later cold reads use the bounded
+  observation path.
+- The integrity-blocking fixture now publishes a real managed selection before
+  blocking validation, rather than presenting an unmanaged receipt and mocking
+  its selected state. All original progress/deadline/unknown assertions remain.
+  The materializer-authority test still proves rejection and preservation of
+  the existing process, while expecting the intentionally classified error log.
+  Initial coupled failures remain failed runs, not passing evidence.
+- Complete disjoint affected cohorts pass 343 receipt/master cases in
+  80.11 seconds and 175 native lifecycle/retention cases with two platform skips
+  in 201.59 seconds: 518 successful cases with unchanged containment budgets.
+  The PR description now names the actual installer/stable-launcher owner,
+  singleton-handoff exception, managed-write barrier, bounded probe shutdown
+  and missed-grace/native-custody limitations. It links the owning lifecycle
+  contract and records the graceful-cutover checklist assessment.
+- Natural predecessor CI passes the native #7020 guard independently. That is
+  not a root-cause fix or acceptance of the earlier failure; the authorized
+  native investigation remains open. New source review and all resulting-head
+  CI still gate merge, with no runtime rollout or broader recovery authority.

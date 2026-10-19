@@ -332,7 +332,7 @@ class ReceiptReconciliation:
                 if record is None:
                     continue
             except (lifecycle.CompanionIndeterminate, OSError) as exc:
-                log.warning("receipt progress unavailable for %s: %s", path.name, exc)
+                log.warning("receipt progress unavailable for %s: error_type=%s", path.name, type(exc).__name__)
                 continue
             progress.append({key: record[key] for key in (
                 "registration_id", "generation_digest", "state", "started_at", "observed_at",
@@ -357,7 +357,7 @@ class ReceiptReconciliation:
                     lifecycle.CompanionError, lifecycle.CompanionIndeterminate,
                     ManagedRuntimeError, OSError,
                 ) as exc:
-                    log.warning("receipt operation incomplete for %s: %s", rid, exc)
+                    log.warning("receipt operation incomplete for %s: error_type=%s", rid, type(exc).__name__)
         ids: set[str] = set()
         for pattern, path_for in (
             ("*.companion.json", self._receipt_path),
@@ -371,7 +371,7 @@ class ReceiptReconciliation:
                     if not isinstance(rid, str) or not rid or path != path_for(rid):
                         raise lifecycle.CompanionIndeterminate("receipt path does not match its identity")
                 except (lifecycle.CompanionIndeterminate, OSError) as exc:
-                    log.warning("receipt inventory unavailable for %s: %s", path.name, exc)
+                    log.warning("receipt inventory unavailable for %s: error_type=%s", path.name, type(exc).__name__)
                     continue
                 ids.add(rid)
         blocked: set[str] = set()
@@ -389,7 +389,7 @@ class ReceiptReconciliation:
                 )
             except (lifecycle.CompanionError, lifecycle.CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
                 blocked.add(rid)
-                log.warning("receipt reconciliation unavailable for %s: %s", rid, exc)
+                log.warning("receipt reconciliation unavailable for %s: error_type=%s", rid, type(exc).__name__)
         return blocked
 
     def _schedule_receipt(
@@ -454,7 +454,12 @@ class ReceiptReconciliation:
                 if self._receipt_generation(rid) != generation:
                     state = "superseded"
                     return
-                snapshot = self.selected_managed(rid)
+                managed = (
+                    generation["selection"] is not None
+                    or generation["receipt"] is not None
+                    and "managed_snapshot" in generation["receipt"]
+                )
+                snapshot = self.selected_managed(rid) if managed else None
                 validated = None
                 if snapshot is not None:
                     validated = self._managed_retention().validate_withdrawal(
