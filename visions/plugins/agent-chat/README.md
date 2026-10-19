@@ -50,6 +50,15 @@ Each viewer can page forward without changing another viewer's progress.
 Normal successive reads do not repeat messages. Interrupted output favors
 recoverable replay over silently losing unseen content.
 
+### workspace-participants-and-session-delivery
+
+A real managed worktree is the stable participant across its sessions. An
+anchor conversation is segmented by its session rather than a synthetic
+worktree identity. Friendly display names are distinct from participant keys.
+The existing local service or bridge owns inbox and source assignment; the
+connection plugin supplies its trusted initialization context and consumes
+that assignment instead of reconstructing an independent identity authority.
+
 ### explicit-membership-and-obligations
 
 Agents join and leave explicitly. Where a workspace authority is adopted,
@@ -138,6 +147,10 @@ this capability preserves unrelated healthy activations and retained authoring
 work. Mute, leave, session succession and workspace-head changes prevent stale
 listeners from sending into the wrong agent. Bounded helpers retain owned
 cleanup across supported platforms and execution boundaries.
+Session-start or extension-initialization identity and working directory are
+trusted host inputs, not values that require agreement from redundant
+environment or foreground snapshots. Existing workspace succession,
+membership and backend access boundaries remain authoritative.
 
 ## Non-Goals / Boundaries
 

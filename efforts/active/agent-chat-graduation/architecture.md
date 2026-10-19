@@ -10,8 +10,8 @@ qualification belong to the parent effort.
 | Component | Owns | Does not own |
 |-----------|------|--------------|
 | Conversation core/service | Durable channel events, explicit membership, viewer cursors, bounded metadata feed | Tasks, approvals, leadership, credentials or session execution |
-| Installed client | Attributable invocation, bounded request/output, local reader serialization and uncertain-operation recovery | Another shared event log or service supervisor |
-| Connection plugin | Guidance, normal setup/discovery, explicit subscription intent and pending notification state | Host extension authority, runtime installation by stealth or another queue |
+| Installed client and existing local service/bridge | Attributable invocation, workspace/session participant resolution, inbox/source assignment, bounded request/output, local reader serialization and uncertain-operation recovery | Another shared event log or service supervisor |
+| Connection plugin | Trusted host initialization context, guidance, normal setup/discovery, explicit subscription intent and pending notification state | Independent participant/inbox authority, host extension authority, runtime installation by stealth or another queue |
 | Native session host | Effective plugin membership, attachment, foreground identity, actual admission/run lifecycle | Conversation history or workspace ownership |
 | Workspace/task authorities | Native identity, claims, head/succession, accepted work and completion | Implicit chat acceptance inferred from a cursor |
 | Existing fleet/service lifecycle | Package/role selection, placement, update/cutover, health, rollback and removal | New conversation semantics or provider credential issuance |
@@ -49,7 +49,25 @@ to reconcile with the existing standalone-system owners before code is moved.
 ## Conversation and reading contract
 
 Use one canonical append-only event history with server-assigned ordered
-identity and timestamps. Participant display names carry disambiguating native
+identity and timestamps. Participant keys and display names are distinct.
+The client resolves the host's initialization CWD through the existing workspace
+owner. For a real managed worktree, the worktree ID identifies the participant
+across sessions; the startup session ID is delivery context. For an anchor
+checkout, the startup session ID segments that conversation. A synthetic anchor
+handle is not a real managed-worktree identity. Retained membership, history,
+cursors and uncertain effects are not reset or renamed implicitly.
+
+The existing local service/bridge assigns each client's inbox and eligible
+sources using that workspace/session identity. The extension captures session
+ID and CWD once from supported session-start or extension initialization and
+consumes the assignment. It trusts those host inputs; it does not require a
+duplicate environment session ID or repeat foreground-snapshot comparisons
+to establish a second identity authority. Missing or invalid initialization
+inputs and unresolved workspace ownership remain explicit errors. Backend
+authentication, assignment isolation, native ownership/succession and explicit
+membership remain enforced by their existing owners.
+
+Participant display names carry disambiguating native
 source metadata and recorded direct-control references; resolving current
 liveness remains the direct-control owner's operation.
 
@@ -123,9 +141,12 @@ session bootstrap, copied extension code, forced source rebinding or another
 session is not an equivalent scoped remedy.
 
 Explicit subscription intent establishes the channels/selectors and lifetime.
-Resolve actual foreground/workspace identity and the rightful current head;
-do not substitute the extension process's working directory or invent an
-identity from an event. Record the pending delivery nonce before enqueue.
+Use the trusted initialization session ID and CWD with the installed client's
+workspace/session resolution and authoritative assignment. The workspace owner
+retains rightful-head and succession decisions for a real managed worktree;
+an anchor is session-segmented, not passed through a fictitious worktree-head
+check. Do not substitute the extension process's working directory or invent an
+identity from a message event. Record the pending delivery nonce before enqueue.
 Retain one pending aggregate and at most one admitted wake per recipient,
 with its generation, exact correlation and positive admission receipt.
 

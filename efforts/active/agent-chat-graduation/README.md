@@ -113,6 +113,10 @@ requirements.
   no source checkout, sibling venv or Copilot plugin is required to host it.
 - [ ] Publish bounded capabilities and errors, endpoint discovery and explicit
   setup. Preserve normal no-gap output/flush/CAS and uncertain-effect recovery.
+- [ ] Resolve trusted host-init session ID and CWD through the workspace owner:
+  real-worktree participant continuity, session-segmented anchor participants,
+  and existing local service/bridge-owned inbox/source assignment. Keep friendly
+  labels separate and preserve existing membership/cursors without migration.
 - [ ] Coordinate trusted materialized-consumer and CI qualification inventory
   support with the existing release owner under #6237 before promoting the
   expanded standalone roster; source review alone is not Main activation.
@@ -190,6 +194,11 @@ requirements.
   confirmed-leave-before-settlement, mute/unsubscribe, crash/restart, changed
   head and stale-foreground refusal with unresolved generations retained and
   already-admitted late hints disclosed rather than silently retracted.
+- [ ] **Initialization and assignment:** two sessions in one real worktree keep
+  its participant identity; two anchor sessions at the same CWD remain separate;
+  valid host initialization needs no duplicate environment session ID. The thin
+  extension consumes the existing owner's inbox/source assignment while backend
+  authentication, assignment isolation and native custody remain intact.
 - [ ] **Host adoption:** normally selected published plugin reaches the same
   genuine foreground while unrelated extension identities/lifecycles and
   retained work remain unchanged; unsupported hosts report an exact gap.
@@ -217,6 +226,20 @@ use remains valuable while an unsupported native host seam is resolved; full
 graduation still requires the declared native and lifecycle guarantees.
 
 ## Journal
+
+### 2026-10-19 - Trusted initialization and participant assignment
+
+- Integrated the [operator clarification](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6278024161)
+  into this one vision and architecture: trust supported host-init session ID
+  and CWD, resolve real-worktree versus anchor identity through the workspace
+  owner, and consume inbox/source assignment from the existing local
+  service/bridge rather than reconstruct it in the extension.
+- This supersedes redundant independent environment/foreground identity
+  comparisons, not backend authentication, ownership/succession, explicit
+  membership or no-replay recovery. The service/client writer owns the shared
+  installed resolution seam; the connection contributor owns the thin adapter.
+- The source contract is not an installed API, completed assignment service,
+  migration, runtime restart or native-listening result.
 
 ### 2026-10-19 - Design intake
 
