@@ -136,6 +136,7 @@ class _FakeProvider:
 def _patch_provider(monkeypatch, provider):
     monkeypatch.setattr(prov, "get_provider", lambda name: provider)
     monkeypatch.setattr(prov, "account_token_for_slug", lambda slug, prcfg: "tok")
+    monkeypatch.setattr(prov, "actor_viewer_permission", lambda *args, **kwargs: "maintain")
 
 
 def _config(prcfg):
@@ -384,6 +385,9 @@ def test_now_refused_when_live_permission_is_read_only(monkeypatch, capsys):
         supported=True, viewer_permission="read",
     )
     _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(
+        prov, "actor_viewer_permission", lambda *args, **kwargs: "read",
+    )
     rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
     assert rc == 2
     assert fake.calls == []  # never attempted
@@ -409,16 +413,39 @@ def test_now_proceeds_when_live_permission_is_write(monkeypatch):
     assert len(fake.calls) == 1
 
 
-def test_now_proceeds_when_permission_read_unsupported(monkeypatch):
-    # A provider/policy read that can't determine viewer_permission (unknown,
-    # not a confident denial) must fail OPEN -- unchanged from before this
-    # gate existed.
+@pytest.mark.parametrize("prefer_auto", [False, True])
+def test_now_refuses_when_permission_read_unsupported(monkeypatch, prefer_auto):
     fake = _FakeProvider()
     fake.get_repo_policy = lambda repo, **kw: SimpleNamespace(supported=False)
     _patch_provider(monkeypatch, fake)
-    rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
-    assert rc == 0
-    assert len(fake.calls) == 1
+    monkeypatch.setattr(
+        prov, "actor_viewer_permission", lambda *args, **kwargs: None,
+    )
+    rc = m._pr_merge_now(
+        _args(), _prcfg(prefer_auto_merge=prefer_auto),
+        _self_merge_flow(), apply=True,
+    )
+    assert rc == 1
+    assert fake.auto_calls == []
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("permission", [None, ""])
+@pytest.mark.parametrize("prefer_auto", [False, True])
+def test_unknown_permission_values_never_reach_merge(
+    monkeypatch, permission, prefer_auto,
+):
+    fake = _FakeProvider()
+    _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(
+        prov, "actor_viewer_permission", lambda *args, **kwargs: permission,
+    )
+    assert m._pr_merge_now(
+        _args(), _prcfg(prefer_auto_merge=prefer_auto),
+        _self_merge_flow(), apply=True, viewer_permission=None,
+    ) == 1
+    assert fake.auto_calls == []
+    assert fake.calls == []
 
 
 def test_now_rejects_all_sweep(monkeypatch):
@@ -813,14 +840,15 @@ def test_mutation_preflight_blocks_every_write(monkeypatch, blocked):
     assert fake.review_gate_calls == []
 
 
-def test_unreadable_mutation_evidence_blocks_every_write(monkeypatch):
+@pytest.mark.parametrize("prefer_auto", [False, True])
+def test_unreadable_mutation_evidence_blocks_every_write(monkeypatch, prefer_auto):
     fake = _FakeProvider(auto_err="", review_gate=(True, True))
     fake.get_snapshot = lambda *args, **kwargs: (_ for _ in ()).throw(
         prov.ProviderError("unreadable")
     )
     _patch_provider(monkeypatch, fake)
     assert m._pr_merge_now(
-        _args(), _prcfg(prefer_auto_merge=True), _self_merge_flow(), apply=True,
+        _args(), _prcfg(prefer_auto_merge=prefer_auto), _self_merge_flow(), apply=True,
     ) == 1
     assert fake.auto_calls == fake.calls == fake.review_gate_calls == []
 

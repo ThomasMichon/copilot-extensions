@@ -26,6 +26,9 @@ from .pr_source import github_source, pull_payload, source_text
 # of these markers (mirrors gitea's numeric ``_is_transient``).
 _GH_TRANSIENT_HTTP = ("http 408", "http 429", "http 500", "http 502",
                       "http 503", "http 504")
+_GH_REVIEW_STATES = frozenset({
+    "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING",
+})
 
 
 def _gh_detail_is_transient(detail: str) -> bool:
@@ -387,11 +390,23 @@ class GitHubProvider:
                 if not isinstance(rid, int):
                     raise ProviderError(f"GitHub review on page {page} has no integer id", transient=True)
                 state = str(r.get("state", "")).upper()
+                user = r.get("user")
+                login = user.get("login") if isinstance(user, dict) else None
+                if not isinstance(login, str) or not login.strip():
+                    raise ProviderError(
+                        f"GitHub review on page {page} has no reviewer identity",
+                        transient=True,
+                    )
+                if state not in _GH_REVIEW_STATES:
+                    raise ProviderError(
+                        f"GitHub review on page {page} has unknown state",
+                        transient=True,
+                    )
                 reviews.append(
                     Review(
                         id=rid,
                         state=state,
-                        user=str((r.get("user") or {}).get("login", "")),
+                        user=login,
                         submitted_at=str(r.get("submitted_at", "") or ""),
                         commit_id=str(r.get("commit_id", "") or ""),
                         dismissed=(state == "DISMISSED"),

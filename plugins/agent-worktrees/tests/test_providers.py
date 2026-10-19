@@ -2238,6 +2238,39 @@ class TestGitHubProvider:
         assert len(snap.reviews) == 101
         assert snap.reviews[-1].id == 101 and snap.reviews[-1].state == "APPROVED"
 
+    def test_get_snapshot_accepts_pending_review_without_submission_time(self, monkeypatch):
+        from agent_worktrees.providers import github
+        pr = {"state": "open", "merged": False, "head": {"sha": "s"},
+              "base": {"ref": "main"}, "user": {"login": "a"}}
+        pending = [[{"id": 1, "user": {"login": "reviewer"}, "state": "PENDING",
+                     "submitted_at": None, "commit_id": None}]]
+        monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
+            pr=pr, reviews_pages=pending,
+        ))
+        snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+        assert [(review.state, review.user) for review in snap.reviews] == [
+            ("PENDING", "reviewer"),
+        ]
+
+    @pytest.mark.parametrize("malformed", [
+        {"id": 101, "user": None, "state": "CHANGES_REQUESTED"},
+        {"id": 101, "user": {"login": ""}, "state": "CHANGES_REQUESTED"},
+        {"id": 101, "user": {"login": "reviewer"}, "state": "UNKNOWN"},
+    ])
+    def test_get_snapshot_rejects_malformed_review_on_later_page(
+        self, monkeypatch, malformed,
+    ):
+        from agent_worktrees.providers import github
+        pr = {"state": "open", "merged": False, "head": {"sha": "s"},
+              "base": {"ref": "main"}, "user": {"login": "a"}}
+        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED"}
+                 for i in range(1, 101)]
+        monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
+            pr=pr, reviews_pages=[page1, [malformed]],
+        ))
+        with pytest.raises(ProviderError):
+            github.GitHubProvider().get_snapshot("o/r", 7, token="t")
+
     def test_combined_checks_state_failure_dominates(self, monkeypatch):
         from agent_worktrees.providers import github
         prov = github.GitHubProvider()

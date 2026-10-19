@@ -228,10 +228,9 @@ def _pr_merge_now(
     # (a maintainer's choice), but that never implies the identity running
     # THIS command holds merge rights -- a repo with several maintainers and
     # outside contributors needs the actor's live permission checked, not
-    # assumed. Fail-open on an unknown/failed read (None): only a confident
-    # read-only/no-access verdict (False) refuses. A maintainer is never
-    # blocked by a permission-read hiccup; a contributor is never told to
-    # self-merge a PR they cannot actually merge.
+    # assumed. Unknown evidence is not permission: only a positive live read
+    # may reach a merge write. A confident denial gets contributor guidance;
+    # an unavailable read is a retryable non-mutating refusal.
     live_permission = viewer_permission
     if live_permission is None:
         live_permission = actor_viewer_permission(
@@ -241,6 +240,28 @@ def _pr_merge_now(
             token=tok,
         )
     authority = pc.actor_merge_authority(live_permission)
+    if authority is None:
+        reason = (
+            "live merge authority could not be established; retry after the "
+            "repository permission read succeeds"
+        )
+        rem = pc.pr_reminder(
+            flow, "pr-merge", ok=False, reason=reason,
+        )
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo,
+                "pr": args.pr,
+                "error": "actor merge authority unavailable",
+                "viewer_permission": live_permission,
+                "flow_profile": flow.profile,
+                "applied": False,
+                "reminder": rem.as_dict(),
+            }))
+        else:
+            output.err(f"pr-merge refused: {reason}. Nothing merged.")
+            print(rem.text(), file=sys.stderr)
+        return 1
     if authority is False:
         reason = (
             "a live permission check found the acting identity does not have "
