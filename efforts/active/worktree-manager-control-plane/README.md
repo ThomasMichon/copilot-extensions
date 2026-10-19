@@ -83,14 +83,14 @@ boundary (`agent-worktrees --json`), owning no worktree logic of its own.
 
 ## Participants
 
-_Solo effort — one participant drives all phases; recorded here (rather than
-omitted per the template's single-effort allowance) solely so an
-agent-worktrees worktree can durably bind to this effort via `effort-focus
-bind` and refuse to finalize before the effort reaches `Status: Done`._
+Existing phase ownership is unchanged. The restart-recovery implementation
+participant owns only the explicitly assigned slice below, not every open
+item in this umbrella.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
+| Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 
 ## Context
 
@@ -1143,6 +1143,14 @@ severity AppleScript-injection finding (shell-quoting alone doesn't escape
 the AppleScript string literal the quoted command is embedded in) was also
 fixed with a dedicated `_applescript_quote` helper and regression test.
 
+### Machine-restart session recovery
+
+- [ ] Deliver the focused [machine-restart recovery plan](machine-restart-recovery.md)
+      under #4564: durable live-session evidence, intentional-exit exclusion,
+      shutdown capture, duplicate-safe restoration of original conversations,
+      and an explicit restart/status-check seed. Implementation starts only
+      after this plan clears review; host rollout remains separately authorized.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -1153,6 +1161,10 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
     (see Journal, 2026-10-05); closes the issue.
 
 ## Validation Plan
+
+- [ ] Complete the [restart-recovery validation matrix](machine-restart-recovery.md#validation-plan),
+      including clean exits, abrupt restart, daemon-only replacement and
+      concurrent recovery. A process-launch receipt is not successful recovery.
 
 - [ ] Complete the wave-specific [Configuration validation matrix](phase-5-configuration-workbench.md#validation-plan).
       No implementation wave is complete from a parser test or rendered
@@ -1217,6 +1229,13 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-18** - Claimed the machine-restart recovery slice on #4564 and
+  captured the operator's request in a focused sub-plan. Existing attachment
+  observation from #5573 is retained; missing-mux tombstones are not treated as
+  intentional-exit evidence. A dedicated CLI implementer is assigned the
+  `steady-resistor` source after plan review; unrelated umbrella work remains
+  with its existing owners. No runtime behavior or host configuration changed.
 
 - **2026-10-16** — Submitted-prompt recovery merged through
   [#6176](https://github.com/ThomasMichon/copilot-extensions/pull/6176) as
