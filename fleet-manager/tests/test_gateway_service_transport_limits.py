@@ -7,12 +7,14 @@ import sys
 import time
 from dataclasses import replace
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import aiohttp
 import pytest
 
 from fleet_manager.__main__ import main
 from fleet_manager.gateway_service_channel import send
+from fleet_manager.gateway_service_connector import verified_tls
 from gateway_service_transport_fixtures import eventually, running
 
 
@@ -181,6 +183,49 @@ def test_buffered_head_omits_unknown_representation_length(tmp_path):
                 assert response.status == 200
                 assert await response.read() == b""
                 assert "Content-Length" not in response.headers
+    asyncio.run(scenario())
+
+
+def test_cacheable_variants_retain_backend_freshness_and_variation(tmp_path):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            for language in ("en", "fr"):
+                async with await rig.request(
+                    "/api/cacheable", headers={"Accept-Language": language},
+                ) as response:
+                    assert response.status == 200
+                    assert await response.text() == language
+                    assert response.headers["Cache-Control"] == "public, max-age=300"
+                    assert response.headers["Vary"] == "Accept-Language"
+                    assert response.headers["Date"] == "Wed, 21 Oct 2015 07:28:00 GMT"
+                    assert response.headers["Age"] == "290"
+                    assert response.headers["Expires"] == "Wed, 21 Oct 2015 07:33:00 GMT"
+    asyncio.run(scenario())
+
+
+def test_http_10_stream_request_refuses_before_backend_dispatch(tmp_path):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            selected = await rig.auth("/api/events")
+            peer = urlsplit(rig.origin)
+            reader, writer = await asyncio.open_connection(
+                "127.0.0.1", peer.port, ssl=verified_tls(rig.ca),
+                server_hostname=peer.hostname)
+            try:
+                head = "GET /api/events HTTP/1.0\r\nHost: localhost\r\n"
+                head += "".join(f"{name}: {value}\r\n" for name, value in selected.items())
+                writer.write((head + "\r\n").encode("ascii"))
+                await writer.drain()
+                response = await asyncio.wait_for(reader.read(), 3)
+                assert response.startswith(b"HTTP/1.0 505 ")
+                assert response.endswith(b'{"error": "stream-http-version-required"}')
+                assert not rig.backends[0].requests
+                assert rig.state.pending == 0
+            finally:
+                writer.close()
+                await writer.wait_closed()
     asyncio.run(scenario())
 
 

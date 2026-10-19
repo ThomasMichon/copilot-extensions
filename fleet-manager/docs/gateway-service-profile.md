@@ -111,6 +111,9 @@ request/response bodies and unsupported forwarding refuse explicitly. Request
 credentials, cookies, client identity headers and hop-by-hop metadata are not
 forwarded. Backend response headers use a narrow allowlist; authentication and
 cookies are not passed through.
+Cacheable responses preserve `Vary`, `Date`, `Age` and `Expires` alongside
+`Cache-Control` and validators. Hop-by-hop nomination of cache metadata refuses
+rather than stripping a variant key or restarting freshness.
 Conditional request headers (`If-Match`, `If-Unmodified-Since`, `If-None-Match`
 and `If-Modified-Since`) reach the backend unchanged. Nominating a condition as
 hop-by-hop refuses rather than silently turning conditional work unconditional.
@@ -136,6 +139,8 @@ oversized local envelope is a known refusal, not an uncertain mutation.
 routes buffer within the separate response bound. Acknowledgment follows
 downstream consumption/write, not merely WebSocket receipt, providing bounded
 backpressure. This is bounded response streaming, not an unlimited stream.
+Streaming routes require HTTP/1.1 or later before dispatch; HTTP/1.0
+close-delimited responses cannot distinguish a revoked stream from normal EOF.
 
 Current service and caller grants are rechecked at admission and chunk
 checkpoints. Buffered replies retain their grant and pending-request custody
@@ -147,6 +152,7 @@ cannot become a successful stream EOF. Lost-channel mutations report
 already performed external effect.
 
 Connector `connect_once()` owns one connection and every request it starts.
+Cancellation retires a correlation even if its worker task never began running.
 `run(stop_event)` adds bounded backoff with five consecutive-failure attempts.
 Only an actually attached channel lasting at least 60 seconds resets that
 budget; long failed admissions do not. It never retries requests from a lost

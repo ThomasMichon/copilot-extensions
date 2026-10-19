@@ -83,6 +83,12 @@ class Backend:
                                 content_type="text/html")
         if request.path == "/asset.js":
             return web.Response(body=b"x" * 40000, content_type="text/javascript")
+        if request.path == "/cacheable":
+            return web.Response(text=request.headers.get("Accept-Language", "en"), headers={
+                "Cache-Control": "public, max-age=300", "Vary": "Accept-Language",
+                "Date": "Wed, 21 Oct 2015 07:28:00 GMT", "Age": "290",
+                "Expires": "Wed, 21 Oct 2015 07:33:00 GMT",
+            })
         return web.json_response(
             {"service": self.name, "path": request.raw_path, "body": body.decode()},
             headers={"Set-Cookie": "fixture=not-forwarded", "X-Identity": "not-forwarded",

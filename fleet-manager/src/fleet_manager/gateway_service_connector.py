@@ -120,7 +120,11 @@ class ServiceConnector:
             LOG.warning("service-connector-closed code=response-writer-failed")
             await ws.close(code=1011, message=b"response-writer-failed")
         finally:
-            self.active.pop(exchange.id, None)
+            self._retire(exchange)
+
+    def _retire(self, exchange: Exchange) -> None:
+        if self.active.get(exchange.id) is exchange:
+            del self.active[exchange.id]
             self.retired.append(exchange.id)
 
     async def _exchange(self, ws: aiohttp.ClientWebSocketResponse,
@@ -234,6 +238,7 @@ class ServiceConnector:
                             if exchange and exchange.task:
                                 exchange.task.cancel()
                                 await asyncio.gather(exchange.task, return_exceptions=True)
+                                self._retire(exchange)
                         else:
                             raise TransportError("invalid-frame")
                 finally:

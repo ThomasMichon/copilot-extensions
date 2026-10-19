@@ -38,6 +38,7 @@ REQUEST_HEADERS = frozenset({
 })
 RESPONSE_HEADERS = frozenset({
     "content-type", "cache-control", "etag", "last-modified", "content-disposition",
+    "vary", "date", "age", "expires",
 })
 
 
@@ -101,7 +102,10 @@ def headers(items: Iterable[tuple[str, str]], allowed: frozenset[str],
     result: dict[str, str] = {}
     for key, value in pairs:
         name = key.lower()
-        check(not (name in allowed and name.startswith("if-") and name in nominated),
+        check(not (name in allowed and name in nominated and (
+            name.startswith("if-") or name in {
+                "cache-control", "etag", "last-modified", "vary", "date", "age", "expires",
+            })),
               "invalid-headers")
         if name not in allowed or name in nominated:
             check(not strict, "invalid-headers")

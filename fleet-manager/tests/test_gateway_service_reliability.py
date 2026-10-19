@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from urllib.parse import urlsplit
 
+from aiohttp import WSMsgType
 import pytest
 
-from fleet_manager.gateway_service_channel import BODY_BYTES, Channel, TransportError
+from fleet_manager.gateway_service_channel import (
+    BODY_BYTES, Channel, TransportError, encode_frame,
+)
 from fleet_manager.gateway_service_connector import ServiceConnector
 from fleet_manager.gateway_service_server import STATE, Ticket, start
 from gateway_service_transport_fixtures import eventually, running
@@ -196,4 +202,57 @@ def test_long_pre_attachment_failures_do_not_reset_retry_budget(monkeypatch) -> 
         finally:
             monkeypatch.setattr(loop, "time", original_time)
         assert len(calls) == 5
+    asyncio.run(scenario())
+
+
+def test_buffered_cancels_retire_workers_that_never_start(monkeypatch) -> None:
+    async def scenario() -> None:
+        connector = ServiceConnector(
+            slot="example", gateway_origin="https://gateway.example",
+            backend_origin="http://127.0.0.1", access_token_callback=AsyncMock(),
+            proof_key=None)
+        correlations = [f"{number:048x}" for number in range(9)]
+        frames = []
+        for correlation in correlations:
+            frames.extend([
+                {"type": "request", "id": correlation, "method": "GET",
+                 "target": "/", "headers": {}, "body": "", "timeout": 1},
+                {"type": "cancel", "id": correlation},
+            ])
+
+        class BufferedSocket:
+            async def send_str(self, value):
+                pass
+
+            async def receive(self, **kwargs):
+                return SimpleNamespace(type=WSMsgType.TEXT, data='{"type":"attached"}')
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                # No scheduling point: each cancel is already buffered behind its request.
+                if not frames:
+                    raise StopAsyncIteration
+                return SimpleNamespace(type=WSMsgType.TEXT, data=encode_frame(frames.pop(0)))
+
+        @asynccontextmanager
+        async def socket_context(*args, **kwargs):
+            yield BufferedSocket()
+
+        @asynccontextmanager
+        async def session_context(**kwargs):
+            yield SimpleNamespace(ws_connect=socket_context)
+
+        monkeypatch.setattr("fleet_manager.gateway_service_connector.aiohttp.ClientSession",
+                            session_context)
+        monkeypatch.setattr("fleet_manager.gateway_service_connector.aiohttp.TCPConnector",
+                            lambda **kwargs: None)
+        monkeypatch.setattr(connector, "_admit", AsyncMock(return_value="synthetic-ticket"))
+        proxy = AsyncMock()
+        monkeypatch.setattr(connector, "_proxy", proxy)
+        await connector.connect_once()
+        proxy.assert_not_awaited()
+        assert connector.active == {}
+        assert list(connector.retired) == correlations
     asyncio.run(scenario())

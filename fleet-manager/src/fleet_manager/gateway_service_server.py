@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from aiohttp import WSMsgType, web
+from aiohttp import HttpVersion11, WSMsgType, web
 
 from .gateway_service_channel import (
     DEADLINE, FRAME_BYTES, GLOBAL_REQUESTS, REQUEST_HEADERS, RESPONSE_BYTES,
@@ -252,6 +252,8 @@ class ServiceRuntime:
         check(request.headers.get("Content-Encoding", "identity") == "identity",
               "unsupported-content-encoding", 400)
         slot, route = self.route(path, request.method)
+        check("response-stream" not in route.capabilities or request.version >= HttpVersion11,
+              "stream-http-version-required", 505)
         access, proof = credentials(request)
         uri = self.origin + path
         grant = self.authority.authenticate_caller(
