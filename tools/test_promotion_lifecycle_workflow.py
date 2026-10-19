@@ -49,8 +49,23 @@ def lifecycle_contract(workflow: dict[str, Any]) -> None:
     )
     assert retirement["env"] == {
         "GH_TOKEN": "${{ github.token }}", "AUTOMATIC_SOURCE": "${{ steps.check.outputs.sha }}",
+        "AUTOMATIC_MAIN": "${{ steps.pause.outputs.main_base }}",
     }
-    assert "--require-idle" in retirement["run"]
+    assert "--require-idle" in retirement["run"] and "--automatic-main" in retirement["run"]
+    record = next(step for step in gate_steps if step.get("name") == "Record immutable admitted source")
+    upload = next(step for step in gate_steps if step.get("name") == "Upload immutable admitted source")
+    assert gate_steps.index(retirement) < gate_steps.index(record) < gate_steps.index(upload)
+    assert record["if"] == upload["if"] == "steps.check.outputs.is_dev == 'true'"
+    assert record["env"] == {
+        "ADMITTED_SOURCE": "${{ steps.check.outputs.sha }}",
+        "ADMITTED_MAIN": "${{ steps.pause.outputs.main_base }}",
+        "ADMISSION_PATH": "${{ runner.temp }}/promotion-admission.json",
+    }
+    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["with"] == {
+        "name": "promotion-admission-${{ steps.check.outputs.sha }}-${{ steps.pause.outputs.main_base }}",
+        "path": "${{ runner.temp }}/promotion-admission.json", "if-no-files-found": "error",
+    }
     assert gate_steps[check_index]["env"]["RELEASED_SOURCE"] == "${{ steps.pause.outputs.released_source }}"
     assert "released_source=" in next(step for step in gate_steps if step.get("id") == "pause")["run"]
     assert publish["env"]["QUALIFICATION_PROMOTION_RUN"] == (
@@ -87,10 +102,20 @@ def minimal_contract() -> dict[str, Any]:
         }, {"id": "pause", "run": "released_source=trusted"},
             {"id": "check", "run": "confirm admitted source",
              "env": {"RELEASED_SOURCE": "${{ steps.pause.outputs.released_source }}"}},
-            {"run": "python promotion_lifecycle.py --require-idle --automatic-source sha",
+            {"run": "python promotion_lifecycle.py --require-idle --automatic-source sha --automatic-main main",
              "if": "github.event_name == 'repository_dispatch' && steps.check.outputs.is_dev == 'true'",
              "env": {"GH_TOKEN": "${{ github.token }}",
-                     "AUTOMATIC_SOURCE": "${{ steps.check.outputs.sha }}"}}]},
+                     "AUTOMATIC_SOURCE": "${{ steps.check.outputs.sha }}",
+                     "AUTOMATIC_MAIN": "${{ steps.pause.outputs.main_base }}"}},
+            {"name": "Record immutable admitted source", "if": "steps.check.outputs.is_dev == 'true'",
+             "env": {"ADMITTED_SOURCE": "${{ steps.check.outputs.sha }}",
+                     "ADMITTED_MAIN": "${{ steps.pause.outputs.main_base }}",
+                     "ADMISSION_PATH": "${{ runner.temp }}/promotion-admission.json"}},
+            {"name": "Upload immutable admitted source", "if": "steps.check.outputs.is_dev == 'true'",
+             "uses": "actions/upload-artifact@v4", "with": {
+                 "name": "promotion-admission-${{ steps.check.outputs.sha }}-${{ steps.pause.outputs.main_base }}",
+                 "path": "${{ runner.temp }}/promotion-admission.json", "if-no-files-found": "error",
+             }}]},
         "promote": {"outputs": {"candidate_sha": "candidate"}, "steps": []},
         "qualify-candidate": {
             "if": "needs.promote.outputs.candidate_sha != ''",
@@ -123,6 +148,7 @@ class ContractFixtureTests(unittest.TestCase):
         for mutation in (
             "early-pr", "pr-dependent-qualification", "no-origin", "no-admission",
             "no-final-admission", "early-open", "wrong-pr", "merge-secret", "no-retirement",
+            "no-admission-record",
         ):
             with self.subTest(mutation=mutation):
                 workflow = copy.deepcopy(original)
@@ -142,6 +168,8 @@ class ContractFixtureTests(unittest.TestCase):
                 elif mutation == "wrong-pr":
                     jobs["merge-promotion"]["if"] = "needs.promote.outputs.pr_number != ''"
                 elif mutation == "no-retirement":
+                    jobs["gate"]["steps"][3]["run"] = "no automatic retirement check"
+                elif mutation == "no-admission-record":
                     jobs["gate"]["steps"].pop()
                 else:
                     jobs["merge-promotion"]["steps"][0]["env"]["GH_TOKEN"] = "${{ secrets.UNEXPECTED }}"
@@ -185,7 +213,7 @@ class TriggerLifecycleTests(boundary._ShellFixture):
                 """import os,runpy,sys
 from pathlib import Path
 sys.path.insert(0,os.environ["TEST_TOOLS"])
-from test_promotion_dispatch import Backend, state, DEV, HEAD, REPO
+from test_promotion_dispatch import Backend, state, ci, DEV, HEAD, REPO
 import verify_promotion_workflows
 backend=Backend()
 mode=os.environ["TEST_MODE"]
@@ -200,6 +228,8 @@ elif mode=="resume":
 elif mode in ("failed-merged","cancelled-merged","failed-unmerged"):
     backend.promotion["conclusion"]="cancelled" if mode=="cancelled-merged" else "failure"
     backend.pr["merged"]=mode!="failed-unmerged"
+elif mode=="manual-deferred":
+    backend.cis=[ci(conclusion="failure"),ci(601,event="workflow_dispatch")]
 def api(path,**kwargs):
     with open(os.environ["API_TRACE"],"a",encoding="utf-8") as log:
         log.write(path+"\\n")
@@ -233,6 +263,7 @@ git() {
                 ("failed-merged", "workflow_run", "Validate and promote dev to main", True, "0"),
                 ("cancelled-merged", "workflow_run", "Validate and promote dev to main", True, "0"),
                 ("failed-unmerged", "workflow_run", "Validate and promote dev to main", False, "0"),
+                ("manual-deferred", "workflow_run", "Validate and promote dev to main", True, "0"),
                 ("resume", "pull_request_target", "", True, "0"),
                 ("ready", "workflow_run", "CI", False, "1"),
             ):
@@ -266,6 +297,37 @@ class QualifiedPRLifecycleTests(boundary._ShellFixture):
             boundary.script(boundary.step(cls.jobs["merge-promotion"], "merged")),
         )
 
+    def test_literal_admission_record_binds_the_actual_source_base_and_original_attempt(self) -> None:
+        record = next(step for step in self.workflow["jobs"]["gate"]["steps"]
+                      if step.get("name") == "Record immutable admitted source")
+        code = boundary.python_body(record["run"])
+        with tempfile.TemporaryDirectory(prefix="promotion-admission-record-") as directory:
+            path = Path(directory) / "record.json"
+            env = {
+                **boundary.environment(), "ADMITTED_SOURCE": boundary.DEV,
+                "ADMITTED_MAIN": boundary.BASE, "ADMISSION_PATH": str(path),
+            }
+            with boundary.mock.patch.dict(boundary.os.environ, env, clear=True):
+                exec(compile(code, "<literal-source-admission>", "exec"), {})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
+                "schema": "copilot-extensions.promotion-source-admission", "version": 1,
+                "source": boundary.DEV, "main_base": boundary.BASE, "run": 123, "attempt": 4,
+            })
+            for name, value in (
+                ("ADMITTED_SOURCE", "invalid"), ("ADMITTED_MAIN", "invalid"),
+                ("GITHUB_RUN_ID", "0"), ("GITHUB_RUN_ATTEMPT", "-1"),
+            ):
+                with self.subTest(name=name):
+                    invalid_path = Path(directory) / f"invalid-{name}.json"
+                    with (
+                        boundary.mock.patch.dict(boundary.os.environ, {
+                            **env, "ADMISSION_PATH": str(invalid_path), name: value,
+                        }, clear=True),
+                        self.assertRaises(RuntimeError),
+                    ):
+                        exec(compile(code, "<literal-source-admission>", "exec"), {})
+                    self.assertFalse(invalid_path.exists())
+
     def test_literal_queued_admission_rechecks_retirement_using_the_real_cli(self) -> None:
         root = Path(__file__).resolve().parents[1]
         retirement = next(
@@ -278,12 +340,14 @@ class QualifiedPRLifecycleTests(boundary._ShellFixture):
                 """import os,runpy,sys
 from pathlib import Path
 sys.path.insert(0,os.environ["TEST_TOOLS"])
-from test_promotion_dispatch import Backend, state, DEV
+from test_promotion_dispatch import Backend, state, admit, DEV
 import verify_promotion_workflows
 backend=Backend()
 backend.pr["merged"]=False
 if os.environ["TEST_MODE"]=="retired":
     backend.candidate=state(DEV)
+elif os.environ["TEST_MODE"]=="owned":
+    admit(backend,500)
 verify_promotion_workflows._api=backend
 assert sys.argv[1:3]==["-I","-B"]
 script=Path(os.environ["TEST_TOOLS"])/"promotion_lifecycle.py"
@@ -293,10 +357,11 @@ runpy.run_path(str(script),run_name="__main__")
                 encoding="utf-8", newline="\n",
             )
             prefix = 'python() { "$PYTHON" -I -B "$TRANSPORT_HELPER" "$@"; }\n'
-            for mode in ("ready", "retired"):
+            for mode in ("ready", "retired", "owned"):
                 with self.subTest(mode=mode):
                     result = self.shell(prefix + retirement["run"], {
                         "GITHUB_REPOSITORY": "example/project", "AUTOMATIC_SOURCE": "b" * 40,
+                        "AUTOMATIC_MAIN": "e" * 40,
                         "PYTHON": Path(sys.executable).as_posix(),
                         "TRANSPORT_HELPER": transport.as_posix(),
                         "TEST_TOOLS": (root / "tools").as_posix(), "TEST_MODE": mode,
@@ -304,6 +369,9 @@ runpy.run_path(str(script),run_name="__main__")
                     self.assertEqual(result.returncode == 0, mode == "ready", result.stderr)
                     if mode == "retired":
                         self.assertIn("retired source is unchanged", result.stderr)
+                        self.assertEqual(result.output, "")
+                    elif mode == "owned":
+                        self.assertIn("already owns this source and Main base", result.stderr)
                         self.assertEqual(result.output, "")
 
     def execute_waiter(self, provider: boundary.Provider, env: dict[str, str]) -> None:

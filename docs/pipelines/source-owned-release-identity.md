@@ -133,12 +133,29 @@ drain already-green changes without another push. Successful no-ops with no merg
 dispatch loop; an unmerged retired candidate does not automatically retry its
 unchanged source. Stale completion events do not take responsibility back from
 a newer generation, including one whose real failure still needs recovery.
-Ownership requires authenticated, fully paginated job evidence: a successful
-Gate and actually started, non-skipped source validation in the same attempt.
-A queued run, failed admission or paused no-op does not own progress. Promotion
-closure and completion events share this ordering rule, including delayed
-closures arriving after a newer admitted run has failed. Resume/control wakes
-remain eligible behind a finishing paused no-op.
+The trusted Gate issues one immutable admission artifact for the exact Dev SHA
+and freshly admitted Main base after ancestry and ownership checks. Its name
+binds those inputs; provider workflow identity and the successful trusted Gate
+upload step bind the original attempt and creation window. The artifact is an
+ownership record, not a substitute for qualification or publication proof.
+Existing repository artifact inventory discovers only the selected input pair,
+without scanning every historical workflow run.
+
+CI, closure, completion and queued automatic admission all consult that same
+record. A failed publication before PR creation still retains its admitted
+inputs; a delayed older CI event cannot start their full qualification again.
+Changed Dev or Main-base inputs remain eligible. A queued run, failed admission
+or paused no-op has no successful record and does not own progress. Legacy
+source-job uploads cannot manufacture the trusted Gate's admission authority.
+Resume/control wakes remain eligible behind a finishing paused no-op.
+
+Deferred CI discovery accepts both push and manual CI for the exact current Dev
+SHA and trusted repository/workflow. The latest eligible run wins by creation
+time, then run ID; its current attempt must succeed. A newer failed or pending
+run blocks an older green one. The triggering run is included when the provider
+index has not caught up, so index lag does not discard direct evidence.
+Successful manual CI can drain after resume or merge without requiring another
+push or selecting an arbitrary older green run.
 
 Retirement is read from the complete closed-promotion history and the immutable
 candidate's recorded source, independent of the waking event. A delayed green
@@ -149,6 +166,10 @@ qualification remains an operator action, not an automatic retry.
 Known non-owner authors are excluded before requiring fork provenance, so
 deletion of an unrelated foreign fork cannot block automatic promotion;
 owner-authored candidates still require complete repository identity.
+Admission artifacts are not overwritten on a full Gate replay. Recover the
+existing publication/merge job with its original qualification owner, or use a
+genuinely changed-input generation; do not replace the record to retry unchanged
+qualification automatically.
 Normal admission also declines duplicate validation of a source already
 recorded on Main; an explicit qualification-only request remains distinct.
 

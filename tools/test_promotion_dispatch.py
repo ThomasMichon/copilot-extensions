@@ -6,11 +6,13 @@ import base64
 import copy
 import json
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import pytest
 
 import promotion_dispatch as dispatch
 import promotion_lifecycle as lifecycle
+from promotion_admission_evidence import SourceAdmission
 
 REPO = "example/project"
 RELEASED, DEV, HEAD, MERGED, CONTROL = (letter * 40 for letter in "abcde")
@@ -31,6 +33,7 @@ def ci(identifier: int = 600, **changes: object) -> dict:
         "id": identifier, "run_attempt": 1, "head_sha": DEV, "event": "push",
         "path": ".github/workflows/ci.yml", "status": "completed", "conclusion": "success",
         "repository": {"full_name": REPO}, "head_repository": {"full_name": REPO},
+        "created_at": "2026-10-18T00:00:00Z",
         **changes,
     }
 
@@ -40,6 +43,7 @@ class Backend:
         self.calls: list[str] = []
         self.active: list[dict] = []
         self.main = state()
+        self.main_sha = CONTROL
         self.candidate = state()
         self.source = DEV
         self.cis = [ci()]
@@ -54,6 +58,7 @@ class Backend:
         self.generations = [copy.deepcopy(self.promotion)]
         self.running: list[dict] = []
         self.jobs: dict[int, list[dict]] = {}
+        self.admissions: list[dict] = []
         self.closed = [{"number": 123}]
         self.pr = {
             "number": 123, "state": "closed", "merged": True, "merge_commit_sha": MERGED,
@@ -69,12 +74,17 @@ class Backend:
         relative = path.removeprefix(f"repos/{REPO}/")
         if relative.startswith("pulls?state=open&base=main"):
             return copy.deepcopy(self.active)
-        if relative == "contents/.github/release-pipeline-state.json?ref=main":
+        if relative in (
+            "contents/.github/release-pipeline-state.json?ref=main",
+            f"contents/.github/release-pipeline-state.json?ref={self.main_sha}",
+        ):
             return copy.deepcopy(self.main)
         if relative == f"contents/.github/release-pipeline-state.json?ref={HEAD}":
             return copy.deepcopy(self.candidate)
         if relative == "git/ref/heads/dev":
             return {"object": {"type": "commit", "sha": self.source}}
+        if relative == "git/ref/heads/main":
+            return {"object": {"type": "commit", "sha": self.main_sha}}
         if relative == "actions/runs/500":
             return copy.deepcopy(self.promotion)
         if relative == "actions/runs/600":
@@ -89,8 +99,12 @@ class Backend:
             return copy.deepcopy(self.closed)
         if relative == "pulls/123":
             return copy.deepcopy(self.pr)
-        if relative.startswith("actions/workflows/ci.yml/runs?event=push&head_sha="):
+        if relative.startswith("actions/workflows/ci.yml/runs?head_sha="):
             return {"total_count": len(self.cis), "workflow_runs": copy.deepcopy(self.cis)}
+        if relative.startswith("actions/artifacts?name="):
+            name = parse_qs(relative.split("?", 1)[1])["name"][0]
+            rows = [row for row in self.admissions if row["name"] == name]
+            return {"total_count": len(rows), "artifacts": copy.deepcopy(rows)}
         if relative.startswith("actions/workflows/validate-and-promote.yml/runs?created="):
             return {"total_count": len(self.generations), "workflow_runs": copy.deepcopy(self.generations)}
         if relative.startswith("actions/workflows/validate-and-promote.yml/runs?status=in_progress&"):
@@ -99,6 +113,9 @@ class Backend:
             identifier = int(relative.split("/")[2])
             jobs = self.jobs.get(identifier, [])
             return {"total_count": len(jobs), "jobs": copy.deepcopy(jobs)}
+        if relative.startswith("actions/runs/"):
+            identifier = int(relative.split("/")[2])
+            return copy.deepcopy(next(row for row in self.generations if row["id"] == identifier))
         raise AssertionError(path)
 
 
@@ -107,7 +124,7 @@ def test_current_source_ci_uses_direct_run_evidence_without_index_lag() -> None:
     backend.cis = []
     result = dispatch.pending_source(REPO, source_ci_run=600, api=backend)
     assert result.source_sha == DEV and result.reason == "current-source-ci-succeeded"
-    assert not any("actions/workflows" in path for path in backend.calls)
+    assert any("actions/workflows/ci.yml/runs?head_sha=" in path for path in backend.calls)
 
 
 def test_actual_merge_completion_recovers_a_ci_advance_suppressed_while_pr_was_open() -> None:
@@ -156,7 +173,7 @@ def test_stale_completion_cannot_retry_a_newer_failed_generation() -> None:
         **backend.promotion, "id": 501, "created_at": "2026-10-18T00:01:00Z",
         "conclusion": "failure",
     })
-    backend.jobs[501] = admitted_jobs()
+    admit(backend, 501)
     result = dispatch.pending_source(REPO, completed_promotion_run=500, api=backend)
     assert result.source_sha is None and result.reason == "newer-generation-owns-progress"
 
@@ -173,9 +190,10 @@ def test_closed_event_does_not_duplicate_another_generation_but_can_drain_its_ow
         **backend.promotion, "id": 501, "status": "in_progress",
         "created_at": "2026-10-18T00:01:00Z",
     })
-    backend.jobs[501] = admitted_jobs()
+    admit(backend, 501)
     assert dispatch.pending_source(REPO, closed_main_pr=123, api=backend).source_sha is None
     backend.generations = [backend.promotion]
+    backend.admissions = []
     backend.pr["merged"] = False
     assert dispatch.pending_source(REPO, closed_main_pr=123, api=backend).source_sha == DEV
 
@@ -260,11 +278,13 @@ def test_state_is_validated_before_any_dispatch(malformed: dict) -> None:
         dispatch.pending_source(REPO, source_ci_run=600, api=backend)
 
 
-def test_ambiguous_source_ci_never_selects_an_arbitrary_green_run() -> None:
+def test_multiple_source_ci_runs_use_explicit_latest_run_order() -> None:
     backend = Backend()
     backend.cis = [ci(), ci(601)]
-    with pytest.raises(dispatch.PromotionDispatchError, match="ambiguous"):
-        dispatch.pending_source(REPO, completed_promotion_run=500, api=backend)
+    result = dispatch.pending_source(REPO, completed_promotion_run=500, api=backend)
+    assert result.source_sha == DEV
+    backend.cis[1]["conclusion"] = "failure"
+    assert dispatch.pending_source(REPO, completed_promotion_run=500, api=backend).source_sha is None
 
 
 def test_cli_exposes_only_a_validated_source_and_active_pr_still_prevents_recovery_dispatch(
@@ -297,10 +317,22 @@ def test_cli_exposes_only_a_validated_source_and_active_pr_still_prevents_recove
 def admitted_jobs() -> list[dict]:
     return [
         {"id": 10, "run_attempt": 1, "name": "gate (confirm this is a dev commit)",
-         "status": "completed", "conclusion": "success"},
+         "status": "completed", "conclusion": "success", "steps": [{
+             "name": "Upload immutable admitted source", "status": "completed", "conclusion": "success",
+             "started_at": "2026-10-18T00:01:01Z", "completed_at": "2026-10-18T00:01:03Z",
+         }]},
         {"id": 11, "run_attempt": 1, "name": "full - example",
          "status": "completed", "conclusion": "failure", "started_at": "2026-10-18T00:01:01Z"},
     ]
+
+
+def admit(backend: Backend, run: int, *, source: str = DEV, main_base: str = CONTROL) -> None:
+    backend.jobs[run] = admitted_jobs()
+    backend.admissions.append({
+        "id": run * 10, "name": f"promotion-admission-{source}-{main_base}",
+        "size_in_bytes": 100, "expired": False, "created_at": "2026-10-18T00:01:02Z",
+        "workflow_run": {"id": run, "head_sha": CONTROL, "head_branch": "main"},
+    })
 
 
 def retirement_row(pr: dict, *, state: str = "CLOSED") -> dict:
@@ -330,7 +362,7 @@ def test_only_a_newer_admitted_generation_suppresses_a_delayed_terminal_wake(
         "created_at": "2026-10-18T00:01:00Z",
     })
     # B was queued during A, then failed admission; A's merge-only retry succeeds.
-    backend.jobs[501] = admitted_jobs()
+    admit(backend, 501)
     if not admitted:
         backend.jobs[501][0]["conclusion"] = "failure"
         backend.jobs[501][1]["conclusion"] = "skipped"
@@ -347,6 +379,7 @@ def test_resume_merge_queues_behind_a_finishing_paused_noop_without_recursing() 
     backend.pr["head"]["ref"] = "release-pipeline/state-123"
     backend.running = [{**backend.promotion, "status": "in_progress"}]
     backend.jobs[500] = admitted_jobs()
+    backend.jobs[500][0]["steps"] = []
     backend.jobs[500][1]["conclusion"] = "skipped"
     assert dispatch.pending_source(REPO, closed_main_pr=123, api=backend).source_sha == DEV
     backend.closed = []
@@ -367,31 +400,39 @@ def test_retirement_history_applies_to_every_automatic_wake_and_queued_admission
         assert result.source_sha is None and result.reason == "retired-source-unchanged"
 
 
-def test_admission_requires_gate_and_source_work_from_the_same_attempt() -> None:
+def admissions(backend: Backend) -> tuple[SourceAdmission, ...]:
+    return dispatch.source_admissions(
+        lambda path: backend(f"repos/{REPO}/{path}", timeout=30), REPO, DEV, CONTROL,
+    )
+
+
+def test_admission_binds_the_actual_gate_attempt_and_reuses_it_for_job_only_recovery() -> None:
     backend = Backend()
-    backend.jobs[501] = admitted_jobs()
-    backend.jobs[501][1]["run_attempt"] = 2
-    assert not dispatch._admitted(lambda path: backend(f"repos/{REPO}/{path}", timeout=30), {"id": 501})
+    admit(backend, 500)
+    backend.promotion["run_attempt"] = 2
+    assert admissions(backend)[0].attempt == 1
+    backend.jobs[500][0]["run_attempt"] = 3
+    with pytest.raises(dispatch.PromotionDispatchError, match="Gate attempt"):
+        admissions(backend)
 
 
-@pytest.mark.parametrize("status,conclusion,started,expected", [
-    ("queued", None, None, False),
-    ("completed", "skipped", "2026-10-18T00:01:01Z", False),
-    ("completed", "cancelled", "2026-10-18T00:01:01Z", True),
-    ("in_progress", None, "2026-10-18T00:01:01Z", True),
+@pytest.mark.parametrize("status,conclusion,expected", [
+    ("queued", None, False), ("in_progress", None, False),
+    ("completed", "skipped", False), ("completed", "cancelled", False),
+    ("completed", "failure", False), ("completed", "success", True),
 ])
-def test_started_source_work_distinguishes_admission_from_waiting_or_paused_noops(
-    status: str, conclusion: str | None, started: str | None, expected: bool,
+def test_successful_recorded_gate_distinguishes_admission_from_waiting_or_paused_noops(
+    status: str, conclusion: str | None, expected: bool,
 ) -> None:
     backend = Backend()
-    backend.jobs[501] = admitted_jobs()
-    backend.jobs[501][1].update(status=status, conclusion=conclusion, started_at=started)
-    assert dispatch._admitted(
-        lambda path: backend(f"repos/{REPO}/{path}", timeout=30), {"id": 501},
-    ) is expected
+    admit(backend, 500)
+    backend.jobs[500][0].update(status=status, conclusion=conclusion)
+    assert bool(admissions(backend)) is expected
 
 
 def test_admission_reads_all_job_attempt_pages_before_deciding() -> None:
+    backend = Backend()
+    admit(backend, 500)
     jobs = [
         {"id": number, "run_attempt": 1, "name": "unrelated", "status": "completed",
          "conclusion": "skipped"}
@@ -401,12 +442,14 @@ def test_admission_reads_all_job_attempt_pages_before_deciding() -> None:
 
     def request(path: str) -> object:
         calls.append(path)
-        return {"total_count": 101, "jobs": jobs if path.endswith("page=1") else [admitted_jobs()[1]]}
+        if "/jobs?" in path:
+            return {"total_count": 101, "jobs": jobs if path.endswith("page=1") else [admitted_jobs()[1]]}
+        return backend(f"repos/{REPO}/{path}", timeout=30)
 
-    assert dispatch._admitted(request, {"id": 501})
-    assert calls == [
-        "actions/runs/501/jobs?filter=all&per_page=100&page=1",
-        "actions/runs/501/jobs?filter=all&per_page=100&page=2",
+    assert dispatch.source_admissions(request, REPO, DEV, CONTROL)
+    assert [path for path in calls if "/jobs?" in path] == [
+        "actions/runs/500/jobs?filter=all&per_page=100&page=1",
+        "actions/runs/500/jobs?filter=all&per_page=100&page=2",
     ]
 
 
@@ -415,11 +458,17 @@ def test_admission_reads_all_job_attempt_pages_before_deciding() -> None:
     {"total_count": 2, "jobs": [admitted_jobs()[0], admitted_jobs()[0]]},
     {"total_count": 1, "jobs": [{**admitted_jobs()[0], "run_attempt": True}]},
     {"total_count": 1, "jobs": [{**admitted_jobs()[0], "conclusion": None}]},
-    {"total_count": 1, "jobs": [{**admitted_jobs()[1], "started_at": "invalid"}]},
+    {"total_count": 1, "jobs": [{**admitted_jobs()[0], "steps": None}]},
 ])
 def test_unavailable_admission_evidence_refuses_instead_of_guessing(malformed: dict) -> None:
+    backend = Backend()
+    admit(backend, 500)
+
+    def request(path: str) -> object:
+        return malformed if "/jobs?" in path else backend(f"repos/{REPO}/{path}", timeout=30)
+
     with pytest.raises(dispatch.PromotionDispatchError):
-        dispatch._admitted(lambda path: malformed, {"id": 501})
+        dispatch.source_admissions(request, REPO, DEV, CONTROL)
 
 
 def test_retirement_paginates_closed_history_and_binds_candidate_bytes() -> None:
@@ -555,3 +604,95 @@ def test_deleted_fork_cannot_block_other_sources_but_owner_provenance_stays_stri
     else:
         with pytest.raises(dispatch.PromotionDispatchError, match="provenance"):
             dispatch.pending_source(REPO, source_ci_run=600, api=api)
+
+
+@pytest.mark.parametrize("mode", ["ci", "completion", "closure", "admission"])
+@pytest.mark.parametrize("changed", ["none", "source", "main"])
+def test_exact_source_and_base_ownership_governs_every_automatic_wake(
+    mode: str, changed: str,
+) -> None:
+    backend = Backend()
+    backend.generations.append({**backend.promotion, "id": 501, "conclusion": "failure"})
+    admit(backend, 501)
+    backend.source_ci["head_sha"] = RELEASED
+    backend.cis = [ci(601)]
+    if changed == "source":
+        backend.source = "f" * 40
+        backend.cis[0]["head_sha"] = backend.source
+    elif changed == "main":
+        backend.main_sha = "f" * 40
+    if mode == "admission":
+        if changed == "none":
+            with pytest.raises(dispatch.PromotionDispatchError, match="already owns"):
+                dispatch.require_automatic_source(REPO, backend.source, api=backend)
+        else:
+            dispatch.require_automatic_source(REPO, backend.source, api=backend)
+        return
+    kwargs = {
+        "ci": {"source_ci_run": 600}, "completion": {"completed_promotion_run": 500},
+        "closure": {"closed_main_pr": 123},
+    }[mode]
+    result = dispatch.pending_source(REPO, api=backend, **kwargs)
+    assert result.source_sha == (None if changed == "none" else backend.source)
+    if changed == "none":
+        assert result.reason == "newer-generation-owns-progress"
+
+
+@pytest.mark.parametrize("wake", ["resume", "merge"])
+def test_deferred_manual_ci_can_supersede_failed_push_ci_without_another_push(wake: str) -> None:
+    backend = Backend()
+    backend.main = state(paused=True)
+    backend.cis = [ci(conclusion="failure"), ci(601, event="workflow_dispatch")]
+    assert dispatch.pending_source(REPO, source_ci_run=600, api=backend).source_sha is None
+    backend.main = state()
+    if wake == "resume":
+        backend.pr["head"]["ref"] = "release-pipeline/state-123"
+        kwargs = {"closed_main_pr": 123}
+    else:
+        kwargs = {"completed_promotion_run": 500}
+    assert dispatch.pending_source(REPO, api=backend, **kwargs).source_sha == DEV
+    backend.cis.append(ci(602, event="workflow_dispatch", conclusion="failure"))
+    assert dispatch.pending_source(REPO, api=backend, **kwargs).source_sha is None
+
+
+def test_newer_failed_ci_still_blocks_an_older_successful_direct_event() -> None:
+    backend = Backend()
+    backend.cis = [ci(), ci(601, event="workflow_dispatch", conclusion="failure")]
+    assert dispatch.pending_source(REPO, source_ci_run=600, api=backend).source_sha is None
+
+
+@pytest.mark.parametrize("mutation", [
+    "time", "workflow-sha", "future-attempt", "duplicate", "upload-time", "upload-status",
+])
+def test_source_admission_integrity_cannot_be_invented_by_artifact_metadata(mutation: str) -> None:
+    backend = Backend()
+    admit(backend, 500)
+    if mutation == "time":
+        backend.admissions[0]["created_at"] = "2026-10-18T01:00:00Z"
+    elif mutation == "workflow-sha":
+        backend.admissions[0]["workflow_run"]["head_sha"] = DEV
+    elif mutation == "future-attempt":
+        backend.jobs[500][0]["run_attempt"] = 2
+    elif mutation == "duplicate":
+        duplicate = copy.deepcopy(backend.admissions[0])
+        duplicate["id"] += 1
+        backend.admissions.append(duplicate)
+    elif mutation == "upload-time":
+        backend.jobs[500][0]["steps"][0]["started_at"] = "invalid"
+    else:
+        backend.jobs[500][0]["steps"][0]["conclusion"] = None
+    with pytest.raises(dispatch.PromotionDispatchError):
+        admissions(backend)
+
+
+@pytest.mark.parametrize("foreign", ["branch", "workflow", "legacy-step"])
+def test_untrusted_or_legacy_artifact_uploads_cannot_claim_current_source_ownership(foreign: str) -> None:
+    backend = Backend()
+    admit(backend, 500)
+    if foreign == "branch":
+        backend.admissions[0]["workflow_run"]["head_branch"] = "dev"
+    elif foreign == "workflow":
+        backend.promotion["path"] = ".github/workflows/ci.yml"
+    else:
+        backend.jobs[500][0]["steps"] = []
+    assert admissions(backend) == ()

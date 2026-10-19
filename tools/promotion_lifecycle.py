@@ -116,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candidate-branch")
     parser.add_argument("--candidate-sha")
     parser.add_argument("--automatic-source")
+    parser.add_argument("--automatic-main")
     events = parser.add_mutually_exclusive_group()
     events.add_argument("--source-ci-run", type=int)
     events.add_argument("--completed-promotion-run", type=int)
@@ -132,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         if event_mode and (
             args.require_idle or args.candidate_branch is not None or args.candidate_sha is not None
             or args.automatic_source is not None
+            or args.automatic_main is not None
         ):
             raise PromotionAdmissionError("dispatch scheduling cannot reuse an existing candidate")
         if (args.candidate_branch is not None or args.candidate_sha is not None) and not args.require_idle:
@@ -140,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
             not args.require_idle or args.candidate_branch is not None or args.candidate_sha is not None
         ):
             raise PromotionAdmissionError("automatic-source admission requires a fresh idle generation")
+        if args.automatic_main is not None and args.automatic_source is None:
+            raise PromotionAdmissionError("automatic Main identity requires automatic-source admission")
         require_idle((), candidate_branch=args.candidate_branch, candidate_sha=args.candidate_sha)
         started = time.monotonic()
         promotions = active_promotions(args.repository)
@@ -153,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise PromotionAdmissionError("promotion scheduling deadline expired")
             require_automatic_source(
                 args.repository, args.automatic_source, api=_api, wait_seconds=remaining,
+                main_base=args.automatic_main,
             )
         idle = not promotions
         decision = None

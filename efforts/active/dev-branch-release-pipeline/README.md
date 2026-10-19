@@ -1089,6 +1089,26 @@ earlier PR closes. Inconsistent totals or cursor/identity ambiguity refuse
 admission. A regression closes the first ordinary PR between page reads and
 proves that the following promotion cannot be mistaken for an idle inventory.
 
+Two later findings exposed the limit of job-only generation ordering. Delayed
+CI must obey the same ownership decision as closure/completion, while changed
+sources remain eligible; deferred discovery must also retain successful manual
+CI rather than consider only a failed push. The prepared Gate now issues a
+small immutable admission artifact named by exact Dev and freshly admitted Main
+base, using the existing artifact action and no additional permissions. The
+reader verifies canonical Main execution, the original successful Gate upload
+attempt and its creation window. All automatic event paths and queued Gate
+admission share that source/base ownership check. Original qualification
+receipts remain independently required.
+
+Deferred CI selection now covers eligible push and manual runs of the exact
+current source. The latest run by creation time/ID wins, with its current
+attempt; a newer failure or pending run blocks an older success. Direct event
+evidence survives run-index lag. Tests cover delayed old CI after a newer
+publication failure, changed source/base eligibility, queued admission,
+successful manual CI after resume/merge, latest-failure refusal and immutable
+record provenance. Main control data still requires separate reviewed
+activation and fresh release acceptance.
+
 ### 2026-10-18 - Reviewed lifecycle charter implemented locally; Main activation pending
 
 Plan amendment #7199 merged as

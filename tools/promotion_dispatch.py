@@ -8,10 +8,13 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 from urllib.parse import quote
 
 from verify_promotion_workflows import _api
+from promotion_admission_evidence import (
+    PromotionDispatchError, canonical_run as _canonical_run, creation_time as _creation_time,
+    pages as _pages, source_admissions,
+)
 
 _REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9_.-]+")
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -19,109 +22,10 @@ _PROMOTION = re.compile(r"release/promote-([1-9][0-9]{0,19})")
 _STATE = ".github/release-pipeline-state.json"
 
 
-class PromotionDispatchError(RuntimeError):
-    """Scheduling evidence is unavailable; a new generation must not be guessed."""
-
-
 @dataclass(frozen=True)
 class DispatchDecision:
     source_sha: str | None
     reason: str
-
-
-def _pages(request: Callable[[str], object], path: str, key: str | None = None) -> list[dict]:
-    rows: list[dict] = []
-    seen: set[int] = set()
-    for page in range(1, 11):
-        data = request(f"{path}&per_page=100&page={page}")
-        batch = data.get(key) if key is not None and isinstance(data, dict) else data
-        if not isinstance(batch, list) or len(batch) > 100:
-            raise PromotionDispatchError("promotion history page is invalid")
-        for row in batch:
-            identifier = row.get("id" if key else "number") if isinstance(row, dict) else None
-            if type(identifier) is not int or identifier <= 0 or identifier in seen:
-                raise PromotionDispatchError("promotion history contains ambiguous identities")
-            seen.add(identifier)
-            rows.append(row)
-        if len(batch) < 100:
-            if key is not None and (
-                type(data.get("total_count")) is not int or data["total_count"] != len(rows)
-            ):
-                raise PromotionDispatchError("promotion history inventory is incomplete")
-            return rows
-    raise PromotionDispatchError("promotion history exceeds the bounded pagination limit")
-
-
-def _admitted(request: Callable[[str], object], run: dict) -> bool:
-    """Only a successful Gate plus non-skipped source work owns a generation."""
-    jobs = _pages(request, f"actions/runs/{run['id']}/jobs?filter=all", "jobs")
-    admitted_attempts: set[int] = set()
-    source_attempts: set[int] = set()
-    for job in jobs:
-        attempt, name = job.get("run_attempt"), job.get("name")
-        if type(attempt) is not int or attempt <= 0 or not isinstance(name, str):
-            raise PromotionDispatchError("promotion admission job identity is invalid")
-        status, conclusion = job.get("status"), job.get("conclusion")
-        if status not in ("queued", "in_progress", "completed", "waiting", "pending", "requested"):
-            raise PromotionDispatchError("promotion admission job status is invalid")
-        if status == "completed" and conclusion not in (
-            "success", "failure", "cancelled", "timed_out", "action_required",
-            "neutral", "skipped", "stale", "startup_failure",
-        ):
-            raise PromotionDispatchError("promotion admission job conclusion is invalid")
-        if name == "gate (confirm this is a dev commit)" and (
-            status == "completed" and conclusion == "success"
-        ):
-            admitted_attempts.add(attempt)
-        started = job.get("started_at")
-        if started is not None:
-            _creation_time(started)
-        if name.startswith("full - ") and conclusion != "skipped" and started is not None:
-            source_attempts.add(attempt)
-    return bool(admitted_attempts & source_attempts)
-
-
-def _creation_time(value: object) -> str:
-    if not isinstance(value, str):
-        raise PromotionDispatchError("promotion generation creation time is unavailable")
-    try:
-        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
-    except ValueError as error:
-        raise PromotionDispatchError("promotion generation creation time is invalid") from error
-    return value
-
-
-def _canonical_run(run: object, repository: str) -> bool:
-    if (
-        not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] <= 0
-        or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0
-    ):
-        raise PromotionDispatchError("promotion generation identity is invalid")
-    return (
-        run.get("head_branch") == "main"
-        and run.get("path") == ".github/workflows/validate-and-promote.yml"
-        and run.get("event") in ("repository_dispatch", "workflow_dispatch")
-        and isinstance(run.get("repository"), dict)
-        and run["repository"].get("full_name") == repository
-        and isinstance(run.get("head_repository"), dict)
-        and run["head_repository"].get("full_name") == repository
-    )
-
-
-def _newer_admitted(request: Callable[[str], object], repository: str, run: dict) -> bool:
-    if not _canonical_run(run, repository):
-        raise PromotionDispatchError("terminal promotion is not the canonical trusted Main promoter")
-    created = _creation_time(run.get("created_at"))
-    generations = _pages(
-        request, "actions/workflows/validate-and-promote.yml/runs?created="
-        + quote(">=" + created, safe=""), "workflow_runs",
-    )
-    for generation in generations:
-        canonical = _canonical_run(generation, repository)
-        ordering = (_creation_time(generation.get("created_at")), generation["id"])
-        if canonical and ordering > (created, run["id"]) and _admitted(request, generation):
-            return True
-    return False
 
 
 def main_pull_requests(
@@ -269,6 +173,7 @@ def pipeline_state(request: Callable[[str], object], ref: str) -> tuple[bool, st
 
 def require_automatic_source(
     repository: str, source: str, *, api: Callable[..., object], wait_seconds: float = 120,
+    main_base: str | None = None,
 ) -> None:
     """Recheck queued automatic admissions against retirements recorded meanwhile."""
     if (
@@ -276,6 +181,7 @@ def require_automatic_source(
         or repository.rsplit("/", 1)[-1] in (".", "..")
         or not isinstance(source, str) or not _SHA.fullmatch(source)
         or type(wait_seconds) not in (int, float) or not 0 < wait_seconds <= 120
+        or (main_base is not None and (not isinstance(main_base, str) or not _SHA.fullmatch(main_base)))
     ):
         raise PromotionDispatchError("invalid automatic promotion source")
     deadline = time.monotonic() + wait_seconds
@@ -289,6 +195,23 @@ def require_automatic_source(
 
     if retired_source(request, repository, source, lambda ref: pipeline_state(request, ref)):
         raise PromotionDispatchError("retired source is unchanged; automatic promotion is not admitted")
+    current_main = _branch_sha(request, "main")
+    if main_base is not None and current_main != main_base:
+        raise PromotionDispatchError("Main changed after automatic source admission")
+    if source_admissions(request, repository, source, current_main):
+        raise PromotionDispatchError("an admitted generation already owns this source and Main base")
+
+
+def _branch_sha(request: Callable[..., object], branch: str) -> str:
+    ref = request(f"git/ref/heads/{branch}")
+    target = ref.get("object") if isinstance(ref, dict) else None
+    sha = target.get("sha") if isinstance(target, dict) else None
+    if (
+        not isinstance(target, dict) or target.get("type") != "commit"
+        or not isinstance(sha, str) or not _SHA.fullmatch(sha)
+    ):
+        raise PromotionDispatchError(f"current {branch} identity is unavailable")
+    return sha
 
 
 def pending_source(
@@ -388,8 +311,6 @@ def pending_source(
             return DispatchDecision(None, "no-merged-promotion")
         if terminal["head"]["ref"] != branch:
             raise PromotionDispatchError("completed promotion PR belongs to a different generation")
-        if _newer_admitted(request, repository, run):
-            return DispatchDecision(None, "newer-generation-owns-progress")
     elif closed_main_pr is not None:
         terminal = closed_pr(closed_main_pr, merged_required=False)
         if terminal is None:
@@ -398,41 +319,28 @@ def pending_source(
             return DispatchDecision(None, "unmerged-control-pr")
         own = _PROMOTION.fullmatch(terminal["head"]["ref"])
         if own:
-            # The same ordering rule must govern delayed closure and completion.
             run = request(f"actions/runs/{int(own[1])}")
             if (
                 not isinstance(run, dict) or type(run.get("id")) is not int
                 or run["id"] != int(own[1])
             ):
                 raise PromotionDispatchError("closed promotion generation is unavailable")
-            if _newer_admitted(request, repository, run):
-                return DispatchDecision(None, "newer-generation-owns-progress")
-        else:
-            generations = _pages(
-                request, "actions/workflows/validate-and-promote.yml/runs?status=in_progress",
-                "workflow_runs",
-            )
-            if any(_canonical_run(generation, repository) and _admitted(request, generation)
-                   for generation in generations):
-                return DispatchDecision(None, "newer-generation-owns-progress")
+            if not _canonical_run(run, repository):
+                raise PromotionDispatchError("closed promotion is not the canonical Main promoter")
     else:
         terminal = None
 
-    paused, released = state("main")
+    main_base = _branch_sha(request, "main")
+    paused, released = state(main_base)
     if paused:
         return DispatchDecision(None, "main-paused")
-    ref = request("git/ref/heads/dev")
-    target = ref.get("object") if isinstance(ref, dict) else None
-    source = target.get("sha") if isinstance(target, dict) else None
-    if (
-        not isinstance(target, dict) or target.get("type") != "commit"
-        or not isinstance(source, str) or not _SHA.fullmatch(source)
-    ):
-        raise PromotionDispatchError("current Dev identity is unavailable")
+    source = _branch_sha(request, "dev")
     if source == released:
         return DispatchDecision(None, "source-already-current")
     if retired_source(request, repository, source, state):
         return DispatchDecision(None, "retired-source-unchanged")
+    if source_admissions(request, repository, source, main_base):
+        return DispatchDecision(None, "newer-generation-owns-progress")
 
     def ci_succeeded(run: object) -> bool:
         if (
@@ -456,6 +364,7 @@ def pending_source(
             raise PromotionDispatchError("current CI evidence is incomplete or invalid")
         return run["head_sha"] == source and run["status"] == "completed" and run["conclusion"] == "success"
 
+    event_ci = None
     if source_ci_run is not None:
         run = request(f"actions/runs/{source_ci_run}")
         if not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] != source_ci_run:
@@ -469,16 +378,25 @@ def pending_source(
             or run["head_repository"].get("full_name") != repository
         ):
             return DispatchDecision(None, "source-ci-ineligible")
-        if ci_succeeded(run):
-            return DispatchDecision(source, "current-source-ci-succeeded")
-    data = request(f"actions/workflows/ci.yml/runs?event=push&head_sha={source}&per_page=100")
-    rows = data.get("workflow_runs") if isinstance(data, dict) else None
-    if (
-        not isinstance(data, dict) or not isinstance(rows, list) or type(data.get("total_count")) is not int
-        or data["total_count"] != len(rows) or len(rows) > 1
-        or any(not isinstance(row, dict) for row in rows)
-    ):
-        raise PromotionDispatchError("current Dev CI inventory is incomplete or ambiguous")
-    if len(rows) == 1 and ci_succeeded(rows[0]):
-        return DispatchDecision(source, "deferred-source-ci-succeeded")
+        ci_succeeded(run)
+        if run["head_sha"] == source:
+            event_ci = run
+    rows = _pages(request, f"actions/workflows/ci.yml/runs?head_sha={source}", "workflow_runs")
+    eligible: dict[int, dict] = {}
+    for row in rows:
+        if row.get("event") not in ("push", "workflow_dispatch"):
+            continue
+        ci_succeeded(row)
+        if row["head_sha"] != source:
+            raise PromotionDispatchError("current Dev CI inventory contains a different source")
+        eligible[row["id"]] = row
+    if event_ci is not None:
+        indexed = eligible.get(event_ci["id"])
+        if indexed is None or indexed["run_attempt"] <= event_ci["run_attempt"]:
+            eligible[event_ci["id"]] = event_ci
+    if eligible:
+        latest = max(eligible.values(), key=lambda row: (_creation_time(row.get("created_at")), row["id"]))
+        if ci_succeeded(latest):
+            reason = "current-source-ci-succeeded" if latest is event_ci else "deferred-source-ci-succeeded"
+            return DispatchDecision(source, reason)
     return DispatchDecision(None, "current-source-ci-not-ready")

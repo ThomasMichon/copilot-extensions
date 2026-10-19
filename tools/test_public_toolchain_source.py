@@ -354,6 +354,7 @@ def test_source_contracts_still_reject_budget_and_dependency_regressions(generat
         "test_promotion_python_artifacts", "test_public_toolchain_source",
         "promotion_lifecycle", "test_promotion_lifecycle", "test_promotion_lifecycle_workflow",
         "promotion_dispatch", "test_promotion_dispatch",
+        "promotion_admission_evidence",
         "ci_plugin_partitions", "test_ci_plugin_partitions",
     )),
 ])
