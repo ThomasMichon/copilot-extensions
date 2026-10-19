@@ -544,6 +544,8 @@ replacing an existing file. A truncated/empty existing database, non-text SQLite
 columns and orphaned transaction sidecars remain blockers; they cannot allocate
 a replacement identity. Filesystems without atomic hard-link publication refuse
 initialization rather than falling back to an unsafe creation path.
+Out-of-range numeric evidence and excessive JSON nesting also remain structured
+recovery blockers, without preventing ordinary mux startup.
 Transactions preserve prior attempts across a crash before commit and serialize
 concurrent freezing. At most 4096 unresolved attempts are retained, each bounded
 to 32 KiB. Capacity refuses new freezing rather than evicting pending identities.

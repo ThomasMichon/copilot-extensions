@@ -426,3 +426,80 @@ def test_missing_database_with_retained_sidecar_is_not_recreated(
         attempts.freeze(journal.snapshot(), HostEpoch("linux", "environment-one", "boot-two"))
     assert not attempts.path.exists()
     assert sidecar.read_bytes() == b"retained unconfirmed transaction"
+
+
+@pytest.mark.parametrize("malformation", ["timestamp-overflow", "nested-json"])
+def test_malformed_json_blocks_without_aborting_mux_startup(
+    tmp_path, journal, attempts_module, monkeypatch, capsys, malformation,
+):
+    from worktree_manager import mux_daemon, restart_observer, self_install, source_config
+    from worktree_manager.__main__ import main
+
+    attempts = attempts_module.RestartAttempts(tmp_path)
+    epoch = HostEpoch("linux", "environment-one", "boot-two")
+    attempts.freeze(journal.snapshot(), epoch)
+    with sqlite3.connect(attempts.path) as connection:
+        value = json.loads(connection.execute("SELECT payload FROM attempts").fetchone()[0])
+        value["last_positive"]["observed_at"] = 10 ** 400
+        payload = (
+            json.dumps(value) if malformation == "timestamp-overflow"
+            else "[" * 15000 + "0" + "]" * 15000
+        )
+        connection.execute("UPDATE attempts SET payload=?", (payload,))
+    with pytest.raises(attempts_module.RestartAttemptError):
+        attempts.snapshot()
+    with pytest.raises(attempts_module.RestartAttemptError):
+        attempts.freeze(journal.snapshot(), epoch)
+    monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(restart_observer, "native_epoch", lambda: epoch)
+    assert main(["mux-daemon", "recovery-evidence"]) == 1
+    assert "attempt" in json.loads(capsys.readouterr().out)["blocker"]
+    source_config.config_path(tmp_path).write_text(
+        "[restart_recovery]\nautomatic_restore = true\n", encoding="utf-8",
+    )
+    runtime = mux_daemon.MuxDaemonRuntime(tmp_path / "mux.json", root=tmp_path)
+    try:
+        runtime.restart_notifications.activate()
+        runtime.start()
+        assert runtime.server is not None and runtime.accepting_requests()
+        assert "attempt" in runtime.health()["restart_recovery"]["blocker"]
+    finally:
+        runtime.shutdown()
+    with sqlite3.connect(attempts.path) as connection:
+        assert connection.execute("SELECT payload FROM attempts").fetchone() == (payload,)
+
+
+@pytest.mark.parametrize("malformation", ["timestamp-overflow", "nested-json"])
+def test_source_json_corruption_remains_a_recovery_evidence_error(
+    tmp_path, journal, monkeypatch, capsys, malformation,
+):
+    from worktree_manager import mux_daemon, restart_observer, self_install
+    from worktree_manager.__main__ import main
+    from worktree_manager.restart_evidence import RecoveryEvidenceError
+
+    with sqlite3.connect(journal.path) as connection:
+        value = json.loads(connection.execute("SELECT payload FROM journal").fetchone()[0])
+        value["last_positive"]["observed_at"] = 10 ** 400
+        payload = (
+            json.dumps(value) if malformation == "timestamp-overflow"
+            else "[" * 15000 + "0" + "]" * 15000
+        )
+        connection.execute("UPDATE journal SET payload=?", (payload,))
+    with pytest.raises(RecoveryEvidenceError):
+        journal.snapshot()
+    monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(restart_observer, "native_epoch", lambda: HostEpoch(
+        "linux", "environment-one", "boot-two",
+    ))
+    assert main(["mux-daemon", "recovery-evidence"]) == 1
+    assert "evidence" in json.loads(capsys.readouterr().out)["blocker"]
+    runtime = mux_daemon.MuxDaemonRuntime(tmp_path / "mux.json", root=tmp_path)
+    try:
+        runtime.restart_notifications.activate()
+        runtime.start()
+        assert runtime.server is not None and runtime.accepting_requests()
+        assert runtime.recovery_observer.startup_result["blocker"]
+    finally:
+        runtime.shutdown()
+    with sqlite3.connect(journal.path) as connection:
+        assert connection.execute("SELECT payload FROM journal").fetchone() == (payload,)

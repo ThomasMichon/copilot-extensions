@@ -181,6 +181,8 @@ Malformed SQLite column types, truncated databases and orphaned sidecars must
 block without losing state or preventing ordinary mux startup. Initial and
 promoted daemon activation share the drain-visible mutation fence; admitted
 freezing prevents idle-drain acknowledgement, and draining blocks a new freeze.
+Extreme numeric timestamps and deeply nested JSON exercise the same structured
+blocker across both the source-evidence and attempt journals.
 
 Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:

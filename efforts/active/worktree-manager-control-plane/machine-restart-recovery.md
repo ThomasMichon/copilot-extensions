@@ -576,3 +576,12 @@ The umbrella effort remains Active independently of this slice's completion.
   mutation boundary under the active lease. The expanded disconnected Manager
   lane passed 327 tests with three native skips; the unchanged owner slice
   retains its 28-test receipt. These remain pre-merge source/fixture results.
+- The next review identified an out-of-range integer timestamp escaping the
+  shared evidence constructor. The 400-digit value reproduced an unwrapped
+  overflow in both the attempt store and its source journal. The shared numeric
+  check now bounds finite values without a potentially overflowing float
+  conversion; excessive JSON nesting is normalized at the shared decoder.
+  Inspection preserves malformed state and reports a blocker while actual mux
+  service still starts. The expanded disconnected lane passed 331 Manager tests
+  with three native skips; owner sources remain unchanged from their 28-test
+  receipt.

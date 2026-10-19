@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import math
 import sqlite3
+import sys
 import time
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
@@ -94,7 +94,7 @@ class PositiveEvidence:
             raise ValueError("Invalid recovery observation sequence")
         if (
             type(self.observed_at) not in {float, int}
-            or not math.isfinite(self.observed_at) or self.observed_at <= 0
+            or not 0 < self.observed_at <= sys.float_info.max
         ):
             raise ValueError("Invalid recovery observation time")
 
@@ -142,8 +142,16 @@ _HISTORY_PER_SUBJECT = 16
 _MAX_SUBJECTS = 4096
 
 
+def decode_recovery_json(payload: str) -> object:
+    """Normalize the native JSON decoder's excessive-nesting refusal."""
+    try:
+        return json.loads(payload)
+    except RecursionError as exc:
+        raise ValueError("Recovery JSON nesting exceeds the decoder budget") from exc
+
+
 def _decode(payload: str) -> dict:
-    row = json.loads(payload)
+    row = decode_recovery_json(payload)
     legacy_keys = {"last_positive", "disposition", "detail", "notification_id"}
     if (
         not isinstance(row, dict)

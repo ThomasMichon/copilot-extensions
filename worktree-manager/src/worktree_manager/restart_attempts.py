@@ -13,7 +13,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from .private_state import protect, reject_links
-from .restart_evidence import PositiveEvidence
+from .restart_evidence import PositiveEvidence, decode_recovery_json
 from .restart_observer import HostEpoch
 
 
@@ -86,7 +86,7 @@ def _decode(attempt_id: str, key: str, payload: str) -> dict:
         raise ValueError("Recovery attempt columns must contain text")
     if len(payload.encode("utf-8")) > _MAX_PAYLOAD_BYTES:
         raise ValueError("Recovery attempt payload exceeds its budget")
-    value = json.loads(payload)
+    value = decode_recovery_json(payload)
     if (
         not isinstance(value, dict)
         or set(value) != {
