@@ -153,6 +153,38 @@ def test_outer_receipt_observation_errors_do_not_expose_private_paths(monkeypatc
         daemon.shutdown()
 
 
+def test_inventory_future_failing_between_priming_and_poll_is_classified(tmp_path, monkeypatch, caplog):
+    from concurrent.futures import Future
+    from agent_dispatch.companion import DefaultCompanionController
+    from tests.test_supervisor_daemon import _companion_reg
+
+    controller = DefaultCompanionController(tmp_path / "receipts")
+    inventory = Future()
+    controller._receipt_inventory_future = inventory
+    calls = []
+
+    def provider(*args, **kwargs):
+        calls.append("provider")
+        assert controller._receipt_inventory_future is inventory
+        assert not inventory.done()
+        inventory.set_exception(OSError("private/delayed/inventory"))
+        return None
+
+    monkeypatch.setattr(controller, "resolver", provider)
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", companion_controller=controller, launcher=FakeLauncher(),
+    )
+    try:
+        daemon._reconcile_deadline = time.monotonic() + 1
+        daemon._resolve_companion_desired({"unit": _companion_reg("unit")})
+        assert calls == ["provider"]
+        assert controller._receipt_inventory_future is None
+        assert "reconciliation is incomplete: error_type=OSError" in caplog.text
+        assert "private/delayed/inventory" not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
 @pytest.mark.parametrize("withdraw", [False, True])
 def test_slow_publication_readback_survives_deadline_and_settles_unknown(monkeypatch, withdraw):
     from types import SimpleNamespace
@@ -285,13 +317,18 @@ def test_publication_poll_harvests_late_readback_without_another_rpc():
     with ThreadPoolExecutor(max_workers=1) as pool:
         try:
             started = time.monotonic()
-            publisher.poll(client, [registration], executor=pool, deadline=started + 0.05)
+            deadline = started + 0.05
+            publisher.poll(client, [registration], executor=pool, deadline=deadline)
             assert time.monotonic() - started < 0.5
             assert entered.wait(1)
             assert not publisher.future.done()
             assert client.writes == []
+            while time.monotonic() < deadline:
+                release.wait(deadline - time.monotonic())
             release.set()
-            publisher.future.result(1)
+            records, error = publisher.future.result(1)
+            assert error is None and "readback" in records["unit"]
+            assert client.writes == []
             assert publisher.records["unit"]["state"] == "pending"
             publisher.poll(client, [registration], executor=pool, deadline=time.monotonic() + 1)
             assert client.reads == 1

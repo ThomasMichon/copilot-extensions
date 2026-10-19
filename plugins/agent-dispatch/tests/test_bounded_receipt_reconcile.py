@@ -169,6 +169,41 @@ def test_submission_error_cannot_supersede_started_work_or_admit_a_late_worker(t
         assert calls == [receipt]
 
 
+def test_submission_error_retains_a_running_execution_future(tmp_path, monkeypatch):
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    receipt = _receipt(controller)
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def retire(value, **kwargs):
+        calls.append(value)
+        entered.set()
+        assert release.wait(3)
+
+    monkeypatch.setattr(controller, "_retire_receipt", retire)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        class LostSubmission:
+            def submit(self, function):
+                pool.submit(function)
+                assert entered.wait(1)
+                raise RuntimeError("response lost after worker started")
+
+        try:
+            controller.reconcile_receipts_bounded(
+                set(), executor=LostSubmission(), deadline=time.monotonic() + 2,
+            )
+            execution = controller._receipt_operations["withdrawn"]
+            assert execution.running() and not execution.done()
+            assert execution in controller.receipt_futures()
+            assert controller._operation_record("withdrawn")["state"] == "pending"
+            release.set()
+            execution.result(1)
+            assert controller._operation_record("withdrawn")["state"] == "complete"
+            assert calls == [receipt]
+        finally:
+            release.set()
+
+
 def test_receipt_only_managed_generation_withdraws_its_validated_root_pin(tmp_path, monkeypatch):
     h = RetentionHarness(tmp_path)
     snapshot = h.generation("1")

@@ -2266,3 +2266,20 @@ requested contract.
   installation are performed; a separate full installation clean-room run is
   not claimed. Hosted current-head CI and a fresh full review remain required,
   and #7020's independent native causal investigation remains unresolved.
+
+### 2026-10-19 - Verify exact future and deadline interleavings
+
+- An actual inventory future now fails between receipt priming and the second
+  poll, proving the outer handler preserves classified logging at that precise
+  boundary. A submission error after real worker entry retains the running
+  execution future in receipt/shutdown accounting until its original operation
+  completes.
+- The held-read publication control explicitly waits until the original
+  monotonic deadline before releasing the RPC and verifies a deferred readback
+  with no write. A caller wake alone is not used as proof that the read crossed
+  the deadline. This strengthens the test precondition without extending the
+  production or test-operation budget.
+- The complete two-file receipt/recovery cohort passes 113 cases; both new
+  future controls are additional to the preceding 650-case implementation proof.
+  Fatal lint and whitespace pass. No production code changes in this follow-up,
+  and fresh full resulting-head review and all hosted CI remain outstanding.
