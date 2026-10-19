@@ -916,6 +916,26 @@ def test_ado_self_merge_uses_native_completion(monkeypatch, capsys):
     assert out["merged"] is False and out["completion_verified"] is None
 
 
+def test_ado_native_completion_does_not_require_unsupported_authority_read(
+    monkeypatch,
+):
+    fake = _FakeProvider(auto_err="")
+    fake.name = "azure-devops"
+    _patch_provider(monkeypatch, fake)
+    monkeypatch.setattr(
+        prov, "actor_viewer_permission", lambda *args, **kwargs: "",
+    )
+    flow = pc.classify_pr_flow(
+        enabled=True, required=True, provider="azure-devops",
+        automerge_label="", merge_actor="submitter-direct",
+    )
+    assert m._pr_merge_now(
+        _args(repo="Project/repo"), _prcfg(provider="azure-devops"),
+        flow, apply=True,
+    ) == 0
+    assert fake.complete_calls
+
+
 @pytest.mark.parametrize("provider_name", ["github", "gitea", "azure-devops"])
 def test_merge_request_failure_has_stable_completion_keys(monkeypatch, capsys, provider_name):
     import json

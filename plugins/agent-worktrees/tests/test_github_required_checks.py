@@ -31,7 +31,10 @@ class GitHubFixture:
         }
         self.rules = [{
             "type": "required_status_checks",
-            "parameters": {"required_status_checks": [{"context": "policy"}]},
+            "parameters": {
+                "required_status_checks": [{"context": "policy"}],
+                "strict_required_status_checks_policy": False,
+            },
         }, {
             "type": "pull_request",
             "ruleset_id": 42,
@@ -66,6 +69,7 @@ class GitHubFixture:
         self.bypass = "pull_requests_only"
         self.classic_protection = {
             "required_pull_request_reviews": None,
+            "required_status_checks": {"strict": False},
             "required_conversation_resolution": {"enabled": False},
             "required_signatures": {"enabled": False},
             "required_linear_history": {"enabled": False},
@@ -535,6 +539,43 @@ def test_required_deployment_prevents_admin_retry(monkeypatch):
     monkeypatch.setattr(github, "run_cli", fixture.invoke)
     result = github.GitHubProvider().merge_pull("owner/project", 7, admin=True)
     assert "required_deployments" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("source", ["ruleset", "classic"])
+def test_strict_branch_freshness_prevents_admin_retry(monkeypatch, source):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    if source == "ruleset":
+        fixture.rules[0]["parameters"]["strict_required_status_checks_policy"] = True
+    else:
+        fixture.classic_protection["required_status_checks"]["strict"] = True
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "up-to-date branch" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("mutation", [
+    {"user": None, "state": "CHANGES_REQUESTED"},
+    {"user": {"login": ""}, "state": "CHANGES_REQUESTED"},
+    {"user": {"login": "reviewer"}, "state": "UNKNOWN"},
+])
+def test_malformed_review_evidence_prevents_admin_retry(monkeypatch, mutation):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.reviews[0].update(mutation)
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "review history is incomplete or invalid" in result
     assert not any("--admin" in argv for argv in fixture.calls)
 
 

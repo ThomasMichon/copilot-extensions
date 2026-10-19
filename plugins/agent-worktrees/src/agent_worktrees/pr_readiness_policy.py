@@ -6,14 +6,21 @@ from __future__ import annotations
 def operation_readiness(
     state, *, operation: str, automerge_label: str, approval_required: bool,
 ) -> dict:
-    direct_candidate = bool(
-        operation == "direct"
-        and not automerge_label
-        and state.reason == "no auto-merge label configured (binding absent)"
-    )
-    assessment = bool(direct_candidate and state.verdict == "COMMENTED")
-    direct_ready = bool(
+    direct_candidate = operation == "direct"
+    direct_safe = bool(
         direct_candidate
+        and state.merge_state == "clean"
+        and not state.wip
+        and not state.held
+        and not state.conflict
+        and state.verdict != "CHANGES_REQUESTED"
+        and not (state.approval_stale and not state.approval_stale_authorized)
+    )
+    assessment = bool(
+        direct_safe and not approval_required and state.verdict == "COMMENTED"
+    )
+    direct_ready = bool(
+        direct_safe
         and not assessment
         and (state.verdict == "APPROVED" or not approval_required)
     )
@@ -26,6 +33,11 @@ def operation_readiness(
         )
     elif assessment:
         reason = "commented review requires findings assessment before direct merge"
+    elif direct_candidate and state.reason in (
+        "no auto-merge label configured (binding absent)",
+        "auto-merge already present",
+    ):
+        reason = "not yet approved"
     return {
         "consent_action": "not-applicable" if direct_candidate else state.consent_action,
         "eligible": direct_ready or state.eligible,

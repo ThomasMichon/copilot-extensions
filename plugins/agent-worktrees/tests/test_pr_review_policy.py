@@ -56,3 +56,17 @@ def test_clean_comment_remains_a_nonblocking_verdict_without_negatives():
         [review(1, "COMMENTED", "copilot")], include_comments=True,
     )
     assert verdict is not None and verdict.state == "COMMENTED"
+
+
+def test_mixed_precision_timestamps_preserve_the_later_veto():
+    reviews = [
+        ReviewEvidence(
+            2, "APPROVED", "reviewer",
+            submitted_at="2026-10-19T09:00:00Z",
+        ),
+        ReviewEvidence(
+            1, "CHANGES_REQUESTED", "reviewer",
+            submitted_at="2026-10-19T09:00:00.500Z",
+        ),
+    ]
+    assert outstanding_change_requests(reviews) == ("reviewer",)

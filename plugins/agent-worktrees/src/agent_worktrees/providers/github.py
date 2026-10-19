@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
+from ..pr_review_policy import KNOWN_REVIEW_STATES
 from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 from .pr_source import github_source, pull_payload, source_text
@@ -26,9 +27,6 @@ from .pr_source import github_source, pull_payload, source_text
 # of these markers (mirrors gitea's numeric ``_is_transient``).
 _GH_TRANSIENT_HTTP = ("http 408", "http 429", "http 500", "http 502",
                       "http 503", "http 504")
-_GH_REVIEW_STATES = frozenset({
-    "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING",
-})
 
 
 def _gh_detail_is_transient(detail: str) -> bool:
@@ -397,7 +395,7 @@ class GitHubProvider:
                         f"GitHub review on page {page} has no reviewer identity",
                         transient=True,
                     )
-                if state not in _GH_REVIEW_STATES:
+                if state not in KNOWN_REVIEW_STATES:
                     raise ProviderError(
                         f"GitHub review on page {page} has unknown state",
                         transient=True,

@@ -716,6 +716,25 @@ class TestMergeReadiness:
         assert m["clear_to_merge"] is False
         assert m["occupancy"] == "needs-review-assessment"
 
+    def test_direct_readiness_ignores_configured_consent_label(self):
+        for labels in ((), ("auto-merge",)):
+            approved = pc.merge_readiness(
+                _approved(labels=labels), operation="direct",
+                automerge_label="auto-merge",
+            )
+            assert approved["ready_for_direct_merge"] is True
+            assert approved["needs_consent"] is False
+            assert approved["consent_action"] == "not-applicable"
+
+            commented = pc.merge_readiness(
+                _approved(reviews=(_rev(1, "COMMENT"),), labels=labels),
+                operation="direct", automerge_label="auto-merge",
+                review_blocking=False, approval_required=False,
+            )
+            assert commented["review_assessment_required"] is True
+            assert commented["clear_to_merge"] is False
+            assert commented["needs_consent"] is False
+
     def test_review_blocking_false_reports_comment_verdict(self):
         snap = _approved(reviews=(_rev(1, "COMMENT"),))
         m = pc.merge_readiness(snap, review_blocking=False, **_BINDING)

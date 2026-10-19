@@ -15,7 +15,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import quote
 
-from ..pr_review_policy import ReviewEvidence, outstanding_change_requests
+from ..pr_review_policy import (
+    KNOWN_REVIEW_STATES,
+    ReviewEvidence,
+    outstanding_change_requests,
+)
 
 _POLICY_QUERY = """
 query($owner:String!,$name:String!,$ref:String!) {
@@ -234,7 +238,8 @@ def review_exception_evidence(
             state = review.get("state")
             if (
                 type(rid) is not int or not isinstance(user, dict)
-                or not isinstance(user.get("login"), str) or not isinstance(state, str)
+                or not isinstance(user.get("login"), str) or not user["login"].strip()
+                or not isinstance(state, str) or state.upper() not in KNOWN_REVIEW_STATES
             ):
                 raise ReviewSafetyError("review history is incomplete or invalid")
             reviews.append(ReviewEvidence(
@@ -273,6 +278,14 @@ def review_exception_evidence(
             rule = obj(raw, "branch rule")
             kind = rule.get("type")
             if kind == "required_status_checks":
+                params = obj(rule.get("parameters"), "required-status-check rule")
+                strict = params.get("strict_required_status_checks_policy")
+                if not isinstance(strict, bool):
+                    raise ReviewSafetyError("required-status-check freshness policy is incomplete")
+                if strict:
+                    raise ReviewExceptionIneligible(
+                        "required checks demand an up-to-date branch"
+                    )
                 continue
             if kind != "pull_request":
                 raise ReviewExceptionIneligible(
@@ -312,6 +325,15 @@ def review_exception_evidence(
     )
     if protection is not None:
         protection = obj(protection, "classic branch protection")
+        status_policy = protection.get("required_status_checks")
+        if status_policy is not None:
+            status_policy = obj(status_policy, "classic required-status-check policy")
+            if not isinstance(status_policy.get("strict"), bool):
+                raise ReviewSafetyError("classic branch freshness policy is incomplete")
+            if status_policy["strict"]:
+                raise ReviewExceptionIneligible(
+                    "classic required checks demand an up-to-date branch"
+                )
         for field in (
             "required_conversation_resolution",
             "required_signatures",

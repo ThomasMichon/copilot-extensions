@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Iterable
 
 DECISIVE_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
 COMMENT_STATES = frozenset({"COMMENTED"})
+KNOWN_REVIEW_STATES = DECISIVE_STATES | COMMENT_STATES | {"PENDING"}
 
 
 @dataclass(frozen=True)
@@ -55,8 +57,14 @@ def review_evidence(reviews: Iterable[object]) -> tuple[ReviewEvidence, ...]:
     return tuple(_coerce(review, index) for index, review in enumerate(reviews, 1))
 
 
-def _order(review: ReviewEvidence) -> tuple[str, int]:
-    return review.submitted_at, review.id
+def _order(review: ReviewEvidence) -> tuple[int, datetime, int]:
+    try:
+        parsed = datetime.fromisoformat(review.submitted_at.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError
+        return 1, parsed.astimezone(timezone.utc), review.id
+    except (AttributeError, ValueError):
+        return 0, datetime.min.replace(tzinfo=timezone.utc), review.id
 
 
 def latest_effective_reviews(
@@ -131,6 +139,7 @@ def effective_review(
 
 __all__ = [
     "ReviewEvidence",
+    "KNOWN_REVIEW_STATES",
     "effective_review",
     "latest_effective_reviews",
     "normalize_review_state",

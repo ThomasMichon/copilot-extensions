@@ -232,14 +232,16 @@ def _pr_merge_now(
     # may reach a merge write. A confident denial gets contributor guidance;
     # an unavailable read is a retryable non-mutating refusal.
     live_permission = viewer_permission
-    if live_permission is None:
-        live_permission = actor_viewer_permission(
-            provider,
-            args.repo,
-            api_base=base,
-            token=tok,
-        )
-    authority = pc.actor_merge_authority(live_permission)
+    authority = True if provider.name == "azure-devops" else None
+    if authority is None:
+        if live_permission is None:
+            live_permission = actor_viewer_permission(
+                provider,
+                args.repo,
+                api_base=base,
+                token=tok,
+            )
+        authority = pc.actor_merge_authority(live_permission)
     if authority is None:
         reason = (
             "live merge authority could not be established; retry after the "
