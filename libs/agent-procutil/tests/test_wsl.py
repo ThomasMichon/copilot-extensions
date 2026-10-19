@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_procutil import wsl
+from agent_procutil import no_window_kwargs, wsl
 
 
 @pytest.mark.parametrize("argv", [[], "", [""], [1], ["ok", "\0"]])
@@ -54,6 +54,33 @@ def test_non_wsl_refuses_before_launch(monkeypatch):
     monkeypatch.setattr(wsl.platform, "release", lambda: "portable-test-kernel")
     with pytest.raises(RuntimeError, match="requires WSL"):
         wsl.run_windows_owned(["synthetic.exe"], windows_python="pythonw.exe", timeout=1)
+
+
+def test_missing_mapped_package_cannot_fall_back_to_an_alternate_installation(tmp_path):
+    package = tmp_path / "agent_procutil"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    marker = tmp_path / "alternate-owner-ran"
+    (package / "wsl.py").write_text(
+        "from pathlib import Path\n"
+        f"def _windows_main(): Path({str(marker)!r}).write_text('unsafe fallback')\n",
+    )
+    env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+    command = wsl._owner_command(sys.executable, str(tmp_path / "unavailable"))
+    result = subprocess.run(
+        command, cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=5, **no_window_kwargs(),
+    )
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" in result.stderr
+    assert not marker.exists()
+    # The alternate package is genuinely reachable without the isolation policy.
+    unsafe = [arg for arg in command if arg not in {"-I", "-S"}]
+    result = subprocess.run(
+        unsafe, cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=5, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and marker.read_text() == "unsafe fallback"
 
 
 @pytest.mark.parametrize("body", [

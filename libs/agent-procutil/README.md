@@ -340,6 +340,9 @@ interface. Existing Windows/POSIX spawn APIs and daemon lifetimes are unchanged.
 The caller supplies an absolute WSL-invokable **base `pythonw.exe`** path; the
 library never discovers or installs a Windows interpreter. WSL's normal
 `wslpath` mapping must make this installed package readable by that interpreter.
+The dependency-free owner starts with isolated, no-site Python flags, so an
+unavailable mapped package cannot fall back to the working directory,
+`PYTHONPATH`, user customization or another Windows installation.
 An unavailable interpreter, mapping, import or strict Windows Job refuses
 execution rather than falling back to an unowned command.
 

@@ -23,6 +23,10 @@ _BOOTSTRAP = (
 )
 
 
+def _owner_command(windows_python: str, package_root: str) -> list[str]:
+    return [windows_python, "-I", "-S", "-u", "-c", _BOOTSTRAP, package_root]
+
+
 def _request(argv: list[str], timeout: float, input_text: str | None, capture: bool) -> dict:
     if (
         not isinstance(argv, list) or not argv or not argv[0]
@@ -109,7 +113,7 @@ def run_windows_owned(
     request["timeout"] = remaining
     payload = (json.dumps(request, ensure_ascii=True) + "\n").encode("ascii")
     process = subprocess.Popen(  # noqa: S603 - explicit GUI interpreter, no shell
-        [str(python), "-u", "-c", _BOOTSTRAP, mapped.stdout.rstrip("\r\n")],
+        _owner_command(str(python), mapped.stdout.rstrip("\r\n")),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         bufsize=0, **no_window_kwargs(),
     )
