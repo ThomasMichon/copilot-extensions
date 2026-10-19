@@ -17,7 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import claim_history, config as cfg
-from . import git_ops, hooks, obligations, output, pr_authority, pr_publication_state, pr_publish, publication_deadline, push_diagnostics, tracking
+from . import git_ops, hooks, obligations, output, pr_authority, pr_publication_checks, pr_publication_state, pr_publish, publication_deadline, push_diagnostics, tracking
 from .config import Config, SourceAttribution
 from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
@@ -429,6 +429,10 @@ def create_pr(
 
     if not Path(worktree_path).exists():
         return {**base, "error": f"Worktree path not found: {worktree_path}"}
+
+    failure = pr_publication_checks.create_preflight(worktree_path, repo, base)
+    if failure:
+        return failure
 
     # Load tracking record (optional but expected).
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -1731,15 +1735,10 @@ def _live_pr_state(
     *,
     prcfg=None,
 ) -> dict | None:
-    """Best-effort live verdict/conflict/merge read for the active PR.
+    """Read the shared watch snapshot, gates and consent for a tracked PR.
 
-    Folds ``pr-watch``'s snapshot + the shared classifier into ``pr-status`` so
-    one command answers "where is my PR?" -- the review **verdict**, whether it
-    has a **conflict**, its **merge state**, and whether merge **consent** is
-    present/eligible -- alongside the tracked metadata.  Returns a ``{"live":
-    {...}}`` dict, or ``None`` when there is no numbered active PR or the
-    provider is unconfigured/unreachable (never fatal: pr-status still reports
-    the tracked state).
+    Unavailable provider evidence is reported separately from tracked metadata;
+    it must not be mistaken for an empty, successful live observation.
     """
     if active is None or active.number is None:
         return None
@@ -1755,14 +1754,13 @@ def _live_pr_state(
             getattr(prcfg, "api_base", "") or ""
         )
         token = providers.account_token_for_slug(target_repo, prcfg)
-        snap = provider.get_snapshot(
+        from .pr_observation import configured_snapshot
+        snap = configured_snapshot(provider,
             target_repo, active.number,
-            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+            prcfg=prcfg, api_base=getattr(prcfg, "api_base", "") or "", token=token,
         )
-    except Exception:
-        # Provider unconfigured/unreachable/unsupported -- omit the live block
-        # rather than guessing; the tracked state is still reported.
-        return None
+    except Exception as exc:
+        return {"live_error": str(exc)}
     evidence_matches_endpoint = (
         active.head_observed_api_base == authority_endpoint
     )
@@ -1814,6 +1812,8 @@ def _live_pr_state(
     }
     if self_merge_note:
         live["self_merge_note"] = self_merge_note
+    if snap.observation is not None:
+        live["observation"] = snap.observation.to_dict()
     return {"live": live}
 
 

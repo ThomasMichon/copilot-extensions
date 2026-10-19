@@ -17,7 +17,10 @@ own ``until`` set.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
+from dataclasses import field
 
 #: The complete transition vocabulary this module can fire. A subscriber's
 #: ``until`` is a non-empty subset of these names.
@@ -27,12 +30,35 @@ REVIEW_CHANGED = "review_changed"
 MERGEABLE_CHANGED = "mergeable_changed"
 CHECKS_CHANGED = "checks_changed"
 
-ALL_TRANSITIONS = (MERGED, CLOSED, REVIEW_CHANGED, MERGEABLE_CHANGED, CHECKS_CHANGED)
+RICH_TRANSITIONS = (
+    "head_changed", "votes_changed", "approvals_changed", "threads_changed",
+    "policies_changed", "gates_changed", "ready_for_human",
+)
+ALL_TRANSITIONS = (MERGED, CLOSED, REVIEW_CHANGED, MERGEABLE_CHANGED, CHECKS_CHANGED, *RICH_TRANSITIONS)
 
 #: The sensible default for a caller that didn't specify ``--until``: only
 #: the two terminal states. A caller that wants early wake on review/CI
 #: movement opts in explicitly.
 DEFAULT_UNTIL = (MERGED, CLOSED)
+
+
+def _fingerprints(snap: PRSnapshot) -> dict[str, str]:
+    observation = snap.observation
+    if observation is None:
+        return {}
+    result = dict(observation["fingerprints"])
+    result["readiness"] = "ready" if observation.get("ready_for_human") is True else "not_ready"
+    metadata = {
+        name: observation.get(name)
+        for name in (
+            "complete", "errors", "guidance", "source_push_at", "iteration",
+            "ready_for_human", "all_required_satisfied", "agent_actionable",
+            "pending", "human_required", "unknown",
+        )
+    }
+    metadata["gates"] = result.get("gates")
+    result["gates"] = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode()).hexdigest()
+    return result
 
 
 @dataclass(frozen=True)
@@ -46,6 +72,9 @@ class PRSnapshot:
     review_decision: str = ""  # "", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"
     checks_state: str = ""  # "", "success", "failure", "pending"
     updated_at: str = ""
+    provider: str = ""
+    observation: dict | None = None
+    native_snapshot: dict | None = None
 
     @property
     def closed_unmerged(self) -> bool:
@@ -68,6 +97,8 @@ class Baseline:
     review_decision: str | None = None
     mergeable: str | None = None
     checks_state: str | None = None
+    head_sha: str | None = None
+    fingerprints: dict[str, str] = field(default_factory=dict)
 
     @staticmethod
     def from_snapshot(snap: PRSnapshot) -> Baseline:
@@ -77,6 +108,8 @@ class Baseline:
             review_decision=snap.review_decision or None,
             mergeable=snap.mergeable or None,
             checks_state=snap.checks_state or None,
+            head_sha=snap.head_sha or None,
+            fingerprints=_fingerprints(snap),
         )
 
 
@@ -91,6 +124,34 @@ def compute_transitions(
     call :func:`advance_baseline` separately; this function is a pure read.
     """
     fired: list[str] = []
+    if (
+        "head_changed" in until and baseline.head_sha is not None
+        and snap.head_sha and baseline.head_sha != snap.head_sha
+    ):
+        fired.append("head_changed")
+    fingerprints = _fingerprints(snap)
+    if (
+        REVIEW_CHANGED in until
+        and any(
+            name in baseline.fingerprints and name in fingerprints
+            and baseline.fingerprints[name] != fingerprints[name]
+            for name in ("votes", "approvals")
+        )
+    ):
+        fired.append(REVIEW_CHANGED)
+    if (
+        "ready_for_human" in until
+        and baseline.fingerprints.get("readiness") == "not_ready"
+        and fingerprints.get("readiness") == "ready"
+    ):
+        fired.append("ready_for_human")
+    for name in ("votes", "approvals", "discussions", "policies", "gates"):
+        transition = "threads_changed" if name == "discussions" else f"{name}_changed"
+        if (
+            transition in until and name in baseline.fingerprints
+            and name in fingerprints and baseline.fingerprints[name] != fingerprints[name]
+        ):
+            fired.append(transition)
     if MERGED in until and snap.merged and not baseline.merged:
         fired.append(MERGED)
     if CLOSED in until and snap.closed_unmerged and not baseline.closed:
@@ -101,7 +162,8 @@ def compute_transitions(
         and snap.review_decision
         and snap.review_decision != baseline.review_decision
     ):
-        fired.append(REVIEW_CHANGED)
+        if REVIEW_CHANGED not in fired:
+            fired.append(REVIEW_CHANGED)
     if (
         MERGEABLE_CHANGED in until
         and baseline.mergeable is not None
@@ -132,6 +194,8 @@ def advance_baseline(baseline: Baseline, snap: PRSnapshot) -> Baseline:
         review_decision=baseline.review_decision or (snap.review_decision or None),
         mergeable=baseline.mergeable or (snap.mergeable or None),
         checks_state=baseline.checks_state or (snap.checks_state or None),
+        head_sha=baseline.head_sha or (snap.head_sha or None),
+        fingerprints={**_fingerprints(snap), **baseline.fingerprints},
     )
 
 

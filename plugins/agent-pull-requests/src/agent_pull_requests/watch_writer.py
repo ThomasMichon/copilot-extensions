@@ -16,7 +16,7 @@ from pathlib import Path
 
 from single_instance_lease import SingleInstance
 
-from .watch_daemon import Fetch, Notify, WatchDaemon
+from .watch_daemon import Fetch, NativeFetch, Notify, WatchDaemon
 from .watch_notification import default_notify, positive_seconds
 
 
@@ -26,6 +26,7 @@ class WatchWriter:
     def __init__(
         self, *, root: Path, authorize: Callable[[str], None], fetch: Fetch,
         notify: Notify = default_notify, poll_interval: float = 30.0,
+        native_fetch: NativeFetch | None = None,
     ) -> None:
         if not root.is_absolute():
             raise ValueError("watch writer state root must be absolute")
@@ -36,6 +37,7 @@ class WatchWriter:
         self.daemon = WatchDaemon(
             fetch=fetch, notify=notify, poll_interval=poll_interval,
             active=False, state_root=root,
+            native_fetch=native_fetch,
         )
         self._lease = SingleInstance(root, service="agent-pull-requests-watch")
         self._lifecycle = threading.Lock()

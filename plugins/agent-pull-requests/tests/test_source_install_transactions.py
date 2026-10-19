@@ -484,7 +484,16 @@ def test_native_source_snapshot_reuse_never_rewrites_existing_bytes(
     assert not list(snapshot.parent.glob(f"{snapshot.name}.tmp-*"))
 
 
-@pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
+# This item performs stamping, fresh construction and reuse through separate
+# native hosts; Windows PowerShell measured 27 seconds before any load margin.
+@pytest.mark.parametrize("shell", [
+    "pwsh",
+    pytest.param(
+        "powershell",
+        marks=pytest.mark.timeout(45) if os.name == "nt" else (),
+    ),
+    "bash",
+])
 def test_native_qualified_generation_reuses_and_retains_installed_closure(
     tmp_path: Path,
     shell: str,

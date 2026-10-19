@@ -18,6 +18,14 @@ The [local setup flow](docs/identity-vault.md) reuses one shared owner key and
 persists only installation-scoped source selection; routine reads remain
 cache-only and require no vault unlock.
 
+For centralized PR status/waits and related-repository ADO review, discussion
+and policy requirements, see [repository-configured PR observation](docs/pr-observation.md).
+Persistent approvals, latest-push approval and human-only completion gates are
+reported separately; no consumer-specific watcher is required for those reads.
+The same surface provides [built-in publication checks](docs/pr-publication-checks.md)
+and [bounded ADO remediation](docs/pr-remediation.md), without casting human
+approvals or creating pipeline runs.
+
 Resolved machine topology treats native Windows and WSL as independent logical
 machines, conventionally `host` and `host-wsl`. The shared machine owner
 projects legacy combined entries without editing topology or historical

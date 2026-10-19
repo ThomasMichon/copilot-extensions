@@ -32,6 +32,9 @@ from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yam
 from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
 from . import machine_instructions
 from .codename_config import CodenameConfig, parse_codename
+from .pr_observation_config import ObservationConfig, parse_observation
+from .pr_publication_config import PublicationChecksConfig, parse_publication_checks, parse_string_tuple
+from .pr_related_binding import parse_repository
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
     cached_load_config_scope,
@@ -196,6 +199,7 @@ class PRConfig:
     enabled: bool = False
     required: bool = False         # enforce PRs: refuse direct-to-master
     provider: str = "gitea"        # gitea | github | azure-devops
+    repository: str = ""          # explicit checkout-free related PR target
     strategy: str = "keep-alive"   # default disposition: keep-alive | detach
     branch_prefix: str = "feature"
     # ``head_scheme`` selects how create-pr *publishes* the PR head (#1815) --
@@ -388,6 +392,8 @@ class PRConfig:
     fork: ForkConfig = field(default_factory=ForkConfig)
     # Free-text repo guidance surfaced by every pr_reminder().
     notes: str = ""
+    observation: ObservationConfig | None = None
+    publication_checks: PublicationChecksConfig | None = None
 
     def __post_init__(self) -> None:
         publication_deadline.validate(self.push_timeout_seconds)
@@ -561,6 +567,7 @@ class Config:
     ThomasMichon/copilot-extensions#3296."""
     copilot_identity_switch_enabled: bool = False
     """Master switch for :mod:`copilot_identity`; default false, config-file based. See docs/config-reference.md."""
+    checkout_free_pr: dict[str, PRConfig] = field(default_factory=dict, kw_only=True)
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -996,6 +1003,7 @@ def _load_config_uncached(
         names.append(repo_name)
 
     repos: dict[str, RepoConfig] = {}
+    checkout_free_pr: dict[str, PRConfig] = {}
     inrepo_profile_assignments: dict[str, Any] = {}
     for name in names:
         machine_repo = machine_repos.get(name) or {}
@@ -1006,8 +1014,8 @@ def _load_config_uncached(
             name, platform
         )
         if not anchor:
-            # No anchor anywhere -- can't manage this repo. Skip silently unless
-            # it was the only candidate (validated after the loop).
+            from .pr_related_binding import remember_checkout_free_pr
+            remember_checkout_free_pr(checkout_free_pr, name, machine_repo, cp_related_pr.get(name, {}))
             continue
 
         worktree_root = machine_repo.get("worktree_root") or derive_worktree_root(
@@ -1094,6 +1102,7 @@ def _load_config_uncached(
         platform=platform,
         repo_name=repo_name,
         repos=repos,
+        checkout_free_pr=checkout_free_pr,
         knowledge_repo=(
             machine_raw.get("knowledge_repo")
             or global_raw.get("knowledge_repo")
@@ -1685,21 +1694,7 @@ def _parse_pr(raw: Any) -> PRConfig:
     # PR mode is on, so a lone ``required: true`` turns the mode on too.
     enabled = bool(raw.get("enabled", False)) or required
 
-    def _str_tuple(value: Any) -> tuple[str, ...]:
-        """Coerce a scalar-or-list config value into a tuple of strings.
-
-        Accepts a list/tuple (each item stringified), a lone scalar (wrapped),
-        or a falsy/missing value (empty tuple). Empty strings are dropped so a
-        stray ``""`` in a YAML list can't become a match-everything token.
-        """
-        if isinstance(value, (list, tuple)):
-            return tuple(s for s in (str(x).strip() for x in value) if s)
-        if value:
-            s = str(value).strip()
-            return (s,) if s else ()
-        return ()
-
-    labels = _str_tuple(raw.get("labels", ()))
+    labels = parse_string_tuple(raw.get("labels", ()))
 
     def _choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
         """Normalize a config enum to one of ``allowed`` (case-insensitive),
@@ -1730,6 +1725,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         enabled=enabled,
         required=required,
         provider=str(raw.get("provider", "gitea")),
+        repository=parse_repository(raw.get("repository", "")),
         strategy=str(raw.get("strategy", "keep-alive")),
         branch_prefix=str(raw.get("branch_prefix", "feature")),
         head_scheme=head_scheme,
@@ -1743,10 +1739,10 @@ def _parse_pr(raw: Any) -> PRConfig:
         auto_open=bool(raw.get("auto_open", False)),
         source_attribution=_source_attribution(raw.get("source_attribution", "codename")),
         source_attribution_configured=("source_attribution" in raw),
-        required_body_sections=_str_tuple(raw.get("required_body_sections", ())),
+        required_body_sections=parse_string_tuple(raw.get("required_body_sections", ())),
         automerge_label=str(raw.get("automerge_label", "")).strip(),
-        hold_labels=_str_tuple(raw.get("hold_labels", ())),
-        wip_title_prefixes=_str_tuple(raw.get("wip_title_prefixes", ())),
+        hold_labels=parse_string_tuple(raw.get("hold_labels", ())),
+        wip_title_prefixes=parse_string_tuple(raw.get("wip_title_prefixes", ())),
         approval_required=bool(raw.get("approval_required", True)),
         allow_stale_approval=bool(raw.get("allow_stale_approval", False)),
         dismiss_stale_reviews=(
@@ -1773,6 +1769,8 @@ def _parse_pr(raw: Any) -> PRConfig:
         roles=_parse_pr_roles(raw.get("roles")),
         fork=_parse_fork(raw.get("fork")),
         notes=str(raw.get("notes", "")).strip(),
+        observation=parse_observation(raw.get("observation")),
+        publication_checks=parse_publication_checks(raw.get("publication_checks")),
     )
 
 

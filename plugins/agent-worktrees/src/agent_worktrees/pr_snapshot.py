@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from .pr_checks import CheckFailure
+from .pr_observation import Observation
 
 
 REVIEW_STATE_EVENT = {
@@ -49,6 +50,7 @@ class PRSnapshot:
     check_failures: tuple[CheckFailure, ...] = ()
     checks_complete: bool | None = None
     check_failures_omitted: int = 0
+    observation: Observation | None = None
 
     @property
     def max_review_id(self) -> int:

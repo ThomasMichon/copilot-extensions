@@ -247,6 +247,10 @@ def push_changes(
     upstream = f"{repo.remote}/{repo.default_branch}"
     lock_path = Path(repo.worktree_root) / ".finalize.lock"
 
+    from . import pr_publication_checks
+    if not pr_publication_checks.allow_publication(worktree_path, repo):
+        return False
+
     # Load tracking record
     from . import config as cfg
     explicit_rewrite = rewrite_pr or break_glass_reason is not None
@@ -361,14 +365,7 @@ def push_changes(
 
         # 2. Dirty check
         wt_exists = Path(worktree_path).exists()
-        if wt_exists and not git_ops.is_clean(cwd=worktree_path):
-            dirty = git_ops.get_dirty_files(cwd=worktree_path)
-            detail = "\n".join(f"    {ln}" for ln in dirty)
-            output.err(
-                "Working tree has uncommitted changes. "
-                "Commit or stash them before pushing:\n"
-                f"{detail}"
-            )
+        if wt_exists and not pr_publication_checks.require_clean_workspace(worktree_path):
             return False
 
         # 3. Divergence check
@@ -571,7 +568,9 @@ def push_changes(
         pushed = False
         for attempt in range(1, max_retries + 1):
             print(f"Pushing to {repo.remote} (attempt {attempt}/{max_retries})...")
-            res = git_ops.push(repo.remote, repo.default_branch, cwd=anchor)
+            res = pr_publication_checks.push_direct_candidate(worktree_path, repo, anchor)
+            if res is None:
+                return False
             if res:
                 pushed = True
                 break

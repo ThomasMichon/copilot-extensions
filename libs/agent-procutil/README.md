@@ -1,8 +1,8 @@
 # agent-procutil
 
-Shared **Windows-headless / detached** process-spawn kwargs for Copilot CLI
-plugins. One vendored helper so every plugin suppresses console-window flashes
-the same way, without each reinventing the creation flags.
+Shared **Windows-headless / detached / bounded-owned** process primitives for
+Copilot CLI plugins. One vendored helper keeps launch flags and finite child
+containment consistent instead of reimplementing them in each consumer.
 
 ```python
 import subprocess
@@ -42,6 +42,28 @@ ownership. Runtime code with an additional in-process survival step can use
 `windowless_daemon_kwargs()` preserves a `CREATE_NO_WINDOW` host on Windows
 instead of using `DETACHED_PROCESS`, so console-subsystem grandchildren do not
 allocate a visible console.
+
+## Bounded owned children
+
+`agent_procutil.owned_process.run_owned()` executes a finite command with
+captured UTF-8 output, optional `input_text`, and a required positive `timeout`.
+It retains strict Windows Job ownership or an unreaped POSIX session/group
+leader until descendant cleanup finishes. Completion, timeout and cancellation
+share that cleanup boundary. Windows stdin writing has independent absolute
+deadline supervision; supervision and pipe-reader threads finish before return.
+Unsupported or lost custody fails visibly rather than signalling a reused ID.
+
+An explicitly contained worker may call `require_contained_worker()` and launch
+nested peers with `inherit_process_group=True`. Kernel checks require Windows
+Job membership or the worker's own POSIX session/group root; an environment flag
+is not evidence. Windows producers enforce strict limits using their retained
+Job handle at suspended spawn, not an ambiguous NULL-Job limit query in a nested
+worker. Borrowed POSIX children stay in the outer
+group and are individually retired before reaping. Their outer supervisor owns
+the final group sweep, including descendants, before reporting whole-scope
+completion. Standalone entry points must supervise that worker with the default
+owned-root mode, not assume ambient containment. This is a lifetime contract,
+not application-level authorization.
 
 ## Launching a resident daemon: `spawn_daemon`
 

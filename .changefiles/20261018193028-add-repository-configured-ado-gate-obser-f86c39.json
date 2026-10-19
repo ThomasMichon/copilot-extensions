@@ -1,0 +1,9 @@
+{
+  "comment": "Centralize repository-configured ADO gate observations, stable vote/discussion/policy transitions, bounded remediation and built-in self-review/scope publication checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

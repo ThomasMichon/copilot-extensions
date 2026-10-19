@@ -88,10 +88,11 @@ def call(invocation: WatchInvocation, kind: str, payload: dict, *, boot: bool) -
         endpoint = dial(invocation)
     if endpoint is None:
         return {"error": "no committed installation-local watch owner"}
+    timeout = 27.0 if kind == "register" and payload.get("worktrees_command") else 5.0
     try:
         return request(
             *endpoint, kind=kind, key=uuid4().hex, payload=payload,
-            request_deadline_s=5.0, completion_timeout_s=5.0,
+            request_deadline_s=timeout, completion_timeout_s=timeout,
         )
     except DaemonUnavailable:
         result = {"error": "installation-local watch request completion is unconfirmed"}
@@ -216,12 +217,13 @@ def stop(invocation: WatchInvocation, *, timeout: float = 120.0) -> bool:
         return True
 
 
-def serve_passive(invocation: WatchInvocation, args, *, fetch) -> int:
+def serve_passive(invocation: WatchInvocation, args, *, fetch, native_fetch=None) -> int:
     if not args.passive_instance or not 0 < args.port <= 65535:
         raise PermissionError("watch passive entry requires its reserved instance and port")
     owner = WatchControlOwner(
         invocation, fetch=fetch, poll_interval=args.poll_interval,
         instance_id=args.passive_instance,
+        native_fetch=native_fetch,
     )
     server = WatchControlServer(owner.compute, on_idle=None, bind_port=args.port)
     try:

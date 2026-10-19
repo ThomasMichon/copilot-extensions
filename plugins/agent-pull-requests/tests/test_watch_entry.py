@@ -43,6 +43,26 @@ print(json.dumps(watch_entry.dial(invocation)), flush=True)
 """
 
 
+@pytest.mark.parametrize("native", [False, True])
+def test_governed_request_budget_covers_only_native_registration_preflight(monkeypatch, native):
+    from agent_pull_requests import watch_entry
+
+    seen = []
+    monkeypatch.setattr(watch_entry, "dial", lambda _: ("127.0.0.1", 1, "test-token"))
+
+    def request(*args, **kwargs):
+        seen.append(kwargs)
+        return {"registered": True}
+
+    monkeypatch.setattr(watch_entry, "request", request)
+    payload = {"repo": "project/repo", "number": 7}
+    if native:
+        payload["worktrees_command"] = "attributable-command"
+    assert watch_entry.call(object(), "register", payload, boot=False)["registered"]
+    assert seen[0]["request_deadline_s"] == (27.0 if native else 5.0)
+    assert seen[0]["completion_timeout_s"] == (27.0 if native else 5.0)
+
+
 @pytest.mark.parametrize("was_running", [False, True])
 @pytest.mark.parametrize("json_output", [False, True])
 def test_governed_restart_preserves_existing_response_contract(

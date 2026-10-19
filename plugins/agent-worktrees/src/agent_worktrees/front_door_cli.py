@@ -407,6 +407,15 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
     command = args_list[0]
     if command in _NO_PROJECT_COMMANDS or command.startswith("-"):
         return True
+    if command == "pr-watch" and len(args_list) > 1 and args_list[1] in (
+        "snapshot", "status", "threads", "deliver",
+    ):
+        return True
+    if command == "pr-status" and all(
+        any(arg == flag or arg.startswith(flag + "=") for arg in args_list[1:])
+        for flag in ("--repo", "--pr")
+    ):
+        return True
     if command == "update" and "--auth-report" in args_list[1:] and any(
         arg == "--auth-source" or arg.startswith("--auth-source=") for arg in args_list[1:]
     ):

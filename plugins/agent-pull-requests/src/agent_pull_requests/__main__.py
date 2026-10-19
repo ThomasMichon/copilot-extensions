@@ -204,6 +204,14 @@ def _watch_github_snapshot(repo: str, number: int):
     )
 
 
+def _watch_native_snapshot(repo: str, number: int, command: str):
+    from .watch_provider import fetch_snapshot
+
+    if _WATCH_INVOCATION is None:
+        return fetch_snapshot(repo, number, command)
+    return fetch_snapshot(repo, number, command, prefix=_agent_worktrees_prefix())
+
+
 def _github_status(repo: str, number: int) -> dict[str, Any]:
     owner, name = _parse_repo_slug(repo)
     payload = _run_agent_worktrees_gh(
@@ -546,7 +554,9 @@ def _watch_request(
             else f"{payload.get('repo', '')}#{payload.get('number', '')}"
         ),
         payload=payload,
-        request_deadline_s=5.0,
+        request_deadline_s=(
+            27.0 if kind == "register" and payload.get("worktrees_command") else 5.0
+        ),
         fallback=_fallback,
     )
 
@@ -561,6 +571,8 @@ def _cmd_watch_unsubscribe(args: argparse.Namespace) -> int:
     from .watch_notification import ACKNOWLEDGED_NOTIFICATIONS
 
     payload = {"repo": args.repo, "number": args.number, "subscriber_id": args.subscriber_id}
+    if getattr(args, "worktrees_command", None):
+        payload["worktrees_command"] = args.worktrees_command
     if getattr(args, "registration_id", None) is not None:
         health = _watch_request("health", {})
         if ACKNOWLEDGED_NOTIFICATIONS not in health.get("capabilities", []):
@@ -621,7 +633,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         from .watch_entry import ensure, serve_passive
 
         if getattr(args, "passive_instance", None):
-            return serve_passive(_WATCH_INVOCATION, args, fetch=_watch_github_snapshot)
+            return serve_passive(
+                _WATCH_INVOCATION, args, fetch=_watch_github_snapshot,
+                native_fetch=_watch_native_snapshot,
+            )
         ensure(_WATCH_INVOCATION, poll_interval=args.poll_interval)
         return 0
     if getattr(args, "passive_instance", None) or getattr(args, "port", 0):
@@ -638,7 +653,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         print(f"agent-pull-requests: watch daemon already running (pid {exc.holder_pid})")
         return 0
 
-    daemon = WatchDaemon(fetch=_watch_github_snapshot, poll_interval=args.poll_interval)
+    daemon = WatchDaemon(
+        fetch=_watch_github_snapshot, native_fetch=_watch_native_snapshot,
+        poll_interval=args.poll_interval,
+    )
     server = CoalescingServer(daemon.compute, on_idle=None)
     server.start()
     write_lock_data(rendezvous_fields(server))
@@ -771,6 +789,8 @@ def _cmd_version(_args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from .watch_contract import ALL_TRANSITIONS
+
     parser = argparse.ArgumentParser(
         prog="agent-pull-requests",
         description="Cross-repository pull-request commands for owner/repo targets.",
@@ -848,7 +868,7 @@ def build_parser() -> argparse.ArgumentParser:
     watch_subscribe.add_argument(
         "--until",
         action="append",
-        choices=["merged", "closed", "review_changed", "mergeable_changed", "checks_changed"],
+        choices=ALL_TRANSITIONS,
         help="transition(s) to wake on (default: merged, closed); repeatable",
     )
     watch_subscribe.add_argument(
@@ -870,7 +890,18 @@ def build_parser() -> argparse.ArgumentParser:
         "fired event is passed as JSON on its stdin) when this fires -- "
         "use an idempotent consumer when opting into acknowledged notifications",
     )
+    watch_subscribe.add_argument(
+        "--notify-stdin", action="store_true",
+        help="read a bounded notify JSON specification from stdin (supports option-looking argv)",
+    )
     watch_subscribe.add_argument("--json", action="store_true")
+    watch_subscribe.add_argument(
+        "--worktrees-command", help="absolute attributable command for native configured snapshots",
+    )
+    watch_subscribe.add_argument(
+        "--continuous", action="store_true",
+        help="retain native acknowledged subscription through terminal delivery",
+    )
     watch_subscribe.set_defaults(handler=_cmd_watch_subscribe)
 
     watch_unsubscribe = watch_sub.add_parser(
@@ -880,6 +911,7 @@ def build_parser() -> argparse.ArgumentParser:
     watch_unsubscribe.add_argument("--number", required=True, type=int)
     watch_unsubscribe.add_argument("--subscriber-id", required=True)
     watch_unsubscribe.add_argument("--registration-id", help="cancel only this exact registration")
+    watch_unsubscribe.add_argument("--worktrees-command")
     watch_unsubscribe.add_argument("--json", action="store_true")
     watch_unsubscribe.set_defaults(handler=_cmd_watch_unsubscribe)
 

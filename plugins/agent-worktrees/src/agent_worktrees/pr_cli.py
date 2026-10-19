@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -48,7 +49,7 @@ def add_parsers(sub) -> None:
 
 def _pr_watch_usage() -> None:
     out = sys.stderr
-    print("Usage: <project> pr-watch <wait|cursor> <owner/name> <pr> [options]", file=out)
+    print("Usage: <project> pr-watch <wait|cursor|snapshot|status|threads> <repo> <pr> [options]", file=out)
     print(file=out)
     print("Block until a pull request moves, then wake the caller. The review", file=out)
     print("backend (host, token) is the repo's PR binding (.agent-worktrees/", file=out)
@@ -62,6 +63,12 @@ def _pr_watch_usage() -> None:
     print("    --interval SECS    Poll interval (> 0; default 20)", file=out)
     print("    --json             Emit only the result JSON on stdout", file=out)
     print("  cursor <repo> <pr>  Print the current baseline cursor for a PR.", file=out)
+    print("  snapshot/status <repo> <pr> --json  Read configured native gate evidence once.", file=out)
+    print("  threads <repo> <pr> --json  Read discussion bodies and revision context on demand.", file=out)
+    print("  reply/requeue <repo> <pr> --help  Bounded ADO discussion or existing-evaluation remediation.", file=out)
+    print("  checks <repo> <lenses|record-self-review|verify-self-review|scope-report> --workspace PATH", file=out)
+    print("  subscribe <repo> <pr> --notify OWNER --bridge COMMAND  Use the shared watch owner.", file=out)
+    print("  stop --notify OWNER --json  Cancel that owner's subscriptions; ownerstatus inspects them.", file=out)
     print(file=out)
     print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
     print(file=out)
@@ -434,6 +441,17 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     the provider plugins. This dispatcher wires the CLI onto the repo's PR
     binding (host/token/provider from config).
     """
+    if argv[:1] == ["checks"]:
+        from .pr_publication_checks import dispatch_cli
+        return dispatch_cli(argv[1:])
+    from .pr_remediation_cli import dispatch as remediation_dispatch
+    remediation_result = remediation_dispatch(argv)
+    if remediation_result is not None:
+        return remediation_result
+    from .pr_watch_owner import dispatch
+    owner_result = dispatch(argv)
+    if owner_result is not None:
+        return owner_result
     import json as _json
 
     from . import pr_contract as pc
@@ -445,7 +463,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         return 0 if argv and argv[0] in ("--help", "-h", "help") else 1
 
     verb = argv[0]
-    if verb not in ("wait", "cursor"):
+    if verb not in ("wait", "cursor", "snapshot", "status", "threads"):
         output.err(f"Unknown pr-watch subcommand: {verb}")
         _pr_watch_usage()
         return 1
@@ -465,6 +483,8 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     )
     p.add_argument("--token", default=None, help="Provider token override (else the binding)")
     p.add_argument("--config", default=None)
+    if verb in ("snapshot", "status", "threads"):
+        p.add_argument("--json", action="store_true")
     if verb == "wait":
         p.add_argument(
             "--until",
@@ -477,26 +497,39 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         )
         p.add_argument("--interval", type=float, default=20.0, help="poll interval seconds")
         p.add_argument("--json", action="store_true", help="emit only the result JSON")
+        p.add_argument("--foreground-only", action="store_true",
+                       help="Finite caller-owned read wait; no durable worktree responsibility is acquired")
     try:
         args = p.parse_args(argv[1:])
     except SystemExit as exc:
         return int(exc.code or 0)
 
-    _claimant_id, claimant_error = require_claimant_worktree(f"pr-watch {verb}")
-    if claimant_error:
-        output.err(claimant_error)
-        return 2
+    read_only = verb in ("snapshot", "status", "threads")
+    if not read_only and not getattr(args, "foreground_only", False):
+        _claimant_id, claimant_error = require_claimant_worktree(f"pr-watch {verb}")
+        if claimant_error:
+            output.err(claimant_error)
+            return 2
 
     if verb == "wait":
-        if args.timeout < 0:
+        if not math.isfinite(args.timeout) or args.timeout < 0:
             output.err("--timeout must be >= 0 (0 = no limit)")
             return 2
-        if args.interval <= 0:
+        if not math.isfinite(args.interval) or args.interval <= 0:
             output.err("--interval must be > 0")
+            return 2
+        if args.foreground_only and args.timeout == 0:
+            output.err("--foreground-only requires a finite positive --timeout")
             return 2
 
     try:
-        config = cfg.load_config(Path(args.config) if args.config else None)
+        if read_only:
+            from .pr_read_context import load_read_config
+            if args.repo is None and not cfg.active_project():
+                raise ValueError("Specify the target repository for a context-free PR read")
+            config = load_read_config(Path(args.config) if args.config else None)
+        else:
+            config = cfg.load_config(Path(args.config) if args.config else None)
         if args.repo is None:
             args.repo = _infer_active_repo_slug(config)
             if not args.repo:
@@ -508,6 +541,9 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         from . import pr_config
         resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
         if not resolution.resolved:
+            if resolution.error:
+                output.err("pr-watch: " + resolution.error)
+                return 2
             output.err(
                 f"pr-watch: {args.repo!r} is not a registered repo this "
                 "machine can resolve a PR binding for. Register it "
@@ -557,6 +593,15 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     )
                     return 2
 
+        if verb == "threads":
+            from .providers import get_provider, account_token_for_slug
+            from .pr_thread_report import thread_report
+            provider = get_provider(prcfg.provider)
+            tok = resolved_token if resolved_token is not None else account_token_for_slug(args.repo, prcfg)
+            report = thread_report(provider, args.repo, args.pr,
+                                   api_base=args.host or prcfg.api_base, token=tok)
+            print(_json.dumps(report))
+            return 1 if report.get("error") or report.get("supported") is False else 0
         fetch = prw.build_fetch(
             prcfg,
             args.repo,
@@ -567,6 +612,11 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         if verb == "cursor":
             snap = fetch()
             print(pc.Baseline.from_snapshot(snap).to_cursor())
+            return 0
+        if verb in ("snapshot", "status"):
+            from .pr_snapshot_payload import snapshot_payload
+            print(_json.dumps(snapshot_payload(fetch(), args.repo, args.pr, prcfg.provider,
+                                               args.host or prcfg.api_base)))
             return 0
 
         baseline = pc.Baseline.from_cursor(args.since) if args.since else None

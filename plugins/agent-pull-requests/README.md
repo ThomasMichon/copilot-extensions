@@ -154,6 +154,119 @@ workers so they cannot stall observation for another subscriber; they still
 receive only one best-effort attempt. The reliable contract is not silently
 enabled for legacy consumers.
 
+## Native configured observation (source capability)
+
+The existing watch owner also accepts an explicitly attributed Worktrees
+command for native Azure DevOps observation. It executes one bounded
+`pr-watch snapshot <repo> <number> --json` read per polling cycle. Worktrees
+owns target configuration, credentials, native provider reads and gate policy;
+this plugin neither imports its Python package nor implements another REST
+adapter. A successful registration requires a version-1
+`agent-worktrees.pr-snapshot` envelope with an ADO observation, or a native
+terminal state when the retained head and active observation are unavailable. A missing or
+incompatible capability fails registration, never starts a second watcher.
+In an installation cell, the physically attested owner uses its validated
+immutable same-cell Worktrees peer prefix; the recorded command hint is not
+executed as an alternative. Native observation is passed through the existing
+passive owner and writer adapter, so it shares their state root, writer lease,
+quiescence and activation boundaries. Legacy commands retain their explicit
+attributed executable path.
+
+Native snapshot children and their callbacks retain owned containment through
+completion, timeout and cancellation. Windows uses a strict kill-on-close Job;
+POSIX keeps the original child unreaped until its process group is retired,
+then reaps it. Unsupported or lost child custody fails visibly rather than
+signalling a potentially reused process-group identity.
+Windows callback input has independent absolute-deadline supervision, so a
+non-reading child cannot block cleanup during a synchronous pipe write.
+Supervision and pipe-reader threads are joined before returning.
+Execution uses the canonical `agent_procutil.owned_process` helper. Generated
+delivery callbacks select an explicitly contained worker, whose Bridge peers
+inherit that verified outer scope instead of opening separate POSIX sessions.
+The public standalone delivery entry supervises the same worker, preserving
+cleanup without relying on an ambient containment flag.
+Pre-flag source-preview callback configurations are not rewritten automatically;
+reconcile their exact registrations before treating them as contained workers.
+
+```text
+agent-pull-requests watch subscribe --repo example/project --number 42 --subscriber-id pr-watch:worker --worktrees-command <absolute-worktrees-command> --continuous --acknowledged-notifications --until merged --until closed --until head_changed --until votes_changed --until approvals_changed --until threads_changed --until policies_changed --until gates_changed --json --notify-argv <callback>
+```
+
+Health advertises `native_snapshots/v1` and `continuous_notifications/v1`
+when the native adapter is available. These describe protocol support, not
+permission to assume any target's ADO configuration is usable: registration
+preflights that target. The native executable is part of the watch key, so
+different attributed installations cannot accidentally share a target's poller.
+Its exact path must also accompany cancellation.
+Registrations also bind the normalized provider endpoint/repository/PR identity;
+configuration changes cannot silently retarget an existing subscription.
+
+For callbacks containing options such as `python -m`, use `--notify-stdin`
+instead of `--notify-argv`: stdin contains a bounded JSON object such as
+`{"argv":["<python>","-m","consumer"]}`. The same notify validation and
+acknowledgement rules apply; this is an input adapter, not another wire protocol.
+
+Native events additionally include `snapshot_protocol` and the immutable
+`snapshot` envelope. Vote, approval-event, discussion, policy, head and gate
+changes are observable even when aggregate CI/review states do not move.
+Completeness, error and guidance changes also wake gate subscribers.
+Vote/approval evidence also maps to `review_changed`; readiness becoming
+human-actionable maps to `ready_for_human`. Both are observations, not actions.
+This owner does not reinterpret approval freshness, reviewer membership,
+comment resolution or human-owned gates.
+
+Continuous subscriptions are explicit and require acknowledged notifications
+plus both terminal transitions. Legacy subscriptions remain one-shot.
+The owner keeps polling while a continuous callback awaits ACK. One immutable
+pending event and at most one coalesced successor are persisted in the same
+subscription file; the successor carries the latest snapshot and the union
+of intervening transition names, not an exhaustive backend event history.
+ACK promotes that successor, or re-arms the retained registration. Terminal
+observation (or an explicit subscription timeout) retires the registration
+only after its final event is acknowledged. Repeating an identical continuous
+registration preserves its generation and pending delivery; changing it
+requires explicit cancellation.
+An open native registration persists its validated admission snapshot as the
+baseline before reporting success. Polls started before that registration
+cannot roll its baseline back. Terminal admission keeps the immediate
+terminal-event behavior. Delivery scheduling captures retry metadata under
+the state transaction and rechecks event identity before launching a worker;
+an ACK may clear or replace a continuous pending event without invalidating
+the shared scheduler.
+
+Status adds registration identities, in-flight callback identities and
+sanitized native observation errors. Cancellation cannot recall an already
+running callback. A facade must refuse to claim a worktree is stopped while
+one remains in flight or its status is unknown.
+
+This documents source behavior, not installation, rollout or a new service
+lifecycle. Existing stop/restart and governed-state boundaries are unchanged.
+
+The Worktrees facade integration hook handles `pr-watch subscribe <repo> <pr>
+--notify <worktree-handle> --bridge <absolute-command>`, `pr-watch stop --notify
+<worktree-handle>`, and `pr-watch ownerstatus` (each supports `--json`).
+Legacy peer discovery uses only the selected Worktrees payload's sibling,
+validates both plugin manifests and canonical platform bin paths, and never
+searches PATH. `--pull-requests` can only select that same verified owner.
+With explicit installation context, the facade instead validates the existing
+cell and uses canonical peer launch for the PR owner, the Worktrees callback,
+and Bridge delivery. Raw owner-command overrides are refused in that mode;
+missing peers or invalid receipts never select another marketplace or legacy
+installation. The callback rebinds to Worktrees before invoking its private
+delivery handler, then resolves Bridge in that same cell.
+
+The callback resolves only an existing live bridge handle, sends with an exact
+session fence, protocol floor 39 and its stable event ID as the idempotency key,
+and queues the prompt without waiting for agent work to finish. Exit success
+alone is not acknowledgement: the callback requires a current matching durable
+inbox admission receipt. This proves admission, not consumption or completed
+work. Missing live owners or incompatible receipts leave the event pending;
+the callback never creates/resumes an agent or restarts the bridge.
+Native callback processes and descendants remain inside the existing callback
+deadline and strict caller-owned process boundary, including peer-bootstrap
+layers. Quiescence still waits for callback completion and durable ACK writes
+before state-writer transfer; ACK remains inbox admission, not consumption.
+
 ## Watch daemon shutdown
 
 The on-demand PR-watch daemon (`serve`) persists pending subscriptions so
@@ -573,3 +686,14 @@ to ambient `gh` authentication until a dedicated account-resolution layer
 lands here.
 
 See [docs/cli-reference.md](docs/cli-reference.md) for full verb documentation.
+
+## Native validation bounds
+
+The source-qualified installed-closure fixture preserves separate native
+stamping, fresh construction and reuse transactions plus the final import
+after removing the source payload. Its Windows PowerShell parameter has a
+45-second item bound: an unchanged-bound reproduction timed out at 30 seconds,
+while stage-observed execution completed in 26.92 seconds and was still doing
+native source verification near the former cap. Only that native parameter
+gets the additional margin; the other parameters, subprocess deadlines,
+group/plugin budgets, production code and all assertions remain unchanged.

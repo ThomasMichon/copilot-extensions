@@ -239,7 +239,7 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                     fresh, target.remote, f"{head_sha}:refs/heads/{pr.branch}", cwd=cwd,
                     expected_head_repo=slug, expected_head_identity=identity,
                     force_with_lease_expect=remote_tip, allow_history_rewrite=True,
-                    strict_lease=recovery,
+                    strict_lease=recovery, repo=repo,
                     timeout=publication_deadline.configured(repo.pr),
                 )
             if not result:

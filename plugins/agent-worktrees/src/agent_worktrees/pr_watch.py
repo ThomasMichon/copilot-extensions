@@ -28,6 +28,7 @@ from . import pr_contract as pc
 from .pr_checks import checks_payload
 from .pr_consent import consent_argv, consent_command, consent_update_key
 from .pr_occupancy import occupancy_from_readiness
+from .pr_observation import configured_snapshot
 from .providers import ProviderError, account_token_for_slug, get_provider
 
 
@@ -112,6 +113,8 @@ def decorate_events(
             ),
         )
     )
+    if snap.observation is not None:
+        payload["observation"] = snap.observation.to_dict()
     return payload
 
 
@@ -167,9 +170,10 @@ def run_wait(
     now = now or _time.monotonic
     sleep = sleep or _time.sleep
     acknowledged = baseline.consent_update if baseline is not None else ""
+    observation_cursor = baseline.observation_cursor if baseline is not None else ""
 
     def _decorate(events: list[dict], snap: pc.PRSnapshot) -> dict:
-        nonlocal acknowledged
+        nonlocal acknowledged, observation_cursor
         payload = decorate_events(
             events, repo, pr, snap,
             automerge_label=automerge_label,
@@ -194,11 +198,14 @@ def run_wait(
                 payload["updates"] = ["consent_required"]
         else:
             acknowledged = ""
-        payload["cursor"] = replace(
+        returned = replace(
             pc.Baseline.from_snapshot(
                 snap, dismiss_stale_reviews=dismiss_stale_reviews,
+                previous_observation_cursor=observation_cursor,
             ), consent_update=key,
-        ).to_cursor()
+        )
+        observation_cursor = returned.observation_cursor
+        payload["cursor"] = returned.to_cursor()
         return payload
 
     deadline = now() + timeout if timeout > 0 else None
@@ -267,6 +274,8 @@ def run_wait(
                             dismiss_stale_reviews=dismiss_stale_reviews,
                         ) == "APPROVED"
                     ))
+                if not base.observation_cursor and snap.observation is not None:
+                    base = replace(base, observation_cursor=pc.Baseline.from_snapshot(snap).observation_cursor)
                 events = pc.compute_events(
                     base, snap, until,
                     dismiss_stale_reviews=dismiss_stale_reviews,
@@ -310,10 +319,12 @@ def build_fetch(
     """
     provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
     base = (api_base or getattr(prcfg, "api_base", "") or "").strip()
-    tok = token if token is not None else account_token_for_slug(repo, prcfg)
+    refresh_binding = token is None and getattr(prcfg, "provider", "") == "azure-devops"
+    tok = token if token is not None or refresh_binding else account_token_for_slug(repo, prcfg)
 
     def _fetch() -> pc.PRSnapshot:
-        return provider.get_snapshot(repo, number, api_base=base, token=tok)
+        current_token = account_token_for_slug(repo, prcfg) if refresh_binding else tok
+        return configured_snapshot(provider, repo, number, prcfg=prcfg, api_base=base, token=current_token)
 
     return _fetch
 

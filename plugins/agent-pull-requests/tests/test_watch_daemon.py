@@ -14,6 +14,8 @@ import pytest
 
 from agent_pull_requests.watch_contract import CLOSED, MERGED, PRSnapshot
 from agent_pull_requests.watch_daemon import WatchDaemon, _atomic_write_json
+from agent_pull_requests.watch_notification import ACKNOWLEDGED_NOTIFICATIONS
+from agent_pull_requests.watch_registry import WatchKey
 
 
 @pytest.fixture
@@ -181,6 +183,47 @@ def test_a_restarted_daemon_reattaches_persisted_subscriptions(
     fetcher.set("o/n", 7, PRSnapshot(pr_state="closed", merged=True))
     assert _wait_until(lambda: len(events) == 1)
     assert events[0]["id"] == "carried-over"
+    assert predecessor_events == []
+
+
+@pytest.mark.parametrize("acknowledged", [False, True])
+def test_non_native_head_watch_detects_push_while_owner_is_stopped(
+    daemon_factory, acknowledged,
+):
+    fetcher = _FakeFetcher()
+    fetcher.set("o/n", 7, PRSnapshot(head_sha="A"))
+    predecessor_events = []
+    first = daemon_factory(
+        fetch=fetcher, notify=predecessor_events.append, poll_interval=0.02,
+    )
+    registration = {
+        "repo": "o/n", "number": 7, "subscriber_id": "head-waiter",
+        "until": ["head_changed"], "notify": {"argv": ["callback"]},
+    }
+    if acknowledged:
+        registration["notification_protocol"] = ACKNOWLEDGED_NOTIFICATIONS
+    assert first.compute("register", registration)["registered"]
+    key = WatchKey("o/n", 7)
+
+    def baseline_is_known():
+        sub = first._registry.subscriber(key, "head-waiter")
+        return sub is not None and sub.baseline is not None and sub.baseline.head_sha == "A"
+
+    assert _wait_until(baseline_is_known)
+    first.compute("shutdown", {})
+    first.close()
+    assert not first._pollers
+    fetcher.set("o/n", 7, PRSnapshot(head_sha="B"))
+    events = []
+
+    def notify(event):
+        events.append(event)
+        return 0
+
+    second = daemon_factory(fetch=fetcher, notify=notify, poll_interval=0.02)
+    assert _wait_until(lambda: len(events) == 1)
+    assert events[0].transitions == ("head_changed",)
+    assert _wait_until(lambda: second.status()["subscribers"] == {})
     assert predecessor_events == []
 
 

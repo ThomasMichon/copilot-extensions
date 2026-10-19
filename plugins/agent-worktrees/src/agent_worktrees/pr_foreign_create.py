@@ -101,6 +101,12 @@ def create_foreign_pr_from_branch(
         }
     base_branch = base or repo_cfg.default_branch
 
+    if getattr(prcfg, "publication_checks", None) is not None:
+        return {"error": (
+            "Configured publication checks require the source worktree and reviewed candidate; "
+            "foreign --from-branch creation cannot prove that local receipt."
+        ), "repo": target_repo}
+
     rec_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     pre_record = tracking.load_record(rec_path) if rec_path.exists() else None
 

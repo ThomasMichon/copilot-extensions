@@ -22,7 +22,7 @@ from zdd import diagnostics
 from zdd.process_exit import ProcessExitReference
 
 from . import _installation_context as api
-from .watch_daemon import Fetch, Notify
+from .watch_daemon import Fetch, NativeFetch, Notify
 from .watch_installation import WatchInstallation
 from .watch_invocation import WatchInvocation
 from .watch_journal import _passive_health, authorize_cleanup, authorize_control
@@ -68,6 +68,7 @@ class WatchControlOwner:
         self, invocation: WatchInvocation, *, fetch: Fetch,
         notify: Notify = default_notify, poll_interval: float = 30.0,
         instance_id: str | None = None,
+        native_fetch: NativeFetch | None = None,
     ) -> None:
         self.invocation = invocation
         self.instance = invocation.instance(instance_id=instance_id)
@@ -78,6 +79,7 @@ class WatchControlOwner:
         self.writer = WatchWriter(
             root=invocation.installation.state_root, authorize=self._authorize,
             fetch=fetch, notify=notify, poll_interval=poll_interval,
+            native_fetch=native_fetch,
         )
 
     def _installation(self) -> WatchInstallation:

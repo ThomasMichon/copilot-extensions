@@ -439,6 +439,17 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
     (``head_repo``) at push time -- another worktree's fork setup could have
     repointed it since it was chosen."""
     timeout = publication_deadline.validate(timeout)
+    checked_policy = getattr(getattr(repo, "pr", None), "publication_checks", None)
+    if checked_policy is not None:
+        from . import pr_publication_checks
+        source = refspec.partition(":")[0]
+        publication = pr_publication_checks.enforce(cwd, repo, head=source)
+        if not publication["ok"]:
+            return git_ops.PushResult(ok=False, stderr=pr_publication_checks.failure_detail(publication))
+        try:
+            refspec = pr_publication_checks.pin_refspec(cwd, refspec, publication["head"])
+        except pr_publication_checks.CheckError as exc:
+            return git_ops.PushResult(ok=False, stderr=str(exc))
     pr = _pr_for(record, refspec.rpartition(":")[2].removeprefix("refs/heads/"))
     want = (expected_head_repo or getattr(pr, "head_repo", "") or "").lower()
     # The full host/owner/name, read when the target was chosen (or recorded at
@@ -501,7 +512,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 tip = _tip(remote, destination.removeprefix("refs/heads/"), cwd)
                 if tip and git_ops.is_commit_ancestor(tip, source, cwd=cwd):
                     result = git_ops.push(remote, refspec, cwd=cwd, timeout=timeout)
-                elif tip and repo is not None:
+                elif tip and repo is not None and checked_policy is None:
                     from . import pr_rebase
                     recovery_result = pr_rebase.push(
                         record, repo, remote, refspec, force_with_lease_expect,
@@ -512,7 +523,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                     else:
                         result.stdout += "\n" + recovery_result.stdout
                         result.stderr += "\n" + recovery_result.stderr
-            if not strict_lease and repo is not None and force_with_lease_expect and result.stderr == (
+            if not strict_lease and repo is not None and checked_policy is None and force_with_lease_expect and result.stderr == (
                 f"Refusing: {force_with_lease_expect} not an ancestor."
             ):
                 from . import pr_rebase
@@ -522,6 +533,8 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
             if result:
                 result.head_repo = got
                 result.head_identity = identity
+                if checked_policy is not None:
+                    result.published_head_sha = publication["head"]
             return result
     except PublishLockTimeout as exc:
         return git_ops.PushResult(ok=False, stderr=str(exc))

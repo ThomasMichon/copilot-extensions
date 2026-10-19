@@ -157,6 +157,10 @@ retains it through restart/crash. Failures retry after 1, 2, 4, 8, 16, 32, then
 60 seconds indefinitely (no automatic exhaustion). Subscribers remain
 independent even on the same PR. Pending callbacks recover before ordinary
 polling; callback execution never holds the persistence lock.
+For native subscriptions, a selected merged/closed result from the admission
+read is persisted as a pending event before registration succeeds. Delivery
+does not depend on another provider read; repeated continuous registration
+preserves the existing generation and any older pending payload.
 
 `watch status` includes `pending_deliveries`, with identity, failed `attempts`,
 `next_attempt` (Unix seconds), and sanitized `last_error` codes
@@ -194,7 +198,8 @@ For shutdown/restart boundaries, durability, and recovery detail, see
 
 ## Not implemented yet
 
-- non-GitHub providers
+- non-GitHub `status`/`create`/`merge`/`wait` verbs (native ADO watch observation
+  is available through the attributed snapshot driver described in the README)
 - worktree-tracking integration (`set-pr`, active-PR selection, reconcile)
 
 Those remain later parity/migration slices, kept separate so this plugin's

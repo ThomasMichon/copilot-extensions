@@ -554,6 +554,12 @@ armed user configuration still fails before any worktree mutation.
 
 ## PR workflow — `repos.<name>.pr` (machine-local **or** in-repo)
 
+Optional `publication_checks` configures fixed built-in self-review and scope
+checks that gate managed code publication. No external check commands or dynamic
+registry are accepted. See [publication checks](pr-publication-checks.md) for the
+strict schema, related-repository configuration and central `pr-watch checks`
+commands. Omission preserves existing defaults.
+
 Controls whether sign-off goes through a pull request instead of direct-push
 finalization. This block can be set in the machine-local config **or** in the
 in-repo overlay (below); the in-repo version wins when both are present.

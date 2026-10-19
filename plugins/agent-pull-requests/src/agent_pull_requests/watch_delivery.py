@@ -19,6 +19,7 @@ class Deliveries:
         self.transaction = transaction
         self.shutdown = shutdown
         self.workers: dict[str, threading.Thread] = {}
+        self.in_flight: dict[str, dict] = {}
         self.lock = threading.Lock()
         self.legacy_queue = deque()
         self.scheduler: threading.Thread | None = None
@@ -49,18 +50,22 @@ class Deliveries:
             start_failed = False
             with self.transaction:
                 pending = sorted(
-                    self.registry.pending_events(),
-                    key=lambda e: e.subscriber.pending["next_attempt"],
+                    (
+                        (event, event.subscriber.pending["next_attempt"],
+                         event.subscriber.registration_id)
+                        for event in self.registry.pending_events()
+                    ),
+                    key=lambda item: item[1],
                 )
-            with self.lock:
+            with self.transaction, self.lock:
                 if self.shutdown.is_set():
                     return
                 available = self.max_workers - len(self.workers)
                 candidates = []
                 ready = deque(
-                    event for event in pending
-                    if event.subscriber.pending["next_attempt"] <= time.time()
-                    and event.subscriber.registration_id not in self.workers
+                    event for event, next_attempt, identity in pending
+                    if next_attempt <= time.time()
+                    and identity not in self.workers and self.registry.is_current(event)
                 )
                 while len(candidates) < available and (ready or self.legacy_queue):
                     if self.legacy_queue and (self.prefer_legacy or not ready):
@@ -69,26 +74,33 @@ class Deliveries:
                         candidates.append((ready.popleft(), self._run))
                     self.prefer_legacy = not self.prefer_legacy
                 for event, target in candidates:
+                    if target == self._run and not self.registry.is_current(event):
+                        continue
                     identity = event.subscriber.registration_id
                     thread = threading.Thread(
                         target=target, args=(event,), name=f"pr-notify:{identity}", daemon=True,
                     )
                     self.workers[identity] = thread
+                    self.in_flight[identity] = {
+                        "registration_id": identity, "subscriber_id": event.subscriber.subscriber_id,
+                        "repo": event.key.repo, "number": event.key.number,
+                    }
                     try:
                         thread.start()
                     except RuntimeError:
                         del self.workers[identity]
+                        self.in_flight.pop(identity, None)
                         if target == self._run_legacy:
                             self.legacy_queue.appendleft(event)
                         self.start_error = "worker_start_failed"
                         start_failed = True
                     else:
                         self.start_error = None
-            future = [
-                e.subscriber.pending["next_attempt"] for e in pending
-                if e.subscriber.registration_id not in self.workers
-                and e.subscriber.pending["next_attempt"] > time.time()
-            ]
+                future = [
+                    next_attempt for event, next_attempt, identity in pending
+                    if identity not in self.workers and next_attempt > time.time()
+                    and self.registry.is_current(event)
+                ]
             delay = min(60.0, max(0.0, min(future) - time.time())) if future else None
             if start_failed:
                 delay = 1.0
@@ -108,6 +120,7 @@ class Deliveries:
         finally:
             with self.lock:
                 self.workers.pop(event.subscriber.registration_id, None)
+                self.in_flight.pop(event.subscriber.registration_id, None)
             self.changed.set()
 
     def _run(self, event) -> None:
@@ -141,16 +154,13 @@ class Deliveries:
                         if error is None:
                             # Write the ACK before deleting in memory. A failed local ACK write
                             # leaves both copies pending, even after a successful remote commit.
-                            entries = [
-                                e for e in self.registry.snapshot_state()
-                                if e.get("registration_id") != sub.registration_id
-                            ]
+                            entries = self.registry.acknowledged_state(event)
                             try:
                                 self.persist(entries)
                             except StateCommitUncertain:
-                                self.registry.unregister(event.key, sub.subscriber_id)
+                                self.registry.acknowledge(event)
                                 return
-                            self.registry.unregister(event.key, sub.subscriber_id)
+                            self.registry.acknowledge(event)
                             return
                         pending = sub.pending
                         pending["attempts"] += 1
@@ -164,12 +174,14 @@ class Deliveries:
                             return
                 except OSError:
                     # The persisted event remains authoritative; never acknowledge a failed write.
-                    if sub.pending is not None:
-                        sub.pending["next_attempt"] = time.time() + 1.0
+                    with self.transaction:
+                        if self.registry.is_current(event) and sub.pending is not None:
+                            sub.pending["next_attempt"] = time.time() + 1.0
         finally:
             with self.lock:
                 if self.workers.get(sub.registration_id) is threading.current_thread():
                     del self.workers[sub.registration_id]
+                    self.in_flight.pop(sub.registration_id, None)
             self.changed.set()
 
     def status(self) -> list[dict]:
@@ -186,6 +198,10 @@ class Deliveries:
                 }
                 for event in self.registry.pending_events()
             ]
+
+    def running(self) -> list[dict]:
+        with self.lock:
+            return [dict(item) for item in self.in_flight.values()]
 
     def close(self, deadline: float, *, bounded: bool = False) -> list[str]:
         self.changed.set()

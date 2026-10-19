@@ -32,7 +32,6 @@ from .pr_checks import checks_payload
 from .pr_readiness_policy import operation_readiness
 from .pr_review_policy import effective_review
 from .pr_snapshot import PRSnapshot as PRSnapshot, Review as Review
-from .pr_snapshot import REVIEW_STATE_EVENT as _REVIEW_STATE_EVENT
 from .pr_status_feedback import STATUS_FEEDBACK
 
 # ---------------------------------------------------------------------------
@@ -66,6 +65,7 @@ ALL_TRANSITIONS = (
                            # what a REVIEWER-side waiter needs: "is there new
                            # content to look at", as opposed to an author's
                            # verdict-shaped DEFAULT_UNTIL)
+    "review_changed", "threads_changed", "policies_changed", "gates_changed", "ready_for_human",
 )
 
 #: The actionable default: everything that needs the author's attention -- a
@@ -75,6 +75,7 @@ ALL_TRANSITIONS = (
 DEFAULT_UNTIL = (
     "changes_requested", "approved", "conflict", "mergeable",
     "checks_failed", "approval_dismissed", "merged", "closed",
+    "review_changed", "threads_changed", "policies_changed", "gates_changed", "ready_for_human",
 )
 
 #: Non-blocking-review variant: also observe comment-only reviews without
@@ -82,6 +83,7 @@ DEFAULT_UNTIL = (
 NONBLOCKING_DEFAULT_UNTIL = (
     "approved", "commented", "changes_requested", "conflict", "mergeable",
     "checks_failed", "checks_succeeded", "approval_dismissed", "merged", "closed",
+    "review_changed", "threads_changed", "policies_changed", "gates_changed", "ready_for_human",
 )
 
 #: The REVIEWER-side counterpart to :data:`DEFAULT_UNTIL`: a durably-assigned
@@ -219,11 +221,14 @@ class Baseline:
     """Arm-time head for ``pushed``; unknown heads are adopted without firing."""
     consent_update: str = ""
     """Last delivered consent-state update; a snapshot cursor never acknowledges it."""
+    observation_cursor: str = ""
 
     @classmethod
     def from_snapshot(
         cls, snap: PRSnapshot, *, dismiss_stale_reviews: bool | None = None,
+        previous_observation_cursor: str = "",
     ) -> Baseline:
+        from .pr_observation_events import cursor_for
         return cls(
             max_review_id=snap.max_review_id,
             merged=snap.merged,
@@ -237,6 +242,10 @@ class Baseline:
                 ) == "APPROVED"
             ),
             head_sha=snap.head_sha,
+            observation_cursor=(
+                cursor_for(snap.observation, previous_observation_cursor)
+                if snap.observation is not None else ""
+            ),
         )
 
     def to_cursor(self) -> str:
@@ -253,6 +262,9 @@ class Baseline:
         if self.consent_update:
             parts.extend([""] * (4 - len(parts)))
             parts.append(f"s{self.consent_update}")
+        if self.observation_cursor:
+            parts.extend([""] * (5 - len(parts)))
+            parts.append("o" + self.observation_cursor)
         return ".".join(parts)
 
     @classmethod
@@ -271,6 +283,12 @@ class Baseline:
         head_sha = parts[2][1:] if len(parts) > 2 and parts[2].startswith("h") else ""
         checks_state = parts[3][1:] if len(parts) > 3 and parts[3].startswith("k") else ""
         consent_update = parts[4][1:] if len(parts) > 4 and parts[4].startswith("s") else ""
+        observation_cursor = parts[5][1:] if len(parts) > 5 and parts[5].startswith("o") else ""
+        if len(parts) > 5:
+            if not observation_cursor or len(parts) != 6:
+                raise ValueError("invalid PR observation cursor")
+            from .pr_observation_events import read_cursor
+            read_cursor(observation_cursor)
         s = s.lstrip("r") or "0"
         try:
             rid = int(s)
@@ -283,6 +301,7 @@ class Baseline:
             head_sha=head_sha,
             checks_state=checks_state,
             consent_update=consent_update,
+            observation_cursor=observation_cursor,
         )
 
 
@@ -304,28 +323,10 @@ def compute_events(
     if "any" in want:
         want = set(ALL_TRANSITIONS)
 
-    events: list[dict] = []
-
-    for review in sorted(snap.reviews, key=lambda r: r.id):
-        if review.id <= baseline.max_review_id:
-            continue
-        if snap.author and review.user == snap.author:
-            continue
-        name = _REVIEW_STATE_EVENT.get(review.state.upper())
-        if name is None or name not in want:
-            continue
-        events.append(
-            {
-                "event": name,
-                "review": {
-                    "id": review.id,
-                    "state": review.state,
-                    "user": review.user,
-                    "submitted_at": review.submitted_at,
-                    "commit_id": review.commit_id,
-                },
-            }
-        )
+    from .pr_observation_events import events_since, historical_review_events
+    events: list[dict] = (events_since(baseline.observation_cursor, snap.observation, want)
+                          if snap.observation is not None else historical_review_events(
+                              baseline.max_review_id, snap.reviews, snap.author, want))
 
     # Merge state change -- only meaningful while open + unmerged, and only on a
     # concrete True<->False flip (a None baseline is adopted without firing).
@@ -800,28 +801,12 @@ def merge_readiness(
     dismiss_stale_reviews: bool | None = None,
     operation: str = "consent",
 ) -> dict:
-    """A caller-facing "what stands between this PR and merge" summary.
+    """Expose consent separately from authoritative native merge requirements.
 
-    Runs the shared :func:`classify_state` and renders its verdict/consent
-    vocabulary into a JSON-able dict -- so ``pr-watch`` can tell a woken caller
-    *what to do next* rather than only *that a review landed*. Beyond the raw
-    classification it adds two action booleans the caller keys off directly:
-
-    - ``needs_consent`` -- the PR is approved (or approval-optional) and
-      otherwise unblocked, but the merge-consent label is not yet applied
-      (``consent_action == "apply"``). The caller must **grant consent** (e.g.
-      add the auto-merge label) for the PR to merge; it will NOT merge on its
-      own. This is the signal a bare ``approved`` transition failed to convey.
-    - ``clear_to_merge`` -- nothing but consent stands between the PR and a
-      merge: consent is already present, or a single consent action away
-      (``consent_action`` in ``{"apply", "already"}``).
-
-    ``review_blocking`` (default ``True``) forwards to :func:`classify_state`
-    (see :func:`effective_verdict`).
-
-    Binding-absent (no ``automerge_label`` configured) degrades cleanly:
-    ``needs_consent`` / ``clear_to_merge`` are False and ``reason`` says so --
-    a human-driven merge repo reports verdict + merge state with no action.
+    ``needs_consent`` retains the existing provider consent action. Arming native
+    auto-completion does not satisfy another gate. ``clear_to_merge`` additionally
+    requires complete, satisfied native gate evidence when observation supports
+    it. An absent binding still reports no consent action.
     """
     from .pr_occupancy import occupancy_from_readiness
     st = classify_state(
@@ -840,6 +825,13 @@ def merge_readiness(
         st, operation=operation, automerge_label=automerge_label,
         approval_required=approval_required, mergeable=snap.mergeable,
     )
+    native = snap.observation.to_dict() if snap.observation is not None else None
+    native_clear = native is None or native["all_required_satisfied"]
+    if operation_fields["ready_for_direct_merge"] and not native_clear:
+        operation_fields.update(
+            eligible=False, ready_for_direct_merge=False,
+            reason="required native gates are not satisfied",
+        )
     return occupancy_from_readiness({
         "verdict": st.verdict,
         "approval_stale": st.approval_stale,
@@ -852,10 +844,12 @@ def merge_readiness(
         "consent_label": automerge_label,
         "eligible": operation_fields["eligible"],
         "needs_consent": operation_fields["needs_consent"],
-        "clear_to_merge": operation_fields["clear_to_merge"],
+        "clear_to_merge": operation_fields["clear_to_merge"] and native_clear,
         "operation": operation_fields["operation"],
         "ready_for_direct_merge": operation_fields["ready_for_direct_merge"],
         "review_assessment_required": operation_fields["review_assessment_required"],
+        **({"required_gates_satisfied": native["all_required_satisfied"],
+            "ready_for_human": native["ready_for_human"]} if native else {}),
         "held": list(st.held),
         "wip": st.wip,
         "reason": operation_fields["reason"],
