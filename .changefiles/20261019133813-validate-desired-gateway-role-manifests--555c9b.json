@@ -1,0 +1,9 @@
+{
+  "comment": "Validate desired Gateway role manifests and publish coherent process-local snapshots.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
