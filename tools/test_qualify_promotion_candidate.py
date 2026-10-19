@@ -266,6 +266,51 @@ def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregat
     assert len(digest) == 64
 
 
+@pytest.mark.parametrize("platform", ["ubuntu-latest", "windows-latest"])
+@pytest.mark.parametrize("conclusion", ["missing", "failure", "cancelled", "skipped"])
+def test_chat_platform_rows_are_required_not_optional_candidate_coverage(
+    backend: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    platform: str, conclusion: str,
+) -> None:
+    _candidate_workflow(tmp_path, monkeypatch)
+    expected, allowed_skips, digest = inventory.required_jobs(ROOT)
+    rows = {f"agent-chat-service ({os})" for os in ("ubuntu-latest", "windows-latest")}
+    assert rows <= expected
+    assert not rows & allowed_skips
+    monkeypatch.setattr(qualification, "required_jobs", lambda root: (expected, allowed_skips, digest))
+    backend["jobs"] = [
+        dict(id=index, name=name, status="completed", conclusion="success")
+        for index, name in enumerate(sorted(expected), 1)
+    ]
+    target = f"agent-chat-service ({platform})"
+    if conclusion == "missing":
+        backend["jobs"] = [row for row in backend["jobs"] if row["name"] != target]
+    else:
+        next(row for row in backend["jobs"] if row["name"] == target)["conclusion"] = conclusion
+    with pytest.raises(workflows.VerificationError, match="required.*row"):
+        _qualify()
+
+
+@pytest.mark.parametrize("matrix", [
+    "        os: [ubuntu-latest]\n",
+    "        os: [ubuntu-latest, ubuntu-latest]\n",
+    "        os: [ubuntu-latest, macos-latest]\n",
+    "        os: [ubuntu-latest, windows-latest, macos-latest]\n",
+    "        os: ${{ fromJson(needs.discover.outputs.platforms) }}\n",
+    "        os: [ubuntu-latest, windows-latest]\n        extra: [one, two]\n",
+])
+def test_chat_platform_matrix_refuses_narrowed_or_unaccounted_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, matrix: str,
+) -> None:
+    workflow = _candidate_workflow(tmp_path, monkeypatch)
+    before, job = workflow.read_text("utf-8").split("  agent-chat-service:\n", 1)
+    old = "        os: [ubuntu-latest, windows-latest]\n"
+    assert old in job
+    workflow.write_text(before + "  agent-chat-service:\n" + job.replace(old, matrix, 1), encoding="utf-8")
+    with pytest.raises(CandidateValidationError, match="chat platform matrix"):
+        inventory.required_jobs(ROOT)
+
+
 @pytest.mark.parametrize("profile", ["actual", "partitioned", "main"])
 def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str,
