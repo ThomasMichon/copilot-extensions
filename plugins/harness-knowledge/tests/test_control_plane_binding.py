@@ -477,3 +477,43 @@ def test_symlinked_registration_retains_its_canonical_spelling(pair, monkeypatch
     selected = _resolve(pair)
     assert selected["knowledge_path"] == str(link)
     assert not pair[0].exists()
+
+
+@pytest.mark.parametrize("layout", ["bare", "dot-git-bare"])
+@pytest.mark.parametrize("matches", [False, True])
+def test_bare_registration_checks_actual_origin_before_binding(tmp_path, monkeypatch, layout, matches):
+    root = tmp_path / "anchor"
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    init = ["git", "init", "--quiet"]
+    if layout == "bare":
+        init.append("--bare")
+    result = subprocess.run([*init, str(root)], capture_output=True, text=True, **kwargs)
+    assert result.returncode == 0, result.stderr
+    git = ["git", "--git-dir", str(root)] if layout == "bare" else ["git", "-C", str(root)]
+    if layout == "dot-git-bare":
+        result = subprocess.run(
+            [*git, "config", "core.bare", "true"], capture_output=True, text=True, **kwargs,
+        )
+        assert result.returncode == 0, result.stderr
+    registered = "file:///expected"
+    actual = registered if matches else "file:///different"
+    result = subprocess.run(
+        [*git, "remote", "add", "origin", actual], capture_output=True, text=True, **kwargs,
+    )
+    assert result.returncode == 0, result.stderr
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+    monkeypatch.setattr(
+        bk, "_run_agent_worktrees",
+        lambda _command, args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, json.dumps({"repos": [{
+                "name": "knowledge", "class": "knowledge",
+                "paths": {bk._current_platform_key(): str(root)},
+                "remote": registered, "default_branch": "main",
+            }]}), "",
+        ),
+    )
+    assert bk.knowledge_origin(str(root)) == actual
+    ready = bk.inspect_registration("knowledge", str(root), "native-owner")
+    assert ready["status"] == ("ready" if matches else "mismatch")
+    if not matches:
+        assert "registered remote" in ready["reason"]

@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import re
-import subprocess
 from pathlib import Path
 from types import ModuleType
+
+_git_spec = importlib.util.spec_from_file_location(
+    "binding_git", Path(__file__).with_name("binding_git.py")
+)
+_binding_git = importlib.util.module_from_spec(_git_spec)
+_git_spec.loader.exec_module(_binding_git)
+validate_checkout = _binding_git.validate_checkout
 
 
 def _json_result(
@@ -29,34 +36,6 @@ def _json_result(
     if not isinstance(value, dict):
         raise RuntimeError("control-plane binding preflight must return a JSON object")
     return value
-
-
-def validate_checkout(path: str) -> None:
-    """Accept actual Git roots, including bare anchors, not stale directories."""
-    git = ["git", "-C", path]
-    if (Path(path) / "HEAD").is_file() and not (Path(path) / ".git").exists():
-        git.extend(["--git-dir", path])
-    try:
-        result = subprocess.run(
-            [*git, "rev-parse", "--is-bare-repository"],
-            capture_output=True, text=True, timeout=5,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-        )
-        if result.returncode:
-            raise RuntimeError("registered control-plane checkout is not a Git repository")
-        flag = "--absolute-git-dir" if result.stdout.strip() == "true" else "--show-toplevel"
-        root = subprocess.run(
-            [*git, "rev-parse", flag],
-            capture_output=True, text=True, timeout=5,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError("registered control-plane Git root could not be checked") from exc
-    expected = Path(path).resolve()
-    if result.stdout.strip() == "true" and (expected / ".git").is_dir():
-        expected = (expected / ".git").resolve()
-    if root.returncode or Path(root.stdout.strip()).resolve() != expected:
-        raise RuntimeError("registered control-plane path is not its Git root")
 
 
 def resolve_binding(

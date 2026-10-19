@@ -45,29 +45,21 @@ _check_existing_binding = _binding_yaml.check_existing_binding
 read_issue_route = _binding_yaml.read_issue_route
 set_top_yaml_key = _binding_yaml.set_top_yaml_key
 
+_git_spec = importlib.util.spec_from_file_location(
+    "binding_git", Path(__file__).with_name("binding_git.py")
+)
+_binding_git = importlib.util.module_from_spec(_git_spec)
+_git_spec.loader.exec_module(_binding_git)
+
 
 def knowledge_origin(knowledge_path: str) -> str:
     path = Path(knowledge_path).resolve()
     if not knowledge_path or not path.is_dir():
         return ""
     try:
-        root = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if root.returncode != 0 or Path(root.stdout.strip()).resolve() != path:
-            return ""
-        result = subprocess.run(
-            ["git", "-C", str(path), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        return sanitize_remote(_binding_git.origin(str(path)))
+    except RuntimeError:
         return ""
-    return sanitize_remote(result.stdout.strip()) if result.returncode == 0 else ""
 
 
 def sanitize_remote(remote: str) -> str:
