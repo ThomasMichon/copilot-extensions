@@ -172,7 +172,8 @@ def current_owned_attention(session: Any, requested_ref: str) -> CurrentAttentio
             open_requests.pop((family, key, correlation_id), None)
             continue
         if kind == "user_message":
-            settled = settled_event = None  # a new turn: the last one's boundary is no longer current
+            # A new turn: the last one's boundary is no longer current.
+            settled = settled_event = None
         if kind in _TURN_ENDS:
             open_requests.clear()
         reason = _event_reason({"event_type": kind, "data": data})
