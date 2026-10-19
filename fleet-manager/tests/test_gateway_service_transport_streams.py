@@ -77,6 +77,57 @@ def test_client_disconnect_cancels_fixed_backend_and_releases_request(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("change", ["caller", "slot", "trust", "expiry"])
+def test_buffered_response_retains_authority_through_downstream_preparation(
+    tmp_path, monkeypatch, change,
+):
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        prepare = web.StreamResponse.prepare
+
+        async def pause_preparation(response, request):
+            result = await prepare(response, request)
+            if STATE in request.app and request.path == "/assets/index.html":
+                entered.set()
+                await release.wait()
+            return result
+
+        monkeypatch.setattr(web.StreamResponse, "prepare", pause_preparation)
+        async with running(tmp_path) as rig:
+            await rig.connect(1)
+            task = asyncio.create_task(rig.request("/assets/index.html"))
+            response = None
+            try:
+                await asyncio.wait_for(entered.wait(), 3)
+                assert rig.state.pending == 1
+                channel = rig.state.channels["service-b"]
+                assert len(channel.pending) == 1
+                if change == "caller":
+                    rig.h.document["callers"] = []
+                elif change == "slot":
+                    rig.h.document["manifest"]["slots"][1]["role"] = "assets"
+                elif change == "trust":
+                    rig.h.document["identity"]["jwks"]["keys"] = [
+                        {**ECKey.generate_key("P-256").as_dict(private=False),
+                         "kid": "issuer-1"}]
+                else:
+                    rig.h.clock.value += 3600
+                await rig.update()
+                release.set()
+                response = await asyncio.wait_for(task, 3)
+                assert response.status == 200
+                with pytest.raises((aiohttp.ClientError, ConnectionError)):
+                    await asyncio.wait_for(response.read(), 3)
+                await eventually(lambda: rig.state.pending == 0 and not channel.pending)
+            finally:
+                release.set()
+                if response is not None:
+                    response.close()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(scenario())
+
+
 def test_slow_real_client_stalls_chunk_ack_and_bounds_queues(tmp_path, monkeypatch):
     prepare = web.StreamResponse.prepare
 

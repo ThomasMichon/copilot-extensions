@@ -300,8 +300,11 @@ class ServiceRuntime:
                 self.checkpoint(channel, pending)
                 if frame["type"] == "end":
                     if not streaming:
-                        return web.Response(status=first["status"], headers=first["headers"],
-                                            body=bytes(buffered))
+                        response.content_length = len(buffered)
+                        await response.prepare(request)
+                        self.checkpoint(channel, pending)
+                        await response.write(bytes(buffered))
+                        self.checkpoint(channel, pending)
                     await response.write_eof()
                     return response
                 data = binary(frame["data"], 16384)

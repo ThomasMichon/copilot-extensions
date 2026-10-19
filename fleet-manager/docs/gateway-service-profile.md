@@ -133,7 +133,10 @@ downstream consumption/write, not merely WebSocket receipt, providing bounded
 backpressure. This is bounded response streaming, not an unlimited stream.
 
 Current service and caller grants are rechecked at admission and chunk
-checkpoints. Withdrawal, token expiry, disconnect, replacement and cancellation
+checkpoints. Buffered replies retain their grant and pending-request custody
+through downstream preparation, body transmission and completion; preparation
+and body-write awaits are followed by another authorization checkpoint.
+Withdrawal, token expiry, disconnect, replacement and cancellation
 cannot become a successful stream EOF. Lost-channel mutations report
 `outcome-unknown` instead of being retried. A local checkpoint cannot fence an
 already performed external effect.
