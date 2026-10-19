@@ -156,6 +156,10 @@ python skills/binding-knowledge/scripts/bind_knowledge.py \
 existing valid knowledge or legacy worktree class when repairing metadata,
 including the checkout's effective origin and reliably detected default branch.
 The resulting canonical record reports the effective GitHub account mapping.
+Current native inventories also report their execution `platform`; explicit-name
+registration uses it just like paired binding, without requiring a topology file.
+Malformed native platform metadata or disagreement with the pair reader refuses
+registration rather than selecting a path from inherited transport labels.
 The configurator does not persist a repository owner fallback as an explicit
 account; agent-worktrees retains authority for account resolution and
 clarification. Omit `--account` when an existing owner/account map is already

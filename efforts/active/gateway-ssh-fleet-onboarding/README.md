@@ -373,6 +373,16 @@ takeover or implementation completion is asserted.
   Actual registration, installed CLI binding, pair writes, tracked resolution
   and common-dir checks remain real. Hosted Linux must exercise the inherited
   label with a Linux-only registration before merge.
+- The next current-head review identified the coupled explicit-name binding
+  path, which still chose a platform independently. The existing native
+  inventory now reports additive `platform` metadata; both binding modes consume
+  and validate that owner result, and contradictory/malformed values refuse
+  before registration. Inventories from older owners without that field retain
+  their legacy behavior. All 146 binding tests pass, including native platform
+  selection and invalid-metadata negatives. All four real first-touch cases
+  pass: declared-pair and explicit missing-registration flows, each with ordinary
+  and conventional bare anchors. Both ordinary cases participate in the same
+  existing hosted guard; no topology is required by explicit registration.
 - Amendment #7198 actually merged as
   `1e313d5ee1f3cd688c95d53de56d7548878ee878` before implementation.
   The shared typed reader retains the legacy scalar launch target and both

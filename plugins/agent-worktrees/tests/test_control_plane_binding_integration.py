@@ -65,8 +65,9 @@ def _checkout(root: Path, name: str, config: str) -> Path:
 @pytest.mark.parametrize(
     "bare_knowledge", [pytest.param(False, marks=pytest.mark.guard), True]
 )
+@pytest.mark.parametrize("binding_mode", ["control-plane", "explicit"])
 def test_first_touch_binds_declared_roles_then_creates_real_pair(
-    tmp_path, monkeypatch, bare_knowledge
+    tmp_path, monkeypatch, bare_knowledge, binding_mode
 ):
     home = tmp_path / "home"
     home.mkdir()
@@ -102,16 +103,12 @@ def test_first_touch_binds_declared_roles_then_creates_real_pair(
         ("example-harness", harness, "worktree"),
         ("example-knowledge", knowledge, "knowledge"),
     ):
+        if binding_mode == "explicit" and repo_class == "knowledge":
+            continue
         repos.add_repo(
             name, str(checkout), repo_class=repo_class, default_branch="main",
             remote=str(tmp_path / f"{name}.git"),
         )
-    registered = repos.read_registry(strict=True)
-    for name, checkout in (
-        ("example-harness", harness), ("example-knowledge", knowledge),
-    ):
-        assert registered.repos[name].paths == {detect_platform(): str(checkout)}
-        assert repos.resolve_path(name) == str(checkout)
     topology = tmp_path / "machines.yaml"
     topology.write_text(
         "control_plane:\n"
@@ -132,11 +129,22 @@ def test_first_touch_binds_declared_roles_then_creates_real_pair(
     )
     config = home / ".example-harness" / "config.yaml"
     assert not config.exists()
+    selection = (
+        ["--control-plane", str(topology)]
+        if binding_mode == "control-plane"
+        else [
+            "--harness", "example-harness",
+            "--knowledge", "example-knowledge",
+            "--harness-path", str(harness),
+            "--knowledge-path", str(knowledge),
+            "--register",
+        ]
+    )
     result = _run(
         [
             sys.executable,
             str(binding_script),
-            "--control-plane", str(topology),
+            *selection,
             "--agent-worktrees-path", str(native_command),
             "--home", str(home),
             "--json",
@@ -147,9 +155,16 @@ def test_first_touch_binds_declared_roles_then_creates_real_pair(
     assert summary["registration"]["status"] == "ready"
     assert summary["registration"]["class"] == "knowledge"
     assert summary["state_root"]["status"] == "ready"
-    assert summary["control_plane"]["harness"] == "example-harness"
-    assert summary["control_plane"]["knowledge"] == "example-knowledge"
+    if binding_mode == "control-plane":
+        assert summary["control_plane"]["harness"] == "example-harness"
+        assert summary["control_plane"]["knowledge"] == "example-knowledge"
     assert "knowledge_repo: example-knowledge" in config.read_text(encoding="utf-8")
+    registered = repos.read_registry(strict=True)
+    for name, checkout in (
+        ("example-harness", harness), ("example-knowledge", knowledge),
+    ):
+        assert registered.repos[name].paths == {detect_platform(): str(checkout)}
+        assert repos.resolve_path(name) == str(checkout)
 
     previous_project = cfg.active_project()
     cfg.set_active_project("example-harness")

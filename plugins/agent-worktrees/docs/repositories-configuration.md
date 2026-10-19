@@ -12,6 +12,8 @@ The cards show absent, stale, unsupported and unknown/error states explicitly.
 Native registry paths use the shared execution-root platform classifier, not
 inherited transport labels such as `WSL_DISTRO_NAME`; registration, binding and
 read-only resolution therefore select the same platform key.
+`repos list --json` reports that native `platform` alongside the inventory, so
+explicit-name binding can use the same selection without a control-plane file.
 An anchor is never presented as a paired writable checkout. No workspace means
 pair inspection is unsupported, rather than inferred from the CLI's CWD.
 Both tracked checkout directories must still exist for a pair to be writable.

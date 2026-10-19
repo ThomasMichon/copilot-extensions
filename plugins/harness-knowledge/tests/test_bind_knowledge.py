@@ -206,6 +206,52 @@ def test_registered_worktree_capable_repo_reports_canonical_readiness(
     assert registration["registration_command"] == ""
 
 
+@pytest.mark.parametrize("native_platform", ["linux", "windows", "wsl"])
+def test_explicit_binding_uses_native_inventory_platform(
+    tmp_path, monkeypatch, native_platform,
+):
+    monkeypatch.setenv("WSL_DISTRO_NAME", "inherited-transport-environment")
+    monkeypatch.setattr(bk, "_current_platform_key", lambda: "legacy-incorrect")
+    monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+    monkeypatch.setattr(
+        bk, "_run_agent_worktrees",
+        lambda _command, args, **_kwargs: _completed(args, stdout=json.dumps({
+            "platform": native_platform,
+            "repos": [{
+                "name": "knowledge", "class": "knowledge",
+                "default_branch": "main", "paths": {native_platform: str(tmp_path)},
+            }],
+        })),
+    )
+    registration = bk.inspect_registration("knowledge", str(tmp_path), "native-owner")
+    assert registration["status"] == "ready"
+    assert registration["resolved_path"] == str(tmp_path)
+    conflicting = bk.inspect_registration(
+        "knowledge", str(tmp_path), "native-owner",
+        platform_key="linux" if native_platform == "wsl" else "wsl",
+    )
+    assert conflicting["status"] == "unverified"
+    assert "platforms disagree" in conflicting["reason"]
+
+
+@pytest.mark.parametrize("native_platform", ["", None, {}, ["linux"], True, "container"])
+def test_invalid_native_inventory_platform_refuses_registration(
+    tmp_path, monkeypatch, native_platform,
+):
+    monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+    monkeypatch.setattr(
+        bk, "_run_agent_worktrees",
+        lambda _command, args, **_kwargs: _completed(
+            args, stdout=json.dumps({"platform": native_platform, "repos": []}),
+        ),
+    )
+    with pytest.raises(RuntimeError, match="invalid native platform"):
+        bk.ensure_registration("knowledge", str(tmp_path), "native-owner")
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_unregistered_fallback_is_not_canonical_readiness(
     tmp_path: Path,
     monkeypatch,

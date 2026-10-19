@@ -296,6 +296,19 @@ def inspect_registration(
         base["reason"] = "agent-worktrees repos list returned invalid JSON"
         return base
 
+    if "platform" in payload:
+        native_platform = payload["platform"]
+        if not isinstance(native_platform, str) or native_platform not in {
+            "windows", "wsl", "linux",
+        }:
+            base["reason"] = "agent-worktrees repos list returned an invalid native platform"
+            return base
+        if platform_key and platform_key != native_platform:
+            base["reason"] = "native inventory and control-plane platforms disagree"
+            return base
+        platform_key = native_platform
+    platform_key = platform_key or _current_platform_key()
+
     entry = next(
         (
             item
@@ -327,7 +340,7 @@ def inspect_registration(
             "path_source": "canonical_registry",
             "resolved_path": str(
                 collision_paths.get(
-                    platform_key or _current_platform_key(),
+                    platform_key,
                     "",
                 )
             ),
@@ -351,7 +364,7 @@ def inspect_registration(
         }
     if entry is not None:
         paths = entry.get("paths") if isinstance(entry.get("paths"), dict) else {}
-        resolved_path = str(paths.get(platform_key or _current_platform_key(), "") or "")
+        resolved_path = str(paths.get(platform_key, "") or "")
         repo_class = str(entry.get("class", "") or "")
         account = str(entry.get("resolved_account", "") or entry.get("account", "") or "")
         explicit_account = str(entry.get("account", "") or "")
