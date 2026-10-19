@@ -485,7 +485,7 @@ def test_board_filters_before_raw_fetch_bound_and_refuses_old_peer(monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        client_categories, "require_endpoint_categories", lambda endpoint: calls.append(endpoint)
+        client_categories, "require_endpoint_categories", lambda endpoint, **_kw: calls.append(endpoint)
     )
 
     class Response:

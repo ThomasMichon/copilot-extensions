@@ -2158,7 +2158,7 @@ function Test-CoordinatorHealthy {
     # True when a coordinator already answers on its rendezvous endpoint. Used to
     # keep the non-elevated fallback idempotent (never start a second instance).
     try {
-        $null = & $VenvPython -m agent_dispatch health 2>$null
+        $null = & $VenvPython -m agent_dispatch --local health 2>$null
         return ($LASTEXITCODE -eq 0)
     } catch { return $false }
 }
@@ -2306,11 +2306,16 @@ function Retire-SupervisorProcessesFallback {
                     )
                 } catch { }
             }
-            $isSupervisor = $underRoot -and (
-                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?=\s*(?:$|serve(?:\s|$)|-))'
+            $dispatchArgv = @()
+            if ($underRoot) { $dispatchArgv = @(Get-SupervisorDispatchArguments -CommandLine $cmd) }
+            $isSupervisor = $underRoot -and $dispatchArgv.Count -gt 0 -and (
+                $dispatchArgv[0] -eq 'supervise'
+            ) -and (
+                $dispatchArgv.Count -eq 1 -or $dispatchArgv[1] -eq 'serve' -or $dispatchArgv[1].StartsWith('-')
             )
             $isRegistrarChild = $underRoot -and (
-                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve(?:\s|$)|schedule\s+serve(?:\s|$)|webhook(?:\s|$))'
+                ($dispatchArgv.Count -ge 2 -and $dispatchArgv[0] -in @('emitter', 'schedule') -and $dispatchArgv[1] -eq 'serve') -or
+                ($dispatchArgv.Count -ge 1 -and $dispatchArgv[0] -eq 'webhook')
             ) -and (
                 $cmd.Replace('"', '').IndexOf(
                     $supervisorRun,
@@ -2334,24 +2339,24 @@ function Retire-SupervisorProcessesFallback {
             }
         }
         $depth = @{}
-        foreach ($pid in $selected) {
+        foreach ($processId in $selected) {
             $value = 0
-            $cursor = $rows | Where-Object ProcessId -eq $pid | Select-Object -First 1
+            $cursor = $rows | Where-Object ProcessId -eq $processId | Select-Object -First 1
             $seen = [System.Collections.Generic.HashSet[int]]::new()
             while ($cursor -and $selected.Contains([int]$cursor.ParentProcessId)) {
                 if (-not $seen.Add([int]$cursor.ParentProcessId)) { break }
                 $value++
                 $cursor = $rows | Where-Object ProcessId -eq $cursor.ParentProcessId | Select-Object -First 1
             }
-            $depth[$pid] = $value
+            $depth[$processId] = $value
         }
         $killed = 0
         # Stop roots first so a still-live master cannot replace a child while
         # the snapshot is being retired.
-        foreach ($pid in @($selected | Sort-Object { $depth[$_] })) {
-            if ($pid -eq $PID) { continue }
+        foreach ($processId in @($selected | Sort-Object { $depth[$_] })) {
+            if ($processId -eq $PID) { continue }
             try {
-                Stop-Process -Id $pid -Force -ErrorAction Stop
+                Stop-Process -Id $processId -Force -ErrorAction Stop
                 $killed++
             } catch { }
         }
@@ -2378,7 +2383,7 @@ function Confirm-CoordinatorRunning {
     $running = $null
     for ($i = 0; $i -lt 12; $i++) {
         try {
-            $out = & $VenvPython -m agent_dispatch health 2>$null
+            $out = & $VenvPython -m agent_dispatch --local health 2>$null
             if (($LASTEXITCODE -eq 0) -and $out) {
                 $h = ($out | Out-String) | ConvertFrom-Json
                 if ($h.PSObject.Properties.Name -contains 'version') { $running = $h.version }

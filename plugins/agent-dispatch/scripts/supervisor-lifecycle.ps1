@@ -1,5 +1,53 @@
 $script:SupervisorAuditCorrelation = "$PID-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
 
+function Get-SupervisorDispatchArguments {
+    param([string]$CommandLine)
+    if (-not ('DispatchSupervisorCommandLine' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class DispatchSupervisorCommandLine {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CommandLineToArgvW(string commandLine, out int count);
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr value);
+    public static string[] Split(string commandLine) {
+        int count;
+        IntPtr values = CommandLineToArgvW(commandLine, out count);
+        if (values == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try {
+            string[] result = new string[count];
+            for (int i = 0; i < count; i++)
+                result[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(values, i * IntPtr.Size));
+            return result;
+        } finally { LocalFree(values); }
+    }
+}
+'@
+    }
+    $tokens = [DispatchSupervisorCommandLine]::Split($CommandLine)
+    for ($index = 0; $index -lt $tokens.Count; $index++) {
+        $module = [IO.Path]::GetFileNameWithoutExtension($tokens[$index])
+        if ($module -notin @('agent_dispatch', 'agent-dispatch')) { continue }
+        $index++
+        while ($index -lt $tokens.Count -and $tokens[$index].StartsWith('-')) {
+            $option = ($tokens[$index] -split '=', 2)[0]
+            if ($option -in @('--local', '--shared') -and $tokens[$index] -eq $option) {
+                $index++
+            } elseif ($option -in @('--url', '--token', '--control-token')) {
+                if ($tokens[$index].Contains('=')) { $index++ }
+                elseif ($index + 1 -lt $tokens.Count -and -not $tokens[$index + 1].StartsWith('--')) {
+                    $index += 2
+                } else { return @() }
+            } else { return @() }
+        }
+        if ($index -lt $tokens.Count) { return $tokens[$index..($tokens.Count - 1)] }
+        return @()
+    }
+    return @()
+}
+
 function Invoke-SupervisorAudit {
     param(
         [string]$Event, [string]$Reason, [string]$Name = '',

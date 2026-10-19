@@ -66,8 +66,22 @@ def _basename(token: str) -> str:
 def _agent_dispatch_argv(command_line: str) -> list[str]:
     tokens = _tokens(command_line)
     for index, token in enumerate(tokens):
-        if _basename(token) in _AGENT_DISPATCH_NAMES:
-            return tokens[index + 1 :]
+        if _basename(token).removesuffix(".exe") in _AGENT_DISPATCH_NAMES:
+            argv = [value.strip('"') for value in tokens[index + 1 :]]
+            while argv and argv[0].startswith("-"):
+                option, equals, _value = argv[0].partition("=")
+                if option in {"--local", "--shared"} and not equals:
+                    argv = argv[1:]
+                elif option in {"--url", "--token", "--control-token"}:
+                    if equals:
+                        argv = argv[1:]
+                    elif len(argv) >= 2 and not argv[1].startswith("--"):
+                        argv = argv[2:]
+                    else:
+                        return []
+                else:
+                    return []
+            return argv
     return []
 
 

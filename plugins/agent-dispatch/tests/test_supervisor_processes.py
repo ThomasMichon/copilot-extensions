@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,110 @@ def _proc(pid, parent, executable, command_line):
         executable=executable,
         command_line=command_line,
     )
+
+
+def _prefixed_processes():
+    python = INSTALL_DIR + r"\versions\1\Scripts\python.exe"
+    spec = INSTALL_DIR + r"\run\supervisor\scope\producer.json"
+    return [
+        _proc(70111, 1, python, rf'"{python}" -m agent_dispatch --shared supervise serve'),
+        _proc(70113, 1, python, rf'"{python}" -m agent_dispatch --local supervise'),
+        _proc(70115, 1, python, rf'"{python}" -m agent_dispatch --local schedule serve "{spec}"'),
+        _proc(70117, 1, python, rf'"{python}" -m agent_dispatch --url "http://writer/path with spaces" --token "supervise" --control-token=value webhook --config "{spec}"'),
+        _proc(70119, 70111, r"C:\Tools\child.exe", "owned-child"),
+        _proc(70121, 1, python, rf'"{python}" -m agent_dispatch --local emitter serve external.json'),
+        _proc(70123, 1, r"C:\foreign\python.exe", 'python -m agent_dispatch --shared supervise serve'),
+        _proc(70125, 1, python, rf'"{python}" -m agent_dispatch --url supervise emitter serve external.json'),
+        _proc(70127, 1, python, rf'"{python}" -m agent_dispatch --unknown supervise serve'),
+        _proc(70129, 1, python, rf'"{python}" -m agent_dispatch --token'),
+    ]
+
+
+def test_target_prefixes_preserve_exact_supervisor_retirement_scope():
+    selected = select_supervisor_generation_pids(
+        _prefixed_processes(), INSTALL_DIR, run_dir=INSTALL_DIR + r"\run",
+    )
+    assert set(selected) == {70111, 70113, 70115, 70117, 70119}
+    assert selected.index(70111) < selected.index(70119)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows argv parsing and installer fallback")
+def test_native_fallback_matches_prefixed_python_scope_without_stopping_real_processes(tmp_path):
+    plugin = Path(__file__).resolve().parents[1]
+    text = (plugin / "scripts/install.ps1").read_text()
+    start = text.index("function Retire-SupervisorProcessesFallback {")
+    function = text[start:text.index("\nfunction ", start + 1)]
+    rows = tmp_path / "processes.json"
+    rows.write_text(json.dumps([
+        {"ProcessId": p.pid, "ParentProcessId": p.parent_pid,
+         "ExecutablePath": p.executable, "CommandLine": p.command_line}
+        for p in _prefixed_processes()
+    ]), encoding="utf-8")
+    script = tmp_path / "retire.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference='Stop'; $env:OS='Windows_NT'",
+        f"$InstallDir='{INSTALL_DIR}'; $env:AGENT_DISPATCH_RUN_DIR=Join-Path $InstallDir 'run'",
+        f"$script:Rows=@(Get-Content -Raw '{rows}' | ConvertFrom-Json)",
+        "$script:Stopped=@()",
+        "function Get-CimInstance { param($ClassName,$ErrorAction) $script:Rows }",
+        "function Stop-Process { param([int]$Id,[switch]$Force,$ErrorAction) $script:Stopped+=$Id }",
+        "function Write-Warn { param($message) throw $message }",
+        "function Stop-DispatchProcess { throw 'unexpected legacy fallback' }",
+        f". '{plugin / 'scripts/supervisor-lifecycle.ps1'}'",
+        function,
+        "$count=Retire-SupervisorProcessesFallback",
+        "if($count -ne 5){throw \"unexpected retirement count $count\"}",
+        "[Console]::Out.Write((ConvertTo-Json -InputObject @($script:Stopped) -Compress))",
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [supervisor_processes.powershell_host(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=20, **supervisor_processes.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert set(json.loads(result.stdout)) == {70111, 70113, 70115, 70117, 70119}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows installer lifecycle health probes")
+@pytest.mark.parametrize("local_healthy", [False, True])
+def test_installer_health_probes_never_use_opposite_central_health(tmp_path, local_healthy):
+    plugin = Path(__file__).resolve().parents[1]
+    text = (plugin / "scripts/install.ps1").read_text()
+    functions = []
+    for name in ("Test-CoordinatorHealthy", "Confirm-CoordinatorRunning"):
+        start = text.index(f"function {name} {{")
+        functions.append(text[start:text.index("\nfunction ", start + 1)])
+    script = tmp_path / "health.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference='Stop'; $env:AGENT_DISPATCH_TASK_AUTHORITY='central'",
+        "$VenvPython='Invoke-FixtureRuntime'; $script:Calls=@(); $script:Ok=@(); $script:Warnings=@()",
+        f"$script:LocalHealthy=${str(local_healthy).lower()}",
+        "function Test-Path { param($Path) $true }",
+        "function Start-Sleep { param($Seconds) }",
+        "function Write-Ok { param($message) $script:Ok+=$message }",
+        "function Write-Warn { param($message) $script:Warnings+=$message }",
+        "function Invoke-FixtureRuntime {",
+        "  $script:Calls+=,@($args)",
+        "  if($args[0] -eq '-c'){$global:LASTEXITCODE=0; return 'candidate'}",
+        "  $local=$args -contains '--local'",
+        "  $healthy=if($local){$script:LocalHealthy}else{-not $script:LocalHealthy}",
+        "  $global:LASTEXITCODE=if($healthy){0}else{1}",
+        "  if($healthy){'{\"version\":\"candidate\"}'}",
+        "}",
+        *functions,
+        "$healthy=Test-CoordinatorHealthy; Confirm-CoordinatorRunning",
+        "[Console]::Out.Write((@{healthy=$healthy;ok=$script:Ok;warnings=$script:Warnings;calls=$script:Calls}|ConvertTo-Json -Depth 5 -Compress))",
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [supervisor_processes.powershell_host(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=20, **supervisor_processes.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    evidence = json.loads(result.stdout)
+    assert evidence["healthy"] is local_healthy
+    probes = [argv for argv in evidence["calls"] if argv[0] == "-m"]
+    assert probes and all(argv == ["-m", "agent_dispatch", "--local", "health"] for argv in probes)
+    assert bool(evidence["ok"]) is local_healthy
+    assert bool(evidence["warnings"]) is not local_healthy
 
 
 def test_selects_old_wrapper_master_children_and_descendants_across_slots():

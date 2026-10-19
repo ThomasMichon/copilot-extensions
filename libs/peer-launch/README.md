@@ -41,6 +41,9 @@ activate, or impose exemplar-only snapshot/completion receipt contracts.
 
 Routing roots and caller credentials are removed before rebinding the peer's
 installation receipt, payload, runtime root, and plugin-specific routing.
+Dispatch peer clients retain the caller's named task authority and separate
+local/shared credentials. Filtering must not turn an explicit authority into
+legacy discovery or silently query another writer for an old task reference.
 Failures return exit 126 with a diagnostic. Consumers must not interpret that
 refusal as optional-peer absence. CodeSpaces allows absence only after validating
 its owner and finding no same-cell worktrees installation directory; an existing

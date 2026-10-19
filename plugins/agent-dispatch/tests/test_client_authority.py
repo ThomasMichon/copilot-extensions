@@ -298,6 +298,22 @@ def test_central_picker_board_keeps_its_stdlib_only_cold_import(monkeypatch):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("authority", ["central", "local"])
+def test_same_cell_peer_filter_keeps_ambiguous_callback_fail_closed(monkeypatch, authority):
+    from agent_dispatch.peer_launch import peer_environment
+
+    context = {
+        "pluginId": "agent-dispatch", "installReceipt": "receipt",
+        "payloadRoot": "payload", "pluginRoot": "runtime",
+    }
+    filtered = peer_environment(context, {"AGENT_DISPATCH_TASK_AUTHORITY": authority})
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", filtered["AGENT_DISPATCH_TASK_AUTHORITY"])
+    monkeypatch.setattr(core, "_client", forbid)
+    invocation = core.build_parser().parse_args(["claim-status", "legacy-unqualified-task"])
+    with pytest.raises(DispatchError, match="original authority"):
+        core._cmd_claim_status(invocation)
+
+
 @pytest.mark.parametrize("role", ["coordinator", "standby", "peeer", ""])
 def test_central_mode_local_server_cannot_promote_its_independent_database(tmp_path, monkeypatch, role):
     monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
