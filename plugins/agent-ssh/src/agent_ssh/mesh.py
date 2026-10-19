@@ -86,7 +86,7 @@ def _machines_file_at(root: Path) -> Path | None:
         candidate = root / relative
         try:
             mode = candidate.stat().st_mode
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             if candidate.is_symlink():
                 raise ValueError(f"machines.yaml source is a broken symlink: {candidate}")
             continue

@@ -276,6 +276,28 @@ def test_invalid_preferred_source_does_not_select_a_fallback(tmp_path: Path) -> 
         mesh_mod.find_machines_file(tmp_path)
 
 
+@pytest.mark.parametrize("with_topology", [False, True])
+@pytest.mark.parametrize("command", ["mesh-status", "refresh-mesh"])
+def test_regular_config_file_does_not_block_conventional_discovery(
+    tmp_path: Path, with_topology: bool, command: str,
+) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, **no_window_kwargs())
+    (tmp_path / "config").write_text("unrelated repository config\n", encoding="utf-8")
+    source = tmp_path / ".github" / "machines.yaml"
+    if with_topology:
+        source.parent.mkdir()
+        source.write_text("machines: {}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_ssh", command, "--json"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    field = "source" if command == "mesh-status" else "machines_yaml"
+    assert data[field] == (str(source) if with_topology else "" if command == "mesh-status" else None)
+
+
 @pytest.mark.parametrize("body", ["", "machines: []", "- not-a-mapping", "machines: [broken"])
 def test_strict_source_load_rejects_invalid_document(tmp_path: Path, body: str) -> None:
     source = tmp_path / "machines.yaml"
