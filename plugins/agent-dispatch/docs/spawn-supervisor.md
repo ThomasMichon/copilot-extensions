@@ -134,6 +134,15 @@ expires another supervisor may safely reclaim it. Thus failed session-record
 retirement remains retryable without reasserting ownership of the body or its
 exclusive key.
 
+Before ending a released local body, the supervisor checkpoints any known
+durable Copilot session ID. If that write fails, teardown waits rather than
+discarding the bridge's only identity mapping. Restarted cleanup uses the
+checkpoint even when the bridge record has disappeared, and wrapping cleanup
+in a retirement envelope preserves that identity. Legacy `session` fields are
+accepted as identities only when they are nonblank strings; structured session
+results are never coerced into IDs. Missing identity still preserves a recorded
+lifecycle head as a visible cleanup hold, rather than guessing or deleting it.
+
 ### Where it lives
 
 The reservation table lives in the **coordinator's SQLite DB** — the coordinator

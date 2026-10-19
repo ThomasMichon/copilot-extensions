@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve durable cleanup session identities before local body teardown and reject structured session results as retry identities.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

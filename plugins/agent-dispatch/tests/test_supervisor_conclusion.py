@@ -12,6 +12,10 @@ unit-tested" bar.
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from agent_dispatch.supervisor import Supervisor
 from agent_dispatch.supervisor_conclusion import (
     _append_conclusion_detail,
@@ -142,6 +146,55 @@ def test_conclusion_retry_payload_parses_stored_json_and_normalizes_session():
     payload = _conclusion_retry_payload(reservation)
     assert payload["acp_session_id"] == "s1"
     assert payload["attempts"] == 2
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        {"action": "preserved", "head_session": "session-exact"},
+        {"action": "concluded", "session": "session-exact"},
+        ["session-exact"],
+        42,
+        True,
+        None,
+        "",
+        " \t",
+    ],
+)
+def test_conclusion_retry_payload_does_not_promote_nonidentity_session_results(session):
+    payload = _conclusion_retry_payload(
+        {"conclusion_detail": json.dumps({"session": session})}
+    )
+    assert "acp_session_id" not in payload
+    assert payload["session"] == session
+
+
+@pytest.mark.parametrize("invalid", [{"session": "wrong"}, ["wrong"], 42, True, "", " \t"])
+def test_conclusion_retry_payload_rejects_invalid_explicit_identity(invalid):
+    payload = _conclusion_retry_payload(
+        {"conclusion_detail": json.dumps({"acp_session_id": invalid})}
+    )
+    assert "acp_session_id" not in payload
+
+
+def test_conclusion_retry_payload_valid_identity_takes_precedence_over_legacy_session():
+    payload = _conclusion_retry_payload(
+        {"conclusion_detail": json.dumps({
+            "acp_session_id": "session-exact",
+            "session": "legacy-session",
+        })}
+    )
+    assert payload["acp_session_id"] == "session-exact"
+
+
+def test_conclusion_retry_payload_invalid_identity_can_use_legacy_string():
+    payload = _conclusion_retry_payload(
+        {"conclusion_detail": json.dumps({
+            "acp_session_id": {"session": "wrong"},
+            "session": "legacy-session",
+        })}
+    )
+    assert payload["acp_session_id"] == "legacy-session"
 
 
 def test_conclusion_retry_payload_defaults_for_malformed_json():

@@ -23,6 +23,9 @@ class-attribute access a test uses -- keep working unchanged.
 from __future__ import annotations
 
 import json
+import logging
+
+log = logging.getLogger("agent-dispatch.supervisor")
 
 #: Cleanup-envelope / conclusion-retry states (terminal-worker release and
 #: spawn-conclusion tracking share this three-state vocabulary).
@@ -182,8 +185,17 @@ def _conclusion_retry_payload(reservation: dict) -> dict:
         return {}
     if not isinstance(payload, dict):
         return {}
-    if not payload.get("acp_session_id") and payload.get("session"):
-        payload["acp_session_id"] = payload["session"]
+    identity = payload.get("acp_session_id")
+    if not isinstance(identity, str) or not identity.strip():
+        if "acp_session_id" in payload:
+            log.warning(
+                "Ignoring invalid ACP session identity in cleanup checkpoint for %s",
+                reservation.get("key", "unknown reservation"),
+            )
+            payload.pop("acp_session_id")
+        legacy_identity = payload.get("session")
+        if isinstance(legacy_identity, str) and legacy_identity.strip():
+            payload["acp_session_id"] = legacy_identity
     return payload
 
 
