@@ -14,7 +14,6 @@ def operation_readiness(
         and not state.held
         and not state.conflict
         and state.verdict != "CHANGES_REQUESTED"
-        and not (state.approval_stale and not state.approval_stale_authorized)
     )
     assessment = bool(
         direct_safe and not approval_required and state.verdict == "COMMENTED"

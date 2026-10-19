@@ -67,6 +67,9 @@ class GitHubFixture:
         }]
         self.review_decision = "REVIEW_REQUIRED"
         self.bypass = "pull_requests_only"
+        self.labels = []
+        self.draft = False
+        self.title = "Ready"
         self.classic_protection = {
             "required_pull_request_reviews": None,
             "required_status_checks": {"strict": False},
@@ -96,8 +99,8 @@ class GitHubFixture:
             head = self.after_head if self.pr_reads > 1 and self.after_head else self.head
             base = self.after_base if self.pr_reads > 1 and self.after_base else self.base
             kind, data = "pr", {
-                "state": "open", "draft": False, "title": "Ready",
-                "labels": [], "user": {"login": "author"},
+                "state": "open", "draft": self.draft, "title": self.title,
+                "labels": self.labels, "user": {"login": "author"},
                 "head": {"sha": head}, "base": {"ref": base},
             }
         elif argv[2].endswith("/pulls/7/reviews"):
@@ -564,6 +567,8 @@ def test_strict_branch_freshness_prevents_admin_retry(monkeypatch, source):
     {"user": None, "state": "CHANGES_REQUESTED"},
     {"user": {"login": ""}, "state": "CHANGES_REQUESTED"},
     {"user": {"login": "reviewer"}, "state": "UNKNOWN"},
+    {"user": {"login": "reviewer"}, "state": "CHANGES_REQUESTED",
+     "submitted_at": None},
 ])
 def test_malformed_review_evidence_prevents_admin_retry(monkeypatch, mutation):
     from agent_worktrees.providers import github
@@ -577,6 +582,33 @@ def test_malformed_review_evidence_prevents_admin_retry(monkeypatch, mutation):
     )
     assert "review history is incomplete or invalid" in result
     assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("mutation", ["hold", "wip", "draft"])
+def test_late_metadata_gate_prevents_admin_retry(monkeypatch, mutation):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    original = fixture.invoke
+
+    def change_after_review(argv, **kwargs):
+        if len(argv) > 2 and argv[2].endswith("/pulls/7") and fixture.pr_reads >= 3:
+            if mutation == "hold":
+                fixture.labels = [{"name": "hold"}]
+            elif mutation == "wip":
+                fixture.title = "WIP: not ready"
+            else:
+                fixture.draft = True
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(github, "run_cli", change_after_review)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+        hold_labels=("hold",), wip_title_prefixes=("WIP:",),
+    )
+    assert not any("--admin" in argv for argv in fixture.calls)
+    assert any(token in result for token in ("hold label", "WIP", "non-draft"))
 
 
 @pytest.mark.parametrize("admin", [False, True])

@@ -1391,6 +1391,23 @@ class TestApprovalRequired:
         assert readiness["clear_to_merge"] is True
         assert "after current head" in readiness["reason"]
 
+    def test_direct_readiness_honors_non_dismissing_stale_approval(self):
+        snap = pc.PRSnapshot(
+            pr_state="open",
+            mergeable=True,
+            head_sha="new",
+            reviews=(_rev(1, "APPROVED", commit_id="old"),),
+        )
+        readiness = pc.merge_readiness(
+            snap,
+            operation="direct",
+            dismiss_stale_reviews=False,
+        )
+        assert readiness["verdict"] == "APPROVED"
+        assert readiness["approval_stale"] is True
+        assert readiness["ready_for_direct_merge"] is True
+        assert readiness["clear_to_merge"] is True
+
     def test_post_approval_push_remains_unapproved(self):
         snap = pc.PRSnapshot(
             pr_state="open",

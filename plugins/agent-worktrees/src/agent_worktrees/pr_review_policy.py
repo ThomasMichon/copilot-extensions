@@ -57,14 +57,21 @@ def review_evidence(reviews: Iterable[object]) -> tuple[ReviewEvidence, ...]:
     return tuple(_coerce(review, index) for index, review in enumerate(reviews, 1))
 
 
-def _order(review: ReviewEvidence) -> tuple[int, datetime, int]:
+def normalized_review_time(value: str) -> datetime | None:
     try:
-        parsed = datetime.fromisoformat(review.submitted_at.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             raise ValueError
-        return 1, parsed.astimezone(timezone.utc), review.id
+        return parsed.astimezone(timezone.utc)
     except (AttributeError, ValueError):
+        return None
+
+
+def _order(review: ReviewEvidence) -> tuple[int, datetime, int]:
+    parsed = normalized_review_time(review.submitted_at)
+    if parsed is None:
         return 0, datetime.min.replace(tzinfo=timezone.utc), review.id
+    return 1, parsed, review.id
 
 
 def latest_effective_reviews(
@@ -143,6 +150,7 @@ __all__ = [
     "effective_review",
     "latest_effective_reviews",
     "normalize_review_state",
+    "normalized_review_time",
     "outstanding_change_requests",
     "review_evidence",
 ]

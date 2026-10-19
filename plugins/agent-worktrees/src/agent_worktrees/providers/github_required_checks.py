@@ -18,6 +18,7 @@ from urllib.parse import quote
 from ..pr_review_policy import (
     KNOWN_REVIEW_STATES,
     ReviewEvidence,
+    normalized_review_time,
     outstanding_change_requests,
 )
 
@@ -127,7 +128,9 @@ def merge_pull(
         )
         verified_merge_head(
             repo, number, host=host, expected_head_sha=expected_head_sha,
-            expected_base_ref=review_evidence.base_ref, invoke=invoke,
+            expected_base_ref=review_evidence.base_ref,
+            hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
+            invoke=invoke,
         )
     except RequiredChecksError as exc:
         return f"{error}; gh admin merge refused for {repo}#{number}: {exc}"
@@ -240,6 +243,10 @@ def review_exception_evidence(
                 type(rid) is not int or not isinstance(user, dict)
                 or not isinstance(user.get("login"), str) or not user["login"].strip()
                 or not isinstance(state, str) or state.upper() not in KNOWN_REVIEW_STATES
+                or (
+                    state.upper() != "PENDING"
+                    and normalized_review_time(review.get("submitted_at")) is None
+                )
             ):
                 raise ReviewSafetyError("review history is incomplete or invalid")
             reviews.append(ReviewEvidence(
@@ -382,6 +389,7 @@ def verified_merge_head(
     repo: str, number: int, *,
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
     host: str, expected_head_sha: str = "", expected_base_ref: str = "",
+    hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
 ) -> str:
     """Return a pinned head only when all configured required checks pass."""
     parts = _target_parts(repo, number)
@@ -412,12 +420,28 @@ def verified_merge_head(
         pr = obj(read_json(["api", f"/repos/{repo}/pulls/{number}"]), "PR metadata")
         head = obj(pr.get("head"), "PR head").get("sha")
         base = obj(pr.get("base"), "PR base").get("ref")
+        title = pr.get("title")
+        labels = pr.get("labels")
         if (
-            pr.get("state") != "open"
+            pr.get("state") != "open" or pr.get("draft") is not False
             or not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head)
             or not isinstance(base, str) or not base
+            or not isinstance(title, str) or not isinstance(labels, list)
         ):
-            raise RequiredChecksError("open PR head/base identity is unavailable or invalid")
+            raise RequiredChecksError("open, non-draft PR identity is unavailable or invalid")
+        names = {
+            label.get("name", "").casefold() for label in labels
+            if isinstance(label, dict) and isinstance(label.get("name"), str)
+        }
+        if len(names) != len(labels):
+            raise RequiredChecksError("PR labels are unavailable or invalid")
+        held = names & {label.casefold() for label in hold_labels}
+        if held:
+            raise RequiredChecksError("hold label present: " + ", ".join(sorted(held)))
+        lowered = title.strip().casefold()
+        if any(lowered.startswith(prefix.strip().casefold())
+               for prefix in wip_title_prefixes if prefix.strip()):
+            raise RequiredChecksError("WIP title prefix is present")
         return head, base
 
     head, base = identity()

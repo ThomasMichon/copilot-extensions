@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
-from ..pr_review_policy import KNOWN_REVIEW_STATES
+from ..pr_review_policy import KNOWN_REVIEW_STATES, normalized_review_time
 from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 from .pr_source import github_source, pull_payload, source_text
@@ -400,12 +400,18 @@ class GitHubProvider:
                         f"GitHub review on page {page} has unknown state",
                         transient=True,
                     )
+                submitted_at = r.get("submitted_at")
+                if state != "PENDING" and normalized_review_time(submitted_at) is None:
+                    raise ProviderError(
+                        f"GitHub review on page {page} has no valid submission time",
+                        transient=True,
+                    )
                 reviews.append(
                     Review(
                         id=rid,
                         state=state,
                         user=login,
-                        submitted_at=str(r.get("submitted_at", "") or ""),
+                        submitted_at=str(submitted_at or ""),
                         commit_id=str(r.get("commit_id", "") or ""),
                         dismissed=(state == "DISMISSED"),
                     )

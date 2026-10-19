@@ -2229,9 +2229,11 @@ class TestGitHubProvider:
         pr = {"state": "open", "merged": False, "head": {"sha": "s"},
               "base": {"ref": "main"}, "user": {"login": "a"}}
         # a full first page (100) forces a second read; short second page stops.
-        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED"}
+        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED",
+                  "submitted_at": f"2026-01-01T00:00:{i % 60:02d}Z"}
                  for i in range(1, 101)]
-        page2 = [{"id": 101, "user": {"login": "u"}, "state": "APPROVED"}]
+        page2 = [{"id": 101, "user": {"login": "u"}, "state": "APPROVED",
+                  "submitted_at": "2026-01-02T00:00:00Z"}]
         monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
             pr=pr, reviews_pages=[page1, page2]))
         snap = github.GitHubProvider().get_snapshot("o/r", 7, token="t")
@@ -2256,6 +2258,8 @@ class TestGitHubProvider:
         {"id": 101, "user": None, "state": "CHANGES_REQUESTED"},
         {"id": 101, "user": {"login": ""}, "state": "CHANGES_REQUESTED"},
         {"id": 101, "user": {"login": "reviewer"}, "state": "UNKNOWN"},
+        {"id": 101, "user": {"login": "reviewer"},
+         "state": "CHANGES_REQUESTED", "submitted_at": None},
     ])
     def test_get_snapshot_rejects_malformed_review_on_later_page(
         self, monkeypatch, malformed,
@@ -2263,7 +2267,8 @@ class TestGitHubProvider:
         from agent_worktrees.providers import github
         pr = {"state": "open", "merged": False, "head": {"sha": "s"},
               "base": {"ref": "main"}, "user": {"login": "a"}}
-        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED"}
+        page1 = [{"id": i, "user": {"login": "u"}, "state": "COMMENTED",
+                  "submitted_at": f"2026-01-01T00:00:{i % 60:02d}Z"}
                  for i in range(1, 101)]
         monkeypatch.setattr(github, "run_cli", self._snapshot_dispatch(
             pr=pr, reviews_pages=[page1, [malformed]],
