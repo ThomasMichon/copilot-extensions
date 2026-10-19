@@ -256,6 +256,33 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-19 - Retain strict CI limits with smaller PR-owner test groups
+
+- Final-runtime candidate `d494201e2` receives actual automated review
+  `5568632217` with no open findings; all three review threads are resolved.
+  Native acceptance `39219867964` succeeds on that exact head with all fifteen
+  selected jobs, including cold and running-owner restart responses.
+- Required CI `39219690896` nevertheless fails. Its PR-owner second partition
+  reaches the strict 300-second process-group limit at 88% of the selected
+  cases. Its separate index job fails before any test starts: the setup-uv
+  action's remote latest-version manifest request times out after five seconds.
+  The required aggregate correctly remains red; neither is bypassed.
+- The PR owner's default file-group size is tightened to ten through the
+  existing contained runner's per-plugin profile. Both job assignments and
+  all test files remain complete and disjoint, explicit group limits still
+  win, and unrelated plugins retain twenty-five-file defaults. Item, group,
+  aggregate-plugin and CI-job deadlines are unchanged. Native filtered
+  acceptance retains its existing grouping and budgets.
+- Complete runner/partition/native-scope contracts pass 250 cases with two
+  explicit skips in 30.23 seconds. The exact runner selection proves every
+  assigned file survives subgrouping once and in order. This changes no
+  qualification recipe, controller routing or test-selection filter.
+- A new-head CI run must exercise the smaller Linux groups within the actual
+  hosted deadline and run the index suite after successful setup. The
+  diagnosed remote bootstrap timeout does not authorize skipping index tests,
+  mutating its runtime or merging past a non-green gate. Review, exact-head
+  native acceptance and actual merge remain owed.
+
 ### 2026-10-19 - Preserve the governed restart response contract
 
 - Published the staged-origin repair at `97b995eac` on #7160.

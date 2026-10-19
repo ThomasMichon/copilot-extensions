@@ -121,6 +121,25 @@ def test_exact_runner_test_file_consumer_keeps_original_process_groups(plugin, c
         ) == original[index::count]
 
 
+def test_pr_owner_smoke_subgroups_preserve_every_assigned_file():
+    spec = importlib.util.spec_from_file_location("pr_owner_group_runner", REPO / "tools" / "run-plugin-tests.py")
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    maximum = runner._FILES_PER_SUBSUITE_OVERRIDES["agent-pull-requests"]
+    assert maximum == 10
+    for index in range(2):
+        selected = partition_files(REPO, "agent-pull-requests", index, 2)
+        groups = runner._test_file_groups(
+            "agent-pull-requests", maximum, test_files=tuple(selected),
+        )
+        assert all(0 < len(group) <= 10 for group in groups)
+        actual = [
+            path.relative_to(REPO / "plugins" / "agent-pull-requests").as_posix()
+            for group in groups for path in group
+        ]
+        assert actual == selected
+
+
 @pytest.mark.parametrize("index,count", [(-1, 3), (3, 3), (0, 0), (99999, 100000)])
 def test_invalid_or_empty_partition_cannot_fall_back_to_full_suite(index, count):
     with pytest.raises(ValueError):

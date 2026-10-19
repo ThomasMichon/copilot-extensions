@@ -87,6 +87,10 @@ TOOLS_DIR = REPO / "tools"
 # alongside any change, not merely when their own files are touched.
 _CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
 
+# The PR owner's complete watch contracts outgrew a single 300-second group.
+# Use smaller sequential groups, not a wider item, group, or plugin deadline.
+_FILES_PER_SUBSUITE_OVERRIDES = {"agent-pull-requests": 10}
+
 # Per-plugin wall-clock budget overrides, applied only when the caller does
 # NOT pass an explicit --timeout/--plugin-timeout (so a deliberate manual
 # override always wins). agent-dispatch's own full suite genuinely needs more
@@ -579,9 +583,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="timeout for each individual pytest item (default: 30, higher "
                          "for certain plugins -- see _TEST_TIMEOUT_OVERRIDES; an "
                          "explicit value here always wins)")
-    ap.add_argument("--max-files-per-sub-suite", type=int, default=25,
+    ap.add_argument("--max-files-per-sub-suite", type=int, default=None,
                     metavar="COUNT",
-                    help="maximum test files per sequential sub-suite (default: 25)")
+                    help="maximum test files per sequential sub-suite "
+                         "(default: 25, or 10 for agent-pull-requests)")
     ap.add_argument("--max-processes", type=int, default=128, metavar="COUNT",
                     help="maximum contained processes per suite (default: 128)")
     ap.add_argument("--max-memory-mb", type=int, default=4096, metavar="MIB",
@@ -617,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("plugin_timeout must be positive")
         if args.test_timeout is not None and args.test_timeout <= 0:
             raise ValueError("test_timeout must be positive")
-        if args.max_files_per_sub_suite <= 0:
+        if args.max_files_per_sub_suite is not None and args.max_files_per_sub_suite <= 0:
             raise ValueError("max_files_per_sub_suite must be positive")
         if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
             raise ValueError("admission_wait must be a non-negative, finite number")
@@ -705,7 +710,11 @@ def main(argv: list[str] | None = None) -> int:
                     limits=plugin_limits,
                     plugin_timeout=effective_plugin_timeout,
                     test_timeout=effective_test_timeout,
-                    max_files_per_subsuite=args.max_files_per_sub_suite,
+                    max_files_per_subsuite=(
+                        args.max_files_per_sub_suite
+                        if args.max_files_per_sub_suite is not None
+                        else _FILES_PER_SUBSUITE_OVERRIDES.get(name, 25)
+                    ),
                     guards=args.guards,
                     collect_only=args.collect_only,
                     prepare_only=args.prepare_only,

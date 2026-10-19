@@ -840,9 +840,17 @@ shared-write umask cannot expose the fixture namespace.
 
 Full dispatch execution in the CI smoke matrix (push, manual and promotion)
 distributes its complete file inventory across three independent jobs.
+The PR owner uses two complete/disjoint jobs. Its default sequential process
+group is ten files rather than twenty-five: the hosted second assignment
+exceeded the unchanged 300-second group budget before completing its last
+cases. Each assigned file still runs exactly once, with no marker/filter
+change. The runner's explicit file-group limit still wins; other plugins keep
+their existing grouping, and all item, group, plugin and job deadlines remain
+unchanged.
 `tools/ci_plugin_partitions.py` assigns
-whole ordinary 25-file groups round-robin and supplies explicit `--test-file`
-arguments to the unchanged contained runner. Every file belongs to exactly one
+whole canonical 25-file cohorts round-robin and supplies explicit `--test-file`
+arguments to the same contained runner, which may subdivide an assigned cohort
+into tighter sequential process groups. Every file belongs to exactly one
 partition, and every full-suite partition remains required by the applicable aggregate;
 a failed or cancelled partition fails the gate. Local unfiltered runs remain
 sequential. Item, sub-suite, plugin and 12-minute job deadlines are unchanged.

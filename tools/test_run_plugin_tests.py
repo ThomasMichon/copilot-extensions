@@ -993,7 +993,7 @@ def test_collect_only_also_takes_environment_admission(monkeypatch) -> None:
     assert acquire_calls == [0.0]
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_native_owner_io_budget_is_scoped_and_explicit_limits_win(monkeypatch, explicit):
+def test_native_owner_test_profile_is_scoped_and_explicit_limits_win(monkeypatch, explicit):
     class Lease:
         def release(self):
             pass
@@ -1006,19 +1006,30 @@ def test_native_owner_io_budget_is_scoped_and_explicit_limits_win(monkeypatch, e
     def capture(name, _uv, **kwargs):
         observed[name] = (
             kwargs["limits"].wall_seconds, kwargs["plugin_timeout"], kwargs["test_timeout"],
+            kwargs["max_files_per_subsuite"],
         )
         return 0
 
     monkeypatch.setattr(runner, "run_plugin", capture)
     arguments = ["agent-pull-requests", "example"]
     if explicit:
-        arguments += ["--timeout", "45", "--plugin-timeout", "75", "--test-timeout", "9"]
+        arguments += [
+            "--timeout", "45", "--plugin-timeout", "75", "--test-timeout", "9",
+            "--max-files-per-sub-suite", "3",
+        ]
     assert runner.main(arguments) == 0
     if explicit:
-        assert observed == {"agent-pull-requests": (45, 75, 9), "example": (45, 75, 9)}
+        assert observed == {"agent-pull-requests": (45, 75, 9, 3), "example": (45, 75, 9, 3)}
     else:
         expected = (1200, 1800, 30) if sys.platform == "win32" else (300, 900, 30)
-        assert observed == {"agent-pull-requests": expected, "example": (300, 900, 30)}
+        assert observed == {"agent-pull-requests": (*expected, 10), "example": (300, 900, 30, 25)}
+
+
+@pytest.mark.parametrize("size", [0, -1])
+def test_explicit_file_group_limit_must_remain_positive(size):
+    with pytest.raises(SystemExit) as error:
+        runner.main(["agent-pull-requests", "--max-files-per-sub-suite", str(size)])
+    assert error.value.code == 2
 
 
 def test_prepare_only_takes_environment_admission(monkeypatch) -> None:
