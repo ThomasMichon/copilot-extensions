@@ -33,7 +33,7 @@ def _proc(pid, parent, executable, command_line):
 def _prefixed_processes():
     python = INSTALL_DIR + r"\versions\1\Scripts\python.exe"
     spec = INSTALL_DIR + r"\run\supervisor\scope\producer.json"
-    return [
+    processes = [
         _proc(70111, 1, python, rf'"{python}" -m agent_dispatch --shared supervise serve'),
         _proc(70113, 1, python, rf'"{python}" -m agent_dispatch --local supervise'),
         _proc(70115, 1, python, rf'"{python}" -m agent_dispatch --local schedule serve "{spec}"'),
@@ -44,14 +44,31 @@ def _prefixed_processes():
         _proc(70125, 1, python, rf'"{python}" -m agent_dispatch --url supervise emitter serve external.json'),
         _proc(70127, 1, python, rf'"{python}" -m agent_dispatch --unknown supervise serve'),
         _proc(70129, 1, python, rf'"{python}" -m agent_dispatch --token'),
+        _proc(70131, 1, python, rf'"{python}" -m agent_dispatch --url "{spec}" emitter serve external.json'),
+        _proc(70133, 1, python, rf'"{python}" -m agent_dispatch --local emitter serve "{INSTALL_DIR}\run\supervisor\..\outside.json"'),
+        _proc(70135, 1, python, rf'"{python}" -m agent_dispatch --shared webhook --config "{spec}" --config external.json'),
+        _proc(70137, 1, python, rf'"{python}" -m agent_dispatch --control-token "{spec}" schedule serve external.json'),
+        _proc(70139, 1, python, rf'"{python}" -m unrelated --token agent_dispatch --local supervise serve'),
+        _proc(70141, 1, python, rf'"{python}" -c "pass" agent_dispatch --shared supervise serve'),
+        _proc(70143, 1, python, rf'"{python}" -I -X utf8 -m agent_dispatch --local supervise serve'),
     ]
+    if os.name == "nt":
+        processes.append(_proc(70145, 1, python, subprocess.list2cmdline([
+            python, "-m", "agent_dispatch", "--token", 'quoted "value" with spaces',
+            "--local", "supervise", "serve",
+        ])))
+    return processes
+
+
+def _prefixed_expected():
+    return {70111, 70113, 70115, 70117, 70119, 70143} | ({70145} if os.name == "nt" else set())
 
 
 def test_target_prefixes_preserve_exact_supervisor_retirement_scope():
     selected = select_supervisor_generation_pids(
         _prefixed_processes(), INSTALL_DIR, run_dir=INSTALL_DIR + r"\run",
     )
-    assert set(selected) == {70111, 70113, 70115, 70117, 70119}
+    assert set(selected) == _prefixed_expected()
     assert selected.index(70111) < selected.index(70119)
 
 
@@ -80,7 +97,7 @@ def test_native_fallback_matches_prefixed_python_scope_without_stopping_real_pro
         f". '{plugin / 'scripts/supervisor-lifecycle.ps1'}'",
         function,
         "$count=Retire-SupervisorProcessesFallback",
-        "if($count -ne 5){throw \"unexpected retirement count $count\"}",
+        f"if($count -ne {len(_prefixed_expected())}){{throw \"unexpected retirement count $count\"}}",
         "[Console]::Out.Write((ConvertTo-Json -InputObject @($script:Stopped) -Compress))",
     ]), encoding="utf-8")
     result = subprocess.run(
@@ -88,7 +105,7 @@ def test_native_fallback_matches_prefixed_python_scope_without_stopping_real_pro
         capture_output=True, text=True, timeout=20, **supervisor_processes.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert set(json.loads(result.stdout)) == {70111, 70113, 70115, 70117, 70119}
+    assert set(json.loads(result.stdout)) == _prefixed_expected()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows installer lifecycle health probes")

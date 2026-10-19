@@ -2313,15 +2313,26 @@ function Retire-SupervisorProcessesFallback {
             ) -and (
                 $dispatchArgv.Count -eq 1 -or $dispatchArgv[1] -eq 'serve' -or $dispatchArgv[1].StartsWith('-')
             )
-            $isRegistrarChild = $underRoot -and (
-                ($dispatchArgv.Count -ge 2 -and $dispatchArgv[0] -in @('emitter', 'schedule') -and $dispatchArgv[1] -eq 'serve') -or
-                ($dispatchArgv.Count -ge 1 -and $dispatchArgv[0] -eq 'webhook')
-            ) -and (
-                $cmd.Replace('"', '').IndexOf(
-                    $supervisorRun,
-                    [StringComparison]::OrdinalIgnoreCase
-                ) -ge 0
-            )
+            $specPath = $null
+            if ($dispatchArgv.Count -ge 3 -and $dispatchArgv[0] -in @('emitter', 'schedule') -and $dispatchArgv[1] -eq 'serve') {
+                $specPath = $dispatchArgv[2]
+            } elseif ($dispatchArgv.Count -gt 0 -and $dispatchArgv[0] -eq 'webhook') {
+                for ($argument = 1; $argument -lt $dispatchArgv.Count; $argument++) {
+                    if ($dispatchArgv[$argument] -eq '--config' -and $argument + 1 -lt $dispatchArgv.Count) {
+                        $specPath = $dispatchArgv[$argument + 1]
+                    } elseif ($dispatchArgv[$argument].StartsWith('--config=')) {
+                        $specPath = $dispatchArgv[$argument].Substring('--config='.Length)
+                    }
+                }
+            }
+            $isRegistrarChild = $false
+            if ($underRoot -and $specPath) {
+                try {
+                    $isRegistrarChild = [IO.Path]::GetFullPath($specPath).StartsWith(
+                        $supervisorRun, [StringComparison]::OrdinalIgnoreCase
+                    )
+                } catch { $isRegistrarChild = $false }
+            }
             if ($isWrapper -or $isSupervisor -or $isRegistrarChild) {
                 [void]$selected.Add([int]$row.ProcessId)
             }

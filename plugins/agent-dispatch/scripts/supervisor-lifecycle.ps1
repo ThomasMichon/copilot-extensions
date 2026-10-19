@@ -27,24 +27,36 @@ public static class DispatchSupervisorCommandLine {
 '@
     }
     $tokens = [DispatchSupervisorCommandLine]::Split($CommandLine)
-    for ($index = 0; $index -lt $tokens.Count; $index++) {
-        $module = [IO.Path]::GetFileNameWithoutExtension($tokens[$index])
-        if ($module -notin @('agent_dispatch', 'agent-dispatch')) { continue }
-        $index++
-        while ($index -lt $tokens.Count -and $tokens[$index].StartsWith('-')) {
-            $option = ($tokens[$index] -split '=', 2)[0]
-            if ($option -in @('--local', '--shared') -and $tokens[$index] -eq $option) {
-                $index++
-            } elseif ($option -in @('--url', '--token', '--control-token')) {
-                if ($tokens[$index].Contains('=')) { $index++ }
-                elseif ($index + 1 -lt $tokens.Count -and -not $tokens[$index + 1].StartsWith('--')) {
-                    $index += 2
-                } else { return @() }
-            } else { return @() }
+    if (-not $tokens.Count) { return @() }
+    $index = 1
+    $module = [IO.Path]::GetFileNameWithoutExtension($tokens[0])
+    $found = $module -in @('agent_dispatch', 'agent-dispatch')
+    if (-not $found) {
+        while ($index -lt $tokens.Count) {
+            $value = $tokens[$index]
+            if ($value -eq '-m') {
+                if ($index + 1 -ge $tokens.Count -or $tokens[$index + 1] -notin @('agent_dispatch', 'agent-dispatch')) { return @() }
+                $index += 2
+                $found = $true
+                break
+            }
+            if (-not $value.StartsWith('-') -or $value.StartsWith('-c')) { return @() }
+            if ($value -in @('-X', '-W', '--check-hash-based-pycs')) { $index += 2 } else { $index++ }
         }
-        if ($index -lt $tokens.Count) { return $tokens[$index..($tokens.Count - 1)] }
-        return @()
     }
+    if (-not $found) { return @() }
+    while ($index -lt $tokens.Count -and $tokens[$index].StartsWith('-')) {
+        $option = ($tokens[$index] -split '=', 2)[0]
+        if ($option -in @('--local', '--shared') -and $tokens[$index] -eq $option) {
+            $index++
+        } elseif ($option -in @('--url', '--token', '--control-token')) {
+            if ($tokens[$index].Contains('=')) { $index++ }
+            elseif ($index + 1 -lt $tokens.Count -and -not $tokens[$index + 1].StartsWith('--')) {
+                $index += 2
+            } else { return @() }
+        } else { return @() }
+    }
+    if ($index -lt $tokens.Count) { return $tokens[$index..($tokens.Count - 1)] }
     return @()
 }
 
