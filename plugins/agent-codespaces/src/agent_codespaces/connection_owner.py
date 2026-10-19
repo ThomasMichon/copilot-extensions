@@ -59,6 +59,7 @@ from .owner_identity import beacon_identity, owner_identity_matches, owner_proce
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
 from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, wait_for_owner_startup
+from . import owner_session_records
 
 if TYPE_CHECKING:
     from .session_forwards import SessionForwards
@@ -201,25 +202,7 @@ def _read_holds() -> dict[str, OwnerHold]:
         hold.tenants = tenants
         hold.daemon_port = _sanitize_port(hold.daemon_port)
         sanitize_hold_forwards(hold)
-        sessions: dict[str, dict[str, Any]] = {}
-        if isinstance(hold.sessions, dict):
-            for tenant, meta in hold.sessions.items():
-                if not isinstance(meta, dict):
-                    continue
-                mux = meta.get("mux_session")
-                try:
-                    expires_at = float(meta.get("expires_at"))
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(mux, str) and mux:
-                    sessions[str(tenant)] = {
-                        "mux_session": mux, "expires_at": expires_at,
-                        "confirmed": bool(meta.get("confirmed", False)),
-                        "generation": str(meta.get("generation") or ""),
-                        **({"pending_delivery": meta["pending_delivery"]}
-                           if isinstance(meta.get("pending_delivery"), dict) else {}),
-                    }
-        hold.sessions = sessions
+        hold.sessions = owner_session_records.normalize_sessions(hold.sessions)
         holds[codespace] = hold
     return holds
 
@@ -379,16 +362,9 @@ def hold(
 
 def record_pending_delivery(codespace: str, tenant: str, pending: dict | None) -> None:
     """Journal the owned send on its existing connection tenant."""
-    with _owner_lock():
-        holds = _read_holds()
-        hold = holds.get(codespace)
-        if hold is None or tenant not in hold.sessions:
-            raise RuntimeError("Pending delivery has no owning connection tenant")
-        if pending is None:
-            hold.sessions[tenant].pop("pending_delivery", None)
-        else:
-            hold.sessions[tenant]["pending_delivery"] = pending
-        _write_holds(holds)
+    owner_session_records.record_pending_delivery(
+        codespace, tenant, pending, lock=_owner_lock, read_holds=_read_holds, write_holds=_write_holds,
+    )
 
 def heartbeat(
     codespace: str, tenant: str, ttl: float = DEFAULT_TTL,
