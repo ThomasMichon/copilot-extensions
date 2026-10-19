@@ -176,6 +176,30 @@ during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
 
+### 2026-10-19 - Uncached snapshots and listener-disabled credentials
+
+- Fresh review confirmed cached project reconciliation but found that the
+  uncached resolver and fallback routes could retain remote rows across later
+  awaits. Eight calibrated cases failed: scoped/unscoped requests, both
+  topology-not-ready and cache-absent routes, and withdrawal during row
+  composition or namespace scans.
+- Uncached listing now composes project-aware rows once and uses the same
+  report-identity reconciliation helper as cached listing after its final
+  await. Fallback routes do not add another composition await; stale remote
+  rows are omitted with a unique incomplete diagnostic while healthy namespace
+  rows remain. The catalog/cache/roster/runtime/historical-route lane passed
+  148 cases and Python lint passed.
+- Another review case showed that disabling the TCP credential relay skipped
+  process-local HTTP source registration too. A real lifespan regression with
+  the listener disabled failed binding an otherwise approved native source.
+  Startup now registers HTTP-only sources in that role without contributing,
+  starting or adopting a TCP listener. Approval and lazy acquisition are
+  unchanged.
+- Native startup/source/profile/readiness/relay-adoption validation passed 58
+  cases, including the real disabled-listener startup and actual synthetic
+  credential command. Python lint passed. Final source attestation and fresh
+  review/CI remain required; no rollout or live credential grant occurred.
+
 ### 2026-10-19 - Project composition before final snapshot assembly
 
 - Fresh review confirmed off-thread row composition but found a later route

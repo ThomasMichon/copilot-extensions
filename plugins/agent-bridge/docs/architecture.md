@@ -133,6 +133,8 @@ derives provider-qualified references and calls the same provider command's
 finite `http-credential <id> get` operation only after exact service approval.
 Request fields use stdin and credentials use captured stdout, never argv or
 bridge persistence. HTTP-only registration needs no relay TCP listener.
+Listener-disabled daemons populate the same process-local HTTP source registry
+without contributing or binding legacy TCP-relay profiles.
 The source protocol and refusal rules are in [remote ACP](remote-acp.md).
 
 If no provider contributes any sources, the relay is disabled and the bridge

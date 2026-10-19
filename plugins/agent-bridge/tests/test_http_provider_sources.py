@@ -20,6 +20,47 @@ from agent_bridge.remote_acp_config import RemoteAcpTarget, RemoteAuthApproval
 
 
 @pytest.mark.asyncio
+async def test_real_startup_registers_approved_http_source_with_tcp_listener_disabled(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge import app as app_module
+    from agent_bridge.agent_registry import AgentResolver
+    from agent_bridge.models import ServiceConfig
+
+    calls, _ = configure(monkeypatch, tmp_path)
+    tcp_start = AsyncMock(side_effect=AssertionError("TCP relay must remain disabled"))
+    monkeypatch.setattr("credential_relay.server.CredentialRelayServer.start", tcp_start)
+    monkeypatch.setattr(app_module, "daemon_resolver", lambda cfg: AgentResolver({}, {}))
+    target = RemoteAcpTarget(
+        endpoint="https://example.com/acp", transport="streamable-http",
+        auth={
+            "source": "injected", "identity": "synthetic", "scheme": "Example",
+            "credential_source": "synthetic@example/grant",
+            "resource": "synthetic-resource", "scope": "read",
+        },
+    )
+    app = app_module.create_app(config=ServiceConfig(
+        port=0, db_path=str(tmp_path / "bridge.db"), enable_credential_relay=False,
+        remote_acp={"peer": target}, remote_acp_auth_sources={
+            "synthetic@example/grant": RemoteAuthApproval(
+                origin=target.origin, identity="synthetic", scheme="Example",
+                resource="synthetic-resource", scope="read",
+            ),
+        },
+    ), token="synthetic-control")
+    app.state.publish_on_ready = False
+    app.state.passive = True
+    async with app.router.lifespan_context(app):
+        assert app.state.ready and not calls.exists()
+        policy = app.state.session_manager._remote_credential_policy
+        context = HttpAuthContext(target.origin, "synthetic", "test", "synthetic-resource", "read")
+        headers = await policy.bind(target)(context).headers(context)
+        assert headers["Authorization"].split(" ", 1) == ["Example", "synthetic-credential"]
+        assert calls.exists() and not app.state.credential_relay_ready
+        tcp_start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_real_provider_process_registers_then_acquires_only_after_approval(monkeypatch, tmp_path):
     calls, _ = configure(monkeypatch, tmp_path)
     builder = RelayBuilder()

@@ -20,7 +20,7 @@ from .agent_registry_discovery import DiscoveryResult, _ProviderDiscoveryMixin
 from .agent_registry_namespace import NamespaceResolver
 from .cold_store_sources import ColdStoreProviderRegistry
 from .provider_sources import ProviderManifest
-from .remote_acp_catalog import RemoteAcpCatalog
+from .remote_acp_catalog import RemoteAcpCatalog, reconcile_remote_rows
 from .remote_acp_config import is_remote_address
 from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
@@ -189,7 +189,8 @@ class AgentResolver(_ProviderDiscoveryMixin):
         treat their absence as a real removal."""
         return [
             *self._last_incomplete_namespaces,
-            *(["remote-acp"] if self.remote_acp_catalog and self.remote_acp_catalog.errors else []),
+            *(["remote-acp"] if self.remote_acp_catalog and self.remote_acp_catalog.errors
+              and "remote-acp" not in self._last_incomplete_namespaces else []),
         ]
 
     def canonical_agent_name(self, name: str) -> str | None:
@@ -921,7 +922,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
             result.extend(self.remote_acp_catalog.rows(project, refresh=False))
         return result
 
-    async def list_agents_async(self) -> list[dict[str, Any]]:
+    async def list_agents_async(self, *, project: str | None = None) -> list[dict[str, Any]]:
         """List all agents including namespace-resolved agents.
 
         A direct, uncached per-call scan of every registered namespace
@@ -932,7 +933,12 @@ class AgentResolver(_ProviderDiscoveryMixin):
         outcome = await asyncio.to_thread(self._scan_provider_report, force=False)
         if not isinstance(outcome, DiscoveryResult):
             self._apply_provider_report(*outcome)
-        result = await asyncio.to_thread(self.list_agents)
+        catalog = self.remote_acp_catalog
+        remote_report = getattr(catalog, "contribution_report", None)
+        result = (
+            await asyncio.to_thread(self.list_agents) if project is None
+            else await asyncio.to_thread(self.list_agents, project=project)
+        )
         prefixes = list(self._namespace_resolvers.keys())
 
         listings = await asyncio.gather(
@@ -959,5 +965,10 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 incomplete_namespaces.append(prefix)
                 continue
             result.extend(outcome)
+        result, remote_changed = reconcile_remote_rows(
+            result, catalog, remote_report, self.remote_acp_catalog,
+        )
+        if remote_changed and "remote-acp" not in incomplete_namespaces:
+            incomplete_namespaces.append("remote-acp")
         self._last_incomplete_namespaces = incomplete_namespaces
         return result

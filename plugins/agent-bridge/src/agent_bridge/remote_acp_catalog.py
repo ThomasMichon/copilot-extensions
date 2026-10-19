@@ -211,3 +211,15 @@ def _project_bindings(project: str) -> Mapping[str, RemoteAcpBinding]:
         return {}
     config = load_repo_bridge_config(root)
     return config.remote_acp_bindings if config is not None else {}
+
+
+def reconcile_remote_rows(
+    rows: list[dict], catalog: RemoteAcpCatalog | None,
+    report: RemoteContributionReport | None, current: RemoteAcpCatalog | None,
+) -> tuple[list[dict], bool]:
+    """Omit superseded remote rows after an asynchronous assembly boundary."""
+    changed = current is not catalog or getattr(catalog, "contribution_report", None) is not report
+    return (
+        [row for row in rows if row.get("target_type") != "remote-acp"] if changed else rows,
+        changed,
+    )

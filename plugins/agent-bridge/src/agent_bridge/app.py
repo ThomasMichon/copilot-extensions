@@ -286,27 +286,32 @@ async def _retire_previous_daemon(
         )
 
 
-async def _start_credential_relay(app: FastAPI):
-    """Build and start the in-process credential relay; return the server or None.
+async def _start_credential_relay(app: FastAPI, *, start_listener: bool = True):
+    """Register sources and optionally start the TCP relay; return it or None.
 
     Extracted so both lifespan startup and the post-cutover relay-adopt endpoint
     can (re)bind the shared relay port (9857). Idempotent: if a relay is already
     running on this app it is returned unchanged.
+    A disabled listener still registers the process-local HTTP source registry.
     """
     existing = getattr(app.state, "credential_relay", None)
-    if existing is not None and getattr(existing, "running", False):
+    if start_listener and existing is not None and getattr(existing, "running", False):
         return existing
     relay_server = None
     try:
         from credential_relay import RelayBuilder
 
         from .agent_registry import register_credential_sources
+        from .http_provider_sources import register_http_credential_sources
 
         builder = RelayBuilder()
-        await _run_in_daemon_thread(register_credential_sources, builder)  # may retry
+        register_sources = register_credential_sources if start_listener else register_http_credential_sources
+        await _run_in_daemon_thread(register_sources, builder)  # may retry
         manager = getattr(app.state, "session_manager", None)
         if manager is not None and manager._remote_credential_policy is not None:
             manager._remote_credential_policy.register_sources(builder.http_sources)
+        if not start_listener:
+            return None
         if builder.empty:
             log.debug("No credential-relay sources registered -- relay disabled")
             return None
@@ -484,8 +489,9 @@ async def lifespan(app: FastAPI):
                 start_worktree_cache(app, resolver, cfg, governance)
 
                 if not getattr(cfg, "enable_credential_relay", True):
+                    await _start_credential_relay(app, start_listener=False)
                     log.info(
-                        "Credential relay disabled for this daemon "
+                        "TCP credential relay disabled for this daemon "
                         "(enable_credential_relay=False) -- reusing the primary daemon's relay"
                     )
                 else:

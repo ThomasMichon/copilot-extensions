@@ -201,6 +201,68 @@ async def test_project_route_reconciles_provider_replaced_during_binding_read(
             await cache.stop()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project", [None, "demo"])
+@pytest.mark.parametrize("phase", ["composition", "namespace"])
+@pytest.mark.parametrize("topology_ready", [False, True])
+async def test_uncached_fallback_fences_remote_withdrawal_after_final_await(
+    contribution, monkeypatch, project, phase, topology_ready,
+):
+    import threading
+
+    import httpx
+    from fastapi import FastAPI
+
+    from agent_bridge.agent_registry import NamespaceAgentInfo
+    from agent_bridge.routes.agents import router
+
+    catalog = RemoteAcpCatalog({}, project_bindings=lambda project: {"assistant": binding()})
+    catalog.apply(discover_remote_contributions())
+    resolver = AgentResolver({}, {})
+    resolver.remote_acp_catalog = catalog
+    started, release = threading.Event(), threading.Event()
+    original = catalog.rows
+
+    def rows(project=None, *, refresh=True):
+        composed = original(project, refresh=refresh)
+        if phase == "composition":
+            started.set()
+            assert release.wait(2)
+        return composed
+
+    async def namespace_rows():
+        if phase == "namespace":
+            started.set()
+            assert await asyncio.to_thread(release.wait, 2)
+        return [NamespaceAgentInfo(name="healthy")]
+
+    monkeypatch.setattr(catalog, "rows", rows)
+    resolver.register_namespace_resolver(SimpleNamespace(
+        prefix="ns", list=namespace_rows, invalidate_list_cache=lambda: None,
+    ))
+    app = FastAPI()
+    app.state.resolver, app.state.topology_ready = resolver, topology_ready
+    app.include_router(router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://bridge.invalid",
+    ) as api:
+        pending = asyncio.create_task(api.get(
+            "/api/v1/agents", params={"project": project} if project else {},
+        ))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            catalog.apply(RemoteContributionReport())
+            release.set()
+            response = await pending
+            assert response.status_code == 200
+            data = response.json()
+            assert data["incomplete_namespaces"] == ["remote-acp"]
+            assert [row["name"] for row in data["agents"]] == ["ns:healthy"]
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+
+
 def test_binding_is_owned_project_qualified_and_url_uses_same_policy(contribution):
     catalog = RemoteAcpCatalog({}, bindings={"assistant": binding()})
     row = catalog.rows()[0]

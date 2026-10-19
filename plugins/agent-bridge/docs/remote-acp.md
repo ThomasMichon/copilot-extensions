@@ -197,6 +197,9 @@ assembly and completeness checks, with no later composition await. Discovery
 publication retains its generation guard; namespace membership/freshness and
 the remote report identity are rechecked after composition. Superseded remote
 rows are omitted and reported incomplete rather than published as current.
+Uncached fallback routes also compose project-aware rows within one resolver
+boundary and recheck that identity after their final namespace await; they do
+not add a second project-composition await after reconciliation.
 Disabled contributions withdraw; uncertain activation cannot retain runnable
 authority from a previous scan. Source-level discovery failures are reported,
 not treated as authoritative emptiness.
@@ -374,6 +377,10 @@ than importing its package. The provider owns actual credential acquisition,
 expiry and revocation; no credential is passed in argv or stored by the bridge.
 Startup reads capabilities, not secrets, and HTTP-only source registration
 does not start a TCP relay merely for these attachments.
+Disabling `enable_credential_relay` disables the shared TCP listener, not the
+process-local HTTP credential registry. Listener-disabled/elevated daemons
+still register approved native sources without starting or adopting that
+listener; credential approval and request-time acquisition remain unchanged.
 
 For application-form withdrawal, `elicitation/complete` can carry the original
 application-approval metadata with its explicit `decisionId`. It must identify

@@ -8,18 +8,11 @@ from fastapi import APIRouter, HTTPException, Request
 router = APIRouter(tags=["agents"])
 
 
-async def _project_rows(resolver, rows: list[dict], project: str | None) -> list[dict]:
-    if project is None:
-        return rows
-    catalog = getattr(resolver, "remote_acp_catalog", None)
-    if catalog is not None:
-        remote_rows = await asyncio.to_thread(catalog.rows, project, refresh=False)
-        rows = [row for row in rows if row.get("target_type") != "remote-acp"] + remote_rows
-    return [
-        row for row in rows
-        if row.get("target_type") != "remote-acp" or row.get("global_scope")
-        or project in row.get("projects", [])
-    ]
+async def _list_uncached(resolver, project: str | None) -> list[dict]:
+    list_async = getattr(resolver, "list_agents_async", None)
+    if not callable(list_async):
+        return []
+    return await list_async() if project is None else await list_async(project=project)
 
 
 @router.get("/api/v1/agents")
@@ -54,10 +47,9 @@ async def list_agents(
     if not topology_ready:
         if require_complete:
             raise HTTPException(status_code=503, detail="agent roster not yet available")
-        list_async = getattr(resolver, "list_agents_async", None)
-        agents = await list_async() if callable(list_async) else []
+        agents = await _list_uncached(resolver, project)
         return {
-            "agents": await _project_rows(resolver, agents, project),
+            "agents": agents,
             "topology_errors": getattr(resolver, "topology_errors", []),
             "topology_warnings": getattr(resolver, "topology_warnings", []),
             "incomplete_namespaces": getattr(resolver, "incomplete_namespaces", []),
@@ -83,10 +75,9 @@ async def list_agents(
         # longer is -- fall back to the pre-3b per-call scan rather than
         # silently serving a different resolver's cached rows. Safe only
         # because the caller never asked for the fail-closed contract above.
-        list_async = getattr(resolver, "list_agents_async", None)
-        agents = await list_async() if callable(list_async) else []
+        agents = await _list_uncached(resolver, project)
         return {
-            "agents": await _project_rows(resolver, agents, project),
+            "agents": agents,
             "topology_errors": getattr(resolver, "topology_errors", []),
             "topology_warnings": getattr(resolver, "topology_warnings", []),
             "incomplete_namespaces": getattr(resolver, "incomplete_namespaces", []),
