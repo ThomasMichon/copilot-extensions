@@ -203,7 +203,9 @@ REMOTE_ACP_PROTOCOL_VERSION = 38
 LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION = 39
 # Ordinary worktree resume derives the exact native head in either execution mode.
 WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION = 40
-HTTP_PROTOCOL_VERSION = 40
+# Direct endpoint targets and inert plugin contributions with scoped source binding.
+REMOTE_ACP_TARGETS_PROTOCOL_VERSION = 41
+HTTP_PROTOCOL_VERSION = 41
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

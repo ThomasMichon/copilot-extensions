@@ -1,0 +1,35 @@
+{
+  "captured_from": {
+    "commit": "d9081f44ce18740676e78b8d9f932b263336f5cf",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 41,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+    "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+    "source_sha256": "916d4687bab944aa33ab395e70d506535e4d3e180ab59b6f3d3cd3d195ee83c3"
+  },
+  "request": {
+    "qualified_peer": true,
+    "sender": "wt-a",
+    "message": "call",
+    "reply_to": "live:host-a:project-a:wt-a",
+    "kind": "prompt",
+    "delivery": "steer",
+    "wait": true,
+    "wait_timeout": 2.0,
+    "timeout": 20.0
+  },
+  "response": {
+    "ok": true,
+    "session_id": "b-current",
+    "message_id": 1,
+    "duplicate": false,
+    "replied": true,
+    "reply": "peer response",
+    "stop_reason": "end_turn"
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-40.json",
+    "sha256": "fec2a1a3c6f4cb80818a4e50fe09cb365d058139216f420985976c56923d3a61",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 41. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; the target vector separately covers the new selection and binding contract."
+  }
+}

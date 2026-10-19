@@ -57,7 +57,7 @@ def session_manager_from_config(
     """
     from .session_manager import SessionManager
 
-    return SessionManager(
+    manager = SessionManager(
         db,
         session_host_state_dir=session_host_state_dir,
         drain_auto_release_s=drain_auto_release_s,
@@ -77,3 +77,12 @@ def session_manager_from_config(
         session_host_unexpected_reap_seconds=cfg.session_host_unexpected_reap_seconds,
         session_host_active_reap_seconds=cfg.session_host_active_reap_seconds,
     )
+    from .remote_acp_catalog import RemoteAcpCatalog
+    from .remote_acp_auth import RemoteCredentialPolicy
+
+    manager._remote_credential_policy = RemoteCredentialPolicy(cfg.remote_acp_auth_sources)
+    manager._remote_acp_catalog = RemoteAcpCatalog(
+        manager._remote_acp_targets, bindings=cfg.remote_acp_bindings,
+        check_auth=manager._remote_credential_policy.bind,
+    )
+    return manager

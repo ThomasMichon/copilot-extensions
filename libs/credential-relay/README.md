@@ -27,6 +27,16 @@ from every venv — hence a lib installed into each, vendored the same way as
   build-time validator/authorizer composition and static scope fallback. Builder
   callbacks retain any-match and remembered scope-denial behavior. This owner
   does not itself serialize callbacks or authorize a runtime handoff.
+- `credential_relay.http_auth.SourceHttpAuth` binds a source to one exact
+  origin/identity/generation context without another cache. Its default token
+  scheme and rejection of resource/scope remain compatible; a constrained
+  ASCII `scheme` and explicit `scoped=True` allow an already-approved source
+  to honor exact resource/scope fields.
+- `credential_relay.http_sources.HttpSourceRegistry` holds provider-qualified
+  HTTP sources and refuses ambiguous references. Providers contribute with
+  `RelayBuilder.add_http_source(reference, source, scoped=False)`. Registration
+  is not caller approval: the consuming service still binds and authorizes
+  the endpoint, identity, resource, scope and scheme before acquiring secrets.
 
 ## Wire protocol
 

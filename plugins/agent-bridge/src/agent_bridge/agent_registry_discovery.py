@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from dropin_registry import Finding
@@ -117,6 +117,8 @@ class _ProviderDiscoveryMixin:
 
         try:
             report = scan_provider_registry(previous=self._provider_entries)
+            if self.remote_acp_catalog is not None:
+                report = replace(report, remote_acp=self.remote_acp_catalog.discover())
         except Exception:
             log.warning("Provider manifest discovery failed", exc_info=True)
             with self._scan_lock:
@@ -157,6 +159,8 @@ class _ProviderDiscoveryMixin:
                 start_generation, self._apply_generation,
             )
             return DiscoveryResult(ok=False)
+        if self.remote_acp_catalog is not None and report.remote_acp is not None:
+            self.remote_acp_catalog.apply(report.remote_acp)
         findings = list(report.findings)
         for manifest in report.manifests.values():
             if (
@@ -264,7 +268,10 @@ class _ProviderDiscoveryMixin:
         # the resolved entry set reflects the true current intent -- a
         # resolver set that's actually gone stale must never be reported as
         # a clean pass just because nothing outright failed or raised.
-        indeterminate = any(finding.status == "indeterminate" for finding in report.findings)
+        indeterminate = (
+            any(finding.status == "indeterminate" for finding in report.findings)
+            or (report.remote_acp is not None and bool(report.remote_acp.errors))
+        )
         # Only now -- actually applied -- is it safe to advance both the
         # generation (so a stale, still-in-flight scan is rejected rather
         # than rolling this state back) and the scan-TTL timestamp (so a

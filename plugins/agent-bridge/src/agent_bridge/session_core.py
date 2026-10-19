@@ -73,6 +73,8 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
     ) -> None:
         self._db = db
         self._remote_acp_targets = dict(remote_acp_targets or {})
+        self._remote_acp_catalog = None
+        self._remote_credential_policy = None
         self._sessions: dict[str, Session] = {}
         self._resolver: Any | None = None
         # Session-Host mode is now the ONLY mode (dotfiles#1478): every local and
@@ -226,6 +228,13 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
     def set_resolver(self, resolver: Any) -> None:
         """Attach the live resolver used for safe provider target refresh."""
         self._resolver = resolver
+        if self._remote_acp_catalog is not None:
+            from .remote_acp_catalog import RemoteAcpCatalog
+
+            previous = getattr(resolver, "remote_acp_catalog", None)
+            if isinstance(previous, RemoteAcpCatalog):
+                self._remote_acp_catalog.apply(previous.contribution_report)
+            resolver.remote_acp_catalog = self._remote_acp_catalog
 
     def _route_acp_event(self, session: Session, event_type: str, data: dict[str, Any]) -> None:
         if session.event_log:

@@ -1,0 +1,60 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions",
+    "json": {
+      "agent": "remote-acp:example-agent",
+      "target_dir": "/workspace",
+      "remote_session_id": "saved-example"
+    }
+  },
+  "response": {
+    "preference_source": "caller-settings",
+    "session_id": "bridge-example",
+    "name": "example-agent",
+    "status": "idle",
+    "protocol_version": 41,
+    "min_protocol_version": 1
+  },
+  "client_requests": {
+    "start": {
+      "agent": "remote-acp:example-agent",
+      "target_dir": "/workspace",
+      "remote_session_id": "saved-example",
+      "protocol_version": 41
+    },
+    "form": {
+      "tool_call_id": "opaque-tool",
+      "request_id": "live-token",
+      "content": {
+        "choice": "explicit"
+      },
+      "action": "accept"
+    },
+    "permission": {
+      "request_id": "live-token",
+      "option_id": "opaque-option"
+    }
+  },
+  "capability": {
+    "remote_acp": 38,
+    "existing_permission_answer_floor": 10,
+    "unsupported_status": 426,
+    "profile": "acp-http-ws-durable-v1alpha1",
+    "experimental_namespace": "remote-acp/explicit-approvals",
+    "ordinary_provider_instance_default": false
+  },
+  "captured_from": {
+    "commit": "d9081f44ce18740676e78b8d9f932b263336f5cf",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 41,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+    "source_git_blob": "01d14a2367e58e5bdda7c6768cc51283ba7011a0",
+    "source_sha256": "8af5d0bf27b9ae0bef8ff872df8c8128ea2d28e923a134d436ba9c71cdcd1d0e"
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-40.json",
+    "sha256": "995aa922b10236c46bd0798da23858483551162a5550b4ea392c6ec678c110e9",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 41. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; the target vector separately covers the new selection and binding contract."
+  }
+}

@@ -63,6 +63,7 @@ from dropin_registry import (
 from plugin_activation import ActivationReport, resolve_active_plugins
 
 from .install_paths import effective_config_dir, normalized_path
+from .remote_acp_sources import RemoteContributionReport
 
 REGISTRY_NAME = "providers.d"
 
@@ -175,6 +176,7 @@ class ProviderRegistryReport:
     entries: Mapping[str, ProviderManifest]
     manifests: Mapping[str, ProviderManifest]
     findings: tuple[Finding, ...]
+    remote_acp: RemoteContributionReport | None = None
 
 
 def _inactive(

@@ -13,7 +13,7 @@ from acp.schema import (
     AcceptElicitationResponse, CancelElicitationResponse, DeclineElicitationResponse,
     Implementation, RequestPermissionResponse,
 )
-from credential_relay.http_auth import HttpAuthInjector, SourceHttpAuth
+from credential_relay.http_auth import HttpAuthContext, HttpAuthInjector, SourceHttpAuth
 from credential_relay.sources.git_credential import GitCredentialSource
 
 from . import __version__
@@ -57,6 +57,7 @@ class RemoteAcpClientMixin:
     async def start_remote(
         self, target: RemoteAcpTarget, *, auth: HttpAuthInjector | None = None,
         transport: RemoteTransport | None = None, cookies: Any = None,
+        auth_factory: Callable[[HttpAuthContext], HttpAuthInjector] | None = None,
     ) -> None:
         from .acp_callbacks import _BridgeClientImpl
         from .acp_subagents import client_capabilities
@@ -75,11 +76,16 @@ class RemoteAcpClientMixin:
         remote = self._remote_transport
         remote.on_lost = self._remote_lost
         remote.on_request_completed = self._remote_rpc_completed
+        if auth_factory is not None:
+            if auth is not None or remote.auth is not None:
+                raise ValueError("Remote credential binding is ambiguous")
+            auth = auth_factory(remote.context)
         if auth is not None:
             remote.auth = auth
         if auth is None and remote.auth is None and target.auth.source == "git-credential":
             remote.auth = SourceHttpAuth(
                 GitCredentialSource(cache_ttl=0), remote.context, target.endpoint,
+                scheme=target.auth.scheme,
             )
         self._host_mode = True
         self._host_transport_alive = True

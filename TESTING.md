@@ -371,10 +371,14 @@ eight-minute job limit during cleanup despite passing test steps. Other plugin
 budgets and the required aggregate gate are unchanged.
 
 Bridge's tolerant-wire-reader guard continues to cover every discovered peer
-model. Its only explicit local-configuration classifications are the immutable
-`RemoteAuth` and `RemoteAcpTarget` settings: unknown auth/transport configuration
+model. Its explicit local-configuration classifications are the immutable remote
+target, contribution, binding and auth-approval settings: unknown configuration
 fails closed instead of silently ignoring a typo. Subclasses do not inherit
-that classification. Remote replay tests also include unfinished historical
+that classification. Catalog/source tests cover enabled payload ownership,
+non-runnable missing bindings and exact URL/auth policy. The native TLS lane
+also crosses ordinary roster/detail/create and remote resume for configured,
+URL and contributed targets with a real custom-scheme header.
+Remote replay tests also include unfinished historical
 tools, checking live tracking and telemetry after load, database restore and
 event-log rebuild.
 

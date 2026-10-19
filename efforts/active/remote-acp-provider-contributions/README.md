@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed proposal and implementation PRs targeting `dev`
 - **Created:** 2026-10-18
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [externally-hosted-acp-agents](../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents), [topology-aware-agent-resolution](../../../visions/plugins/agent-bridge/README.md#topology-aware-agent-resolution)
 - **Umbrella issue:** #7218
 
@@ -75,37 +75,37 @@ are **agent-recommended**.
 ### Phase 1 - Reviewed contribution contract
 
 - [x] Deduplicate and claim the public coordination issue.
-- [ ] Review and merge this effort and the vision delta before implementation.
-- [ ] Sync execution forward onto the reviewed plan without dropping ownership.
+- [x] Review and merge this effort and the vision delta before implementation.
+- [x] Sync execution forward onto the reviewed plan without dropping ownership.
 
 ### Phase 2 - Declarative configuration and target resolution
 
-- [ ] Compose enabled-plugin remote target requirements through existing
+- [x] Compose enabled-plugin remote target requirements through existing
   activation/config/provider seams; retain command-provider compatibility.
-- [ ] Define and document the minimal target declaration, adopter binding,
+- [x] Define and document the minimal target declaration, adopter binding,
   precedence, conflict diagnostics and canonical endpoint identity.
-- [ ] Expose named and contributed remote targets through ordinary roster,
+- [x] Expose named and contributed remote targets through ordinary roster,
   detail and project-context resolution, including explicit `requires-binding`
   or unavailable state for incomplete bindings.
-- [ ] Resolve direct HTTPS/WSS targets through an explicitly matching local
+- [x] Resolve direct HTTPS/WSS targets through an explicitly matching local
   policy and the same remote session manager; refuse unmatched URLs before
   network, credential lookup or workspace/process acquisition.
 
 ### Phase 3 - Scoped source binding and conversations
 
-- [ ] Wire an explicitly approved provider-qualified credential source and
+- [x] Wire an explicitly approved provider-qualified credential source and
   constrained token scheme into daemon-created remote sessions through the
   existing credential relay injector.
-- [ ] Preserve origin, identity, resource, scope and generation boundaries;
+- [x] Preserve origin, identity, resource, scope and generation boundaries;
   reject unknown/ambiguous sources and unsafe header values without fallback.
-- [ ] Exercise ordinary create/send/resume, correlated manual approvals and
+- [x] Exercise ordinary create/send/resume, correlated manual approvals and
   remote session identity through the same connector for all target forms.
-- [ ] Preserve named-target compatibility, bounded pre-admission auth retry,
+- [x] Preserve named-target compatibility, bounded pre-admission auth retry,
   non-replay of uncertain prompts and remote process/workspace non-ownership.
 
 ### Phase 4 - Reviewed delivery and closure
 
-- [ ] Update bridge/credential-source configuration docs and agent-facing usage;
+- [x] Update bridge/credential-source configuration docs and agent-facing usage;
   add required plugin changefiles and shared-library consumer validation.
 - [ ] Satisfy the validation matrix, address review findings and merge the
   implementation PRs to `dev`.
@@ -174,6 +174,35 @@ Schema details must reconcile with current configuration and provider patterns
 during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
+
+### 2026-10-19 - Generic implementation and bounded evidence
+
+- Pinned implementation sources in `d9081f44c` before generation-41 contract
+  capture. Direct URL requests need the new capability floor; named remote ACP
+  retains generation 38. Immutable compatibility evidence is being updated
+  before publication, with historical floors and vectors retained.
+- Targeted local evidence: 617 bridge core cases, 131 configuration/cache cases,
+  185 shared-relay cases, and 45 actual TLS HTTP/2/SSE/WSS peer cases passed.
+  The peer lane crosses configured, URL and plugin targets with real custom
+  headers, exact manual decisions and durable history resume.
+- Shared-relay consumer checks passed: 78 codespaces, 80 containers and 16 MCP
+  cases; existing platform skips remain explicit. A CLI regression also proves
+  ordinary/streaming project filtering and visible unbound diagnostics.
+- Encountered and calibrated a buffered-read cancellation race during ordinary
+  direct shutdown, then fixed the closed-state boundary without changing any
+  deadline; follow-up evidence is recorded on #7186.
+- The first native full-suite group reached its unchanged wall limit. Smaller
+  10-file groups retained all limits and passed five groups (1,363 cases) before
+  identifying three historical route-vector kwargs differences. The runtime
+  compatibility fix is included in the pinned source; contract and remaining
+  full-suite checks are still open, not waived.
+
+### 2026-10-19 - Reviewed plan merged
+
+- #7220 merged as `5d304dff3859623eb5e2d93f53bbfe5d5c35108d` after an
+  approving Copilot review with no findings and successful observed CI.
+- Synced the claimed worktree onto the reviewed `dev` plan and began Phase 2.
+  Promotion, installed rollout and live credentials remain separately gated.
 
 ### 2026-10-18 - Proposal and public coordination
 

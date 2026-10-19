@@ -14,13 +14,23 @@ from .remote_acp_config import REMOTE_ACP_VERSION, RemoteAcpTarget
 from .remote_acp_transport import RemoteTransportError
 from .transport import SpawnTarget
 if TYPE_CHECKING:
+    from .models import StartSessionRequest
     from .session_manager import Session, SessionManager
+
+
+def has_local_launch_options(request: StartSessionRequest) -> bool:
+    return any((
+        request.worktree_id, request.creation_key, request.provider_instance,
+        request.copilot_args, request.env, request.mcp_servers,
+        request.model, request.effort, request.parity_fault,
+    ))
 
 
 async def connect_remote_session(
     manager: SessionManager, name: str, *, cwd: str = "/", caller_id: str | None = None,
     caller_session_id: str | None = None, remote_session_id: str | None = None,
     session: Session | None = None,
+    project: str | None = None,
 ) -> Session:
     if manager.is_draining:
         raise ValueError("Bridge is draining")
@@ -30,6 +40,7 @@ async def connect_remote_session(
             manager, name, cwd=cwd, caller_id=caller_id,
             caller_session_id=caller_session_id, remote_session_id=remote_session_id,
             session=session,
+            project=project,
         )
     finally:
         manager._active_acquisitions -= 1
@@ -39,23 +50,37 @@ async def _attach_remote_session(
     manager: SessionManager, name: str, *, cwd: str = "/", caller_id: str | None = None,
     caller_session_id: str | None = None, remote_session_id: str | None = None,
     session: Session | None = None,
+    project: str | None = None,
 ) -> Session:
     from .session_manager import Session
 
     if manager.is_draining:
         raise ValueError("Bridge is draining")
-    spec = getattr(manager, "_remote_acp_targets", {}).get(name)
-    if spec is None:
-        raise ValueError("Unknown configured remote ACP target")
-    spec = RemoteAcpTarget.model_validate(spec)
+    catalog = getattr(manager, "_remote_acp_catalog", None)
+    if catalog is not None:
+        address = name if "://" in name or name.startswith("remote-acp:") else "remote-acp:" + name
+        name, spec = await asyncio.to_thread(
+            catalog.resolve, address, project=project or (session.target.project if session else None),
+        )
+    else:
+        spec = getattr(manager, "_remote_acp_targets", {}).get(name)
+        if spec is None:
+            raise ValueError("Unknown configured remote ACP target")
+        spec = RemoteAcpTarget.model_validate(spec)
     snapshot = spec.model_dump(mode="json")
-    if session is not None and session.target.remote_acp != snapshot:
+    previous_spec = (
+        RemoteAcpTarget.model_validate(session.target.remote_acp).model_dump(mode="json")
+        if session is not None else None
+    )
+    if session is not None and previous_spec != snapshot:
         raise ValueError("Remote endpoint/profile/identity changed; explicit new attachment required")
+    policy = getattr(manager, "_remote_credential_policy", None)
+    auth_factory = policy.bind(spec) if policy is not None else None
     if session is None:
         if len(manager._sessions) >= manager.MAX_SESSIONS:
             raise ValueError("Bridge session limit exceeded")
         target = SpawnTarget(
-            type="remote-acp", cwd=cwd, remote_acp=snapshot,
+            type="remote-acp", cwd=cwd, remote_acp=snapshot, project=project,
         )
         session = Session(
             uuid.uuid4().hex[:12], name, target, agent_name="remote-acp:" + name,
@@ -112,7 +137,10 @@ async def _attach_remote_session(
             raise RemoteTransportError("Remote session startup was closed or superseded")
 
     try:
-        await client.start_remote(spec, cookies=cookies)
+        if auth_factory is None:
+            await client.start_remote(spec, cookies=cookies)
+        else:
+            await client.start_remote(spec, cookies=cookies, auth_factory=auth_factory)
         require_current()
         session._remote_affinity_cookies = getattr(client._remote_transport, "cookies", None)
         session.target.remote_acp_capabilities = {

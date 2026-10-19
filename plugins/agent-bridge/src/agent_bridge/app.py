@@ -304,6 +304,9 @@ async def _start_credential_relay(app: FastAPI):
 
         builder = RelayBuilder()
         await _run_in_daemon_thread(register_credential_sources, builder)  # may retry
+        manager = getattr(app.state, "session_manager", None)
+        if manager is not None and manager._remote_credential_policy is not None:
+            manager._remote_credential_policy.register_sources(builder.http_sources)
         if builder.empty:
             log.debug("No credential-relay sources registered -- relay disabled")
             return None

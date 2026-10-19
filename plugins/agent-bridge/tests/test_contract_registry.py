@@ -55,7 +55,7 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/native-worktree-resume-generation-40.json")
+    fixture = _fixture("fixtures/http/current/native-worktree-resume-generation-41.json")
     body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
@@ -68,7 +68,8 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
     assert bridge_protocol.REMOTE_ACP_PROTOCOL_VERSION == 38
     assert bridge_protocol.LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION == 39
     assert bridge_protocol.WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION == 40
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 40
+    assert bridge_protocol.REMOTE_ACP_TARGETS_PROTOCOL_VERSION == 41
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 41
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -170,7 +171,7 @@ def test_live_registration_fixture_preserves_opt_in_wire_shape_and_default() -> 
     assert fixture["compatibility"]["ordinary_null_heartbeat_retains_metadata"] is True
 
 
-@pytest.mark.parametrize("generation", [35, 36, 37, 38, 39, 40])
+@pytest.mark.parametrize("generation", [35, 36, 37, 38, 39, 40, 41])
 @pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
 def test_native_bound_wire_is_preserved_at_later_generations(owner, generation) -> None:
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
@@ -202,7 +203,7 @@ def test_worktree_render_contract_declares_versioned_opt_in_and_retained_holder(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("generation", [38, 39, 40])
+@pytest.mark.parametrize("generation", [38, 39, 40, 41])
 async def test_remote_acp_route_matches_independent_expected_wire(monkeypatch, generation):
     from agent_bridge import remote_acp_sessions
     from agent_bridge.models import SessionStatus
@@ -233,7 +234,7 @@ async def test_remote_acp_route_matches_independent_expected_wire(monkeypatch, g
     })]
 
 
-@pytest.mark.parametrize("generation", [38, 39, 40])
+@pytest.mark.parametrize("generation", [38, 39, 40, 41])
 def test_remote_acp_clients_retain_native_request_identity(generation):
     from agent_bridge.client import BridgeClient, BridgeClientError
 

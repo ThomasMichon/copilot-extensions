@@ -55,6 +55,23 @@ def _cmd_agent_show(args: argparse.Namespace) -> None:
             print(f"  Host:     {host}")
         if agent.get("managed"):
             print(f"  Managed:  {agent['managed']}")
+        _print_remote_binding(agent)
+
+
+def _print_remote_binding(agent: dict) -> None:
+    if agent.get("target_type") == "remote-acp":
+        print(f"  State:    {agent.get('state', 'unavailable')}")
+        if agent.get("unavailable_reason"):
+            print(f"  Binding:  {agent['unavailable_reason']}")
+
+
+def _in_listing_project(agent: dict, project: str) -> bool:
+    if agent.get("target_type") == "remote-acp":
+        return bool(
+            agent.get("global_scope")
+            or project in [str(value).casefold() for value in agent.get("projects", [])]
+        )
+    return agent.get("project") is None or str(agent.get("project")).casefold() == project
 
 
 def _report_topology_errors(errors: list[str]) -> None:
@@ -91,7 +108,7 @@ def _cmd_agents(args: argparse.Namespace) -> None:
         agents = [
             agent
             for agent in agents
-            if agent.get("project") is None or str(agent.get("project")).casefold() == project_key
+            if _in_listing_project(agent, project_key)
         ]
     if args.json:
         core._json_out(agents)
@@ -120,6 +137,7 @@ def _cmd_agents(args: argparse.Namespace) -> None:
                 print(f"  Host:     {host}")
             if managed:
                 print(f"  Managed:  {managed}")
+            _print_remote_binding(a)
             if i < len(agents) - 1:
                 print()
     if project and total > len(agents) and not args.json and agents:
@@ -166,7 +184,7 @@ def _fetch_agent_rows(
         agents = [
             agent
             for agent in agents
-            if agent.get("project") is None or str(agent.get("project")).casefold() == project_key
+            if _in_listing_project(agent, project_key)
         ]
     return agents, incomplete_namespaces, capability_known
 

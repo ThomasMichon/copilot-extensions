@@ -1,0 +1,298 @@
+"""Synthetic contribution, binding, roster and endpoint-policy contracts."""
+
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from dropin_registry import EntryDecision, ScanAuthority
+from plugin_activation import ActivationReport, ActivePlugin
+
+from agent_bridge.agent_registry import AgentResolver
+from agent_bridge.models import ServiceConfig, StartSessionRequest
+from agent_bridge.remote_acp_catalog import RemoteAcpCatalog
+from agent_bridge.remote_acp_config import RemoteAcpBinding, RemoteAcpTarget, canonical_endpoint
+from agent_bridge.remote_acp_sources import (
+    RemoteContributionReport,
+    discover_remote_contributions,
+)
+from agent_bridge.routes.agents import get_agent, list_agents
+from agent_bridge.routes.sessions import start_session
+from agent_bridge.session_manager import session_manager_from_config
+
+
+def configured(**changes):
+    return RemoteAcpTarget.model_validate({
+        "endpoint": "https://example.com/acp",
+        "transport": "streamable-http",
+        "auth": {"source": "git-credential", "identity": "synthetic"},
+        **changes,
+    })
+
+
+@pytest.fixture
+def contribution(tmp_path, monkeypatch):
+    from agent_bridge import remote_acp_sources
+
+    root = tmp_path / "payload"
+    root.mkdir()
+    folder = root / ".agent-bridge"
+    folder.mkdir()
+    providers = folder / "providers.d"
+    providers.mkdir()
+    (root / "plugin.json").write_text(json.dumps({
+        "name": "synthetic-harness",
+        "bridgeConfig": ".agent-bridge/config.yaml",
+        "bridgeProviders": ".agent-bridge/providers.d",
+    }))
+    (folder / "config.yaml").write_text(json.dumps({
+        "remote_acp": {"assistant": {
+            "transport": "streamable-http", "description": "Synthetic remote agent",
+        }},
+    }))
+    (providers / "assistant.json").write_text(json.dumps({
+        "schema_version": 1, "kind": "remote-acp", "name": "assistant",
+        "target": "assistant",
+    }))
+    plugin = ActivePlugin(
+        source="synthetic-harness@example", name="synthetic-harness",
+        marketplace="example", root=root, scopes=("project:demo",),
+    )
+    activation = ActivationReport(
+        ScanAuthority.COMPLETE, {plugin.source: EntryDecision.active(plugin)},
+    )
+    monkeypatch.setattr(remote_acp_sources, "resolve_active_plugins", lambda: activation)
+    return root, plugin, activation
+
+
+def binding(**changes):
+    return RemoteAcpBinding.model_validate({
+        "plugin": "synthetic-harness@example",
+        "endpoint": "https://example.com/acp",
+        "identity": "synthetic",
+        **changes,
+    })
+
+
+def test_unbound_contribution_is_visible_without_connection_or_credential_lookup(contribution):
+    report = discover_remote_contributions()
+    assert report.errors == []
+    assert list(report.targets) == ["assistant"]
+    catalog = RemoteAcpCatalog({}, discover=lambda: report)
+    row = catalog.rows()[0]
+    assert row["name"] == "remote-acp:assistant"
+    assert row["target_type"] == "remote-acp"
+    assert row["state"] == "requires-binding" and not row["spawnable"]
+    assert row["project"] == "demo" and row["plugin"] == "synthetic-harness@example"
+    assert catalog.rows("other") == []
+    with pytest.raises(ValueError, match="binding"):
+        catalog.resolve("remote-acp:assistant", project="demo")
+
+
+def test_binding_is_owned_project_qualified_and_url_uses_same_policy(contribution):
+    catalog = RemoteAcpCatalog({}, bindings={"assistant": binding()})
+    row = catalog.rows()[0]
+    assert row["state"] == "bound" and row["spawnable"]
+    name, target = catalog.resolve("https://EXAMPLE.com:443/acp", project="demo")
+    assert name == "assistant" and target.auth.identity == "synthetic"
+    assert catalog.resolve("remote-acp:assistant", project="demo") == (name, target)
+    for project in (None, "other"):
+        with pytest.raises(ValueError, match="project"):
+            catalog.resolve("remote-acp:assistant", project=project)
+    catalog.bindings["assistant"] = binding(plugin="foreign@example")
+    assert catalog.rows()[0]["unavailable_reason"] == "binding-owner-mismatch"
+    with pytest.raises(ValueError):
+        catalog.resolve("https://example.com/acp", project="demo")
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://example.com/other", "https://example.com/acp?query=1",
+    "https://example.com/acp#fragment", "http://example.com/acp",
+    "https://other.example.com/acp", "https://example.com/acp\n",
+    "https://user@example.com/acp", "https://example.com\\other/acp",
+])
+def test_arbitrary_url_does_not_select_ambient_policy(endpoint):
+    catalog = RemoteAcpCatalog({"one": configured()}, discover=RemoteContributionReport)
+    with pytest.raises(ValueError):
+        catalog.resolve(endpoint)
+
+
+def test_url_ambiguity_is_refused_and_websocket_selection_is_explicit():
+    catalog = RemoteAcpCatalog(
+        {"one": configured(), "two": configured()}, discover=RemoteContributionReport,
+    )
+    with pytest.raises(ValueError, match="unique"):
+        catalog.resolve("https://example.com/acp")
+    del catalog.targets["two"]
+    with pytest.raises(ValueError):
+        catalog.resolve("wss://example.com/acp")
+    catalog.targets["one"] = configured(transport="websocket")
+    assert catalog.resolve("wss://example.com:443/acp")[0] == "one"
+    assert canonical_endpoint("https://[::1]:443/acp") == "https://[::1]/acp"
+
+
+def test_url_client_refuses_named_only_daemon_before_sending_any_request():
+    from agent_bridge.client import BridgeClient, BridgeClientError
+    from agent_bridge.protocol import REMOTE_ACP_PROTOCOL_VERSION
+
+    client = BridgeClient.__new__(BridgeClient)
+    client.daemon_supports = lambda version: version <= REMOTE_ACP_PROTOCOL_VERSION
+    calls = []
+    client._request = lambda *args, **kwargs: calls.append((args, kwargs)) or {}
+    with pytest.raises(BridgeClientError) as refused:
+        client.start_session(agent="https://example.com/acp")
+    assert refused.value.status == 426 and calls == []
+    client.start_session(agent="remote-acp:configured")
+    assert len(calls) == 1
+
+
+def test_inactive_plugin_does_not_confer_binding_authority(contribution):
+    _root, plugin, _activation = contribution
+    catalog = RemoteAcpCatalog({}, bindings={"assistant": binding()})
+    assert catalog.rows()[0]["spawnable"]
+    report = discover_remote_contributions(ActivationReport(ScanAuthority.COMPLETE, {}))
+    catalog._discover = lambda: report
+    assert catalog.rows() == []
+    with pytest.raises(ValueError):
+        catalog.resolve("remote-acp:assistant", project="demo")
+    # Uncertain activation retains the known row, but never its authority.
+    catalog._discover = discover_remote_contributions
+    assert catalog.rows()[0]["spawnable"]
+    report = discover_remote_contributions(ActivationReport(
+        ScanAuthority.INDETERMINATE, {plugin.source: EntryDecision.active(plugin)},
+    ))
+    catalog._discover = lambda: report
+    row = catalog.rows()[0]
+    assert not row["spawnable"] and row["unavailable_reason"] == "contribution-unavailable"
+
+
+def test_duplicate_owners_and_malformed_requirements_refuse_only_affected_target(contribution):
+    root, plugin, activation = contribution
+    other = root.parent / "other"
+    other.mkdir()
+    (other / "plugin.json").write_text(json.dumps({
+        "name": "other-harness", "bridgeConfig": "config.json",
+    }))
+    (other / "config.json").write_text(json.dumps({
+        "remote_acp": {
+            "assistant": {"transport": "websocket"},
+            "healthy": {"transport": "streamable-http"},
+            "invalid": {"transport": "streamable-http", "endpoint": "https://example.com/acp"},
+        },
+    }))
+    foreign = ActivePlugin(
+        source="other-harness@example", name="other-harness", marketplace="example",
+        root=other, scopes=("global",),
+    )
+    report = discover_remote_contributions(ActivationReport(
+        ScanAuthority.COMPLETE,
+        {**activation.decisions, foreign.source: EntryDecision.active(foreign)},
+    ))
+    assert report.targets["assistant"].reason == "conflicting-contributions"
+    assert report.targets["healthy"].requirements is not None
+    assert report.targets["invalid"].reason == "invalid-requirements"
+    assert plugin.source not in report.unavailable_owners
+
+
+@pytest.mark.parametrize("path", ["../outside.json", "/outside.json", "C:\\outside.json"])
+def test_payload_config_cannot_escape_verified_root(contribution, path):
+    root, plugin, _activation = contribution
+    (root / "plugin.json").write_text(json.dumps({"name": plugin.name, "bridgeConfig": path}))
+    report = discover_remote_contributions()
+    assert not report.targets
+    assert plugin.source in report.unavailable_owners
+    assert report.errors
+
+
+@pytest.mark.parametrize("selected", ["config.yaml", "providers.d"])
+def test_payload_reparse_components_are_refused_before_read(contribution, monkeypatch, selected):
+    from pathlib import Path
+
+    root, plugin, _activation = contribution
+    original = Path.lstat
+    refused = root / ".agent-bridge" / selected
+
+    def lstat(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path == refused:
+            return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    report = discover_remote_contributions()
+    assert plugin.source in report.unavailable_owners
+    assert report.errors
+
+
+def test_project_binding_uses_existing_config_layers_then_service_override(contribution, monkeypatch, tmp_path):
+    from agent_bridge import related_plugins
+
+    project = tmp_path / "project"
+    legacy = project / ".agent-bridge"
+    canonical = project / ".copilot-extensions" / "agent-bridge"
+    legacy.mkdir(parents=True)
+    canonical.mkdir(parents=True)
+    monkeypatch.setattr(related_plugins, "_registry_anchor", lambda name: project if name == "demo" else None)
+    (legacy / "config.yaml").write_text(json.dumps({
+        "remote_acp_bindings": {"assistant": binding(endpoint="https://legacy.example.com/acp").model_dump()},
+    }))
+    (canonical / "config.yaml").write_text(json.dumps({
+        "remote_acp_bindings": {"assistant": binding(endpoint="https://canonical.example.com/acp").model_dump()},
+    }))
+    catalog = RemoteAcpCatalog({})
+    assert catalog.resolve("remote-acp:assistant", project="demo")[1].endpoint == "https://canonical.example.com/acp"
+    catalog.bindings["assistant"] = binding(endpoint="https://service.example.com/acp")
+    assert catalog.resolve("remote-acp:assistant", project="demo")[1].endpoint == "https://service.example.com/acp"
+    (canonical / "config.yaml").write_text("[invalid]")
+    assert catalog.rows("demo")[0]["unavailable_reason"] == "project-binding-unavailable"
+    with pytest.raises(ValueError):
+        catalog.resolve("remote-acp:assistant", project="demo")
+
+
+def test_fresh_resolve_does_not_publish_over_background_catalog_generation(contribution):
+    catalog = RemoteAcpCatalog({})
+    catalog.apply(catalog.discover())
+    cached = catalog.contribution_report
+    catalog.bindings["assistant"] = binding()
+    assert catalog.resolve("remote-acp:assistant", project="demo")[0] == "assistant"
+    assert catalog.contribution_report is cached
+    catalog._discover = lambda: (_ for _ in ()).throw(AssertionError("static roster must not discover"))
+    assert catalog.rows(refresh=False)[0]["name"] == "remote-acp:assistant"
+
+
+@pytest.mark.asyncio
+async def test_normal_roster_detail_and_resolution_expose_same_bound_policy(contribution, tmp_db):
+    manager = session_manager_from_config(
+        tmp_db, ServiceConfig(remote_acp_bindings={"assistant": binding()}),
+    )
+    resolver = AgentResolver({}, {})
+    manager.set_resolver(resolver)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        session_manager=manager, resolver=resolver, ready=True,
+    )))
+    rows = (await list_agents(request, project="demo"))["agents"]
+    assert [row["name"] for row in rows] == ["remote-acp:assistant"]
+    assert await get_agent("remote-acp:assistant", request, project="demo") == rows[0]
+    assert (await list_agents(request, project="other"))["agents"] == []
+    target = await resolver.resolve_async("https://example.com/acp", sender_repo="demo")
+    assert target.type == "remote-acp" and target.worktree_id is None
+    assert target.project is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_url_route_refuses_before_local_resolution_or_spawn(tmp_db):
+    manager = session_manager_from_config(tmp_db, ServiceConfig())
+    resolver = SimpleNamespace(
+        canonical_agent_name=lambda value: None,
+        resolve_async=AsyncMock(side_effect=AssertionError("local resolution")),
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        session_manager=manager, resolver=resolver, ready=True,
+    )))
+    with pytest.raises(Exception) as refused:
+        await start_session(StartSessionRequest(agent="https://example.com/acp"), request)
+    assert refused.value.status_code == 422
+    resolver.resolve_async.assert_not_called()
+    assert manager.list_sessions() == []

@@ -51,12 +51,19 @@ class SessionStartClientMixin(_Base):
         from .client import BridgeClientError
 
         body: dict[str, Any] = {}
-        if (agent or "").startswith("remote-acp:") or remote_session_id is not None:
+        from .remote_acp_config import is_remote_address
+
+        if "://" in (agent or ""):
+            from .protocol import REMOTE_ACP_TARGETS_PROTOCOL_VERSION
+
+            if not self.daemon_supports(REMOTE_ACP_TARGETS_PROTOCOL_VERSION):
+                raise BridgeClientError(426, "daemon does not support remote ACP endpoint targets")
+        if is_remote_address(agent or "") or remote_session_id is not None:
             from .protocol import REMOTE_ACP_PROTOCOL_VERSION
             if not self.daemon_supports(REMOTE_ACP_PROTOCOL_VERSION):
                 raise BridgeClientError(426, "daemon does not support qualified remote ACP")
             if remote_session_id is not None:
-                if not (agent or "").startswith("remote-acp:"):
+                if not is_remote_address(agent or ""):
                     raise ValueError("remote_session_id requires remote-acp target")
                 body["remote_session_id"] = remote_session_id
         if provider_instance:

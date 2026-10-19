@@ -202,8 +202,10 @@ class HttpAcpTransport(RemoteTransport):
         lines: list[bytes] = []
         size = 0
         previous_cr = False
-        while True:
+        while not self.closed:
             chunk = await asyncio.wait_for(iterator.__anext__(), self.target.idle_seconds)
+            if self.closed:
+                return
             if not chunk:
                 continue
             if previous_cr and chunk.startswith(b"\n"):

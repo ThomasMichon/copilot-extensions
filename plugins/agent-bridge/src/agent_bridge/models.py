@@ -30,7 +30,7 @@ from .preference_models import PreferencePolicyFields
 from .session_start_models import StartSessionRequest  # noqa: F401 -- public model re-export
 from .execution_identity_models import ExecutionSpaceConfigFields
 from .session_status import SessionStatus
-from .remote_acp_config import RemoteAcpTarget
+from .remote_acp_config import RemoteAcpBinding, RemoteAcpTarget, RemoteAuthApproval
 from .prompt_models import (  # noqa: F401 -- preserved public model imports
     PendingPrompt,
     PendingQueueResponse,
@@ -707,6 +707,7 @@ class RepoBridgeConfig(BaseModel):
 
     default_copilot_args: list[str] = Field(default_factory=list)
     default_env: dict[str, str] = Field(default_factory=dict)
+    remote_acp_bindings: dict[str, RemoteAcpBinding] = Field(default_factory=dict)
 
 
 class ServiceConfig(ExecutionSpaceConfigFields):
@@ -722,6 +723,8 @@ class ServiceConfig(ExecutionSpaceConfigFields):
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
     schema_version: int = 2
     remote_acp: dict[str, RemoteAcpTarget] = Field(default_factory=dict)
+    remote_acp_bindings: dict[str, RemoteAcpBinding] = Field(default_factory=dict)
+    remote_acp_auth_sources: dict[str, RemoteAuthApproval] = Field(default_factory=dict)
 
     # Port 0 is the "unset" sentinel: the daemon binds an OS-assigned ephemeral
     # port and advertises it via active.json (dotfiles #694 -- no fixed 9280/9281

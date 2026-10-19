@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 from .server import CredentialRelayServer, RelayPolicy
 from .sources import CredentialSource
+from .http_sources import HttpSourceRegistry
 from .token_gate import RelayTokenGate
 
 
@@ -84,6 +85,7 @@ class RelayBuilder:
     # dedup. ``"*"`` means any scope.
     azure_resources: set[str] = field(default_factory=set)
     _azure_enabled: bool = False
+    http_sources: HttpSourceRegistry = field(default_factory=HttpSourceRegistry)
 
     def add_source(self, source: CredentialSource) -> None:
         """Register a credential source (deduped by ``name``; first wins).
@@ -95,6 +97,12 @@ class RelayBuilder:
         if any(s.name == source.name for s in self.sources):
             return
         self.sources.append(source)
+
+    def add_http_source(
+        self, reference: str, source: CredentialSource, *, scoped: bool = False,
+    ) -> None:
+        """Register an HTTP source; the bridge still requires scoped approval."""
+        self.http_sources.register(reference, source, scoped=scoped)
 
     def allow_azure_resources(self, resources: list[str]) -> None:
         """Enable Azure-token minting for ``resources`` (merged across providers).

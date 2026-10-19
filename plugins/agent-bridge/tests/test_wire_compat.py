@@ -30,9 +30,15 @@ import pkgutil
 from pydantic import BaseModel
 
 import agent_bridge
-from agent_bridge.remote_acp_config import RemoteAcpTarget, RemoteAuth
+from agent_bridge.remote_acp_config import (
+    RemoteAcpTarget, RemoteAuth, RemoteAuthApproval, RemoteAuthRequirements,
+    RemoteAcpBinding, RemoteAcpRequirements,
+)
 
-_LOCAL_CONFIGURATION_MODELS = frozenset({RemoteAcpTarget, RemoteAuth})
+_LOCAL_CONFIGURATION_MODELS = frozenset({
+    RemoteAcpTarget, RemoteAuth, RemoteAuthApproval, RemoteAuthRequirements,
+    RemoteAcpBinding, RemoteAcpRequirements,
+})
 
 
 def _agent_bridge_models() -> list[type[BaseModel]]:

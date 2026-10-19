@@ -37,7 +37,135 @@ from agent_bridge import telemetry
 from agent_bridge.launch_runtime import executing_executable
 
 
-def authenticated_wire(spec, context, cookies=None):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["streamable-http", "websocket"])
+@pytest.mark.parametrize("address_kind", ["configured", "url", "plugin"])
+async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_path, tmp_db, monkeypatch, mode, address_kind):
+    from fastapi import FastAPI
+    from credential_relay import RelayBuilder
+    from dropin_registry import EntryDecision, ScanAuthority
+    from plugin_activation import ActivationReport, ActivePlugin
+    from agent_bridge import remote_acp_sources
+    from agent_bridge.agent_registry import AgentResolver
+    from agent_bridge.models import ServiceConfig
+    from agent_bridge.routes import agents, sessions
+
+    url, context, proc = peer
+    endpoint, reference = url + "/custom-auth", "synthetic@example/grant"
+    config = {
+        "remote_acp_auth_sources": {reference: {
+            "origin": url, "identity": "synthetic", "scheme": "Example",
+            "resource": "synthetic-resource", "scope": "read",
+        }},
+    }
+    auth = {
+        "source": "injected", "identity": "synthetic", "scheme": "Example",
+        "credential_source": reference, "resource": "synthetic-resource", "scope": "read",
+    }
+    if address_kind == "plugin":
+        root = tmp_path / "payload"
+        root.mkdir()
+        (root / "plugin.json").write_text(json.dumps({
+            "name": "synthetic-harness", "bridgeConfig": "targets.json",
+        }))
+        (root / "targets.json").write_text(json.dumps({"remote_acp": {"peer": {
+            "transport": mode, "auth": {"source": "injected", "scheme": "Example"},
+        }}}))
+        plugin = ActivePlugin(
+            "synthetic-harness@example", "synthetic-harness", "example", root, ("global",),
+        )
+        monkeypatch.setattr(remote_acp_sources, "resolve_active_plugins", lambda: ActivationReport(
+            ScanAuthority.COMPLETE, {plugin.source: EntryDecision.active(plugin)},
+        ))
+        config["remote_acp_bindings"] = {"peer": {
+            "plugin": plugin.source, "endpoint": endpoint, "identity": "synthetic",
+            "credential_source": reference, "resource": "synthetic-resource", "scope": "read",
+        }}
+    else:
+        config["remote_acp"] = {"peer": {
+            "endpoint": endpoint, "transport": mode, "auth": auth,
+        }}
+    calls = []
+
+    class Source:
+        name = "synthetic"
+
+        def supports(self, action, fields):
+            calls.append((action, fields))
+            return action == "get"
+
+        async def resolve(self, action, fields, *, timeout):
+            assert fields["scope"] == "read" and fields["resource"] == "synthetic-resource"
+            return "\n".join(("username=synthetic", "password=" + "synthetic-credential", ""))
+
+    manager = session_manager_from_config(tmp_db, ServiceConfig(**config))
+    builder = RelayBuilder()
+    builder.add_http_source(reference, Source(), scoped=True)
+    manager._remote_credential_policy.register_sources(builder.http_sources)
+    resolver = AgentResolver({}, {})
+    manager.set_resolver(resolver)
+    original = AcpClient.start_remote
+
+    async def start(client, target, *, cookies=None, auth_factory=None):
+        wire = HttpAcpTransport(target, client_factory=lambda: httpx.AsyncClient(
+            http2=True, verify=context, trust_env=False, follow_redirects=False, cookies=cookies,
+        )) if mode == "streamable-http" else WsAcpTransport(target, ssl=context, cookies=cookies)
+        assert wire.auth is None and auth_factory is not None
+        await original(client, target, transport=wire, auth_factory=auth_factory)
+
+    monkeypatch.setattr(AcpClient, "start_remote", start)
+    app = FastAPI()
+    app.state.session_manager, app.state.resolver, app.state.ready = manager, resolver, True
+    app.include_router(agents.router)
+    app.include_router(sessions.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bridge.invalid") as api:
+        roster = (await api.get("/api/v1/agents")).json()["agents"]
+        assert [row["name"] for row in roster] == ["remote-acp:peer"] and not calls
+        assert (await api.get("/api/v1/agents/remote-acp:peer")).json() == roster[0]
+        assert not calls
+        async with httpx.AsyncClient(verify=context, trust_env=False) as probe:
+            untouched = (await probe.get(url + "/evidence")).json()
+        assert untouched["auth_ok"] == untouched["auth_refused"] == 0
+        assert untouched["http_versions"] == []
+        address = endpoint if address_kind == "url" else "remote-acp:peer"
+        if address_kind == "url" and mode == "websocket":
+            address = address.replace("https:", "wss:", 1)
+        response = await api.post("/api/v1/sessions", json={"agent": address})
+        assert response.status_code == 201, response.text
+        session = manager.get_session(response.json()["session_id"])
+        try:
+            assert session.pid is None and session.target.worktree_id is None
+            await manager.submit_prompt(session.session_id, "permission")
+            event = None
+            for _ in range(100):
+                pending = [
+                    item.data for item in session.event_log.get_events()
+                    if item.event == "permission_request"
+                ]
+                if pending:
+                    event = pending[-1]
+                    break
+                await asyncio.sleep(0.02)
+            assert event is not None
+            assert session.client.resolve_permission(event["request_id"], "reject/opaque")
+            await asyncio.wait_for(session._prompt_task, 5)
+            remote_id = session.acp_session_id
+            await manager.stop_session(session.session_id)
+            await manager.resume_session(session.session_id)
+            assert session.acp_session_id == remote_id
+            await manager.submit_prompt(session.session_id, "fresh")
+            await asyncio.wait_for(session._prompt_task, 5)
+            assert session.target.type == "remote-acp"
+            assert "synthetic-credential" not in str(manager.db.get_session(session.session_id))
+        finally:
+            await manager.stop_session(session.session_id)
+    async with httpx.AsyncClient(verify=context, trust_env=False) as probe:
+        evidence = (await probe.get(url + "/evidence")).json()
+    assert evidence["prompts"] == 2 and evidence["accepted_actions"] == 0
+    assert evidence["auth_ok"] > 0 and proc.poll() is None
+
+
+def authenticated_wire(spec, context, cookies=None, auth_factory=None):
     wire = (
         HttpAcpTransport(spec, client_factory=lambda: httpx.AsyncClient(
             http2=True, verify=context, trust_env=False, follow_redirects=False,
@@ -53,8 +181,37 @@ def authenticated_wire(spec, context, cookies=None):
         async def resolve(self, action, fields, *, timeout):
             return "\n".join(("username=synthetic", "password=synthetic-credential", ""))
 
-    wire.auth = SourceHttpAuth(Source(), wire.context, spec.endpoint)
+    wire.auth = (
+        auth_factory(wire.context) if auth_factory is not None
+        else SourceHttpAuth(Source(), wire.context, spec.endpoint)
+    )
     return wire
+
+
+def manager_with_registered_source(db, spec, source=None):
+    reference = "synthetic@example/peer"
+    bound = RemoteAcpTarget.model_validate({
+        **spec.model_dump(),
+        "auth": {**spec.auth.model_dump(), "credential_source": reference},
+    })
+    manager = session_manager_from_config(db, ServiceConfig(
+        remote_acp={"peer": bound},
+        remote_acp_auth_sources={reference: {
+            "origin": bound.origin, "identity": bound.auth.identity, "scheme": bound.auth.scheme,
+        }},
+    ))
+
+    class Source:
+        name = "synthetic-peer"
+
+        def supports(self, action, fields):
+            return action == "get"
+
+        async def resolve(self, action, fields, *, timeout):
+            return "\n".join(("username=synthetic", "password=" + "synthetic-credential", ""))
+
+    manager._remote_credential_policy.sources.register(reference, source or Source())
+    return manager
 
 
 @pytest.fixture
@@ -338,18 +495,15 @@ async def test_actual_service_resume_retains_history_as_replay_without_spawn(pee
         async def resolve(self, action, fields, *, timeout):
             return "password=synthetic-credential\n\n"
 
-    async def start(client, target, *, cookies=None):
-        wire = HttpAcpTransport(target, client_factory=lambda: httpx.AsyncClient(
-            http2=True, verify=context, trust_env=False, follow_redirects=False,
-            cookies=cookies,
-        )) if mode == "streamable-http" else WsAcpTransport(target, ssl=context, cookies=cookies)
-        wire.auth = SourceHttpAuth(Source(), wire.context, target.endpoint)
-        await original(client, target, transport=wire)
+    async def start(client, target, *, cookies=None, auth_factory=None):
+        await original(client, target, transport=authenticated_wire(
+            target, context, cookies, auth_factory,
+        ))
 
     monkeypatch.setattr(AcpClient, "start_remote", start)
     records = []
     monkeypatch.setattr(telemetry, "emit", records.append)
-    manager = session_manager_from_config(tmp_db, ServiceConfig(remote_acp={"peer": spec}))
+    manager = manager_with_registered_source(tmp_db, spec, Source())
     session = await connect_remote_session(manager, "peer", cwd="/workspace")
     try:
         await manager.submit_prompt(session.session_id, "history")
@@ -562,11 +716,11 @@ async def test_malformed_sdk_results_never_reach_logs_events_or_failure_records(
     )
     original = AcpClient.start_remote
 
-    async def start(client, target, *, cookies=None):
-        await original(client, target, transport=authenticated_wire(target, context, cookies))
+    async def start(client, target, *, cookies=None, auth_factory=None):
+        await original(client, target, transport=authenticated_wire(target, context, cookies, auth_factory))
 
     monkeypatch.setattr(AcpClient, "start_remote", start)
-    manager = session_manager_from_config(tmp_db, ServiceConfig(remote_acp={"peer": spec}))
+    manager = manager_with_registered_source(tmp_db, spec)
     session = await connect_remote_session(manager, "peer")
     try:
         await manager.submit_prompt(session.session_id, malformed)
@@ -618,8 +772,8 @@ async def test_manager_stop_during_session_sse_open_keeps_attachment_stopped(
     original = AcpClient.start_remote
     entered = asyncio.Event()
 
-    async def start(client, target, *, cookies=None):
-        wire = authenticated_wire(target, context, cookies)
+    async def start(client, target, *, cookies=None, auth_factory=None):
+        wire = authenticated_wire(target, context, cookies, auth_factory)
         request = wire._request
 
         async def gated(method, headers, content=None, **kwargs):
@@ -632,7 +786,7 @@ async def test_manager_stop_during_session_sse_open_keeps_attachment_stopped(
         await original(client, target, transport=wire)
 
     monkeypatch.setattr(AcpClient, "start_remote", start)
-    manager = session_manager_from_config(tmp_db, ServiceConfig(remote_acp={"peer": spec}))
+    manager = manager_with_registered_source(tmp_db, spec)
     pending = asyncio.create_task(connect_remote_session(manager, "peer"))
     await asyncio.wait_for(entered.wait(), 5)
     session = next(iter(manager._sessions.values()))

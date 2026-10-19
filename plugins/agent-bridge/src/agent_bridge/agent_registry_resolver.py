@@ -20,6 +20,8 @@ from .agent_registry_discovery import _ProviderDiscoveryMixin
 from .agent_registry_namespace import NamespaceResolver
 from .cold_store_sources import ColdStoreProviderRegistry
 from .provider_sources import ProviderManifest
+from .remote_acp_catalog import RemoteAcpCatalog
+from .remote_acp_config import is_remote_address
 from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
 
@@ -42,6 +44,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
         from . import agent_registry as compat
 
         self._agents = agents
+        self.remote_acp_catalog: RemoteAcpCatalog | None = None
         self._machines = machines
         self._topology_errors = list(topology_errors or [])
         self._topology_warnings = list(topology_warnings or [])
@@ -172,7 +175,10 @@ class AgentResolver(_ProviderDiscoveryMixin):
 
     @property
     def topology_warnings(self) -> list[str]:
-        return list(self._topology_warnings)
+        return [
+            *self._topology_warnings,
+            *(self.remote_acp_catalog.errors if self.remote_acp_catalog else []),
+        ]
 
     @property
     def incomplete_namespaces(self) -> list[str]:
@@ -181,7 +187,10 @@ class AgentResolver(_ProviderDiscoveryMixin):
         namespaces' agents are silently absent from that listing, not
         confirmed gone. A ``--stream``/``--subscribe`` consumer must not
         treat their absence as a real removal."""
-        return list(self._last_incomplete_namespaces)
+        return [
+            *self._last_incomplete_namespaces,
+            *(["remote-acp"] if self.remote_acp_catalog and self.remote_acp_catalog.errors else []),
+        ]
 
     def canonical_agent_name(self, name: str) -> str | None:
         """Resolve an exact, case-insensitive, or declared static alias."""
@@ -290,6 +299,8 @@ class AgentResolver(_ProviderDiscoveryMixin):
 
     def resolve(self, agent_name: str) -> SpawnTarget:
         """Resolve an agent name to a SpawnTarget (sync path)."""
+        if is_remote_address(agent_name):
+            return self._resolve_remote(agent_name)
         ns = self._parse_namespaced_agent(agent_name)
         if ns:
             raise ValueError(
@@ -304,6 +315,8 @@ class AgentResolver(_ProviderDiscoveryMixin):
         """Resolve an agent name to a SpawnTarget (async path)."""
         from . import agent_registry as compat
 
+        if is_remote_address(agent_name):
+            return await asyncio.to_thread(self._resolve_remote, agent_name, sender_repo)
         self.refresh_provider_resolvers()
         ns = self._parse_namespaced_agent(agent_name)
         if ns:
@@ -354,6 +367,12 @@ class AgentResolver(_ProviderDiscoveryMixin):
             return await self._resolve_with_plugins(resolver, resolve_name)
 
         return self._resolve_static(agent_name)
+
+    def _resolve_remote(self, address: str, project: str | None = None) -> SpawnTarget:
+        if self.remote_acp_catalog is None:
+            raise ValueError("Remote ACP target policy unavailable")
+        _name, spec = self.remote_acp_catalog.resolve(address, project=project)
+        return SpawnTarget(type="remote-acp", cwd="/", remote_acp=spec.model_dump(mode="json"))
 
     async def _resolve_venue_bound(
         self, repo: str, venue: str,
@@ -898,6 +917,8 @@ class AgentResolver(_ProviderDiscoveryMixin):
             if not config.spawnable_as_target:
                 continue
             result.append(self._agent_to_dict(config))
+        if self.remote_acp_catalog is not None:
+            result.extend(self.remote_acp_catalog.rows(refresh=False))
         return result
 
     async def list_agents_async(self) -> list[dict[str, Any]]:

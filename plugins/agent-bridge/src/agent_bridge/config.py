@@ -153,7 +153,7 @@ def load_config() -> ServiceConfig:
             ) from exc
         except Exception as exc:
             if isinstance(exc, ValidationError) and any(
-                error["loc"] and error["loc"][0] == "remote_acp"
+                error["loc"] and str(error["loc"][0]).startswith("remote_acp")
                 for error in exc.errors()
             ):
                 raise ValueError(
@@ -169,7 +169,7 @@ def load_config() -> ServiceConfig:
                 ):
                     kind = "execution-space or topology"
                 raise ValueError(f"Invalid {kind} configuration; refusing identity fallback") from exc
-            if isinstance(data, dict) and "remote_acp" in data:
+            if isinstance(data, dict) and any(str(key).startswith("remote_acp") for key in data):
                 raise ValueError(
                     "Invalid remote ACP configuration; refusing configuration fallback",
                 ) from None

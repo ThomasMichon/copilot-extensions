@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Mapping, Protocol
 from urllib.parse import urlsplit
@@ -36,21 +37,31 @@ def format_token_header(header: str, template: str, token: str) -> dict[str, str
 
 
 class SourceHttpAuth:
-    """Bind an existing source to one endpoint/identity without another cache."""
+    """Bind an existing source to one endpoint/identity without another cache.
+
+    ``scoped`` opts an already-approved source into receiving resource/scope
+    fields; the caller is responsible for choosing a source that honors them.
+    ``scheme`` is a single HTTP auth token, not a header name or template.
+    """
 
     def __init__(
         self, source: CredentialSource, context: HttpAuthContext, endpoint: str,
-        *, timeout: float = 15.0,
+        *, timeout: float = 15.0, scheme: str = "Bearer", scoped: bool = False,
     ) -> None:
+        if not isinstance(scheme, str) or not re.fullmatch(
+            r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+", scheme,
+        ):
+            raise ValueError("Invalid HTTP credential scheme")
         self._source = source
         self._context = context
         self._timeout = timeout
+        self._scheme = scheme
         if not context.identity or context.identity != context.identity.strip():
             raise ValueError("Explicit credential identity is required")
         url = urlsplit(endpoint)
         if (
             context.origin != f"{url.scheme}://{url.netloc.lower()}"
-            or context.resource or context.scope
+            or (not scoped and (context.resource or context.scope))
         ):
             raise ValueError("Unsupported HTTP credential scope")
         self._fields = {
@@ -59,6 +70,8 @@ class SourceHttpAuth:
             "path": url.path.lstrip("/"),
             "username": context.identity,
         }
+        if scoped:
+            self._fields.update(resource=context.resource, scope=context.scope)
         if any("\n" in v or "\r" in v for v in self._fields.values()):
             raise ValueError("Invalid credential context")
 
@@ -81,7 +94,7 @@ class SourceHttpAuth:
             raise PermissionError("Credential identity mismatch")
         if not token:
             raise PermissionError("Credential source unavailable")
-        scheme = "Bear" + "er "
+        scheme = self._scheme + " "
         return format_token_header("Authorization", scheme + "{token}", token)
 
     async def invalidate(self, context: HttpAuthContext) -> None:

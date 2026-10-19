@@ -434,6 +434,18 @@ def daemon_resolver(cfg) -> AgentResolver:  # noqa: ANN001
     if resolver is None:
         resolver = AgentResolver({}, {})
         _register_namespace_resolvers(resolver)
+    from .remote_acp_catalog import RemoteAcpCatalog
+    from .remote_acp_auth import RemoteCredentialPolicy
+
+    if cfg is None:
+        from .models import ServiceConfig
+
+        cfg = ServiceConfig()
+    resolver.remote_acp_catalog = RemoteAcpCatalog(
+        cfg.remote_acp, bindings=cfg.remote_acp_bindings,
+        check_auth=RemoteCredentialPolicy(cfg.remote_acp_auth_sources).bind,
+    )
+    resolver.remote_acp_catalog.apply(resolver.remote_acp_catalog.discover())
     return resolver
 
 

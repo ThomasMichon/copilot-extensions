@@ -301,8 +301,10 @@ async def app(scope, receive, send):
     if scope["path"] == "/forbidden":
         evidence["redirect_followed"] += 1
     scheme = "Bear" + "er "
+    if scope["path"] == "/custom-auth":
+        scheme = "Exam" + "ple "
     authenticated = headers.get(b"authorization") == (scheme + "synthetic-credential").encode()
-    if scope["path"] in {"/acp", "/auth-cookie"}:
+    if scope["path"] in {"/acp", "/auth-cookie", "/custom-auth"}:
         challenge = scope["path"] == "/auth-cookie"
         has_challenge = b"challenge=synthetic" in headers.get(b"cookie", b"")
         if not authenticated or (challenge and not has_challenge):

@@ -8,7 +8,9 @@ container venues.
 An explicitly configured, already-running remote ACP server is also a client
 target: see [experimental remote ACP](docs/remote-acp.md) for the neutral
 qualified HTTP/2/SSE + WebSocket profile, scoped authentication, headless
-approval contract, and connection-only ownership boundary.
+approval contract, and connection-only ownership boundary. Named and secure URL
+targets share one policy catalog; enabled plugins can contribute inert target
+requirements while adopters retain instance and credential-source bindings.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 

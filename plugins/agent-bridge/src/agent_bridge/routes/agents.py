@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(tags=["agents"])
+
+
+def _project_rows(rows: list[dict], project: str | None) -> list[dict]:
+    if project is None:
+        return rows
+    return [
+        row for row in rows
+        if row.get("target_type") != "remote-acp" or row.get("global_scope")
+        or project in row.get("projects", [])
+    ]
 
 
 @router.get("/api/v1/agents")
@@ -12,6 +23,7 @@ async def list_agents(
     request: Request,
     force_refresh: bool = False,
     require_complete: bool = False,
+    project: str | None = None,
 ):
     """List registered agent profiles.
 
@@ -41,7 +53,7 @@ async def list_agents(
         list_async = getattr(resolver, "list_agents_async", None)
         agents = await list_async() if callable(list_async) else []
         return {
-            "agents": agents,
+            "agents": _project_rows(agents, project),
             "topology_errors": getattr(resolver, "topology_errors", []),
             "topology_warnings": getattr(resolver, "topology_warnings", []),
             "incomplete_namespaces": getattr(resolver, "incomplete_namespaces", []),
@@ -70,20 +82,25 @@ async def list_agents(
         list_async = getattr(resolver, "list_agents_async", None)
         agents = await list_async() if callable(list_async) else []
         return {
-            "agents": agents,
+            "agents": _project_rows(agents, project),
             "topology_errors": getattr(resolver, "topology_errors", []),
             "topology_warnings": getattr(resolver, "topology_warnings", []),
             "incomplete_namespaces": getattr(resolver, "incomplete_namespaces", []),
         }
 
     snapshot = await cache.get_snapshot(force_refresh=force_refresh)
-    if require_complete and not snapshot.complete:
+    remote_catalog = getattr(resolver, "remote_acp_catalog", None)
+    remote_incomplete = bool(remote_catalog is not None and remote_catalog.errors)
+    if require_complete and (not snapshot.complete or remote_incomplete):
         raise HTTPException(status_code=503, detail="agent roster incomplete")
     return {
-        "agents": snapshot.rows,
+        "agents": _project_rows(snapshot.rows, project),
         "topology_errors": getattr(resolver, "topology_errors", []),
         "topology_warnings": getattr(resolver, "topology_warnings", []),
-        "incomplete_namespaces": snapshot.incomplete_namespaces,
+        "incomplete_namespaces": [
+            *snapshot.incomplete_namespaces,
+            *(["remote-acp"] if remote_incomplete else []),
+        ],
     }
 
 
@@ -92,11 +109,18 @@ async def get_agent(
     agent_name: str,
     request: Request,
     include_unaddressable: bool = False,
+    project: str | None = None,
 ):
     """Get agent profile detail."""
     resolver = getattr(request.app.state, "resolver", None)
     if not resolver:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
+    catalog = getattr(resolver, "remote_acp_catalog", None)
+    if catalog is not None and agent_name.startswith("remote-acp:"):
+        row = await asyncio.to_thread(catalog.detail, agent_name, project)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Remote ACP target not found")
+        return row
 
     lookup = getattr(resolver, "get_agent_config", None)
     config = (

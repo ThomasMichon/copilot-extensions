@@ -129,7 +129,15 @@ class ServingRuntimeCapture:
                 raise PrivateIPCError(Refusal.AUTHORITY)
             if state.session_manager._db is not state.db:
                 raise PrivateIPCError(Refusal.AUTHORITY)
-            if state.config.remote_acp or state.session_manager._remote_acp_targets:
+            if (
+                state.config.remote_acp or state.config.remote_acp_bindings
+                or state.config.remote_acp_auth_sources
+                or state.session_manager._remote_acp_targets
+                or (
+                    state.session_manager._remote_acp_catalog is not None
+                    and state.session_manager._remote_acp_catalog._contributions
+                )
+            ):
                 raise PrivateIPCError(Refusal.AUTHORITY)
             config = state.config.model_dump(mode="json")
             # The bound passive port is activation state. Durable relay policy
