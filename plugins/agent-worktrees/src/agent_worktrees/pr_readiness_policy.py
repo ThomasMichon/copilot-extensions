@@ -34,7 +34,11 @@ def operation_readiness(
         )
     elif assessment:
         reason = "commented review requires findings assessment before direct merge"
-    elif direct_candidate and mergeable is None:
+    elif (
+        direct_candidate
+        and mergeable is None
+        and state.merge_state not in ("merged", "closed")
+    ):
         reason = "mergeability is unknown; re-read before direct merge"
     elif direct_candidate and state.reason in (
         "no auto-merge label configured (binding absent)",

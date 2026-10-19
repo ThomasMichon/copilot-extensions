@@ -758,6 +758,21 @@ class TestMergeReadiness:
             "mergeability is unknown; re-read before direct merge"
         )
 
+    def test_direct_terminal_state_precedes_unknown_mergeability(self):
+        merged = pc.merge_readiness(
+            _approved(pr_state="closed", merged=True, mergeable=None),
+            operation="direct",
+        )
+        assert merged["occupancy"] == "merged"
+        assert merged["reason"] == "already merged"
+
+        closed = pc.merge_readiness(
+            _approved(pr_state="closed", merged=False, mergeable=None),
+            operation="direct",
+        )
+        assert closed["occupancy"] == "closed"
+        assert closed["reason"] == "closed without merging"
+
     def test_review_blocking_false_reports_comment_verdict(self):
         snap = _approved(reviews=(_rev(1, "COMMENT"),))
         m = pc.merge_readiness(snap, review_blocking=False, **_BINDING)
