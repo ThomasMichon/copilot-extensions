@@ -62,6 +62,25 @@ def test_confirmed_native_head_uses_owners_exact_identity(owner, native_record, 
     assert result["automatic_eligible"] is False
 
 
+def test_hosting_reports_existing_worktree_incarnation_without_allocating_one(
+    owner, native_record, monkeypatch,
+):
+    monkeypatch.setattr(owner.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(owner.sessions, "session_has_conversation_data", lambda _: True)
+    monkeypatch.setattr(owner, "session_liveness", lambda _: "live")
+    record = replace(native_record, creation_nonce="0123456789abcdef", head_revision=17)
+    result = owner.observe(record.worktree_id, loader=lambda: record)
+    assert result["recovery_binding_capability"] == "worktree-head-v1"
+    assert result["worktree_incarnation"] == record.creation_nonce
+    assert result["head_revision"] == 17
+    legacy = replace(record, creation_nonce="")
+    result = owner.observe(legacy.worktree_id, loader=lambda: legacy)
+    assert result["confirmed"] is True
+    assert result["recovery_binding_capability"] is None
+    assert result["worktree_incarnation"] is None
+    assert legacy.creation_nonce == ""
+
+
 @pytest.mark.parametrize("state", ["dead", "unknown"])
 def test_dead_or_uncertain_is_not_positive_hosting(
     owner, native_record, monkeypatch, state,

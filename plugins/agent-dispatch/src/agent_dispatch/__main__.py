@@ -239,16 +239,20 @@ def _emit(value: Any) -> int:
 def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
     """Resolve the ordinary fleet client's coordinator and bearer.
 
-    An explicit ``--url`` wins; ``--shared`` requires a hosted coordinator.
-    Otherwise use the local coordinator, falling back to a configured shared
-    endpoint only when the local one is down. With no shared endpoint there is
-    no probe or fallback. Task-only workers bypass this resolution entirely.
+    Explicit local/central authority never changes with reachability.
+    Unconfigured callers retain local-first discovery and its shared fallback.
+    Task-only workers bypass this resolution entirely.
     """
+    from .client_authority import client_authority, default_authority
+
+    authority = client_authority(args)
     url = getattr(args, "url", None)
     token = getattr(args, "token", None)
     if url:
         return url, (token or client_token())
-    if getattr(args, "shared", False):
+    if authority == "local":
+        return client_url(local=True), (token or client_token())
+    if authority == "central":
         surl = shared_url()
         if not surl:
             print(
@@ -257,7 +261,10 @@ def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
                 file=sys.stderr,
             )
             raise SystemExit(2)
-        return surl, (token or shared_token())
+        bearer = token or shared_token()
+        if default_authority() == "central" and not bearer:
+            raise DispatchError(403, "central task authority requires a shared coordinator bearer")
+        return surl, bearer
     # Default local path, with opt-in failover to the shared coordinator: only
     # probe (and only fall back) when a shared URL is configured, so the common
     # single-machine case pays nothing and behaves exactly as before.
@@ -276,7 +283,9 @@ def _should_ssh_failover(args: argparse.Namespace) -> str | None:
     HTTP fallback (per-machine SSH identity, no shared secret). Returns the peer
     machine name, or ``None`` when failover does not apply.
     """
-    if getattr(args, "url", None) or getattr(args, "shared", False):
+    from .client_authority import client_authority
+
+    if client_authority(args) != "legacy":
         return None
     machine = failover_machine()
     if not machine:
@@ -321,8 +330,11 @@ def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
             tunnel=tunnel,
         )
     url, token = _resolve_client_target(args)
-    use_shared_control = bool(getattr(args, "shared", False)) or (
-        not getattr(args, "url", None) and shared_url() is not None and url == shared_url()
+    from .client_authority import client_authority
+
+    authority = client_authority(args)
+    use_shared_control = bool(getattr(args, "shared", False)) or authority == "central" or (
+        authority == "legacy" and shared_url() is not None and url == shared_url()
     )
     if use_shared_control:
         control = getattr(args, "control_token", None) or shared_control_token()
@@ -455,7 +467,9 @@ def _ensure_local_coordinator(args: argparse.Namespace) -> None:
     fails loudly on its own if the coordinator really is unreachable, so autostart
     never converts a hard error into a silent hang.
     """
-    if getattr(args, "url", None) or getattr(args, "shared", False):
+    from .client_authority import client_authority
+
+    if client_authority(args) in {"pinned_url", "central"}:
         return
     if os.environ.get(_AUTOSTART_ENV_OPT_OUT):
         return
@@ -486,7 +500,9 @@ def _cmd_ensure_coordinator(args: argparse.Namespace) -> int:
     the client/autostart call, so they are not safe/general-purpose triggers).
     Not part of the public CLI surface (unlisted; leading underscore).
     """
-    _ensure_local_coordinator(args)
+    from .client_authority import local_service_args
+
+    _ensure_local_coordinator(local_service_args(args))
     from .config import has_live_local_coordinator
 
     return 0 if has_live_local_coordinator() else 1
@@ -511,7 +527,9 @@ def _cmd_stop_coordinator(args: argparse.Namespace) -> int:
     if not has_live_local_coordinator():
         return 0
     try:
-        with _client(args, ensure=False) as c:
+        from .client_authority import local_service_args
+
+        with _client(local_service_args(args), ensure=False) as c:
             c.shutdown()
     except Exception:
         return 1
@@ -628,6 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
         "the hosted coordinator) for cross-machine dispatch, instead of this "
         "host's local coordinator. Authenticated with AGENT_DISPATCH_SHARED_TOKEN.",
     )
+    parser.add_argument("--local", action="store_true", help="target only the local task authority; never fail over")
     sub = parser.add_subparsers(dest="command", required=True)
 
     register_coordinator_commands(sub)

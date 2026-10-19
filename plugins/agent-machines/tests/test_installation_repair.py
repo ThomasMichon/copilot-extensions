@@ -312,7 +312,8 @@ def test_installation_repair_refuses_binding_changed_during_post_install_readine
 
 
 def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixture):
-    _, _, payload, _, _ = repair_fixture
+    _, _, payload, configure, identity = repair_fixture
+    configure(dependencies=())
     declaration = payload / "contracts" / "readiness.json"
     declaration.parent.mkdir()
     (payload / "installer-readiness.json").rename(declaration)
@@ -321,9 +322,12 @@ def test_installation_repair_admits_manifest_declared_readiness_path(repair_fixt
     value["installerReadiness"] = "contracts/readiness.json"
     write_json(manifest, value)
     plan = invoke(repair_fixture)
+    selected = identity + "::agent-example/child"
+    assert [row["module"] for row in plan["outcomes"]] == [selected]
     assert all(row["observedBefore"]["state"] == "not-ready" for row in plan["outcomes"])
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     assert result["status"] == "ready"
+    assert [row["module"] for row in result["outcomes"]] == [selected]
     assert all(row["attempted"] for row in result["outcomes"])
 
 

@@ -8,12 +8,12 @@ from .task_categories import category_value
 from .client_errors import DispatchError, DispatchUpgradeRequired
 
 
-def require_endpoint_categories(endpoint: str) -> None:
+def require_endpoint_categories(endpoint: str, *, token: str | None = None) -> None:
     import os
     from .client import DispatchClient
 
     with DispatchClient(
-        endpoint, token=os.environ.get("AGENT_DISPATCH_TOKEN"), timeout=3
+        endpoint, token=token or os.environ.get("AGENT_DISPATCH_TOKEN"), timeout=3
     ) as client:
         client.require_task_categories()
 

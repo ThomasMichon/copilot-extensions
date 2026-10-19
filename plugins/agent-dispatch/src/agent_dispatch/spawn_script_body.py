@@ -244,7 +244,8 @@ def make_script_spawn(
                     "AGENT_DISPATCH_SCRIPT_TASK_ID": str(task["id"]),
                     "AGENT_DISPATCH_SCRIPT_WORKER_ID": worker_id,
                     "AGENT_DISPATCH_SCRIPT_ROUTE": (
-                        "shared" if route.strip() == "--shared" else "local"
+                        "shared" if route.strip() == "--shared"
+                        else "strict-local" if route.strip() == "--local" else "local"
                     ),
                     "AGENT_DISPATCH_SCRIPT_REPO": (
                         "" if all_repos else str(task.get("repo") or "")

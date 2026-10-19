@@ -10,9 +10,11 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Draft; generic scoped admission, drain, effect-fence and handback contract only | #7268; implementation and adoption separately authorized |
+| [Gateway Role Tunnels](active/gateway-role-tunnels/README.md) | Active; plan reviewed, strict manifest/publication slice first, outbound channel and container qualification open | #7257; finite sub-effort of #6236, retained #6443/#5789 integration owners |
+| [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Draft; reviewed host-worktree relationship and obligation plan before implementation | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
 | [Remote ACP Provider Contributions](active/remote-acp-provider-contributions/README.md) | Draft; URL/name/plugin targets and approved scoped-auth proposal before implementation | #7218; existing transport and dispatch-catalog owners retained |
-| [Maintenance-Safe Module Opt-In](active/maintenance-safe-module-optin/README.md) | Draft; explicit default-off module consent, proposal review before implementation | #7213 |
 | [ADO PR Stewardship](active/ado-pr-stewardship/README.md) | Draft; centralized provider/configuration/observation proposal before implementation | #7203; preserves #7051/#6007/#6818 owners |
 | [Conventional Fleet Connectivity](active/conventional-fleet-connectivity/README.md) | Active; plan reviewed, conventional source discovery first; direct refresh and Bridge derivation pending | #7206 under #63; preserves identity, profile and listing owners |
 | [Dispatch Extension Catalog](active/dispatch-extension-catalog/README.md) | Active; execution authorized, amended-plan review precedes templates, mapped sources and client semantic parity | #7091; preserves #6379/#4959/#6283 owners |
@@ -125,6 +127,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Maintenance-Safe Module Opt-In](2026/10/19%20maintenance-safe-module-optin/README.md) | Done; strict default-off consent and bounded native fixtures merged to dev, pending release; no rollout | #7213; residual reliability #7247 |
 | [Remote ACP Client Transport](2026/10/16%20remote-acp-client-transport/README.md) | Done; runtime merged to dev, pending release, no rollout | #6908; runtime #6997 |
 | [Bridge Workspace Owner Boundary](2026/10/16%20bridge-workspace-owner-boundary/README.md) | Done; released owner-process repair and preserved managed-session resume verified | #6757; #6776 |
 | [Workspace Acquisition Continuity](2026/10/13%20workspace-acquisition-continuity/README.md) | Done; runtime merged to dev, main publication unconfirmed, no host rollout | #6440; automatic promotion remains #3336 |

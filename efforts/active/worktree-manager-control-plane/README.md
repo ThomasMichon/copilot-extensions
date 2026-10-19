@@ -1230,6 +1230,30 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - Restart recovery's default-off preferences, read-only
+  capability reporting and gated native Linux notification transport landed in
+  [#7252](https://github.com/ThomasMichon/copilot-extensions/pull/7252)
+  (`81b4186db8`) after exact-head Copilot approval and required CI. The
+  disconnected related lane passed 337 tests with three platform skips.
+  The focused [recovery plan](machine-restart-recovery.md) retains its full
+  restoration gate: blocking-work notification timing, startup enrollment,
+  current owner/task/hold admission, durable attempts and acknowledged
+  status-first exact-conversation Resume remain open. The next bounded stretch
+  is owner-mediated candidate admission and durable attempt identity, without
+  enabling launch. This umbrella stays Active; no release or rollout is claimed.
+
+- **2026-10-19** - The restart-recovery implementer landed source-bound native
+  lifecycle observations and intentional-exit corroboration in
+  [#7241](https://github.com/ThomasMichon/copilot-extensions/pull/7241)
+  (`834dfd278d`), following the private evidence foundation in #7230. Current
+  review had no open findings and required CI passed. The focused
+  [recovery plan](machine-restart-recovery.md) resolves only its intentional-exit
+  producer item; notification adapters, explicit enrollment, recovery admission
+  and acknowledged status-first Resume remain open. The next stretch is
+  configuration/capability gating and native notification capture under the
+  existing mux-daemon lifecycle. No host configuration or live rollout changed;
+  this umbrella stays Active.
+
 - **2026-10-18** - Claimed the machine-restart recovery slice on #4564 and
   captured the operator's request in a focused sub-plan. Existing attachment
   observation from #5573 is retained; missing-mux tombstones are not treated as

@@ -1,0 +1,9 @@
+{
+  "comment": "Report repository-local plugin activation declarations separately from base settings",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

@@ -15,12 +15,9 @@ schedule-lease over a ``supervisor:<machine>:<env>`` scope): the first daemon
 wins the scope and a second **stands down** rather than spawning a rival loop --
 the *one supervisor per machine-and-environment* the vision requires.
 
-This increment lands the daemon mechanics and the **supervised-lane** unit
-(reconstruct the ``agent-dispatch supervise`` foreground loop from a stored
-spec). Folding the schedule / emitter / evaluator kinds into units the daemon
-runs is the next increment; an unsupported kind is logged and skipped, never
-fatal. The class is transport-light and fully injectable (launcher, clock,
-sleep) so its reconcile logic is unit-tested without real subprocesses.
+Lane and producer children retain the daemon's selected task authority.
+Unsupported kinds are logged and skipped. Injected launchers, clocks and
+clients let reconciliation tests run without real subprocesses.
 
 Registration fingerprinting, desired-set diffing, command-line building, and
 the launcher/handle protocols used to live here too; they moved to
@@ -138,6 +135,7 @@ class SupervisorDaemon(BoundedReconciliation):
         declared_source: Callable[[], Iterable[Any]] | None = None,
         overrides_source: Callable[[], Mapping[str, dict]] | None = None,
         client_factory: Callable[[], Any] | None = None,
+        target_args: tuple[str, ...] = (),
         companion_controller: CompanionController | None = None,
         runtime_materializer: RuntimeMaterializer | None = None,
         runtime_executor: Executor | None = None,
@@ -160,6 +158,7 @@ class SupervisorDaemon(BoundedReconciliation):
         #: this to re-resolve and reconnect, mirroring the rendezvous cutover
         #: ladder. ``None`` disables reconnect (tests inject a fixed fake client).
         self._client_factory = client_factory
+        self._target_args = target_args
         self.machine = machine
         self.env = env or "default"
         self.launcher = launcher or SubprocessLauncher()
@@ -1532,6 +1531,7 @@ class SupervisorDaemon(BoundedReconciliation):
             try:
                 cmd = build_command(
                     reg, python=self._own_python(), materialize=self._materializer(reg),
+                    target_args=self._target_args,
                 )
             except UnsupportedKind as exc:
                 log.warning("skipping registration %s: %s", rid, exc)

@@ -56,6 +56,8 @@ def _render(state: dict[str, object]) -> None:
     print(f"User activation: {state['userActivation']}")
     if state["repositoryActivation"] is not None:
         print(f"Repository activation: {state['repositoryActivation']}")
+        if "repositoryLocalActivation" in state:
+            print(f"Repository-local declaration: {state['repositoryLocalActivation']}")
         print(f"Repository trusted: {'yes' if state['repositoryTrusted'] else 'no'}")
     print(
         "Installed but not user-enabled: "
@@ -69,6 +71,16 @@ def _inspect(args: argparse.Namespace) -> int:
         args.copilot_home.expanduser().resolve(),
         args.repo,
     )
+    if args.repo is not None:
+        path = (
+            args.repo.expanduser().resolve()
+            / ".github" / "copilot" / "settings.local.json"
+        )
+        _, settings = _STATE.read_json_object(path)
+        value = _STATE.activation_value(settings, path, args.identity)
+        state["repositoryLocalActivation"] = (
+            "absent" if value is None else str(value).lower()
+        )
     if args.json:
         print(json.dumps(state, indent=2))
     else:

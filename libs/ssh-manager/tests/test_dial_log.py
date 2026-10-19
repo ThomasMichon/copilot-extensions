@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
+import sys
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from ssh_manager import dial_log
 from ssh_manager.codespace_source import CodespaceConfigSource
@@ -55,9 +59,15 @@ def test_the_log_stays_bounded_and_keeps_the_newest(monkeypatch):
     assert [e["attempt"] for e in entries] == sorted(e["attempt"] for e in entries)
 
 
-def test_concurrent_writers_never_interleave_a_line():
+def test_concurrent_writers_never_interleave_a_line(caplog):
+    caplog.set_level(logging.DEBUG, logger=dial_log.log.name)
+    # Keep six concurrent writers without starving one across forty rounds.
+    # The unpaced hot-writer test separately accounts for bounded lock refusals.
+    round_start = threading.Barrier(6)
+
     def write(n):
         for i in range(40):
+            round_start.wait(timeout=5)
             dial_log.record("cs-3", kind="reconnect", outcome="ok", elapsed_s=0, attempt=n * 100 + i)
 
     threads = [threading.Thread(target=write, args=(n,)) for n in range(6)]
@@ -68,6 +78,118 @@ def test_concurrent_writers_never_interleave_a_line():
     raw = dial_log._file_for("cs-3").read_text(encoding="utf-8").splitlines()
     assert len(raw) == 240
     assert all(json.loads(line)["kind"] == "reconnect" for line in raw)
+    assert sorted(json.loads(line)["attempt"] for line in raw) == sorted(
+        n * 100 + i for n in range(6) for i in range(40))
+
+
+def test_hot_writers_preserve_every_lock_admitted_record(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG, logger=dial_log.log.name)
+    original_lock = dial_log._locked
+    current = threading.local()
+    admitted = []
+    refused = []
+
+    @contextmanager
+    def observe_lock(path, *, wait):
+        with original_lock(path, wait=wait) as held:
+            (admitted if held else refused).append(current.attempt)
+            yield held
+
+    monkeypatch.setattr(dial_log, "_locked", observe_lock)
+
+    def write(n):
+        for i in range(40):
+            current.attempt = n * 100 + i
+            dial_log.record(
+                "hot-writers", kind="reconnect", outcome="ok", elapsed_s=0,
+                attempt=current.attempt,
+            )
+
+    threads = [threading.Thread(target=write, args=(n,)) for n in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    expected = sorted(n * 100 + i for n in range(6) for i in range(40))
+    assert sorted(admitted + refused) == expected
+    raw = dial_log._file_for("hot-writers").read_text(encoding="utf-8").splitlines()
+    assert sorted(json.loads(line)["attempt"] for line in raw) == sorted(admitted)
+    assert not caplog.records
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows byte-range locking")
+def test_contended_empty_lock_never_seeds_another_writers_locked_byte():
+    import msvcrt
+
+    path = dial_log._file_for("empty-lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("w+b") as owner:
+        msvcrt.locking(owner.fileno(), msvcrt.LK_NBLCK, 1)
+        try:
+            with dial_log._locked(path, wait=0) as held:
+                assert not held
+            assert lock_path.stat().st_size == 0
+        finally:
+            owner.seek(0)
+            msvcrt.locking(owner.fileno(), msvcrt.LK_UNLCK, 1)
+    with dial_log._locked(path, wait=0) as held:
+        assert held
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows byte-range locking")
+def test_first_record_survives_contended_empty_lock(monkeypatch):
+    import msvcrt
+    import time
+    from types import SimpleNamespace
+
+    path = dial_log._file_for("first-record")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("w+b") as owner:
+        msvcrt.locking(owner.fileno(), msvcrt.LK_NBLCK, 1)
+        held = True
+
+        def release_owner(delay):
+            nonlocal held
+            assert delay == 0.02
+            owner.seek(0)
+            msvcrt.locking(owner.fileno(), msvcrt.LK_UNLCK, 1)
+            held = False
+
+        monkeypatch.setattr(
+            dial_log, "time", SimpleNamespace(monotonic=time.monotonic, sleep=release_owner),
+        )
+        try:
+            dial_log.record("first-record", kind="reconnect", outcome="ok", elapsed_s=0, attempt=1)
+        finally:
+            if held:
+                owner.seek(0)
+                msvcrt.locking(owner.fileno(), msvcrt.LK_UNLCK, 1)
+    assert not held
+    (entry,) = dial_log.read("first-record")
+    assert entry["attempt"] == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows byte-range locking")
+def test_busy_native_lock_keeps_production_drop_deadline(monkeypatch):
+    import msvcrt
+    from types import SimpleNamespace
+
+    path = dial_log._file_for("busy-lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    clock = iter((0.0, 2.0))
+    monkeypatch.setattr(dial_log, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    assert dial_log.LOCK_WAIT_S == 2.0
+    with path.with_suffix(path.suffix + ".lock").open("w+b") as owner:
+        msvcrt.locking(owner.fileno(), msvcrt.LK_NBLCK, 1)
+        try:
+            dial_log.record("busy-lock", kind="reconnect", outcome="ok", elapsed_s=0)
+            assert not path.exists()
+            assert list(clock) == []
+        finally:
+            owner.seek(0)
+            msvcrt.locking(owner.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def test_recording_never_raises(monkeypatch, tmp_path):
@@ -264,7 +386,10 @@ def test_writers_in_separate_processes_never_interleave_a_line():
               "for i in range(40):\n"
               "    dial_log.record('cs-procs', kind='reconnect', outcome='ok', elapsed_s=0,"
               " attempt=n * 100 + i, stderr='x' * 200)\n")
-    procs = [subprocess.Popen([sys.executable, "-c", script, str(n)]) for n in range(6)]
+    procs = [
+        subprocess.Popen([sys.executable, "-c", script, str(n)], **no_window_kwargs())
+        for n in range(6)
+    ]
     assert all(p.wait(timeout=120) == 0 for p in procs)
     raw = dial_log._file_for("cs-procs").read_text(encoding="utf-8").splitlines()
     assert len(raw) == 240
@@ -445,12 +570,10 @@ def test_only_pinned_or_ambient_is_ever_stored_as_the_account():
         assert dial_log.read("cs-acct", last=1)[0]["account"] == stored
 
 
-def test_a_fresh_lock_file_is_seeded_before_it_is_locked():
-    """msvcrt.locking takes a byte range that should already exist: the first writer
-    seeds byte 0 of a new (empty) lock file, and the line is written."""
+def test_a_fresh_empty_lock_file_protects_the_first_record():
     dial_log.record("cs-seed", kind="reconnect", outcome="ok", elapsed_s=0)
     lock = dial_log._file_for("cs-seed").with_suffix(".jsonl.lock")
-    assert lock.stat().st_size >= 1 and len(dial_log.read("cs-seed")) == 1
+    assert lock.stat().st_size == 0 and len(dial_log.read("cs-seed")) == 1
 
 
 def test_a_tunnel_reset_on_the_last_config_fetch_is_still_transient(monkeypatch, tmp_path):

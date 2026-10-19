@@ -3,7 +3,7 @@
 - **Subject:** the repository-wide portfolio of automated tests for plugins and shared libraries
 - **Scope:** leaf (concrete cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-10-19
 - **Reality docs:** [`TESTING.md`](../../TESTING.md)
 
 ## Purpose & Intent
@@ -43,6 +43,11 @@ Checks are placed at the least expensive tier that preserves fidelity:
 structural guards, hermetic units, contained components, disposable clean-room
 validation, and explicitly targeted end-to-end checks. Higher-fidelity tiers
 complement lower ones; they do not silently join the default developer loop.
+
+Promotion admits unit tests only and collects their coverage in that execution.
+Required PR CI conditionally selects eligible units by impact. Actual-Git,
+multi-process, native and end-to-end integration belongs to periodic
+containerized validation, never a transitive promotion dependency.
 
 ### containment boundary
 
@@ -131,9 +136,18 @@ coverage are consolidated or removed rather than preserved for count.
 
 ### reductions preserve assurance
 
-Portfolio reduction never trades away a critical contract merely to improve
-runtime or test count. Removal is accompanied by evidence that equivalent or
-stronger detection remains.
+Critical contracts retain explicit ownership across the portfolio, but their
+integration tests need not block a release. Recovery can aggressively move
+blocking, slow or inappropriate cases out of the gate while preserving periodic
+container execution. That routing change does not wait for a full-corpus
+equivalence exercise or a replacement unit.
+
+### validation tournament
+
+Stable delivery precedes portfolio expansion. Tests compete on unique
+defect-detection value, useful coverage, actionable failures, runtime,
+flakiness and maintenance cost. More valuable eligible units replace lesser
+ones within the same or smaller budget; integration contenders remain periodic.
 
 ### growth is budgeted
 
@@ -154,8 +168,10 @@ force unrelated contributors to debug an entire subsystem.
 - **No line-coverage maximization.** Coverage is supporting evidence, not the
   definition of value.
 - **No ban on subprocess or end-to-end tests.** Side-effecting tests remain when
-  they detect unique failures, but they run under containment or in disposable
-  venues.
+  they detect unique failures, but run periodically in containers, not promotion
+  or required PR CI.
+- **No integration hidden by a unit label.** Enrollment follows actual fixture
+  and execution behavior, not a marker or runner name alone.
 - **No replacement for clean-room validation.** The clean room continues to
   validate fresh-machine install, bootstrap, provision, and behavior claims;
   this vision governs how all tiers compose into one portfolio.

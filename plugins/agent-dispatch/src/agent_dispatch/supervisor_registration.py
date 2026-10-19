@@ -439,6 +439,7 @@ def build_command(
     *,
     python: str | None = None,
     materialize: Callable[[str, dict], str] | None = None,
+    target_args: tuple[str, ...] = (),
 ) -> list[str]:
     """Build the subprocess argv that runs one registration.
 
@@ -460,7 +461,7 @@ def build_command(
     """
     kind = reg.get("kind")
     spec = reg.get("spec") or {}
-    base = [python or sys.executable, "-m", "agent_dispatch"]
+    base = [python or sys.executable, "-m", "agent_dispatch", *target_args]
 
     def _need_materialize(name: str, payload: dict) -> str:
         if materialize is None:

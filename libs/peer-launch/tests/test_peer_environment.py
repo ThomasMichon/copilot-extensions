@@ -70,3 +70,16 @@ def test_other_peers_never_inherit_pr_owner_state():
         "AGENT_PULL_REQUESTS_UNRELATED_OVERRIDE": "foreign",
     })
     assert not any(name.startswith("AGENT_PULL_REQUESTS_") for name in env)
+
+
+def test_agent_dispatch_retains_authority_and_separate_shared_control():
+    inherited = {
+        "AGENT_DISPATCH_TASK_AUTHORITY": "central",
+        "AGENT_DISPATCH_SHARED_CONTROL_TOKEN": "shared-control",
+    }
+    env = peer_launch.peer_environment(_context("agent-dispatch"), inherited)
+    assert env["AGENT_DISPATCH_TASK_AUTHORITY"] == "central"
+    assert env["AGENT_DISPATCH_SHARED_CONTROL_TOKEN"] == "shared-control"
+    other = peer_launch.peer_environment(_context("agent-worktrees"), inherited)
+    assert "AGENT_DISPATCH_TASK_AUTHORITY" not in other
+    assert "AGENT_DISPATCH_SHARED_CONTROL_TOKEN" not in other

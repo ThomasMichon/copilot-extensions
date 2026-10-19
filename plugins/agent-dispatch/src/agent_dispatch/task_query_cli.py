@@ -121,8 +121,9 @@ def _cmd_list(args: argparse.Namespace) -> int:
         print(_core()._REPO_UNRESOLVED, file=sys.stderr)
         return 2
     from . import remote_dispatch
+    from .client_authority import client_authority
 
-    if remote_dispatch.is_peer_machine(getattr(args, "machine", None)):
+    if client_authority(args) == "legacy" and remote_dispatch.is_peer_machine(getattr(args, "machine", None)):
         return _core()._browse_peer(args, "list", repo=repo)
     with _core()._client(args) as c:
         tasks = c.list(
@@ -252,8 +253,9 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     pick up -- rather than filtering the local queue.
     """
     from . import remote_dispatch
+    from .client_authority import client_authority
 
-    if remote_dispatch.is_peer_machine(args.machine):
+    if client_authority(args) == "legacy" and remote_dispatch.is_peer_machine(args.machine):
         return _core()._browse_peer(args, "inbox")
     machine = args.machine
     if not machine:
@@ -799,7 +801,10 @@ def _cmd_consume(args: argparse.Namespace) -> int:
     return 0
 
 def _cmd_mcp(args: argparse.Namespace) -> int:
-    from .mcp_server import serve_stdio
+    from .client_authority import client_authority
+    from .mcp_server import DispatchTools, serve_stdio
 
-    serve_stdio()
+    serve_stdio(DispatchTools(
+        client_factory=lambda: _core()._client(args), authority_resolver=lambda: client_authority(args),
+    ))
     return 0

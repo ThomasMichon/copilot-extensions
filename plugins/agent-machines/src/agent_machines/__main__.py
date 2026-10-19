@@ -830,7 +830,8 @@ def _build_parser() -> argparse.ArgumentParser:
     restore.add_argument(
         "--maintenance-safe",
         action="store_true",
-        help="limit resources to maintenance-safe declarations and pinned version realignment",
+        help="limit resources to maintenance-safe declarations/pinned version realignment "
+             "and modules to explicit maintenance_safe opt-ins (unless named by --only)",
     )
     restore.add_argument(
         "--verbose",

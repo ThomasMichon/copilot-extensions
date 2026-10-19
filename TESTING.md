@@ -146,6 +146,44 @@ They do not reboot a machine, kill a
 production session, qualify Windows native source capture, or prove acknowledged
 restart-seed delivery. Those remain separate native integration obligations.
 
+Default-off recovery configuration and native notification transport use:
+
+```text
+python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_manager_config or test_restart_capabilities or test_restart_notification_runtime or test_restart_notifications'
+```
+
+The disposable transport tests exercise actual pipe-FD ownership, inhibitor-before-
+subscription ordering, checkpoint/cancellation/rearm, owner and bus loss, spoofed
+signals, immediate SQLite lock refusal and FD cleanup before coroutine pickup.
+`test_restart_notifications_dbus.py` additionally uses a private `dbus-daemon`
+and negotiated SCM_RIGHTS; it never connects to the host system bus. That native
+fixture skips explicitly if the binary is unavailable (including the standard
+isolated image), so such a run is not actual D-Bus qualification. A disposable
+derivative of the same pinned, hardened image with Debian's `dbus-daemon`
+installed can run this fixture without changing the wrapper's filesystem,
+credential or network isolation. Neither fixture proves resident-loop latency,
+real host shutdown coverage, automatic enrollment or acknowledged Resume.
+
+Frozen restart-attempt identities and historical owner bindings use:
+
+```text
+python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_restart_attempts or test_restart_capabilities or test_restart_notification_runtime'
+```
+
+This bounded lane covers no-write default/passive/inspection paths, legacy
+binding refusal, original-snapshot retention, cancelled-shutdown fences, private
+storage, corruption/schema refusal and atomic capacity rollback. Two real
+processes prove concurrent freeze deduplication; a disposable child exiting
+after insert but before commit proves crash rollback without discarding prior
+attempts. These are metadata/transaction contracts, not owner/task admission,
+native launch, seed pickup or platform restart qualification.
+Malformed SQLite column types, truncated databases and orphaned sidecars must
+block without losing state or preventing ordinary mux startup. Initial and
+promoted daemon activation share the drain-visible mutation fence; admitted
+freezing prevents idle-drain acknowledgement, and draining blocks a new freeze.
+Extreme numeric timestamps and deeply nested JSON exercise the same structured
+blocker across both the source-evidence and attempt journals.
+
 Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:
 
@@ -741,6 +779,39 @@ workflow budget. Both hosts still verify live progress, complete split
 stdout/stderr capture, exact exit codes, actual retry, warm dispatch and cleanup.
 Transient processes use the canonical caller-owned Windows Job: a deadline must
 close the whole tree before joining readers or closing their streams.
+
+### Central versus local-only authority
+
+`tests/test_client_authority.py` in `agent-dispatch` covers the opt-in
+`AGENT_DISPATCH_TASK_AUTHORITY` selector, separate credentials, no automatic
+cross-authority fallback, local installer lifecycle, producer/worker routing,
+restricted task pins, explicit browse/create authority and presence-only role
+admission. The existing CLI discovery fixture has its own distinct name so it
+cannot shadow the suite's authentication-command isolation fixture.
+Authority-qualified claim providers retain fixed callback target prefixes and
+disable read-time provisioning. The existing native consumer-prefix tests also
+run under the managed Windows runner: their CMD fixture uses an ordinary path
+spelling of the same interpreter file, while preserving every registered
+argument, child environment and process boundary.
+Native fallback retirement retains the selected CIM creation identity and a
+process handle: creation-time validation and termination use that same handle,
+never a later PID lookup. Missing, replaced or unqueryable identities refuse
+with a warning. The native regression covers replacement of both roots and
+descendants, handle disposal and a real test-owned child's stale-identity
+refusal followed by matching-identity termination. Runtime existence probes use
+literal paths so extended Windows interpreter paths reach these real adapters.
+
+The opt-in native multi-container proof is documented in the
+[central/local authority clean-room lane](tools/clean-room/central-local-authority/README.md).
+It uses the actual central service, an independent peer database and native
+CLI processes inside fresh containers, including a central network partition
+without ownership migration. It is not required PR CI or a model evaluation.
+The lane's host driver durably preassigns the network and all three container
+names (including the UID probe), binds the fixture to that registry and verifies
+absence after contained-worker death within the original 360-second budget.
+`tests/test_central_authority_clean_room.py` covers report/owner refusals and a
+real native containment timeout against a file-backed daemon protocol stub.
+That fatal-worker regression is not a real Docker fault-injection proof.
 
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and
@@ -1585,8 +1656,15 @@ consoleless parent with native Windows OpenSSH and, when installed, Git for
 Windows. It checks displayed terminal windows and foreground changes using a
 synthetic proxy, without remote hosts or credentials:
 
+The windowless parent carries synthetic Win32-OpenSSH socket-descriptor metadata
+while its children receive newly redirected handles. Both cycles must reach the
+real SSH proxy, and the broker-owned proxy must not inherit that obsolete state.
+Portable contracts separately cover ambient, explicit and empty environments,
+case-insensitive key removal, retained unrelated entries, caller immutability,
+and unchanged POSIX handling.
+
 ```powershell
-$env:PYTHONPATH = Join-Path $PWD 'plugins\agent-bridge\libs\ssh-manager\src'
+$env:PYTHONPATH = "$(Join-Path $PWD 'libs\ssh-manager\src');$(Join-Path $PWD 'libs\agent-procutil\src')"
 $env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
 & .\.test-venvs\win32\agent-bridge\Scripts\python.exe -m pytest -q libs\ssh-manager\tests\test_proxy_windows.py
 ```

@@ -383,6 +383,12 @@ Positive Linux/WSL proof also matches the exact native session's open
 stale PID lock names, unavailable descriptors and unsupported native ownership
 formats remain unconfirmed. Ordinary conservative liveness/death-detector
 semantics are unchanged.
+`recovery_binding_capability: "worktree-head-v1"` additionally binds the owner's
+existing `worktree_incarnation` (creation nonce) and `head_revision`. The reader
+never creates a missing nonce. Legacy or malformed nonce metadata leaves this
+capability and incarnation null without changing ordinary hosting evidence.
+The Manager preserves this historical binding for restart-candidate freezing;
+it is not current task/hold admission or permission to launch.
 Missing, uncertain, foreign, superseded or hosted-provider evidence
 returns `confirmed: false` with a reason; unreadable owner state is a JSON error.
 The mode requires an exact worktree id and never infers the daemon caller's

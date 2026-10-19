@@ -76,6 +76,12 @@ unavailable, surface that failure rather than improvising an install.
    surfaces/modules so you review and apply section by section. Surfaces back up
    before writing; a module runs in a dry-run only if it declares `dry_run_args`.
    Restore refuses to run (dry-run or apply) while the validator reports errors.
+   Blanket `--maintenance-safe` runs include only modules explicitly declaring
+   boolean `maintenance_safe: true`; omitted/false modules remain skipped and
+   malformed values are manifest errors. Opt-in is consent for individually
+   trusted code, not a sandbox or an exemption from source, applicability or
+   preview gates. Do not automatically opt modules in. Explicit `--only <module>`
+   can run that named module without opt-in; unselected modules do not execute.
 
 For maintenance queued because the machine was unreachable, use the companion
 `performing-machine-maintenance` skill. It resolves the explicit user-repository

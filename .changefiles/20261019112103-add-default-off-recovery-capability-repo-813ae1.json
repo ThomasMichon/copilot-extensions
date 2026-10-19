@@ -1,0 +1,9 @@
+{
+  "comment": "Add default-off recovery capability reporting and gated Linux shutdown notification transport",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

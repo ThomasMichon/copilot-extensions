@@ -261,6 +261,10 @@ def test_real_init_stages_and_watchdog_preserves_124(
         source.replace(probe_invocation, "& $legacyProbe"),
         encoding="utf-8",
     )
+    shutil.copyfile(
+        PLUGIN / "scripts" / "versioned_runtime_native.ps1",
+        scripts / "versioned_runtime_native.ps1",
+    )
     shutil.copyfile(PLUGIN / "plugin.json", payload / "plugin.json")
     env["FIXTURE_INSTALLER"] = str(scripts / "init.ps1")
     env["COPILOT_PLUGIN_INSTALL_SMOKE"] = "1"

@@ -51,7 +51,7 @@ def _reexec_argv(args: argparse.Namespace) -> list[str]:
     forked per-tick subprocess re-invokes -- see ``emitter.serve``/
     ``schedule.serve``'s own docstrings.
 
-    Reproduces THIS invocation's own top-level ``--url``/``--shared``/
+    Reproduces THIS invocation's own top-level ``--url``/``--shared``/``--local``/
     ``--token``/``--control-token`` flags (an operator's explicit,
     deliberately pinned target must keep applying to every tick, exactly
     like ``test_serve_still_supports_a_pinned_static_target`` expects) but
@@ -62,16 +62,9 @@ def _reexec_argv(args: argparse.Namespace) -> list[str]:
     would -- never silently caching whatever happened to resolve at
     ``serve`` startup.
     """
-    argv = [sys.executable, "-m", "agent_dispatch"]
-    if getattr(args, "url", None):
-        argv += ["--url", args.url]
-    if getattr(args, "token", None):
-        argv += ["--token", args.token]
-    if getattr(args, "control_token", None):
-        argv += ["--control-token", args.control_token]
-    if getattr(args, "shared", False):
-        argv.append("--shared")
-    return argv
+    from .client_authority import target_cli_args
+
+    return [sys.executable, "-m", "agent_dispatch", *target_cli_args(args)]
 
 
 def _cmd_schedule(args: argparse.Namespace) -> int:
@@ -249,13 +242,21 @@ def _cmd_emitter(args: argparse.Namespace) -> int:
 
 def _cmd_webhook(args: argparse.Namespace) -> int:
     from .producers import webhook
+    from .client_authority import client_authority
 
     config = webhook.load_config(args.config) if args.config else {}
     if args.url:
         config["url"] = args.url
     if args.token:
         config["coordinator_token"] = args.token
-    webhook.serve(config, host=args.host, port=args.port)
+    kwargs = {}
+    authority = client_authority(args)
+    target_args = args
+    if authority == "pinned_url" and not args.token and config.get("coordinator_token"):
+        target_args = argparse.Namespace(**{**vars(args), "token": config["coordinator_token"]})
+    if authority != "legacy":
+        kwargs["client_factory"] = lambda: _client(target_args)
+    webhook.serve(config, host=args.host, port=args.port, **kwargs)
     return 0
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,198 @@ def _proc(pid, parent, executable, command_line):
         executable=executable,
         command_line=command_line,
     )
+
+
+def _prefixed_processes():
+    python = INSTALL_DIR + r"\versions\1\Scripts\python.exe"
+    spec = INSTALL_DIR + r"\run\supervisor\scope\producer.json"
+    processes = [
+        _proc(70111, 1, python, rf'"{python}" -m agent_dispatch --shared supervise serve'),
+        _proc(70113, 1, python, rf'"{python}" -m agent_dispatch --local supervise'),
+        _proc(70115, 1, python, rf'"{python}" -m agent_dispatch --local schedule serve "{spec}"'),
+        _proc(70117, 1, python, rf'"{python}" -m agent_dispatch --url "http://writer/path with spaces" --token "supervise" --control-token=value webhook --config "{spec}"'),
+        _proc(70119, 70111, r"C:\Tools\child.exe", "owned-child"),
+        _proc(70121, 1, python, rf'"{python}" -m agent_dispatch --local emitter serve external.json'),
+        _proc(70123, 1, r"C:\foreign\python.exe", 'python -m agent_dispatch --shared supervise serve'),
+        _proc(70125, 1, python, rf'"{python}" -m agent_dispatch --url supervise emitter serve external.json'),
+        _proc(70127, 1, python, rf'"{python}" -m agent_dispatch --unknown supervise serve'),
+        _proc(70129, 1, python, rf'"{python}" -m agent_dispatch --token'),
+        _proc(70131, 1, python, rf'"{python}" -m agent_dispatch --url "{spec}" emitter serve external.json'),
+        _proc(70133, 1, python, rf'"{python}" -m agent_dispatch --local emitter serve "{INSTALL_DIR}\run\supervisor\..\outside.json"'),
+        _proc(70135, 1, python, rf'"{python}" -m agent_dispatch --shared webhook --config "{spec}" --config external.json'),
+        _proc(70137, 1, python, rf'"{python}" -m agent_dispatch --control-token "{spec}" schedule serve external.json'),
+        _proc(70139, 1, python, rf'"{python}" -m unrelated --token agent_dispatch --local supervise serve'),
+        _proc(70141, 1, python, rf'"{python}" -c "pass" agent_dispatch --shared supervise serve'),
+        _proc(70143, 1, python, rf'"{python}" -I -X utf8 -m agent_dispatch --local supervise serve'),
+    ]
+    if os.name == "nt":
+        processes.append(_proc(70145, 1, python, subprocess.list2cmdline([
+            python, "-m", "agent_dispatch", "--token", 'quoted "value" with spaces',
+            "--local", "supervise", "serve",
+        ])))
+    return processes
+
+
+def _prefixed_expected():
+    return {70111, 70113, 70115, 70117, 70119, 70143} | ({70145} if os.name == "nt" else set())
+
+
+def test_target_prefixes_preserve_exact_supervisor_retirement_scope():
+    selected = select_supervisor_generation_pids(
+        _prefixed_processes(), INSTALL_DIR, run_dir=INSTALL_DIR + r"\run",
+    )
+    assert set(selected) == _prefixed_expected()
+    assert selected.index(70111) < selected.index(70119)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows argv parsing and installer fallback")
+@pytest.mark.parametrize("replacement", [None, 70111, 70119, "missing-identity", "query-failed"])
+def test_native_fallback_matches_prefixed_scope_and_refuses_replaced_processes(tmp_path, replacement):
+    plugin = Path(__file__).resolve().parents[1]
+    text = (plugin / "scripts/install.ps1").read_text()
+    start = text.index("function Retire-SupervisorProcessesFallback {")
+    function = text[start:text.index("\nfunction ", start + 1)]
+    rows = tmp_path / "processes.json"
+    rows.write_text(json.dumps([
+        {"ProcessId": p.pid, "ParentProcessId": p.parent_pid,
+         "ExecutablePath": p.executable, "CommandLine": p.command_line,
+         "CreationDate": None if replacement == "missing-identity" and p.pid == 70111 else "2026-10-01T00:00:00Z"}
+        for p in _prefixed_processes()
+    ]), encoding="utf-8")
+    replaced_pid = replacement if isinstance(replacement, int) else 0
+    script = tmp_path / "retire.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference='Stop'; $env:OS='Windows_NT'",
+        f"$InstallDir='{INSTALL_DIR}'; $env:AGENT_DISPATCH_RUN_DIR=Join-Path $InstallDir 'run'",
+        f"$script:Rows=@(Get-Content -Raw '{rows}' | ConvertFrom-Json)",
+        "$script:Disposed=@(); $script:Warnings=@()",
+        "Add-Type -TypeDefinition @'",
+        "using System; using System.Collections.Generic;",
+        "public static class DispatchSupervisorProcessHandle {",
+        "  public static long Expected, ReplacementHandle;",
+        "  public static List<long> Queries=new List<long>(), Stopped=new List<long>();",
+        "  public static long CreationFileTime(IntPtr handle) {",
+        "    Queries.Add(handle.ToInt64());",
+        "    return Expected + (handle.ToInt64()==ReplacementHandle ? 10000000 : 0);",
+        "  }",
+        "  public static void Terminate(IntPtr handle) {",
+        "    if(Queries[Queries.Count-1]!=handle.ToInt64()) throw new Exception(\"handle changed\");",
+        "    Stopped.Add(handle.ToInt64());",
+        "  }",
+        "}",
+        "'@",
+        "[DispatchSupervisorProcessHandle]::Expected=([datetime]'2026-10-01T00:00:00Z').ToFileTimeUtc()",
+        f"[DispatchSupervisorProcessHandle]::ReplacementHandle={replaced_pid + 100000}",
+        f"$script:FailQuery=${str(replacement == 'query-failed').lower()}",
+        "function Get-CimInstance { param($ClassName,$ErrorAction) $script:Rows }",
+        "function Get-Process {",
+        "  param([int]$Id,$ErrorAction)",
+        "  if($script:FailQuery -and $Id -eq 70111){throw 'process query denied'}",
+        "  $process=[pscustomobject]@{Handle=[IntPtr]($Id+100000)}",
+        "  $process | Add-Member -MemberType ScriptMethod -Name Dispose -Value {$script:Disposed+=$this.Handle.ToInt64()}",
+        "  return $process",
+        "}",
+        "function Stop-Process { throw 'PID-only termination is forbidden' }",
+        "function Write-Warn { param($message) $script:Warnings+=$message }",
+        "function Stop-DispatchProcess { throw 'unexpected legacy fallback' }",
+        f". '{plugin / 'scripts/supervisor-lifecycle.ps1'}'",
+        function,
+        "$count=Retire-SupervisorProcessesFallback",
+        "[Console]::Out.Write((@{count=$count; stopped=@([DispatchSupervisorProcessHandle]::Stopped);",
+        "queries=@([DispatchSupervisorProcessHandle]::Queries);disposed=$script:Disposed;warnings=$script:Warnings}|ConvertTo-Json -Compress))",
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [supervisor_processes.powershell_host(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=20, **supervisor_processes.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    evidence = json.loads(result.stdout)
+    refused = {replaced_pid or 70111} if replacement is not None else set()
+    expected = {pid + 100000 for pid in _prefixed_expected() - refused}
+    assert set(evidence["stopped"]) == expected
+    assert evidence["count"] == len(expected)
+    assert set(evidence["disposed"]) == set(evidence["queries"])
+    assert len(evidence["warnings"]) == int(replacement is not None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows retained process handle")
+def test_native_process_handle_refuses_stale_identity_and_stops_only_owned_child(tmp_path):
+    import sys
+
+    plugin = Path(__file__).resolve().parents[1]
+    script = tmp_path / "handle.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference='Stop'; $script:Warnings=@()",
+        "function Write-Warn { param($message) $script:Warnings+=$message }",
+        f". '{plugin / 'scripts/supervisor-lifecycle.ps1'}'",
+        "$start=[Diagnostics.ProcessStartInfo]::new()",
+        f"$start.FileName='{sys.executable}'",
+        "$start.Arguments='-c \"import time; time.sleep(60)\"'",
+        "$start.UseShellExecute=$false; $start.CreateNoWindow=$true",
+        "$child=[Diagnostics.Process]::Start($start)",
+        "try {",
+        "  $snapshot=[pscustomobject]@{ProcessId=$child.Id;CreationDate=$child.StartTime.AddSeconds(-1)}",
+        "  if(Stop-SupervisorSnapshotProcess $snapshot){throw 'stale identity was retired'}",
+        "  if($child.HasExited){throw 'stale identity stopped its replacement'}",
+        "  $snapshot.CreationDate=$child.StartTime",
+        "  if(-not (Stop-SupervisorSnapshotProcess $snapshot)){throw 'matching child was not retired'}",
+        "  if(-not $child.WaitForExit(5000)){throw 'matching child survived termination'}",
+        "  if($script:Warnings.Count -ne 1){throw 'identity refusal was not reported'}",
+        "  [Console]::Out.Write('owned-handle-retirement-pass')",
+        "} finally {",
+        "  if(-not $child.HasExited){$child.Kill();$child.WaitForExit(5000)|Out-Null}",
+        "  $child.Dispose()",
+        "}",
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [supervisor_processes.powershell_host(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=20, **supervisor_processes.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "owned-handle-retirement-pass"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows installer lifecycle health probes")
+@pytest.mark.parametrize("local_healthy", [False, True])
+def test_installer_health_probes_never_use_opposite_central_health(tmp_path, local_healthy):
+    plugin = Path(__file__).resolve().parents[1]
+    text = (plugin / "scripts/install.ps1").read_text()
+    functions = []
+    for name in ("Test-CoordinatorHealthy", "Confirm-CoordinatorRunning"):
+        start = text.index(f"function {name} {{")
+        functions.append(text[start:text.index("\nfunction ", start + 1)])
+    script = tmp_path / "health.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference='Stop'; $env:AGENT_DISPATCH_TASK_AUTHORITY='central'",
+        "$VenvPython='Invoke-FixtureRuntime'; $script:Calls=@(); $script:Ok=@(); $script:Warnings=@()",
+        f"$script:LocalHealthy=${str(local_healthy).lower()}",
+        "function Test-Path { param($Path) $true }",
+        "function Start-Sleep { param($Seconds) }",
+        "function Write-Ok { param($message) $script:Ok+=$message }",
+        "function Write-Warn { param($message) $script:Warnings+=$message }",
+        "function Invoke-FixtureRuntime {",
+        "  $script:Calls+=,@($args)",
+        "  if($args[0] -eq '-c'){$global:LASTEXITCODE=0; return 'candidate'}",
+        "  $local=$args -contains '--local'",
+        "  $healthy=if($local){$script:LocalHealthy}else{-not $script:LocalHealthy}",
+        "  $global:LASTEXITCODE=if($healthy){0}else{1}",
+        "  if($healthy){'{\"version\":\"candidate\"}'}",
+        "}",
+        *functions,
+        "$healthy=Test-CoordinatorHealthy; Confirm-CoordinatorRunning",
+        "[Console]::Out.Write((@{healthy=$healthy;ok=$script:Ok;warnings=$script:Warnings;calls=$script:Calls}|ConvertTo-Json -Depth 5 -Compress))",
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [supervisor_processes.powershell_host(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=20, **supervisor_processes.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    evidence = json.loads(result.stdout)
+    assert evidence["healthy"] is local_healthy
+    probes = [argv for argv in evidence["calls"] if argv[0] == "-m"]
+    assert probes and all(argv == ["-m", "agent_dispatch", "--local", "health"] for argv in probes)
+    assert bool(evidence["ok"]) is local_healthy
+    assert bool(evidence["warnings"]) is not local_healthy
 
 
 def test_selects_old_wrapper_master_children_and_descendants_across_slots():

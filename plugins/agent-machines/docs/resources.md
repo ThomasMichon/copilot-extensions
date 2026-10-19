@@ -397,12 +397,12 @@ Resources appear in every verb:
   Copilot settings/permissions entry, runs runtime spot checks for installed
   runtime plugins, and applies only resources that explicitly declare
   `maintenance_safe: true` plus the package pinned-version realignment exception
-  above. **Repo-local `modules:` are excluded entirely** (reported as `skipped`,
-  not run) unless `--only <module>` names one explicitly: a module executes an
-  arbitrary repo-local command with no per-module safety opt-in equivalent to a
-  resource's `maintenance_safe: true`, so the whole category stays out of a
-  blanket unattended run rather than risking an unreviewed side effect (package
-  installs, PATH/config edits, and similar). Excluded resources and modules
+  above. **Repo-local `modules:` default to excluded** (reported as `skipped`,
+  not run) unless the individual module declares boolean `maintenance_safe: true`
+  or `--only <module>` names it explicitly. Module opt-in is consent to execute
+  trusted code, not an inherent safety guarantee or a bypass of normal
+  machine/platform, source or dry-run gates. Explicit nonboolean module flags
+  are manifest errors. Excluded resources and modules
   remain visible as `skipped` results with a reason; plain restore behavior is
   otherwise unchanged.
 - `agent-machines restore --json` includes a `resources` list (each result has

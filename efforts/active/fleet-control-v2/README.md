@@ -9,7 +9,8 @@
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
   #6443 Gateway/index vertical slice; existing #5862 coherent observation and
-  central push-backed state. Existing #5789, #6030 and #5861 retain ownership.
+  central push-backed state; #7257 declarative service-role tunnels.
+  Existing #5789, #6030 and #5861 retain ownership.
 
 ## Guiding Intent
 
@@ -62,6 +63,12 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 - **Completion boundary:** Plan publication is not V2 implementation completion.
 
 ## Context
+
+The finite [Gateway Role Tunnels](../gateway-role-tunnels/README.md) sub-effort
+owns the reviewed initial service-manifest, live-reconciliation and outbound
+service-channel campaign. It preserves the Gateway/index/auth/provider and
+lifecycle boundaries below; its isolated proof does not complete this product
+or authorize adopter deployment.
 
 [Architecture proposal](architecture.md) records the recommendation, alternatives,
 authority boundaries and implementation gates. It reconciles the

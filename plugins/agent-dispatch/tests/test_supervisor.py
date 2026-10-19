@@ -3915,7 +3915,12 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     assert calls["prompt"] == "SEED::task-1"  # the CLI autopilot seed, verbatim
 
 
-def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch, tmp_path):
+@pytest.mark.parametrize("route,expected_route", [
+    (" --shared", "shared"), (" --local", "strict-local"), ("", "local"),
+])
+def test_make_script_spawn_launches_runtime_python_with_task_context(
+    monkeypatch, tmp_path, route, expected_route,
+):
     from agent_dispatch import spawn_factories, spawn_script_body
     from agent_dispatch.supervisor import make_script_spawn
 
@@ -3954,7 +3959,7 @@ def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch
         lambda pid: f"token-{pid}",
     )
 
-    spawn = make_script_spawn(route=" --shared", all_repos=False)
+    spawn = make_script_spawn(route=route, all_repos=False)
     ok, handle = spawn(
         {
             "id": "task-1",
@@ -3968,7 +3973,7 @@ def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch
     env = started["kwargs"]["env"]
     assert env["AGENT_DISPATCH_SCRIPT_TASK_ID"] == "task-1"
     assert env["AGENT_DISPATCH_SCRIPT_WORKER_ID"].startswith("script-")
-    assert env["AGENT_DISPATCH_SCRIPT_ROUTE"] == "shared"
+    assert env["AGENT_DISPATCH_SCRIPT_ROUTE"] == expected_route
     assert env["AGENT_DISPATCH_SCRIPT_REPO"] == TEST_REPO
     assert Path(env["AGENT_DISPATCH_SCRIPT_TASK_FILE"]).is_file()
     parsed = spawn_factories._parse_script_body_handle(handle["session"])
@@ -4654,7 +4659,8 @@ def test_cli_supervise_rejects_idle_nudge_exempt_label_not_watched(monkeypatch, 
     assert "every --idle-nudge-exempt-label must also be watched" in capsys.readouterr().err
 
 
-def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client):
+@pytest.mark.parametrize("authority,route", [(None, ""), ("central", " --shared"), ("local", " --local")])
+def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client, authority, route):
     """--pool --headless constructs a headless FleetSpawner with the configured
     --headless-agent (the headless-fleet embodiment for a remote pool host)."""
     import types
@@ -4664,17 +4670,19 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     from agent_dispatch import remote_dispatch
 
     q.create("work")
+    if authority:
+        monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", authority)
     captured: dict = {}
 
     class FakeFleet:
         def __init__(
             self, pool, *, origin, headless=False, agent="task-worker",
-            charter=None, all_repos=False, verify_timeout=0,
+            charter=None, all_repos=False, verify_timeout=0, route="",
         ):
             self.pool = list(pool)
             captured.update(
                 pool=pool, origin=origin, headless=headless, agent=agent,
-                charter=charter, all_repos=all_repos,
+                charter=charter, all_repos=all_repos, route=route,
             )
 
         def __call__(self, task):
@@ -4704,6 +4712,7 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     assert captured["all_repos"] is False
     assert captured["pool"] == ["anomalous-potato-wsl"]
     assert captured["origin"] == "mantis-counter"
+    assert captured["route"] == route
 
 
 def test_hold_live_leases_heartbeats_live_script_body(q, client):

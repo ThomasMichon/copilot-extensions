@@ -2183,3 +2183,37 @@ requested contract.
   not a root-cause fix or acceptance of the earlier failure; the authorized
   native investigation remains open. New source review and all resulting-head
   CI still gate merge, with no runtime rollout or broader recovery authority.
+
+### 2026-10-19 - Preserve late readback and incomplete observation semantics
+
+- Full Balanced review `5577661133` contains three Medium findings in its
+  overview despite the empty-open-issues banner. Eight fail-first cases
+  reproduce incomplete receipt observations, publication starvation after a
+  slow read, and raw withdrawal errors; a known-empty observation passes.
+- Any invalid or unreadable operation record now makes the whole optional
+  progress observation unavailable, rather than reporting empty or partial
+  inventory as complete. Per-identity scheduling and immutable evidence remain.
+  Withdrawal warnings retain pending custody and expose only the error type.
+- A detached publication ledger retains completed readback rows across the
+  existing deadline. A later batch consumes them before another RPC, invalidates
+  changed targets, and consumes each observation before mutation. An unknown
+  old target settles before a changed declaration. Deterministic four-second
+  reads under a three-second budget prove eventual publish/withdraw/readback;
+  an event-blocked real executor proves bounded polling and single-writer harvest.
+- The no-second-selection-read regression now asserts the exact single-read
+  contract during real recovery, rather than putting unrelated complete
+  filesystem recovery beneath a half-second observation timeout. Production
+  call deadlines and separate blocking-boundary timing assertions are unchanged.
+  Initial coupled failures are recorded as failures, not passing evidence.
+- Current dev integration preserves reviewed #7126 task-authority ownership
+  alongside queued native-generation/cycle progress. The receiving authority
+  fixture now implements the real queue interface and checks both identities.
+  The combined consuming-boundary cohort passes 321 cases; preceding managed
+  recovery coverage passes 296 with one platform skip, and independent receipt,
+  health and native-lifecycle consumers pass 84 with one platform skip. These
+  overlapping selections are not summed as unique coverage.
+- Install contract, contribution ceilings, fatal lint and whitespace pass.
+  This is source-level behavior, not a new installer or provisioning path.
+  Existing native Windows subprocess/filesystem coverage remains distinct from
+  the still-open native POSIX #7020 cause and production adoption. Fresh full
+  resulting-head review and every required CI check remain merge gates.

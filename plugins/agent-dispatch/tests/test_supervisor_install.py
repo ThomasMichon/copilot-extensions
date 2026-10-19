@@ -555,16 +555,19 @@ class TestWindowsSupervisorInstall:
         assert "current-version" in helper
         assert "function Retire-SupervisorProcessesFallback" in helper
         assert "Get-CimInstance Win32_Process" in helper
-        assert "Stop-Process -Id $pid" in helper
+        assert "Stop-SupervisorSnapshotProcess -Snapshot $snapshot" in helper
+        assert "Stop-Process -Id $processId" not in helper
+        assert "return (Stop-DispatchProcess -Subcommand supervise)" not in helper
+        assert "foreach ($pid " not in helper
         assert "$isRegistrarChild" in helper
         assert "$supervisorRun" in helper
         assert "AGENT_DISPATCH_RUN_DIR" in helper
-        assert "$isSupervisor = $underRoot -and (" in helper
-        assert "supervise(?=\\s*(?:$|serve(?:\\s|$)|-))" in helper
+        assert "$isSupervisor = $underRoot -and" in helper
+        assert "Get-SupervisorDispatchArguments -CommandLine $cmd" in helper
         assert "$enumerationFailed" in helper
         assert "if ($rc -eq 0 -or -not $enumerationFailed)" in helper
-        assert "emitter\\s+serve(?:\\s|$)" in helper
-        assert "schedule\\s+serve(?:\\s|$)" in helper
+        assert "$dispatchArgv[0] -in @('emitter', 'schedule')" in helper
+        assert "$dispatchArgv[1] -eq 'serve'" in helper
         assert "Sort-Object { $depth[$_] } -Descending" not in helper
 
     def test_interactive_hosts_get_a_self_restarting_scheduled_task(self):

@@ -1,0 +1,19 @@
+{
+  "name": "central-local-authority",
+  "description": "Native task clients and a presence-only local peer retain explicit independent authorities through a real central outage.",
+  "tier": "P",
+  "family": "F1",
+  "runner": "tools/clean-room/central-local-authority/run.py",
+  "auth": {"cloud": "none", "central": "generated authenticated bearer", "local": "independent generated authenticated bearer"},
+  "prereqs": {"present": ["Linux Docker engine", "candidate services/dispatch image", "prepared agent-dispatch test runtime"]},
+  "boundaries": {"separate_databases": true, "internal_network": true, "published_host_ports": false, "mounted_socket": false, "privileged": false},
+  "deadlines_seconds": {"pytest_item": 300, "contained_case": 360, "docker_command": 45},
+  "expected_artifacts": ["cr-report.json", "runner.log", "owned-resources.json", "evidence/cr-report.json"],
+  "stages": [
+    {"n": 1, "title": "fresh authenticated central and local services"},
+    {"n": 2, "title": "real peer presence, bad-role and bad-auth refusals"},
+    {"n": 3, "title": "independent tasks and qualified callbacks retain authority even under opposite defaults"},
+    {"n": 4, "title": "central network partition refuses mutations without local promotion; same ownership resumes"},
+    {"n": 5, "title": "owned containers and network removed and absence verified"}
+  ]
+}

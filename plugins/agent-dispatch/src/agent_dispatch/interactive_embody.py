@@ -79,7 +79,7 @@ import subprocess
 from typing import Any, Protocol
 
 from . import embody
-from .embody_prompts import interactive_worker_prompt
+from .embody_prompts import interactive_worker_prompt, validate_fleet_route
 from .queue import worker_id_for
 from .queue_records import Status
 
@@ -205,6 +205,7 @@ def launch_interactive_embodiment(
     project: str | None = None,
     supervisor: str = DEFAULT_SUPERVISOR_ID,
     timeout: float | None = None,
+    route: str = "",
 ) -> dict[str, Any]:
     """Run the interactive-embodiment transaction for one task.
 
@@ -218,6 +219,7 @@ def launch_interactive_embodiment(
     documented in the module docstring (launch succeeds but the follow-up
     bind fails).
     """
+    route = validate_fleet_route(route)
     task = client.get(task_id)
     status = task.get("status")
     if status == Status.PROPOSED:
@@ -308,7 +310,7 @@ def launch_interactive_embodiment(
                 "(claimed by another owner, or no longer queued)"
             )
 
-    seed = interactive_worker_prompt(task_id, status=status)
+    seed = interactive_worker_prompt(task_id, status=status, route=route)
     try:
         from . import bridge, session_acquisition
         current_task = client.get(task_id)

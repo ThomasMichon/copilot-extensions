@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-19
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -351,6 +351,15 @@ or workspace. Transport selection and experimental protocol boundaries remain
 explicit; disconnect, cancellation, connection close, and durable session
 retirement are not interchangeable. Recovery preserves remote session identity
 without replaying uncertain consequential work.
+
+When a managed host worktree opens a conversation, it owns that relationship
+as a durable, inspectable obligation without allocating another workspace.
+The originating worktree, current caller, bridge attachment and target-native
+conversation remain distinct identities. Stop, reconnect and host-session
+succession preserve responsibility; explicit retirement or accepted transfer
+settles it without terminating the external service or erasing its history.
+Standalone callers remain explicitly unowned rather than acquiring a
+fictional worktree identity.
 
 Credentials come from the existing scoped host-credential and auth-injection
 owners, not a second credential store. Remote tool permissions and structured

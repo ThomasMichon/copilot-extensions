@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid unowned Windows dial-log lock seed writes while preserving bounded contention and exact admitted records.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

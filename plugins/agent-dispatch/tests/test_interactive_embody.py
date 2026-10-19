@@ -170,6 +170,32 @@ def test_queued_task_claims_launches_and_starts(q, client, monkeypatch):
     assert res.session_handle == "cli-session-1"
 
 
+@pytest.mark.parametrize("flags,route", [([], "--shared"), (["--local"], "--local")])
+def test_cli_interactive_transaction_pins_every_seed_command(q, client, monkeypatch, flags, route):
+    from agent_dispatch import __main__ as core
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    task = q.create("work", repo="github.com/example/repo")
+    _mock_prepare(monkeypatch)
+    calls = _mock_spawn_ok(monkeypatch)
+    monkeypatch.setattr(core, "_client", lambda _args: client)
+    invocation = core.build_parser().parse_args([
+        *flags, "embody", task.id, "--interactive", "--machine", "m",
+    ])
+    assert core._cmd_embody_interactive(invocation) == 0
+    seed = calls[0]["seed"]
+    for command in ("show", "progress", "card set", "complete", "suspend", "abandon"):
+        assert f"agent-dispatch {route} {command}" in seed
+        assert f"`agent-dispatch {command}" not in seed
+    assert q.get(task.id).status == Status.STARTED
+
+
+def test_invalid_interactive_route_refuses_before_queue_mutation(client, monkeypatch):
+    monkeypatch.setattr(client, "get", lambda _id: pytest.fail("invalid route read task"))
+    with pytest.raises(ValueError, match="routing"):
+        launch_interactive_embodiment(client, "task", machine="m", route=" --token secret")
+
+
 def test_proposed_task_is_approved_first(q, client, monkeypatch):
     t = q.propose("work")
     assert q.get(t.id).status == Status.PROPOSED

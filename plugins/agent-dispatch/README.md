@@ -2753,6 +2753,26 @@ re-registering it with no `--alias` **preserves that empty set** rather than
 auto-deriving one -- enabling enforcement without first adding an explicit
 `--alias` to every pre-existing pointer will reject their lanes' tasks).
 
+For a pinned fleet writer, opt into `AGENT_DISPATCH_TASK_AUTHORITY=central`;
+use `--local` for explicitly local-only work. These separate targets never
+switch databases on an outage, and a retained local coordinator is presence-only
+(`peer`/`satellite`), not an eligible replacement central writer. Unset retains
+legacy routing; `AGENT_DISPATCH_TASK_AUTHORITY=local` selects strict local
+authority. See the [central/local authority deployment contract](../../services/dispatch/README.md#pinned-central-authority-with-optional-local-only-work)
+for credentials, references, lifecycle and migration limits.
+
+The stdio MCP client uses the same authority and credential selection as the
+CLI. Attention action/page hints, ensured supervisor daemons, their registered
+lane/producer children and script workers preserve explicit target overrides.
+Reactive webhook producers, interactive worker seeds and detached waiters
+retain that selection too; waiter re-exec arguments never contain credentials.
+Raw-URL webhook invocations retain their configured coordinator token unless a
+CLI token overrides it; named targets still use their separate authority credentials.
+The Picker's board reads and live relay honor the same environment default and
+use the corresponding local or central bearer, without loading the full CLI.
+Strict-local script workers ignore an inherited remote `AGENT_DISPATCH_URL`;
+unconfigured legacy script routes retain their existing discovery behavior.
+
 ### Federation (`agent-dispatch federation run|status`)
 
 Opt-in cross-machine awareness/claim-plane participation (see the

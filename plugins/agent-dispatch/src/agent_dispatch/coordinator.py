@@ -176,6 +176,9 @@ def create_app(
         raise ValueError(
             "AGENT_DISPATCH_CONTROL_TOKEN must differ from AGENT_DISPATCH_TOKEN"
         )
+    from .client_authority import validate_server_authority
+
+    validate_server_authority()
     bus = EventBus()
     directory = FleetDirectory(fencing_floor=queue.advance_fencing_epoch)
     # FleetDirectory.discover_coordinator() already matches the shape the

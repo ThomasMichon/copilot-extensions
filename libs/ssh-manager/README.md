@@ -28,7 +28,9 @@ agent-codespaces) import this library instead of spawning SSH directly.
   stderr tail; user-only (0700 directory, 0600 files) on POSIX, one file per exact
   target (a readable prefix plus a digest). Recording is best-effort and never raises into a dial (on an event loop's thread it does no file I/O: a bounded background writer appends the line, dropping it when saturated);
   `ssh_manager.dial_log.summary()` counts dials per outcome over the last 10
-  minutes and hour.
+  minutes and hour. File locks work from an empty lock file, without an
+  unowned seed-byte write on Windows. Lock contention retains the two-second
+  best-effort deadline; admitted records remain serialized without interleaving.
 - **Safe carrier startup diagnostics** -- failed framed-HELLO negotiation reports
   its stage, exception type, observed pre-cleanup exit code (or unknown), and an
   allowlisted stderr reason. Stderr is drained concurrently with raw protocol
@@ -76,6 +78,15 @@ unchanged. The client and broker forward opaque bytes without a terminal or
 text decoder.
 Native Windows OpenSSH and Git for Windows retain their respective proxy-command
 quoting and shell semantics.
+
+Windows SSH roots and broker-owned proxy children omit Win32-OpenSSH's inherited
+`c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE` environment key. That metadata
+describes an ancestor's file descriptors, not the new redirected handles; passing
+it through can silently break SSH stdio. All other ambient or explicitly supplied
+environment entries are preserved without modifying the caller's environment.
+An explicit empty environment stays empty. When the descriptor-state key is
+absent, the original environment argument is left unchanged, including ambient
+inheritance. POSIX environment handling is unchanged.
 
 The broker lives in the calling process and closes with its SSH root.
 `terminate_ssh_process_tree` also awaits broker cleanup on timeout or

@@ -53,10 +53,29 @@ class SupervisorRetireResult:
 def _tokens(command_line: str) -> list[str]:
     if not command_line:
         return []
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        split = ctypes.WinDLL("shell32", use_last_error=True).CommandLineToArgvW
+        split.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+        split.restype = ctypes.POINTER(wintypes.LPWSTR)
+        free = ctypes.WinDLL("kernel32", use_last_error=True).LocalFree
+        free.argtypes = [ctypes.c_void_p]
+        free.restype = ctypes.c_void_p
+        count = ctypes.c_int()
+        values = split(command_line, ctypes.byref(count))
+        if not values:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            return [values[index] for index in range(count.value)]
+        finally:
+            if free(values):
+                raise ctypes.WinError(ctypes.get_last_error())
     try:
-        return shlex.split(command_line, posix=False)
+        return [value.strip('"') for value in shlex.split(command_line, posix=False)]
     except ValueError:
-        return command_line.split()
+        return []
 
 
 def _basename(token: str) -> str:
@@ -65,10 +84,37 @@ def _basename(token: str) -> str:
 
 def _agent_dispatch_argv(command_line: str) -> list[str]:
     tokens = _tokens(command_line)
-    for index, token in enumerate(tokens):
-        if _basename(token) in _AGENT_DISPATCH_NAMES:
-            return tokens[index + 1 :]
-    return []
+    if not tokens:
+        return []
+    index = 1
+    if _basename(tokens[0]).removesuffix(".exe") not in _AGENT_DISPATCH_NAMES:
+        while index < len(tokens):
+            value = tokens[index]
+            if value == "-m":
+                if index + 1 >= len(tokens) or tokens[index + 1] not in _AGENT_DISPATCH_NAMES:
+                    return []
+                index += 2
+                break
+            if not value.startswith("-") or value.startswith("-c"):
+                return []
+            index += 2 if value in {"-X", "-W", "--check-hash-based-pycs"} else 1
+        else:
+            return []
+    argv = tokens[index:]
+    while argv and argv[0].startswith("-"):
+        option, equals, _value = argv[0].partition("=")
+        if option in {"--local", "--shared"} and not equals:
+            argv = argv[1:]
+        elif option in {"--url", "--token", "--control-token"}:
+            if equals:
+                argv = argv[1:]
+            elif len(argv) >= 2 and not argv[1].startswith("--"):
+                argv = argv[2:]
+            else:
+                return []
+        else:
+            return []
+    return argv
 
 
 def _under_install_root(path: str, install_dir: str | Path) -> bool:
@@ -105,17 +151,24 @@ def _is_materialized_supervisor_child(
     argv = _agent_dispatch_argv(process.command_line)
     if not argv:
         return False
-    producer = (
-        argv[:2] in (["emitter", "serve"], ["schedule", "serve"])
-        or argv[0] == "webhook"
-    )
-    if not producer:
+    spec = None
+    if argv[:2] in (["emitter", "serve"], ["schedule", "serve"]) and len(argv) >= 3:
+        spec = argv[2]
+    elif argv[0] == "webhook":
+        for index, value in enumerate(argv[1:], start=1):
+            if value == "--config" and index + 1 < len(argv):
+                spec = argv[index + 1]
+            elif value.startswith("--config="):
+                spec = value.partition("=")[2]
+    if not spec:
         return False
     spec_root = ntpath.normcase(
         ntpath.abspath(ntpath.join(str(run_dir), "supervisor"))
     ).rstrip("\\") + "\\"
-    command_line = ntpath.normcase(process.command_line.replace('"', ""))
-    return spec_root in command_line
+    try:
+        return ntpath.normcase(ntpath.abspath(spec)).startswith(spec_root)
+    except (OSError, ValueError):
+        return False
 
 
 def _is_supervisor_wrapper(process: WindowsProcess, install_dir: str | Path) -> bool:

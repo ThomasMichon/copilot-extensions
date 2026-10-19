@@ -139,6 +139,102 @@ docker build -f services/dispatch/Dockerfile \
 ```
 
 
+## Pinned central authority with optional local-only work
+
+Fleet mode is explicit: set `AGENT_DISPATCH_TASK_AUTHORITY=central` on fleet
+clients and supervisors. The central `services/dispatch` instance keeps its own
+durable database and ordinary server authentication; its serving environment
+does not opt into this client mode. Use a private authenticated endpoint, not
+an unauthenticated public listener.
+
+Configure each participating machine with:
+
+| Setting | Meaning |
+|---------|---------|
+| `AGENT_DISPATCH_TASK_AUTHORITY=central` | Default all ordinary task clients and supervisor reconnects to the central writer, regardless of local health. |
+| `AGENT_DISPATCH_SHARED_URL` | The pinned central endpoint, discovered/provided by its owning deployment. |
+| `AGENT_DISPATCH_SHARED_TOKEN` or `AGENT_DISPATCH_SHARED_TOKEN_COMMAND` | Central service authentication, independent of the local server's bearer. Central mode refuses missing credentials instead of borrowing local authority. |
+| `AGENT_DISPATCH_SHARED_CONTROL_TOKEN` or its `_COMMAND` variant | Separate central control authority when managed producer/grant operations require it. |
+| `AGENT_DISPATCH_FEDERATION_ROLE=peer` | Presence-only federation for a machine retaining its own coordinator. `satellite` is also supported under its existing enrollment gate. |
+| `AGENT_DISPATCH_FEDERATION_INSTANCE` | The machine/environment's stable, uniquely resolved directory identity. |
+
+A pure client need not start a local coordinator. If one is retained, central
+mode requires its role to be `peer` or `satellite`, never `coordinator` or
+`standby`. Both server admission and the federation runner reject lease-eligible
+roles in this mode. Directory awareness does not replicate a task database or
+grant a local database permission to become the central writer.
+Strict local-only mode needs no central service or federation, but if it does
+participate in federation its role is likewise presence-only, not a candidate
+fleet writer. Unconfigured legacy federation/election behavior is unchanged.
+
+Central and local-only work have **explicit separate targets**, not a combined
+list. Ordinary `create`, `list`, `show` and lifecycle operations use the central
+writer in central mode; `--shared` also names that target explicitly. Use
+`--local` for local-only work. It resolves the local rendezvous, ignores a
+remote `AGENT_DISPATCH_URL` override, and never switches to a shared or SSH peer
+when the local service is unavailable. Conversely, a central outage never
+starts/promotes a local queue or redirects a central task mutation there.
+Transport errors do not prove a write was unaccepted: reconcile an uncertain
+outcome from that same central authority, never by replaying it locally.
+Explicit `--url` remains an operator-selected endpoint; `--local` cannot be
+combined with it or `--shared`.
+
+The supervisor singleton remains one owner per machine/environment, not one per
+authority. An explicit `supervise register --ensure` accepts an existing owner
+only when its current PID-bound status receipt names the same target.
+`authority conflict` or `authority unavailable` means the registration was
+saved but that target is **not ensured**; reconcile the existing owner's
+configuration explicitly. The command does not start a second supervisor,
+terminate the existing one or move its registrations. Target receipts contain
+only a digest of credential-free target flags and the configured central
+endpoint, not bearer/control credentials. Local rendezvous discovery remains
+dynamic; changing it does not create a different supervisor target.
+
+Explicit `inspect-task --machine` reads from the selected writer rather than
+implicitly inspecting that machine's independent queue over SSH. Remote MCP
+emitter side-loads refuse explicit authority before executing on an SSH owner:
+the remote login's default is not proof of the same writer, and coordinator
+credentials are not forwarded. Invoke the side-load on its owner with the same
+explicit writer instead. Legacy peer browsing/side-loading is unchanged.
+
+Central task reads are on-demand references to the central service, not local
+task rows or an offline write replica. Keep the selected authority with any
+saved task reference; a bare task ID is not permission to move its state to
+another database. Existing local tasks remain local and are accessed with
+`--local`; selecting central mode does not import or migrate them. No ownership
+transfer operation is introduced: any future transfer must be acknowledged and
+fenced at the durable owner before the destination activates it.
+
+Named-authority `create`, `claim` and `show` output includes `task_authority`
+and a durable `claim_ref`: `dispatch-central-task:<id>` or
+`dispatch-local-task:<id>`. The existing claim-provider registry carries the
+corresponding fixed `--shared`/`--local` callback prefix, so changing a caller's
+default mode cannot redirect the reference. No second task store is created.
+When explicit mode is configured, the old unqualified `dispatch-task:` callback
+fails unavailable rather than interpreting a foreign 404 as proof that the
+original resource disappeared. Reconcile old references at their original
+writer before explicitly recording the appropriate qualified reference; mode
+selection never rewrites claims or transfers task ownership.
+
+In explicit authority mode, inbox machine filters apply to that selected
+authority, not a peer's independent database. `list --target-machine` filters
+placement without changing writers. The legacy SSH create-and-embody path that
+creates a task in another machine's queue is refused with explicit authority:
+enqueue using `--target-machine` and let the selected central authority's
+supervisor acquire it instead. Spawned worker monikers and producer re-exec
+arguments retain explicit local/central routing. Installer-owned local
+start/stop commands remain local even when ordinary clients default central.
+Existing SSH fleet bodies retain that selector on commands relayed through
+their origin host as well, so an SSH login's different default cannot retarget
+an explicitly local-only task. Central credentials stay on the origin.
+
+This is an opt-in routing/authority contract, not a host deployment action.
+Apply configuration and restart affected long-lived clients through their
+existing installer/service lifecycle when rollout is authorized. Leaving
+`AGENT_DISPATCH_TASK_AUTHORITY` unset preserves existing standalone discovery,
+legacy shared fallback and SSH behavior. Restricted task-only credentials keep
+their separately pinned task endpoint and reject `--local` overrides.
+
 ## Scope
 
 See [`efforts/active/agent-dispatch-standalone-container/README.md`](../../efforts/active/agent-dispatch-standalone-container/README.md)

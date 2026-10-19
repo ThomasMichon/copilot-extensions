@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native claim-provider callback fixtures executable through CMD when the managed test interpreter has an extended path spelling.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

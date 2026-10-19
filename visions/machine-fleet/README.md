@@ -1,9 +1,9 @@
 # Machine Fleet - Vision
 
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
-- **Scope:** leaf (cross-cutting child of agent-fabric)
+- **Scope:** branch (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-19
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -29,6 +29,12 @@ independently owned fleets, never placing another operator's state or credential
 inside this fleet.
 
 ## Concepts & Components
+
+### Declarative service Gateway
+
+The [Gateway child vision](gateway/README.md) defines repository-owned role
+slots and namespaces, authenticated outbound service channels, live desired-state
+reconciliation and reusable container/edge-adapter boundaries.
 
 ### Standalone fleet-manager system
 

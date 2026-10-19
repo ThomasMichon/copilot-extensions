@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import math
 import sqlite3
+import sys
+import time
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,8 @@ class PositiveEvidence:
     activation_ordinal: int = 0
     source_identity: str | None = None
     lifecycle_qualified: bool = False
+    worktree_incarnation: str | None = None
+    head_revision: int | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -78,11 +81,20 @@ class PositiveEvidence:
             or self.lifecycle_qualified and self.source_identity is None
         ):
             raise ValueError("Unconfirmed recovery activation identity")
+        if (self.worktree_incarnation is None) != (self.head_revision is None):
+            raise ValueError("Incomplete recovery worktree/head binding")
+        if self.worktree_incarnation is not None and (
+            not isinstance(self.worktree_incarnation, str)
+            or len(self.worktree_incarnation) != 16
+            or any(character not in "0123456789abcdef" for character in self.worktree_incarnation)
+            or type(self.head_revision) is not int or self.head_revision < 0
+        ):
+            raise ValueError("Invalid recovery worktree/head binding")
         if type(self.observation_sequence) is not int or self.observation_sequence < 1:
             raise ValueError("Invalid recovery observation sequence")
         if (
             type(self.observed_at) not in {float, int}
-            or not math.isfinite(self.observed_at) or self.observed_at <= 0
+            or not 0 < self.observed_at <= sys.float_info.max
         ):
             raise ValueError("Invalid recovery observation time")
 
@@ -93,8 +105,14 @@ class PositiveEvidence:
             if field.name not in {
                 "observed_at", "observation_sequence", "owner_revision", "mapping_revision",
                 "lifecycle_qualified",
+                "worktree_incarnation", "head_revision",
             }
         )
+
+    @property
+    def recovery_binding_qualified(self) -> bool:
+        """Historical capture proof only; current owner admission is still owed."""
+        return self.lifecycle_qualified and self.worktree_incarnation is not None
 
     def provider_identity(self) -> tuple:
         """The enclosing host generation, independent of its native occupant."""
@@ -104,6 +122,7 @@ class PositiveEvidence:
                 "observed_at", "observation_sequence", "owner_revision",
                 "native_session_id", "native_incarnation", "mapping_revision",
                 "activation_ordinal", "source_identity", "lifecycle_qualified",
+                "worktree_incarnation", "head_revision",
             }
         )
 
@@ -123,8 +142,16 @@ _HISTORY_PER_SUBJECT = 16
 _MAX_SUBJECTS = 4096
 
 
+def decode_recovery_json(payload: str) -> object:
+    """Normalize the native JSON decoder's excessive-nesting refusal."""
+    try:
+        return json.loads(payload)
+    except RecursionError as exc:
+        raise ValueError("Recovery JSON nesting exceeds the decoder budget") from exc
+
+
 def _decode(payload: str) -> dict:
-    row = json.loads(payload)
+    row = decode_recovery_json(payload)
     legacy_keys = {"last_positive", "disposition", "detail", "notification_id"}
     if (
         not isinstance(row, dict)
@@ -190,17 +217,21 @@ class RecoveryJournal:
         return True
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, deadline: float | None = None):
         try:
             reject_links(self.path)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._protect()
-            with closing(sqlite3.connect(self.path, timeout=5)) as conn, conn:
+            with closing(sqlite3.connect(self.path, timeout=0 if deadline is not None else 5)) as conn, conn:
+                if deadline is not None:
+                    conn.set_progress_handler(lambda: int(time.monotonic() >= deadline), 100)
                 protect(self.path)
                 conn.execute("PRAGMA synchronous=FULL")
                 conn.execute("BEGIN IMMEDIATE")
                 self._schema(conn, create=True)
                 yield conn
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise RecoveryEvidenceError("Restart checkpoint deadline expired.")
         except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
             raise RecoveryEvidenceError(
                 f"Could not persist restart recovery evidence ({type(exc).__name__}): {exc}"
@@ -330,15 +361,25 @@ class RecoveryJournal:
             return {"applied": True}
 
     def _shutdown_event(
-        self, platform: str, environment_id: str, boot_id: str, notification_id: str, *,
-        cancelled: bool,
+        self, platform: str, environment_id: str, boot_id: str,
+        notification_ids: frozenset[str], *,
+        cancelled: bool, deadline: float | None = None,
     ) -> None:
+        # One persisted ID per subject, plus this adapter's current native event.
+        if (
+            not isinstance(notification_ids, frozenset) or not notification_ids
+            or len(notification_ids) > _MAX_SUBJECTS + 1
+            or not cancelled and len(notification_ids) != 1
+        ):
+            raise ValueError("Invalid recovery notification identity budget")
+        for identifier in notification_ids:
+            _text(identifier, "notification", 256)
         for name, value in (
             ("platform", platform), ("environment", environment_id),
-            ("boot", boot_id), ("notification", notification_id),
+            ("boot", boot_id),
         ):
             _text(value, name, 256)
-        with self._transaction() as conn:
+        with self._transaction(deadline=deadline) as conn:
             rows = conn.execute(
                 "SELECT payload FROM journal WHERE id IN "
                 "(SELECT max(id) FROM journal GROUP BY project, worktree_id)"
@@ -352,28 +393,47 @@ class RecoveryJournal:
                     continue
                 if cancelled:
                     if (
-                        row["disposition"] != "shutdown-pending"
-                        or row["notification_id"] != notification_id
+                        row["disposition"] not in {"shutdown-pending", "shutdown-interrupted"}
+                        or row["notification_id"] not in notification_ids
                     ):
                         continue
-                    row.update(disposition="live", notification_id="", detail="shutdown-cancelled")
+                    interrupted = row["disposition"] == "shutdown-interrupted"
+                    row.update(
+                        disposition="unknown" if interrupted else "live",
+                        notification_id="",
+                        detail=(
+                            "native-end-after-cancel-unconfirmed" if interrupted
+                            else "shutdown-cancelled"
+                        ),
+                    )
                 else:
                     if row["disposition"] != "live":
                         continue
-                    row.update(disposition="shutdown-pending", notification_id=notification_id)
+                    row.update(
+                        disposition="shutdown-pending",
+                        notification_id=next(iter(notification_ids)),
+                    )
                 self._append(conn, evidence, row)
 
     def shutdown_pending(
         self, platform: str, environment_id: str, boot_id: str, *, notification_id: str,
+        deadline: float | None = None,
     ) -> None:
         """Freeze eligible positive generations before shutdown teardown."""
-        self._shutdown_event(platform, environment_id, boot_id, notification_id, cancelled=False)
+        self._shutdown_event(
+            platform, environment_id, boot_id, frozenset({notification_id}),
+            cancelled=False, deadline=deadline,
+        )
 
     def shutdown_cancelled(
-        self, platform: str, environment_id: str, boot_id: str, *, notification_id: str,
+        self, platform: str, environment_id: str, boot_id: str, *,
+        notification_id: str | frozenset[str],
     ) -> None:
-        """Cancel only the matching notification, never revive an explicit exit."""
-        self._shutdown_event(platform, environment_id, boot_id, notification_id, cancelled=True)
+        """Cancel matching notification identities atomically, never explicit exits."""
+        identifiers = (
+            frozenset({notification_id}) if isinstance(notification_id, str) else notification_id
+        )
+        self._shutdown_event(platform, environment_id, boot_id, identifiers, cancelled=True)
 
     def snapshot(self, *, recover_existing: bool = False) -> list[dict]:
         """Read evidence without creating absent storage or launch intent.

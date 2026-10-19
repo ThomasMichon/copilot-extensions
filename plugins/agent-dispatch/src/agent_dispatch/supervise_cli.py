@@ -30,6 +30,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .client_authority import (
+    locked_supervisor_status,
+    supervisor_authority_target as _supervisor_authority_target,
+)
 from .loop_commands import _resolve_cli_module
 
 
@@ -89,24 +93,17 @@ def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
         "backing_off": summary.backing_off,
         "dead": getattr(summary, "dead", []),
     }
+    if "owner" in (previous or {}):
+        payload["owner"] = previous["owner"]
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
 
 
-def _write_supervisor_cycle_start(scope: str, cycle_id: int, started_at: float) -> None:
-    """Mark a reconcile cycle as started, *before* it runs.
-
-    Written and read independently of :func:`_write_supervisor_runtime_status`
-    (which only lands after a cycle **finishes**) so a stuck cycle is
-    detectable while it is still stuck: ``cycle_started_at`` advances every
-    cycle regardless of outcome, while ``updated_at`` only advances on a
-    completed one. A large, growing gap between the two -- not just an old
-    ``updated_at`` alone -- is the specific, unambiguous signature of a wedge
-    (the process alive but blocked inside one reconcile call), distinct from a
-    dead process (no writer at all) or a genuinely idle one (both advance
-    together, cheaply, every ``poll_interval``).
-    """
+def _write_supervisor_cycle_start(
+    scope: str, cycle_id: int, started_at: float, *, authority_target: str | None = None,
+) -> None:
+    """Publish the master's queued cycle-start observation, not recovery authority."""
     path = _supervisor_runtime_status_path(scope)
     path.parent.mkdir(parents=True, exist_ok=True)
     previous, _err = _read_supervisor_runtime_status(scope)
@@ -119,6 +116,8 @@ def _write_supervisor_cycle_start(scope: str, cycle_id: int, started_at: float) 
         "pid": os.getpid(), "start_token": process_start_token(os.getpid()),
     }
     payload["progress"] = {"phase": "starting", "observed_at": started_at, "cycle_id": cycle_id}
+    if authority_target is not None:
+        payload["owner"] = {"pid": os.getpid(), "authority_target": authority_target}
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
@@ -345,7 +344,9 @@ def _cmd_supervise_remove(args: argparse.Namespace) -> int:
         return _emit(c.remove_registration(args.id))
 
 
-def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
+def _spawn_supervisor_daemon_detached(
+    machine: str | None, env: str, *, target_args: tuple[str, ...] = (),
+) -> bool:
     """Best-effort: launch the singleton supervisor daemon as a detached child.
 
     Runs ``agent-dispatch supervise serve`` for this (machine, env) fully detached
@@ -358,7 +359,7 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
     # Canonically-resolved current-version slot, not sys.executable -- see
     # resolve_own_runtime_python's docstring for why a raw sys.executable here is
     # a footgun (this is the sibling spawn site to _spawn_coordinator_process).
-    argv = [resolve_own_runtime_python(), "-m", "agent_dispatch", "supervise", "serve"]
+    argv = [resolve_own_runtime_python(), "-m", "agent_dispatch", *target_args, "supervise", "serve"]
     if machine:
         argv += ["--machine", machine]
     if env:
@@ -376,24 +377,18 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
 def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env: str) -> dict:
     """Ensure a singleton supervisor daemon is running for this (machine, env).
 
-    ``--ensure`` only ever ensures a daemon for the *local* host. A registration's
-    ``--machine`` names where the work should run, not an instruction for this
-    invocation to become that machine: a scope that names a different machine
-    than this host's own resolved identity is a foreign scope and is a no-op
-    here -- silently starting a same-named-but-elsewhere supervisor process
-    would leave a persistent, wrongly-scoped daemon running on the wrong box
-    with nothing (a local ``daemon-status``/``supervise list`` check included)
-    to reveal it (github.com/ThomasMichon/copilot-extensions#2791). The correct
-    machine's *own* session is expected to run its own ``--ensure`` (or its
-    already-installed supervisor service) for its own scope.
+    ``--machine`` names the work's target, not permission to become that host.
+    Foreign scopes are no-ops here: the target machine's own session or
+    installed service must ensure its scope (#2791).
 
-    Otherwise, checks the supervisor lease first; if a daemon already holds it,
-    this is a no-op. Otherwise it launches one detached. Best-effort and
-    fail-soft -- a failure to ensure never fails the register call.
+    Otherwise, checks the supervisor lease first; an explicit target only
+    accepts a holder whose status receipt binds that same target to its PID.
+    Conflicting or unknown targets are reported without another daemon.
+    Best-effort and fail-soft -- a failure to ensure never fails registration.
     """
     from . import remote_dispatch
     from .config import run_dir
-    from .single_instance import is_locked, lock_path_for
+    from .single_instance import is_locked, lock_path_for, read_holder_pid
     from .supervisor_daemon import supervisor_lease_scope
 
     if remote_dispatch.is_peer_machine(machine):
@@ -410,11 +405,17 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
 
     scope = supervisor_lease_scope(machine, env)
     try:
-        if is_locked(lock_path_for(run_dir(), scope)):
-            return {"ensured": False, "reason": "already running"}
+        lock_path = lock_path_for(run_dir(), scope)
+        if is_locked(lock_path):
+            status, error = _read_supervisor_runtime_status(scope)
+            return locked_supervisor_status(
+                args, scope, status=status, holder=read_holder_pid(lock_path), error=error,
+            )
     except OSError:  # noqa: BLE001 -- fail-soft; fall through to a spawn attempt
         pass
-    spawned = _spawn_supervisor_daemon_detached(machine, env)
+    from .client_authority import target_cli_args
+
+    spawned = _spawn_supervisor_daemon_detached(machine, env, target_args=tuple(target_cli_args(args)))
     return {"ensured": spawned, "reason": "spawned" if spawned else "spawn failed"}
 
 
@@ -476,6 +477,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         declared_source = registrar_discovery.read_legacy_env_profiles
 
     from .supervisor_daemon import _self_update_settings
+    from .client_authority import target_cli_args
 
     _su_enabled, _su_poll, _su_cooldown = _self_update_settings()
 
@@ -490,6 +492,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             # connection failure -- the coordinator's ephemeral port moves on
             # restart, so a cached one would wedge the daemon (#3825).
             client_factory=lambda: _client(args, ensure=False),
+            target_args=tuple(target_cli_args(args)),
             # Live self-update (#2259): default-ON / opt-out via
             # AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0. Reuses this process's own
             # sys.argv[1:] to respawn the successor with the identical
@@ -504,6 +507,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         def _on_cycle_start(cycle_id: int, started_at: float) -> None:
             daemon.queue_cycle_start(cycle_id, started_at, lambda cycle, timestamp: _write_supervisor_cycle_start(
                 supervisor_lease_scope(machine, env), cycle, timestamp,
+                authority_target=_supervisor_authority_target(args),
             ))
 
         def _on_cycle(summary) -> None:
@@ -778,6 +782,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         fleet = FleetSpawner(
             pool,
             origin=origin,
+            route=_spawn_route(args),
             headless=fleet_headless,
             agent=getattr(args, "headless_agent", None) or "task-worker",
             charter=getattr(args, "charter", None),

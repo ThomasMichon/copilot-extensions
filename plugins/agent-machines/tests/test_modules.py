@@ -36,6 +36,50 @@ def test_parse_modules(tmp_path):
     assert pkg.repo_root() == (tmp_path / "acme").resolve()
 
 
+@pytest.mark.parametrize("schema_version", [1, 2, 3, 4])
+@pytest.mark.parametrize("flag", [None, "true", "false", 0, 1, 1.0, [], {}])
+def test_module_maintenance_safe_rejects_nonboolean(tmp_path, schema_version, flag):
+    data = {
+        "schema_version": schema_version, "package": "example/modules", "manage": {},
+        "modules": [{"name": "probe", "maintenance_safe": flag}],
+    }
+    with pytest.raises(ManifestError, match="maintenance_safe must be a boolean"):
+        load_package(write_package(tmp_path / "example", "modules.yaml", data))
+
+
+@pytest.mark.parametrize("flag", [False, True])
+def test_module_maintenance_safe_accepts_boolean(tmp_path, flag):
+    data = {
+        "schema_version": 4, "package": "example/modules", "manage": {},
+        "modules": [{"name": "probe", "maintenance_safe": flag}],
+    }
+    pkg = load_package(write_package(tmp_path / "example", "modules.yaml", data))
+    assert pkg.modules[0]["maintenance_safe"] is flag
+
+
+@pytest.mark.parametrize("plat", ["windows", "linux", "wsl"])
+def test_maintenance_safe_preserves_module_gates(tmp_path, monkeypatch, plat):
+    pkg = _mod_package(tmp_path, plat="linux")
+    pkg.modules[0]["maintenance_safe"] = True
+    called = []
+    monkeypatch.setattr(
+        modules, "run_module",
+        lambda *args: called.append(args) or modules.ModuleResult(
+            "probe", "acme", ran=True, dry_run=False, returncode=0,
+        ),
+    )
+    results = modules.run_modules(
+        [pkg], "box-1", plat, dry_run=False, maintenance_safe=True,
+    )
+    assert len(results) == len(called) == (0 if plat == "windows" else 1)
+    called.clear()
+    pkg.modules[0]["gate"] = ["other"]
+    assert modules.run_modules(
+        [pkg], "box-1", plat, dry_run=False, maintenance_safe=True,
+    ) == []
+    assert called == []
+
+
 def test_module_without_name_rejected(tmp_path):
     data = {"schema_version": 1, "package": "a/x", "manage": {}, "modules": [{"linux": {}}]}
     path = write_package(tmp_path / "a", "m.yaml", data)
@@ -138,10 +182,12 @@ def _provider_package(tmp_path: Path):
     )
 
 
+@pytest.mark.parametrize("maintenance_safe", [False, True])
 def test_payload_provider_invocation_uses_attributed_shim(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, maintenance_safe
 ):
     pkg = _provider_package(tmp_path)
+    pkg.modules[0]["maintenance_safe"] = True
     payload = tmp_path / "payload"
     shim = payload / "bin" / "agent-ssh.ps1"
     shim.parent.mkdir(parents=True)
@@ -166,17 +212,16 @@ def test_payload_provider_invocation_uses_attributed_shim(
 
     monkeypatch.setattr(modules.subprocess, "run", run)
 
-    result = modules.run_module(
-        pkg,
-        pkg.modules[0],
-        "windows",
-        dry_run=True,
-    )
+    environment_before = dict(modules.os.environ)
+    result = modules.run_modules(
+        [pkg], "box-1", "windows", dry_run=True, maintenance_safe=maintenance_safe,
+    )[0]
 
     assert result.ok
     assert result.command[-1] == "--dry-run"
     assert captured["kwargs"]["env"]["COPILOT_PLUGIN_ROOT"] == str(payload)
     assert str(shim) in captured["command"]
+    assert dict(modules.os.environ) == environment_before
 
 
 def test_payload_provider_honors_commands_output_dir_and_cmd_shim(

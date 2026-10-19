@@ -219,6 +219,14 @@ when its platform block declares `dry_run_args`; otherwise it is safely skipped.
 Module failures are reported in the result but do not prevent later modules from
 running.
 
+Blanket maintenance-safe restore runs a module only when its declaration has
+the boolean `maintenance_safe: true`. Omitted/false declarations produce skipped
+results; explicit nonboolean values (including null) fail manifest loading.
+This consent does not bypass applicability, trusted-source or preview gates.
+Explicit `--only <module>` retains its operator-directed exception, with module
+selection applied before command execution rather than filtering only results.
+The same executor handles ordinary, opted-in maintenance and explicit runs.
+
 The public plugin does not ship OS-mutating modules. Those stay repo-local.
 Module authority is reporting-only and uses the explicit
 `authority_mode: opaque-additive`: all applicable modules remain additive,

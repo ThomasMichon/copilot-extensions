@@ -26,12 +26,13 @@ def write(path, value):
 
 
 def fixture(tmp_path, *, name="alpha", versions=("1.0.0",)):
+    payload_version = versions[0] if versions else "1.0.0"
     payload = tmp_path / name
     payload.mkdir(parents=True)
     (payload / "content").write_text("payload", encoding="utf-8")
-    write(payload / "plugin.json", {"name": "agent-machines", "version": versions[0]})
+    write(payload / "plugin.json", {"name": "agent-machines", "version": payload_version})
     stamped = ic.stamp_context(
-        payload_root=payload, plugin_id="agent-machines", payload_version=versions[0], payload_origin="explicit",
+        payload_root=payload, plugin_id="agent-machines", payload_version=payload_version, payload_origin="explicit",
         expected_namespace_generation=0, expected_install_generation=0,
         durable_home=tmp_path / "d", source_descriptor={"source": "github", "repo": f"example-org/{name}"},
         marketplace_key=name, environment={},
@@ -57,11 +58,11 @@ def fixture(tmp_path, *, name="alpha", versions=("1.0.0",)):
             "payload_hash": ic._snapshot_content_sha256(snapshot),
         })
         ic.complete_runtime_slot(**common, runtime_version=version,
-                                 expected_payload_root=payload, expected_payload_version=versions[0])
+                                 expected_payload_root=payload, expected_payload_version=payload_version)
     args = argparse.Namespace(
         action="cell-repair", context=stamped["installReceipt"], durable_home=str(tmp_path / "d"),
         expected_marketplace_id=stamped["marketplaceId"], expected_payload_root=str(payload),
-        expected_payload_version=versions[0], snapshot_id=versions[0], runtime_version=versions[0],
+        expected_payload_version=payload_version, snapshot_id=payload_version, runtime_version=payload_version,
         expected_namespace_generation=stamped["namespaceGeneration"], expected_install_generation=stamped["generation"],
         expected_activation_generation=None, expected_tombstone_activation_generation=None,
         expect_tombstone_absent=False,
@@ -107,38 +108,46 @@ STYLES = (["bash"] if os.name != "nt" and shutil.which("bash") else []) + (
 
 
 @pytest.mark.parametrize("style", STYLES)
-def test_adapters_repair_uninstall_preserve_isolate_replay(tmp_path, style):
-    root, args = fixture(tmp_path, versions=("1.0.0", "2.0.0"))
+@pytest.mark.parametrize("transition", ["repair", "healthy", "uninstall", "replay"])
+def test_adapters_repair_uninstall_preserve_isolate_replay(tmp_path, style, transition):
+    # Replay starts from the empty owned state verified by the uninstall case.
+    versions = () if transition == "replay" else ("1.0.0", "2.0.0")
+    root, args = fixture(tmp_path, versions=versions)
+    if transition == "replay":
+        for name in ("versions", "snapshots"):
+            (root / name).mkdir()
     peer, _ = fixture(tmp_path, name="beta")
     immutable = {p: p.read_bytes() for p in root.rglob("*.json")}
     state = root / "state" / "inventory.json"
     write(state, {"keep": True})
     peer_before = {p: p.read_bytes() for p in peer.rglob("*") if p.is_file()}
-    first = adapter(style, args)
-    assert first.returncode == 0, first.stderr
-    assert json.loads(first.stdout)["reason"] == "cell-repaired"
-    select(args)
-    second = adapter(style, args)
-    assert second.returncode == 0, second.stderr
-    assert json.loads(second.stdout)["reason"] == "cell-repair-healthy"
-    assert all(p.read_bytes() == content for p, content in immutable.items())
-    for name in ("run", "logs", "cache", "launchers"):
-        write(root / name / "derived.json", {"generated": True})
-    args.action = "cell-uninstall"
+    if transition in {"healthy", "uninstall"}:
+        assert engine.lifecycle(args)["reason"] == "cell-repaired"
+        select(args)
+    if transition == "uninstall":
+        for name in ("run", "logs", "cache", "launchers"):
+            write(root / name / "derived.json", {"generated": True})
+    if transition in {"uninstall", "replay"}:
+        args.action = "cell-uninstall"
     result = adapter(style, args)
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    assert report["reason"] == "cell-uninstalled", report
-    assert report["removed"][:2] == ["current-version", "last-known-good"]
-    assert not list((root / "versions").iterdir())
-    assert not list((root / "snapshots").iterdir())
+    if transition in {"repair", "healthy"}:
+        assert report["reason"] == (
+            "cell-repaired" if transition == "repair" else "cell-repair-healthy"
+        ), report
+        assert all(p.read_bytes() == content for p, content in immutable.items())
+    else:
+        if transition == "uninstall":
+            assert report["reason"] == "cell-uninstalled", report
+            assert report["removed"][:2] == ["current-version", "last-known-good"]
+        else:
+            assert report["status"] == "preserved", report
+        assert not list((root / "versions").iterdir())
+        assert not list((root / "snapshots").iterdir())
     assert state.read_text().strip() == '{"keep": true}'
     assert all(p.read_bytes() == content for p, content in peer_before.items())
     assert (root / "install.json").read_bytes() == immutable[root / "install.json"]
-    select(args, None)
-    replay = adapter(style, args)
-    assert replay.returncode == 0, replay.stderr
-    assert json.loads(replay.stdout)["status"] == "preserved"
 
 
 @pytest.mark.parametrize("style", STYLES)

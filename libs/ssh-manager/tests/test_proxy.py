@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -15,6 +18,134 @@ from agent_procutil import no_window_kwargs, windowless_python
 from ssh_manager import SSHConfig
 from ssh_manager import proxy
 from ssh_manager.process import register_process_cleanup, run_process_cleanup
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("prior_state", [None, "original-parent-state"])
+async def test_native_probe_cancels_pipe_drain_even_when_cleanup_fails(
+    tmp_path, monkeypatch, cleanup_fails, prior_state,
+):
+    fixture = Path(__file__).parent / "fixtures" / "windows_proxy_probe.py"
+    spec = importlib.util.spec_from_file_location("native_proxy_probe", fixture)
+    assert spec is not None and spec.loader is not None
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    monkeypatch.setattr(probe, "console_window", lambda: 0)
+    monkeypatch.setattr(probe, "terminal_windows", lambda: {})
+    monkeypatch.setattr(probe, "drive_procutil_spawn", AsyncMock(return_value={}))
+    if prior_state is None:
+        monkeypatch.delenv(probe.DESCRIPTOR_STATE, raising=False)
+    else:
+        monkeypatch.setenv(probe.DESCRIPTOR_STATE, prior_state)
+    monkeypatch.setenv("SSH_MANAGER_TEST_SSH", sys.executable)
+    monkeypatch.setenv("SSH_MANAGER_TEST_SSH_KIND", "native")
+    drains = []
+    processes = []
+
+    async def communicate(marker):
+        drains.append(asyncio.current_task())
+        marker.write_text(json.dumps({
+            "console_handles": [0], "inherited_descriptor_state": False,
+        }), encoding="utf-8")
+        await asyncio.Event().wait()
+
+    async def spawn(*args, **kwargs):
+        marker = tmp_path / f"proxy-{len(processes)}.json"
+        process = SimpleNamespace(returncode=None, communicate=lambda: communicate(marker))
+        processes.append(process)
+        return process
+
+    async def terminate(process):
+        process.returncode = 1
+        if cleanup_fails:
+            raise RuntimeError("owned cleanup failed")
+
+    monkeypatch.setattr(proxy, "create_ssh_subprocess", spawn)
+    monkeypatch.setattr("ssh_manager.process.terminate_ssh_process_tree", terminate)
+    monkeypatch.setattr("ssh_manager.process.run_process_cleanup", AsyncMock())
+    try:
+        if cleanup_fails:
+            with pytest.raises(RuntimeError, match="owned cleanup failed"):
+                await asyncio.wait_for(probe.drive(tmp_path), timeout=1)
+        else:
+            evidence = await asyncio.wait_for(probe.drive(tmp_path), timeout=1)
+            assert len(evidence["cycles"]) == 2
+        assert len(drains) == (1 if cleanup_fails else 2)
+        assert all(task.cancelled() for task in drains)
+        restored_state = os.environ.get(probe.DESCRIPTOR_STATE)
+        assert restored_state == prior_state
+    finally:
+        for task in drains:
+            task.cancel()
+        await asyncio.gather(*drains, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("environment", ["ambient", "ambient-none", "explicit", "empty"])
+@pytest.mark.parametrize("has_proxy", [False, True])
+@pytest.mark.parametrize("descriptor_present", [False, True])
+async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
+    monkeypatch, windows, environment, has_proxy, descriptor_present,
+):
+    key = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
+    inherited = {
+        "OTHER_POSIX_FD_STATE": "keep",
+        "GH_TOKEN": "synthetic-account-value",
+    }
+    if descriptor_present:
+        inherited.update({
+            key: "synthetic-descriptors",
+            key.upper(): "synthetic-case-variant",
+        })
+    monkeypatch.setattr(proxy, "_is_windows", lambda: windows)
+    monkeypatch.setattr(os, "environ", dict(inherited))
+    explicit = {} if environment == "empty" else dict(inherited)
+    ambient = environment.startswith("ambient")
+    before = dict(os.environ if ambient else explicit)
+    process = SimpleNamespace(wait=AsyncMock(return_value=0))
+    spawn = AsyncMock(return_value=(process, None))
+    broker_environments = []
+    broker = SimpleNamespace(start=AsyncMock(return_value=34567), close=AsyncMock())
+
+    def make_broker(command, env, **kwargs):
+        broker_environments.append(env)
+        return broker
+
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(proxy, "_ProxyBroker", make_broker)
+    monkeypatch.setattr(proxy, "_resolve_shell", AsyncMock(return_value=None))
+    monkeypatch.setattr(proxy, "_split_windows_command", lambda command: ["proxy"])
+    monkeypatch.setattr(proxy, "_client_command", lambda *args, **kwargs: "client")
+    kwargs = {} if environment == "ambient" else {"env": explicit}
+    if environment == "ambient-none":
+        kwargs = {"env": None}
+    try:
+        await proxy.create_ssh_subprocess(
+            "ssh", "example",
+            config=SSHConfig("example", user="probe", proxy_command="proxy" if has_proxy else None),
+            **kwargs,
+        )
+        if windows and descriptor_present and environment != "empty":
+            expected = {
+                name: value for name, value in before.items()
+                if name.casefold() != key.casefold()
+            }
+            assert spawn.await_args.kwargs["env"] == expected
+            if has_proxy:
+                assert broker_environments == [expected]
+        elif ambient:
+            assert spawn.await_args.kwargs.get("env") is None
+            if has_proxy and windows:
+                assert broker_environments == [None]
+        else:
+            assert spawn.await_args.kwargs["env"] == before
+            if has_proxy and windows:
+                assert broker_environments == [before]
+        assert dict(os.environ if ambient else explicit) == before
+    finally:
+        await run_process_cleanup(process)
 
 
 @pytest.mark.asyncio

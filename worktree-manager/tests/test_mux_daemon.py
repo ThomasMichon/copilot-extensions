@@ -933,8 +933,9 @@ def test_drain_winning_before_loop_fence_prevents_new_mutation(tmp_path, monkeyp
 
     @contextlib.contextmanager
     def fence(runtime):
-        entries[0] += 1
-        if entries[0] == race_entry:
+        if runtime.server is not None:
+            entries[0] += 1
+        if runtime.server is not None and entries[0] == race_entry:
             runtime.begin_drain()
             assert runtime.drain({"timeout": 0})["drained"] is True
         with original_fence(runtime):
@@ -1728,6 +1729,9 @@ def test_runtime_health_reports_version_attached_clients_and_busy(tmp_path):
             "version": __version__,
             "attached_clients": 0,
             "busy": False,
+            "restart_recovery": {
+                "admitted": False, "automatic_eligible": False, "capabilities": {},
+            },
         }
 
         runtime.server.subscribe("client-1")

@@ -271,7 +271,11 @@ fast-forward pulls of discovered adopted repos, each owning repo's
 --apply --all-projects --maintenance-safe`). Maintenance-safe sweep restores
 always include `manage:` Copilot settings/permissions, include only resources
 that declare `maintenance_safe: true`, and also allow already-installed pinned
-package version realignment by default. Sweep no longer blanket-defers for an
+package version realignment by default. Repo-local modules remain excluded unless
+each individually trusted module declares boolean `maintenance_safe: true`;
+this is deliberate unattended-execution consent, not a safety guarantee. Normal
+applicability and dry-run gates still apply; malformed module flags are errors.
+Do not automatically opt existing modules in. Sweep no longer blanket-defers for an
 unrelated live worktree session; git fast-forward safety still stays per-repo.
 Neither tier mutates anything when its resolved config is "not opted in."
 

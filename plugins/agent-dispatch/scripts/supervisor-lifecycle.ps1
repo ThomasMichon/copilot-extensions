@@ -1,12 +1,119 @@
 $script:SupervisorAuditCorrelation = "$PID-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
 
+function Get-SupervisorDispatchArguments {
+    param([string]$CommandLine)
+    if (-not ('DispatchSupervisorCommandLine' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class DispatchSupervisorCommandLine {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CommandLineToArgvW(string commandLine, out int count);
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr value);
+    public static string[] Split(string commandLine) {
+        int count;
+        IntPtr values = CommandLineToArgvW(commandLine, out count);
+        if (values == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try {
+            string[] result = new string[count];
+            for (int i = 0; i < count; i++)
+                result[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(values, i * IntPtr.Size));
+            return result;
+        } finally { LocalFree(values); }
+    }
+}
+'@
+    }
+    $tokens = [DispatchSupervisorCommandLine]::Split($CommandLine)
+    if (-not $tokens.Count) { return @() }
+    $index = 1
+    $module = [IO.Path]::GetFileNameWithoutExtension($tokens[0])
+    $found = $module -in @('agent_dispatch', 'agent-dispatch')
+    if (-not $found) {
+        while ($index -lt $tokens.Count) {
+            $value = $tokens[$index]
+            if ($value -eq '-m') {
+                if ($index + 1 -ge $tokens.Count -or $tokens[$index + 1] -notin @('agent_dispatch', 'agent-dispatch')) { return @() }
+                $index += 2
+                $found = $true
+                break
+            }
+            if (-not $value.StartsWith('-') -or $value.StartsWith('-c')) { return @() }
+            if ($value -in @('-X', '-W', '--check-hash-based-pycs')) { $index += 2 } else { $index++ }
+        }
+    }
+    if (-not $found) { return @() }
+    while ($index -lt $tokens.Count -and $tokens[$index].StartsWith('-')) {
+        $option = ($tokens[$index] -split '=', 2)[0]
+        if ($option -in @('--local', '--shared') -and $tokens[$index] -eq $option) {
+            $index++
+        } elseif ($option -in @('--url', '--token', '--control-token')) {
+            if ($tokens[$index].Contains('=')) { $index++ }
+            elseif ($index + 1 -lt $tokens.Count -and -not $tokens[$index + 1].StartsWith('--')) {
+                $index += 2
+            } else { return @() }
+        } else { return @() }
+    }
+    if ($index -lt $tokens.Count) { return $tokens[$index..($tokens.Count - 1)] }
+    return @()
+}
+
+function Stop-SupervisorSnapshotProcess {
+    param($Snapshot)
+    $process = $null
+    try {
+        if (-not $Snapshot.CreationDate) { throw 'snapshot has no process creation identity' }
+        $expected = ([datetime]$Snapshot.CreationDate).ToUniversalTime().ToFileTimeUtc()
+        if (-not ('DispatchSupervisorProcessHandle' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class DispatchSupervisorProcessHandle {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    private static extern bool GetProcessTimes(
+        IntPtr handle, out long creation, out long exit, out long kernel, out long user);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    private static extern bool TerminateProcess(IntPtr handle, uint exitCode);
+    public static long CreationFileTime(IntPtr handle) {
+        long creation, exit, kernel, user;
+        if (!GetProcessTimes(handle, out creation, out exit, out kernel, out user))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        return creation;
+    }
+    public static void Terminate(IntPtr handle) {
+        if (!TerminateProcess(handle, 1))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+}
+'@
+        }
+        $process = Get-Process -Id ([int]$Snapshot.ProcessId) -ErrorAction Stop
+        $handle = $process.Handle
+        $actual = [DispatchSupervisorProcessHandle]::CreationFileTime($handle)
+        # CIM creation timestamps retain microseconds; FILETIME retains 100 ns.
+        if (($actual - ($actual % 10)) -ne ($expected - ($expected % 10))) {
+            throw 'process creation identity changed after inventory'
+        }
+        [DispatchSupervisorProcessHandle]::Terminate($handle)
+        return $true
+    } catch {
+        Write-Warn "Supervisor process $($Snapshot.ProcessId) not retired: $($_.Exception.Message)"
+        return $false
+    } finally {
+        if ($process) { $process.Dispose() }
+    }
+}
+
 function Invoke-SupervisorAudit {
     param(
         [string]$Event, [string]$Reason, [string]$Name = '',
         [string]$EnvFile = '', [string]$Outcome = 'begin', [int]$ExitCode = -1
     )
     try {
-    $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
+    $py = if (Test-Path -LiteralPath $VenvPython) { $VenvPython } elseif (Test-Path -LiteralPath $LinkPython) { $LinkPython } else { $null }
     if (-not $py) {
         Write-Warn "Supervisor lifecycle audit unavailable ($Event/$Reason); action is not suppressed"
         return

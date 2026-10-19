@@ -28,8 +28,17 @@ class AhpConfig:
 
 
 @dataclass(frozen=True)
+class RestartRecoveryConfig:
+    """Explicit local requests, not proof of runtime recovery capability."""
+
+    shutdown_notifications: bool = False
+    automatic_restore: bool = False
+
+
+@dataclass(frozen=True)
 class ManagerConfig:
     ahp: AhpConfig = AhpConfig()
+    restart_recovery: RestartRecoveryConfig = RestartRecoveryConfig()
 
 
 def _load(path: Path) -> dict:
@@ -37,7 +46,7 @@ def _load(path: Path) -> dict:
         value = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
         raise ManagerConfigError(f"could not read {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise ManagerConfigError(f"{path} must contain TOML tables")
@@ -49,6 +58,19 @@ def _positive_timeout(table: dict, key: str, default: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
         raise ManagerConfigError(f"ahp.{key} must be a positive number")
     return float(value)
+
+
+def _restart_recovery(data: dict) -> RestartRecoveryConfig:
+    raw = data.get("restart_recovery", {})
+    if not isinstance(raw, dict):
+        raise ManagerConfigError("restart_recovery must be a TOML table")
+    unknown = raw.keys() - {"shutdown_notifications", "automatic_restore"}
+    if unknown:
+        raise ManagerConfigError(f"unknown restart_recovery setting: {sorted(unknown)[0]}")
+    for key, value in raw.items():
+        if type(value) is not bool:
+            raise ManagerConfigError(f"restart_recovery.{key} must be a boolean")
+    return RestartRecoveryConfig(**raw)
 
 
 def load_config(root: Path | None = None) -> ManagerConfig:
@@ -80,6 +102,7 @@ def load_config(root: Path | None = None) -> ManagerConfig:
             "ahp.protocol_versions must be a non-empty string array"
         )
     return ManagerConfig(
+        restart_recovery=_restart_recovery(data),
         ahp=AhpConfig(
             endpoint_url=endpoint.strip(),
             account=account.strip(),

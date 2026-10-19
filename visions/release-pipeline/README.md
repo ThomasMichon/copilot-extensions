@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-16
+- **Last revised:** 2026-10-19
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -15,9 +15,11 @@ not a second product history or an independent artifact owner. Consumers and
 operators should be able to answer which development snapshot a release carries
 without treating an incidental generated Git commit as another release identity.
 
-Promotion should continuously deliver qualified development changes, ordinarily
-within the intended short validation cycle and at an hourly-or-faster cadence
-while changes await release. Repeated bookkeeping, composition or bootstrap
+Promotion should continuously deliver qualified development changes in less
+than thirty minutes end-to-end, including queueing, while changes await release.
+Its test gate consists only of unit tests with coverage; required PR testing
+selects that unit portfolio conditionally by impact. Repeated bookkeeping,
+composition or bootstrap
 failures should not turn release control into a barrier to its own repair.
 Agreement between artifact production and verification belongs in ordinary
 contribution checks, not as a first discovery during release qualification.
@@ -71,8 +73,10 @@ to belong to a different release.
 
 ### qualified-before-complete
 
-Required source, materialized-consumer and artifact-availability checks establish
-the actual release, not merely successful submission or an open generated PR.
+Complete admitted unit evidence and production artifact-availability/integrity
+establish the actual release, not merely successful submission or an open PR.
+Real-Git, multi-process, native, installation and end-to-end integration tests
+belong to periodic containerized validation, not release qualification.
 Publication and runtime activation remain distinct outcomes. Optional client
 artifact use and governed source assembly follow the
 [runtime admission contract](../plugin-services/runtime-assembly/README.md).
@@ -81,11 +85,10 @@ artifact use and governed source assembly follow the
 
 Changes affecting hashing, materialization, source-closure declarations or
 normalization prove producer and verifier agreement before entering development
-trunk. Bounded checks exercise the real composition and verification paths,
-including relevant platform and checkout representations. Coverage follows the
-actual contract inputs, not just edits to the verifier's own file. Release
-qualification confirms that tested contract rather than serving as its first
-integration test.
+trunk. Bounded in-process units exercise decision rules and representations;
+actual platform, checkout and composition integration runs periodically in
+containers. Coverage follows the relevant unit inputs, not just edits to the
+verifier's file. Promotion does not become an integration-test discovery loop.
 
 ## Behaviors
 
@@ -126,14 +129,30 @@ do not multiply the same exception into repeated approval requests.
 
 Release freshness measures qualified source advancement while development changes
 are pending. No-op workflows, queued requests and unqualified snapshots do not
-count as deliveries. Missed cadence names its actual blocker and owner; it is not
-hidden by a green wrapper or satisfied by weakening the qualification.
+count as deliveries. A normal release completes under thirty minutes including
+queueing. Missed cadence names its blocker and owner rather than hiding behind
+a green wrapper, a larger deadline or an ever-growing test gate.
+
+### unit-only-release-test-gate
+
+Promotion runs eligible unit tests and collects coverage once. Conditional PR
+testing uses that bounded unit portfolio. Integration does not rejoin the gate
+through a baseline, preflight, generated-consumer or qualification dependency.
+Slow or unclassified cases remain outside the release path.
+
+### periodic-integration-and-replacement
+
+Integration assurance remains available through periodic containerized
+validation with explicit failure ownership. Stable delivery comes first;
+subsequent portfolio improvement replaces lesser-value tests with more valuable
+eligible units within the same or smaller budget, instead of accumulating them.
 
 ## Non-Goals / Boundaries
 
 - No generated-main commit as a second durable release or artifact identity.
-- No removal of byte integrity, signing, exact locks, source governance or
-  required qualification to achieve a timing target.
+- No fake or omitted admitted-unit evidence, or removal of byte integrity,
+  signing, exact locks, source governance or publication authority.
+- No end-to-end, actual-Git or multi-process integration test in promotion.
 - No implicit authorization for a main repair, stale overwrite, forced tag
   movement or change to independently governed control preservation.
 - No second release channel, competing publisher or separate client provenance

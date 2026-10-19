@@ -84,9 +84,86 @@ def test_inspect_distinguishes_inventory_user_repo_and_trust(tmp_path):
         "inventoryEnabled": True,
         "userActivation": "true",
         "repositoryActivation": "true",
+        "repositoryLocalActivation": "absent",
         "repositoryTrusted": True,
         "installedButNotUserEnabled": False,
     }
+
+
+@pytest.mark.parametrize(
+    ("base", "local", "expected_base", "expected_local"),
+    [
+        (None, True, "absent", "true"),
+        (True, False, "true", "false"),
+        (False, True, "false", "true"),
+        (True, None, "true", "absent"),
+    ],
+)
+def test_inspect_reports_local_declaration_without_merging_or_mutating(
+    tmp_path, base, local, expected_base, expected_local
+):
+    home, repo = _state(tmp_path)
+    settings = repo / ".github" / "copilot"
+    (settings / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {} if base is None else {IDENTITY: base}}),
+        encoding="utf-8",
+    )
+    (settings / "settings.local.json").write_text(
+        json.dumps(
+            {"enabledPlugins": {} if local is None else {IDENTITY: local}, "keep": 1}
+        ),
+        encoding="utf-8",
+    )
+    before = {
+        path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+    }
+
+    result = _run(home, "inspect", IDENTITY, "--repo", str(repo))
+
+    assert result.returncode == 0, result.stderr
+    state = json.loads(result.stdout)
+    assert state["repositoryActivation"] == expected_base
+    assert state["repositoryLocalActivation"] == expected_local
+    assert state["userActivation"] == "true"
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{bad",
+        '{"enabledPlugins":[]}',
+        '{"enabledPlugins":{"optional-plugin@example-marketplace":"true"}}',
+        '{"enabledPlugins":{},"enabledPlugins":{}}',
+    ],
+)
+def test_inspect_refuses_invalid_repository_local_settings(tmp_path, content):
+    home, repo = _state(tmp_path)
+    (repo / ".github" / "copilot" / "settings.local.json").write_text(
+        content, encoding="utf-8"
+    )
+    result = _run(home, "inspect", IDENTITY, "--repo", str(repo))
+    assert result.returncode == 2
+    assert "settings.local.json" in result.stderr
+    assert not result.stdout
+
+
+def test_inspect_text_labels_local_declaration_separately(tmp_path):
+    home, repo = _state(tmp_path)
+    (repo / ".github" / "copilot" / "settings.local.json").write_text(
+        json.dumps({"enabledPlugins": {IDENTITY: False}}), encoding="utf-8"
+    )
+    result = subprocess.run(
+        [
+            sys.executable, str(SCRIPT), "inspect", IDENTITY,
+            "--copilot-home", str(home), "--repo", str(repo),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Repository activation: true\n" in result.stdout
+    assert "Repository-local declaration: false\n" in result.stdout
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows path comparison contract")
@@ -165,3 +242,4 @@ def test_inspect_treats_missing_optional_state_as_absent(tmp_path):
     state = json.loads(result.stdout)
     assert state["installed"] is False
     assert state["userActivation"] == "absent"
+    assert "repositoryLocalActivation" not in state

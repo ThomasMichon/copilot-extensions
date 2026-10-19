@@ -117,7 +117,10 @@ class RestartObserver:
                     else "same-boot" if evidence["boot_id"] == self.epoch.boot_id
                     else "previous-boot-unconfirmed"
                 )
-                candidates.append({**row, "reason": reason})
+                candidates.append({
+                    **row, "reason": reason,
+                    "capture_binding_qualified": PositiveEvidence(**evidence).recovery_binding_qualified,
+                })
             self.startup_result = {"candidates": candidates, "automatic_eligible": False}
             self._startup_complete = True
         except RecoveryEvidenceError as exc:
@@ -275,6 +278,14 @@ class RestartObserver:
                 activation_ordinal=owner.get("activation_ordinal", 0),
                 source_identity=owner.get("source_identity"),
                 lifecycle_qualified=owner.get("lifecycle_qualified", False),
+                worktree_incarnation=(
+                    owner.get("worktree_incarnation")
+                    if owner.get("recovery_binding_capability") == "worktree-head-v1" else None
+                ),
+                head_revision=(
+                    owner.get("head_revision")
+                    if owner.get("recovery_binding_capability") == "worktree-head-v1" else None
+                ),
             )
             self.last_result = self.journal.observe(evidence)
         except (engine_client.EngineError, RecoveryEvidenceError, OSError, ValueError, KeyError) as exc:

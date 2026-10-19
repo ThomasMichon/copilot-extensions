@@ -15,6 +15,20 @@ fail with ``control_authority_not_configured`` even though the installed
 
 from __future__ import annotations
 
+import os
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_production_environment_overlay(monkeypatch):
+    # Production overlays mutate os.environ directly, outside monkeypatch's undo log.
+    original = os.environ
+    before = dict(original)
+    monkeypatch.setattr(os, "environ", before.copy())
+    yield
+    assert dict(original) == before
+
 
 def test_apply_service_env_overlay_adds_control_token_command(tmp_path):
     from agent_dispatch.install_paths import apply_service_env_overlay

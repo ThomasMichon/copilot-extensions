@@ -17,6 +17,7 @@ Requires the optional ``mcp`` extra (``pip install 'agent-dispatch[mcp]'``).
 
 from __future__ import annotations
 
+import argparse
 import json
 from collections.abc import Callable
 from typing import Annotated, Any
@@ -24,7 +25,7 @@ from typing import Annotated, Any
 from pydantic import PlainValidator, StrictInt, WithJsonSchema
 
 from .client import DispatchClient, DispatchError
-from .config import client_control_token, client_token, client_url
+from .client_authority import Authority, default_authority
 from .identity import resolve_identity, resolve_repo, resolve_repo_selector
 from .queue import StructuredResult, worker_id_for
 
@@ -47,11 +48,9 @@ McpStructuredResult = Annotated[
 
 
 def _default_client() -> DispatchClient:
-    return DispatchClient(
-        client_url(),
-        token=client_token(),
-        control_token=client_control_token(),
-    )
+    from .loop_commands import _resolve_cli_module
+
+    return _resolve_cli_module()._client(argparse.Namespace())
 
 
 class DispatchTools:
@@ -70,10 +69,12 @@ class DispatchTools:
         client_factory: ClientFactory = _default_client,
         identity_resolver: IdentityResolver = resolve_identity,
         repo_resolver: RepoResolver = resolve_repo,
+        authority_resolver: Callable[[], Authority] = default_authority,
     ):
         self._client_factory = client_factory
         self._identity = identity_resolver
         self._repo = repo_resolver
+        self._authority = authority_resolver
 
     def _resolve(self, machine: str | None, worktree: str | None) -> tuple[str | None, str | None]:
         if machine is None or worktree is None:
@@ -352,6 +353,12 @@ class DispatchTools:
             registration = c.get_registration(registration_id)
             owner = registration.get("machine")
             if remote_dispatch.is_peer_machine(owner):
+                if self._authority() != "legacy":
+                    raise DispatchError(
+                        409, "remote emitter side-load cannot preserve the selected authority; "
+                        "invoke it on its owner with the same explicit writer. "
+                        "Coordinator credentials are not forwarded over SSH.",
+                    )
                 completed = remote_dispatch.browse_remote(
                     owner,
                     [
@@ -645,6 +652,6 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     return mcp
 
 
-def serve_stdio() -> None:
+def serve_stdio(tools: DispatchTools | None = None) -> None:
     """Run the local dispatch MCP server over stdio (blocking)."""
-    build_server().run(transport="stdio")
+    build_server(tools).run(transport="stdio")

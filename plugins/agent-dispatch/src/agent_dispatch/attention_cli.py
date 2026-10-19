@@ -35,14 +35,10 @@ def _core():
 
 
 def _target_cli(args: argparse.Namespace) -> tuple[str, ...]:
-    """The invocation that reaches this read's coordinator: its ``--url`` and
-    ``--shared``, never a token (the operator's environment supplies that)."""
-    cli = ["agent-dispatch"]
-    if getattr(args, "url", None):
-        cli += ["--url", args.url]
-    if getattr(args, "shared", False):
-        cli.append("--shared")
-    return tuple(cli)
+    """Pin the read's writer without copying credentials into action hints."""
+    from .client_authority import target_cli_args
+
+    return ("agent-dispatch", *target_cli_args(args, credentials=False))
 
 
 def _effective_cli(args: argparse.Namespace, client: Any) -> tuple[str, ...] | None:
