@@ -653,3 +653,11 @@ The umbrella effort remains Active independently of this slice's completion.
   binding and existing session
   lifecycle, hosting, frozen-storage and ordinary mux contracts. This is source
   validation, not a claim of native restart or shutdown qualification.
+- Provider review of #7271 found that the boolean mux-presence helper collapsed
+  failed probes into absence. Five regressions first failed. The check now uses
+  the existing tri-state listing: spawn denial, timeout and failed listing stay
+  unknown; confirmed empty/unrelated listings are distinct from an existing mux.
+  Both owner fixtures use that contract, including canonical dotted-name
+  matching. The disconnected owner lane passed 179 tests; Manager sources are
+  unchanged from their 196-test/three-skip receipt. The review fix still awaits
+  a new exact-head verdict and required CI.

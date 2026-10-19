@@ -126,7 +126,10 @@ def _refusal(record: tracking.WorktreeRecord, expected: dict) -> str | None:
         return "ended-native-activation"
     if not sessions.session_has_conversation_data(expected["native_session_id"]):
         return "missing-native-conversation"
-    if sessions.has_mux_session(record.worktree_id):
+    mux = sessions._list_mux_sessions()
+    if mux is None:
+        return "mux-state-unknown"
+    if sessions.mux_session_name(record.worktree_id) in mux:
         return "existing-mux"
     state = session_liveness(expected["native_session_id"])
     return None if state == "dead" else f"native-head-{state}"

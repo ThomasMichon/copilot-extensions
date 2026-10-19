@@ -175,7 +175,9 @@ Provisional current-worktree checks additionally use
 two release units. The tests cover exact incarnation/head/lifecycle/activation
 binding, pause/seed/task/claim/profile refusals, changed owner observations,
 transcript/mux/liveness blockers, target-epoch skew, malformed input and typed
-response mismatch. One actual child reads persisted owner YAML and a separate
+response mismatch. Failed/denied/timed-out mux probes stay unknown, confirmed
+empty listings qualify absence, and existing dotted worktree names use their
+canonical mux encoding. One actual child reads persisted owner YAML and a separate
 Manager/engine process fixture verifies the no-update/no-reconcile environment
 and unchanged real attempt storage. Process observations and native epochs are
 synthetic; these fixtures do not launch Copilot, qualify current task policy,

@@ -11,6 +11,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees import session_metadata_cli, tracking
+from agent_worktrees.sessions import _list_mux_sessions as real_mux_listing
 
 
 NATIVE = "00000000-0000-4000-8000-000000000001"
@@ -43,7 +44,7 @@ def subject(sample_record, tmp_path, monkeypatch):
     }
     monkeypatch.setattr(owner.native_source_context, "epoch", lambda: dict(EPOCH))
     monkeypatch.setattr(owner.sessions, "session_has_conversation_data", lambda _: True)
-    monkeypatch.setattr(owner.sessions, "has_mux_session", lambda _: False)
+    monkeypatch.setattr(owner.sessions, "_list_mux_sessions", lambda: {})
     monkeypatch.setattr(owner, "session_liveness", lambda _: "dead")
     return owner, record, expected
 
@@ -117,7 +118,10 @@ def test_missing_transcript_and_existing_mux_refuse(subject, monkeypatch):
     monkeypatch.setattr(owner.sessions, "session_has_conversation_data", lambda _: False)
     assert owner.check(expected, loader=lambda: record)["reason"] == "missing-native-conversation"
     monkeypatch.setattr(owner.sessions, "session_has_conversation_data", lambda _: True)
-    monkeypatch.setattr(owner.sessions, "has_mux_session", lambda _: True)
+    monkeypatch.setattr(
+        owner.sessions, "_list_mux_sessions",
+        lambda: {owner.sessions.mux_session_name(record.worktree_id): 0},
+    )
     assert owner.check(expected, loader=lambda: record)["reason"] == "existing-mux"
 
 
@@ -186,7 +190,7 @@ expected = json.loads(sys.argv[1])
 cli.cfg.tracking_dir = lambda: Path(sys.argv[2]).parent
 owner.native_source_context.epoch = lambda: expected["target_epoch"]
 owner.sessions.session_has_conversation_data = lambda _: True
-owner.sessions.has_mux_session = lambda _: False
+owner.sessions._list_mux_sessions = lambda: {}
 owner.session_liveness = lambda _: "dead"
 args = core.build_parser().parse_args(["session-role", "--restart-check", sys.argv[1], "--json"])
 raise SystemExit(cli.cmd_session_role(args))
@@ -222,3 +226,50 @@ def test_released_claim_metadata_is_not_current_policy_proof(subject):
     claim = tracking.ResourceClaim(kind="task", ref="dispatch-task:old-task", state="released")
     record.resources.append(claim)
     assert owner.check(expected, loader=lambda: record)["reason"] == "claim-policy-unqualified"
+
+
+@pytest.mark.parametrize("failure", [
+    PermissionError("mux socket denied"),
+    subprocess.TimeoutExpired(["tmux", "list-sessions"], 5),
+    subprocess.CompletedProcess(["tmux", "list-sessions"], 1, stdout="", stderr="permission denied"),
+])
+def test_failed_real_mux_listing_never_qualifies(subject, monkeypatch, failure):
+    owner, record, expected = subject
+    monkeypatch.setattr(owner.sessions, "_list_mux_sessions", real_mux_listing)
+
+    def run(*args, **kwargs):
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = owner.check(expected, loader=lambda: record)
+    assert result["reason"] == "mux-state-unknown"
+    assert result["worktree_qualified"] is False
+    assert result["launch_authorized"] is False
+
+
+@pytest.mark.parametrize("listing,qualified,reason", [
+    (None, False, "mux-state-unknown"),
+    ({}, True, "current-worktree-matches"),
+    ({"unrelated": 1}, True, "current-worktree-matches"),
+])
+def test_mux_listing_distinguishes_uncertainty_from_confirmed_absence(
+    subject, monkeypatch, listing, qualified, reason,
+):
+    owner, record, expected = subject
+    monkeypatch.setattr(owner.sessions, "_list_mux_sessions", lambda: listing)
+    result = owner.check(expected, loader=lambda: record)
+    assert result["worktree_qualified"] is qualified
+    assert result["reason"] == reason
+
+
+def test_existing_mux_uses_canonical_encoded_identity(subject, monkeypatch):
+    owner, record, expected = subject
+    record = replace(record, worktree_id=record.worktree_id + ".dotted")
+    expected = {**expected, "worktree_id": record.worktree_id}
+    monkeypatch.setattr(
+        owner.sessions, "_list_mux_sessions",
+        lambda: {owner.sessions.mux_session_name(record.worktree_id): 0},
+    )
+    assert owner.check(expected, loader=lambda: record)["reason"] == "existing-mux"

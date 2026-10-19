@@ -410,7 +410,10 @@ native death and absent mux matched, followed by an unchanged owner reread.
 It is a provisional snapshot, **not** a reservation or a launch capability.
 Changed heads/incarnations/lifecycle, terminal or paused worktrees, pause
 history, pending handoffs/seeds, indirect/missing paths, ended or ambiguous
-activations and uncertain/live processes refuse with a reason. Task provenance,
+activations and uncertain/live processes refuse with a reason.
+Mux listing errors/timeouts remain `mux-state-unknown`, not confirmed absence;
+an empty successful listing is distinct from a failed probe.
+Task provenance,
 claim metadata and bound/profile-assigned worktrees remain conservatively
 unqualified; their current owners' policy is not inferred from that metadata
 or its absence. Even a matching worktree always returns

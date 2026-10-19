@@ -580,6 +580,8 @@ even on a match. Neither command writes an attempt outcome, reserves a launch,
 starts a conversation, changes enrollment or contacts the host notification
 service. Ordinary inspection makes no owner call, and the resident daemon has
 no additional polling or blocking work from this opt-in check.
+Failed or timed-out mux listings remain unknown and cannot establish the mux
+absence needed for even a provisional worktree match.
 
 Native Linux and WSL have evidence-epoch readers; WSL includes its init-process
 incarnation because a distro can restart without restarting the shared kernel.
