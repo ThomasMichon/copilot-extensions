@@ -12,6 +12,7 @@ import logging
 import re
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import quote
 
 from ..pr_review_policy import ReviewEvidence, outstanding_change_requests
@@ -26,23 +27,6 @@ query($owner:String!,$name:String!,$ref:String!) {
 }
 """
 
-_REVIEW_POLICY_QUERY = """
-query($owner:String!,$name:String!,$ref:String!) {
-  repository(owner:$owner,name:$name) {
-    ref(qualifiedName:$ref) {
-      branchProtectionRule {
-        requiresApprovingReviews
-        requiredApprovingReviewCount
-        requiresCodeOwnerReviews
-        requiresConversationResolution
-        requiresLastPushApproval
-      }
-    }
-  }
-}
-"""
-
-
 class RequiredChecksError(RuntimeError):
     pass
 
@@ -53,6 +37,12 @@ class ReviewExceptionIneligible(RequiredChecksError):
 
 class ReviewSafetyError(RequiredChecksError):
     """Mutation evidence is unsafe or incomplete; no merge write is permitted."""
+
+
+@dataclass(frozen=True)
+class ReviewExceptionEvidence:
+    head_sha: str
+    base_ref: str
 
 
 def _target_parts(repo: str, number: int) -> list[str]:
@@ -126,13 +116,14 @@ def merge_pull(
         "Normal GitHub merge refused for %s#%s; verifying configured admin fallback", repo, number,
     )
     try:
-        review_exception_evidence(
+        review_evidence = review_exception_evidence(
             repo, number, host=host, expected_head_sha=expected_head_sha,
             hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
             invoke=invoke,
         )
         verified_merge_head(
-            repo, number, host=host, expected_head_sha=expected_head_sha, invoke=invoke,
+            repo, number, host=host, expected_head_sha=expected_head_sha,
+            expected_base_ref=review_evidence.base_ref, invoke=invoke,
         )
     except RequiredChecksError as exc:
         return f"{error}; gh admin merge refused for {repo}#{number}: {exc}"
@@ -147,14 +138,14 @@ def review_exception_evidence(
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
     host: str, expected_head_sha: str = "",
     hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
-) -> str:
+) -> ReviewExceptionEvidence:
     """Prove the narrow missing-CODEOWNER-approval admin exception.
 
     The final merge still uses GitHub's expected-head CAS. GitHub exposes no
     atomic review-version CAS, so this re-read minimizes but cannot eliminate a
     provider lifecycle race after the evidence read.
     """
-    parts = _target_parts(repo, number)
+    _target_parts(repo, number)
 
     def read_json(args: list[str]) -> object:
         argv = ["gh", *args]
@@ -171,18 +162,30 @@ def review_exception_evidence(
         except json.JSONDecodeError as exc:
             raise ReviewSafetyError("review-exception verification returned invalid JSON") from exc
 
+    def read_optional_api(path: str) -> object | None:
+        result = invoke(["gh", "api", "--include", path, "--hostname", host])
+        text = result.stdout or ""
+        status = re.search(r"(?m)^HTTP/\\S+\\s+(\\d{3})\\b", text)
+        if result.returncode != 0 and status and status.group(1) == "404":
+            return None
+        if result.returncode != 0:
+            detail = result.stderr.strip() or text.strip()
+            raise ReviewSafetyError(
+                f"classic review-policy verification failed "
+                f"(exit {result.returncode}): {detail}"
+            )
+        body = re.split(r"\\r?\\n\\r?\\n", text)[-1]
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise ReviewSafetyError(
+                "classic review-policy verification returned invalid JSON"
+            ) from exc
+
     def obj(value: object, label: str) -> dict:
         if not isinstance(value, dict):
             raise ReviewSafetyError(f"{label} is unavailable or invalid")
         return value
-
-    decision = obj(read_json([
-        "pr", "view", str(number), "--repo", repo, "--json", "reviewDecision",
-    ]), "review decision").get("reviewDecision")
-    if decision != "REVIEW_REQUIRED":
-        raise ReviewExceptionIneligible(
-            "GitHub does not report missing required approval as the current review block"
-        )
 
     def identity() -> tuple[str, str]:
         pr = obj(read_json(["api", f"/repos/{repo}/pulls/{number}"]), "PR metadata")
@@ -248,6 +251,14 @@ def review_exception_evidence(
     if asking:
         raise ReviewSafetyError("active change request by " + ", ".join(asking))
 
+    decision = obj(read_json([
+        "pr", "view", str(number), "--repo", repo, "--json", "reviewDecision",
+    ]), "review decision").get("reviewDecision")
+    if decision != "REVIEW_REQUIRED":
+        raise ReviewExceptionIneligible(
+            "GitHub does not report missing required approval as the current review block"
+        )
+
     pages = read_json([
         "api", f"/repos/{repo}/rules/branches/{quote(base, safe='')}",
         "--paginate", "--slurp",
@@ -260,8 +271,13 @@ def review_exception_evidence(
             raise ReviewSafetyError("effective branch rules page is invalid")
         for raw in page:
             rule = obj(raw, "branch rule")
-            if rule.get("type") != "pull_request":
+            kind = rule.get("type")
+            if kind == "required_status_checks":
                 continue
+            if kind != "pull_request":
+                raise ReviewExceptionIneligible(
+                    f"additional unverified merge requirement is active: {kind or 'unknown'}"
+                )
             params = obj(rule.get("parameters"), "pull-request rule")
             codeowner = params.get("require_code_owner_review")
             count = params.get("required_approving_review_count")
@@ -291,29 +307,24 @@ def review_exception_evidence(
             "a missing CODEOWNER approval rule was not positively identified"
         )
 
-    classic = obj(read_json([
-        "api", "graphql", "-f", f"query={_REVIEW_POLICY_QUERY}",
-        "-f", f"owner={parts[0]}", "-f", f"name={parts[1]}",
-        "-f", f"ref=refs/heads/{base}",
-    ]), "classic branch-protection response")
-    if classic.get("errors"):
-        raise ReviewSafetyError("classic review policy could not be read completely")
-    protection = obj(obj(obj(classic.get("data"), "classic policy data")
-                         .get("repository"), "repository").get("ref"), "base branch").get(
-        "branchProtectionRule"
+    protection = read_optional_api(
+        f"/repos/{repo}/branches/{quote(base, safe='')}/protection"
     )
     if protection is not None:
         protection = obj(protection, "classic branch protection")
-        fields = (
-            "requiresApprovingReviews", "requiresCodeOwnerReviews",
-            "requiresConversationResolution", "requiresLastPushApproval",
-        )
-        if any(not isinstance(protection.get(field), bool) for field in fields):
-            raise ReviewSafetyError("classic review requirements are incomplete")
-        count = protection.get("requiredApprovingReviewCount")
-        if type(count) is not int or count < 0:
-            raise ReviewSafetyError("classic approval requirement is invalid")
-        if any(protection[field] for field in fields) or count:
+        reviews_policy = protection.get("required_pull_request_reviews")
+        if reviews_policy is not None:
+            reviews_policy = obj(reviews_policy, "classic review requirements")
+            count = reviews_policy.get("required_approving_review_count")
+            flags = (
+                "require_code_owner_reviews",
+                "required_review_thread_resolution",
+                "require_last_push_approval",
+            )
+            if type(count) is not int or count < 0 or any(
+                not isinstance(reviews_policy.get(flag), bool) for flag in flags
+            ):
+                raise ReviewSafetyError("classic review requirements are incomplete")
             raise ReviewExceptionIneligible(
                 "classic branch protection adds a review requirement without actor-scoped evidence"
             )
@@ -327,13 +338,13 @@ def review_exception_evidence(
             )
     if identity() != (head, base):
         raise ReviewSafetyError("PR head/base or mutation gates changed during review verification")
-    return head
+    return ReviewExceptionEvidence(head_sha=head, base_ref=base)
 
 
 def verified_merge_head(
     repo: str, number: int, *,
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
-    host: str, expected_head_sha: str = "",
+    host: str, expected_head_sha: str = "", expected_base_ref: str = "",
 ) -> str:
     """Return a pinned head only when all configured required checks pass."""
     parts = _target_parts(repo, number)
@@ -375,6 +386,8 @@ def verified_merge_head(
     head, base = identity()
     if expected_head_sha and head != expected_head_sha:
         raise RequiredChecksError("PR head differs from the expected commit; revalidate before merging")
+    if expected_base_ref and base != expected_base_ref:
+        raise RequiredChecksError("PR base differs from the review-policy evidence; revalidate before merging")
     policy = obj(read_json([
         "api", "graphql", "-f", f"query={_POLICY_QUERY}",
         "-f", f"owner={parts[0]}", "-f", f"name={parts[1]}",

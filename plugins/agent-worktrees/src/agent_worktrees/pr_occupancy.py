@@ -60,6 +60,13 @@ def occupancy_from_state(state) -> str:
 def occupancy_from_readiness(readiness: dict) -> dict:
     """Copy ``readiness`` and set ``occupancy`` from its classification fields."""
     out = dict(readiness)
+    if readiness.get("operation") == "direct":
+        if readiness.get("ready_for_direct_merge"):
+            out["occupancy"] = "needs-merge"
+            return out
+        if readiness.get("review_assessment_required"):
+            out["occupancy"] = "needs-review-assessment"
+            return out
     out["occupancy"] = occupancy_for(
         wip=bool(readiness.get("wip")),
         conflict=bool(readiness.get("conflict")),

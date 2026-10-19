@@ -29,6 +29,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from .pr_checks import checks_payload
+from .pr_readiness_policy import operation_readiness
 from .pr_review_policy import effective_review
 from .pr_snapshot import PRSnapshot as PRSnapshot, Review as Review
 from .pr_snapshot import REVIEW_STATE_EVENT as _REVIEW_STATE_EVENT
@@ -797,6 +798,7 @@ def merge_readiness(
     stale_approval_head_observed_at: str = "",
     review_blocking: bool = True,
     dismiss_stale_reviews: bool | None = None,
+    operation: str = "consent",
 ) -> dict:
     """A caller-facing "what stands between this PR and merge" summary.
 
@@ -834,6 +836,10 @@ def merge_readiness(
         review_blocking=review_blocking,
         dismiss_stale_reviews=dismiss_stale_reviews,
     )
+    operation_fields = operation_readiness(
+        st, operation=operation, automerge_label=automerge_label,
+        approval_required=approval_required,
+    )
     return occupancy_from_readiness({
         "verdict": st.verdict,
         "approval_stale": st.approval_stale,
@@ -842,14 +848,17 @@ def merge_readiness(
         "conflict": st.conflict,
         "mergeable": snap.mergeable,
         "consent_present": st.consent_present,
-        "consent_action": st.consent_action,
+        "consent_action": operation_fields["consent_action"],
         "consent_label": automerge_label,
-        "eligible": st.eligible,
-        "needs_consent": st.consent_action == "apply",
-        "clear_to_merge": st.consent_action in ("apply", "already"),
+        "eligible": operation_fields["eligible"],
+        "needs_consent": operation_fields["needs_consent"],
+        "clear_to_merge": operation_fields["clear_to_merge"],
+        "operation": operation_fields["operation"],
+        "ready_for_direct_merge": operation_fields["ready_for_direct_merge"],
+        "review_assessment_required": operation_fields["review_assessment_required"],
         "held": list(st.held),
         "wip": st.wip,
-        "reason": st.reason,
+        "reason": operation_fields["reason"],
     })
 
 

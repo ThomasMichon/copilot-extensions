@@ -49,6 +49,7 @@ def decorate_events(
     stale_approval_head_observed_at: str = "",
     review_blocking: bool = True,
     dismiss_stale_reviews: bool | None = None,
+    flow_profile: str = pc.PROFILE_PR_AGENT_MERGE,
 ) -> dict:
     """Wrap the raw transition list into the final result payload.
 
@@ -104,6 +105,11 @@ def decorate_events(
             stale_approval_head_observed_at=stale_approval_head_observed_at,
             review_blocking=review_blocking,
             dismiss_stale_reviews=dismiss_stale_reviews,
+            operation=(
+                "direct"
+                if flow_profile == pc.PROFILE_PR_SELF_MERGE
+                else "consent"
+            ),
         )
     )
     return payload
@@ -175,6 +181,7 @@ def run_wait(
             stale_approval_head_observed_at=stale_approval_head_observed_at,
             review_blocking=review_blocking,
             dismiss_stale_reviews=dismiss_stale_reviews,
+            flow_profile=flow_profile,
         )
         key = consent_update_key(
             snap, payload["merge"], flow_profile=flow_profile,

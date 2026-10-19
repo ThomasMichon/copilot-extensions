@@ -693,6 +693,29 @@ class TestMergeReadiness:
         assert m["consent_label"] == ""
         assert "no auto-merge label" in m["reason"]
 
+    def test_direct_operation_does_not_require_a_missing_consent_binding(self):
+        m = pc.merge_readiness(_approved(), operation="direct")
+        assert m["operation"] == "direct"
+        assert m["ready_for_direct_merge"] is True
+        assert m["review_assessment_required"] is False
+        assert m["needs_consent"] is False
+        assert m["clear_to_merge"] is True
+        assert m["consent_action"] == "not-applicable"
+        assert m["occupancy"] == "needs-merge"
+
+    def test_direct_clean_comment_requires_assessment_not_consent(self):
+        snap = _approved(reviews=(_rev(1, "COMMENT"),))
+        m = occupancy_from_readiness(pc.merge_readiness(
+            snap, operation="direct", review_blocking=False,
+            approval_required=False,
+        ))
+        assert m["verdict"] == "COMMENTED"
+        assert m["review_assessment_required"] is True
+        assert m["ready_for_direct_merge"] is False
+        assert m["needs_consent"] is False
+        assert m["clear_to_merge"] is False
+        assert m["occupancy"] == "needs-review-assessment"
+
     def test_review_blocking_false_reports_comment_verdict(self):
         snap = _approved(reviews=(_rev(1, "COMMENT"),))
         m = pc.merge_readiness(snap, review_blocking=False, **_BINDING)

@@ -64,7 +64,7 @@ class GitHubFixture:
         }]
         self.review_decision = "REVIEW_REQUIRED"
         self.bypass = "pull_requests_only"
-        self.classic_review_rule = None
+        self.classic_protection = {"required_pull_request_reviews": None}
 
     def invoke(self, argv, **kwargs):
         self.calls.append(argv)
@@ -73,7 +73,10 @@ class GitHubFixture:
             if failed:
                 return subprocess.CompletedProcess(argv, 1, "", "protected merge refused")
             return subprocess.CompletedProcess(argv, 0, "", "")
-        if argv[:3] == ["gh", "pr", "view"]:
+        if argv[:3] == ["gh", "api", "--include"]:
+            assert argv[3].endswith("/protection")
+            kind, data = "review_policy", self.classic_protection
+        elif argv[:3] == ["gh", "pr", "view"]:
             kind, data = "decision", {"reviewDecision": self.review_decision}
         elif argv[:3] == ["gh", "pr", "checks"]:
             assert "--required" in argv
@@ -93,17 +96,9 @@ class GitHubFixture:
             kind, data = "reviews", [self.reviews]
         elif argv[2] == "graphql":
             assert f"ref=refs/heads/{self.base}" in argv
-            query = next(value for value in argv if value.startswith("query="))
-            if "requiresApprovingReviews" in query:
-                kind, data = "review_policy", {
-                    "data": {"repository": {"ref": {
-                        "branchProtectionRule": self.classic_review_rule,
-                    }}},
-                }
-            else:
-                kind, data = "policy", {
-                    "data": {"repository": {"ref": {"branchProtectionRule": self.protection}}},
-                }
+            kind, data = "policy", {
+                "data": {"repository": {"ref": {"branchProtectionRule": self.protection}}},
+            }
         elif "/rules/branches/" in argv[2]:
             assert "--paginate" in argv
             assert "--slurp" in argv
@@ -337,7 +332,9 @@ def test_actual_admin_merge_is_guarded_and_pins_the_verified_head(monkeypatch, p
     if not passed:
         fixture.checks = [{"name": "policy", "bucket": "pass"}]
     monkeypatch.setattr(github, "run_cli", fixture.invoke)
-    result = github.GitHubProvider().merge_pull("owner/project", 7, admin=True)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
     merges = [argv for argv in fixture.calls if argv[:3] == ["gh", "pr", "merge"]]
     if passed:
         assert result == ""
@@ -351,10 +348,11 @@ def test_actual_admin_merge_is_guarded_and_pins_the_verified_head(monkeypatch, p
 
 def test_review_exception_requires_complete_clean_codeowner_evidence():
     fixture = GitHubFixture()
-    assert review_exception_evidence(
+    evidence = review_exception_evidence(
         "owner/project", 7, invoke=fixture.invoke, host="github.com",
         expected_head_sha=HEAD,
-    ) == HEAD
+    )
+    assert evidence.head_sha == HEAD and evidence.base_ref == "dev"
 
 
 @pytest.mark.parametrize("mutation,match", [
@@ -410,18 +408,87 @@ def test_extra_required_approval_prevents_codeowner_exception():
 
 def test_classic_review_requirement_prevents_ruleset_exception():
     fixture = GitHubFixture()
-    fixture.classic_review_rule = {
-        "requiresApprovingReviews": True,
-        "requiredApprovingReviewCount": 1,
-        "requiresCodeOwnerReviews": False,
-        "requiresConversationResolution": False,
-        "requiresLastPushApproval": False,
-    }
+    fixture.classic_protection = {"required_pull_request_reviews": {
+        "required_approving_review_count": 1,
+        "require_code_owner_reviews": False,
+        "required_review_thread_resolution": False,
+        "require_last_push_approval": False,
+    }}
     with pytest.raises(RequiredChecksError, match="classic branch protection"):
         review_exception_evidence(
             "owner/project", 7, invoke=fixture.invoke, host="github.com",
             expected_head_sha=HEAD,
         )
+
+
+def test_base_change_between_review_and_check_guards_blocks_admin_retry(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    original = fixture.invoke
+
+    def retarget_after_review(argv, **kwargs):
+        if len(argv) > 2 and argv[2].endswith("/pulls/7") and fixture.pr_reads >= 3:
+            fixture.after_base = "main"
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(github, "run_cli", retarget_after_review)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "base differs from the review-policy evidence" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("late_state", ["hold", "changes"])
+def test_concrete_exception_probe_refuses_late_unsafe_evidence(monkeypatch, late_state):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.review_decision = "APPROVED"
+    if late_state == "hold":
+        original = fixture.invoke
+
+        def held(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if len(argv) > 2 and argv[2].endswith("/pulls/7") and result.returncode == 0:
+                data = json.loads(result.stdout)
+                data["labels"] = [{"name": "hold"}]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+            return result
+
+        monkeypatch.setattr(github, "run_cli", held)
+        provider = github.GitHubProvider()
+        result = provider.pull_review_exception(
+            "owner/project", 7, expected_head_sha=HEAD, hold_labels=("hold",),
+        )
+        assert result[0:2] == (False, True)
+    else:
+        fixture.reviews.insert(0, {
+            "id": 0, "state": "CHANGES_REQUESTED", "user": {"login": "human"},
+            "submitted_at": "2026-10-17T00:00:00Z", "commit_id": HEAD,
+        })
+        monkeypatch.setattr(github, "run_cli", fixture.invoke)
+        result = github.GitHubProvider().pull_review_exception(
+            "owner/project", 7, expected_head_sha=HEAD,
+        )
+        assert result[0:2] == (False, True)
+
+
+def test_required_deployment_prevents_admin_retry(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.rules.append({
+        "type": "required_deployments",
+        "parameters": {"required_deployment_environments": ["production"]},
+    })
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull("owner/project", 7, admin=True)
+    assert "required_deployments" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
 
 
 @pytest.mark.parametrize("admin", [False, True])
