@@ -245,7 +245,7 @@ onboarded merely because its source is published.
 
 - [x] Publish the accepted pure per-target policy leaf and focused installed
   consumer contracts; source merge does not close configuration or setup.
-- [ ] Review and implement the explicit harness/knowledge declaration,
+- [x] Review and implement the explicit harness/knowledge declaration,
   matching legacy launch projection and normal new-machine binding consumer
   under #7195, preserving the separate #6300 routing reservation.
 - [ ] Implement the agreed per-machine/environment Gateway/controller binding
@@ -355,6 +355,25 @@ takeover or implementation completion is asserted.
 
 ### 2026-10-19 - Paired declaration implementation qualification
 
+- The source merge's exact `dev` CI completed successfully. Normal promotion
+  run `39216459826` then completed green with all expensive validation,
+  publication and merge stages **skipped**, because trusted Main is explicitly
+  paused under #6237. Skipped promotion is not release evidence. Main at
+  `a325f5063e7cc0a2b3276be81be3e4959f8f4651` still publishes
+  `harness-knowledge` `0.1.1-dev1`, whose binding script has neither the
+  preservation capability probe nor its result field. Generic dependency
+  evidence is recorded in #6237, comment `6262596752`; release availability
+  remains with that retained containment/qualification owner. No pause bypass,
+  qualification dispatch, candidate installation or alternate writer is implied.
+- Implementation #7205 actually merged to `dev` at
+  `991cfd8e23750b3c82af92fd537034b1914b5da8` on reviewed head
+  `df6f6fd15baba90a7e8f9fde2efdaed6df167a52`. Current-head Copilot review
+  approved with no open findings; all 49 observed checks completed without a
+  failure, including the existing hosted Linux native guard. Every review
+  thread was resolved before the normal managed merge. This closes only the
+  declaration/binding source item under #7195, not release, installed adoption
+  or the provider/setup/lifecycle integration.
+
 - The operator-authorized continuation reconciled the retained Configuration
   context and verified #6725's actual merge. The narrow #7205 overlap now reuses
   the existing shared execution-root classifier in `repos._current_platform`;
@@ -418,6 +437,7 @@ takeover or implementation completion is asserted.
   actual conventional bare-anchor consumer lane. The unchanged item timeout
   remains enforced; native registry setup uses its real owner API rather than
   paying for repeated setup-only CLI startups.
-- Implementation publication and release remain pending. These focused
+- Implementation is merged to `dev`; release and installed adoption remain
+  pending. These focused
   validation items do not complete the parent integration, provider, setup,
   admission, lifecycle or controlled-adoption plans.
