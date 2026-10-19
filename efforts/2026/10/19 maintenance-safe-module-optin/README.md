@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential proposal, implementation and completion PRs against `dev`
 - **Created:** 2026-10-18
-- **Status:** Active
+- **Status:** Done
 - **Vision:** installer `legible-and-consent-driven`; machine-fleet existing service authorities
 - **Umbrella issue:** #7213
 
@@ -67,12 +67,14 @@ are outside this implementation objective.
 - [x] Execute only opted-in applicable modules during blanket maintenance-safe
   restore, reusing existing execution and dry-run paths; preserve explicit selection.
 - [x] Update owning schema/documentation/skill surfaces and add a plugin changefile.
-- [ ] Add focused regression coverage and land the implementation through review.
+- [x] Add focused regression coverage and land the implementation through review.
 
 ### Phase 3 — Completion
-- [ ] Record merged implementation and validation outcomes; close the implementation
+- [x] Record merged implementation and validation outcomes; close the implementation
   issue and effort, retaining automatic promotion and authorized rollout as
   separate release/adopter responsibilities.
+- [x] Deferred to `#7247`: investigate unexplained historical native Windows stamp
+  item-limit expirations without weakening native coverage or original bounds.
 
 ## Validation Plan
 
@@ -83,7 +85,7 @@ are outside this implementation objective.
   invocation/environment behavior with focused and full agent-machines suites.
 - [x] Stage new tests before contained execution; run the documented bounded
   runner, relevant lint, documentation guards and install-contract gate.
-- [ ] Verify generic public artifacts, passing required checks and real Copilot
+- [x] Verify generic public artifacts, passing required checks and real Copilot
   review before each merge. Do not claim release or rollout from a `dev` merge.
 
 ## Proposal
@@ -258,3 +260,19 @@ retain the operator-directed exception. No existing module gains an opt-in.
   (13 runtime plugins), version consistency and documentation consistency
   (24 plugins). Reviewed the exact runtime diff against the shared review rubric;
   no additional mutation authority or automatic opt-in was introduced.
+
+### 2026-10-19 — Implementation merged and coding objective complete
+- Implementation #7248 merged to `dev` as
+  `d2f1f796101f019f60ccd4cdc85c3ee32fa0892c`; reviewed head was
+  `2b716506c7ac335f3ff66d3334e77f7a6fb578a4`.
+  Copilot approved that head, posted no findings, and required PR-gate,
+  source-attribution and workflow-lockdown checks passed before merge.
+- Closed #7213 as implemented. Re-read this effort and resolved its Plan and
+  Validation Plan against the actual merged behavior and bounded test results.
+  The coding objective is Done; the separate historical reliability investigation
+  remains open in #7247, not hidden as an accepted flake or claimed source fix.
+- Release remains pending automatic promotion owned by the existing release
+  pipeline (#3336); adopter-specific rollout requires its own authorization and
+  running-state proof. No runtime update, machine configuration or service
+  change was performed. Archive this completed coding effort through normal
+  review, then release its binding and finalize the child.
