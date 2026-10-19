@@ -64,7 +64,12 @@ class GitHubFixture:
         }]
         self.review_decision = "REVIEW_REQUIRED"
         self.bypass = "pull_requests_only"
-        self.classic_protection = {"required_pull_request_reviews": None}
+        self.classic_protection = {
+            "required_pull_request_reviews": None,
+            "required_conversation_resolution": {"enabled": False},
+            "required_signatures": {"enabled": False},
+            "required_linear_history": {"enabled": False},
+        }
 
     def invoke(self, argv, **kwargs):
         self.calls.append(argv)
@@ -117,6 +122,13 @@ class GitHubFixture:
             raise AssertionError(f"Unexpected command: {argv}")
         if kind == self.fail:
             return subprocess.CompletedProcess(argv, 1, "", "permission denied")
+        if kind == "review_policy":
+            return subprocess.CompletedProcess(
+                argv, 0,
+                "HTTP/2.0 200 OK\r\ncontent-type: application/json\r\n\r\n"
+                + json.dumps(data),
+                "",
+            )
         return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
 
     def verify(self, **kwargs):
@@ -411,14 +423,49 @@ def test_classic_review_requirement_prevents_ruleset_exception():
     fixture.classic_protection = {"required_pull_request_reviews": {
         "required_approving_review_count": 1,
         "require_code_owner_reviews": False,
-        "required_review_thread_resolution": False,
         "require_last_push_approval": False,
-    }}
+    }, "required_conversation_resolution": {"enabled": False},
+        "required_signatures": {"enabled": False},
+        "required_linear_history": {"enabled": False}}
     with pytest.raises(RequiredChecksError, match="classic branch protection"):
         review_exception_evidence(
             "owner/project", 7, invoke=fixture.invoke, host="github.com",
             expected_head_sha=HEAD,
         )
+
+
+def test_absent_classic_protection_404_is_not_an_unknown_policy():
+    fixture = GitHubFixture()
+    original = fixture.invoke
+
+    def no_classic(argv, **kwargs):
+        if argv[:3] == ["gh", "api", "--include"]:
+            return subprocess.CompletedProcess(
+                argv, 1,
+                "HTTP/2.0 404 Not Found\r\ncontent-type: application/json\r\n\r\n{}",
+                "gh: Branch not protected (HTTP 404)",
+            )
+        return original(argv, **kwargs)
+
+    evidence = review_exception_evidence(
+        "owner/project", 7, invoke=no_classic, host="github.com",
+        expected_head_sha=HEAD,
+    )
+    assert evidence.base_ref == "dev"
+
+
+def test_classic_conversation_resolution_prevents_admin_retry(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.classic_protection["required_conversation_resolution"] = {"enabled": True}
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "required_conversation_resolution" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
 
 
 def test_base_change_between_review_and_check_guards_blocks_admin_retry(monkeypatch):

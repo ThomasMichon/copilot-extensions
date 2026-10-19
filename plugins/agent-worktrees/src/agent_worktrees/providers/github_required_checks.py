@@ -165,7 +165,7 @@ def review_exception_evidence(
     def read_optional_api(path: str) -> object | None:
         result = invoke(["gh", "api", "--include", path, "--hostname", host])
         text = result.stdout or ""
-        status = re.search(r"(?m)^HTTP/\\S+\\s+(\\d{3})\\b", text)
+        status = re.search(r"(?m)^HTTP/\S+\s+(\d{3})\b", text)
         if result.returncode != 0 and status and status.group(1) == "404":
             return None
         if result.returncode != 0:
@@ -174,7 +174,7 @@ def review_exception_evidence(
                 f"classic review-policy verification failed "
                 f"(exit {result.returncode}): {detail}"
             )
-        body = re.split(r"\\r?\\n\\r?\\n", text)[-1]
+        body = re.split(r"\r?\n\r?\n", text)[-1]
         try:
             return json.loads(body)
         except json.JSONDecodeError as exc:
@@ -312,13 +312,28 @@ def review_exception_evidence(
     )
     if protection is not None:
         protection = obj(protection, "classic branch protection")
+        for field in (
+            "required_conversation_resolution",
+            "required_signatures",
+            "required_linear_history",
+        ):
+            constraint = protection.get(field)
+            if constraint is not None:
+                constraint = obj(constraint, f"classic {field}")
+                if not isinstance(constraint.get("enabled"), bool):
+                    raise ReviewSafetyError(
+                        f"classic {field} requirement is incomplete"
+                    )
+                if constraint["enabled"]:
+                    raise ReviewExceptionIneligible(
+                        f"classic branch protection adds unverified requirement: {field}"
+                    )
         reviews_policy = protection.get("required_pull_request_reviews")
         if reviews_policy is not None:
             reviews_policy = obj(reviews_policy, "classic review requirements")
             count = reviews_policy.get("required_approving_review_count")
             flags = (
                 "require_code_owner_reviews",
-                "required_review_thread_resolution",
                 "require_last_push_approval",
             )
             if type(count) is not int or count < 0 or any(
