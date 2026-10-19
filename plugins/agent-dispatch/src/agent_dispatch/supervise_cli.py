@@ -30,6 +30,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .client_authority import (
+    locked_supervisor_status,
+    supervisor_authority_target as _supervisor_authority_target,
+)
 from .loop_commands import _resolve_cli_module
 
 
@@ -87,12 +91,16 @@ def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
         "backing_off": summary.backing_off,
         "dead": getattr(summary, "dead", []),
     }
+    if "owner" in (previous or {}):
+        payload["owner"] = previous["owner"]
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
 
 
-def _write_supervisor_cycle_start(scope: str, cycle_id: int, started_at: float) -> None:
+def _write_supervisor_cycle_start(
+    scope: str, cycle_id: int, started_at: float, *, authority_target: str | None = None,
+) -> None:
     """Mark a reconcile cycle as started, *before* it runs.
 
     Written and read independently of :func:`_write_supervisor_runtime_status`
@@ -111,6 +119,8 @@ def _write_supervisor_cycle_start(scope: str, cycle_id: int, started_at: float) 
     payload = dict(previous or {})
     payload["cycle_started_at"] = started_at
     payload["cycle_id"] = cycle_id
+    if authority_target is not None:
+        payload["owner"] = {"pid": os.getpid(), "authority_target": authority_target}
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
@@ -368,24 +378,18 @@ def _spawn_supervisor_daemon_detached(
 def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env: str) -> dict:
     """Ensure a singleton supervisor daemon is running for this (machine, env).
 
-    ``--ensure`` only ever ensures a daemon for the *local* host. A registration's
-    ``--machine`` names where the work should run, not an instruction for this
-    invocation to become that machine: a scope that names a different machine
-    than this host's own resolved identity is a foreign scope and is a no-op
-    here -- silently starting a same-named-but-elsewhere supervisor process
-    would leave a persistent, wrongly-scoped daemon running on the wrong box
-    with nothing (a local ``daemon-status``/``supervise list`` check included)
-    to reveal it (github.com/ThomasMichon/copilot-extensions#2791). The correct
-    machine's *own* session is expected to run its own ``--ensure`` (or its
-    already-installed supervisor service) for its own scope.
+    ``--machine`` names the work's target, not permission to become that host.
+    Foreign scopes are no-ops here: the target machine's own session or
+    installed service must ensure its scope (#2791).
 
-    Otherwise, checks the supervisor lease first; if a daemon already holds it,
-    this is a no-op. Otherwise it launches one detached. Best-effort and
-    fail-soft -- a failure to ensure never fails the register call.
+    Otherwise, checks the supervisor lease first; an explicit target only
+    accepts a holder whose status receipt binds that same target to its PID.
+    Conflicting or unknown targets are reported without another daemon.
+    Best-effort and fail-soft -- a failure to ensure never fails registration.
     """
     from . import remote_dispatch
     from .config import run_dir
-    from .single_instance import is_locked, lock_path_for
+    from .single_instance import is_locked, lock_path_for, read_holder_pid
     from .supervisor_daemon import supervisor_lease_scope
 
     if remote_dispatch.is_peer_machine(machine):
@@ -402,8 +406,12 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
 
     scope = supervisor_lease_scope(machine, env)
     try:
-        if is_locked(lock_path_for(run_dir(), scope)):
-            return {"ensured": False, "reason": "already running"}
+        lock_path = lock_path_for(run_dir(), scope)
+        if is_locked(lock_path):
+            status, error = _read_supervisor_runtime_status(scope)
+            return locked_supervisor_status(
+                args, scope, status=status, holder=read_holder_pid(lock_path), error=error,
+            )
     except OSError:  # noqa: BLE001 -- fail-soft; fall through to a spawn attempt
         pass
     from .client_authority import target_cli_args
@@ -502,6 +510,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
                 supervisor_lease_scope(machine, env),
                 cycle_id,
                 started_at,
+                authority_target=_supervisor_authority_target(args),
             )
 
         def _on_cycle(summary) -> None:

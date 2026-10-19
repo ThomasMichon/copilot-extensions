@@ -179,6 +179,15 @@ outcome from that same central authority, never by replaying it locally.
 Explicit `--url` remains an operator-selected endpoint; `--local` cannot be
 combined with it or `--shared`.
 
+The supervisor singleton remains one owner per machine/environment, not one per
+authority. An explicit `supervise register --ensure` accepts an existing owner
+only when its current PID-bound status receipt names the same target.
+`authority conflict` or `authority unavailable` means the registration was
+saved but that target is **not ensured**; reconcile the existing owner's
+configuration explicitly. The command does not start a second supervisor,
+terminate the existing one or move its registrations. Target receipts contain
+only a digest of credential-free target flags, not bearer/control credentials.
+
 Central task reads are on-demand references to the central service, not local
 task rows or an offline write replica. Keep the selected authority with any
 saved task reference; a bare task ID is not permission to move its state to

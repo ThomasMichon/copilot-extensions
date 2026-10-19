@@ -148,7 +148,7 @@ def test_real_contained_selection_checks_nodes_and_unions_guards_and_files(
 
 @pytest.mark.parametrize("retired", ["test_new", "test_new[old]"])
 def test_whole_changed_file_executes_all_replacements_for_retired_baseline_nodes(
-    selection_fixture, monkeypatch, capfd, retired,
+    selection_fixture, capfd, retired,
 ):
     root, path = selection_fixture
     (root / "tests/test_changed.py").write_text(
@@ -160,7 +160,6 @@ def test_whole_changed_file_executes_all_replacements_for_retired_baseline_nodes
     payload = json.loads(path.read_text())
     payload["nodes"].append("tests/test_changed.py::" + retired)
     path.write_text(json.dumps(payload), encoding="utf-8")
-    monkeypatch.setattr(runner, "_ensure_venv", lambda *_a, **_kw: Path(sys.executable))
     assert runner.run_plugin(
         "fixture", "unused", reinstall=False, kexpr=None, limits=runner.Limits(),
         plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,

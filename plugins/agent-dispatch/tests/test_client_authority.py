@@ -190,8 +190,10 @@ def test_ensure_supervisor_and_registration_children_keep_local_override(monkeyp
     assert all(cmd[:4] == ["owned-python", "-m", "agent_dispatch", "--local"] for cmd in commands)
 
 
-def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch):
-    from agent_dispatch import logging_setup, procutil, supervise_cli, supervisor_daemon
+def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch, tmp_path):
+    import os
+    from agent_dispatch import config, logging_setup, procutil, supervise_cli, supervisor_daemon
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
     from types import SimpleNamespace
 
     monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
@@ -199,11 +201,17 @@ def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_NO_AUTOSTART", "1")
     monkeypatch.setattr(procutil, "relocate_off_payload", lambda: None)
     monkeypatch.setattr(logging_setup, "configure_file_logging", lambda _name: None)
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path)
     captured = []
 
     def daemon(*_args, **kwargs):
         captured.append(kwargs)
-        return SimpleNamespace(serve=lambda **_kwargs: 0)
+
+        def serve(**callbacks):
+            callbacks["on_cycle_start"](1, 10.0)
+            return 0
+
+        return SimpleNamespace(serve=serve)
 
     monkeypatch.setattr(supervisor_daemon, "SupervisorDaemon", daemon)
     invocation = core.build_parser().parse_args([
@@ -211,8 +219,95 @@ def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch):
     ])
     assert supervise_cli._cmd_supervise_serve(invocation) == 0
     assert captured[0]["target_args"] == ("--local",)
+    status, error = supervise_cli._read_supervisor_runtime_status(supervisor_lease_scope("host", "default"))
+    assert error is None and status["owner"] == {
+        "pid": os.getpid(), "authority_target": supervise_cli._supervisor_authority_target(invocation),
+    }
     with captured[0]["client_factory"]() as client:
         assert client.base_url == "http://127.0.0.1:19847"
+
+
+@pytest.mark.parametrize("holder_flags,request_flags,conflict", [
+    (["--shared"], ["--local"], True),
+    (["--local"], ["--shared"], True),
+    (["--local"], ["--local"], False),
+    (["--shared"], ["--shared"], False),
+    (["--url", "http://first:8787"], ["--url", "http://second:8787"], True),
+])
+def test_ensure_rejects_opposite_authority_under_the_real_singleton_lock(
+    monkeypatch, tmp_path, capsys, holder_flags, request_flags, conflict,
+):
+    import os
+    from types import SimpleNamespace
+    from agent_dispatch import config, remote_dispatch, single_instance, supervise_cli
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda _machine: False)
+    monkeypatch.setattr(supervise_cli, "_spawn_supervisor_daemon_detached", forbid)
+    parser = core.build_parser()
+    holder = parser.parse_args([*holder_flags, "supervise", "serve"])
+    request = parser.parse_args([*request_flags, "supervise", "register"])
+    scope = supervisor_lease_scope("host", "default")
+    lock_path = single_instance.lock_path_for(tmp_path, scope)
+    with single_instance.SingleInstance(lock_path) as acquired:
+        assert acquired
+        supervise_cli._write_supervisor_cycle_start(
+            scope, 1, 10.0, authority_target=supervise_cli._supervisor_authority_target(holder),
+        )
+        supervise_cli._write_supervisor_runtime_status(
+            scope, SimpleNamespace(running=[], backing_off=[], dead=[]),
+        )
+        result = supervise_cli._ensure_supervisor_daemon(request, "host", "default")
+        assert single_instance.read_holder_pid(lock_path) == os.getpid()
+        assert single_instance.is_locked(lock_path)
+    assert result["ensured"] is False
+    assert result["reason"] == ("authority conflict" if conflict else "already running")
+    assert ("registration is saved" in capsys.readouterr().err) is conflict
+
+
+@pytest.mark.parametrize("receipt", ["absent", "old-pid", "no-target", "malformed"])
+def test_explicit_ensure_refuses_unknown_lock_authority(monkeypatch, tmp_path, capsys, receipt):
+    import json
+    import os
+    from agent_dispatch import config, remote_dispatch, single_instance, supervise_cli
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
+
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda _machine: False)
+    monkeypatch.setattr(supervise_cli, "_spawn_supervisor_daemon_detached", forbid)
+    invocation = core.build_parser().parse_args(["--local", "supervise", "register"])
+    scope = supervisor_lease_scope("host", "default")
+    lock_path = single_instance.lock_path_for(tmp_path, scope)
+    with single_instance.SingleInstance(lock_path) as acquired:
+        assert acquired
+        if receipt != "absent":
+            payload = {"owner": {"pid": os.getpid(), "authority_target": "0" * 64}}
+            if receipt == "old-pid":
+                payload["owner"]["pid"] += 1
+            elif receipt == "no-target":
+                payload["owner"].pop("authority_target")
+            supervise_cli._supervisor_runtime_status_path(scope).write_text(
+                "{" if receipt == "malformed" else json.dumps(payload), encoding="utf-8",
+            )
+        result = supervise_cli._ensure_supervisor_daemon(invocation, "host", "default")
+    assert result["ensured"] is False and result["reason"] == "authority unavailable"
+    assert "selected authority is not ensured" in capsys.readouterr().err
+
+
+def test_supervisor_target_receipt_excludes_credentials():
+    from agent_dispatch import supervise_cli
+
+    parser = core.build_parser()
+    plain = parser.parse_args(["--local", "supervise", "serve"])
+    secrets = parser.parse_args([
+        "--local", "--token", "reader-secret", "--control-token", "control-secret",
+        "supervise", "serve",
+    ])
+    target = supervise_cli._supervisor_authority_target(secrets)
+    assert target == supervise_cli._supervisor_authority_target(plain)
+    assert len(target) == 64 and "reader-secret" not in target and "control-secret" not in target
 
 
 @pytest.mark.parametrize("route,expected", [

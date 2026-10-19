@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import sys
 from typing import Any, Literal
 
 from .client_errors import DispatchError
@@ -49,6 +52,37 @@ def target_cli_args(args: argparse.Namespace, *, credentials: bool = True) -> li
             if getattr(args, name, None):
                 flags += ["--" + name.replace("_", "-"), getattr(args, name)]
     return flags
+
+
+def supervisor_authority_target(args: argparse.Namespace) -> str:
+    target = json.dumps(target_cli_args(args, credentials=False), separators=(",", ":"))
+    return hashlib.sha256(target.encode("utf-8")).hexdigest()
+
+
+def locked_supervisor_status(
+    args: argparse.Namespace, scope: str, *, status: dict | None, holder: int | None, error: str | None,
+) -> dict:
+    if client_authority(args) == "legacy":
+        return {"ensured": False, "reason": "already running"}
+    owner = (status or {}).get("owner")
+    if (
+        not isinstance(owner, dict) or not holder or owner.get("pid") != holder
+        or not isinstance(owner.get("authority_target"), str)
+        or len(owner["authority_target"]) != 64
+    ):
+        reason = "authority unavailable"
+    elif owner["authority_target"] != supervisor_authority_target(args):
+        reason = "authority conflict"
+    else:
+        return {"ensured": False, "reason": "already running"}
+    print(
+        f"supervise register --ensure: {reason} for existing scope '{scope}'; "
+        "the registration is saved but its selected authority is not ensured. "
+        "Reconcile the existing owner before changing its target."
+        + (f" Status receipt error: {error}" if error else ""),
+        file=sys.stderr,
+    )
+    return {"ensured": False, "reason": reason, "owner_pid": holder}
 
 
 def validate_server_authority() -> None:
