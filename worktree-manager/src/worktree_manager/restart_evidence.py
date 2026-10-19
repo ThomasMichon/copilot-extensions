@@ -357,11 +357,19 @@ class RecoveryJournal:
                     continue
                 if cancelled:
                     if (
-                        row["disposition"] != "shutdown-pending"
+                        row["disposition"] not in {"shutdown-pending", "shutdown-interrupted"}
                         or row["notification_id"] != notification_id
                     ):
                         continue
-                    row.update(disposition="live", notification_id="", detail="shutdown-cancelled")
+                    interrupted = row["disposition"] == "shutdown-interrupted"
+                    row.update(
+                        disposition="unknown" if interrupted else "live",
+                        notification_id="",
+                        detail=(
+                            "native-end-after-cancel-unconfirmed" if interrupted
+                            else "shutdown-cancelled"
+                        ),
+                    )
                 else:
                     if row["disposition"] != "live":
                         continue

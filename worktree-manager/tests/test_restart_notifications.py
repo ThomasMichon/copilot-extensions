@@ -164,6 +164,27 @@ def test_cancellation_is_durable_before_rearming(active_adapter):
         os.read(bus.readers[-1], 1)
 
 
+@pytest.mark.parametrize("reason", ["intentional", "unknown"])
+def test_native_end_before_cancellation_loses_shutdown_authority(active_adapter, reason):
+    adapter, bus, journal = active_adapter
+    bus.prepare(True)
+    journal.record_exit(
+        positive(), reason=reason, detail="native-session-end", end_consumed=True,
+    )
+    assert journal.snapshot()[0]["disposition"] == "shutdown-interrupted"
+
+    bus.prepare(False)
+    pump_until(adapter, lambda: adapter.status["status"] == "watching")
+
+    row = journal.snapshot()[0]
+    assert row["disposition"] == "unknown"
+    assert row["notification_id"] == ""
+    assert row["detail"] == "native-end-after-cancel-unconfirmed"
+    assert row["end_consumed"] is True
+    journal.record_exit(positive(), reason="intentional", detail="native-session-end")
+    assert journal.snapshot()[0]["disposition"] == "unknown"
+
+
 @pytest.mark.parametrize("changes", [
     {"sender": ":1.99"},
     {"path": "/example/unrelated"},

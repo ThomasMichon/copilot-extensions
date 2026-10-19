@@ -478,3 +478,9 @@ The umbrella effort remains Active independently of this slice's completion.
   owner/task/hold admission, durable attempts and acknowledged exact-UUID
   status-first Resume remain open. No Plan or Validation Plan item is closed
   solely by this increment.
+- The first native callback integration also exposed End arriving before the
+  cancellation signal. The original journal only cancelled still-live pending
+  rows, retaining an ended generation's obsolete shutdown authority. Both
+  native-cause regressions failed first. Matching cancellation now makes that
+  ended generation unknown, clears its notification and preserves the sticky
+  cancelled-shutdown marker; an explicit operator closure stays closed.

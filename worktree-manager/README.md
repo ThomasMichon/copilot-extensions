@@ -483,6 +483,8 @@ subscribing, authenticates the unique logind owner and reads the initial
 `PreparingForShutdown` state. A shutdown signal checkpoints matching
 last-positive generations transactionally, then releases the inhibitor;
 cancellation durably reconciles the matching notification before reacquiring.
+If native End preceded cancellation, its shutdown-interruption claim becomes
+unknown with a sticky cancelled-shutdown marker, not a revived execution.
 Checkpoint lock contention fails immediately rather than spending the delay
 budget waiting for SQLite, and a progress deadline can roll back an expired
 checkpoint. This is not a hard bound on operating-system filesystem stalls.
