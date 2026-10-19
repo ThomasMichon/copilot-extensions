@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import venv
 from pathlib import Path
 
 import pytest
@@ -1321,14 +1322,15 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         ):
             shutil.copytree(REPO / "libs" / lib, stage / "libs" / lib)
     env = _env(tmp_path)
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir()
-    _fake_uv(fake_bin)
     if os.name == "nt":
-        (fake_bin / "py.cmd").write_text(
-            f'@echo {sys._base_executable}\n@exit /b 0\n', encoding="utf-8",
-        )
+        # The windowless bootstrap consumer needs an executable, not py.cmd.
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(tmp_path)
+        fake_bin = tmp_path / "Scripts"
     else:
+        fake_bin = tmp_path / "fake-bin"
+        fake_bin.mkdir()
+    _fake_uv(fake_bin)
+    if os.name != "nt":
         (fake_bin / "python3").symlink_to(sys._base_executable)
     isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
     env["TEST_UV_MODE"] = "fatal"
