@@ -166,6 +166,16 @@ rows until the replacement generation completes. Unsupported authority is an
 actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
 selects current one-shot reads, not a direct computation fallback.
 
+The CLAIMS preview retains the engine's ranking and links, with a leading
+omitted-count or unresolved-descendant warning when the bounded publication
+is partial. Older publications without sufficient evidence show **coverage
+unknown**, not a complete subtree. **View details** loads full held claims
+on demand and, when child claims are present, uses the engine's existing
+transitive inspection to show descendant owner paths and unresolved edges.
+Those inspections run in the background only after opening the detail card;
+ordinary row rendering never walks a claim graph or performs network reads.
+Descendant claims remain owned by their original worktrees.
+
 Held-feed startup uses the source's existing bounded process/SSH budget
 (20 seconds by default). Once an initial snapshot or update starts, the
 two-second atomic-publication deadline applies; committed feeds retain the

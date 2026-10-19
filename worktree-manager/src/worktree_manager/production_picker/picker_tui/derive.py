@@ -20,6 +20,7 @@ from . import reciprocal
 from .controller_workspaces import managed_child, sessionless as _sessionless
 from . import source_identity
 from .worktree_assets import asset_hints as _asset_hints
+from .worktree_assets import needs_descendant_details
 
 # The "now" derived ages are measured against. Data sources refresh this to the
 # real clock before normalizing a batch (see ``data_local``).
@@ -777,6 +778,10 @@ def norm(
         # call site) for real hyperlink spans; None falls back to the plain
         # string above.
         "claims_links": w.get("claims_links"),
+        "claims_link_count": w.get("claims_link_count"),
+        "claims_links_complete": w.get("claims_links_complete"),
+        "claims_projection": w.get("claims_projection"),
+        "claims_descendants_available": needs_descendant_details(w),
         # #3307 Phase 3: raw pass-through of the worktree's last real resume
         "last_resumed_at": w.get("last_resumed_at"),
         "cleanup_bucket": _bucket_from_raw(w),

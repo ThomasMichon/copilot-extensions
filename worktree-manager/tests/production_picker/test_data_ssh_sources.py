@@ -725,7 +725,8 @@ def test_provider_routes_reads_but_suppresses_mutations(monkeypatch):
     )
 
 
-def test_provider_claims_capability_is_admitted_and_routes_with_live_identity(monkeypatch):
+@pytest.mark.parametrize("transitive", [False, True])
+def test_provider_claims_capability_is_admitted_and_routes_with_live_identity(monkeypatch, transitive):
     _install_roster(monkeypatch, {}, machine="local", local_id=("local", "linux"))
     registered = provider_sources._parse_source(
         _provider_descriptor(capabilities={"list": True, "claims": True}),
@@ -738,8 +739,10 @@ def test_provider_claims_capability_is_admitted_and_routes_with_live_identity(mo
         "", "", "wt-1", source_id=registered.source_id,
         expected_instance_id=registered.instance_id, expected_assignment=_assignment(),
         expected_transport_fingerprint=fingerprint,
+        transitive=transitive,
     )
-    assert argv and "claims wt-1 --json" in argv[-1]
+    command = "claims transitive" if transitive else "claims"
+    assert argv and f"{command} wt-1 --json" in argv[-1]
     proxy = next(part for part in argv if part.startswith("ProxyCommand="))
     assert "--expected-instance-id instance-1" in proxy
     assert "--expected-target-id container:one" in proxy
@@ -748,6 +751,7 @@ def test_provider_claims_capability_is_admitted_and_routes_with_live_identity(mo
         "", "", "wt-1", source_id=registered.source_id,
         expected_instance_id="replaced", expected_assignment=_assignment(),
         expected_transport_fingerprint=fingerprint,
+        transitive=transitive,
     ) is None
     assert data_ssh.remote_op_argv(
         "", "", "cleanup", "wt-1", source_id=registered.source_id,

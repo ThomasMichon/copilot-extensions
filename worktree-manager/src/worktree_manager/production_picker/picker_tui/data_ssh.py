@@ -729,12 +729,13 @@ def list_sessions_argv(
     )
 
 
-def claims_argv(machine, env, worktree_id, **source_identity):
+def claims_argv(machine, env, worktree_id, *, transitive=False, **source_identity):
     """Explicit full claim inspection through the selected remote source."""
     from .worktree_detail_queries import remote_argv
 
     return remote_argv(
-        machine, env, worktree_id, command="claims", capability="claims", **source_identity,
+        machine, env, worktree_id, command="claims transitive" if transitive else "claims",
+        capability="claims", **source_identity,
     )
 
 

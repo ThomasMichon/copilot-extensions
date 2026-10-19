@@ -320,9 +320,14 @@ def _claims_cell(rec, w):
     the terminal's own OSC 8 hyperlink affordance conventionally pairs with
     an underline so it visually reads as a clickable link, not just as
     differently-coloured text."""
+    from .worktree_assets import claim_coverage
+
+    notices = claim_coverage(rec)
+    seg = Text()
+    if notices:
+        seg.append(f"[{'; '.join(notices)}] ", style=C_WARN)
     links = rec.get("claims_links")
     if links:
-        seg = Text()
         for i, entry in enumerate(links):
             if i:
                 seg.append(" \u00b7 ", style=C_DIM)
@@ -330,7 +335,7 @@ def _claims_cell(rec, w):
             url = entry.get("url")
             seg.append(label, style=f"underline link {url}" if url else "")
     else:
-        seg = Text(str(rec.get("claims_summary", "") or ""))
+        seg.append(str(rec.get("claims_summary", "") or ""))
     if seg.cell_len < w:
         seg.append(" " * (w - seg.cell_len))
     return seg
