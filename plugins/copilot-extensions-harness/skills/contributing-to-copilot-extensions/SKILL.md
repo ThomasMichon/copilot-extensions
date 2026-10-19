@@ -231,8 +231,9 @@ installer. Know which kind you are changing.
      re-review rather than being a no-op)
      and wait up to 10 minutes again -- there's nothing to address or push yet,
      so don't invent a commit just to have something to push. On a
-     contributor PR's `Approve`, or an owner-authored PR's `Comment` with
-     zero Medium/High findings open, merge. Otherwise: address genuinely
+     PR's `Approve` (either author type), or an owner-authored PR's `Comment`
+     with zero Medium/High findings open, merge once required CI and the
+     separate Contributor acceptance gate pass. Otherwise: address genuinely
      valuable findings; if that requires a real change, push it and wait
      up to another 10 minutes for the automatic post-push review. **If every
      finding is dismissed/explained with no actual change needed,** skip

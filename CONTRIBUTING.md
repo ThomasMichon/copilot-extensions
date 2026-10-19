@@ -169,9 +169,9 @@ copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
 #   → wait up to 10 minutes for Copilot's review to land (re-requesting a
 #     review is itself not instant -- give it room to actually run)
-#   → Contributor PR, Approved: merge. Owner-authored PR, clean Comment (no
-#     Medium/High findings open): merge -- that's the passing verdict here,
-#     Copilot structurally never renders Approve on this repo's own PRs.
+#   → Approve for either author type, or owner-authored clean Comment (no
+#     Medium/High findings open): merge once the separate required approval
+#     and CI gates pass. Contributor PRs still need Maintainer acceptance.
 #     Otherwise: address findings, push, wait up to 10 minutes for the
 #     automatic post-push review; still not passing -> re-request review via
 #     the API (see "Requesting a fresh review" below), wait up to 10 minutes
@@ -325,7 +325,7 @@ each attempt real room to actually land before treating it as a timeout:
    timeout, not a review event):** there's nothing to address or push yet —
    skip straight to step 4's re-request action rather than inventing an
    unrelated commit.
-2. **Contributor PR, `Approve` landed:** proceed to merge (subject to the
+2. **Either author type, `Approve` landed:** proceed to merge (subject to the
    separate required-approving-review gate for a Contributor's PR — see
    [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation);
    Copilot's own `Approve` never substitutes for that).
@@ -339,8 +339,9 @@ each attempt real room to actually land before treating it as a timeout:
    **`Comment` landed, but every finding is dismissed/explained with no
    actual change needed:** there's nothing new for a re-review to see —
    skip the push and go straight to step 4's re-request action.
-4. **Automatic post-push review landed `Approve` (contributor PR) or a
-   clean `Comment` (owner-authored PR):** merge. **Still not there** (a
+4. **Automatic post-push review landed `Approve` (either author type) or a
+   clean `Comment` (owner-authored PR):** merge, preserving the separate
+   Contributor acceptance and required CI gates. **Still not there** (a
    `Comment` with a Medium/High finding still open, or the post-push wait
    also timed out with nothing landing): explicitly re-request a review —
    see "Requesting a fresh review" below — then wait up to 10 minutes again
