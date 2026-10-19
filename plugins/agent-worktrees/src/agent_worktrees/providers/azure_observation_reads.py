@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from http.client import HTTPResponse, HTTPSConnection
+from io import BufferedReader, RawIOBase
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .base import ProviderError
 
@@ -19,6 +21,74 @@ MAX_RECORDS = 20_000
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class _ReadDeadlineExpired(TimeoutError):
+    pass
+
+
+class _DeadlineRaw(RawIOBase):
+    def __init__(self, raw, sock, deadline, clock):
+        self.raw, self.sock = raw, sock
+        self.deadline, self.clock = deadline, clock
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        remaining = self.deadline - self.clock()
+        if remaining <= 0:
+            raise _ReadDeadlineExpired("ADO observation read budget exhausted")
+        self.sock.settimeout(min(20, remaining))
+        try:
+            return self.raw.readinto(buffer)
+        except TimeoutError as exc:
+            if remaining <= 20:
+                raise _ReadDeadlineExpired("ADO observation read budget exhausted") from exc
+            raise
+
+    def close(self):
+        try:
+            self.raw.close()
+        finally:
+            super().close()
+
+
+class _DeadlineSocket:
+    def __init__(self, sock, deadline, clock):
+        self.sock, self.deadline, self.clock = sock, deadline, clock
+
+    def __getattr__(self, name):
+        return getattr(self.sock, name)
+
+    def makefile(self, mode):
+        raw = self.sock.makefile(mode, buffering=0)
+        return BufferedReader(_DeadlineRaw(raw, self.sock, self.deadline, self.clock))
+
+
+class _DeadlineHTTPSConnection(HTTPSConnection):
+    def __init__(self, host, *, deadline, clock, **kwargs):
+        super().__init__(host, **kwargs)
+
+        def response(sock, *args, **options):
+            # Wrap below HTTP buffering, including chunk framing and proxy headers.
+            return HTTPResponse(_DeadlineSocket(sock, deadline, clock), *args, **options)
+
+        self.response_class = response
+
+
+class _DeadlineHTTPSHandler(HTTPSHandler):
+    def __init__(self, deadline, clock):
+        super().__init__()
+        self.deadline, self.clock = deadline, clock
+
+    def https_open(self, request):
+        def connection(host, **kwargs):
+            return _DeadlineHTTPSConnection(
+                host, deadline=self.deadline, clock=self.clock, **kwargs,
+            )
+
+        return self.do_open(connection, request, context=self._context)
 
 
 @dataclass(frozen=True)
@@ -49,9 +119,9 @@ class AdoReader:
         if not separator or name.casefold() != "authorization" or not value.strip():
             raise ProviderError("ADO observation received an invalid authentication binding")
         self._authorization = value.strip()
-        self.opener = opener or build_opener(NoRedirect())
         self.clock = clock
         self.deadline = clock() + budget
+        self.opener = opener or build_opener(NoRedirect(), _DeadlineHTTPSHandler(self.deadline, clock))
 
     def json(self, url, *, query=None) -> tuple[dict, str]:
         remaining = self.deadline - self.clock()
@@ -70,6 +140,10 @@ class AdoReader:
             raise ProviderError(f"ADO observation GET returned HTTP {exc.code}",
                                 transient=exc.code in (408, 429) or exc.code >= 500) from exc
         except (URLError, OSError, TimeoutError) as exc:
+            if (isinstance(exc, _ReadDeadlineExpired)
+                    or isinstance(getattr(exc, "reason", None), _ReadDeadlineExpired)
+                    or self.clock() >= self.deadline):
+                raise ProviderError("ADO observation read budget exhausted", transient=True) from exc
             raise ProviderError("ADO observation transport unavailable", transient=True) from exc
         if len(data) > MAX_RESPONSE_BYTES:
             raise ProviderError("ADO observation response exceeds its byte limit")

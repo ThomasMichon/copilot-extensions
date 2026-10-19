@@ -648,6 +648,68 @@ def test_native_transport_keeps_real_auth_value_out_of_process_arguments():
     assert seen[0].get_method() == "GET"
 
 
+@pytest.mark.parametrize("framing", ["length", "chunked", "headers"])
+@pytest.mark.parametrize("slow", [False, True])
+def test_native_transport_absolute_deadline_bounds_slow_stream(monkeypatch, framing, slow):
+    import http.client
+    import socketserver
+    import threading
+    import time
+    from urllib.request import ProxyHandler
+    from agent_worktrees.providers import azure_observation_reads as reads
+
+    body = b'{"value":[' + b" " * 80 + b"]}"
+
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(2)
+            self.request.recv(8192)
+            headers = b"HTTP/1.1 200 OK\r\nx-ms-continuationtoken: next\r\n"
+            if framing == "chunked":
+                headers += b"Transfer-Encoding: chunked\r\n\r\n"
+                fragments = [b"1\r\n" + bytes([value]) + b"\r\n" for value in body]
+                fragments.append(b"0\r\n\r\n")
+            else:
+                headers += f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+                fragments = [bytes([value]) for value in body]
+            if framing == "headers":
+                fragments = [bytes([value]) for value in headers] + [body]
+            else:
+                fragments.insert(0, headers)
+            try:
+                for fragment in fragments:
+                    self.request.sendall(fragment)
+                    if slow:
+                        time.sleep(.01)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                return
+
+    # Keep the production HTTPS opener/HTTP parser, but use a plaintext loopback
+    # fixture so this deadline test needs neither external TLS nor certificates.
+    monkeypatch.setattr(http.client.HTTPSConnection, "connect", http.client.HTTPConnection.connect)
+    build = reads.build_opener
+    monkeypatch.setattr(reads, "build_opener", lambda *handlers: build(ProxyHandler({}), *handlers))
+    with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
+        worker = threading.Thread(target=server.handle_request)
+        worker.start()
+        try:
+            reader = AdoReader(
+                AzureDevOpsProvider(), "Project/repository", 7,
+                f"https://127.0.0.1:{server.server_address[1]}", "fixture-token",
+                budget=.15 if slow else 2.0,
+            )
+            started = time.monotonic()
+            if slow:
+                with pytest.raises(ProviderError, match="budget exhausted"):
+                    reader.json(reader.base)
+                assert time.monotonic() - started < .75
+            else:
+                assert reader.json(reader.base) == ({"value": []}, "next")
+        finally:
+            worker.join(timeout=2)
+            assert not worker.is_alive()
+
+
 def test_native_policy_skip_paging_and_repeated_page_refusal():
     provider = AzureDevOpsProvider()
     provider._auth_header = lambda token: ("Authorization: fixture", "")

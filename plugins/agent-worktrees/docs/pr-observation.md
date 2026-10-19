@@ -202,6 +202,8 @@ evidence, never a complete empty result.
 Source/merge-candidate movement during traversal triggers a fresh complete read.
 Stale build/policy evidence cannot green the current source push. Configured
 human/composite policies are not flattened into an independent build failure.
-HTTP reads have finite budgets and reject redirects; authentication stays in
-memory rather than child-process arguments. No broad retry, pipeline queue,
+HTTP reads enforce the remaining absolute budget before each raw socket receive,
+below HTTP buffering, header parsing and chunk framing. A slow stream cannot
+renew the budget by sending fragments. Redirects are rejected; authentication
+stays in memory rather than child-process arguments. No broad retry, pipeline queue,
 approval, presence action or policy bypass is performed by observation.

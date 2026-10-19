@@ -189,6 +189,21 @@ remain outside this proposal's authority.
 
 ## Journal
 
+### 2026-10-19 - Remote review: absolute HTTP receive budgets
+
+- A late review found socket-operation timeouts did not bound a continuously
+  streaming response. Real loopback reads through the production opener and
+  HTTP parser reproduced three failures for fixed-length bodies, chunked
+  bodies and fragmented headers; their fast counterparts already passed.
+- The HTTPS transport now enforces the remaining absolute deadline below HTTP
+  buffering on every raw receive, retaining TLS, redirect refusal, in-memory
+  authentication and response limits. Budget-bound socket timeouts keep an
+  explicit transient budget error even with platform timer rounding.
+- The combined native driver, cursor, CLI, contract and wait selection passes
+  332 cases. A bounded authorized live TLS metadata/iteration read also passes
+  without a backend mutation. Updated-head review/CI, release and rollout
+  remain open.
+
 ### 2026-10-19 - Integrating current review-boundary contracts
 
 - Current `dev` advanced through the review-exception boundary and output-free
