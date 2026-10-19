@@ -95,11 +95,23 @@ def latest_effective_reviews(
     latest: dict[str, ReviewEvidence] = {}
     for review in review_evidence(reviews):
         key = review.reviewer.casefold()
-        if not key or key == author_key:
+        if key == author_key and key:
             continue
         state = "DISMISSED" if review.dismissed else normalize_review_state(review.state)
         if state not in DECISIVE_STATES:
             continue
+        if not key:
+            if state != "CHANGES_REQUESTED":
+                continue
+            key = f"<unknown:{review.id}>"
+            review = ReviewEvidence(
+                id=review.id,
+                state=state,
+                reviewer="unknown reviewer",
+                submitted_at=review.submitted_at,
+                commit_id=review.commit_id,
+                dismissed=review.dismissed,
+            )
         decisive = ReviewEvidence(
             id=review.id,
             state=state,
@@ -140,7 +152,8 @@ def effective_review(
     author_key = author.casefold()
     candidates = [
         review for review in evidence
-        if review.reviewer.casefold() != author_key
+        if review.reviewer
+        and review.reviewer.casefold() != author_key
         and not review.dismissed
         and normalize_review_state(review.state) in allowed
     ]

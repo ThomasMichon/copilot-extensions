@@ -23,6 +23,7 @@ from .pr_patch_ids import (
     _commit_patch_ids as _commit_patch_ids,
     _patch_id as _patch_id,
 )
+from .pr_bypass_note import self_merge_bypass_note
 from .tracking import PRRecord
 
 HOLD_LABEL = "do-not-merge"
@@ -1002,40 +1003,6 @@ def create_pr(
     return result
 
 
-def self_merge_bypass_note(
-    flow, provider, repo: str, number: int | None, *,
-    api_base: str = "", token: str | None = None,
-) -> str | None:
-    """Explain live review-rule authority without asserting review readiness.
-
-    Only the self-merge profile and affirmative provider evidence of a required,
-    actor-bypassable review rule produce a note. Unknown/unavailable evidence
-    produces none. The note is independent of review state: status, creation
-    and observation all use it, including after an approval (#3638, #4234).
-    """
-    from . import pr_contract as pc
-
-    if flow.profile != pc.PROFILE_PR_SELF_MERGE:
-        return None
-    if number is None or not hasattr(provider, "pull_review_gate"):
-        return None
-    try:
-        review_required, bypassable = provider.pull_review_gate(
-            repo, number, api_base=api_base, token=token,
-        )
-    except Exception:
-        return None
-    if not (review_required and bypassable):
-        return None
-    return (
-        "This identity holds repository-authorized Maintainer bypass rights "
-        "for the required-review rule. After the configured review and required CI "
-        "pass, use `pr-merge <#> --now`; missing additional required approval alone "
-        "needs no new permission prompt. This does not override a change request, "
-        "hold, conflict or failed check."
-    )
-
-
 def _pr_claim_ref(pr: PRRecord) -> str:
     """The resource-claim ``ref`` string identifying ``pr``'s PR.
 
@@ -1303,6 +1270,11 @@ def _open_via_provider(
         note = self_merge_bypass_note(
             flow, provider, scope.repo, pull.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
+            expected_head_sha=pull.head_sha,
+            hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
+            wip_title_prefixes=tuple(
+                getattr(prcfg, "wip_title_prefixes", ()) or ()
+            ),
         )
         if note:
             result["self_merge_note"] = note
@@ -1818,6 +1790,11 @@ def _live_pr_state(
         self_merge_note = self_merge_bypass_note(
             flow, provider, target_repo, active.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
+            expected_head_sha=snap.head_sha,
+            hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
+            wip_title_prefixes=tuple(
+                getattr(prcfg, "wip_title_prefixes", ()) or ()
+            ),
         )
     live: dict = {
         **pr_checks.checks_payload(snap.checks_state, snap.check_failures, complete=snap.checks_complete, omitted=snap.check_failures_omitted),

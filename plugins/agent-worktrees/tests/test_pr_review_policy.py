@@ -81,3 +81,18 @@ def test_missing_timestamp_falls_back_to_later_review_id():
         ReviewEvidence(2, "CHANGES_REQUESTED", "reviewer"),
     ]
     assert outstanding_change_requests(reviews) == ("reviewer",)
+
+
+def test_unknown_reviewer_change_request_fails_closed():
+    reviews = [
+        ReviewEvidence(
+            1, "CHANGES_REQUESTED", "",
+            submitted_at="2026-10-19T09:00:00Z",
+        ),
+        ReviewEvidence(
+            2, "APPROVED", "copilot",
+            submitted_at="2026-10-19T09:01:00Z",
+        ),
+    ]
+    assert outstanding_change_requests(reviews) == ("unknown reviewer",)
+    assert effective_review(reviews).state == "CHANGES_REQUESTED"

@@ -656,16 +656,20 @@ def test_reviews_in_the_same_second_are_ordered_by_id():
         assert status["review_on_head"] == "met" and status["review_findings_zero"] == "met"
 
 
-@pytest.mark.parametrize("gate, expected", [((True, True), "met"), ((True, None), "pending"),
-                                             ((True, False), "pending")])
+@pytest.mark.parametrize("gate, expected", [
+    ((True, False, ""), "met"),
+    ((False, True, "unreadable"), "pending"),
+    ((False, False, "extra approval required"), "pending"),
+])
 def test_a_required_review_counts_unless_the_provider_affirms_a_bypass(monkeypatch, capsys, gate, expected):
     from types import SimpleNamespace
 
     from agent_worktrees.providers.github import GitHubProvider
 
-    monkeypatch.setattr(GitHubProvider, "pull_review_gate", lambda self, *a, **k: gate)
+    monkeypatch.setattr(
+        GitHubProvider, "pull_review_exception", lambda self, *a, **k: gate,
+    )
     base = SimpleNamespace(approval_required=False, review_blocking=False, hold_labels=(), wip_title_prefixes=())
     flow = SimpleNamespace(pr_config=base, resolution="actor-role")
     status = _cli_bar(monkeypatch, capsys, flow, [_review()], review_decision="REVIEW_REQUIRED")
     assert status["merge_policy"] == expected
-

@@ -647,6 +647,13 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                         actor_flow.flow, watch_provider, args.repo, args.pr,
                         api_base=args.host or prcfg.api_base or "",
                         token=watch_token,
+                        expected_head_sha=result.payload.get("head_sha", ""),
+                        hold_labels=tuple(
+                            getattr(prcfg, "hold_labels", ()) or ()
+                        ),
+                        wip_title_prefixes=tuple(
+                            getattr(prcfg, "wip_title_prefixes", ()) or ()
+                        ),
                     )
                 except Exception:
                     self_merge_note = None
