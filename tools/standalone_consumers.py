@@ -7,6 +7,7 @@ from pathlib import Path
 
 STANDALONE_CONSUMERS = (
     "worktree-manager", "services/index", "fleet-manager", "services/dispatch",
+    "services/chat",
 )
 
 

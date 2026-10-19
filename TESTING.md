@@ -720,6 +720,15 @@ Preparation's disposable override files stay under the repository so retaining
 their topology does not expand copied source paths back to a drive-root layout
 and exceed Windows' relative-path limit.
 
+`agent-chat-service` resolves to `services/chat` through that same canonical
+preparation and environment-admission path. Its dependency-free conversation
+core has a bounded native Windows/Linux CI lane selected before runner
+allocation. The required PR aggregate refuses missing admission or a selected
+but skipped core job. Portable SQLite contracts and one real wheel/fresh-target
+installation probe run within the existing contained standalone harness; no
+listener, credentials, model, plugin activation or managed service deployment
+is exercised or claimed.
+
 The index-service smoke lane includes offline container-context and explicit
 fleet-image profile contracts; neither needs Docker, a model or enrollment.
 The real-wheel release test builds the sixth first-party `fleet-manager` wheel

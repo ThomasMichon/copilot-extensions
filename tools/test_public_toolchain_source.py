@@ -341,6 +341,7 @@ def test_source_contracts_still_reject_budget_and_dependency_regressions(generat
     "libs/library/src/library/__init__.py", "libs/library/pyproject.toml", "libs/library/LICENSE",
     "worktree-manager/bin/launch-session.sh", "fleet-manager/pyproject.toml",
     "services/index/pyproject.toml", "services/dispatch/src/service.py",
+    "services/chat/pyproject.toml", "services/chat/src/agent_chat_service/store.py",
     "docs/patterns/entity-relationship-model.md",
     *("tools/" + name + ".py" for name in (
         "materialize_main", "materialize_installer_engine", "materialize_launch_wrapper_assets",

@@ -18,6 +18,7 @@ class Admission:
     manager: bool
     dispatch: bool
     reason: str
+    chat: bool = False
 
     def outputs(self) -> str:
         """Render only fixed-name, validated GitHub step outputs."""
@@ -26,13 +27,14 @@ class Admission:
             f"fleet_contracts={str(self.fleet).lower()}",
             f"manager_contracts={str(self.manager).lower()}",
             f"dispatch_contracts={str(self.dispatch).lower()}",
+            f"chat_contracts={str(self.chat).lower()}",
         ))
 
 
 def select_jobs(paths: Iterable[str], *, event: str) -> Admission:
     """Conservatively select the first standalone admission families."""
     if event != "pull_request":
-        return Admission(True, True, True, "full-event")
+        return Admission(True, True, True, "full-event", chat=True)
     paths = tuple(paths)
     for path in paths:
         if (
@@ -43,16 +45,18 @@ def select_jobs(paths: Iterable[str], *, event: str) -> Admission:
             or ":" in path
         ):
             raise ValueError("changed paths must be unambiguous repository-relative paths")
-    fleet = manager = dispatch = False
+    fleet = manager = dispatch = chat = False
     for path in paths:
         if path.startswith(("libs/", "tools/", ".github/")):
-            return Admission(True, True, True, "shared-input")
+            return Admission(True, True, True, "shared-input", chat=True)
         if path.startswith("fleet-manager/"):
             fleet = True
         elif path.startswith("worktree-manager/"):
             manager = True
         elif path.startswith("services/dispatch/"):
             dispatch = True
+        elif path.startswith("services/chat/"):
+            chat = True
         elif path.startswith("plugins/"):
             # Manager imports the engine and consumes plugin-owned pivot data.
             manager = True
@@ -63,12 +67,12 @@ def select_jobs(paths: Iterable[str], *, event: str) -> Admission:
         elif "/" not in path and path.endswith(".md"):
             # TESTING governs the harnesses even when no implementation changed.
             if path == "TESTING.md":
-                return Admission(True, True, True, "shared-test-contract")
+                return Admission(True, True, True, "shared-test-contract", chat=True)
         elif path.startswith("services/index/"):
             continue
         else:
-            return Admission(True, True, True, "unclassified-input")
-    return Admission(fleet, manager, dispatch, "changed-paths")
+            return Admission(True, True, True, "unclassified-input", chat=True)
+    return Admission(fleet, manager, dispatch, "changed-paths", chat=chat)
 
 
 def changed_paths(repo: Path, base: str, head: str) -> list[str]:

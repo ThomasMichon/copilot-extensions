@@ -174,6 +174,7 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("component", [
     "fleet-manager", "worktree-manager", "services/index", "services/dispatch",
+    "services/chat",
 ])
 def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch, component):
     projects = {
@@ -181,6 +182,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         "worktree-manager": "worktree-manager",
         "services/index": "agent-index-service",
         "services/dispatch": "agent-dispatch-service",
+        "services/chat": "agent-chat-service",
         "plugins/agent-index": "agent-index",
         "plugins/agent-dispatch": "agent-dispatch",
         "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
@@ -263,8 +265,13 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
     assert called == []
 
 
-def test_legacy_dispatch_name_uses_canonical_preparation_lease_and_tests(tmp_path, monkeypatch):
-    legacy, canonical = "agent-dispatch-service", "services/dispatch"
+@pytest.mark.parametrize("legacy,canonical", [
+    ("agent-dispatch-service", "services/dispatch"),
+    ("agent-chat-service", "services/chat"),
+])
+def test_service_alias_uses_canonical_preparation_lease_and_tests(
+    tmp_path, monkeypatch, legacy, canonical,
+):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     root = tmp_path / canonical
     (root / "tests").mkdir(parents=True)

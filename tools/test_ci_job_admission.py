@@ -48,11 +48,25 @@ def test_dependency_and_unknown_paths(path: str, expected: tuple[bool, bool, boo
     result = admission.select_jobs([path], event="pull_request")
     assert (result.fleet, result.manager, result.dispatch) == expected
     assert result.outputs().splitlines()[0] == "admission_validated=true"
+    assert result.chat is all(expected)
+
+
+@pytest.mark.parametrize("path", [
+    "services/chat/pyproject.toml",
+    "services/chat/src/agent_chat_service/store.py",
+    "services/chat/tests/test_store.py",
+])
+def test_chat_core_selects_only_its_own_standalone_family(path: str) -> None:
+    result = admission.select_jobs([path], event="pull_request")
+    assert (result.fleet, result.manager, result.dispatch, result.chat) == (False, False, False, True)
+    assert "chat_contracts=true" in result.outputs()
 
 
 @pytest.mark.parametrize("event", ["push", "workflow_dispatch", "repository_dispatch", "future-event"])
 def test_non_pr_events_keep_full_coverage(event: str) -> None:
-    assert admission.select_jobs([], event=event) == admission.Admission(True, True, True, "full-event")
+    assert admission.select_jobs([], event=event) == admission.Admission(
+        True, True, True, "full-event", chat=True,
+    )
 
 
 @pytest.mark.parametrize("path", ["", "../outside", "/outside", "a//b", "a/./b", "a\\b", "a\nb", "C:/x"])
@@ -142,6 +156,7 @@ def workflow() -> dict:
 @pytest.mark.parametrize("job,key", [
     ("fleet-native-linux", "fleet_contracts"), ("fleet-native-windows", "fleet_contracts"),
     ("worktree-manager", "manager_contracts"), ("agent-dispatch-service", "dispatch_contracts"),
+    ("agent-chat-service", "chat_contracts"),
 ])
 def test_actual_job_admission_and_full_manual_override(job: str, key: str) -> None:
     cfg = workflow()["jobs"][job]
@@ -194,11 +209,14 @@ def valid_needs(*, selected: bool) -> dict:
     jobs = workflow()["jobs"]
     needs = {name: {"result": "skipped"} for name in jobs["pr-gate"]["needs"]}
     outputs = {"admission_validated": "true"}
-    for key in ("fleet_contracts", "manager_contracts", "dispatch_contracts"):
+    for key in ("fleet_contracts", "manager_contracts", "dispatch_contracts", "chat_contracts"):
         outputs[key] = str(selected).lower()
     needs["discover"] = {"result": "success", "outputs": outputs}
     if selected:
-        for name in ("fleet-native-linux", "fleet-native-windows", "worktree-manager", "agent-dispatch-service"):
+        for name in (
+            "fleet-native-linux", "fleet-native-windows", "worktree-manager",
+            "agent-dispatch-service", "agent-chat-service",
+        ):
             needs[name] = {"result": "success"}
     return needs
 
@@ -210,7 +228,10 @@ def test_actual_discovery_exports_pinned_selection_and_required_noop() -> None:
     assert "ci_job_admission.py" in step["run"] and '>> "$GITHUB_OUTPUT"' in step["run"]
     assert "pull_request.head.sha" in step["env"]["HEAD_SHA"]
     assert "pull_request.base.sha" in step["env"]["BASE_SHA"]
-    for key in ("admission_validated", "fleet_contracts", "manager_contracts", "dispatch_contracts"):
+    for key in (
+        "admission_validated", "fleet_contracts", "manager_contracts",
+        "dispatch_contracts", "chat_contracts",
+    ):
         assert discovery["outputs"][key] == "${{ steps.admission.outputs." + key + " }}"
     assert jobs["pr-gate"]["name"] == "PR gate (required check)"
     assert "!cancelled()" in jobs["pr-gate"]["if"]
@@ -218,18 +239,25 @@ def test_actual_discovery_exports_pinned_selection_and_required_noop() -> None:
     assert gate_result(valid_needs(selected=True)).returncode == 0
 
 
-@pytest.mark.parametrize("broken", ["missing", "skipped", "failure", "invalid", "no-outputs", "selected-skipped"])
+@pytest.mark.parametrize("broken", [
+    "missing", "skipped", "failure", "invalid", "invalid-chat", "no-outputs",
+    "selected-skipped", "selected-chat-skipped",
+])
 def test_actual_aggregate_refuses_unknown_or_incomplete_admission(broken: str) -> None:
-    needs = valid_needs(selected=broken == "selected-skipped")
+    needs = valid_needs(selected=broken in {"selected-skipped", "selected-chat-skipped"})
     if broken == "missing":
         del needs["discover"]
     elif broken in {"skipped", "failure"}:
         needs["discover"]["result"] = broken
     elif broken == "invalid":
         needs["discover"]["outputs"]["fleet_contracts"] = ""
+    elif broken == "invalid-chat":
+        needs["discover"]["outputs"]["chat_contracts"] = ""
     elif broken == "no-outputs":
         del needs["discover"]["outputs"]
-    else:
+    elif broken == "selected-skipped":
         needs["fleet-native-windows"]["result"] = "skipped"
+    else:
+        needs["agent-chat-service"]["result"] = "skipped"
     result = gate_result(needs)
     assert result.returncode == 1, result.stdout + result.stderr

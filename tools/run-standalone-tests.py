@@ -30,6 +30,7 @@ REPO = Path(__file__).resolve().parent.parent
 COMPONENT_ALIASES = {
     "agent-index-service": "services/index",
     "agent-dispatch-service": "services/dispatch",
+    "agent-chat-service": "services/chat",
 }
 
 

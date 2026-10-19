@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch model:** one proposal PR, then explicitly assigned implementation slices.
 - **Created:** 2026-10-19
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [agent-chat](../../../visions/plugins/agent-chat/README.md),
   [agent fabric](../../../visions/agent-fabric/README.md) and
   [plugin services](../../../visions/plugin-services/README.md).
@@ -96,18 +96,18 @@ requirements.
 
 ### Phase 1 - One reviewed proposal
 
-- [ ] Review the intent-level vision, reciprocal parent/index links and
+- [x] Review the intent-level vision, reciprocal parent/index links and
   architecture proposal, preserving the full collaboration interaction.
-- [ ] Integrate the plugin and qualification contributors' bounded input in
+- [x] Integrate the plugin and qualification contributors' bounded input in
   this one plan; resolve real contradictions without creating peer copies.
 - [ ] Reconcile independent packaging and optional fleet integration with
   current lifecycle owners; name unavailable primitives as exact dependencies.
-- [ ] Land the proposal through normal review and required CI before
+- [x] Land the proposal through normal review and required CI before
   implementation. Keep #7238 open across the partial slice.
 
 ### Phase 2 - Portable service and installed client
 
-- [ ] Claim a bounded implementation slice and extract/reuse the conversation
+- [x] Claim a bounded implementation slice and extract/reuse the conversation
   core, independent cursor and stable-request semantics with synthetic tests.
 - [ ] Package a dependency-light client and independently operable service;
   no source checkout, sibling venv or Copilot plugin is required to host it.
@@ -220,3 +220,25 @@ graduation still requires the declared native and lifecycle guarantees.
 - Created the deduplicated public coordination issue #7238 and this single
   proposal. Integrated generic interaction, qualification and process-boundary
   input; no implementation, service activation or release change is asserted.
+
+### 2026-10-19 - Reviewed proposal and first implementation slice
+
+- Proposal #7239 merged as `9f935357283ed246590a1144936ce9a3baea5b31`
+  after current-head approval with no open findings and passing required CI.
+  The parent #7238 remains open.
+- Integrated the native contributor's recovery correction: preparation sends
+  ID/delta hints only; body reads happen in the admitted recipient turn, with
+  explicit crash/lost-admission qualification. No new retrieval API, body
+  store or semantic acceptance authority is introduced.
+- The next bounded slice is the portable conversation core/service package
+  and synthetic tests, using the repository's standalone service layout.
+  Shared test/release integration will be named before editing its owned
+  registry. This is not a deployed service, plugin activation or migration.
+- Fleet-specific packaging/placement, native host adoption and cross-OS
+  process ownership remain their exact existing owner dependencies. Independent
+  conversation-core work does not change those owners or imply their readiness.
+- The first [portable core distribution](../../../services/chat/README.md)
+  contains no listener or resident launcher. Its actual installed artifact
+  executes the conversation contract after the fixture source is removed.
+  Remaining client, hosting, native and lifecycle work is not completed by
+  this core implementation.
