@@ -85,7 +85,8 @@ Endpoint/profile/identity changes refuse resume and require a new explicit
 attachment. A configured remote target rejects local launch flags, environment,
 worktree creation, model flags and per-session MCP process definitions.
 
-An explicit URL must match exactly one bound target policy before credentials,
+An explicit URL must match exactly one bound target policy in the requested
+project context before credentials,
 network access or session creation. HTTPS uses the policy's selected transport;
 WSS additionally requires `transport: websocket`. Host case and default ports
 are canonicalized, but paths remain distinct. URL text never supplies auth
@@ -163,14 +164,20 @@ fallback, then the selected marketplace overlay. Explicit service bindings win
 over repository bindings. Repository config cannot approve a credential source.
 An optional binding `project` narrows applicability; project-only activation
 requires matching `sender_repo` at attachment.
+CLI creation passes its selected project for named and URL remote targets:
+`agent-bridge --project demo create remote-acp:example-agent`. The authenticated
+session API supplies the same context through `sender_repo`.
 
 Ordinary roster/detail includes `remote-acp:<name>` with owner, applicable
 projects and a non-secret binding diagnostic. Unbound targets remain visible
 as `requires-binding` and non-spawnable. `state: bound` means configuration and
 source registration/approval are complete, **not** that credentials exist, the
 server is reachable, or a conversation works. Discovery does not contact the
-endpoint or retrieve credentials. `/api/v1/agents?project=<name>` filters remote
-contributions by context; ordinary static/provider rows retain their behavior.
+endpoint or retrieve credentials. `/api/v1/agents?project=<name>` composes remote
+bindings in that project before filtering contributions, including cached
+rosters. Detail accepts the same `project` query. Plain and streaming CLI rosters
+and remote detail pass their selected project; ordinary static/provider rows
+retain their behavior.
 Disabled contributions withdraw; uncertain activation cannot retain runnable
 authority from a previous scan. Source-level discovery failures are reported,
 not treated as authoritative emptiness.

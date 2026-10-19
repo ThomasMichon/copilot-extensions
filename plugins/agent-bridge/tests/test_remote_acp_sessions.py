@@ -114,6 +114,36 @@ async def test_route_resolves_remote_before_workspace_or_agent_provider(remote_m
 
 
 @pytest.mark.asyncio
+async def test_drain_during_policy_lookup_does_not_create_starting_ledger_row(remote_manager):
+    import threading
+
+    manager, calls = remote_manager
+    entered, release = threading.Event(), threading.Event()
+    catalog = manager._remote_acp_catalog
+    original = catalog.resolve
+
+    def resolve(*args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+        return original(*args, **kwargs)
+
+    catalog.resolve = resolve
+    pending = asyncio.create_task(connect_remote_session(manager, "example"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        manager._draining = True
+        release.set()
+        with pytest.raises(ValueError, match="draining"):
+            await pending
+        assert calls == [] and manager.list_sessions() == []
+        assert manager._active_acquisitions == 0
+        assert manager.db.list_sessions() == []
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_ambiguous_remote_session_ids_do_not_cross_endpoints(remote_manager):
     manager, _ = remote_manager
     one = await connect_remote_session(manager, "example")

@@ -21,10 +21,13 @@ def _cmd_agent_show(args: argparse.Namespace) -> None:
     from .client import BridgeClientError
 
     client = core._get_client()
+    from .remote_acp_config import is_remote_address
+    project = core._sender_repo() if is_remote_address(args.name) else None
     try:
         agent = client.get_agent(
             args.name,
             include_unaddressable=bool(getattr(args, "include_unaddressable", False)),
+            **({"project": project} if project is not None else {}),
         )
     except BridgeClientError as exc:
         if exc.status == 404:
@@ -100,8 +103,10 @@ def _cmd_agents(args: argparse.Namespace) -> None:
         sys.exit(_run_agents_stream(args))
     core = _core()
     client = core._get_client()
-    agents, topology_errors = client.list_agents_with_diagnostics()
     project = _listing_project(args)
+    agents, topology_errors = client.list_agents_with_diagnostics(
+        **({"project": project} if project is not None else {}),
+    )
     total = len(agents)
     if project:
         project_key = project.casefold()
@@ -171,14 +176,15 @@ def _fetch_agent_rows(
     the ones named in ``incomplete_namespaces``."""
     core = _core()
     client = core._get_client()
+    project = _listing_project(args)
     agents, topology_errors, incomplete_namespaces, capability_known = (
         client.list_agents_with_incomplete(
             force_refresh=force_refresh, require_complete=require_complete,
+            **({"project": project} if project is not None else {}),
         )
     )
     if topology_errors:
         raise RuntimeError("; ".join(topology_errors)[:200])
-    project = _listing_project(args)
     if project:
         project_key = project.casefold()
         agents = [

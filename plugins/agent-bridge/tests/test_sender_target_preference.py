@@ -165,3 +165,27 @@ def test_force_takeover_keeps_existing_session_when_preflight_fails(monkeypatch)
             agent_inventory=[{"name": "machine", "derived": True, "host": "host"}],
         )
     assert events == []
+
+
+@pytest.mark.parametrize("target", [
+    "remote-acp:assistant", "https://example.com/acp", "wss://example.com/acp",
+    "https://example.com/acp@agent",
+])
+def test_remote_cli_start_supplies_explicit_project_to_request(monkeypatch, target):
+    from agent_bridge.client import BridgeClient
+
+    monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "demo")
+    monkeypatch.setattr(cli, "_get_caller_id", lambda: None)
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
+    requests = []
+    client = BridgeClient.__new__(BridgeClient)
+    client.daemon_supports = lambda version: True
+    client._request = lambda *args, **kwargs: requests.append(args) or {
+        "session_id": "created", "name": "remote", "status": "idle",
+    }
+    assert _start_agent_session(
+        client, target, force_new=True, agent_inventory=[],
+    ) == "created"
+    assert requests[0][0:2] == ("POST", "/api/v1/sessions")
+    assert requests[0][2]["sender_repo"] == "demo"

@@ -2,7 +2,10 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from agent_bridge import inventory_cli
+from agent_bridge.client import BridgeClient
 
 
 def test_cli_keeps_unbound_remote_visible_and_does_not_leak_multi_project_target(monkeypatch, capsys):
@@ -24,10 +27,12 @@ def test_cli_keeps_unbound_remote_visible_and_does_not_leak_multi_project_target
         {"name": "local", "target_type": "local", "project": "demo"},
     ]
     emitted = []
-    client = SimpleNamespace(
-        list_agents_with_diagnostics=lambda: (rows, []),
-        list_agents_with_incomplete=lambda **kwargs: (rows, [], [], True),
-    )
+    requests = []
+    client = BridgeClient.__new__(BridgeClient)
+    client.daemon_supports = lambda version: True
+    client._request = lambda *args, **kwargs: requests.append((args, kwargs)) or {
+        "agents": rows, "incomplete_namespaces": [],
+    }
     core = SimpleNamespace(
         _get_client=lambda: client, _PROJECT_OVERRIDE="demo", _PROJECT_ROUTED=False,
         _sender_repo=lambda: "demo", _json_out=emitted.append,
@@ -45,3 +50,30 @@ def test_cli_keeps_unbound_remote_visible_and_does_not_leak_multi_project_target
     output = capsys.readouterr().out
     assert "requires-binding" in output and "instance-binding-required" in output
     assert "remote-acp:foreign" not in output
+    assert all(kwargs["params"]["project"] == "demo" for _args, kwargs in requests)
+
+
+def test_remote_cli_detail_transmits_project_to_real_client(monkeypatch):
+    requests, emitted = [], []
+    client = BridgeClient.__new__(BridgeClient)
+    client.daemon_supports = lambda version: True
+    client._request = lambda *args, **kwargs: requests.append(args) or {"state": "bound"}
+    monkeypatch.setattr(inventory_cli, "_core", lambda: SimpleNamespace(
+        _get_client=lambda: client, _sender_repo=lambda: "demo",
+        _json_out=emitted.append,
+    ))
+    inventory_cli._cmd_agent_show(SimpleNamespace(
+        name="remote-acp:assistant", json=True, include_unaddressable=True,
+    ))
+    assert requests == [("GET", "/api/v1/agents/remote-acp:assistant?include_unaddressable=true&project=demo")]
+    assert emitted == [{"state": "bound"}]
+
+
+@pytest.mark.parametrize("version", [38, 40, 41])
+def test_roster_project_is_only_sent_to_capable_daemon(version):
+    requests = []
+    client = BridgeClient.__new__(BridgeClient)
+    client.daemon_supports = lambda required: version >= required
+    client._request = lambda *args, **kwargs: requests.append(kwargs) or {"agents": []}
+    client.list_agents_with_diagnostics(project="demo")
+    assert requests == [{"params": {"project": "demo"} if version == 41 else None}]

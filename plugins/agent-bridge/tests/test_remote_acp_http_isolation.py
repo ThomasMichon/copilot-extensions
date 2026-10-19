@@ -152,7 +152,8 @@ async def test_reused_stream_client_is_refused_and_control_client_still_closes()
 
 
 @pytest.mark.asyncio
-async def test_sse_close_does_not_reenter_read_after_cancel_races_buffered_chunk() -> None:
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_sse_close_does_not_reenter_read_after_cancel_races_buffered_chunk(cancel) -> None:
     entered, release = asyncio.Event(), asyncio.Event()
     wire = HttpAcpTransport(target())
     reads = []
@@ -162,6 +163,9 @@ async def test_sse_close_does_not_reenter_read_after_cancel_races_buffered_chunk
             entered.set()
             await release.wait()
             reads.append("buffered")
+            wire.closed = True
+            if cancel:
+                consumer.cancel()
             yield b": ready\n\n"
             reads.append("after-close")
             raise AssertionError("SSE consumer read again after close")
@@ -170,11 +174,6 @@ async def test_sse_close_does_not_reenter_read_after_cancel_races_buffered_chunk
     try:
         await asyncio.wait_for(entered.wait(), 1)
         release.set()
-        # Complete the inner read before cancellation reaches wait_for's
-        # waiter: supported Python versions differ in that cancellation race.
-        await asyncio.sleep(0)
-        wire.closed = True
-        consumer.cancel()
         outcome = (await asyncio.wait_for(
             asyncio.gather(consumer, return_exceptions=True), 1,
         ))[0]

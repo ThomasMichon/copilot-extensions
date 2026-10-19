@@ -175,6 +175,26 @@ during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
 
+### 2026-10-19 - First implementation review and CI repairs
+
+- #7231's current-head Copilot review identified project binding gaps in
+  ordinary rosters and CLI attachment. Both cached and direct roster paths now
+  compose remote rows with the requested project; plain/streaming CLI listings,
+  detail and real client creation requests propagate that context.
+- URL ambiguity considers only policies enabled in that context. A drain
+  entering during off-thread policy lookup refuses before creating any ledger
+  row; the acquisition counter still unwinds.
+- Hosted Python 3.12 exposed nondeterministic ordering in the new SSE regression
+  test, not a missing reader guard: the test could request its second chunk
+  before it had marked the wire closed. Closure now occurs inside the buffered
+  reader before returning the chunk. The unguarded reader was calibrated red;
+  guarded cases cover cancellation and ordinary closure.
+- Focused project/session/cache cases passed (129), adjacent CLI/API roster
+  consumers passed (56), and actual TLS HTTP/2/SSE/WSS peer checks passed (46).
+  The native plugin cases now use repository-only bindings for a multi-project
+  contribution, including project-aware roster/detail, create and resume.
+  Review and hosted full-suite gates remain open until the repaired head passes.
+
 ### 2026-10-19 - Generic implementation and bounded evidence
 
 - Pinned implementation sources in `d9081f44c` before generation-41 contract

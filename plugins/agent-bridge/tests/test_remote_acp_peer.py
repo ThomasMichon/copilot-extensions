@@ -45,7 +45,7 @@ async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_pa
     from credential_relay import RelayBuilder
     from dropin_registry import EntryDecision, ScanAuthority
     from plugin_activation import ActivationReport, ActivePlugin
-    from agent_bridge import remote_acp_sources
+    from agent_bridge import related_plugins, remote_acp_sources
     from agent_bridge.agent_registry import AgentResolver
     from agent_bridge.models import ServiceConfig
     from agent_bridge.routes import agents, sessions
@@ -72,15 +72,24 @@ async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_pa
             "transport": mode, "auth": {"source": "injected", "scheme": "Example"},
         }}}))
         plugin = ActivePlugin(
-            "synthetic-harness@example", "synthetic-harness", "example", root, ("global",),
+            "synthetic-harness@example", "synthetic-harness", "example", root,
+            ("project:demo", "project:other"),
         )
         monkeypatch.setattr(remote_acp_sources, "resolve_active_plugins", lambda: ActivationReport(
             ScanAuthority.COMPLETE, {plugin.source: EntryDecision.active(plugin)},
         ))
-        config["remote_acp_bindings"] = {"peer": {
+        project_root = tmp_path / "project"
+        (project_root / ".agent-bridge").mkdir(parents=True)
+        monkeypatch.setattr(
+            related_plugins, "_registry_anchor",
+            lambda project: project_root if project == "demo" else None,
+        )
+        (project_root / ".agent-bridge" / "config.yaml").write_text(json.dumps({
+            "remote_acp_bindings": {"peer": {
             "plugin": plugin.source, "endpoint": endpoint, "identity": "synthetic",
             "credential_source": reference, "resource": "synthetic-resource", "scope": "read",
-        }}
+            }},
+        }))
     else:
         config["remote_acp"] = {"peer": {
             "endpoint": endpoint, "transport": mode, "auth": auth,
@@ -119,9 +128,14 @@ async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_pa
     app.include_router(agents.router)
     app.include_router(sessions.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bridge.invalid") as api:
-        roster = (await api.get("/api/v1/agents")).json()["agents"]
+        params = {"project": "demo"} if address_kind == "plugin" else {}
+        roster = (await api.get("/api/v1/agents", params=params)).json()["agents"]
         assert [row["name"] for row in roster] == ["remote-acp:peer"] and not calls
-        assert (await api.get("/api/v1/agents/remote-acp:peer")).json() == roster[0]
+        assert roster[0]["state"] == "bound"
+        assert (await api.get("/api/v1/agents/remote-acp:peer", params=params)).json() == roster[0]
+        if address_kind == "plugin":
+            other = (await api.get("/api/v1/agents", params={"project": "other"})).json()
+            assert other["agents"][0]["state"] == "requires-binding"
         assert not calls
         async with httpx.AsyncClient(verify=context, trust_env=False) as probe:
             untouched = (await probe.get(url + "/evidence")).json()
@@ -130,7 +144,8 @@ async def test_normal_catalog_create_and_resume_use_approved_source(peer, tmp_pa
         address = endpoint if address_kind == "url" else "remote-acp:peer"
         if address_kind == "url" and mode == "websocket":
             address = address.replace("https:", "wss:", 1)
-        response = await api.post("/api/v1/sessions", json={"agent": address})
+        body = {"agent": address, **({"sender_repo": "demo"} if address_kind == "plugin" else {})}
+        response = await api.post("/api/v1/sessions", json=body)
         assert response.status_code == 201, response.text
         session = manager.get_session(response.json()["session_id"])
         try:

@@ -15,6 +15,7 @@ from agent_bridge.models import ServiceConfig, StartSessionRequest
 from agent_bridge.remote_acp_catalog import RemoteAcpCatalog
 from agent_bridge.remote_acp_config import RemoteAcpBinding, RemoteAcpTarget, canonical_endpoint
 from agent_bridge.remote_acp_sources import (
+    RemoteContribution,
     RemoteContributionReport,
     discover_remote_contributions,
 )
@@ -296,3 +297,57 @@ async def test_unknown_url_route_refuses_before_local_resolution_or_spawn(tmp_db
     assert refused.value.status_code == 422
     resolver.resolve_async.assert_not_called()
     assert manager.list_sessions() == []
+
+
+@pytest.mark.parametrize("scopes", [("global",), ("project:demo", "project:other")])
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.asyncio
+async def test_project_roster_composes_bindings_before_filtering(contribution, scopes, cached):
+    from dataclasses import replace
+
+    report = discover_remote_contributions()
+    report.targets["assistant"] = replace(report.targets["assistant"], scopes=scopes)
+    catalog = RemoteAcpCatalog(
+        {}, discover=lambda: report,
+        project_bindings=lambda project: {"assistant": binding()} if project == "demo" else {},
+    )
+    catalog.apply(report)
+    resolver = AgentResolver({}, {})
+    resolver.remote_acp_catalog = catalog
+    stale_rows = resolver.list_agents()
+    assert stale_rows[0]["state"] == "requires-binding"
+    state = SimpleNamespace(resolver=resolver, topology_ready=True)
+    if cached:
+        state.agent_roster_cache = SimpleNamespace(
+            resolver=resolver,
+            get_snapshot=AsyncMock(return_value=SimpleNamespace(
+                rows=stale_rows, complete=True, incomplete_namespaces=[],
+            )),
+        )
+    request = SimpleNamespace(app=SimpleNamespace(state=state))
+    rows = (await list_agents(request, project="demo"))["agents"]
+    assert rows[0]["state"] == "bound"
+    assert await get_agent("remote-acp:assistant", request, project="demo") == rows[0]
+    assert (await list_agents(request, project="other"))["agents"][0]["state"] == "requires-binding"
+    assert stale_rows[0]["state"] == "requires-binding"
+
+
+def test_url_uniqueness_only_counts_policies_enabled_in_requested_project(contribution):
+    from dataclasses import replace
+
+    report = discover_remote_contributions()
+    report.targets["foreign"] = RemoteContribution(
+        "foreign", "foreign@example", ("project:other",),
+        report.targets["assistant"].requirements,
+    )
+    catalog = RemoteAcpCatalog(
+        {}, bindings={"assistant": binding(), "foreign": binding(plugin="foreign@example")},
+        discover=lambda: report,
+    )
+    assert catalog.resolve("https://example.com/acp", project="demo")[0] == "assistant"
+    assert catalog.resolve("https://example.com/acp", project="other")[0] == "foreign"
+    with pytest.raises(ValueError):
+        catalog.resolve("https://example.com/acp")
+    report.targets["foreign"] = replace(report.targets["foreign"], scopes=("project:demo",))
+    with pytest.raises(ValueError, match="unique"):
+        catalog.resolve("https://example.com/acp", project="demo")

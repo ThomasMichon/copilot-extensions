@@ -67,6 +67,8 @@ async def _attach_remote_session(
         if spec is None:
             raise ValueError("Unknown configured remote ACP target")
         spec = RemoteAcpTarget.model_validate(spec)
+    if manager.is_draining:
+        raise ValueError("Bridge is draining")
     snapshot = spec.model_dump(mode="json")
     previous_spec = (
         RemoteAcpTarget.model_validate(session.target.remote_acp).model_dump(mode="json")

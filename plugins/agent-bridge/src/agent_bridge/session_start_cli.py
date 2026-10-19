@@ -166,6 +166,10 @@ def _sender_repo_for_target(
     agent_name: str, *, agent_inventory: list[dict] | None = None,
 ) -> str | None:
     """Derive a preference only for targets whose resolver consumes it."""
+    from .remote_acp_config import is_remote_address
+
+    if is_remote_address(agent_name):
+        return _core()._sender_repo()
     repo, separator, venue = agent_name.partition("@")
     if separator and repo.strip() and venue.strip():
         return None
@@ -222,6 +226,10 @@ class _SenderPreference:
 def _prepare_sender_preference(
     client, agent_name: str, *, agent_inventory: list[dict] | None = None,
 ) -> _SenderPreference:
+    from .remote_acp_config import is_remote_address
+
+    if is_remote_address(agent_name):
+        return _SenderPreference(agent_name, _core()._sender_repo())
     repo, separator, venue = agent_name.partition("@")
     if separator and repo.strip() and venue.strip():
         return _SenderPreference(agent_name, None)

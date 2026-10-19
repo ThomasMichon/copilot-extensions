@@ -182,6 +182,7 @@ class RemoteAcpCatalog:
             candidates = [
                 entry for entry in entries.values()
                 if entry.target and canonical_endpoint(entry.target.endpoint) == identity
+                and (entry.global_scope or project in entry.projects)
                 and (urlsplit(address).scheme != "wss" or entry.target.transport == "websocket")
             ]
         if len(candidates) != 1:

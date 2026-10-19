@@ -8,9 +8,13 @@ from fastapi import APIRouter, HTTPException, Request
 router = APIRouter(tags=["agents"])
 
 
-def _project_rows(rows: list[dict], project: str | None) -> list[dict]:
+async def _project_rows(resolver, rows: list[dict], project: str | None) -> list[dict]:
     if project is None:
         return rows
+    catalog = getattr(resolver, "remote_acp_catalog", None)
+    if catalog is not None:
+        remote_rows = await asyncio.to_thread(catalog.rows, project, refresh=False)
+        rows = [row for row in rows if row.get("target_type") != "remote-acp"] + remote_rows
     return [
         row for row in rows
         if row.get("target_type") != "remote-acp" or row.get("global_scope")
@@ -53,7 +57,7 @@ async def list_agents(
         list_async = getattr(resolver, "list_agents_async", None)
         agents = await list_async() if callable(list_async) else []
         return {
-            "agents": _project_rows(agents, project),
+            "agents": await _project_rows(resolver, agents, project),
             "topology_errors": getattr(resolver, "topology_errors", []),
             "topology_warnings": getattr(resolver, "topology_warnings", []),
             "incomplete_namespaces": getattr(resolver, "incomplete_namespaces", []),
@@ -82,7 +86,7 @@ async def list_agents(
         list_async = getattr(resolver, "list_agents_async", None)
         agents = await list_async() if callable(list_async) else []
         return {
-            "agents": _project_rows(agents, project),
+            "agents": await _project_rows(resolver, agents, project),
             "topology_errors": getattr(resolver, "topology_errors", []),
             "topology_warnings": getattr(resolver, "topology_warnings", []),
             "incomplete_namespaces": getattr(resolver, "incomplete_namespaces", []),
@@ -94,7 +98,7 @@ async def list_agents(
     if require_complete and (not snapshot.complete or remote_incomplete):
         raise HTTPException(status_code=503, detail="agent roster incomplete")
     return {
-        "agents": _project_rows(snapshot.rows, project),
+        "agents": await _project_rows(resolver, snapshot.rows, project),
         "topology_errors": getattr(resolver, "topology_errors", []),
         "topology_warnings": getattr(resolver, "topology_warnings", []),
         "incomplete_namespaces": [
