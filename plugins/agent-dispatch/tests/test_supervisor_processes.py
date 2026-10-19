@@ -73,7 +73,8 @@ def test_target_prefixes_preserve_exact_supervisor_retirement_scope():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows argv parsing and installer fallback")
-def test_native_fallback_matches_prefixed_python_scope_without_stopping_real_processes(tmp_path):
+@pytest.mark.parametrize("replacement", [None, 70111, 70119, "missing-identity", "query-failed"])
+def test_native_fallback_matches_prefixed_scope_and_refuses_replaced_processes(tmp_path, replacement):
     plugin = Path(__file__).resolve().parents[1]
     text = (plugin / "scripts/install.ps1").read_text()
     start = text.index("function Retire-SupervisorProcessesFallback {")
@@ -81,31 +82,101 @@ def test_native_fallback_matches_prefixed_python_scope_without_stopping_real_pro
     rows = tmp_path / "processes.json"
     rows.write_text(json.dumps([
         {"ProcessId": p.pid, "ParentProcessId": p.parent_pid,
-         "ExecutablePath": p.executable, "CommandLine": p.command_line}
+         "ExecutablePath": p.executable, "CommandLine": p.command_line,
+         "CreationDate": None if replacement == "missing-identity" and p.pid == 70111 else "2026-10-01T00:00:00Z"}
         for p in _prefixed_processes()
     ]), encoding="utf-8")
+    replaced_pid = replacement if isinstance(replacement, int) else 0
     script = tmp_path / "retire.ps1"
     script.write_text("\n".join([
         "$ErrorActionPreference='Stop'; $env:OS='Windows_NT'",
         f"$InstallDir='{INSTALL_DIR}'; $env:AGENT_DISPATCH_RUN_DIR=Join-Path $InstallDir 'run'",
         f"$script:Rows=@(Get-Content -Raw '{rows}' | ConvertFrom-Json)",
-        "$script:Stopped=@()",
+        "$script:Disposed=@(); $script:Warnings=@()",
+        "Add-Type -TypeDefinition @'",
+        "using System; using System.Collections.Generic;",
+        "public static class DispatchSupervisorProcessHandle {",
+        "  public static long Expected, ReplacementHandle;",
+        "  public static List<long> Queries=new List<long>(), Stopped=new List<long>();",
+        "  public static long CreationFileTime(IntPtr handle) {",
+        "    Queries.Add(handle.ToInt64());",
+        "    return Expected + (handle.ToInt64()==ReplacementHandle ? 10000000 : 0);",
+        "  }",
+        "  public static void Terminate(IntPtr handle) {",
+        "    if(Queries[Queries.Count-1]!=handle.ToInt64()) throw new Exception(\"handle changed\");",
+        "    Stopped.Add(handle.ToInt64());",
+        "  }",
+        "}",
+        "'@",
+        "[DispatchSupervisorProcessHandle]::Expected=([datetime]'2026-10-01T00:00:00Z').ToFileTimeUtc()",
+        f"[DispatchSupervisorProcessHandle]::ReplacementHandle={replaced_pid + 100000}",
+        f"$script:FailQuery=${str(replacement == 'query-failed').lower()}",
         "function Get-CimInstance { param($ClassName,$ErrorAction) $script:Rows }",
-        "function Stop-Process { param([int]$Id,[switch]$Force,$ErrorAction) $script:Stopped+=$Id }",
-        "function Write-Warn { param($message) throw $message }",
+        "function Get-Process {",
+        "  param([int]$Id,$ErrorAction)",
+        "  if($script:FailQuery -and $Id -eq 70111){throw 'process query denied'}",
+        "  $process=[pscustomobject]@{Handle=[IntPtr]($Id+100000)}",
+        "  $process | Add-Member -MemberType ScriptMethod -Name Dispose -Value {$script:Disposed+=$this.Handle.ToInt64()}",
+        "  return $process",
+        "}",
+        "function Stop-Process { throw 'PID-only termination is forbidden' }",
+        "function Write-Warn { param($message) $script:Warnings+=$message }",
         "function Stop-DispatchProcess { throw 'unexpected legacy fallback' }",
         f". '{plugin / 'scripts/supervisor-lifecycle.ps1'}'",
         function,
         "$count=Retire-SupervisorProcessesFallback",
-        f"if($count -ne {len(_prefixed_expected())}){{throw \"unexpected retirement count $count\"}}",
-        "[Console]::Out.Write((ConvertTo-Json -InputObject @($script:Stopped) -Compress))",
+        "[Console]::Out.Write((@{count=$count; stopped=@([DispatchSupervisorProcessHandle]::Stopped);",
+        "queries=@([DispatchSupervisorProcessHandle]::Queries);disposed=$script:Disposed;warnings=$script:Warnings}|ConvertTo-Json -Compress))",
     ]), encoding="utf-8")
     result = subprocess.run(
         [supervisor_processes.powershell_host(), "-NoProfile", "-NonInteractive", "-File", str(script)],
         capture_output=True, text=True, timeout=20, **supervisor_processes.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert set(json.loads(result.stdout)) == _prefixed_expected()
+    evidence = json.loads(result.stdout)
+    refused = {replaced_pid or 70111} if replacement is not None else set()
+    expected = {pid + 100000 for pid in _prefixed_expected() - refused}
+    assert set(evidence["stopped"]) == expected
+    assert evidence["count"] == len(expected)
+    assert set(evidence["disposed"]) == set(evidence["queries"])
+    assert len(evidence["warnings"]) == int(replacement is not None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows retained process handle")
+def test_native_process_handle_refuses_stale_identity_and_stops_only_owned_child(tmp_path):
+    import sys
+
+    plugin = Path(__file__).resolve().parents[1]
+    script = tmp_path / "handle.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference='Stop'; $script:Warnings=@()",
+        "function Write-Warn { param($message) $script:Warnings+=$message }",
+        f". '{plugin / 'scripts/supervisor-lifecycle.ps1'}'",
+        "$start=[Diagnostics.ProcessStartInfo]::new()",
+        f"$start.FileName='{sys.executable}'",
+        "$start.Arguments='-c \"import time; time.sleep(60)\"'",
+        "$start.UseShellExecute=$false; $start.CreateNoWindow=$true",
+        "$child=[Diagnostics.Process]::Start($start)",
+        "try {",
+        "  $snapshot=[pscustomobject]@{ProcessId=$child.Id;CreationDate=$child.StartTime.AddSeconds(-1)}",
+        "  if(Stop-SupervisorSnapshotProcess $snapshot){throw 'stale identity was retired'}",
+        "  if($child.HasExited){throw 'stale identity stopped its replacement'}",
+        "  $snapshot.CreationDate=$child.StartTime",
+        "  if(-not (Stop-SupervisorSnapshotProcess $snapshot)){throw 'matching child was not retired'}",
+        "  if(-not $child.WaitForExit(5000)){throw 'matching child survived termination'}",
+        "  if($script:Warnings.Count -ne 1){throw 'identity refusal was not reported'}",
+        "  [Console]::Out.Write('owned-handle-retirement-pass')",
+        "} finally {",
+        "  if(-not $child.HasExited){$child.Kill();$child.WaitForExit(5000)|Out-Null}",
+        "  $child.Dispose()",
+        "}",
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [supervisor_processes.powershell_host(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=20, **supervisor_processes.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "owned-handle-retirement-pass"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows installer lifecycle health probes")

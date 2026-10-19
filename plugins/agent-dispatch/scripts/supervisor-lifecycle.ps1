@@ -60,13 +60,60 @@ public static class DispatchSupervisorCommandLine {
     return @()
 }
 
+function Stop-SupervisorSnapshotProcess {
+    param($Snapshot)
+    $process = $null
+    try {
+        if (-not $Snapshot.CreationDate) { throw 'snapshot has no process creation identity' }
+        $expected = ([datetime]$Snapshot.CreationDate).ToUniversalTime().ToFileTimeUtc()
+        if (-not ('DispatchSupervisorProcessHandle' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class DispatchSupervisorProcessHandle {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    private static extern bool GetProcessTimes(
+        IntPtr handle, out long creation, out long exit, out long kernel, out long user);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    private static extern bool TerminateProcess(IntPtr handle, uint exitCode);
+    public static long CreationFileTime(IntPtr handle) {
+        long creation, exit, kernel, user;
+        if (!GetProcessTimes(handle, out creation, out exit, out kernel, out user))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        return creation;
+    }
+    public static void Terminate(IntPtr handle) {
+        if (!TerminateProcess(handle, 1))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+}
+'@
+        }
+        $process = Get-Process -Id ([int]$Snapshot.ProcessId) -ErrorAction Stop
+        $handle = $process.Handle
+        $actual = [DispatchSupervisorProcessHandle]::CreationFileTime($handle)
+        # CIM creation timestamps retain microseconds; FILETIME retains 100 ns.
+        if (($actual - ($actual % 10)) -ne ($expected - ($expected % 10))) {
+            throw 'process creation identity changed after inventory'
+        }
+        [DispatchSupervisorProcessHandle]::Terminate($handle)
+        return $true
+    } catch {
+        Write-Warn "Supervisor process $($Snapshot.ProcessId) not retired: $($_.Exception.Message)"
+        return $false
+    } finally {
+        if ($process) { $process.Dispose() }
+    }
+}
+
 function Invoke-SupervisorAudit {
     param(
         [string]$Event, [string]$Reason, [string]$Name = '',
         [string]$EnvFile = '', [string]$Outcome = 'begin', [int]$ExitCode = -1
     )
     try {
-    $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
+    $py = if (Test-Path -LiteralPath $VenvPython) { $VenvPython } elseif (Test-Path -LiteralPath $LinkPython) { $LinkPython } else { $null }
     if (-not $py) {
         Write-Warn "Supervisor lifecycle audit unavailable ($Event/$Reason); action is not suppressed"
         return

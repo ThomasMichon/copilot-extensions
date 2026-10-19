@@ -688,6 +688,13 @@ disable read-time provisioning. The existing native consumer-prefix tests also
 run under the managed Windows runner: their CMD fixture uses an ordinary path
 spelling of the same interpreter file, while preserving every registered
 argument, child environment and process boundary.
+Native fallback retirement retains the selected CIM creation identity and a
+process handle: creation-time validation and termination use that same handle,
+never a later PID lookup. Missing, replaced or unqueryable identities refuse
+with a warning. The native regression covers replacement of both roots and
+descendants, handle disposal and a real test-owned child's stale-identity
+refusal followed by matching-identity termination. Runtime existence probes use
+literal paths so extended Windows interpreter paths reach these real adapters.
 
 The opt-in native multi-container proof is documented in the
 [central/local authority clean-room lane](tools/clean-room/central-local-authority/README.md).

@@ -2239,8 +2239,8 @@ function Retire-SupervisorProcesses {
             }
         }
     } catch { }
-    if (-not $py -and (Test-Path $VenvPython)) { $py = $VenvPython }
-    if (-not $py -and (Test-Path $LinkPython)) { $py = $LinkPython }
+    if (-not $py -and (Test-Path -LiteralPath $VenvPython)) { $py = $VenvPython }
+    if (-not $py -and (Test-Path -LiteralPath $LinkPython)) { $py = $LinkPython }
     if (-not $py) {
         return (Retire-SupervisorProcessesFallback)
     }
@@ -2366,15 +2366,15 @@ function Retire-SupervisorProcessesFallback {
         # the snapshot is being retired.
         foreach ($processId in @($selected | Sort-Object { $depth[$_] })) {
             if ($processId -eq $PID) { continue }
-            try {
-                Stop-Process -Id $processId -Force -ErrorAction Stop
+            $snapshot = $rows | Where-Object ProcessId -eq $processId | Select-Object -First 1
+            if (Stop-SupervisorSnapshotProcess -Snapshot $snapshot) {
                 $killed++
-            } catch { }
+            }
         }
         return $killed
     } catch {
         Write-Warn "Native supervisor generation retirement failed: $_"
-        return (Stop-DispatchProcess -Subcommand supervise)
+        return 0
     }
 }
 

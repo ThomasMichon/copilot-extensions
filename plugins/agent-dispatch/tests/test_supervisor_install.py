@@ -555,7 +555,9 @@ class TestWindowsSupervisorInstall:
         assert "current-version" in helper
         assert "function Retire-SupervisorProcessesFallback" in helper
         assert "Get-CimInstance Win32_Process" in helper
-        assert "Stop-Process -Id $processId" in helper
+        assert "Stop-SupervisorSnapshotProcess -Snapshot $snapshot" in helper
+        assert "Stop-Process -Id $processId" not in helper
+        assert "return (Stop-DispatchProcess -Subcommand supervise)" not in helper
         assert "foreach ($pid " not in helper
         assert "$isRegistrarChild" in helper
         assert "$supervisorRun" in helper
