@@ -141,7 +141,7 @@ def test_binding_update_preserves_native_indentless_sequence_structure(tmp_path)
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
     path = tmp_path / "config.yaml"
-    existing = "repo_name: harness\ncopilot_profiles:\n- name: cloud\n  model: example\n"
+    existing = "repo_name: harness\ncopilot_profiles:\n-\n  name: cloud\n  model: example\n"
     path.write_text(existing, encoding="utf-8")
     owner.write_binding(path, "harness", "knowledge", preserve=True)
     before, after = yaml.safe_load(existing), yaml.safe_load(path.read_text())

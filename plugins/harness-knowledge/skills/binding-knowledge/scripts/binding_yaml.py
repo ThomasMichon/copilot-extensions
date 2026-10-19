@@ -70,7 +70,7 @@ def check_document_shape(existing: str) -> None:
     if significant and (
         not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\s*:", significant[0])
         or any(
-            not line[0].isspace() and not line.startswith("- ")
+            not line[0].isspace() and not re.match(r"^-(?:\s|$)", line)
             and not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\s*:", line)
             for line in significant
         )
@@ -79,7 +79,7 @@ def check_document_shape(existing: str) -> None:
     for index, line in enumerate(significant[:-1]):
         following = significant[index + 1]
         if re.match(r"^knowledge_repo\s*:", line) and (
-            following[0].isspace() or following.startswith("- ")
+            following[0].isspace() or re.match(r"^-(?:\s|$)", following)
         ):
             raise RuntimeError("unsupported multiline knowledge binding; configuration was preserved")
 
