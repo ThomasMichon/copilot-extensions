@@ -78,6 +78,7 @@ class GitHubFixture:
             "required_conversation_resolution": {"enabled": False},
             "required_signatures": {"enabled": False},
             "required_linear_history": {"enabled": False},
+            "lock_branch": {"enabled": False},
         }
 
     def invoke(self, argv, **kwargs):
@@ -476,6 +477,20 @@ def test_classic_conversation_resolution_prevents_admin_retry(monkeypatch):
         "owner/project", 7, admin=True, expected_head_sha=HEAD,
     )
     assert "required_conversation_resolution" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+def test_locked_classic_branch_prevents_admin_retry(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.classic_protection["lock_branch"] = {"enabled": True}
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "lock_branch" in result
     assert not any("--admin" in argv for argv in fixture.calls)
 
 

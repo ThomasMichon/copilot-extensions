@@ -358,6 +358,7 @@ def review_exception_evidence(
             "required_conversation_resolution",
             "required_signatures",
             "required_linear_history",
+            "lock_branch",
         ):
             constraint = protection.get(field)
             if constraint is not None:
