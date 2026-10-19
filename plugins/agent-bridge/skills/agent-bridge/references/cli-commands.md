@@ -337,12 +337,22 @@ be discarded (or the cancel signature *persists* across sends). See the
 # for the session heading that worktree now). --json prints {schema: 1,
 # sessions: [{ref, status: ok|not_found|unsupported|error, reason, availability,
 # registry: bridge|live, session_id, worktree_id, fidelity: full|reduced,
-# detail, error}]}, one per operand in order. reason is an attention reason
-# (input_required, permission_required, policy_required, failed, unreachable,
-# turn_complete, ...) or null when nothing is pending; availability
-# unknown_after_restart marks a request this daemon generation can't answer.
-# A daemon older than HTTP protocol 29 reports every session unsupported (no
-# request is sent).
+# detail, since, position, error}]}, one per operand in order. reason is an
+# attention reason (input_required, permission_required, policy_required,
+# failed, unreachable, turn_complete, ...) or null when nothing is pending;
+# availability unknown_after_restart marks a request this daemon generation
+# can't answer. since (RFC 3339) and position name the event behind reason:
+# position is the opaque attention position -- for a bridge-managed session the
+# one `wait --attention --position` accepts, so the next boundary is one wait
+# away; for a represented one only a comparison key -- and an unchanged
+# position is the same boundary (compare positions only across reads of the
+# same session or worktree). Both are null with no reason, without a recorded
+# boundary event (e.g. a terminal status with no recorded transition), and for
+# a represented session after a bridge restart (availability
+# unknown_after_restart); a represented boundary learned from a history replay
+# keeps since but has a null position. A daemon older than HTTP protocol 42
+# omits both keys. A daemon older than HTTP protocol 29 reports every session
+# unsupported (no request is sent).
 <agent-bridge catalog argv[0]> --json attention <session|worktree> [<session|worktree> ...]
 
 # Stop a session (preserves state for resume)

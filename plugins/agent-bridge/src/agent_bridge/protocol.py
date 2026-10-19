@@ -205,7 +205,11 @@ LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION = 39
 WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION = 40
 # Direct endpoint targets and inert plugin contributions with scoped source binding.
 REMOTE_ACP_TARGETS_PROTOCOL_VERSION = 41
-HTTP_PROTOCOL_VERSION = 41
+# Each current-attention reason names its boundary: ``since`` and the opaque
+# attention ``position`` (``null`` without one). Below this the keys are absent,
+# so a reader can tell an unsupported daemon from one that has no boundary.
+ATTENTION_BOUNDARY_PROTOCOL_VERSION = 42
+HTTP_PROTOCOL_VERSION = 42
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

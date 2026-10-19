@@ -654,10 +654,10 @@ def _represented_latest_result(
     )
 
 
-def _represented_pending_input(
-    event_log: EventLog, budget: _TextBudget
-) -> tuple[ResultField, bool]:
-    _continuity, events = _represented_tail(event_log)
+def _represented_pending_events(events: list[Any]) -> list[Any]:
+    """The parent questions and permission requests still open after the last
+    parent turn completion: unkeyed ones, then keyed ones in first-seen order.
+    A snapshot reports the last one."""
     last_complete = max(
         (
             index
@@ -683,7 +683,43 @@ def _represented_pending_input(
                 unkeyed.append(event)
         elif event.event in {"tool_call_start", "tool_call_update"} and key:
             pending_by_id.pop(key, None)
-    pending = [*unkeyed, *pending_by_id.values()]
+    return [*unkeyed, *pending_by_id.values()]
+
+
+def represented_attention_boundary(
+    event_log: EventLog, reason: str | None
+) -> tuple[str | None, Any | None]:
+    """The represented tail's continuity and the event behind *reason*, the
+    attention a represented result snapshot derives: the open question or
+    permission request it reports, or the parent turn completion. ``None`` when
+    the tail holds no such event (``ended`` never has one)."""
+    continuity, events = _represented_tail(event_log)
+    if reason in {"input_required", "permission_required"}:
+        pending = _represented_pending_events(events)
+        wanted = (
+            "permission_request" if reason == "permission_required" else "ask_user_request"
+        )
+        if pending and pending[-1].event == wanted:
+            return continuity, pending[-1]
+        return continuity, None
+    if reason == "turn_complete":
+        return continuity, next(
+            (
+                event
+                for event in reversed(events)
+                if event.event == "turn_complete"
+                and not is_nested_event_data(event.data)
+            ),
+            None,
+        )
+    return continuity, None
+
+
+def _represented_pending_input(
+    event_log: EventLog, budget: _TextBudget
+) -> tuple[ResultField, bool]:
+    _continuity, events = _represented_tail(event_log)
+    pending = _represented_pending_events(events)
     if not pending:
         return (
             ResultField(

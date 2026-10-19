@@ -209,3 +209,160 @@ def test_the_cli_reports_unsupported_against_an_older_daemon_without_asking_it()
     assert [e["status"] for e in entries] == ["unsupported", "unsupported"]
     assert f"v{CURRENT_ATTENTION_PROTOCOL_VERSION}" in entries[0]["error"]
     fake.current_attention.assert_not_called()
+
+
+def test_the_cli_passes_a_boundary_through(monkeypatch, capsys):
+    from agent_bridge.protocol import ATTENTION_BOUNDARY_PROTOCOL_VERSION
+
+    fake = _fake_client(ATTENTION_BOUNDARY_PROTOCOL_VERSION, {
+        "a": {"requested_ref": "a", "registry": "bridge", "session_id": "a", "reason": "turn_complete",
+              "availability": "available", "fidelity": "full",
+              "since": "2026-01-01T00:00:00+00:00", "position": "opaque-position"}})
+    monkeypatch.setattr(cli, "_get_client", lambda ensure=True: fake)
+    cli.main(["--json", "attention", "a"])
+    entry = json.loads(capsys.readouterr().out)["sessions"][0]
+    assert (entry["since"], entry["position"]) == ("2026-01-01T00:00:00+00:00", "opaque-position")
+
+
+# -- the boundary (since, position) ------------------------------------------------
+
+
+def _token(position: str) -> dict:
+    from agent_bridge.attention_wait import _decode_token
+
+    return _decode_token(position)
+
+
+def _epoch(since: str) -> float:
+    from datetime import datetime
+
+    return datetime.fromisoformat(since).timestamp()
+
+
+_QUESTION = {"id": "1", "type": "tool.execution_start", "data": {
+    "toolCallId": "ask-1", "toolName": "ask_user", "arguments": {"message": "Choose"}}}
+
+
+def test_the_boundary_capability_is_advertised():
+    from agent_bridge.protocol import ATTENTION_BOUNDARY_PROTOCOL_VERSION
+
+    assert HTTP_PROTOCOL_VERSION >= ATTENTION_BOUNDARY_PROTOCOL_VERSION > CURRENT_ATTENTION_PROTOCOL_VERSION
+
+
+def test_an_owned_request_names_the_position_wait_settles_on(client, app):
+    session = _owned(app, pending={"ask-1"})
+    session.event_log.append("user_message", {"content": "go"})
+    asked = session.event_log.append("ask_user_request", {"tool_call_id": "ask-1", "message": "which?"})
+    body = _current(client)
+    assert _epoch(body["since"]) == pytest.approx(asked.timestamp)
+    token = _token(body["position"])
+    assert (token["kind"], token["logical_delegate_kind"], token["logical_delegate_id"],
+            token["observed_session_id"], token["event_id"]) == ("position", "worktree", "wt-1", "sess-1", asked.id)
+    waited = client.get("/api/v1/sessions/sess-1/attention",
+                        params={"reason": "input_required", "timeout_seconds": 0}).json()
+    assert (waited["settled"], waited["position"]) == (True, body["position"])
+    after = client.get("/api/v1/sessions/sess-1/attention", params={
+        "reason": "input_required", "position": body["position"], "timeout_seconds": 0})
+    assert after.status_code == 200, after.text
+    assert after.json()["settled"] is False
+
+
+def test_the_same_boundary_keeps_its_position_and_the_next_one_moves_it(client, app):
+    session = _owned(app, pending={"ask-1", "ask-2"})
+    session.event_log.append("ask_user_request", {"tool_call_id": "ask-1", "message": "which?"})
+    first = _current(client)
+    assert _current(client, "wt-1")["position"] == first["position"]
+    session.event_log.append("ask_user_resolved", {"tool_call_id": "ask-1"})
+    session.event_log.append("ask_user_request", {"tool_call_id": "ask-2", "message": "and then?"})
+    second = _current(client)
+    assert second["reason"] == first["reason"] == "input_required"
+    assert _token(second["position"])["event_id"] > _token(first["position"])["event_id"]
+
+
+def test_an_idle_session_names_its_turn_completion(client, app):
+    session = _owned(app, status=SessionStatus.IDLE)
+    session.event_log.append("user_message", {"content": "go"})
+    done = session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+    body = _current(client)
+    assert (body["reason"], _token(body["position"])["event_id"]) == ("turn_complete", done.id)
+    assert _epoch(body["since"]) == pytest.approx(done.timestamp)
+
+
+def test_a_terminal_status_names_its_recorded_transition(client, app):
+    session = _owned(app, status=SessionStatus.FAILED)
+    session.event_log.append("user_message", {"content": "go"})
+    failed = session.event_log.append("session_state_changed", {"status": "failed"})
+    body = _current(client)
+    assert (body["reason"], _token(body["position"])["event_id"]) == ("failed", failed.id)
+
+
+def test_a_terminal_status_without_a_recorded_transition_has_no_boundary(client, app):
+    session = _owned(app, status=SessionStatus.FAILED)
+    session.event_log.append("user_message", {"content": "go"})
+    body = _current(client)
+    assert (body["reason"], body["since"], body["position"]) == ("failed", None, None)
+
+
+def test_nothing_open_reports_an_empty_boundary_not_a_missing_one(client, app):
+    session = _owned(app)
+    session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+    session.event_log.append("user_message", {"content": "next"})
+    body = _current(client)
+    assert {"since", "position"} <= body.keys()
+    assert (body["reason"], body["since"], body["position"]) == (None, None, None)
+
+
+def test_a_request_from_before_a_restart_keeps_its_boundary(client, app):
+    session = _owned(app)  # the client no longer knows the request
+    asked = session.event_log.append("ask_user_request", {"tool_call_id": "ask-1", "message": "which?"})
+    body = _current(client)
+    assert (body["availability"], _token(body["position"])["event_id"]) == ("unknown_after_restart", asked.id)
+
+
+def test_a_represented_question_names_a_stable_boundary(client):
+    _register_live(client)
+    _ingest_live(client, _QUESTION)
+    first = _current(client, "live-1")
+    assert first["since"] is not None
+    assert _current(client, "wt-live")["position"] == first["position"]
+    token = _token(first["position"])
+    assert (token["logical_delegate_kind"], token["logical_delegate_id"], token["observed_session_id"]) == (
+        "worktree", "wt-live", "live-1")
+    _ingest_live(client, {"id": "2", "type": "tool.execution_complete", "data": {
+        "toolCallId": "ask-1", "success": True}}, {"id": "3", "type": "tool.execution_start", "data": {
+            "toolCallId": "ask-2", "toolName": "ask_user", "arguments": {"message": "Choose again"}}})
+    second = _current(client, "live-1")
+    assert (second["reason"], second["detail"]) == ("input_required", "Choose again")
+    assert _token(second["position"])["event_id"] > token["event_id"]
+
+
+def test_a_represented_turn_completion_names_its_boundary(client):
+    _register_live(client)
+    _ingest_live(client, {"id": "1", "type": "user.message", "data": {"content": "go"}},
+                 {"id": "2", "type": "assistant.turn_end", "data": {}})
+    first = _current(client, "live-1")
+    assert first["reason"] == "turn_complete" and first["since"] is not None
+    _ingest_live(client, {"id": "3", "type": "user.message", "data": {"content": "more"}},
+                 {"id": "4", "type": "assistant.turn_end", "data": {}})
+    second = _current(client, "live-1")
+    assert second["reason"] == "turn_complete"
+    assert _token(second["position"])["event_id"] > _token(first["position"])["event_id"]
+
+
+def test_a_represented_session_after_a_restart_has_no_boundary(client, app):
+    _register_live(client)
+    _ingest_live(client, _QUESTION)
+    app.state.live_event_store = type(app.state.live_event_store)()  # a new generation's empty store
+    body = _current(client, "live-1")
+    assert (body["availability"], body["since"], body["position"]) == ("unknown_after_restart", None, None)
+
+
+def test_a_represented_boundary_from_before_this_generation_has_no_position(client):
+    """A history replay renumbers what an earlier generation already reported:
+    the boundary keeps its time but gets no position to compare."""
+    _register_live(client)
+    asked_at = time.time() - 7 * 86400
+    _ingest_live(client, {**_QUESTION, "timestamp": asked_at})
+    body = _current(client, "live-1")
+    assert (body["reason"], body["position"]) == ("input_required", None)
+    assert _epoch(body["since"]) == pytest.approx(asked_at)

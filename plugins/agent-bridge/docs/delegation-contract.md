@@ -265,6 +265,22 @@ only the bounded attention request. The server scans durable evidence before
 performing one bounded event-log wait; it never reads or advances a delivery
 cursor.
 
+The current-attention read (`GET /api/v1/sessions/{ref}/attention/current`,
+`agent-bridge attention`) answers the other question -- what a session is
+parked on now -- without waiting. Since HTTP protocol v42 each reason it
+reports names its boundary: `since` (RFC 3339) and `position`, the opaque
+attention position of the event behind the reason. For an owned session that is
+the position settlement returns for the same boundary, so a caller can wait
+from it for the next one; for a represented session it is a comparison key
+only. An unchanged position is the same boundary. Positions compare only within
+one target and change when the history behind them is rebuilt (an owned resync,
+a represented alias merge). Both are `null` without a boundary event -- no
+reason, a terminal status with no recorded transition, or a represented session
+after a bridge restart (`availability: unknown_after_restart`) -- and a
+represented boundary learned from a history replay keeps `since` with a `null`
+position, since the replay renumbered it. A daemon older than v42 omits both
+keys, so "unsupported" stays distinguishable from "no boundary".
+
 ## Target logical-message idempotency
 
 The current represented-session inbox supports an `idempotency_key`, but the

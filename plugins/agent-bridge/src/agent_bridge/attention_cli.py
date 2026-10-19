@@ -9,7 +9,9 @@ older one every session reports ``unsupported`` and no request is sent.
 ``{"schema": 1, "sessions": [{"ref", "status", ...}]}``, one entry per operand in
 order. ``status`` is ``ok`` (with the daemon's ``reason`` -- ``null`` when
 nothing is pending -- ``availability``, ``registry``, ``session_id``,
-``worktree_id``, ``fidelity`` and ``detail``), ``not_found``, ``unsupported`` or
+``worktree_id``, ``fidelity`` and ``detail``; from a daemon speaking
+``ATTENTION_BOUNDARY_PROTOCOL_VERSION`` also the boundary's ``since`` and
+``position``, absent from an older one), ``not_found``, ``unsupported`` or
 ``error`` (with ``error``). It exits 0 once every operand has an entry; an
 unreachable daemon exits as every other command does.
 """

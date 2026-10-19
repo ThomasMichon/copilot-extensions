@@ -11,6 +11,7 @@ from ..attention_current import (
     current_owned_attention,
     current_represented_attention,
 )
+from ..live_backfill import backfill
 
 router = APIRouter()
 
@@ -56,4 +57,7 @@ def get_current_attention(session_ref: str, request: Request) -> CurrentAttentio
         registration=registration, event_log=log, requested_ref=session_ref, position=None,
         max_items=1, retired_ids=frozenset(db.live_session_aliases_to(row["session_id"])),
     )
-    return current_represented_attention(snapshot, registration, session_ref)
+    return current_represented_attention(
+        snapshot, registration, session_ref,
+        event_log=log, replayed_before=backfill(request.app.state).started_at,
+    )
