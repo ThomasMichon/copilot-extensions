@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import tempfile
 from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
@@ -80,6 +82,8 @@ def _candidate(row: dict, target: dict) -> tuple[str, dict] | None:
 
 
 def _decode(attempt_id: str, key: str, payload: str) -> dict:
+    if any(not isinstance(value, str) for value in (attempt_id, key, payload)):
+        raise ValueError("Recovery attempt columns must contain text")
     if len(payload.encode("utf-8")) > _MAX_PAYLOAD_BYTES:
         raise ValueError("Recovery attempt payload exceeds its budget")
     value = json.loads(payload)
@@ -123,6 +127,41 @@ class RestartAttempts:
             except FileNotFoundError:
                 pass
 
+    def _exists(self) -> bool:
+        reject_links(self.path)
+        if self.path.exists():
+            return True
+        for suffix in ("-journal", "-wal", "-shm"):
+            sidecar = self.path.with_name(self.path.name + suffix)
+            reject_links(sidecar)
+            if sidecar.exists():
+                if self.path.exists():
+                    return True
+                raise RestartAttemptError("Recovery attempt database is missing but a sidecar remains.")
+        return False
+
+    def _initialize(self) -> None:
+        if self._exists():
+            return
+        # Publish only a fully initialized schema; never expose an empty final file.
+        with tempfile.TemporaryDirectory(prefix="attempt-init-", dir=self.path.parent) as temporary:
+            staged = Path(temporary) / "attempts.sqlite3"
+            with closing(sqlite3.connect(staged)) as connection, connection:
+                connection.execute("PRAGMA synchronous=FULL")
+                connection.execute("BEGIN IMMEDIATE")
+                self._schema(connection, create=True)
+            protect(staged)
+            try:
+                os.link(staged, self.path)
+            except FileExistsError:
+                return
+            if os.name != "nt":
+                descriptor = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+
     @staticmethod
     def _schema(connection: sqlite3.Connection, *, create: bool) -> None:
         objects = dict(connection.execute(
@@ -154,8 +193,7 @@ class RestartAttempts:
     def snapshot(self, *, recover_existing: bool = False) -> list[dict]:
         """Read without creating absent storage; only the lease holder recovers."""
         try:
-            reject_links(self.path)
-            if not self.path.exists():
+            if not self._exists():
                 return []
             self._protect()
             mode = "rw" if recover_existing else "ro"
@@ -183,11 +221,15 @@ class RestartAttempts:
             reject_links(self.path)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._protect()
-            with closing(sqlite3.connect(self.path, timeout=5)) as connection, connection:
+            self._initialize()
+            self._protect()
+            with closing(sqlite3.connect(
+                self.path.absolute().as_uri() + "?mode=rw", uri=True, timeout=5,
+            )) as connection, connection:
                 protect(self.path)
                 connection.execute("PRAGMA synchronous=FULL")
                 connection.execute("BEGIN IMMEDIATE")
-                self._schema(connection, create=True)
+                self._schema(connection, create=False)
                 existing = self._read(connection)
                 keys = {
                     _key(PositiveEvidence(**item["last_positive"]), item["target_epoch"])

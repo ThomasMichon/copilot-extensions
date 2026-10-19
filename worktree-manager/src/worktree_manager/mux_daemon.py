@@ -652,6 +652,12 @@ class MuxDaemonRuntime:
         self._control_requests_in_flight = 0
         self._control_requests_lock = threading.Lock()
 
+    def activate_restart_recovery(self) -> None:
+        """Freeze under the owning loop's drain-visible mutation boundary."""
+        with self.loop_mutation():
+            if self.accepting_requests():
+                self.restart_notifications.activate()
+
     def start(self) -> None:
         try:
             server = start_server(
@@ -861,7 +867,7 @@ def run_daemon_foreground(
             listen_port=listen_port,
         )
         if lease is not None:
-            runtime.restart_notifications.activate()
+            runtime.activate_restart_recovery()
         runtime.start()
         if runtime.server is None or runtime.port is None:
             return 1
@@ -890,7 +896,7 @@ def run_daemon_foreground(
                             lease = promoted
                             runtime.passive = False
                             runtime._self_retire_generation = generation
-                            runtime.restart_notifications.activate()
+                            runtime.activate_restart_recovery()
                 if lease is not None:
                     write_lock_data(lock, runtime.lock_extra())
                 runtime.sync_self_retire()

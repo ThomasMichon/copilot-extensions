@@ -539,12 +539,22 @@ launch is implemented by freezing.
 
 Attempt inspection is read-only and included in `recovery-evidence`; absent state
 is not created and corrupt, foreign or torn state is not silently reset.
+The first writer atomically publishes a fully initialized schema without
+replacing an existing file. A truncated/empty existing database, non-text SQLite
+columns and orphaned transaction sidecars remain blockers; they cannot allocate
+a replacement identity. Filesystems without atomic hard-link publication refuse
+initialization rather than falling back to an unsafe creation path.
 Transactions preserve prior attempts across a crash before commit and serialize
 concurrent freezing. At most 4096 unresolved attempts are retained, each bounded
 to 32 KiB. Capacity refuses new freezing rather than evicting pending identities.
 `frozen` means **awaiting owner admission**, never launched or seed-acknowledged;
 it is not an exactly-once execution guarantee. Default-off and passive daemon
 paths do not create attempt state.
+Initial activation and passive-generation promotion freeze only after acquiring
+the active daemon lease, inside its existing drain-visible loop-mutation
+boundary. A draining generation admits no new freeze, and an already admitted
+freeze must finish or report its blocker before drain can report idle. The
+existing update/cutover owner and notification resource teardown are unchanged.
 
 Native Linux and WSL have evidence-epoch readers; WSL includes its init-process
 incarnation because a distro can restart without restarting the shared kernel.

@@ -177,6 +177,10 @@ processes prove concurrent freeze deduplication; a disposable child exiting
 after insert but before commit proves crash rollback without discarding prior
 attempts. These are metadata/transaction contracts, not owner/task admission,
 native launch, seed pickup or platform restart qualification.
+Malformed SQLite column types, truncated databases and orphaned sidecars must
+block without losing state or preventing ordinary mux startup. Initial and
+promoted daemon activation share the drain-visible mutation fence; admitted
+freezing prevents idle-drain acknowledgement, and draining blocks a new freeze.
 
 Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:

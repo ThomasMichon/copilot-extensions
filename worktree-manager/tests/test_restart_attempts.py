@@ -7,6 +7,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+import threading
 from dataclasses import replace
 
 import pytest
@@ -293,3 +294,135 @@ def test_attempts_are_private_and_symlinks_are_refused(tmp_path, journal, attemp
     with pytest.raises(attempts_module.RestartAttemptError):
         attempts.freeze(journal.snapshot(), epoch)
     assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize("field", ["payload", "attempt_id", "candidate_key"])
+def test_blob_columns_block_recovery_but_not_mux_startup(
+    tmp_path, journal, attempts_module, monkeypatch, capsys, field,
+):
+    from worktree_manager import mux_daemon, restart_observer, self_install, source_config
+    from worktree_manager.__main__ import main
+
+    attempts = attempts_module.RestartAttempts(tmp_path)
+    epoch = HostEpoch("linux", "environment-one", "boot-two")
+    attempts.freeze(journal.snapshot(), epoch)
+    with sqlite3.connect(attempts.path) as connection:
+        connection.execute(f"UPDATE attempts SET {field}=?", (sqlite3.Binary(b"invalid"),))
+    with pytest.raises(attempts_module.RestartAttemptError, match="column"):
+        attempts.snapshot()
+    with pytest.raises(attempts_module.RestartAttemptError, match="column"):
+        attempts.freeze(journal.snapshot(), epoch)
+    monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(restart_observer, "native_epoch", lambda: epoch)
+    assert main(["mux-daemon", "recovery-evidence"]) == 1
+    assert "column" in json.loads(capsys.readouterr().out)["blocker"]
+    source_config.config_path(tmp_path).write_text(
+        "[restart_recovery]\nautomatic_restore = true\n", encoding="utf-8",
+    )
+    runtime = mux_daemon.MuxDaemonRuntime(tmp_path / "mux.json", root=tmp_path)
+    try:
+        runtime.restart_notifications.activate()
+        runtime.start()
+        assert runtime.server is not None and runtime.accepting_requests()
+        assert "column" in runtime.health()["restart_recovery"]["blocker"]
+    finally:
+        runtime.shutdown()
+    with sqlite3.connect(attempts.path) as connection:
+        assert connection.execute(f"SELECT typeof({field}) FROM attempts").fetchone() == ("blob",)
+
+
+def test_truncated_attempt_database_is_not_reinitialized(tmp_path, journal, attempts_module):
+    attempts = attempts_module.RestartAttempts(tmp_path)
+    epoch = HostEpoch("linux", "environment-one", "boot-two")
+    assert attempts.freeze(journal.snapshot(), epoch)
+    attempts.path.write_bytes(b"")
+    with pytest.raises(attempts_module.RestartAttemptError, match="uninitialized"):
+        attempts.snapshot()
+    with pytest.raises(attempts_module.RestartAttemptError, match="uninitialized"):
+        attempts.freeze(journal.snapshot(), epoch)
+    assert attempts.path.read_bytes() == b""
+
+
+@pytest.mark.parametrize("passive", [False, True])
+def test_daemon_activation_freezes_inside_drain_mutation_boundary(
+    tmp_path, monkeypatch, passive,
+):
+    from worktree_manager import mux_daemon
+
+    original = mux_daemon.MuxDaemonRuntime
+    activations = []
+
+    def runtime(*args, **kwargs):
+        result = original(*args, **kwargs)
+        activate = result.restart_notifications.activate
+
+        def guarded():
+            assert result._loop_mutation_active
+            activations.append(True)
+            activate()
+
+        result.restart_notifications.activate = guarded
+        if passive:
+            result.promote()
+        return result
+
+    monkeypatch.setattr(mux_daemon, "MuxDaemonRuntime", runtime)
+    monkeypatch.setattr(mux_daemon.mux_daemon_cutover, "active_generation_for_pid", lambda *_a, **_k: 1)
+    assert mux_daemon.run_daemon_foreground(tmp_path, passive=passive, max_iterations=1) == 0
+    assert activations == [True]
+
+
+def test_drain_does_not_report_idle_while_freezing(tmp_path, monkeypatch):
+    from worktree_manager import mux_daemon
+
+    runtime = mux_daemon.MuxDaemonRuntime(tmp_path / "mux.json", root=tmp_path)
+    entered, release = threading.Event(), threading.Event()
+    runtime.start()
+    assert runtime.server is not None
+
+    def freeze():
+        entered.set()
+        assert release.wait(3)
+
+    monkeypatch.setattr(runtime.restart_notifications, "activate", freeze)
+    worker = threading.Thread(target=runtime.activate_restart_recovery)
+    worker.start()
+    try:
+        assert entered.wait(3)
+        runtime.begin_drain()
+        assert runtime._is_drained() is False
+    finally:
+        release.set()
+        worker.join(3)
+        runtime.shutdown()
+    assert not worker.is_alive()
+    assert runtime._is_drained()
+
+
+def test_draining_generation_does_not_start_a_freeze(tmp_path, monkeypatch):
+    from worktree_manager import mux_daemon
+
+    runtime = mux_daemon.MuxDaemonRuntime(tmp_path / "mux.json", root=tmp_path)
+    runtime.begin_drain()
+    monkeypatch.setattr(
+        runtime.restart_notifications, "activate",
+        lambda: pytest.fail("draining generation started restart freezing"),
+    )
+    runtime.activate_restart_recovery()
+    assert runtime._is_drained()
+    runtime.shutdown()
+
+
+@pytest.mark.parametrize("suffix", ["-journal", "-wal", "-shm"])
+def test_missing_database_with_retained_sidecar_is_not_recreated(
+    tmp_path, journal, attempts_module, suffix,
+):
+    attempts = attempts_module.RestartAttempts(tmp_path)
+    sidecar = attempts.path.with_name(attempts.path.name + suffix)
+    sidecar.write_bytes(b"retained unconfirmed transaction")
+    with pytest.raises(attempts_module.RestartAttemptError, match="sidecar"):
+        attempts.snapshot()
+    with pytest.raises(attempts_module.RestartAttemptError, match="sidecar"):
+        attempts.freeze(journal.snapshot(), HostEpoch("linux", "environment-one", "boot-two"))
+    assert not attempts.path.exists()
+    assert sidecar.read_bytes() == b"retained unconfirmed transaction"

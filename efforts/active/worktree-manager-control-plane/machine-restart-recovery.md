@@ -566,3 +566,13 @@ The umbrella effort remains Active independently of this slice's completion.
   false. Native launch/crash reconciliation, acknowledgement, enrollment and
   notification timing remain open. No full Plan/Validation item is closed by
   this unmerged increment.
+- Provider review found non-text SQLite columns escaping the structured blocker
+  and truncated storage being mistaken for a new database. Six regressions
+  first failed, including the initial/promoted activation mutation boundary.
+  Stored column types are now validated; first initialization atomically
+  publishes a complete schema without replacing an existing file. Truncation
+  and orphaned transaction sidecars remain blockers, preserving pending identity.
+  Initial activation and passive promotion use the existing drain-visible
+  mutation boundary under the active lease. The expanded disconnected Manager
+  lane passed 327 tests with three native skips; the unchanged owner slice
+  retains its 28-test receipt. These remain pre-merge source/fixture results.
