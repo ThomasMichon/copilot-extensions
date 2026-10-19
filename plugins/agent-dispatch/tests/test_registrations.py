@@ -1156,7 +1156,7 @@ def test_ensure_supervisor_daemon_no_ops_for_a_foreign_machine(monkeypatch):
     monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
     spawned = {}
 
-    def _fake_spawn(machine, env):
+    def _fake_spawn(machine, env, *, target_args=()):
         spawned["called"] = (machine, env)
         return True
 
@@ -1183,7 +1183,7 @@ def test_ensure_supervisor_daemon_still_spawns_for_the_local_machine(monkeypatch
     monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
     spawned = {}
 
-    def _fake_spawn(machine, env):
+    def _fake_spawn(machine, env, *, target_args=()):
         spawned["called"] = (machine, env)
         return True
 
@@ -1211,7 +1211,7 @@ def test_ensure_supervisor_daemon_still_spawns_for_a_case_insensitive_local_matc
     monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
     spawned = {}
 
-    def _fake_spawn(machine, env):
+    def _fake_spawn(machine, env, *, target_args=()):
         spawned["called"] = (machine, env)
         return True
 

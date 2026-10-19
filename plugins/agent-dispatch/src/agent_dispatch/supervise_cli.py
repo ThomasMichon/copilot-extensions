@@ -335,7 +335,9 @@ def _cmd_supervise_remove(args: argparse.Namespace) -> int:
         return _emit(c.remove_registration(args.id))
 
 
-def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
+def _spawn_supervisor_daemon_detached(
+    machine: str | None, env: str, *, target_args: tuple[str, ...] = (),
+) -> bool:
     """Best-effort: launch the singleton supervisor daemon as a detached child.
 
     Runs ``agent-dispatch supervise serve`` for this (machine, env) fully detached
@@ -348,7 +350,7 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
     # Canonically-resolved current-version slot, not sys.executable -- see
     # resolve_own_runtime_python's docstring for why a raw sys.executable here is
     # a footgun (this is the sibling spawn site to _spawn_coordinator_process).
-    argv = [resolve_own_runtime_python(), "-m", "agent_dispatch", "supervise", "serve"]
+    argv = [resolve_own_runtime_python(), "-m", "agent_dispatch", *target_args, "supervise", "serve"]
     if machine:
         argv += ["--machine", machine]
     if env:
@@ -404,7 +406,9 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
             return {"ensured": False, "reason": "already running"}
     except OSError:  # noqa: BLE001 -- fail-soft; fall through to a spawn attempt
         pass
-    spawned = _spawn_supervisor_daemon_detached(machine, env)
+    from .client_authority import target_cli_args
+
+    spawned = _spawn_supervisor_daemon_detached(machine, env, target_args=tuple(target_cli_args(args)))
     return {"ensured": spawned, "reason": "spawned" if spawned else "spawn failed"}
 
 
@@ -466,6 +470,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         declared_source = registrar_discovery.read_legacy_env_profiles
 
     from .supervisor_daemon import _self_update_settings
+    from .client_authority import target_cli_args
 
     _su_enabled, _su_poll, _su_cooldown = _self_update_settings()
 
@@ -480,6 +485,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             # connection failure -- the coordinator's ephemeral port moves on
             # restart, so a cached one would wedge the daemon (#3825).
             client_factory=lambda: _client(args, ensure=False),
+            target_args=tuple(target_cli_args(args)),
             # Live self-update (#2259): default-ON / opt-out via
             # AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0. Reuses this process's own
             # sys.argv[1:] to respawn the successor with the identical

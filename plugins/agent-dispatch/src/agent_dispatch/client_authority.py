@@ -34,6 +34,23 @@ def client_authority(args: argparse.Namespace) -> Authority:
     return default_authority()
 
 
+def target_cli_args(args: argparse.Namespace, *, credentials: bool = True) -> list[str]:
+    """Preserve the selected writer across generated commands and subprocesses."""
+    authority = client_authority(args)
+    flags: list[str] = []
+    if getattr(args, "url", None):
+        flags += ["--url", args.url]
+    if getattr(args, "shared", False) or authority == "central":
+        flags.append("--shared")
+    elif authority == "local":
+        flags.append("--local")
+    if credentials:
+        for name in ("token", "control_token"):
+            if getattr(args, name, None):
+                flags += ["--" + name.replace("_", "-"), getattr(args, name)]
+    return flags
+
+
 def validate_server_authority() -> None:
     from .config import federation_role, shared_url
 

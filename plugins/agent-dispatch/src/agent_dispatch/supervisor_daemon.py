@@ -137,6 +137,7 @@ class SupervisorDaemon:
         declared_source: Callable[[], Iterable[Any]] | None = None,
         overrides_source: Callable[[], Mapping[str, dict]] | None = None,
         client_factory: Callable[[], Any] | None = None,
+        target_args: tuple[str, ...] = (),
         companion_controller: CompanionController | None = None,
         runtime_materializer: RuntimeMaterializer | None = None,
         runtime_executor: Executor | None = None,
@@ -159,6 +160,7 @@ class SupervisorDaemon:
         #: this to re-resolve and reconnect, mirroring the rendezvous cutover
         #: ladder. ``None`` disables reconnect (tests inject a fixed fake client).
         self._client_factory = client_factory
+        self._target_args = target_args
         self.machine = machine
         self.env = env or "default"
         self.launcher = launcher or SubprocessLauncher()
@@ -1560,6 +1562,7 @@ class SupervisorDaemon:
             try:
                 cmd = build_command(
                     reg, python=self._own_python(), materialize=self._materializer(reg),
+                    target_args=self._target_args,
                 )
             except UnsupportedKind as exc:
                 log.warning("skipping registration %s: %s", rid, exc)

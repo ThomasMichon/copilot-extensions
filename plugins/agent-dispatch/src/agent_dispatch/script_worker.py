@@ -55,6 +55,8 @@ def _client_for_route(route: str) -> DispatchClient:
     route_name = (route or "local").strip().lower()
     if route_name == "shared":
         return DispatchClient(shared_url(), token=shared_token())
+    if route_name == "strict-local":
+        return DispatchClient(client_url(local=True), token=client_token())
     return DispatchClient(client_url(), token=client_token())
 
 

@@ -62,21 +62,9 @@ def _reexec_argv(args: argparse.Namespace) -> list[str]:
     would -- never silently caching whatever happened to resolve at
     ``serve`` startup.
     """
-    argv = [sys.executable, "-m", "agent_dispatch"]
-    if getattr(args, "url", None):
-        argv += ["--url", args.url]
-    if getattr(args, "token", None):
-        argv += ["--token", args.token]
-    if getattr(args, "control_token", None):
-        argv += ["--control-token", args.control_token]
-    from .client_authority import client_authority
+    from .client_authority import target_cli_args
 
-    authority = client_authority(args)
-    if getattr(args, "shared", False) or authority == "central":
-        argv.append("--shared")
-    if authority == "local":
-        argv.append("--local")
-    return argv
+    return [sys.executable, "-m", "agent_dispatch", *target_cli_args(args)]
 
 
 def _cmd_schedule(args: argparse.Namespace) -> int:

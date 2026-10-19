@@ -3915,7 +3915,12 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     assert calls["prompt"] == "SEED::task-1"  # the CLI autopilot seed, verbatim
 
 
-def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch, tmp_path):
+@pytest.mark.parametrize("route,expected_route", [
+    (" --shared", "shared"), (" --local", "strict-local"), ("", "local"),
+])
+def test_make_script_spawn_launches_runtime_python_with_task_context(
+    monkeypatch, tmp_path, route, expected_route,
+):
     from agent_dispatch import spawn_factories, spawn_script_body
     from agent_dispatch.supervisor import make_script_spawn
 
@@ -3954,7 +3959,7 @@ def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch
         lambda pid: f"token-{pid}",
     )
 
-    spawn = make_script_spawn(route=" --shared", all_repos=False)
+    spawn = make_script_spawn(route=route, all_repos=False)
     ok, handle = spawn(
         {
             "id": "task-1",
@@ -3968,7 +3973,7 @@ def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch
     env = started["kwargs"]["env"]
     assert env["AGENT_DISPATCH_SCRIPT_TASK_ID"] == "task-1"
     assert env["AGENT_DISPATCH_SCRIPT_WORKER_ID"].startswith("script-")
-    assert env["AGENT_DISPATCH_SCRIPT_ROUTE"] == "shared"
+    assert env["AGENT_DISPATCH_SCRIPT_ROUTE"] == expected_route
     assert env["AGENT_DISPATCH_SCRIPT_REPO"] == TEST_REPO
     assert Path(env["AGENT_DISPATCH_SCRIPT_TASK_FILE"]).is_file()
     parsed = spawn_factories._parse_script_body_handle(handle["session"])

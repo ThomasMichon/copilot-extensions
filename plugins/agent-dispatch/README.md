@@ -2761,6 +2761,12 @@ legacy routing; `AGENT_DISPATCH_TASK_AUTHORITY=local` selects strict local
 authority. See the [central/local authority deployment contract](../../services/dispatch/README.md#pinned-central-authority-with-optional-local-only-work)
 for credentials, references, lifecycle and migration limits.
 
+The stdio MCP client uses the same authority and credential selection as the
+CLI. Attention action/page hints, ensured supervisor daemons, their registered
+lane/producer children and script workers preserve explicit target overrides.
+Strict-local script workers ignore an inherited remote `AGENT_DISPATCH_URL`;
+unconfigured legacy script routes retain their existing discovery behavior.
+
 ### Federation (`agent-dispatch federation run|status`)
 
 Opt-in cross-machine awareness/claim-plane participation (see the

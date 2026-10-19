@@ -61,6 +61,33 @@ def tools(server_url):
     )
 
 
+@pytest.mark.parametrize("flags", [[], ["--local"], ["--url", "selected"]])
+def test_stdio_cli_authority_reaches_real_coordinator(server_url, monkeypatch, flags):
+    from agent_dispatch import __main__ as core, config, mcp_server
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", server_url)
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "central-reader")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_CONTROL_TOKEN", "control-secret")
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN", "control-secret")
+    monkeypatch.setenv("AGENT_DISPATCH_URL", "http://127.0.0.1:1")
+    monkeypatch.setenv("AGENT_DISPATCH_NO_AUTOSTART", "1")
+    monkeypatch.setattr(config, "_routing_url", lambda: server_url)
+    if flags and flags[-1] == "selected":
+        flags = ["--url", server_url]
+    observed = []
+
+    def serve(selected):
+        task = selected.create("stdio authority proof", repo=TEST_REPO)
+        observed.append(selected.show(task["id"]))
+
+    monkeypatch.setattr(mcp_server, "serve_stdio", serve)
+    invocation = core.build_parser().parse_args([*flags, "mcp"])
+    assert invocation.func(invocation) == 0
+    assert len(observed) == 1
+    assert observed[0]["title"] == "stdio authority proof"
+
+
 def test_create_find_show(tools):
     t = tools.create(
         "do a thing",

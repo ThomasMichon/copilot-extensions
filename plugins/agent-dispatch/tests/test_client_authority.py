@@ -114,6 +114,121 @@ def test_worker_and_producer_routes_retain_explicit_authority(monkeypatch):
     assert _reexec_argv(args())[1:] == ["-m", "agent_dispatch", "--local"]
 
 
+@pytest.mark.parametrize("flags,target", [([], "--shared"), (["--local"], "--local")])
+def test_mcp_cli_preserves_target_and_separate_credentials(monkeypatch, flags, target):
+    from agent_dispatch import mcp_server
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "http://central:8787")
+    monkeypatch.setenv("AGENT_DISPATCH_URL", "http://foreign:8787")
+    for name, value in {
+        "TOKEN": "local-reader", "CONTROL_TOKEN": "local-control",
+        "SHARED_TOKEN": "central-reader", "SHARED_CONTROL_TOKEN": "central-control",
+    }.items():
+        monkeypatch.setenv("AGENT_DISPATCH_" + name, value)
+    monkeypatch.setenv("AGENT_DISPATCH_NO_AUTOSTART", "1")
+    observed = []
+
+    def serve(tools):
+        with tools._client_factory() as client:
+            observed.append((client.base_url, client._control_token,
+                             client._http.headers["Authorization"]))
+
+    monkeypatch.setattr(mcp_server, "serve_stdio", serve)
+    with mcp_server._default_client() as default_client:
+        assert default_client.base_url == "http://central:8787"
+        assert default_client._control_token == "central-control"
+    invocation = core.build_parser().parse_args([*flags, "mcp"])
+    assert invocation.func(invocation) == 0
+    expected = ("http://127.0.0.1:19847", "local-control", "local-reader") if target == "--local" else (
+        "http://central:8787", "central-control", "central-reader"
+    )
+    assert observed[0][:2] == expected[:2]
+    assert observed[0][2].endswith(expected[2])
+
+
+def test_attention_keeps_local_override_in_action_and_page_prefix(monkeypatch):
+    from types import SimpleNamespace
+    from agent_dispatch.attention_cli import _effective_cli, _target_cli
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    invocation = args("--local")
+    assert _target_cli(invocation) == ("agent-dispatch", "--local")
+    assert _effective_cli(invocation, SimpleNamespace(base_url="http://local:8787")) == (
+        "agent-dispatch", "--local"
+    )
+
+
+def test_ensure_supervisor_and_registration_children_keep_local_override(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from agent_dispatch import procutil, remote_dispatch, single_instance, supervise_cli
+    from agent_dispatch.supervisor_daemon import ReconcileSummary, SupervisorDaemon
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda _machine: False)
+    monkeypatch.setattr(single_instance, "is_locked", lambda _path: False)
+    monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: "owned-python")
+    spawned = []
+    monkeypatch.setattr(procutil, "spawn_dispatch_daemon", lambda argv, **_kw: spawned.append(argv))
+    invocation = core.build_parser().parse_args(["--local", "supervise", "register"])
+    assert supervise_cli._ensure_supervisor_daemon(invocation, "host", "default")["ensured"]
+    assert spawned == [["owned-python", "-m", "agent_dispatch", "--local",
+                        "supervise", "serve", "--machine", "host", "--env", "default"]]
+
+    commands = []
+    launcher = SimpleNamespace(launch=lambda _reg, cmd: commands.append(cmd) or object())
+    daemon = SupervisorDaemon(object(), "host", launcher=launcher, target_args=("--local",))
+    monkeypatch.setattr(daemon, "_own_python", lambda: "owned-python")
+    monkeypatch.setattr(daemon, "_materializer", lambda _reg: lambda *_a: str(tmp_path / "spec.json"))
+    for kind, spec in (
+        ("supervised-lane", {"repo": "example.com/acme/repo"}),
+        ("schedule", {"schedules": []}),
+        ("emitter", {"command": ["owned-command"]}),
+    ):
+        daemon._start({"id": kind, "kind": kind, "spec": spec}, ReconcileSummary(), bucket="started")
+    assert len(commands) == 3
+    assert all(cmd[:4] == ["owned-python", "-m", "agent_dispatch", "--local"] for cmd in commands)
+
+
+def test_supervisor_serve_forwards_selected_authority_to_daemon(monkeypatch):
+    from agent_dispatch import logging_setup, procutil, supervise_cli, supervisor_daemon
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE", "0")
+    monkeypatch.setenv("AGENT_DISPATCH_NO_AUTOSTART", "1")
+    monkeypatch.setattr(procutil, "relocate_off_payload", lambda: None)
+    monkeypatch.setattr(logging_setup, "configure_file_logging", lambda _name: None)
+    captured = []
+
+    def daemon(*_args, **kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(serve=lambda **_kwargs: 0)
+
+    monkeypatch.setattr(supervisor_daemon, "SupervisorDaemon", daemon)
+    invocation = core.build_parser().parse_args([
+        "--local", "supervise", "serve", "--machine", "host", "--no-declared", "--once",
+    ])
+    assert supervise_cli._cmd_supervise_serve(invocation) == 0
+    assert captured[0]["target_args"] == ("--local",)
+    with captured[0]["client_factory"]() as client:
+        assert client.base_url == "http://127.0.0.1:19847"
+
+
+@pytest.mark.parametrize("route,expected", [
+    ("local", "http://foreign:8787"), ("strict-local", "http://127.0.0.1:19847"),
+])
+def test_script_route_distinguishes_legacy_from_strict_local(monkeypatch, route, expected):
+    from agent_dispatch.script_worker import _client_for_route
+
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+    monkeypatch.setenv("AGENT_DISPATCH_URL", "http://foreign:8787")
+    monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "local-reader")
+    with _client_for_route(route) as client:
+        assert client.base_url == expected
+        assert client._http.headers["Authorization"].endswith("local-reader")
+
+
 @pytest.mark.parametrize("role", ["coordinator", "standby", "peeer", ""])
 def test_central_mode_local_server_cannot_promote_its_independent_database(tmp_path, monkeypatch, role):
     monkeypatch.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
