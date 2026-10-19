@@ -70,3 +70,14 @@ def test_mixed_precision_timestamps_preserve_the_later_veto():
         ),
     ]
     assert outstanding_change_requests(reviews) == ("reviewer",)
+
+
+def test_missing_timestamp_falls_back_to_later_review_id():
+    reviews = [
+        ReviewEvidence(
+            1, "APPROVED", "reviewer",
+            submitted_at="2026-10-19T09:00:00Z",
+        ),
+        ReviewEvidence(2, "CHANGES_REQUESTED", "reviewer"),
+    ]
+    assert outstanding_change_requests(reviews) == ("reviewer",)

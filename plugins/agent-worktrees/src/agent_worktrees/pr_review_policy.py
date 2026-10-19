@@ -67,11 +67,20 @@ def normalized_review_time(value: str) -> datetime | None:
         return None
 
 
-def _order(review: ReviewEvidence) -> tuple[int, datetime, int]:
-    parsed = normalized_review_time(review.submitted_at)
-    if parsed is None:
-        return 0, datetime.min.replace(tzinfo=timezone.utc), review.id
-    return 1, parsed, review.id
+def _later(candidate: ReviewEvidence, current: ReviewEvidence) -> bool:
+    candidate_time = normalized_review_time(candidate.submitted_at)
+    current_time = normalized_review_time(current.submitted_at)
+    if candidate_time is not None and current_time is not None:
+        return (candidate_time, candidate.id) > (current_time, current.id)
+    return candidate.id > current.id
+
+
+def _latest(reviews: Iterable[ReviewEvidence]) -> ReviewEvidence | None:
+    latest = None
+    for review in reviews:
+        if latest is None or _later(review, latest):
+            latest = review
+    return latest
 
 
 def latest_effective_reviews(
@@ -84,14 +93,14 @@ def latest_effective_reviews(
     """
     author_key = author.casefold()
     latest: dict[str, ReviewEvidence] = {}
-    for review in sorted(review_evidence(reviews), key=_order):
+    for review in review_evidence(reviews):
         key = review.reviewer.casefold()
         if not key or key == author_key:
             continue
         state = "DISMISSED" if review.dismissed else normalize_review_state(review.state)
         if state not in DECISIVE_STATES:
             continue
-        latest[key] = ReviewEvidence(
+        decisive = ReviewEvidence(
             id=review.id,
             state=state,
             reviewer=review.reviewer,
@@ -99,6 +108,9 @@ def latest_effective_reviews(
             commit_id=review.commit_id,
             dismissed=review.dismissed,
         )
+        current = latest.get(key)
+        if current is None or _later(decisive, current):
+            latest[key] = decisive
     return latest
 
 
@@ -122,7 +134,7 @@ def effective_review(
         if review.state == "CHANGES_REQUESTED"
     ]
     if negatives:
-        return max(negatives, key=_order)
+        return _latest(negatives)
 
     allowed = {"APPROVED"} | (set(COMMENT_STATES) if include_comments else set())
     author_key = author.casefold()
@@ -134,7 +146,9 @@ def effective_review(
     ]
     if not candidates:
         return None
-    review = max(candidates, key=_order)
+    review = _latest(candidates)
+    if review is None:
+        return None
     return ReviewEvidence(
         id=review.id,
         state=normalize_review_state(review.state),
