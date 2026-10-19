@@ -59,6 +59,8 @@ class GitHubFixture:
         self.after_head = None
         self.after_base = None
         self.pr_reads = 0
+        self.rules_reads = 0
+        self.protection_reads = 0
         self.normal_merge_fails = False
         self.admin_merge_fails = False
         self.reviews = [{
@@ -87,6 +89,7 @@ class GitHubFixture:
             return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[:3] == ["gh", "api", "--include"]:
             assert argv[3].endswith("/protection")
+            self.protection_reads += 1
             kind, data = "review_policy", self.classic_protection
         elif argv[:3] == ["gh", "pr", "view"]:
             kind, data = "decision", {"reviewDecision": self.review_decision}
@@ -114,6 +117,7 @@ class GitHubFixture:
         elif "/rules/branches/" in argv[2]:
             assert "--paginate" in argv
             assert "--slurp" in argv
+            self.rules_reads += 1
             kind, data = "rules", [self.rules, *self.later_pages]
         elif argv[2].endswith("/protection/required_status_checks"):
             kind, data = "classic", self.classic
@@ -542,6 +546,38 @@ def test_required_deployment_prevents_admin_retry(monkeypatch):
     monkeypatch.setattr(github, "run_cli", fixture.invoke)
     result = github.GitHubProvider().merge_pull("owner/project", 7, admin=True)
     assert "required_deployments" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("source", ["ruleset", "classic"])
+def test_policy_change_between_guards_prevents_admin_retry(monkeypatch, source):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    original = fixture.invoke
+
+    def change_after_review(argv, **kwargs):
+        if source == "ruleset" and "/rules/branches/" in " ".join(argv):
+            if fixture.rules_reads >= 1:
+                fixture.rules.append({
+                    "type": "required_deployments",
+                    "parameters": {
+                        "required_deployment_environments": ["production"],
+                    },
+                })
+        if source == "classic" and argv[:3] == ["gh", "api", "--include"]:
+            if fixture.protection_reads >= 1:
+                fixture.classic_protection[
+                    "required_conversation_resolution"
+                ] = {"enabled": True}
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(github, "run_cli", change_after_review)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "changed after review verification" in result
     assert not any("--admin" in argv for argv in fixture.calls)
 
 

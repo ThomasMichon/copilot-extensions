@@ -48,6 +48,33 @@ class ReviewSafetyError(RequiredChecksError):
 class ReviewExceptionEvidence:
     head_sha: str
     base_ref: str
+    rules_fingerprint: str
+    classic_fingerprint: str
+
+
+def _fingerprint(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _optional_api_json(
+    invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    *, host: str, path: str, label: str,
+) -> object | None:
+    result = invoke(["gh", "api", "--include", path, "--hostname", host])
+    text = result.stdout or ""
+    status = re.search(r"(?m)^HTTP/\S+\s+(\d{3})\b", text)
+    if result.returncode != 0 and status and status.group(1) == "404":
+        return None
+    if result.returncode != 0:
+        detail = result.stderr.strip() or text.strip()
+        raise RequiredChecksError(
+            f"{label} verification failed (exit {result.returncode}): {detail}"
+        )
+    body = re.split(r"\r?\n\r?\n", text)[-1]
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RequiredChecksError(f"{label} verification returned invalid JSON") from exc
 
 
 def _target_parts(repo: str, number: int) -> list[str]:
@@ -129,6 +156,8 @@ def merge_pull(
         verified_merge_head(
             repo, number, host=host, expected_head_sha=expected_head_sha,
             expected_base_ref=review_evidence.base_ref,
+            expected_rules_fingerprint=review_evidence.rules_fingerprint,
+            expected_classic_fingerprint=review_evidence.classic_fingerprint,
             hold_labels=hold_labels, wip_title_prefixes=wip_title_prefixes,
             invoke=invoke,
         )
@@ -168,26 +197,6 @@ def review_exception_evidence(
             return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise ReviewSafetyError("review-exception verification returned invalid JSON") from exc
-
-    def read_optional_api(path: str) -> object | None:
-        result = invoke(["gh", "api", "--include", path, "--hostname", host])
-        text = result.stdout or ""
-        status = re.search(r"(?m)^HTTP/\S+\s+(\d{3})\b", text)
-        if result.returncode != 0 and status and status.group(1) == "404":
-            return None
-        if result.returncode != 0:
-            detail = result.stderr.strip() or text.strip()
-            raise ReviewSafetyError(
-                f"classic review-policy verification failed "
-                f"(exit {result.returncode}): {detail}"
-            )
-        body = re.split(r"\r?\n\r?\n", text)[-1]
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise ReviewSafetyError(
-                "classic review-policy verification returned invalid JSON"
-            ) from exc
 
     def obj(value: object, label: str) -> dict:
         if not isinstance(value, dict):
@@ -277,6 +286,7 @@ def review_exception_evidence(
     ])
     if not isinstance(pages, list) or not pages:
         raise ReviewSafetyError("effective branch rules are unavailable")
+    rules_fingerprint = _fingerprint(pages)
     codeowner_rulesets: set[int] = set()
     for page in pages:
         if not isinstance(page, list):
@@ -327,9 +337,12 @@ def review_exception_evidence(
             "a missing CODEOWNER approval rule was not positively identified"
         )
 
-    protection = read_optional_api(
-        f"/repos/{repo}/branches/{quote(base, safe='')}/protection"
+    protection = _optional_api_json(
+        invoke, host=host,
+        path=f"/repos/{repo}/branches/{quote(base, safe='')}/protection",
+        label="classic review-policy",
     )
+    classic_fingerprint = _fingerprint(protection)
     if protection is not None:
         protection = obj(protection, "classic branch protection")
         status_policy = protection.get("required_status_checks")
@@ -382,13 +395,19 @@ def review_exception_evidence(
             )
     if identity() != (head, base):
         raise ReviewSafetyError("PR head/base or mutation gates changed during review verification")
-    return ReviewExceptionEvidence(head_sha=head, base_ref=base)
+    return ReviewExceptionEvidence(
+        head_sha=head,
+        base_ref=base,
+        rules_fingerprint=rules_fingerprint,
+        classic_fingerprint=classic_fingerprint,
+    )
 
 
 def verified_merge_head(
     repo: str, number: int, *,
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
     host: str, expected_head_sha: str = "", expected_base_ref: str = "",
+    expected_rules_fingerprint: str = "", expected_classic_fingerprint: str = "",
     hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
 ) -> str:
     """Return a pinned head only when all configured required checks pass."""
@@ -512,6 +531,8 @@ def verified_merge_head(
     ])
     if not isinstance(pages, list) or not pages:
         raise RequiredChecksError("effective branch rules are unavailable or invalid")
+    if expected_rules_fingerprint and _fingerprint(pages) != expected_rules_fingerprint:
+        raise RequiredChecksError("effective branch rules changed after review verification")
     for rules in pages:
         if not isinstance(rules, list):
             raise RequiredChecksError("effective branch rules page is unavailable or invalid")
@@ -524,6 +545,17 @@ def verified_merge_head(
                 continue
             checks = obj(rule.get("parameters"), "required-check rule").get("required_status_checks")
             add_checks(checks, "integration_id")
+
+    if expected_classic_fingerprint:
+        protection = _optional_api_json(
+            invoke, host=host,
+            path=f"/repos/{repo}/branches/{quote(base, safe='')}/protection",
+            label="classic branch-policy",
+        )
+        if _fingerprint(protection) != expected_classic_fingerprint:
+            raise RequiredChecksError(
+                "classic branch protection changed after review verification"
+            )
 
     if expected:
         checks = read_json([
