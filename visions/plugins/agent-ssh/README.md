@@ -5,7 +5,7 @@
   rather than merely borrowing whatever SSH profiles happen to already exist.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's [`README`](../../../plugins/agent-ssh/README.md),
   `docs/transport-provider-contract.md`, and its skills (`agent-ssh`,
@@ -184,6 +184,14 @@ single owning store of *its own* locations; the fabric reads them at query time
 rather than copying them into a central list that will drift.
 
 ## Features
+
+### conventional-repository-connectivity
+An operator's declared repository topology is discoverable through the existing
+machine and SSH configuration conventions, without a second inventory. Each
+source machine can converge its permitted client profiles across selected
+transports and execution environments through ordinary quick maintenance.
+Explicit configuration retains priority; discovery is read-only, and profile
+convergence never implicitly authorizes server, key or firewall changes.
 
 ### provisioned-not-assumed-transport
 The SSH mesh is something agent-ssh **provisions and maintains**, not something

@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-15
+- **Last revised:** 2026-10-18
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -370,6 +370,14 @@ Named agents and sessions resolve through project context, worktree state,
 machine topology, namespace providers, and capability probes. A target may be
 local, remote, elevated, dynamic, or venue-provided, while the caller sees one
 catalog and one resolution contract.
+
+### conventional-repository-discovery
+After basic installation, Bridge derives declared targets and existing
+agents/worktrees from conventional repository topology and their owning machine
+registries, without separate topology registration or a hand-authored roster.
+Explicit profiles retain priority. Source changes invalidate derived views
+without blind configuration writes or disruptive restarts; unavailable discovery
+is not authoritative emptiness, and observation grants no enrollment or control.
 
 ### bridge-as-agent-delegation
 
