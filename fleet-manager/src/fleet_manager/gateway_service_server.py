@@ -19,7 +19,7 @@ from .gateway_service_channel import (
     DEADLINE, FRAME_BYTES, GLOBAL_REQUESTS, REQUEST_HEADERS, RESPONSE_BYTES,
     BODY_BYTES,
     Channel, Pending, TransportError, ValueFreeLogger, binary, check, headers,
-    send, shape, target, unpack,
+    encode_frame, send, send_encoded, shape, target, unpack,
 )
 from .gateway_service_context import ServiceContext, ServicePolicyError
 from .gateway_service_listener import Listener, read_bounded
@@ -192,6 +192,7 @@ class ServiceRuntime:
                                    compress=False, timeout=2)
         channel = None
         grant = None
+        candidate = None
         try:
             await ws.prepare(request)
             message = await ws.receive(timeout=5)
@@ -205,7 +206,11 @@ class ServiceRuntime:
             ticket = self.tickets.pop(value["ticket"], None)
             check(ticket is not None, "invalid-ticket", 401)
             assert ticket is not None
-            grant = self.authority.promote_service(ticket.candidate)
+            candidate = ticket.candidate
+            self.authority.revalidate_candidate(candidate)
+            await send(ws, {"type": "attached"})
+            grant = self.authority.promote_service(candidate)
+            candidate = None
             channel = Channel(ws, self.authority, grant)
             previous = self.channels.get(grant.slot)
             self.channels[grant.slot] = channel
@@ -213,7 +218,6 @@ class ServiceRuntime:
                 await previous.close("channel-replaced")
             self.authority.revalidate_service(grant)
             check(self.channels.get(grant.slot) is channel, "channel-replaced", 403)
-            await send(ws, {"type": "attached"})
         except (TransportError, ServicePolicyError, OSError, asyncio.TimeoutError,
                 asyncio.CancelledError) as exc:
             LOG.warning("service-channel-refused code=attachment-refused")
@@ -223,6 +227,8 @@ class ServiceRuntime:
                     del self.channels[grant.slot]
             elif grant:
                 self.authority.release_service(grant)
+            if candidate is not None:
+                self.authority.release_candidate(candidate)
             await ws.close(code=1008, message=b"attachment-refused")
             if isinstance(exc, asyncio.CancelledError):
                 raise
@@ -269,13 +275,15 @@ class ServiceRuntime:
             selected = headers(request.headers.items(), REQUEST_HEADERS)
             self.checkpoint(channel, pending)
             stripped = path[len(route.prefix):] or "/"
-            pending.dispatched = True
-            request[DISPATCHED] = True
-            await send(channel.ws, {
+            envelope = encode_frame({
                 "type": "request", "id": pending.id, "method": request.method,
                 "target": stripped + query, "headers": selected,
                 "body": base64.b64encode(payload).decode("ascii"), "timeout": DEADLINE,
             })
+            self.checkpoint(channel, pending)
+            pending.dispatched = True
+            request[DISPATCHED] = True
+            await send_encoded(channel.ws, envelope)
             first = await pending.queue.get()
             if isinstance(first, TransportError):
                 raise first

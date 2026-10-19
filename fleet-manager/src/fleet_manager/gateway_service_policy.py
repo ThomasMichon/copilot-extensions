@@ -290,6 +290,21 @@ class ServiceAuthority:
                 grant, record.identity, record.verifier, record.slot_fingerprint, record.slot)
             return grant
 
+    def revalidate_candidate(self, candidate: ServiceCandidate) -> ServiceSlot:
+        """Validate ready attachment without evicting the active generation."""
+        with self._lock:
+            context, _, now = self._active()
+            require(type(candidate) is ServiceCandidate
+                    and type(candidate.generation) is int, "invalid-candidate")
+            record = self._candidates.get(candidate.generation)
+            require(record is not None and record.grant is candidate, "invalid-candidate")
+            assert record is not None
+            require(self._valid(record, context, now), "revoked-candidate")
+            active = self._services.get(record.slot)
+            require(active is None or candidate.generation > active.grant.generation,
+                    "stale-candidate")
+            return context.slot(record.slot)
+
     def release_candidate(self, candidate: ServiceCandidate) -> bool:
         """Expire an unused ticket without touching the active slot owner."""
         with self._lock:

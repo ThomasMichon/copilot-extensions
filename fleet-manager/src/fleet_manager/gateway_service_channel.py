@@ -142,12 +142,22 @@ def binary(value: object, maximum: int) -> bytes:
     return decoded
 
 
+def encode_frame(value: dict) -> str:
+    raw = planning.canonical(value).decode("utf-8")
+    check(len(raw.encode("utf-8")) <= FRAME_BYTES, "frame-limit", 413)
+    return raw
+
+
+async def send_encoded(
+    ws: web.WebSocketResponse | ClientWebSocketResponse, raw: str
+) -> None:
+    await asyncio.wait_for(ws.send_str(raw), SEND_TIMEOUT)
+
+
 async def send(
     ws: web.WebSocketResponse | ClientWebSocketResponse, value: dict
 ) -> None:
-    raw = planning.canonical(value).decode("utf-8")
-    check(len(raw.encode("utf-8")) <= FRAME_BYTES)
-    await asyncio.wait_for(ws.send_str(raw), SEND_TIMEOUT)
+    await send_encoded(ws, encode_frame(value))
 
 
 @dataclass(eq=False)

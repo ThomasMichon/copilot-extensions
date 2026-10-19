@@ -78,7 +78,9 @@ The connector opens `/_fleet/service-channel` and submits the ticket as its
 first bounded WebSocket message within five seconds.
 
 Ticket preparation does not withdraw a healthy active channel. Promotion occurs
-only on authenticated attachment; an unused/expired ticket cannot evict the
+only after attachment confirmation is written, before the channel becomes
+routable; current candidate authority is checked again after that await.
+An unused/expired ticket cannot evict the
 predecessor. Candidate and active generations fence stale attachment, late
 frames and delayed cleanup. No failed close can retire a newer slot owner.
 
@@ -120,6 +122,10 @@ cookies are not passed through.
 | Concurrent pending requests | 32 globally, 8 per channel |
 | Per-request queue / unacknowledged chunks | 8 / 1 |
 | Request deadline / backend connect / backend idle read | 60s / 5s / 15s |
+
+The combined JSON envelope must also fit the frame bound, including base64
+and header escaping. Preflight rejection occurs before dispatch, so an
+oversized local envelope is a known refusal, not an uncertain mutation.
 
 `response-stream` routes send chunks before backend completion; ordinary `http`
 routes buffer within the separate response bound. Acknowledgment follows

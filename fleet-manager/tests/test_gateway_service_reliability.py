@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from fleet_manager.gateway_service_channel import TransportError
+from fleet_manager.gateway_service_channel import BODY_BYTES, Channel, TransportError
 from fleet_manager.gateway_service_connector import ServiceConnector
 from fleet_manager.gateway_service_server import STATE, Ticket, start
 from gateway_service_transport_fixtures import eventually, running
@@ -29,6 +29,61 @@ def test_abandoned_replacement_ticket_keeps_healthy_channel(tmp_path) -> None:
             assert rig.state.channels["service-a"] is active and not active.closed
             async with await rig.request() as response:
                 assert response.status == 200
+    asyncio.run(scenario())
+
+
+def test_replacement_confirms_before_routing_while_predecessor_close_waits(
+    tmp_path, monkeypatch,
+) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            predecessor = rig.state.channels["service-a"]
+            close_entered, release_close = asyncio.Event(), asyncio.Event()
+            close = Channel.close
+
+            async def delayed_close(channel, code="channel-disconnected") -> None:
+                if channel is predecessor and code == "channel-replaced":
+                    close_entered.set()
+                    await release_close.wait()
+                await close(channel, code)
+
+            monkeypatch.setattr(Channel, "close", delayed_close)
+            pending = None
+            try:
+                replacement = await rig.connect()
+                await asyncio.wait_for(close_entered.wait(), 3)
+                assert replacement.connected.is_set()
+                pending = asyncio.create_task(rig.request())
+                await eventually(lambda: len(rig.backends[0].requests) == 1)
+                assert rig.state.channels["service-a"] is not predecessor
+                release_close.set()
+                async with await pending as response:
+                    assert response.status == 200
+            finally:
+                release_close.set()
+                if pending is not None:
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+    asyncio.run(scenario())
+
+
+def test_combined_frame_limit_is_known_before_mutation_dispatch(tmp_path) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            async with await rig.request(
+                "/api/echo", "POST", data=b"x" * BODY_BYTES,
+                headers={
+                    "Accept": '"' * 4096,
+                    "Accept-Language": '"' * 4096,
+                    "Content-Type": '"' * 4096,
+                },
+            ) as response:
+                assert response.status == 413
+                assert await response.json() == {"error": "frame-limit"}
+            assert rig.backends[0].requests == []
+            assert rig.state.pending == 0
     asyncio.run(scenario())
 
 
