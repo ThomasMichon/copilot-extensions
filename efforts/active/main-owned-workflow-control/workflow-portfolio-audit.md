@@ -168,6 +168,13 @@ No implementation starts against this amendment before its normal review.
 | E - Deep/maintenance consolidation | Component, portfolio and remediation owners accept each separately bounded row | Full native/installation/stress selectors and failure escalation remain executed and attributable; scheduler sharing saves actual invocations without uncontrolled fanout. |
 | F - Close the loop | Campaign driver owns the measured report and current parent Plan/Validation Plan | Observe two release cycles plus comparable contribution events, rejection and rollback; refresh policy and as-is docs. Resolve or explicitly transfer every outstanding item before completion. |
 
+Wave A's accepted bounded metadata/helper/event closure is recorded in
+[metadata-event-closure.md](metadata-event-closure.md). Current-head enforcement,
+old-head peer recovery and Main promotion refresh are distinct obligations,
+not duplicate policy checks. The first proposed production seam shares only
+the Dev synchronize entrypoint; exact CI/controller agreement and prospective
+event equivalence remain open before Wave B edits.
+
 The already accepted #3336 Phase 9 single-flight promotion work and parent
 Phase 5a Maintainer stewardship continue with their current owners. This plan
 does not duplicate their writer, permission, consent or rebase implementation.

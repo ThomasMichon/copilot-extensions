@@ -57,6 +57,12 @@ completion separately; neither alone completes the overall objective.
   driver point ownership of the audit and consolidation plan. This is the same
   canonical #6237 effort, not a second control or runner campaign. Existing
   #3336/#7122/#1303 and remediation implementation/admission scopes remain.
+- **Accepted Wave A seam:** the existing Main-control participant accepted
+  read-only metadata workflow/helper/event closure and separately reviewed
+  negatives/docs, reporting no active writer on the named workflows/helpers.
+  [The bounded closure](metadata-event-closure.md) records the contract.
+  Production Wave B remains held for exact CI/release-controller integration
+  agreement; a public overlap scan does not clear unpublished custody.
 
 ## Context
 
@@ -151,6 +157,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Complete helper/recipe closure and comparable event/job/check/queue
   measurements for the next proposed reduction; the initial audit is not proof
   every apparent duplicate is safe to remove.
+- [x] Map the accepted Wave A metadata event/helper boundary at pinned source
+  commits and exercise existing negatives, including its promotion-verifier
+  consumer; [record prospective Wave B obligations](metadata-event-closure.md).
+  This does not close portfolio-wide equivalence or authorize production edits.
 - [ ] Accept non-overlapping implementation ownership and execute the ordered
   waves in [the shared roadmap](workflow-portfolio-audit.md#ordered-execution-plan).
 - [ ] Prove actual admitted self-hosted execution before claiming offload;
