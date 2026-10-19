@@ -14,6 +14,78 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promote_release as pr
 
+
+def test_baseline_ingestion_checks_new_proof_but_preserves_legacy_v3(tmp_path, monkeypatch):
+    from coverage_guided_selection import completion
+
+    scratch, directory = tmp_path / "scratch", tmp_path / "baselines"
+    scratch.mkdir()
+    directory.mkdir()
+    path = directory / "example.json"
+    legacy = dict(schema_version=3, plugin="example", measured_commit="a" * 40)
+    path.write_text(json.dumps(legacy))
+    assert pr._write_coverage_baselines_into_scratch(
+        scratch, directory, dev_head="a" * 40,
+    ) == ["example"]
+    monkeypatch.setattr(completion, "collector_identity", lambda *a: "b" * 64)
+    monkeypatch.setattr(completion, "source_files", lambda *a: {"test": "c" * 40})
+    path.write_text(json.dumps({**legacy, "complete_execution": {}}))
+    with pytest.raises(pr.PromotionError, match="invalid complete baseline"):
+        pr._write_coverage_baselines_into_scratch(scratch, directory, dev_head="a" * 40)
+
+
+def test_baseline_ingestion_accepts_a_verified_complete_v3_pointer(tmp_path, monkeypatch):
+    from coverage_guided_selection import completion
+    from tools.coverage_baseline_chunk_contract import _complete_fixture
+
+    data, _ = _complete_fixture()
+    scratch, directory = tmp_path / "scratch", tmp_path / "baselines"
+    scratch.mkdir()
+    directory.mkdir()
+    (directory / "fixture.json").write_text(json.dumps(data))
+    monkeypatch.setattr(completion, "collector_identity", lambda *a: "b" * 64)
+    monkeypatch.setattr(
+        completion, "source_files", lambda *a: {"plugins/fixture/tests/test_example.py": "c" * 40},
+    )
+    assert pr._write_coverage_baselines_into_scratch(
+        scratch, directory, dev_head="a" * 40,
+    ) == ["fixture"]
+    pointer = json.loads((scratch / pr.COVERAGE_BASELINES_DIR / "fixture.json").read_text())
+    assert pointer["measured_commit"] == "a" * 40 and pointer["asset"] == "fixture.json"
+
+
+def test_baseline_ingestion_bootstraps_without_test_or_coverage_packages(tmp_path):
+    script = """
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import promote_release as promotion
+root = Path(sys.argv[2])
+scratch, baselines = root / "scratch", root / "baselines"
+scratch.mkdir()
+baselines.mkdir()
+path = baselines / "example.json"
+data = dict(schema_version=3, plugin="example", measured_commit="a" * 40)
+path.write_text(json.dumps(data))
+assert promotion._write_coverage_baselines_into_scratch(
+    scratch, baselines, dev_head="a" * 40,
+) == ["example"]
+path.write_text(json.dumps(dict(data, complete_execution={})))
+try:
+    promotion._write_coverage_baselines_into_scratch(scratch, baselines, dev_head="a" * 40)
+except promotion.PromotionError as exc:
+    assert "invalid complete baseline" in str(exc)
+else:
+    raise AssertionError("invalid proof accepted")
+assert not {"pytest", "coverage", "pytest_jsonreport"} & sys.modules.keys()
+"""
+    subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(_TOOLS), str(tmp_path)],
+        check=True, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+
 _TOOLS = Path(__file__).resolve().parent
 _REQUIRED_TOOLS = (
     "accumulate_bumps.py", "materialize_main.py", "changefile.py", "uv_editable_ref.py",

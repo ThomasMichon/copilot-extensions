@@ -32,6 +32,353 @@ finally:
     sys.path[:] = _previous_path
 
 
+@pytest.mark.parametrize("options", [
+    ["--guards"], ["-k", "one"], ["--collect-only"], ["--prepare-only", "--guards"],
+    ["--selection-file", "selection.json"], ["--test-file", "tests/test_one.py"],
+    ["--allow-host-state"], ["--allow-explicit-tiers"], ["--all"], ["--list"], ["--pre-push"],
+])
+def test_complete_baseline_rejects_partial_or_host_profiles(options):
+    with pytest.raises(SystemExit) as error:
+        runner.main([
+            "agent-bridge", "--complete-baseline-out", "agent-bridge.json",
+            "--measured-commit", "a" * 40, *options,
+        ])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("options", [
+    ["agent-bridge", "--complete-baseline-out", "agent-bridge.json"],
+    ["agent-bridge", "--measured-commit", "a" * 40],
+    ["agent-bridge", "--baseline-workers", "2"],
+])
+def test_complete_baseline_requires_its_explicit_source_and_mode(options):
+    with pytest.raises(SystemExit) as error:
+        runner.main(options)
+    assert error.value.code == 2
+
+
+def test_complete_baseline_uses_prepared_interpreter_and_no_second_pytest(
+    tmp_path, monkeypatch,
+):
+    from tools.coverage_guided_selection import baseline, completion
+
+    monkeypatch.setattr(runner, "_has_suite", lambda _: True)
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **kw: [[]])
+    preparations = []
+    monkeypatch.setattr(
+        runner, "_ensure_venv",
+        lambda *a, **kw: preparations.append(kw) or Path(sys.executable),
+    )
+    monkeypatch.setattr(runner, "run_uv_install", lambda *a, **kw: None)
+    monkeypatch.setattr(completion, "collector_identity", lambda *a, **kw: "c" * 64)
+    monkeypatch.setattr(completion, "source_files", lambda *a, **kw: {"test": "d" * 40})
+    verified = []
+    monkeypatch.setattr(completion, "verify", lambda result, **kw: verified.append(kw))
+    calls = []
+    monkeypatch.setattr(
+        baseline, "collect_baseline",
+        lambda **kw: calls.append(kw) or {"complete_execution": {}, "schema_version": 3},
+    )
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda *a, **kw: pytest.fail("a second ordinary pytest execution is forbidden"),
+    )
+    output = tmp_path / "agent-bridge.json"
+    assert runner.run_plugin(
+        "agent-bridge", "uv", reinstall=False, kexpr=None, limits=containment.Limits(),
+        plugin_timeout=900, test_timeout=30, max_files_per_subsuite=25,
+        complete_baseline_out=output, measured_commit="a" * 40, baseline_workers=2,
+    ) == 0
+    assert len(calls) == len(verified) == 1
+    assert preparations == [{"reinstall": False, "complete_baseline": True}]
+    assert calls[0]["prepared_python"] == Path(sys.executable)
+    assert calls[0]["workers"] == 2 and calls[0]["timeout_s"] == 300
+    assert calls[0]["complete"]["bounds"] == completion.MAXIMA
+    assert json.loads(output.read_text())["schema_version"] == 3
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="hardened devcontainer wrapper is Linux-only")
+def test_complete_baseline_hardened_preparation_uses_full_cache_without_tests_or_proof(
+    tmp_path, monkeypatch,
+):
+    from tools import run_tests_in_devcontainer as wrapper
+    from tools.coverage_guided_selection import baseline, completion
+
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "1.0.0"\n')
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _: plugin)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    monkeypatch.setattr(runner, "_has_suite", lambda _: True)
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **kw: [[]])
+    monkeypatch.setattr(runner.shutil, "which", lambda _: "uv")
+    leases, prepared, collections, verified = [], [], [], []
+
+    class Lease:
+        def release(self):
+            pass
+
+    monkeypatch.setattr(
+        runner, "_acquire_admission",
+        lambda wait, path: leases.append(path) or Lease(),
+    )
+
+    def prepare(name, uv, *, reinstall, complete_baseline=False):
+        assert complete_baseline
+        prepared.append((
+            runner._venv_base(name, complete_baseline=True),
+            runner._dep_fingerprint(name, complete_baseline=True),
+        ))
+        return runner._venv_python(name, complete_baseline=True)
+
+    monkeypatch.setattr(runner, "_ensure_venv", prepare)
+    monkeypatch.setattr(completion, "collector_identity", lambda *a, **kw: "c" * 64)
+    monkeypatch.setattr(completion, "source_files", lambda *a, **kw: {"test": "d" * 40})
+    monkeypatch.setattr(completion, "verify", lambda *a, **kw: verified.append(kw))
+    monkeypatch.setattr(
+        baseline, "collect_baseline",
+        lambda **kw: collections.append(kw) or {"schema_version": 3, "complete_execution": {}},
+    )
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda *a, **kw: pytest.fail("preparation must not execute pytest"),
+    )
+    output = tmp_path / "agent-ssh.json"
+    arguments = [
+        "agent-ssh", "--complete-baseline-out", str(output),
+        "--measured-commit", "a" * 40, "--baseline-workers", "1",
+    ]
+
+    def execute(command):
+        offset = command.index("tools/run-plugin-tests.py") + 1
+        assert command[offset:] == [*arguments, "--prepare-only"]
+        return subprocess.CompletedProcess(command, runner.main(command[offset:]))
+
+    monkeypatch.setattr(wrapper._net_scope.subprocess, "run", execute)
+    wrapper._net_scope.prepare_dependencies(
+        "devcontainer", tmp_path, "fixture", tmp_path / "config.json",
+        arguments, wrapper._canonicalize_flag,
+    )
+    assert not output.exists() and not collections and not verified
+    assert len(prepared) == 1
+    assert runner.main(arguments) == 0
+    assert len(collections) == len(verified) == 1 and output.exists()
+    assert prepared[0] == prepared[1]
+    assert leases == [prepared[0][0].resolve()] * 2
+    assert collections[0]["prepared_python"] == runner._venv_python("agent-ssh", complete_baseline=True)
+    with pytest.raises(ValueError, match="already exists"):
+        runner.run_plugin(
+            "agent-ssh", "uv", reinstall=False, kexpr=None, limits=containment.Limits(),
+            plugin_timeout=900, test_timeout=30, max_files_per_subsuite=25,
+            prepare_only=True, complete_baseline_out=output, measured_commit="a" * 40,
+        )
+    assert len(prepared) == 2
+
+
+def test_complete_baseline_prepare_only_retains_portable_no_proof_contract(tmp_path, monkeypatch):
+    from tools.coverage_guided_selection import baseline, completion
+
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    monkeypatch.setattr(runner, "_has_suite", lambda _: True)
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **kw: [[]])
+    monkeypatch.setattr(runner.shutil, "which", lambda _: "uv")
+    prepared, leases = [], []
+
+    class Lease:
+        def release(self):
+            pass
+
+    monkeypatch.setattr(
+        runner, "_acquire_admission",
+        lambda wait, path: leases.append(path) or Lease(),
+    )
+    monkeypatch.setattr(
+        runner, "_ensure_venv",
+        lambda *a, **kw: prepared.append((a, kw)) or Path(sys.executable),
+    )
+    monkeypatch.setattr(
+        baseline, "collect_baseline",
+        lambda **kw: pytest.fail("preparation must not collect or execute tests"),
+    )
+    monkeypatch.setattr(
+        completion, "collector_identity",
+        lambda *a, **kw: pytest.fail("preparation must not issue a source completion claim"),
+    )
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda *a, **kw: pytest.fail("preparation must not launch pytest"),
+    )
+    output = tmp_path / "fixture.json"
+    assert runner.main([
+        "fixture", "--complete-baseline-out", str(output),
+        "--measured-commit", "a" * 40, "--prepare-only",
+    ]) == 0
+    assert prepared == [(("fixture", "uv"), {"reinstall": False, "complete_baseline": True})]
+    assert leases == [runner._venv_base("fixture", complete_baseline=True).resolve()]
+    assert not output.exists()
+
+
+def test_complete_baseline_linux_wrapper_boundary_retains_portable_witnesses():
+    marks = test_complete_baseline_hardened_preparation_uses_full_cache_without_tests_or_proof.pytestmark
+    assert any(
+        mark.name == "skipif" and mark.kwargs.get("reason") == "hardened devcontainer wrapper is Linux-only"
+        for mark in marks
+    )
+    for witness in (
+        test_complete_baseline_prepare_only_retains_portable_no_proof_contract,
+        test_complete_baseline_uses_prepared_interpreter_and_no_second_pytest,
+        test_complete_baseline_prepared_cache_installs_and_fingerprints_instrumentation,
+    ):
+        assert not any(mark.name in {"skip", "skipif"} for mark in getattr(witness, "pytestmark", []))
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="complete source baseline profile is Linux-only")
+def test_complete_baseline_script_cli_works_without_pythonpath_or_repo_cwd(tmp_path, monkeypatch):
+    import shlex
+    from tools.coverage_guided_selection import completion
+
+    repo = tmp_path / "source"
+    repo.mkdir()
+    for name in (*completion.TOOLS, "tools/seasoned_uv.py",
+                 "tools/plugin_test_selection.py", "tools/_admission_protocol.py"):
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(runner.REPO / name, target)
+    for name in ("installer-engine", "single-instance-lease", "agent-procutil"):
+        shutil.copytree(
+            runner.REPO / "libs" / name, repo / "libs" / name,
+            ignore=shutil.ignore_patterns("__pycache__", "tests", "*.pyc"),
+        )
+    (repo / ".gitignore").write_text(".test-venvs/\n__pycache__/\n")
+    plugin = repo / "plugins/fixture"
+    (plugin / "tests").mkdir(parents=True)
+    (plugin / "src/fixture").mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname = "fixture"\nversion = "1.0.0"\n'
+        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+    )
+    (plugin / "src/fixture/__init__.py").write_text("def answer(): return 42\n")
+    (plugin / "tests/conftest.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))\n",
+    )
+    (plugin / "tests/test_sample.py").write_text(
+        "from fixture import answer\n"
+        "def test_sample(): assert answer() == 42\n",
+    )
+    completion._git(repo, "init", "-q", "-b", "main")
+    completion._git(repo, "add", "-A")
+    completion._git(
+        repo, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "direct complete baseline CLI fixture",
+    )
+    source = completion._git(repo, "rev-parse", "HEAD").decode().strip()
+    cache = repo / ".test-venvs" / sys.platform / ".complete-baselines/fixture"
+    python = cache / "bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} \"$@\"\n")
+    python.chmod(0o755)
+    with monkeypatch.context() as patch:
+        patch.setattr(runner, "_plugin_dir", lambda _: plugin)
+        fingerprint = runner._dep_fingerprint("fixture", complete_baseline=True)
+    (cache / ".dep-fingerprint").write_text(fingerprint)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    uv = fake_bin / "uv"
+    uv.write_text("#!/bin/sh\necho 'unexpected dependency preparation' >&2\nexit 97\n")
+    uv.chmod(0o755)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    env = containment.isolated_environment(os.environ, tmp_path / "sandbox")
+    env.pop("PYTHONPATH", None)
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    output = tmp_path / "fixture.json"
+    command = [
+        sys.executable, str(repo / "tools/run-plugin-tests.py"), "fixture",
+        "--complete-baseline-out", str(output), "--measured-commit", source,
+        "--baseline-workers", "1",
+    ]
+    preparation = subprocess.run(
+        [*command, "--prepare-only"], cwd=elsewhere, env=env,
+        capture_output=True, text=True, timeout=30,
+    )
+    assert preparation.returncode == 0, preparation.stdout + preparation.stderr
+    assert not output.exists()
+    result = subprocess.run(command, cwd=elsewhere, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(output.read_text())
+    completion.verify(
+        data, source=source, collector=completion.collector_identity(repo, source),
+        plugin="fixture", files=completion.source_files(repo, source, "fixture"), workers=1,
+    )
+    assert len(data["tests"]) == 1
+    assert set(data["complete_execution"]["outcomes"].values()) == {"passed"}
+    assert (cache / ".dep-fingerprint").read_text() == fingerprint
+
+
+@pytest.mark.parametrize("project", [False, True])
+def test_complete_baseline_prepared_cache_installs_and_fingerprints_instrumentation(
+    tmp_path, monkeypatch, project,
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "1.0.0"\n')
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _: plugin)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    monkeypatch.setattr(runner, "_has_pyproject", lambda _: project)
+    monkeypatch.setattr(runner, "_has_dev_extra", lambda _: False)
+    ordinary = runner._venv_base("example")
+    ordinary.mkdir(parents=True)
+    ordinary_python = runner._venv_python("example")
+    ordinary_python.parent.mkdir()
+    ordinary_python.write_text("ordinary environment without instrumentation")
+    normal_fingerprint = runner._dep_fingerprint("example")
+    (ordinary / ".dep-fingerprint").write_text(normal_fingerprint)
+    baseline = runner._venv_base("example", complete_baseline=True)
+    baseline.mkdir(parents=True)
+    python = runner._venv_python("example", complete_baseline=True)
+    python.parent.mkdir()
+    python.touch()
+    (baseline / ".dep-fingerprint").write_text(normal_fingerprint)
+    calls = []
+
+    def create(command, **kwargs):
+        assert command == ["uv", "venv", "--allow-existing", str(baseline)]
+        assert kwargs["timeout"] == 300
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.touch()
+        return subprocess.CompletedProcess(command, 0)
+
+    def install(uv, arguments, **kwargs):
+        assert uv == "uv" and kwargs["timeout"] == 300
+        assert arguments[:2] == ["--python", str(python)]
+        assert kwargs["cwd"] == plugin and kwargs["trusted_source_roots"] == (runner.REPO,)
+        assert {"coverage", "pytest-json-report", "pytest-timeout>=2.3,<3"} <= set(arguments)
+        calls.append(arguments)
+
+    monkeypatch.setattr(runner.subprocess, "run", create)
+    monkeypatch.setattr(runner, "run_uv_install", install)
+    assert runner._ensure_venv(
+        "example", "uv", reinstall=False, complete_baseline=True,
+    ) == python
+    fingerprint = runner._dep_fingerprint("example", complete_baseline=True)
+    assert fingerprint != normal_fingerprint
+    assert (baseline / ".dep-fingerprint").read_text() == fingerprint
+    assert runner._ensure_venv(
+        "example", "uv", reinstall=False, complete_baseline=True,
+    ) == python
+    assert len(calls) == 1, "matching complete cache must not reinstall instrumentation"
+    assert runner._ensure_venv("example", "uv", reinstall=False) == ordinary_python
+    assert ordinary_python.read_text() == "ordinary environment without instrumentation"
+    assert (ordinary / ".dep-fingerprint").read_text() == normal_fingerprint
+    monkeypatch.setattr(runner, "COMPLETE_BASELINE_DEPENDENCIES", ("coverage>=7", "pytest-json-report"))
+    assert runner._dep_fingerprint("example", complete_baseline=True) != fingerprint
+    assert runner._dep_fingerprint("example") == normal_fingerprint
+    before_timeout_change = runner._dep_fingerprint("example", complete_baseline=True)
+    monkeypatch.setattr(runner, "RUNNER_DEPENDENCIES", ("pytest-timeout>=2.4,<3",))
+    assert runner._dep_fingerprint("example", complete_baseline=True) != before_timeout_change
+
+
 @pytest.mark.parametrize("reinstall", [False, True])
 @pytest.mark.parametrize("cached", [False, True])
 def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(

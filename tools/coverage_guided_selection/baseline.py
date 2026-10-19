@@ -112,7 +112,12 @@ _DRIVER_SCRIPT = textwrap.dedent(
     # Python's own `multiprocessing` docs describe for any script, not
     # something specific to pytest or coverage.
     if __name__ == "__main__":
-        test_paths_json, cov_source, cwd, cov_data_file, json_report_file, out_file, basetemp = sys.argv[1:8]
+        args = sys.argv[1:]
+        complete = {}
+        if args[0] == "--complete":
+            complete = json.loads(args[1])
+            args = args[2:]
+        test_paths_json, cov_source, cwd, cov_data_file, json_report_file, out_file, basetemp = args[:7]
         test_paths = json.loads(test_paths_json)
 
         # Captured via a hook plugin (not pytest-json-report's own
@@ -126,8 +131,19 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # declared tier even though this driver never registers that
         # guard plugin.
         tier_by_nodeid = {}
+        collected, deselected = [], []
 
         class _TierCollector:
+            def pytest_configure(self, config):
+                if complete and set(config.getini("python_files")) != {"test_*.py", "*_test.py"}:
+                    raise ValueError("unsupported complete baseline file discovery profile")
+
+            def pytest_itemcollected(self, item):
+                collected.append(item.nodeid)
+
+            def pytest_deselected(self, items):
+                deselected.extend(item.nodeid for item in items)
+
             def pytest_collection_modifyitems(self, items):
                 for item in items:
                     marker = item.get_closest_marker("portfolio_tier")
@@ -232,6 +248,10 @@ _DRIVER_SCRIPT = textwrap.dedent(
                 # configured-file source.
                 "-o",
                 "addopts=",
+                *(
+                    ["-p", "pytest_portfolio_guard", "--timeout=" + str(complete["item_seconds"])]
+                    if complete else []
+                ),
             ],
             plugins=[_TierCollector(), _ContextSwitcher()],
         )
@@ -289,11 +309,26 @@ _DRIVER_SCRIPT = textwrap.dedent(
                     total += float(phase_data.get("duration", 0.0))
             durations[nodeid] = total
 
-        Path(out_file).write_text(
-            json.dumps(
-                {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map}
+        result = {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map}
+        if complete:
+            import platform
+            from importlib.metadata import version
+            from coverage_guided_selection.completion import validate_chunk
+
+            reported = [test["nodeid"] for test in report.get("tests", [])]
+            if len(reported) != len(set(reported)):
+                raise ValueError("duplicate baseline test reports")
+            result.update(
+                collected=collected, deselected=deselected,
+                outcomes={test["nodeid"]: test["outcome"] for test in report.get("tests", [])},
+                toolchain={
+                    "python": platform.python_version(), "platform": sys.platform,
+                    **{name: version(name) for name in
+                       ("pytest", "coverage", "pytest-json-report", "pytest-timeout")},
+                },
             )
-        )
+            validate_chunk(result)
+        Path(out_file).write_text(json.dumps(result))
         sys.exit(0)
     """
 )
@@ -441,6 +476,8 @@ def collect_baseline(
     project_dir: Path | None = None,
     max_files_per_chunk: int = DEFAULT_MAX_FILES_PER_CHUNK,
     workers: int = 1,
+    prepared_python: Path | None = None,
+    complete: dict | None = None,
 ) -> dict:
     """Run `test_path` under coverage and return a portable baseline dict.
 
@@ -491,6 +528,12 @@ def collect_baseline(
         raise ValueError("coverage workers must be 1 or 2")
     if max_files_per_chunk < 1:
         raise ValueError("max_files_per_chunk must be positive")
+    if complete:
+        from tools.coverage_guided_selection.completion import validate_bounds
+
+        validate_bounds(complete["bounds"])
+        if prepared_python is None or max_files_per_chunk > 5:
+            raise ValueError("complete baseline requires a prepared interpreter and at most five files")
     with tempfile.TemporaryDirectory(
         prefix="cgs-baseline-", ignore_cleanup_errors=True
     ) as tmp:
@@ -512,7 +555,9 @@ def collect_baseline(
         # chunk -- matches `run-plugin-tests.py`'s own sequential sub-suite
         # loop, which shares a single sandbox the same way.
 
-        if project_dir is not None:
+        if prepared_python is not None:
+            command_prefix = [str(prepared_python), str(driver_file)]
+        elif project_dir is not None:
             python_exe = _prepare_project_venv(project_dir, tmp_path, timeout_s=timeout_s)
             command_prefix = [str(python_exe), str(driver_file)]
         else:
@@ -522,6 +567,8 @@ def collect_baseline(
                 "--with", "pytest-json-report",
                 "python", str(driver_file),
             ]
+        if complete:
+            command_prefix += ["--complete", json.dumps(complete["bounds"])]
 
         chunks = _plan_chunks(cwd, test_path, max_files_per_chunk)
         tasks = []
@@ -553,16 +600,21 @@ def collect_baseline(
                 sandbox=str(sandbox if workers == 1 else tmp_path / f"s{index}"),
                 coverage_file=str(chunk_cov_data_file),
                 output_file=str(chunk_out_file), timeout_s=timeout_s,
+                complete=bool(complete),
             ))
 
         chunk_results = (
-            [run_chunk(task) for task in tasks]
-            if workers == 1 else collect_contained(tasks, tmp_path)
+            collect_contained(
+                tasks, tmp_path, workers=workers, bounds=complete["bounds"],
+            ) if complete else (
+                [run_chunk(task) for task in tasks]
+                if workers == 1 else collect_contained(tasks, tmp_path)
+            )
         )
 
         merged = _merge_chunk_results(chunk_results)
 
-    return {
+    result = {
         "schema_version": BASELINE_SCHEMA_VERSION,
         "plugin": plugin,
         "cov_source": cov_source,
@@ -574,9 +626,18 @@ def collect_baseline(
         },
         "coverage": merged["coverage"],
     }
+    if complete:
+        from tools.coverage_guided_selection.completion import seal, verify
+
+        seal(
+            result, chunk_results, collector=complete["collector"], workers=workers,
+            bounds=complete["bounds"], files=complete["files"], max_files=max_files_per_chunk,
+        )
+        verify(result, source=measured_commit, collector=complete["collector"], plugin=plugin)
+    return result
 
 
-def _subprocess_env(cov_data_file: Path, sandbox: Path) -> dict:
+def _subprocess_env(cov_data_file: Path, sandbox: Path, *, complete: bool = False) -> dict:
     import os
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -594,7 +655,7 @@ def _subprocess_env(cov_data_file: Path, sandbox: Path) -> dict:
     # never would. A baseline is only ever earned from the same conditions
     # the real validation gate runs under (see `collect_baseline`'s own
     # docstring).
-    env = isolated_environment(os.environ, sandbox)
+    env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=complete)
     # Match `run-plugin-tests.py`'s own override exactly (not just leave
     # `isolated_environment`'s caller-preserved `PYTHONPATH` as-is): without
     # this, an ambient stale source tree on `PYTHONPATH` could still take

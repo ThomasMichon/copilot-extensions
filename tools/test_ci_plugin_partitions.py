@@ -6,8 +6,10 @@ from collections import Counter
 from copy import deepcopy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -72,12 +74,68 @@ def test_real_matrix_cli_single_job_mode_is_explicit():
     assert len(json.loads(selected.stdout)) == 2
 
 
+@pytest.fixture
+def isolated_partition_cli(tmp_path):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    script = tools / "ci_plugin_partitions.py"
+    shutil.copyfile(REPO / "tools/ci_plugin_partitions.py", script)
+    assert {path.name for path in tools.iterdir()} == {"ci_plugin_partitions.py"}
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key not in {"PYTHONPATH", "PYTHONHOME"}
+    }
+
+    def run(*arguments):
+        return subprocess.run(
+            [sys.executable, "-S", str(script), *arguments],
+            cwd=tmp_path, env=environment, capture_output=True, text=True,
+            timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    return tmp_path, run
+
+
+def test_isolated_legacy_matrix_and_files_cli_need_only_the_single_script(isolated_partition_cli):
+    root, run = isolated_partition_cli
+    matrix = run("matrix", '["agent-dispatch","agent-bridge"]')
+    assert matrix.returncode == 0, matrix.stdout + matrix.stderr
+    assert Counter(row["plugin"] for row in json.loads(matrix.stdout)) == {
+        "agent-dispatch": 3, "agent-bridge": 1,
+    }
+    tests = root / "plugins/agent-dispatch/tests"
+    tests.mkdir(parents=True)
+    for index in range(26):
+        (tests / f"test_{index:03d}.py").write_text("def test_fixture(): pass\n")
+    files = run("files", "--plugin", "agent-dispatch", "--partition", "1", "--partitions", "2")
+    assert files.returncode == 0, files.stdout + files.stderr
+    assert files.stdout.splitlines() == ["--test-file", "tests/test_025.py"]
+    assert {path.name for path in (root / "tools").iterdir()} == {"ci_plugin_partitions.py"}
+
+
+def test_isolated_candidate_cli_reports_missing_helpers_without_legacy_fallback(isolated_partition_cli):
+    _, run = isolated_partition_cli
+    result = run(
+        "candidate-smoke", '["agent-dispatch","agent-bridge"]',
+        "--event", "workflow_dispatch", "--promotion-run", "123-1",
+        "--phase", "candidate", "--profile", "complete-once-v1",
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "candidate-smoke helper dependency is unavailable: materialized_candidate_inventory" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_candidate_qualification_requires_exactly_the_actual_smoke_matrix_names():
+    from candidate_complete_once import complete_once_plan
     from candidate_qualification_inventory import required_jobs
     from materialized_candidate_inventory import python_suites
 
-    plugins = python_suites(REPO) - {"agent-worktrees"}
-    workflow = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    suites = python_suites(REPO)
+    text = (REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    plan = complete_once_plan(text, suites)
+    plugins = suites - {"agent-worktrees"} if plan is None else set(plan["smoke"])
+    workflow = yaml.safe_load(text)
     name = workflow["jobs"]["smoke"]["name"]
     if name == "${{ matrix.name }}":
         actual = {row["name"] for row in smoke_matrix(sorted(plugins))}
@@ -86,7 +144,11 @@ def test_candidate_qualification_requires_exactly_the_actual_smoke_matrix_names(
         actual = plugins
     required, _, _ = required_jobs(REPO)
     assert required & (actual | plugins) == actual
-    assert len(actual) == len(plugins) + (3 if name == "${{ matrix.name }}" else 0)
+    extra = (
+        (2 if "agent-dispatch" in plugins else 0)
+        + (1 if "agent-pull-requests" in plugins else 0)
+    ) if name == "${{ matrix.name }}" else 0
+    assert len(actual) == len(plugins) + extra
 
 
 @pytest.mark.parametrize("plugins", [None, "agent-dispatch", [False], ["../outside"], ["same", "same"]])

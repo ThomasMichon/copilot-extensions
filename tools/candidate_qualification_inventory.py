@@ -3,11 +3,17 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import re
 from pathlib import Path
 
 from materialized_candidate_inventory import (
     PLUGIN, CandidateValidationError, fleet_partitions, python_suites, regular,
+)
+from candidate_complete_once import (
+    PARTITIONED_SMOKE_STEP as _PARTITIONED_SMOKE_STEP,
+    PARTITIONED_SMOKE_WORKERS_STEP as _PARTITIONED_SMOKE_WORKERS_STEP,
+    complete_once_plan,
 )
 
 _MATRIX = re.compile(r"\$\{\{\s*matrix\.([a-z][a-z0-9_]*)(?:\.name)?\s*\}\}")
@@ -15,30 +21,9 @@ _NON_CANDIDATE = {
     "pr-gate": "github.event_name == 'pull_request'",
     "coverage-guided-selection-integration": "inputs.promotion_run == ''",
 }
-_PARTITIONED_SMOKE_STEP = """      - name: Test ${{ matrix.plugin }}
-        if: matrix.plugin != 'agent-dispatch' || github.event_name != 'pull_request'
-        env:
-          PLUGIN: ${{ matrix.plugin }}
-          PARTITION: ${{ matrix.partition }}
-          PARTITIONS: ${{ matrix.partitions }}
-        run: |
-          args=()
-          if [ "$PARTITIONS" -gt 1 ]; then
-            files=$(python tools/ci_plugin_partitions.py files \\
-              --plugin "$PLUGIN" --partition "$PARTITION" --partitions "$PARTITIONS")
-            mapfile -t args <<< "$files"
-          fi
-          python tools/run-plugin-tests.py "$PLUGIN" "${args[@]}"
-"""
-_PARTITIONED_SMOKE_WORKERS_STEP = _PARTITIONED_SMOKE_STEP.replace(
-    "        env:\n",
-    "        env:\n"
-    "          PYTEST_ADDOPTS: ${{ matrix.plugin == 'agent-bridge' && "
-    "inputs.promotion_run != '' && '-n 2 --dist=worksteal' || '' }}\n",
-)
-
-
-def _smoke_rows(root: Path, plugins: set[str]) -> tuple[list[str], str]:
+def _smoke_rows(
+    root: Path, plugins: set[str], *, declared_plugins: set[str] | None = None,
+) -> tuple[list[str], str]:
     """Read candidate scheduling data without executing candidate Python."""
     try:
         text = regular(root, Path("tools/ci_plugin_partitions.py")).read_bytes().decode("utf-8")
@@ -63,7 +48,7 @@ def _smoke_rows(root: Path, plugins: set[str]) -> tuple[list[str], str]:
         keys = [ast.literal_eval(key) for key in declaration.keys]
         counts = ast.literal_eval(declaration)
         if len(keys) != len(set(keys)) or any(
-            not isinstance(key, str) or key not in plugins
+            not isinstance(key, str) or key not in (plugins if declared_plugins is None else declared_plugins)
             or type(count) is not int or not 2 <= count <= 256
             for key, count in counts.items()
         ):
@@ -104,9 +89,19 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
     plugins = python_suites(root)
     if heavy is None or heavy[1] not in plugins:
         raise CandidateValidationError("canonical CI heavy-plugin declaration is unavailable")
+    plan = complete_once_plan(text, plugins)
+    smoke_plugins = plugins - {heavy[1]} if plan is None else set(plan["smoke"])
     expected: set[str] = set()
     allowed_skips: set[str] = set()
     digest = hashlib.sha256(text.encode("utf-8"))
+    if plan is not None:
+        digest.update(b"\0complete-once-plan\0")
+        digest.update(json.dumps(plan, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        for name in ("candidate_complete_once.py", "ci_plugin_partitions.py"):
+            source = regular(root, Path("tools") / name).read_bytes().decode("utf-8").replace("\r\n", "\n")
+            if "\r" in source:
+                raise CandidateValidationError("complete-once helper has an unsupported lone carriage return")
+            digest.update(b"\0" + name.encode("utf-8") + b"\0" + source.encode("utf-8"))
     for identifier in [*needs, "promotion-gate", *_NON_CANDIDATE]:
         block = jobs.get(identifier)
         if block is None:
@@ -129,7 +124,7 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
             if identifier == "smoke" and axis == "plugin":
                 if "plugin: ${{ fromJson(needs.discover.outputs.smoke) }}" not in block:
                     raise CandidateValidationError("canonical smoke job no longer uses discovered suites")
-                values = sorted(plugins - {heavy[1]})
+                values = sorted(smoke_plugins)
             elif identifier == "smoke" and axis == "name":
                 if (
                     name != "${{ matrix.name }}"
@@ -148,7 +143,9 @@ def required_jobs(root: Path) -> tuple[set[str], set[str], str]:
                     ) not in ([_PARTITIONED_SMOKE_STEP], [_PARTITIONED_SMOKE_WORKERS_STEP])
                 ):
                     raise CandidateValidationError("canonical smoke job no longer uses discovered partitions")
-                values, partition_source = _smoke_rows(root, plugins - {heavy[1]})
+                values, partition_source = _smoke_rows(
+                    root, smoke_plugins, declared_plugins=plugins - {heavy[1]},
+                )
                 digest.update(b"\0tools/ci_plugin_partitions.py\0")
                 digest.update(partition_source.encode("utf-8"))
             elif identifier == "full" and axis == "plugin":

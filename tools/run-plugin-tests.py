@@ -70,10 +70,13 @@ from plugin_test_containment import (
 )
 
 REPO = Path(__file__).resolve().parents[1]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
+COMPLETE_BASELINE_DEPENDENCIES = ("coverage", "pytest-json-report")
 EXTERNAL_TEST_DEPENDENCIES = {
     "payload-invocation": ("pyyaml>=6.0.3",),
     "runtime-source": ("pyyaml>=6.0.3",),
@@ -242,14 +245,18 @@ def changed_plugins(base: str) -> list[str]:
     return sorted(n for n in names if _has_suite(n))
 
 
-def _venv_python(name: str) -> Path:
-    base = VENV_ROOT / name
+def _venv_base(name: str, *, complete_baseline: bool = False) -> Path:
+    return VENV_ROOT / ".complete-baselines" / name if complete_baseline else VENV_ROOT / name
+
+
+def _venv_python(name: str, *, complete_baseline: bool = False) -> Path:
+    base = _venv_base(name, complete_baseline=complete_baseline)
     if os.name == "nt":
         return base / "Scripts" / "python.exe"
     return base / "bin" / "python"
 
 
-def _dep_fingerprint(name: str) -> str:
+def _dep_fingerprint(name: str, *, complete_baseline: bool = False) -> str:
     """Hash the plugin's ``pyproject.toml`` plus any vendored lib pyprojects, so
     a dependency change forces a venv rebuild. Without this, ``_ensure_venv``
     reuses a cached venv whose installed deps have drifted -- e.g. a path dep
@@ -264,7 +271,10 @@ def _dep_fingerprint(name: str) -> str:
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
     h = hashlib.sha256()
-    for dependency in (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())):
+    for dependency in (
+        *RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ()),
+        *(COMPLETE_BASELINE_DEPENDENCIES if complete_baseline else ()),
+    ):
         h.update(f"runner:{dependency}\n".encode())
     for p in parts:
         try:
@@ -274,16 +284,20 @@ def _dep_fingerprint(name: str) -> str:
     return h.hexdigest()
 
 
-def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
+def _ensure_venv(
+    name: str, uv: str, *, reinstall: bool, complete_baseline: bool = False,
+) -> Path:
     """Prepare the cached venv and return its Python interpreter.
 
     The caller must establish the environment directory and hold its
     environment-scoped lease throughout preparation and subsequent test use.
     """
-    venv = VENV_ROOT / name
-    py = _venv_python(name)
+    venv = _venv_base(name, complete_baseline=complete_baseline)
+    options = {"complete_baseline": True} if complete_baseline else {}
+    py = _venv_python(name, **options)
     stamp = venv / ".dep-fingerprint"
-    fingerprint = _dep_fingerprint(name)
+    fingerprint = _dep_fingerprint(name, **options)
+    instrumentation = COMPLETE_BASELINE_DEPENDENCIES if complete_baseline else ()
     fresh = not py.exists()
     # Rebuild a cached venv whose dependency fingerprint has drifted (e.g. a
     # dependency added across a rebase) -- otherwise the stale venv silently
@@ -317,6 +331,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         subprocess.run(
             [uv, "venv", "--allow-existing", str(venv)], check=True,
             env={key: value for key, value in os.environ.items() if key != "UV_VENV_CLEAR"},
+            **({"timeout": 300} if complete_baseline else {}),
         )
         after = venv.stat()
         if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
@@ -335,12 +350,15 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 cmd.append("--reinstall")
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
-            cmd.extend((*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())))
+            cmd.extend((
+                *RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ()), *instrumentation,
+            ))
             run_uv_install(
                 uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
                 retained_resource_roots=(
                     (REPO / "libs" / "versioned-runtime",) if name == "agent-index" else ()
                 ),
+                **({"timeout": 300} if complete_baseline else {}),
             )
         else:
             # A pyproject-less plugin (e.g. a skill-script plugin like
@@ -349,8 +367,9 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # pytest runner is present in the venv.
             run_uv_install(
                 uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
-                     *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
+                     *EXTERNAL_TEST_DEPENDENCIES.get(name, ()), *instrumentation],
                 cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                **({"timeout": 300} if complete_baseline else {}),
             )
         stamp.write_text(fingerprint, encoding="utf-8")
     return py
@@ -392,7 +411,17 @@ def run_plugin(
     allow_host_state: bool = False,
     test_files: tuple[str, ...] = (),
     selection_file: Path | None = None,
+    complete_baseline_out: Path | None = None,
+    measured_commit: str | None = None,
+    baseline_workers: int = 1,
 ) -> int:
+    if complete_baseline_out is not None and (
+        kexpr or guards or collect_only or test_files or selection_file
+        or allow_host_state or allow_explicit_tiers
+    ):
+        raise ValueError("complete baseline requires the named contained full-corpus tier profile")
+    if complete_baseline_out is not None and complete_baseline_out.exists():
+        raise ValueError("complete baseline output already exists; refusing stale evidence")
     selection: TestSelection | None = None
     if selection_file is not None:
         if test_files or prepare_only or guards or kexpr or collect_only:
@@ -410,6 +439,8 @@ def run_plugin(
         test_files=test_files,
     )
     if not _has_suite(name) and selection is None:
+        if complete_baseline_out is not None:
+            raise ValueError("complete baseline requires a nonempty source test suite")
         print(f"[SKIP] {name}: no test suite")
         return 0
     if prepare_only:
@@ -420,13 +451,46 @@ def run_plugin(
         # "dependency preparation" pass can safely run before network
         # access is removed for the real test pass.
         print(f"[RUN ] {name}: preparing venv only (--prepare-only) ...")
-        _ensure_venv(name, uv, reinstall=reinstall)
+        _ensure_venv(
+            name, uv, reinstall=reinstall,
+            **({"complete_baseline": True} if complete_baseline_out is not None else {}),
+        )
         print(f"[PASS] {name} (prepared)")
         return 0
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
-    py = _ensure_venv(name, uv, reinstall=reinstall)
+    py = _ensure_venv(
+        name, uv, reinstall=reinstall,
+        **({"complete_baseline": True} if complete_baseline_out is not None else {}),
+    )
+    if complete_baseline_out is not None:
+        from tools.coverage_guided_selection import baseline, completion
+
+        collector = completion.collector_identity(REPO, measured_commit, check_working=True)
+        files = completion.source_files(REPO, measured_commit, name, check_working=True)
+        bounds = dict(
+            plugin_seconds=min(plugin_timeout, 900), chunk_seconds=min(limits.wall_seconds, 300),
+            item_seconds=min(test_timeout, 30), max_processes=limits.max_processes,
+            max_memory_mb=limits.max_memory_mb, max_temp_mb=limits.max_temp_mb,
+        )
+        completion.validate_bounds(bounds)
+        result = baseline.collect_baseline(
+            cwd=REPO, test_path=f"plugins/{name}/tests",
+            cov_source=f"plugins/{name}/src/{name.replace('-', '_')}", plugin=name,
+            timeout_s=bounds["chunk_seconds"], measured_commit=measured_commit,
+            prepared_python=py, workers=baseline_workers,
+            complete=dict(collector=collector, bounds=bounds, files=files),
+        )
+        if completion.collector_identity(REPO, measured_commit, check_working=True) != collector:
+            raise ValueError("complete baseline collector changed during collection")
+        completion.verify(
+            result, source=measured_commit, collector=collector, plugin=name,
+            files=completion.source_files(REPO, measured_commit, name, check_working=True),
+        )
+        complete_baseline_out.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"[PASS] {name} (complete source suite and baseline)")
+        return 0
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -529,6 +593,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--all", action="store_true", help="every plugin with a suite")
     ap.add_argument("--changed", action="store_true", help="plugins changed vs --base")
     ap.add_argument("--base", default="origin/main", help="diff base for --changed")
+    ap.add_argument("--complete-baseline-out", type=Path,
+                    help="one complete contained source suite plus schema-v3 baseline")
+    ap.add_argument("--measured-commit", help="exact source SHA for complete baseline evidence")
+    ap.add_argument("--baseline-workers", type=int, choices=(1, 2), default=1)
     ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
     ap.add_argument(
@@ -596,6 +664,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    if args.complete_baseline_out is not None and (
+        len(args.plugins) != 1 or args.all or args.changed
+        or args.test_file or args.guards or args.kexpr or args.collect_only or args.selection_file
+        or args.list_only or args.exclude or args.pre_push or args.allow_host_state
+        or args.allow_explicit_tiers or not args.measured_commit
+    ):
+        ap.error("--complete-baseline-out requires one full source plugin and exact --measured-commit")
+    if args.complete_baseline_out is None and (args.measured_commit or args.baseline_workers != 1):
+        ap.error("baseline provenance/options require --complete-baseline-out")
     if args.selection_file is not None and (
         len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
         or args.test_file or args.guards or args.kexpr or args.collect_only
@@ -666,7 +743,9 @@ def main(argv: list[str] | None = None) -> int:
     for name in targets:
         lease: SingleInstance | None = None
         try:
-            environment_root = (VENV_ROOT / name).resolve()
+            environment_root = _venv_base(
+                name, complete_baseline=args.complete_baseline_out is not None,
+            ).resolve()
             environment_root.mkdir(parents=True, exist_ok=True)
             if args.admission_wait:
                 print(f"Waiting up to {args.admission_wait:g}s for {environment_root} ...")
@@ -722,6 +801,10 @@ def main(argv: list[str] | None = None) -> int:
                     allow_host_state=args.allow_host_state,
                     test_files=tuple(args.test_file),
                     selection_file=args.selection_file,
+                    **(dict(
+                        complete_baseline_out=args.complete_baseline_out,
+                        measured_commit=args.measured_commit, baseline_workers=args.baseline_workers,
+                    ) if args.complete_baseline_out is not None else {}),
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)

@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-16
+- **Last revised:** 2026-10-19
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -15,8 +15,8 @@ not a second product history or an independent artifact owner. Consumers and
 operators should be able to answer which development snapshot a release carries
 without treating an incidental generated Git commit as another release identity.
 
-Promotion should continuously deliver qualified development changes, ordinarily
-within the intended short validation cycle and at an hourly-or-faster cadence
+Promotion should continuously deliver qualified development changes, targeting
+thirty minutes and never exceeding one hour end-to-end, including queueing,
 while changes await release. Repeated bookkeeping, composition or bootstrap
 failures should not turn release control into a barrier to its own repair.
 Agreement between artifact production and verification belongs in ordinary
@@ -128,6 +128,15 @@ Release freshness measures qualified source advancement while development change
 are pending. No-op workflows, queued requests and unqualified snapshots do not
 count as deliveries. Missed cadence names its actual blocker and owner; it is not
 hidden by a green wrapper or satisfied by weakening the qualification.
+
+### assurance-without-repeat-execution
+
+One complete, trustworthy execution should satisfy every compatible obligation
+it proves. Gathering evidence or crossing an orchestration boundary should not
+repeat the same tests solely to produce another status or artifact. Distinct
+platform, generated-consumer, installation and integrity guarantees remain
+explicit, while bounded preflight catches composition mistakes before an
+expensive release cycle.
 
 ## Non-Goals / Boundaries
 

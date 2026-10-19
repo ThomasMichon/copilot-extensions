@@ -526,6 +526,8 @@ def _write_coverage_baselines_into_scratch(
                 f"write a pointer whose asset name would not match the "
                 f"file it was actually collected as"
             )
+        from coverage_guided_selection.completion import verify_optional
+        verify_optional(data, root=scratch, source=dev_head, plugin=plugin, error_type=PromotionError)
         pointer = {
             "schema": "copilot-extensions.coverage-baseline-pointer",
             "plugin": plugin,

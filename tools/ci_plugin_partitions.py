@@ -175,6 +175,10 @@ def main() -> int:
         "--single-job-plugin", action="append", default=[],
         help="emit one row for this plugin (repeatable; default partitions stay unchanged)",
     )
+    candidate = commands.add_parser("candidate-smoke")
+    candidate.add_argument("plugins_json")
+    for name in ("event", "promotion-run", "phase", "profile"):
+        candidate.add_argument(f"--{name}", required=True)
     files = commands.add_parser("files")
     files.add_argument("--plugin", required=True)
     files.add_argument("--partition", type=int, required=True)
@@ -185,6 +189,22 @@ def main() -> int:
             print(json.dumps(smoke_matrix(
                 json.loads(args.plugins_json), single_job_plugins=frozenset(args.single_job_plugin),
             ), separators=(",", ":")))
+        elif args.command == "candidate-smoke":
+            try:
+                from materialized_candidate_inventory import CandidateValidationError
+                from candidate_complete_once import candidate_smoke
+            except ModuleNotFoundError as exc:
+                parser.error(f"candidate-smoke helper dependency is unavailable: {exc.name}")
+
+            try:
+                selected = candidate_smoke(
+                    Path(__file__).resolve().parents[1], json.loads(args.plugins_json),
+                    event=args.event, promotion_run=args.promotion_run,
+                    phase=args.phase, profile=args.profile,
+                )
+            except CandidateValidationError as exc:
+                parser.error(str(exc))
+            print(json.dumps(selected, separators=(",", ":")))
         else:
             for path in partition_files(
                 Path(__file__).resolve().parents[1], args.plugin, args.partition, args.partitions,

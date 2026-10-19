@@ -99,6 +99,21 @@ rewrite)._
 
 ## Request
 
+**2026-10-19 release-turnaround clarification (verbatim):**
+
+> You definitely need to focus on making the turnaround for resolution shorter
+
+> 2 hours is also way too long; we can't get the release take that long. We need to cut down on what runs there.
+
+> 1 hour max, ideally 30 minutes
+
+The operative release acceptance is now at most sixty minutes end-to-end,
+including queueing, with thirty minutes the target. This supersedes the earlier
+conditional one-hour allowance below; ordinary PR CI remains under ten minutes.
+Reduce repeated executions using complete equivalent evidence, not by dropping
+distinct source, generated, native, installation, baseline or integrity checks.
+The detailed reductions remain agent-recommended within Phase 9.
+
 **2026-10-18 promotion lifecycle clarification (verbatim):**
 
 > Close those old ones then to keep them out of the PR queue. We sitll need to fix the dev-to-main promotion flow to include waiting and drving the PR to merge before marking complete, so new runs can't trigger while the previous PR is still active. We also need (as part of this agent's charter) a way to ensure those PRs always go through, and aren't dependent on running redundant checks which may fail due to flakiness.
@@ -809,6 +824,35 @@ _(Agent-recommended implementation and validation decomposition of the
       reuse existing exact-source run/artifact provenance only when portfolio,
       platform, configuration and collector compatibility are proven. A source
       proof never substitutes for unproven materialized-consumer coverage.
+- [ ] _(Agent-recommended bounded reduction.)_ Use the existing complete
+      baseline collector as one managed source-suite execution, retaining all
+      nine artifacts and both prior profiles' enrolled corpus. Require complete
+      collection/outcome and provenance evidence under unchanged containment;
+      do not silently lose tiered cases or multiply worker concurrency.
+- [ ] _(Agent-recommended bounded reduction.)_ Give each exact-candidate plugin
+      suite one complete owner. Subtract only validated full owners from its
+      repeated smoke matrix; retain smoke-only plugins, shared SSH coverage,
+      worker-profile assurance and every distinct native/install/platform lane.
+      Discovery and trusted qualification must derive the same fail-closed
+      ownership map and reject stale receipts.
+- [ ] _(Agent-recommended scheduling reduction.)_ Allow unsigned construction
+      to overlap source validation, moving the complete source-success barrier
+      to attestation rather than removing it. Signing, freshness, publication
+      and merge authority remain separately gated.
+- [ ] _(Agent-recommended fixture reduction.)_ Remove repeated preparation from
+      the native Windows artifact portfolio without dropping its real Git,
+      CRLF, export, integrity or subprocess witnesses. Prove the retained
+      portfolio fits its existing five-minute job with meaningful headroom;
+      Linux timings alone do not close this validation.
+- [ ] _(Agent-recommended integration of newly reviewed Source coverage.)_
+      Carry the standalone chat consumer's required Linux/Windows witnesses
+      into the independently preserved Main CI through its normal control
+      review, retaining the reviewed six-minute jobs and 120-second contained
+      commands. Older released payloads lacking that consumer must remain
+      valid for ordinary checks; an owned candidate missing it must refuse.
+      Both required aggregates and exact qualification must demand the two
+      successful rows. Do not replace Main CI wholesale or omit unique
+      assurance to meet the time budget.
 - [ ] _(Agent-recommended mechanism.)_ Prove existing publication/event
       authority reliably delivers the required Main gate and a nonadministrator
       exact-head merge. Missing checks, API ambiguity, moved Main, unqualified
@@ -817,8 +861,9 @@ _(Agent-recommended implementation and validation decomposition of the
 - [ ] Measure actual qualified source advancement, queue time and blocking
       stages against hourly-or-faster delivery while changes are pending;
       ordinary PR event-to-required-gate time must be below ten minutes,
-      including queueing. Target thirty minutes for validate-and-promote;
-      the one-hour allowance requires actual local-Dev workflow acceptance.
+      including queueing. Target thirty minutes for validate-and-promote and
+      require at most sixty minutes end-to-end through verified publication,
+      Main merge and tagging, including queueing.
       Unblock the current promotion before changing its performance.
 - [x] _(Agent-recommended sequencing.)_ Contain superseded PR CI without
       interrupting the executing Main qualification. Retain rolling Dev/manual
@@ -1000,9 +1045,10 @@ participants' phase ownership remain unchanged.
       demonstrate the cadence, source marker, artifact reuse and landed tag.
       Missed targets and remaining blockers stay explicit and owned.
 - [ ] Measure ordinary PR event-to-required-gate completion below ten minutes,
-      including queue delays; separately measure validate-and-promote against
-      the thirty-minute target. Do not apply the conditional one-hour allowance
-      before the local-Dev workflow has actual acceptance evidence.
+      including queue delays; separately measure validate-and-promote through
+      verified publication, Main merge and tagging against the thirty-minute
+      target and absolute sixty-minute ceiling, including queueing. The
+      October 19 clarification supersedes the earlier conditional allowance.
 - [ ] A second Dev advance, manual request or retry cannot dispatch a competing
       promotion while an earlier promotion PR is open. A failed/cancelled run
       cannot lose that obligation; resume or explicit retirement is auditable.
@@ -1048,6 +1094,78 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-19 - Current-Dev integration retains newly reviewed unique coverage
+
+The first Source publication attempt safely aborted on three genuine conflicts
+after Dev advanced. The tested source was retained unchanged and integrated
+once in a fresh managed checkout. Conflict resolution preserves chat source
+closure and native coverage, the newly declared PR-owner smoke partitions,
+and the complete-once recipe/fingerprint cases. No branch history was reset
+or rewritten by hand. The source implementation is submitted as #7249;
+production Main remains paused.
+
+The newly reviewed standalone chat component adds two unique platform
+obligations, not duplicate plugin runs. The bounded Main CI proposal retains
+its reviewed checkout/setup/contained-command recipe and original limits,
+gates old-payload absence without loading unshipped helpers, and requires
+both rows for a qualifying candidate. The existing release owner retains this
+integration; no competing writer was established in the retained coordination
+record, which is not a fleet-wide absence claim or activation permission.
+The proposal still needs normal Main review and the covering qualification.
+
+### 2026-10-19 - Complete-once source and control implementation rehearsed
+
+The inactive source profiles and proposed Main-derived pair preserve all nine
+baseline outputs and distinct candidate/native/install/publication gates while
+removing repeated suite executions. The complete proposed control portfolio
+passes 3,996 cases, 294 subtests and 34 platform/opt-in skips in 358.02 seconds.
+The actual old-Main validator and its unchanged sixty-five-case negative suite
+also accept the proposed overlay. These results do not activate it.
+
+Real isolated execution exposed preparation, script-import and Git ownership
+assumptions before a release retry. Preparation now uses the same separately
+fingerprinted cache without tests or proof output. Script imports are
+file-derived, and provenance reads trust only the exact checkout for that Git
+process; no global Git exception or history expansion is added.
+
+The first complete real source corpus records 721 SSH nodes: 628 passed and
+93 platform/opt-in skips, with eleven covered source files. Its saved proof
+passes independent `python -I -S` verification. The original T3 snapshot
+provisioning case needs a network-capable tier; the explicitly admitted,
+credential-free isolated comparison passes without raising a test timeout or
+changing the default disconnected harness. All-nine corpus/outcome comparison,
+native Windows budget margin and actual release timing remain open before
+retiring the production duplicate executions.
+
+### 2026-10-19 - Reduce repeated release work before another full attempt
+
+#7233 merged as `26836e27a81fd0142c0ca9230b44ab10aac46372` with exact-head
+Copilot approval and all three original CI gates passed. The subsequent
+old-portfolio qualification `39220534241` was explicitly cancelled by the
+operator to free capacity for the reduced graph; it reached terminal cancelled
+state without generating a candidate CI run or product PR. Partial results
+are not qualification. Main remains paused.
+
+The preceding complete attempt spent separate full-suite and instrumented
+baseline passes on each of nine source plugins. Exact-candidate CI also ran
+eight plugin suites twice under full and smoke owners. The named Phase 9
+reductions preserve all baseline artifacts, smoke-only plugins and distinct
+native/install/integrity evidence rather than merely increasing deadlines.
+Early unsigned construction retains the complete source barrier on attestation.
+
+The native Windows artifact cancellation is independently confirmed by the
+provider's five-minute maximum-execution annotation. Its 301 composed cases
+passed in 186.50 seconds, but setup and public-toolchain work consumed almost
+all remaining time before lifecycle contracts began. Fixture preparation must
+be reduced and the complete retained Windows portfolio measured; a partial
+passing count is not acceptance.
+
+The recovery owner will not launch another full qualification until the
+coherent reduced portfolio is reviewed and ready. Its release target is
+thirty minutes, with an absolute sixty-minute end-to-end ceiling including
+queueing. Neither the proposed source changes nor prepared control activate
+stewardship, a new provider, additional authority or a deadline increase.
 
 ### 2026-10-19 - Generated Fleet guard exposes one more source/control profile seam
 

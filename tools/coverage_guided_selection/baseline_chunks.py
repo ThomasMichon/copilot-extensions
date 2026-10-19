@@ -57,6 +57,7 @@ class Chunk:
     coverage_file: str
     output_file: str
     timeout_s: float
+    complete: bool = False
 
 
 def run_chunk(chunk: Chunk) -> dict:
@@ -74,7 +75,10 @@ def run_chunk(chunk: Chunk) -> dict:
         proc = subprocess.run(
             chunk.command,
             cwd=Path(chunk.cwd),
-            env=_subprocess_env(Path(chunk.coverage_file), Path(chunk.sandbox)),
+            env=_subprocess_env(
+                Path(chunk.coverage_file), Path(chunk.sandbox),
+                **({"complete": True} if chunk.complete else {}),
+            ),
             capture_output=True,
             text=True,
             timeout=chunk.timeout_s,
@@ -131,7 +135,9 @@ def run_parallel(chunks: list[Chunk]) -> list[dict]:
     return [results[index] for index in range(len(chunks))]
 
 
-def collect_contained(chunks: list[Chunk], tmp_path: Path) -> list[dict]:
+def collect_contained(
+    chunks: list[Chunk], tmp_path: Path, *, workers: int = 2, bounds: dict | None = None,
+) -> list[dict]:
     from tools.coverage_guided_selection.baseline import _subprocess_env
     from tools.plugin_test_containment import Limits, run_contained
 
@@ -139,12 +145,17 @@ def collect_contained(chunks: list[Chunk], tmp_path: Path) -> list[dict]:
     output = tmp_path / "chunks-result.json"
     error = tmp_path / "chunks-error.json"
     manifest.write_text(json.dumps([asdict(chunk) for chunk in chunks]), encoding="utf-8")
+    limits = Limits() if bounds is None else Limits(
+        wall_seconds=bounds["plugin_seconds"], max_processes=bounds["max_processes"],
+        max_memory_mb=bounds["max_memory_mb"], max_temp_mb=bounds["max_temp_mb"],
+    )
     returncode = run_contained(
-        [sys.executable, str(Path(__file__).resolve()), str(manifest), str(output), str(error)],
+        [sys.executable, str(Path(__file__).resolve()), str(manifest), str(output), str(error),
+         str(workers)],
         cwd=Path(chunks[0].cwd),
         env=_subprocess_env(tmp_path / ".coverage-control", tmp_path / "control"),
         sandbox=tmp_path,
-        limits=Limits(),
+        limits=limits,
     )
     if returncode != 0:
         if error.is_file():
@@ -160,10 +171,13 @@ def collect_contained(chunks: list[Chunk], tmp_path: Path) -> list[dict]:
 
 
 def main(argv: list[str]) -> int:
-    manifest, output, error = map(Path, argv)
+    manifest, output, error = map(Path, argv[:3])
+    workers = int(argv[3]) if len(argv) > 3 else 2
+    if workers not in (1, 2):
+        raise ValueError("coverage workers must be 1 or 2")
     chunks = [Chunk(**entry) for entry in json.loads(manifest.read_text(encoding="utf-8"))]
     try:
-        results = run_parallel(chunks)
+        results = run_parallel(chunks) if workers == 2 else [run_chunk(chunk) for chunk in chunks]
     except BaselineCollectionError as exc:
         error.write_text(json.dumps({
             "returncode": exc.returncode, "stdout": exc.stdout, "stderr": exc.stderr,

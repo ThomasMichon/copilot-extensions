@@ -1586,6 +1586,32 @@ $env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
 The portable proxy contracts cover binary forwarding, routing identity, and
 timeout/cancellation cleanup and run in the Agent Bridge CI lane.
 
+## Complete source suite and baseline
+
+The managed runner's opt-in `--complete-baseline-out <plugin>.json
+--measured-commit <verified-dev-sha> --baseline-workers <1-or-2>` profile uses
+the existing instrumented collector as the single complete source-suite
+execution. Run it under normal bounded supervision. It retains the enrolled
+baseline corpus, contained tier policy, item/chunk/plugin limits and nine
+artifact names; ordinary runner invocations are unchanged. Instrumentation uses
+a separately fingerprinted, seasoned managed environment, not an ambient package
+installation or an additional xdist layer.
+
+Version-3 baseline data gains an additive complete-profile proof. Collection,
+terminal outcomes, attribution, source and collector identity, corpus, worker
+profile and bounds must agree. Filtered, guard-only, collection-only,
+interrupted, incomplete or stale output cannot stand in for a full run. The
+completion verifier checks each artifact independently before promotion;
+legacy separate-run artifacts do not acquire shared-execution proof by rename.
+This source evidence never substitutes for distinct generated/native consumer
+qualification.
+
+Candidate CI can separately opt into `complete-once-v1`: validated complete
+owners replace their repeated smoke rows, while smoke-only plugins, shared SSH
+contracts and native/install/platform lanes remain required. The discovery
+helper is invoked only for an owned candidate dispatch, so older released Main
+payloads do not need unshipped helper code for ordinary validation.
+
 ## Coverage-selected dispatch PRs
 
 Only `agent-dispatch`'s pull-request lane uses coverage selection. Its unchanged
@@ -1723,6 +1749,16 @@ a scheduled or manually dispatched workflow.
   qualification owner for successful cases; missing ownership still refuses
   before a provider call. Default legacy-profile results alone do not validate
   a newly preserved Main controller.
+- `python tools/rehearse_promotion_control.py --control-ref origin/main`
+  runs the union of Source- and control-CI-declared tool modules against a
+  disposable, Git-backed pairing
+  of committed source and pinned preserved control. Run it inside normal bounded
+  supervision; use `--tests tools/test_fleet_ci_scope.py` for a focused
+  composition check. `--workflow-overlay <directory>` rehearses proposed
+  `ci.yml`/`validate-and-promote.yml` as a distinct synthetic control commit.
+  It never changes the source checkout or its refs, and refuses dirty source,
+  unavailable lineage, unsafe control paths and missing test modules. This is
+  compatibility evidence, not native or live release qualification.
 - Release-tool compatibility tests retain complete legacy-controller branches
   and execute the prepared source-owned graph when present. Before activation,
   the full tool portfolio must also pass with the actual controlled workflow

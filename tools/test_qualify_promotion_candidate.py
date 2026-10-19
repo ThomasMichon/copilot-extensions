@@ -230,6 +230,20 @@ def _candidate_workflow(
         ).decode().strip()
         text = _materializer_git(ROOT, "show", f"{main}:.github/workflows/ci.yml").decode("utf-8")
         assert _supported_smoke_profile(text) == "unpartitioned"
+    if profile in {"partitioned", "main"} and "CANDIDATE_PORTFOLIO_PROFILE:" in text:
+        # Keep historical receipt/partition cases exercising their original
+        # recipes after the active workflow adopts complete-once ownership.
+        from candidate_complete_once import DISCOVERY_ENV, DISCOVERY_FILTER, FULL_JOB
+
+        legacy_full = FULL_JOB.split("      - name: Test shared SSH proxy contracts\n", 1)[0]
+        legacy_full = legacy_full.replace(
+            "(matrix.plugin == 'agent-worktrees' || matrix.plugin == 'agent-bridge')",
+            "matrix.plugin == 'agent-worktrees'",
+        )
+        text = text.replace(DISCOVERY_ENV, "").replace(DISCOVERY_FILTER, "")
+        start = text.index("  full:\n")
+        end = text.index("\n  coverage-guided-selection-integration:", start)
+        text = text[:start] + legacy_full + text[end:]
     # Emulate the reviewed candidate aggregate while the workflow-only bootstrap is separate.
     start = text.index("  promotion-gate:\n")
     before, gate = text[:start], text[start:]
@@ -251,9 +265,16 @@ def test_inventory_derives_all_platform_and_matrix_rows_from_the_actual_aggregat
     workflow = _candidate_workflow(tmp_path, monkeypatch, profile=profile)
     required, allowed_skips, digest = inventory.required_jobs(ROOT)
     assert {"guards + lint", "full - agent-worktrees", "archive sources (windows-latest)"} <= required
-    assert {"agent-bridge", "agent-index", "Promotion snapshot gate"} <= required
+    from candidate_complete_once import complete_once_plan
+
+    plan = complete_once_plan(workflow.read_text("utf-8"), inventory.python_suites(ROOT))
+    assert {"agent-index", "Promotion snapshot gate"} <= required
+    assert ("agent-bridge" in required) == (plan is None)
     partitions = {f"agent-dispatch (partition {index}/3)" for index in (1, 2, 3)}
-    if _supported_smoke_profile(workflow.read_text("utf-8")) == "partitioned":
+    if plan is not None:
+        assert not partitions & required and "agent-dispatch" not in required
+        assert "full - agent-dispatch" in required
+    elif _supported_smoke_profile(workflow.read_text("utf-8")) == "partitioned":
         assert partitions <= required
         assert "agent-dispatch" not in required
     else:
@@ -307,11 +328,21 @@ def test_chat_platform_jobs_cannot_gain_an_unaccounted_matrix(
         inventory.required_jobs(ROOT)
 
 
-@pytest.mark.parametrize("profile", ["actual", "partitioned", "main"])
+@pytest.mark.parametrize("profile", [
+    "actual", "partitioned", "main", "complete-once-partitioned", "complete-once-unpartitioned",
+])
 def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str,
 ) -> None:
-    workflow = _candidate_workflow(tmp_path, monkeypatch, profile=profile)
+    workflow = _candidate_workflow(
+        tmp_path, monkeypatch, profile="partitioned" if profile.startswith("complete-once-") else profile,
+    )
+    if profile.startswith("complete-once-"):
+        from test_candidate_complete_once import profile_text
+
+        workflow.write_text(profile_text(
+            workflow.read_text("utf-8"), partitioned=profile == "complete-once-partitioned",
+        ), encoding="utf-8")
     canonical = workflow.read_text("utf-8").replace("\r\n", "\n").encode("utf-8")
     workflow.write_bytes(canonical)
     lf = inventory.required_jobs(ROOT)
@@ -320,6 +351,24 @@ def test_inventory_uses_the_same_declared_source_representation_for_lf_and_crlf(
     workflow.write_bytes(represented)
     assert inventory.required_jobs(ROOT) == lf
     digest_input = canonical
+    declaration = yaml.safe_load(canonical)
+    profiles = [
+        step["env"]["CANDIDATE_PORTFOLIO_PROFILE"]
+        for step in declaration["jobs"]["discover"]["steps"]
+        if "CANDIDATE_PORTFOLIO_PROFILE" in step.get("env", {})
+    ]
+    if profiles:
+        assert profiles == ["complete-once-v1"]
+        owners = declaration["jobs"]["full"]["strategy"]["matrix"]["plugin"]
+        plan = {
+            "profile": profiles[0], "full": owners,
+            "smoke": sorted(inventory.python_suites(ROOT) - set(owners)),
+        }
+        digest_input += b"\0complete-once-plan\0"
+        digest_input += json.dumps(plan, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        for name in ("candidate_complete_once.py", "ci_plugin_partitions.py"):
+            helper = (ROOT / "tools" / name).read_bytes().replace(b"\r\n", b"\n")
+            digest_input += b"\0" + name.encode("utf-8") + b"\0" + helper
     if _supported_smoke_profile(canonical.decode("utf-8")) == "partitioned":
         helper = (ROOT / "tools/ci_plugin_partitions.py").read_bytes().replace(b"\r\n", b"\n")
         digest_input += b"\0tools/ci_plugin_partitions.py\0" + helper

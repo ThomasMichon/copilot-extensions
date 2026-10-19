@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from _promotion_artifact_fixture import artifact_repo as _artifact_repo_fixture, copy_fixture_seed
 from _promotion_workflow_test_support import (
     assert_source_owned_boundary, heredoc, reviewed_helpers, source_owned,
 )
@@ -33,7 +34,7 @@ from test_promote_release import (
     _commit, _git, no_ambient_git_identity as _identity_fixture, repo as _repo_fixture,
 )
 
-repo = _repo_fixture
+repo = _artifact_repo_fixture
 no_ambient_git_identity = _identity_fixture
 
 DEV, MAIN, TREE = "a" * 40, "b" * 40, "c" * 40
@@ -140,6 +141,65 @@ def _validate(directory: Path, **kwargs) -> dict:
     return artifacts.validate_artifacts(
         directory, content_tree=TREE, dev_head=DEV, main_before=MAIN, **kwargs
     )
+
+
+def test_repo_preparation_seed_isolates_git_metadata_and_payload(
+    repo: Path, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+    pytestconfig: pytest.Config,
+) -> None:
+    initial = _git(["rev-parse", "HEAD"], repo)
+    tool = (repo / "tools/changefile.py").read_bytes()
+    readme = (repo / "README.md").read_bytes()
+    (repo / "README.md").write_text("mutated checkout\n", encoding="utf-8")
+    (repo / "tools/changefile.py").write_text("raise RuntimeError('mutated tool')\n")
+    _git(["config", "core.autocrlf", "true"], repo)
+    changed = _commit(repo, "independent adversarial mutation")
+    _git(["update-ref", "refs/heads/dev", changed], repo)
+    fresh = copy_fixture_seed(
+        pytestconfig, tmp_path_factory, _repo_fixture.__wrapped__, tmp_path / "fresh",
+    )
+    assert not (fresh / ".git").is_symlink()
+    assert not os.path.samefile(repo / ".git/config", fresh / ".git/config")
+    assert _git(["rev-parse", "HEAD", "main", "dev"], fresh).splitlines() == [initial] * 3
+    assert _git(["config", "core.autocrlf"], fresh) == "false"
+    assert _git(["status", "--porcelain"], fresh) == ""
+    assert _git(["worktree", "list", "--porcelain"], fresh).startswith(f"worktree {fresh.as_posix()}\n")
+    assert (fresh / "README.md").read_bytes() == readme
+    assert (fresh / "tools/changefile.py").read_bytes() == tool
+
+
+def test_seed_git_maintenance_policy_is_process_local(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+    pytestconfig: pytest.Config, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "fixture.sentinel")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "preserved")
+    expected = {
+        "gc.auto": "0", "maintenance.auto": "false",
+        "gc.autoDetach": "false", "maintenance.autoDetach": "false",
+    }
+    prepared = []
+
+    def prepare(directory: Path) -> Path:
+        prepared.append(directory)
+        assert {key: _git(["config", "--get", key], directory) for key in expected} == expected
+        assert _git(["config", "--get", "fixture.sentinel"], directory) == "preserved"
+        _git(["init", "-q"], directory)
+        _git(["config", "--local", "gc.auto", "1"], directory)
+        assert _git(["config", "--get", "gc.auto"], directory) == "0"
+        (directory / "payload").write_bytes(b"immutable seed\n")
+        return directory
+
+    first = copy_fixture_seed(pytestconfig, tmp_path_factory, prepare, tmp_path / "first")
+    (first / "payload").write_bytes(b"mutable copy\n")
+    second = copy_fixture_seed(pytestconfig, tmp_path_factory, prepare, tmp_path / "second")
+    assert len(prepared) == 1
+    assert (prepared[0] / "payload").read_bytes() == (second / "payload").read_bytes() == b"immutable seed\n"
+    assert _git(["config", "--local", "--get", "gc.auto"], second) == "1"
+    assert os.environ["GIT_CONFIG_COUNT"] == "1"
+    assert os.environ["GIT_CONFIG_KEY_0"] == "fixture.sentinel"
+    assert os.environ["GIT_CONFIG_VALUE_0"] == "preserved"
 
 
 def test_bundle_and_transfer_roundtrip(tmp_path):
@@ -1558,12 +1618,66 @@ def test_candidate_artifact_validation_resolves_temporary_root_aliases(
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
+_ARTIFACT_SOURCE_BARRIER = frozenset({
+    "full", "worktree-manager", "agent-index-service-linux",
+    "agent-index-service-windows", "guards-full-sweep",
+})
+
+
+def _assert_artifact_source_barrier(jobs: dict) -> None:
+    builder_needs = jobs["build-python-artifacts"]["needs"]
+    signer_needs = set(jobs["python-artifacts"]["needs"])
+    assert {"gate", "build-python-artifacts"} <= signer_needs
+    if builder_needs == ["gate"]:
+        assert _ARTIFACT_SOURCE_BARRIER <= signer_needs
+    else:
+        assert {"gate", *_ARTIFACT_SOURCE_BARRIER} <= set(builder_needs)
+
+
+@pytest.mark.parametrize("early_build", [False, True], ids=["legacy-builder", "early-builder"])
+def test_workflow_artifact_source_barrier_accepts_supported_profiles(early_build: bool) -> None:
+    _assert_artifact_source_barrier({
+        "build-python-artifacts": {
+            "needs": ["gate"] if early_build else ["gate", *sorted(_ARTIFACT_SOURCE_BARRIER)],
+        },
+        "python-artifacts": {
+            "needs": ["gate", "build-python-artifacts"]
+            + (sorted(_ARTIFACT_SOURCE_BARRIER) if early_build else []),
+        },
+    })
+
+
+@pytest.mark.parametrize("missing", ["gate", "build-python-artifacts", *sorted(_ARTIFACT_SOURCE_BARRIER)])
+def test_workflow_early_artifact_signer_requires_each_source_dependency(missing: str) -> None:
+    with pytest.raises(AssertionError):
+        _assert_artifact_source_barrier({
+            "build-python-artifacts": {"needs": ["gate"]},
+            "python-artifacts": {
+                "needs": sorted({"gate", "build-python-artifacts", *_ARTIFACT_SOURCE_BARRIER} - {missing}),
+            },
+        })
+
+
+@pytest.mark.parametrize("missing", sorted(_ARTIFACT_SOURCE_BARRIER))
+def test_workflow_legacy_artifact_builder_requires_each_source_dependency(missing: str) -> None:
+    with pytest.raises(AssertionError):
+        _assert_artifact_source_barrier({
+            "build-python-artifacts": {
+                "needs": sorted({"gate", *_ARTIFACT_SOURCE_BARRIER} - {missing}),
+            },
+            "python-artifacts": {
+                "needs": ["gate", "build-python-artifacts", *sorted(_ARTIFACT_SOURCE_BARRIER)],
+            },
+        })
+
+
 def test_workflow_separates_candidate_execution_signing_and_release_authority():
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())
     jobs = workflow["jobs"]
     current = source_owned(jobs)
     builder, signer = jobs["build-python-artifacts"], jobs["python-artifacts"]
+    _assert_artifact_source_barrier(jobs)
     assert builder["permissions"] == (
         {"contents": "read", "actions": "read", "attestations": "read"} if current
         else {"contents": "read"}

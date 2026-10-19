@@ -667,6 +667,14 @@ def test_ci_runner_portfolio_keeps_smoke_path_gated_and_manual_exhaustive():
 
 @pytest.mark.parametrize("workflow", worker_contract.WORKFLOWS)
 def test_worktrees_full_steps_use_exactly_two_workers_without_narrowing(workflow: str) -> None:
+    if workflow == "ci.yml":
+        text = (TOOLS.parent / ".github/workflows/ci.yml").read_text("utf-8")
+        if "CANDIDATE_PORTFOLIO_PROFILE:" in text:
+            from candidate_complete_once import complete_once_plan
+            from materialized_candidate_inventory import python_suites
+
+            assert complete_once_plan(text, python_suites(TOOLS.parent)) is not None
+            return
     worker_contract.assert_full_step_uses_exactly_two_workers_without_narrowing_tests(workflow)
 
 
@@ -685,3 +693,131 @@ def test_candidate_bridge_workers_share_the_existing_job_and_limits() -> None:
 
 def test_worktrees_manual_main_bootstrap_stays_serial() -> None:
     worker_contract.assert_manual_main_validation_does_not_need_unshipped_test_dependencies()
+
+
+def _source_full_worker_fixture(profile: str):
+    import yaml
+
+    declaration = yaml.safe_load(
+        (TOOLS.parent / ".github/workflows/validate-and-promote.yml").read_text("utf-8"),
+    )
+    job = declaration["jobs"]["full"]
+    step = next(step for step in job["steps"] if step.get("name") == worker_contract.FULL_STEP)
+    job["steps"] = [
+        other for other in job["steps"]
+        if other is step or not any(
+            token in other.get("run", "")
+            for token in ("coverage_guided_selection/baseline.py", "run-plugin-tests.py")
+        )
+    ]
+    if profile == "one-pass":
+        step["env"] = {
+            "DEV_SHA": "${{ needs.gate.outputs.sha }}",
+            "BASELINE_WORKERS": worker_contract.SOURCE_BASELINE_WORKERS,
+        }
+        step["run"] = worker_contract.SOURCE_COMPLETE_RUN
+    else:
+        assert profile == "legacy"
+        step["env"] = {"PYTEST_ADDOPTS": worker_contract.OPTIONS["validate-and-promote.yml"]}
+        step["run"] = "python tools/run-plugin-tests.py ${{ matrix.plugin }}"
+    return declaration
+
+
+@pytest.mark.parametrize("profile", ["legacy", "one-pass"])
+def test_source_full_worker_profiles_remain_explicit_and_complete(monkeypatch, profile):
+    declaration = _source_full_worker_fixture(profile)
+    monkeypatch.setattr(worker_contract, "_workflow", lambda _: declaration)
+    worker_contract.assert_full_step_uses_exactly_two_workers_without_narrowing_tests(
+        "validate-and-promote.yml",
+    )
+    worker_contract.assert_workers_do_not_leak_into_guards_collection_or_baselines(
+        "validate-and-promote.yml",
+    )
+    if profile == "one-pass":
+        job = declaration["jobs"]["full"]
+        assert job["strategy"]["matrix"]["plugin"] == [
+            "agent-bridge", "agent-codespaces", "agent-containers", "agent-dispatch",
+            "agent-logger", "agent-mcp", "agent-ssh", "agent-vault", "agent-worktrees",
+        ]
+        step = next(step for step in job["steps"] if step.get("name") == worker_contract.FULL_STEP)
+        assert step["env"]["BASELINE_WORKERS"] == (
+            "${{ (matrix.plugin == 'agent-worktrees' || matrix.plugin == 'agent-dispatch') "
+            "&& '2' || '1' }}"
+        )
+        assert "PYTEST_ADDOPTS" not in step["env"]
+        assert "--measured-commit" in step["run"] and "/completion.py" in step["run"]
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing-owner", "extra-owner", "fail-fast", "deadline", "platform", "wrong-source",
+    "wrong-checkout", "wrong-measured-source", "dispatch-serial", "three-workers",
+    "all-parallel", "nested-xdist", "nested-xdist-argv", "missing-verifier", "waived-verifier",
+    "filtered-step", "continue-on-error", "duplicate-collector", "unknown-command",
+])
+def test_one_pass_source_profile_rejects_missing_or_mutated_proof(monkeypatch, mutation):
+    declaration = _source_full_worker_fixture("one-pass")
+    job = declaration["jobs"]["full"]
+    step = next(step for step in job["steps"] if step.get("name") == worker_contract.FULL_STEP)
+    if mutation == "missing-owner":
+        job["strategy"]["matrix"]["plugin"].remove("agent-dispatch")
+    elif mutation == "extra-owner":
+        job["strategy"]["matrix"]["plugin"].append("agent-index")
+    elif mutation == "fail-fast":
+        job["strategy"]["fail-fast"] = True
+    elif mutation == "deadline":
+        job["timeout-minutes"] = 60
+    elif mutation == "platform":
+        job["runs-on"] = "windows-latest"
+    elif mutation == "wrong-source":
+        step["env"]["DEV_SHA"] = "unvalidated"
+    elif mutation == "wrong-checkout":
+        next(s for s in job["steps"] if s.get("uses") == "actions/checkout@v4")["with"]["ref"] = "dev"
+    elif mutation == "wrong-measured-source":
+        step["run"] = step["run"].replace('--measured-commit "$DEV_SHA"', "--measured-commit HEAD")
+    elif mutation == "dispatch-serial":
+        step["env"]["BASELINE_WORKERS"] = "${{ matrix.plugin == 'agent-worktrees' && '2' || '1' }}"
+    elif mutation == "three-workers":
+        step["env"]["BASELINE_WORKERS"] = step["env"]["BASELINE_WORKERS"].replace("'2'", "'3'")
+    elif mutation == "all-parallel":
+        step["env"]["BASELINE_WORKERS"] = "2"
+    elif mutation == "nested-xdist":
+        step["env"]["PYTEST_ADDOPTS"] = "-n 2 --dist=worksteal"
+    elif mutation == "nested-xdist-argv":
+        step["run"] = step["run"].replace('--baseline-workers "$BASELINE_WORKERS"', "-n 2")
+    elif mutation == "missing-verifier":
+        step["run"] = step["run"].split("python tools/coverage_guided_selection/completion.py")[0]
+    elif mutation == "waived-verifier":
+        step["run"] += " || true"
+    elif mutation == "filtered-step":
+        step["if"] = "matrix.plugin == 'agent-worktrees'"
+    elif mutation == "continue-on-error":
+        step["continue-on-error"] = True
+    elif mutation == "duplicate-collector":
+        job["steps"].append({"name": "duplicate", "run": "python tools/coverage_guided_selection/baseline.py"})
+    else:
+        step["run"] = "python tools/unrecognized.py"
+    monkeypatch.setattr(worker_contract, "_workflow", lambda _: declaration)
+    for check in (
+        worker_contract.assert_full_step_uses_exactly_two_workers_without_narrowing_tests,
+        worker_contract.assert_workers_do_not_leak_into_guards_collection_or_baselines,
+    ):
+        with pytest.raises(AssertionError):
+            check("validate-and-promote.yml")
+
+
+@pytest.mark.parametrize("kind", ["baseline", "xdist", "global-filter"])
+def test_one_pass_workers_cannot_leak_to_other_execution_scopes(monkeypatch, kind):
+    declaration = _source_full_worker_fixture("one-pass")
+    if kind == "global-filter":
+        declaration.setdefault("env", {})["PYTEST_ADDOPTS"] = "-m guard"
+    else:
+        declaration["jobs"]["guards-full-sweep"]["steps"].append({
+            "name": "unreviewed workers",
+            "env": {"BASELINE_WORKERS": "2"} if kind == "baseline" else {"PYTEST_ADDOPTS": "-n 2"},
+            "run": "python tools/other.py",
+        })
+    monkeypatch.setattr(worker_contract, "_workflow", lambda _: declaration)
+    with pytest.raises(AssertionError):
+        worker_contract.assert_workers_do_not_leak_into_guards_collection_or_baselines(
+            "validate-and-promote.yml",
+        )

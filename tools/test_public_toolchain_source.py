@@ -10,15 +10,18 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 import yaml
 
 from _promotion_workflow_test_support import source_workflow
+from _promotion_artifact_fixture import SEED_GIT_OPTIONS, copy_fixture_seed, source_workflow_snapshot
+import test_promotion_artifact_readiness as _readiness_fixtures
 from test_promotion_artifact_readiness import (
-    _materializer_git,
-    generated_materializer_checkout as generated_materializer_checkout,
+    _materializer_git as _raw_materializer_git,
+    generated_materializer_checkout as _generated_materializer_checkout,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -126,13 +129,29 @@ def test_ci_dependency_policy_changes_trigger_age_guard(changed):
 
 
 def _artifact_scope(job_name: str, root: Path | None = None) -> tuple[dict, str]:
-    root = root if root is not None else Path(__file__).resolve().parents[1]
-    jobs = source_workflow(root, "ci.yml")["jobs"]
+    document = (
+        source_workflow_snapshot(Path(__file__).resolve().parents[1], "ci.yml")
+        if root is None else source_workflow(root, "ci.yml")
+    )
+    jobs = document["jobs"]
     detector = next(step for step in jobs[job_name]["steps"]
                     if step.get("id") == "python-artifact-builder")
     expression = re.search(r"grep -Eq -e '([^']+)' -e\s*\\\n\s*'([^']+)'", detector["run"])
     assert expression is not None
     return jobs, "|".join(f"(?:{part})" for part in expression.groups())
+
+
+def test_workflow_preparation_seed_tracks_bytes_and_isolates_mutations(tmp_path: Path) -> None:
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "validate-and-promote.yml").write_text("jobs: {}\n", encoding="utf-8")
+    controller = workflows / "ci.yml"
+    controller.write_text("jobs:\n  checks:\n    timeout-minutes: 5\n", encoding="utf-8")
+    first = source_workflow_snapshot(tmp_path, "ci.yml")
+    first["jobs"]["checks"]["timeout-minutes"] = 999
+    assert source_workflow_snapshot(tmp_path, "ci.yml")["jobs"]["checks"]["timeout-minutes"] == 5
+    controller.write_text("jobs:\n  checks:\n    timeout-minutes: 10\n", encoding="utf-8")
+    assert source_workflow_snapshot(tmp_path, "ci.yml")["jobs"]["checks"]["timeout-minutes"] == 10
 
 
 def test_windows_source_contracts_keep_separate_budgets_without_dropping_cases():
@@ -182,10 +201,35 @@ def _assert_windows_source_contracts(jobs):
 
 
 @pytest.fixture
-def generated_source_controller(generated_materializer_checkout):
-    return _retain_main_ci(
-        generated_materializer_checkout, Path(__file__).resolve().parents[1],
+def generated_materializer_checkout(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, pytestconfig: pytest.Config,
+) -> Path:
+    return copy_fixture_seed(
+        pytestconfig, tmp_path_factory, _prepare_generated_materializer,
+        tmp_path / "generated-checkout",
     )
+
+
+@pytest.fixture
+def generated_source_controller(
+    generated_materializer_checkout, tmp_path_factory: pytest.TempPathFactory,
+    pytestconfig: pytest.Config,
+) -> Path:
+    return copy_fixture_seed(
+        pytestconfig, tmp_path_factory, _prepare_source_controller,
+        generated_materializer_checkout.parent / "source-controller",
+    )
+
+
+def _materializer_git(root: Path, *args: str) -> bytes:
+    return _raw_materializer_git(root, *SEED_GIT_OPTIONS, *args)
+
+
+def _prepare_generated_materializer(directory: Path) -> Path:
+    # This native helper intentionally strips GIT_* env; preserve the policy in argv.
+    with pytest.MonkeyPatch.context() as policy:
+        policy.setattr(_readiness_fixtures, "_materializer_git", _materializer_git)
+        return _generated_materializer_checkout.__wrapped__(directory)
 
 
 def _retain_main_ci(root: Path, original: Path) -> Path:
@@ -204,6 +248,75 @@ def _retain_main_ci(root: Path, original: Path) -> Path:
         "commit", "-qm", "retain actual Main CI controller",
     )
     return root
+
+
+def _prepare_source_controller(directory: Path) -> Path:
+    return _retain_main_ci(
+        _prepare_generated_materializer(directory),
+        Path(__file__).resolve().parents[1],
+    )
+
+
+@pytest.mark.parametrize(
+    "constructor", [_prepare_generated_materializer, _prepare_source_controller],
+    ids=["generated-checkout", "retained-main-controller"],
+)
+def test_generated_seed_disables_maintenance_before_copy(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, pytestconfig: pytest.Config,
+    monkeypatch: pytest.MonkeyPatch, constructor: Callable[[Path], Path],
+) -> None:
+    native = _raw_materializer_git
+    calls = []
+    seed_paths = []
+
+    def observe(root: Path, *args: str) -> bytes:
+        assert args[:len(SEED_GIT_OPTIONS)] == SEED_GIT_OPTIONS
+        if not calls:
+            for key, value in {
+                "gc.auto": "0", "maintenance.auto": "false",
+                "gc.autoDetach": "false", "maintenance.autoDetach": "false",
+            }.items():
+                readback = native(root, *SEED_GIT_OPTIONS, "config", "--show-origin", "--get", key)
+                assert readback.decode().strip() == f"command line:\t{value}"
+        calls.append(args)
+        return native(root, *args)
+
+    monkeypatch.setattr(sys.modules[__name__], "_raw_materializer_git", observe)
+
+    def prepare(directory: Path) -> Path:
+        seed = constructor(directory)
+        seed_paths.append(seed)
+        return seed
+
+    first = copy_fixture_seed(pytestconfig, tmp_path_factory, prepare, tmp_path / "first")
+    seed = seed_paths[0]
+    objects = seed / ".git/objects"
+    source_objects = Path(native(
+        Path(__file__).resolve().parents[1], "rev-parse", "--path-format=absolute", "--git-path", "objects",
+    ).decode().strip())
+    assert not objects.is_symlink() and objects.resolve() != source_objects.resolve()
+    alternate = (objects / "info/alternates").read_bytes()
+    assert alternate.endswith(b"\n") and alternate.count(b"\n") == 1
+    assert b"\r" not in alternate
+    assert Path(os.fsdecode(alternate[:-1])).resolve() == source_objects.resolve()
+    before = {
+        path.relative_to(seed): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in seed.rglob("*") if path.is_file()
+    }
+    (first / ".github/release-pipeline-state.json").write_bytes(b"copy-only mutation\n")
+    _materializer_git(first, "config", "--local", "fixture.copy", "mutated")
+    second = copy_fixture_seed(pytestconfig, tmp_path_factory, prepare, tmp_path / "second")
+    assert len(seed_paths) == 1 and calls
+    assert not os.path.samefile(first / ".git/config", second / ".git/config")
+    assert (second / ".github/release-pipeline-state.json").read_bytes() == (
+        seed / ".github/release-pipeline-state.json"
+    ).read_bytes()
+    assert before == {
+        path.relative_to(seed): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in seed.rglob("*") if path.is_file()
+    }
+    local_config = native(second, "config", "--local", "--list").decode()
+    assert not re.search(r"^(gc|maintenance)\.", local_config, re.M)
 
 
 def test_source_contracts_retain_main_from_actions_checkout_without_local_main(

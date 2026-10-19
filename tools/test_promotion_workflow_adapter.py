@@ -9,8 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
-
+from _promotion_artifact_fixture import fixture_yaml
 from _promotion_workflow_test_support import heredoc, source_owned
 from test_promotion_python_artifacts import (
     _commit, _fake_builder, _git, artifacts, promotion,
@@ -23,7 +22,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 
 
 def _adapter() -> str:
-    workflow = yaml.safe_load((_ROOT / ".github/workflows/validate-and-promote.yml").read_text())
+    workflow = fixture_yaml((_ROOT / ".github/workflows/validate-and-promote.yml").read_text())
     if source_owned(workflow["jobs"]):
         step = next(step for step in workflow["jobs"]["promote"]["steps"]
                     if step.get("id") == "promote")
@@ -59,7 +58,7 @@ def _legacy_promoter(monkeypatch):
 
 
 def _run_adapter(repo, directory, dev, main, monkeypatch):
-    current = source_owned(yaml.safe_load(
+    current = source_owned(fixture_yaml(
         (_ROOT / ".github/workflows/validate-and-promote.yml").read_text(),
     )["jobs"])
     monkeypatch.setattr(sys, "argv", [
@@ -141,7 +140,7 @@ def test_adapter_uses_real_cli_validation_and_failure_boundary(
 
     monkeypatch.setattr(artifacts, "_run", checkout)
     capsys.readouterr()
-    current = source_owned(yaml.safe_load(
+    current = source_owned(fixture_yaml(
         (_ROOT / ".github/workflows/validate-and-promote.yml").read_text(),
     )["jobs"])
     unsupported_legacy = current and legacy
@@ -185,7 +184,7 @@ def test_adapter_isolates_trusted_imports_and_preserves_arguments(tmp_path):
         (hostile / name).write_text("raise RuntimeError('candidate code executed')\n", encoding="utf-8")
     driver = tmp_path / "trusted-promoter.py"
     driver.write_text(_adapter(), encoding="utf-8")
-    current = source_owned(yaml.safe_load(
+    current = source_owned(fixture_yaml(
         (_ROOT / ".github/workflows/validate-and-promote.yml").read_text(),
     )["jobs"])
     result = subprocess.run(
@@ -199,7 +198,7 @@ def test_adapter_isolates_trusted_imports_and_preserves_arguments(tmp_path):
 
 
 def test_both_workflow_promotion_branches_use_isolated_adapter():
-    workflow = yaml.safe_load((_ROOT / ".github/workflows/validate-and-promote.yml").read_text())
+    workflow = fixture_yaml((_ROOT / ".github/workflows/validate-and-promote.yml").read_text())
     step = next(
         step for step in workflow["jobs"]["promote"]["steps"]
         if step.get("id") == "promote"
