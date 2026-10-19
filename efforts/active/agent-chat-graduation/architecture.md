@@ -84,16 +84,22 @@ history are explicit recovery conditions.
 
 The attachment persists pending information before advancing feed progress.
 It coalesces to the highest relevant watermark within bounded channel/state
-limits, then retrieves a bounded recipient-relevant body batch when the
-rightful foreground can consume it. Scope includes subscribed channels,
-direct mentions and all-agent attention; marker syntax is not a vision promise.
+limits and sends bounded ID/delta hints, not prepared message bodies. It must
+not invoke ordinary semantic `read` to prepare a notification. The actual
+admitted recipient turn uses the installed client's normal bounded read to
+obtain relevant body context, with that client's output/flush/cursor contract.
+Before that read, failed or unknown admission leaves the semantic cursor
+unchanged and the pending content recoverable from the conversation service.
+No second body store or work queue is introduced. Scope includes subscribed
+channels, direct mentions and all-agent attention; marker syntax is not a
+vision promise.
 
 Borrow recipient scoping and captured-batch completion, not another task
-controller. Complete only the batch actually admitted/consumed under the
-supported host contract; later arrivals remain pending. Ambient context
-truncation cannot silently erase an actionable follow-up. Work that must
-survive the conversation becomes an existing task/effort obligation, not a
-parallel chat-owned work queue.
+controller. Settle only the captured notification-hint batch supported by
+actual admission/run evidence; this is not proof that bodies were read or work
+accepted, and later arrivals remain pending. Ambient context truncation cannot
+silently erase an actionable follow-up. Work that must survive the conversation
+becomes an existing task/effort obligation, not a parallel chat-owned work queue.
 
 Context deduplication is bounded by real context and delivery evidence.
 A historical display cursor is not proof that a later foreground already

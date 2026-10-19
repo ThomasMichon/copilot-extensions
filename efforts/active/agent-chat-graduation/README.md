@@ -179,7 +179,10 @@ requirements.
   bounds are measured separately from the session host's own process model.
 - [ ] **Uncertainty and context:** durable pending hints before scan progress,
   nonce before admission, no fresh send after an unknown result, non-primary
-  run ambiguity held, bounded recipient batches and explicit retention/epoch gaps.
+  run ambiguity held, bounded recipient batches and explicit retention/epoch
+  gaps. Crash or lose admission after preparing a hint: semantic progress stays
+  unchanged and the exact pending body remains available to the recipient's
+  normal read, without a cursor reset or a fresh native-send replay.
 - [ ] **Membership and succession:** real obligation-before-join,
   confirmed-leave-before-settlement, mute/unsubscribe, crash/restart, changed
   head and stale-foreground refusal with unresolved generations retained and
