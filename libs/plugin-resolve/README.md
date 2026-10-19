@@ -304,8 +304,8 @@ does not invalidate a previously usable manifest-only ACP payload. This path
 neither invents a remote origin nor invokes installation, copies payloads, or
 writes source catalogs. Repository-local enablement is still published, and ACP
 receives the existing directory. A manifest-only manual inventory is **not**
-proof of settings-only native CLI discovery; native acquisition remains outside
-this local ACP integration.
+proof of settings-only native CLI discovery: it remains ACP-only unless the
+native owner has a declared marketplace and can confirm the registered loadout.
 The selected home's `settings.json` directory declarations are a fallback after
 repository/controller authority: a valid registered local catalog resolves its
 live original payload even without an installed copy. That grounded catalog can
@@ -318,6 +318,20 @@ isolated native installer after removing Git selectors. Omission retains the
 ambient-environment contract. `check_cancelled` may stop preparation between
 bounded operations and before publication; callers using a worker thread must
 await its quiescence rather than abandon it.
+
+Relative and empty `PATH` entries are anchored in a copied preparation
+environment to the original requested execution directory, even when Git
+discovery identifies a repository root above it. The productive environment and
+process cwd are not changed. Native installer executable lookup also uses that
+execution context before entering the private neutral install directory; default
+commands honor `COPILOT_PATH`, while an explicit command prefix retains priority.
+Windows lookup uses the child `PATHEXT` and current-directory policy, and selected
+batch commands use the existing `COMSPEC` contract. A reserved per-child
+environment value transports the literal batch path through one expansion,
+avoiding quote stripping and re-expansion of spaces, `&`, `%` or `!` in that
+path; it is not a user configuration or another launcher. A missing installer fails
+only when installation or refresh actually requires it, not for local-only
+preparation or verified cache reuse.
 
 ## Target-owned absolute local sources
 

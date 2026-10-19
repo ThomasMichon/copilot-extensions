@@ -226,9 +226,10 @@ def _wrap_batch_for_windows(
     target_path = resolved or exe
 
     if target_path.lower().endswith((".cmd", ".bat")):
-        comspec = env.get("COMSPEC", os.environ.get("COMSPEC", "cmd.exe"))
-        args = [comspec, "/d", "/s", "/c", target_path, *args[1:]]
-        log.debug("Wrapped batch file for Windows: %s", " ".join(args))
+        from plugin_resolve.execution import windows_batch_command
+
+        args = windows_batch_command([target_path, *args[1:]], env)
+        log.debug("Wrapped batch file %s for Windows: %s", target_path, " ".join(args))
 
     elif resolved:
         # Use the fully resolved path even for non-batch executables
@@ -588,7 +589,7 @@ async def resolve_local_launch(
     else:
         if not target.cwd:
             raise ValueError("Local agent without 'project' requires 'cwd'")
-        copilot = target.copilot_path or _find_copilot(env)
+        copilot = _find_copilot(env, cwd=target.cwd, explicit_path=target.copilot_path)
         args = [copilot, "--acp", "--stdio", "--no-auto-update"] + target.copilot_args
         work_dir = target.cwd
         log.info("Resolved local agent launch: %s (cwd=%s)", " ".join(args), work_dir)
@@ -1157,11 +1158,20 @@ async def spawn_raw(
     return AgentProcess(proc, target)
 
 
-def _find_copilot(environment: dict[str, str] | None = None) -> str:
+def _find_copilot(
+    environment: dict[str, str] | None = None, *, cwd: str | None = None,
+    explicit_path: str | None = None,
+) -> str:
     """Find the copilot CLI binary."""
     # Check environment override
     env = os.environ if environment is None else environment
-    path = env.get("COPILOT_PATH")
+    path = explicit_path or env.get("COPILOT_PATH")
+    if path and os.path.isabs(path):
+        return path
+    if cwd is not None:
+        from plugin_resolve.execution import execution_executable
+
+        return execution_executable(path or "copilot", dict(env), cwd, required=False)
     if path:
         return path
 

@@ -1024,8 +1024,9 @@ class TestWrapBatchForWindows:
             result = _wrap_batch_for_windows(args, env)
 
         assert result[0].endswith("cmd.exe")
-        assert result[1:4] == ["/d", "/s", "/c"]
-        assert result[4] == "C:\\Users\\test\\.local\\bin\\my-project.cmd"
+        assert result[1:5] == ["/d", "/v:off", "/s", "/c"]
+        assert result[5] == "%COPILOT_VENUE_BATCH_EXECUTABLE%"
+        assert env["COPILOT_VENUE_BATCH_EXECUTABLE"] == '"C:\\Users\\test\\.local\\bin\\my-project.cmd"'
         assert "--no-mux" in result
         assert "--acp" in result
 
@@ -1042,7 +1043,8 @@ class TestWrapBatchForWindows:
             result = _wrap_batch_for_windows(args, env)
 
         assert result[0].endswith("cmd.exe")
-        assert result[4] == "C:\\tools\\launcher.bat"
+        assert result[5] == "%COPILOT_VENUE_BATCH_EXECUTABLE%"
+        assert env["COPILOT_VENUE_BATCH_EXECUTABLE"] == '"C:\\tools\\launcher.bat"'
 
     def test_does_not_wrap_exe_on_windows(self):
         """.exe files should not be wrapped."""
@@ -1084,7 +1086,8 @@ class TestWrapBatchForWindows:
             result = _wrap_batch_for_windows(args, env)
 
         assert result[0].endswith("cmd.exe")
-        assert result[4] == "my-project.cmd"
+        assert result[5] == "%COPILOT_VENUE_BATCH_EXECUTABLE%"
+        assert env["COPILOT_VENUE_BATCH_EXECUTABLE"] == '"my-project.cmd"'
 
     def test_which_resolves_bare_name_to_cmd(self):
         """A bare project name that resolves to .cmd should be wrapped."""
@@ -1099,7 +1102,8 @@ class TestWrapBatchForWindows:
             result = _wrap_batch_for_windows(args, env)
 
         assert result[0].endswith("cmd.exe")
-        assert result[4] == "C:\\Users\\test\\.local\\bin\\my-control-harness.cmd"
+        assert result[5] == "%COPILOT_VENUE_BATCH_EXECUTABLE%"
+        assert env["COPILOT_VENUE_BATCH_EXECUTABLE"] == '"C:\\Users\\test\\.local\\bin\\my-control-harness.cmd"'
         assert "--no-mux" in result
 
     def test_uses_comspec_env_var(self):

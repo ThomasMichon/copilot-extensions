@@ -80,14 +80,15 @@ async def prepare_local_plugins(
         direct_launch = not target.project or (target.explicit_cwd and not target.native_resume_id)
         # Managed plans may run opaque setup wrappers. Their selected environment
         # supplies the packaging CLI, not proof of the wrapper's eventual backend.
-        executable = (
-            target.copilot_path if direct_launch and target.copilot_path
-            else _find_copilot(environment)
+        executable = _find_copilot(
+            environment, cwd=workspace,
+            explicit_path=target.copilot_path if direct_launch else None,
         )
-        command = tuple(_wrap_batch_for_windows([executable], environment))
+        installer_environment = dict(environment)
+        command = tuple(_wrap_batch_for_windows([executable], installer_environment))
         prepared = prepare(
             request,
-            copilot_command=command, environment=environment, check_cancelled=check_cancelled,
+            copilot_command=command, environment=installer_environment, check_cancelled=check_cancelled,
             prepared_context=prepared_context,
         )
         return [arg for directory in prepared.values() for arg in ("--plugin-dir", directory)]

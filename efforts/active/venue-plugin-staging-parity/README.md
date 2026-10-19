@@ -266,6 +266,27 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-19 - Bind executable lookup to the real execution context
+
+- Full review found eager native executable lookup using the daemon's cwd for
+  relative `PATH` entries, and an outdated README exclusion for local CLI
+  acquisition. The same lookup context also matters when preparation moves a
+  relative installer command into its intentionally neutral acquisition cwd.
+- Bound lookup to the final execution directory and reused a stdlib-only shared
+  helper for the direct owner and preparation, including emitted receivers.
+  Preparation anchors a copy of `PATH` before Git/installer work, retains the
+  original execution directory across repository-root discovery, and resolves a
+  required installer lazily. Productive environment, process cwd, explicit
+  command precedence and opaque runtime wrappers remain unchanged.
+- Real contained subprocess regressions cover relative, empty and dot entries,
+  direct/environment/managed relative installers, and the emitted receiver from
+  a subdirectory. The local/transport selection passes 141 tests and the entire
+  shared preparation suite passes 282, including unchanged private preferences.
+  The dependent customization suite passes 527 tests with the existing private
+  Git validation policy; no machine-global Git configuration is changed.
+  The README now distinguishes supported ordinary local CLI acquisition from
+  remaining excluded contexts. New-head review and CI still gate merge.
+
 ### 2026-10-19 - Fix the actual merged-hook inventory CI gate
 
 - Current-head full review returned no open issues, but runtime CI exposed a

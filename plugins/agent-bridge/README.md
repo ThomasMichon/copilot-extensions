@@ -395,10 +395,17 @@ An unavailable or invalid packaging CLI fails when installation requires it;
 direct-reference-only preparation does not invoke it. This contract adds no
 Worktrees launch-plan metadata or configuration.
 
-This registration integration excludes native CLI acquisition, SSH, command
-wrappers, privileged configurations (including POSIX `requires_admin`),
-sub-daemon relays and receiver-local Session Host runners. Existing launch
-behavior remains unchanged there. Host-backed loopback preparation additionally
+Ordinary local CLI acquisition is integrated through the existing Worktrees
+owner after its profile-environment merge and before mux creation. Bridge-owned
+task delivery requires protocol 41 and confirmation of the compiled native
+plugin selection; live reuse requires preparation evidence bound to that same
+native session. See the [startup-readiness contract](docs/startup-plugin-readiness.md).
+Ordinary operator launches are not retrofitted with this task gate.
+
+Remaining exclusions are genuine SSH, command wrappers, privileged
+configurations (including POSIX `requires_admin`), sub-daemon relays and
+receiver-local Session Host runners. Their existing launch behavior remains
+unchanged. Host-backed loopback preparation additionally
 checks the configured effective SSH login against the current login, retaining
 the actual SSH target's environment-user-before-agent-user precedence. An unset
 login may resolve through SSH alias configuration; neither it nor a different

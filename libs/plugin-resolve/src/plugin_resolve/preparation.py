@@ -26,6 +26,7 @@ from .registration import (
 )
 from .settings import RepoPluginSettings, local_marketplace_path
 from .inventory import inventory_paths, installed_item
+from .execution import execution_environment, execution_executable, windows_batch_command
 from .target import bind_target
 
 _GIT_SELECTORS = {
@@ -127,6 +128,7 @@ def _installed_metadata(
 
 def _install(source: str, definition: dict, home: Path, repo: Path,
              copilot_command: tuple[str, ...], *, environment=None,
+             execution_cwd: Path | None = None,
              check_cancelled=lambda: None) -> tuple[Path, dict, dict]:
     check_cancelled()
     name, marketplace = identity(source)
@@ -187,10 +189,21 @@ def _install(source: str, definition: dict, home: Path, repo: Path,
             **_environment(environment), "COPILOT_HOME": str(home),
             "COPILOT_CACHE_HOME": str(cache_root), "COPILOT_AUTO_UPDATE": "false",
         }
+        if not copilot_command:
+            raise ValueError("Native installation requires an executable")
+        command_prefix = list(copilot_command)
+        if copilot_command == ("copilot",):
+            command_prefix[0] = env.get("COPILOT_PATH") or "copilot"
+        command_prefix[0] = execution_executable(
+            command_prefix[0], env, execution_cwd or repo,
+        )
+        if os.name == "nt" and command_prefix[0].lower().endswith((".cmd", ".bat")):
+            command_prefix = windows_batch_command(command_prefix, env)
+            command_prefix[0] = execution_executable(command_prefix[0], env, execution_cwd or repo)
         def command(arguments, operation):
             check_cancelled()
             result = subprocess.run(
-                [*copilot_command, *arguments], cwd=neutral, env=env,
+                [*command_prefix, *arguments], cwd=neutral, env=env,
                 capture_output=True, text=True, timeout=240,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
@@ -231,6 +244,8 @@ def prepare(
         raise ValueError("Provider must resolve the explicit execution checkout before preparation")
     if not repo.is_dir():
         raise ValueError("Target checkout is not a directory")
+    execution_cwd = repo
+    environment = execution_environment(_environment(environment), execution_cwd)
     repo = Path(_git(repo, "rev-parse", "--show-toplevel", environment=environment)).resolve(strict=True)
     git_dir = Path(_git(repo, "rev-parse", "--absolute-git-dir", environment=environment)).resolve(strict=True)
     state_dir = git_dir / "copilot-venue-plugins"
@@ -436,7 +451,8 @@ def prepare(
                 payload, item["catalog"], item["entry"] = _install(
                     source, item["marketplace"], install_home, repo,
                     copilot_command,
-                    environment=environment, check_cancelled=check_cancelled,
+                    environment=environment, execution_cwd=execution_cwd,
+                    check_cancelled=check_cancelled,
                 )
             payloads[source] = str(payload)
             enabled[source] = item["enable"]

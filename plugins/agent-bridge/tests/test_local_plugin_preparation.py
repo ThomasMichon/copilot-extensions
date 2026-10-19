@@ -62,6 +62,40 @@ def target_for(root, controller=None):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["bin", "", "."])
+@pytest.mark.parametrize("checkout_name", ["execution", "execution checkout"])
+async def test_real_launch_resolves_relative_path_from_execution_checkout(
+    tmp_path, monkeypatch, entry, checkout_name,
+):
+    daemon, execution, fallback = (tmp_path / name for name in ("daemon", checkout_name, "fallback"))
+    child_bin = execution / entry if entry else execution
+    daemon.mkdir()
+    for directory, marker in ((child_bin, "execution"), (fallback, "fallback")):
+        directory.mkdir(parents=True, exist_ok=True)
+        binary = directory / ("copilot.cmd" if os.name == "nt" else "copilot")
+        binary.write_text(
+            f"@echo {marker}\n" if os.name == "nt" else f"#!/bin/sh\nprintf '{marker}\\n'\n",
+        )
+        binary.chmod(0o700)
+    monkeypatch.chdir(daemon)
+    path = os.pathsep.join([entry, str(fallback)])
+    target = SpawnTarget(
+        cwd=str(execution), explicit_cwd=True, env={"PATH": path, "COPILOT_PATH": ""},
+    )
+    args, cwd, environment = await transport.resolve_local_launch(target)
+    result = subprocess.run(
+        args, cwd=cwd, env=environment, stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0 and result.stdout.strip() == "execution", result.stderr
+    expected = str(child_bin / ("copilot.cmd" if os.name == "nt" else "copilot"))
+    actual = environment["COPILOT_VENUE_BATCH_EXECUTABLE"].strip('"') if os.name == "nt" else args[0]
+    assert os.path.normcase(actual) == os.path.normcase(expected)
+    assert environment["PATH"] == path and Path.cwd() == daemon
+
+
+@pytest.mark.asyncio
 async def test_fresh_repeat_direct_reference_preserves_explicit_flags_and_source(
     tmp_path, monkeypatch, isolated_selection,
 ):
@@ -203,9 +237,11 @@ def test_installer_uses_child_override_not_acp_command(monkeypatch):
     assert transport._find_copilot({"COPILOT_PATH": "child-installer.cmd"}) == "child-installer.cmd"
     monkeypatch.setattr(transport.sys, "platform", "win32")
     monkeypatch.setattr(transport.shutil, "which", lambda exe, path: exe)
-    assert transport._wrap_batch_for_windows(
-        ["child-installer.cmd"], {"PATH": "child-path", "COMSPEC": "child-cmd.exe"},
-    ) == ["child-cmd.exe", "/d", "/s", "/c", "child-installer.cmd"]
+    environment = {"PATH": "child-path", "COMSPEC": "child-cmd.exe"}
+    assert transport._wrap_batch_for_windows(["child-installer.cmd"], environment) == [
+        "child-cmd.exe", "/d", "/v:off", "/s", "/c", "%COPILOT_VENUE_BATCH_EXECUTABLE%",
+    ]
+    assert environment["COPILOT_VENUE_BATCH_EXECUTABLE"] == '"child-installer.cmd"'
 
 
 @pytest.mark.parametrize("admin", [False, True])
@@ -314,7 +350,10 @@ async def test_malformed_overlay_preserves_previous_bytes_and_prevents_child(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["environment", "explicit", "managed-plan"])
+@pytest.mark.parametrize("mode", [
+    "environment", "explicit", "managed-plan", "environment-relative",
+    "explicit-relative", "path-relative", "managed-relative",
+])
 async def test_real_child_environment_installer_and_direct_reference_barrier(
     tmp_path, monkeypatch, isolated_selection, mode,
 ):
@@ -324,7 +363,11 @@ async def test_real_child_environment_installer_and_direct_reference_barrier(
     payload = marketplace(controller)
     fixture = (Path(__file__).resolve().parents[3] / "libs" / "plugin-resolve" /
                "tests" / "fixtures" / "venue_installer.py")
-    installer = tmp_path / ("native-installer.cmd" if os.name == "nt" else "native-installer")
+    relative = mode.endswith("-relative")
+    directory = root / "bin" if relative else tmp_path
+    directory.mkdir(exist_ok=True)
+    name = "copilot" if mode == "path-relative" else "native-installer"
+    installer = directory / (name + ".cmd" if os.name == "nt" else name)
     if os.name == "nt":
         installer.write_text(f'@"{sys.executable}" "{fixture}" %*\n')
     else:
@@ -342,12 +385,26 @@ async def test_real_child_environment_installer_and_direct_reference_barrier(
     })
     target = target_for(root, controller)
     log = tmp_path / "native-calls.jsonl"
-    target.copilot_path = str(installer) if mode == "explicit" else None
+    selected = os.path.relpath(installer, root) if relative else str(installer)
+    explicit = mode in {"explicit", "explicit-relative"}
+    managed = mode in {"managed-plan", "managed-relative"}
+    target.copilot_path = selected if explicit else None
     target.env = {
-        "COPILOT_PATH": str(tmp_path / "must-not-run") if mode == "explicit" else str(installer),
+        "COPILOT_PATH": str(tmp_path / "must-not-run") if explicit else selected,
         "VENUE_CALL_LOG": str(log),
     }
-    if mode == "managed-plan":
+    if relative:
+        daemon, fallback = tmp_path / "daemon", tmp_path / "fallback"
+        daemon.mkdir()
+        fallback.mkdir()
+        wrong = fallback / ("copilot.cmd" if os.name == "nt" else "copilot")
+        wrong.write_text("@exit /b 77\n" if os.name == "nt" else "#!/bin/sh\nexit 77\n")
+        wrong.chmod(0o700)
+        monkeypatch.chdir(daemon)
+        target.env["PATH"] = os.pathsep.join(["bin", str(fallback), os.environ.get("PATH", "")])
+        if mode == "path-relative":
+            target.env["COPILOT_PATH"] = ""
+    if managed:
         target.explicit_cwd = False
         target.copilot_path = str(tmp_path / "ignored-direct-copilot")
         target.env["COPILOT_PATH"] = str(tmp_path / "overridden-packaging-cli")
@@ -355,16 +412,25 @@ async def test_real_child_environment_installer_and_direct_reference_barrier(
             "launch": {
                 "cmd": ["opaque-runtime-wrapper", "--runtime-only-option"],
                 "work_dir": str(root), "worktree_id": "synthetic-allocated",
-                "env": {"COPILOT_PATH": str(installer)},
+                "env": {"COPILOT_PATH": selected},
             },
         }))
     for _ in range(2):
-        args, _, _ = await transport.resolve_local_launch(target)
-        if mode == "managed-plan":
+        args, _, environment = await transport.resolve_local_launch(target)
+        if relative:
+            assert environment["PATH"] == target.env["PATH"] and Path.cwd() == daemon
+        if managed:
             assert args[:2] == ["opaque-runtime-wrapper", "--runtime-only-option"]
             assert str(installer) not in args
+            assert environment.get("COPILOT_VENUE_BATCH_EXECUTABLE") == os.environ.get(
+                "COPILOT_VENUE_BATCH_EXECUTABLE",
+            )
         else:
-            assert str(installer) in args
+            actual = (
+                environment["COPILOT_VENUE_BATCH_EXECUTABLE"].strip('"')
+                if os.name == "nt" else args[0]
+            )
+            assert os.path.normcase(str(installer)) == os.path.normcase(actual)
         assert str(payload) in args
         native = [value for value in args if "installed-plugins" in value]
         assert len(native) == 1 and (Path(native[0]) / "plugin.json").exists()
