@@ -2,12 +2,18 @@ name: Installation context native acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      watch_owner:
+        description: Run PR-owner native-account and contained owner-boundary acceptance instead
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
+    if: ${{ !inputs.watch_owner }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -28,6 +34,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
+    if: ${{ !inputs.watch_owner }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -49,3 +56,97 @@ jobs:
           python tools/seasoned_uv.py --uv uv -- --system pytest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
+
+  watch-owner-native-linux:
+    if: ${{ inputs.watch_owner }}
+    name: Native PR owner (Linux, ${{ matrix.scenario.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy: &watch-owner-native-strategy
+      fail-fast: false
+      matrix:
+        scenario:
+          - name: normal-upgrade
+            selector: test_normal_payload_init_refreshes_receipt
+          - name: two-shipped-cells
+            selector: test_two_normal_shipped_cells
+          - name: peer-roundtrip
+            selector: test_normal_payload_peer_roundtrip
+          - name: lease-only-endpoint-live
+            selector: native_account_lease_only_owner and endpoint_live
+          - name: lease-only-endpoint-missing
+            selector: native_account_lease_only_owner and endpoint_missing
+    steps: &watch-owner-native-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Normal payloads in the actual disposable OS account
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-host-state --allow-explicit-tiers
+          --timeout 1200 --plugin-timeout 1800
+          -k "${{ matrix.scenario.selector }}"
+
+  watch-owner-native-windows:
+    if: ${{ inputs.watch_owner }}
+    name: Native PR owner (Windows, ${{ matrix.scenario.name }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy: *watch-owner-native-strategy
+    steps: *watch-owner-native-steps
+
+  watch-owner-macos-refusal:
+    if: ${{ inputs.watch_owner }}
+    name: Native macOS PR-owner identity refusal
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Unsupported native evidence refuses without control or state adoption
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-explicit-tiers --timeout 300 --plugin-timeout 600
+          -k native_macos_governed_watch_refuses_unprovable_identity
+
+  watch-owner-boundaries-linux:
+    if: ${{ inputs.watch_owner }}
+    name: Contained PR-owner boundaries (Linux, ${{ matrix.scenario.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy: &watch-owner-boundaries-strategy
+      fail-fast: false
+      matrix:
+        scenario:
+          - name: controller-death
+            selector: >-
+              actual_controller_death_recovers or bound_passive_endpoint_recovery
+              or completed_receipt_parallel_reads_keep_native_identity
+          - name: concurrent-upgrade
+            selector: actual_installer_upgrade_drains_handlers_poll_ack
+    steps: &watch-owner-boundaries-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Owned processes and disposable installation profiles
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-explicit-tiers --timeout 1200 --plugin-timeout 1800
+          -k "${{ matrix.scenario.selector }}"
+
+  watch-owner-boundaries-windows:
+    if: ${{ inputs.watch_owner }}
+    name: Contained PR-owner boundaries (Windows, ${{ matrix.scenario.name }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy: *watch-owner-boundaries-strategy
+    steps: *watch-owner-boundaries-steps

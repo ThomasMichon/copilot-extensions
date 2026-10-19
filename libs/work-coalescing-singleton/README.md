@@ -63,7 +63,11 @@ own discovery/boot logic (each plugin already has one).
 - `request(..., request_deadline_s=...)` -- one coalesced request; raises
   `DaemonUnavailable` on timeout, malformed response, or an explicit
   `fallback` reply from the server (its own coalesced execution missed the
-  requester's deadline).
+  requester's deadline). An optional positive finite `completion_timeout_s`
+  bounds the whole transport on a monotonic deadline, including dialing,
+  sending and all response fragments, without the ordinary one-second
+  server-deadline grace. A late complete response is still unavailable.
+  Omission preserves the existing ordinary request behavior.
 - `call_with_fallback(...)` -- the full boot-wait + request + inline-fallback
   sequence in one call: dial an existing daemon, else invoke the caller's
   `boot` and re-poll `dial` up to `boot_wait_s`, else run the caller's

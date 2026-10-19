@@ -18,6 +18,7 @@ def _context(plugin: str) -> dict[str, str]:
         "installReceipt": "receipt",
         "payloadRoot": "/payload",
         "pluginRoot": "/plugin",
+        "stateRoot": "/plugin/state",
     }
 
 
@@ -48,3 +49,24 @@ def test_agent_dispatch_omits_unset_control_token_keys():
     env = peer_launch.peer_environment(_context("agent-dispatch"), {})
     assert "AGENT_DISPATCH_CONTROL_TOKEN" not in env
     assert "AGENT_DISPATCH_CONTROL_TOKEN_COMMAND" not in env
+
+
+def test_pr_owner_roster_and_state_rebinding():
+    assert peer_launch.PEERS["agent-pull-requests"] == "agent_pull_requests"
+    assert "agent-pull-requests" in peer_launch.OWNERS
+    env = peer_launch.peer_environment(_context("agent-pull-requests"), {
+        "AGENT_PULL_REQUESTS_HOME": "/foreign/state",
+        "AGENT_PULL_REQUESTS_PAYLOAD_ROOT": "/foreign/payload",
+        "AGENT_PULL_REQUESTS_UNRELATED_OVERRIDE": "foreign",
+    })
+    assert env["AGENT_PULL_REQUESTS_HOME"] == "/plugin/state"
+    assert env["AGENT_PULL_REQUESTS_PAYLOAD_ROOT"] == "/payload"
+    assert "AGENT_PULL_REQUESTS_UNRELATED_OVERRIDE" not in env
+
+
+def test_other_peers_never_inherit_pr_owner_state():
+    env = peer_launch.peer_environment(_context("agent-worktrees"), {
+        "AGENT_PULL_REQUESTS_HOME": "/foreign/state",
+        "AGENT_PULL_REQUESTS_UNRELATED_OVERRIDE": "foreign",
+    })
+    assert not any(name.startswith("AGENT_PULL_REQUESTS_") for name in env)

@@ -992,6 +992,34 @@ def test_collect_only_also_takes_environment_admission(monkeypatch) -> None:
     assert runner.main(["alpha", "--collect-only"]) == 0
     assert acquire_calls == [0.0]
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_native_owner_io_budget_is_scoped_and_explicit_limits_win(monkeypatch, explicit):
+    class Lease:
+        def release(self):
+            pass
+
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    monkeypatch.setattr(runner, "_acquire_admission", lambda wait, root: Lease())
+    observed = {}
+
+    def capture(name, _uv, **kwargs):
+        observed[name] = (
+            kwargs["limits"].wall_seconds, kwargs["plugin_timeout"], kwargs["test_timeout"],
+        )
+        return 0
+
+    monkeypatch.setattr(runner, "run_plugin", capture)
+    arguments = ["agent-pull-requests", "example"]
+    if explicit:
+        arguments += ["--timeout", "45", "--plugin-timeout", "75", "--test-timeout", "9"]
+    assert runner.main(arguments) == 0
+    if explicit:
+        assert observed == {"agent-pull-requests": (45, 75, 9), "example": (45, 75, 9)}
+    else:
+        expected = (1200, 1800, 30) if sys.platform == "win32" else (300, 900, 30)
+        assert observed == {"agent-pull-requests": expected, "example": (300, 900, 30)}
+
 
 def test_prepare_only_takes_environment_admission(monkeypatch) -> None:
     # Like --guards/--collect-only, --prepare-only is NOT exempt: it can

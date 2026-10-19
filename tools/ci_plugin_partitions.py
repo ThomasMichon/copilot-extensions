@@ -11,7 +11,7 @@ import re
 
 _PLUGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 _FILES_PER_GROUP = 25
-_SMOKE_PARTITIONS = {"agent-dispatch": 3}
+_SMOKE_PARTITIONS = {"agent-dispatch": 3, "agent-pull-requests": 2}
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
 

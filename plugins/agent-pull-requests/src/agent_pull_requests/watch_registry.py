@@ -50,6 +50,7 @@ class Subscriber:
     acknowledged: bool = False
     registration_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     pending: dict | None = None
+    deadline_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ class WatchRegistry(RegistryState):
         sub = Subscriber(
             subscriber_id=subscriber_id, until=until, notify=notify, deadline=deadline,
             acknowledged=acknowledged,
+            deadline_at=time.time() + timeout if acknowledged and timeout else None,
         )
         with self._lock:
             self._subscribers.setdefault(key, {})[subscriber_id] = sub

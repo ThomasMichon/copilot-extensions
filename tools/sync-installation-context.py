@@ -64,6 +64,7 @@ ADOPTERS = (
     "agent-index",
     "agent-logger",
     "agent-mcp",
+    "agent-pull-requests",
     "agent-ssh",
     "agent-vault",
     "agent-worktrees",
@@ -101,6 +102,7 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         if plugin in {
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
             "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
+            "agent-pull-requests",
         }
         for name in FILES
         if name.endswith(".py")

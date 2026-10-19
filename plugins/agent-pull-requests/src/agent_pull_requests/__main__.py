@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from agent_procutil import no_window_kwargs
@@ -38,6 +40,7 @@ _PR_URL_NUMBER_RE = re.compile(r"/pull/(\d+)\s*$")
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
 _WATCH_HANDLER_DRAIN_TIMEOUT_S = 5.0
 _WATCH_RESTART_STOP_TIMEOUT_S = 45.0
+_WATCH_INVOCATION = None
 
 
 def _parse_repo_slug(value: str) -> tuple[str, str]:
@@ -66,7 +69,7 @@ def _run_agent_worktrees_gh_raw(
     repo: str, gh_args: list[str], *, timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     command = [
-        _agent_worktrees_command(),
+        *_agent_worktrees_prefix(),
         "repos",
         "gh",
         repo,
@@ -83,6 +86,25 @@ def _run_agent_worktrees_gh_raw(
         **({"timeout": timeout} if timeout is not None else {}),
         **no_window_kwargs(),
     )
+
+
+def _agent_worktrees_prefix() -> list[str]:
+    if _WATCH_INVOCATION is None:
+        return [_agent_worktrees_command()]
+    _WATCH_INVOCATION.require_current()
+    path = (
+        Path(_WATCH_INVOCATION.installation.evidence()["snapshotsRoot"])
+        / _WATCH_INVOCATION.runtime.snapshot_id / "src" / "agent_pull_requests" / "_peer_launch.py"
+    )
+    if not path.is_file():
+        raise PermissionError("watch same-cell peer launcher is unavailable in its immutable snapshot")
+    spec = importlib.util.spec_from_file_location("watch_peer_launch", path)
+    if spec is None or spec.loader is None:
+        raise PermissionError("watch same-cell peer launcher is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    # Import machinery would write bytecode into the immutable snapshot.
+    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
+    return _WATCH_INVOCATION.peer_prefix(module)
 
 
 def _run_agent_worktrees_gh(
@@ -453,6 +475,10 @@ def _cmd_wait(args: argparse.Namespace) -> int:
 
 
 def _watch_dial() -> tuple[str, int, str] | None:
+    if _WATCH_INVOCATION is not None:
+        from .watch_entry import dial
+
+        return dial(_WATCH_INVOCATION)
     from .watch_daemon import endpoint_from_rendezvous, read_lock_data
 
     return endpoint_from_rendezvous(read_lock_data())
@@ -469,6 +495,11 @@ def _watch_boot() -> None:
     kill-on-close Job around the caller, and appends its stdout/stderr to
     ``watch-daemon.log`` there. A Job that forbids breakaway still starts it
     inside that Job, where it always ran before, as a logged degradation."""
+    if _WATCH_INVOCATION is not None:
+        from .watch_entry import ensure
+
+        ensure(_WATCH_INVOCATION)
+        return
     from agent_procutil import spawn_daemon
 
     from .watch_storage import state_dir
@@ -490,6 +521,10 @@ def _watch_boot() -> None:
 def _watch_request(
     kind: str, payload: dict, *, boot_wait_s: float = 6.0, boot: bool = True
 ) -> dict:
+    if _WATCH_INVOCATION is not None:
+        from .watch_entry import call
+
+        return call(_WATCH_INVOCATION, kind, payload, boot=boot)
     from work_coalescing_singleton import call_with_fallback
     import uuid
 
@@ -582,6 +617,15 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     silently drops a caller that's suspended waiting on this daemon to wake
     it.
     """
+    if _WATCH_INVOCATION is not None:
+        from .watch_entry import ensure, serve_passive
+
+        if getattr(args, "passive_instance", None):
+            return serve_passive(_WATCH_INVOCATION, args, fetch=_watch_github_snapshot)
+        ensure(_WATCH_INVOCATION, poll_interval=args.poll_interval)
+        return 0
+    if getattr(args, "passive_instance", None) or getattr(args, "port", 0):
+        raise PermissionError("watch passive entry requires an explicit installation context")
     from single_instance_lease import AlreadyRunningError, SingleInstance
     from work_coalescing_singleton import CoalescingServer
 
@@ -625,7 +669,12 @@ def _cmd_serve_stop(args: argparse.Namespace) -> int:
     Every subscription is already durable (persisted on every mutation), so
     nothing is lost -- 'serve' (or the next auto-boot) reattaches all of
     them."""
-    result = _watch_request("shutdown", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False)
+    if _WATCH_INVOCATION is not None:
+        from .watch_entry import stop
+
+        result = {"shutting_down": stop(_WATCH_INVOCATION)}
+    else:
+        result = _watch_request("shutdown", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False)
     ok = bool(result.get("shutting_down"))
     if args.json:
         print(json.dumps({"stopped": ok, **result}, indent=2, sort_keys=True))
@@ -658,6 +707,11 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
     interpreter -- the update/reattach path: every durable subscription
     survives (see ``_cmd_serve``'s own docstring), so 'restart to pick up
     an update' never orphans a caller that's suspended waiting on a PR."""
+    if _WATCH_INVOCATION is not None:
+        from .watch_entry import ensure
+
+        ensure(_WATCH_INVOCATION, restart=True)
+        return 0
     from single_instance_lease import AlreadyRunningError, SingleInstance
 
     from .watch_daemon import state_dir
@@ -843,6 +897,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--poll-interval", type=float, default=30.0, help="seconds between polls per watched PR"
     )
+    serve.add_argument("--passive-instance", help=argparse.SUPPRESS)
+    serve.add_argument("--port", type=int, default=0, help=argparse.SUPPRESS)
     serve.set_defaults(handler=_cmd_serve)
 
     stop = subparsers.add_parser(
@@ -865,6 +921,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .watch_invocation import WatchInvocation
+
+    global _WATCH_INVOCATION
+    _WATCH_INVOCATION = WatchInvocation.capture()
     args = build_parser().parse_args(argv)
     return args.handler(args)
 

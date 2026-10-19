@@ -19,6 +19,7 @@ dependencies = [
     "agent-work-coalescing-singleton",
     "agent-procutil",
     "agent-single-instance-lease",
+    "agent-zdd",
 ]
 
 [tool.uv.sources]
@@ -33,6 +34,7 @@ agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # ``serve`` must never let two daemons race to bind and both write
 # rendezvous, orphaning one silently.
 agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
+agent-zdd = { path = "../../libs/zdd", editable = true }
 
 [project.optional-dependencies]
 dev = [

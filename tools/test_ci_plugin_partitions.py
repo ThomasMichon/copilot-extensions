@@ -24,14 +24,19 @@ from test_promotion_artifact_readiness import (
 REPO = Path(__file__).resolve().parents[1]
 
 
-def test_matrix_changes_only_dispatch_parallelism():
-    rows = smoke_matrix(["agent-dispatch", "agent-bridge", "copilot-extensions-harness"])
+def test_matrix_partitions_only_declared_large_suites():
+    rows = smoke_matrix([
+        "agent-dispatch", "agent-pull-requests", "agent-bridge", "copilot-extensions-harness",
+    ])
     assert Counter(row["plugin"] for row in rows) == {
-        "agent-dispatch": 3, "agent-bridge": 1, "copilot-extensions-harness": 1,
+        "agent-dispatch": 3, "agent-pull-requests": 2,
+        "agent-bridge": 1, "copilot-extensions-harness": 1,
     }
     assert [row["partition"] for row in rows[:3]] == [0, 1, 2]
     assert all(row["partitions"] == 3 for row in rows[:3])
-    assert all(row["partitions"] == 1 and row["name"] == row["plugin"] for row in rows[3:])
+    assert [row["partition"] for row in rows[3:5]] == [0, 1]
+    assert all(row["partitions"] == 2 for row in rows[3:5])
+    assert all(row["partitions"] == 1 and row["name"] == row["plugin"] for row in rows[5:])
     assert smoke_matrix([]) == []
 
 
@@ -81,7 +86,7 @@ def test_candidate_qualification_requires_exactly_the_actual_smoke_matrix_names(
         actual = plugins
     required, _, _ = required_jobs(REPO)
     assert required & (actual | plugins) == actual
-    assert len(actual) == len(plugins) + (2 if name == "${{ matrix.name }}" else 0)
+    assert len(actual) == len(plugins) + (3 if name == "${{ matrix.name }}" else 0)
 
 
 @pytest.mark.parametrize("plugins", [None, "agent-dispatch", [False], ["../outside"], ["same", "same"]])
@@ -90,28 +95,30 @@ def test_invalid_matrix_refuses_instead_of_omitting_work(plugins):
         smoke_matrix(plugins)
 
 
-def test_partitions_cover_every_actual_dispatch_file_exactly_once_and_keep_groups():
-    root = REPO / "plugins" / "agent-dispatch"
+@pytest.mark.parametrize("plugin,count", [("agent-dispatch", 3), ("agent-pull-requests", 2)])
+def test_partitions_cover_every_actual_file_exactly_once_and_keep_groups(plugin, count):
+    root = REPO / "plugins" / plugin
     complete = [path.relative_to(root).as_posix() for path in sorted((root / "tests").rglob("test_*.py"))]
-    parts = [partition_files(REPO, "agent-dispatch", index, 3) for index in range(3)]
+    parts = [partition_files(REPO, plugin, index, count) for index in range(count)]
     assert all(parts)
     assert Counter(path for part in parts for path in part) == Counter(complete)
     for start in range(0, len(complete), 25):
         group = set(complete[start:start + 25])
         assert sum(group <= set(part) for part in parts) == 1
-    assert max(map(len, parts)) <= (len(complete) + 2) // 3 + 25
+    assert max(map(len, parts)) <= (len(complete) + count - 1) // count + 25
 
 
-def test_exact_runner_test_file_consumer_keeps_original_process_groups():
+@pytest.mark.parametrize("plugin,count", [("agent-dispatch", 3), ("agent-pull-requests", 2)])
+def test_exact_runner_test_file_consumer_keeps_original_process_groups(plugin, count):
     spec = importlib.util.spec_from_file_location("ci_partition_runner", REPO / "tools" / "run-plugin-tests.py")
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)
-    original = runner._test_file_groups("agent-dispatch", 25)
-    for index in range(3):
-        selected = partition_files(REPO, "agent-dispatch", index, 3)
+    original = runner._test_file_groups(plugin, 25)
+    for index in range(count):
+        selected = partition_files(REPO, plugin, index, count)
         assert runner._test_file_groups(
-            "agent-dispatch", 25, test_files=tuple(selected),
-        ) == original[index::3]
+            plugin, 25, test_files=tuple(selected),
+        ) == original[index::count]
 
 
 @pytest.mark.parametrize("index,count", [(-1, 3), (3, 3), (0, 0), (99999, 100000)])

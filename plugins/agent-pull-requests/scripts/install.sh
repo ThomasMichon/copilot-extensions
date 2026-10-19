@@ -14,18 +14,45 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTION="${AGENT_PULL_REQUESTS_ACTION:-install}"
 FORCE="${AGENT_PULL_REQUESTS_FORCE:-0}"
 INSTALL_DIR="${AGENT_PULL_REQUESTS_INSTALL_DIR:-}"
+CELL_ARGS=()
+CELL_REQUESTED=0
+CELL_CONTEXT=0
+CELL_INSTALL_DIR=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         install|update|status|uninstall|stamp|provision) ACTION="$1"; shift ;;
+        snapshot-prepare|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-complete|slot-completion-validate)
+            ACTION="$1"; CELL_REQUESTED=1; shift ;;
+        --context|--durable-home|--expected-marketplace-id|--snapshot-id|--runtime-version|--expected-namespace-generation|--expected-install-generation)
+            [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || { _fail "$1 requires a value"; exit 2; }
+            [[ "$1" != --context ]] || CELL_CONTEXT=1
+            CELL_REQUESTED=1
+            CELL_ARGS+=("$1" "$2")
+            shift 2 ;;
         --force) FORCE=1; shift ;;
         --install-dir)
             [[ $# -ge 2 ]] || { _fail "--install-dir requires a value"; exit 2; }
             INSTALL_DIR="$2"
+            CELL_INSTALL_DIR=1
             shift 2
             ;;
         *) _fail "unknown argument: $1"; exit 2 ;;
     esac
 done
+if [[ "$CELL_REQUESTED" == 1 ]]; then
+    [[ "$CELL_CONTEXT" == 1 ]] || { _fail 'Cell actions require explicit --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization'; exit 2; }
+    [[ "$CELL_INSTALL_DIR" == 0 && -z "$INSTALL_DIR" ]] || { _fail '--context and --install-dir cannot be combined'; exit 2; }
+    [[ "$FORCE" != 1 ]] || { _fail '--force cannot replace an immutable cell slot'; exit 2; }
+    cd "${HOME:?Cell installer requires an existing home working directory}"
+    exec bash "$SCRIPT_DIR/cell-install.sh" "$ACTION" "${CELL_ARGS[@]}"
+fi
+if [[ "$ACTION" != status ]]; then
+    mode="$(bash "$SCRIPT_DIR/payload-mode.sh")"
+    if [[ "$mode" != legacy ]]; then
+        _fail 'Governed installation requires explicit --context; use payload init for first touch'
+        exit 126
+    fi
+fi
 export AGENT_PULL_REQUESTS_ACTION="$ACTION"
 export AGENT_PULL_REQUESTS_FORCE="$FORCE"
 export AGENT_PULL_REQUESTS_INSTALL_DIR="$INSTALL_DIR"

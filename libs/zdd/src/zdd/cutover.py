@@ -468,10 +468,11 @@ class CutoverOrchestrator:
             result.steps.append(f"refused: {result.error}")
             return result
         if self.drain_before_publish:
-            selected_raw = (
-                selection_table.get("active") or selection_table.get("previous")
-                if selection_table else None
-            )
+            selected_raw = selection_table.get("active") if selection_table else None
+            if selected_raw is None and old is not None and selection_table:
+                # A retained previous row is a generation witness, not proof
+                # that the adapter selected an incumbent to drain.
+                selected_raw = selection_table.get("previous")
             selected = Endpoint.from_dict(selected_raw) if isinstance(selected_raw, dict) else None
             if (
                 self.routing.read_table(self.config_dir) != selection_table

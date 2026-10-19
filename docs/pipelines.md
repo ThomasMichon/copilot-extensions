@@ -120,6 +120,9 @@ The canonical smoke portfolio similarly derives every plugin partition from
 `tools/ci_plugin_partitions.py`'s literal scheduling map without importing
 candidate code. Qualification requires each executed partition, and its
 workflow digest binds normalized bytes from both the workflow and that helper.
+The PR-owner suite uses two partitions so its existing 25-file process groups
+run independently within the unchanged eight-minute smoke-job deadline.
+Partitioning preserves every test file and the runner's containment limits.
 
 Validator bootstrap starts with a fresh venv and private empty UV cache. It
 runs the candidate's actual `seasoned_uv.py --registry-only` with the same

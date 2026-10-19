@@ -345,14 +345,24 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
-    assert workflow.get("on", workflow.get(True)) == {"workflow_dispatch": None}
+    trigger = workflow.get("on", workflow.get(True))
+    assert set(trigger) == {"workflow_dispatch"}
+    inputs = trigger["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"watch_owner"}
+    assert inputs["watch_owner"]["type"] == "boolean"
+    assert inputs["watch_owner"]["default"] is False
     routes = {
         "derived-diagnostics-posix": "ubuntu-latest",
         "derived-diagnostics-windows": "windows-latest",
     }
-    assert set(workflow["jobs"]) == set(routes)
+    assert set(workflow["jobs"]) == set(routes) | {
+        "watch-owner-native-linux", "watch-owner-native-windows",
+        "watch-owner-macos-refusal",
+        "watch-owner-boundaries-linux", "watch-owner-boundaries-windows",
+    }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
+        assert job["if"] == "${{ !inputs.watch_owner }}"
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
         matrix = job["strategy"]["matrix"]
@@ -366,6 +376,70 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         assert "-m " not in step["run"].rsplit("pytest", 1)[1]
         if runner == "windows-latest":
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+
+
+def test_watch_owner_acceptance_is_opt_in_native_and_separately_contained() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    assert workflow["permissions"] == {"contents": "read"}
+    jobs = workflow["jobs"]
+    expected_scenarios = {
+        "normal-upgrade": "test_normal_payload_init_refreshes_receipt",
+        "two-shipped-cells": "test_two_normal_shipped_cells",
+        "peer-roundtrip": "test_normal_payload_peer_roundtrip",
+        "lease-only-endpoint-live": "native_account_lease_only_owner and endpoint_live",
+        "lease-only-endpoint-missing": "native_account_lease_only_owner and endpoint_missing",
+    }
+    routes = (
+        ("watch-owner-native-linux", "ubuntu-latest", True),
+        ("watch-owner-native-windows", "windows-latest", True),
+        ("watch-owner-boundaries-linux", "ubuntu-latest", False),
+        ("watch-owner-boundaries-windows", "windows-latest", False),
+    )
+    for name, runner, native in routes:
+        job = jobs[name]
+        assert job["if"] == "${{ inputs.watch_owner }}"
+        assert job["runs-on"] == runner
+        assert job["timeout-minutes"] == 35
+        assert job["strategy"]["fail-fast"] is False
+        matrix = job["strategy"]["matrix"]
+        assert set(matrix) == {"scenario"}
+        commands = [step for step in job["steps"] if "run" in step]
+        assert len(commands) == 1
+        command = commands[0]
+        assert "python tools/run-plugin-tests.py agent-pull-requests" in command["run"]
+        assert "--allow-explicit-tiers" in command["run"]
+        assert "--timeout 1200 --plugin-timeout 1800" in command["run"]
+        assert '-k "${{ matrix.scenario.selector }}"' in command["run"]
+        if native:
+            assert command["env"] == {"APR_NATIVE_OS_ACCOUNT_ACCEPTANCE": "1"}
+            assert "--allow-host-state" in command["run"]
+            assert {
+                case["name"]: case["selector"] for case in matrix["scenario"]
+            } == expected_scenarios
+        else:
+            assert "--allow-host-state" not in command["run"]
+            assert not command.get("env")
+            assert {case["name"] for case in matrix["scenario"]} == {
+                "controller-death", "concurrent-upgrade",
+            }
+            selectors = " ".join(case["selector"] for case in matrix["scenario"])
+            for boundary in (
+                "actual_controller_death_recovers", "bound_passive_endpoint_recovery",
+                "completed_receipt_parallel_reads_keep_native_identity",
+                "actual_installer_upgrade_drains_handlers_poll_ack",
+            ):
+                assert boundary in selectors
+    macos = jobs["watch-owner-macos-refusal"]
+    assert macos["if"] == "${{ inputs.watch_owner }}"
+    assert macos["runs-on"] == "macos-latest"
+    assert macos["timeout-minutes"] == 10
+    commands = [step for step in macos["steps"] if "run" in step]
+    assert len(commands) == 1
+    assert "--allow-host-state" not in commands[0]["run"]
+    assert "--allow-explicit-tiers --timeout 300 --plugin-timeout 600" in commands[0]["run"]
+    assert "-k native_macos_governed_watch_refuses_unprovable_identity" in commands[0]["run"]
 
 
 def test_foundation_lane_leaves_new_native_matrix_to_its_scoped_step() -> None:

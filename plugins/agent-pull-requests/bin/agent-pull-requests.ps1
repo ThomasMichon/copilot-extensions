@@ -3,117 +3,43 @@ $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $_plugin = 'agent-pull-requests'
 $_command = 'agent-pull-requests'
-$_module = 'agent_pull_requests'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-pull-requests'
-$_bootTraceLogPath = Join-Path $_runtimeRoot 'logs\boot-trace.jsonl'
 
 function Get-BootTraceTimestamp {
     return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 }
 
-function Get-BootTraceIsoTimestamp {
-    return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:sszzz')
-}
-
-function Escape-BootTraceJson([string]$Value) {
-    if ($null -eq $Value) { return '' }
-    return $Value.Replace('\', '\\').Replace('"', '\"')
-}
-
-function Write-BootTraceRecord(
-    [string]$Phase,
-    [long]$TimestampMs,
-    [string]$Emitter,
-    [string]$ResolutionSource = '',
-    [string]$Result = '',
-    [string]$Version = '',
-    [string]$DispatchPath = ''
-) {
-    if (-not $_bootTraceLogPath) { return }
-    try {
-        [IO.Directory]::CreateDirectory((Split-Path -Parent $_bootTraceLogPath)) | Out-Null
-        $parts = [System.Collections.Generic.List[string]]::new()
-        [void]$parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
-        [void]$parts.Add('"event":"boot_trace"')
-        [void]$parts.Add('"plugin":"' + (Escape-BootTraceJson $_plugin) + '"')
-        [void]$parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
-        [void]$parts.Add('"t_ms":' + $TimestampMs)
-        [void]$parts.Add('"pid":' + $PID)
-        $hostName = [Environment]::MachineName
-        if ($hostName) {
-            [void]$parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
-        }
-        [void]$parts.Add('"source":"' + (Escape-BootTraceJson $Emitter) + '"')
-        if ($ResolutionSource) {
-            [void]$parts.Add('"resolution_source":"' + (Escape-BootTraceJson $ResolutionSource) + '"')
-        }
-        if ($Result) {
-            [void]$parts.Add('"result":"' + (Escape-BootTraceJson $Result) + '"')
-        }
-        if ($Version) {
-            [void]$parts.Add('"version":"' + (Escape-BootTraceJson $Version) + '"')
-        }
-        if ($DispatchPath) {
-            [void]$parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
-        }
-        $line = '{' + ($parts -join ',') + '}'
-        # `AppendAllText` is synchronous: on a healthy local disk this is a
-        # single small write (microseconds), but on a slow or contended
-        # filesystem (a network-mapped home directory, heavy antivirus
-        # scanning, another process holding a lock) it can add real,
-        # unbounded latency to every phase logged before the actual
-        # dispatch -- this is a real, documented tradeoff, not a
-        # fire-and-forget guarantee (Copilot review, PR #3310). Exceptions
-        # are swallowed (never raises, never blocks dispatch on failure)
-        # but a slow write still stalls this call until it returns or
-        # throws. Left synchronous rather than backgrounded (a PowerShell
-        # runspace/job per phase would itself add measurable startup
-        # overhead to every launch, likely exceeding the write it's meant
-        # to hide behind, for a cost class -- a handful of tiny local
-        # appends per launch -- that rarely needs it in practice).
-        [IO.File]::AppendAllText(
-            $_bootTraceLogPath,
-            $line + [Environment]::NewLine,
-            [Text.UTF8Encoding]::new($false)
-        )
-    } catch {}
-}
-
-function Write-BootTrace(
-    [string]$Phase,
-    [string]$Emitter = 'shim',
-    [string]$ResolutionSource = '',
-    [string]$Result = '',
-    [string]$Version = '',
-    [string]$DispatchPath = ''
-) {
+function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
     $timestampMs = Get-BootTraceTimestamp
-    Write-BootTraceRecord `
-        -Phase $Phase `
-        -TimestampMs $timestampMs `
-        -Emitter $Emitter `
-        -ResolutionSource $ResolutionSource `
-        -Result $Result `
-        -Version $Version `
-        -DispatchPath $DispatchPath
-    if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
+    if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return $timestampMs }
     $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
     } else {
         $_plugin
     }
-    $extras = [System.Collections.Generic.List[string]]::new()
-    if ($ResolutionSource) { [void]$extras.Add("source=$ResolutionSource") }
-    if ($Result) { [void]$extras.Add("result=$Result") }
-    if ($Version) { [void]$extras.Add("version=$Version") }
-    if ($DispatchPath) { [void]$extras.Add("path=$DispatchPath") }
     $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$timestampMs"
-    if ($extras.Count) { $line += " " + ($extras -join ' ') }
+    if ($DispatchPath) { $line += " path=$DispatchPath" }
     [Console]::Error.WriteLine($line)
+    return $timestampMs
 }
 
-Write-BootTrace 'shim-start'
+# This outer dispatcher template's own `$_runtimeRoot` would ALWAYS be the
+# LEGACY root (see generate.py's `runtimeRoot`/`legacyRuntimeRoot`
+# resolution): installationContext=required plugins -- the only plugins
+# that ever select this template -- may actually be running under a
+# resolved, ACTIVE namespaced root that only the inner, installation-
+# context-aware dispatcher knows how to determine. Writing shim-start/
+# dispatch durably here, gated only on the legacy log directory already
+# existing, would either lose those phases when the legacy dir happens
+# not to exist yet, or silently misroute them into a stale legacy log
+# that happens to still exist while a namespaced context is actually
+# active (Copilot review, PR #3310). So this outer template never itself
+# writes the durable record for these two early phases -- it forwards
+# `shim-start`'s own timestamp via an env var so the inner dispatcher can
+# log both phases once it has resolved whichever root is genuinely
+# active. `COPILOT_EXTENSIONS_BOOT_TRACE` (opt-in stderr) still fires
+# here immediately, unaffected by this deferral.
+$_bootTraceShimStartMs = Write-BootTrace 'shim-start'
 
 if (-not (Test-Path -LiteralPath (Join-Path $_payloadRoot 'plugin.json'))) {
     [Console]::Error.WriteLine("[$_command] payload root is not a plugin: $_payloadRoot")
@@ -173,123 +99,10 @@ if ($_nativeInPayload -and -not $_logicalInPayload -and
     [IO.Directory]::SetCurrentDirectory($_outside)
 }
 
-$_resolver = Join-Path $_payloadRoot 'scripts\resolve-runtime.ps1'
-function Resolve-PayloadRuntime {
-    $AgentRtPy = $null
-    $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
-    $env:COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH = $_bootTraceLogPath
-    if (Test-Path -LiteralPath $_resolver) {
-        $env:AGENT_RT_ROOT = $_runtimeRoot
-        . $_resolver
-    }
-    return $AgentRtPy
-}
-
-$_py = Resolve-PayloadRuntime
-Write-BootTrace 'resolver-loaded'
-if ($_py) {
-    Write-BootTrace 'dispatch' 'shim' '' '' '' 'fast'
-    # Relax EAP for just this forwarding call: the wrapped module's own
-    # exit code is the only contract this dispatcher relays, so a
-    # legitimate stderr diagnostic from a non-zero exit must never become
-    # a terminating exception here. Confirmed: when a CALLER further up
-    # the stack redirects this dispatcher's error stream (e.g. `2>$null`),
-    # 'Stop' at this scope converts that diagnostic into a terminating
-    # RemoteException/NativeCommandError that propagates past every
-    # ancestor's own EAP, silently killing the whole calling script
-    # (copilot-extensions#5494).
-    $_previousEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-    & $_py -m $_module @args
-    } finally {
-        $ErrorActionPreference = $_previousEap
-    }
-    exit $LASTEXITCODE
-}
-if (Test-Path "env:AGENT_PULL_REQUESTS_NO_SELFPROVISION") {
-    [Console]::Error.WriteLine("[$_command] runtime not provisioned (AGENT_PULL_REQUESTS_NO_SELFPROVISION set).")
-    exit 1
-}
-
-if (-not (Test-Path -LiteralPath $_runtimeRoot)) {
-    New-Item -ItemType Directory -Path $_runtimeRoot -Force | Out-Null
-}
-$_lockPath = Join-Path $_runtimeRoot '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open(
-            $_lockPath,
-            [IO.FileMode]::OpenOrCreate,
-            [IO.FileAccess]::ReadWrite,
-            [IO.FileShare]::None
-        )
-    } catch {
-        Start-Sleep -Milliseconds 200
-    }
-}
-
-$_provisionedPy = $null
-$_provisionRc = 0
-try {
-    $_provisionedPy = Resolve-PayloadRuntime
-    if ($_provisionedPy) {
-        Write-BootTrace 'resolver-loaded'
-    } else {
-$_installer = Join-Path $_payloadRoot 'scripts\install.ps1'
-if (-not (Test-Path -LiteralPath $_installer)) {
-    [Console]::Error.WriteLine("[$_command] payload installer not found: $_installer")
-    exit 127
-}
-
-[Console]::Error.WriteLine("[$_command] runtime not provisioned -- provisioning from the owning payload.")
-[Console]::Error.WriteLine("::agent-provisioning:: plugin=$_command eta_seconds=120 reason=first-use")
-Write-BootTrace 'provision-start'
-# Resolve pwsh/powershell by ABSOLUTE path only -- never ambient Get-Command/
-# PATH resolution, which can fail under the bridge daemon's restricted PATH
-# even when a usable host is installed (#2042). Mirrors the cmd shim's
-# %SystemRoot%\System32\where.exe lookup with the same WindowsPowerShell v1.0
-# absolute fallback, so both entry points resolve identically regardless of
-# the caller's PATH.
-$_hostExe = $null
-try {
-    $_whereExe = Join-Path $env:SystemRoot 'System32\where.exe'
-    if (Test-Path -LiteralPath $_whereExe) {
-        $_found = & $_whereExe pwsh 2>$null | Select-Object -First 1
-        if ($_found -and (Test-Path -LiteralPath $_found)) { $_hostExe = $_found }
-    }
-} catch {}
-if (-not $_hostExe) {
-    $_hostExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-}
-& $_hostExe -NoProfile -ExecutionPolicy Bypass -File $_installer provision 2>&1 |
-    ForEach-Object { [Console]::Error.WriteLine($_) }
-$_provisionRc = $LASTEXITCODE
-        Write-BootTrace 'provision-end'
-        if ($_provisionRc -eq 0) {
-            $_provisionedPy = Resolve-PayloadRuntime
-            if ($_provisionedPy) {
-                Write-BootTrace 'resolver-loaded'
-            }
-        }
-    }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
-}
-if ($_provisionRc -ne 0) { exit $_provisionRc }
-if ($_provisionedPy) {
-    Write-BootTrace 'dispatch' 'shim' '' '' '' 'provisioned'
-    # See the matching 'fast' dispatch path above for why EAP is relaxed
-    # around just this forwarding call (copilot-extensions#5494).
-    $_previousEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-    & $_provisionedPy -m $_module @args
-    } finally {
-        $ErrorActionPreference = $_previousEap
-    }
-    exit $LASTEXITCODE
-}
-[Console]::Error.WriteLine("[$_command] provisioning completed without a resolvable runtime.")
-exit 1
+$env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
+$env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS = $_bootTraceShimStartMs
+Write-BootTrace 'dispatch' | Out-Null
+$env:AGENT_PULL_REQUESTS_PAYLOAD_ROOT = $_payloadRoot
+$_payloadDispatcher = Join-Path $_payloadRoot 'scripts\invoke-payload-runtime.ps1'
+& $_payloadDispatcher @args
+exit $LASTEXITCODE

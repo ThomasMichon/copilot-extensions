@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from . import diagnostic_exit, diagnostics
 
@@ -93,7 +95,7 @@ def _open_linux(pid: int, token: str, *, allow_exited: bool = False) -> ProcessE
         raise
 
 
-def _open_windows(pid: int, token: str, *, allow_exited: bool = False) -> ProcessExitReference:
+def _windows_process(pid: int) -> tuple:
     import ctypes
     from ctypes import wintypes
 
@@ -115,15 +117,15 @@ def _open_windows(pid: int, token: str, *, allow_exited: bool = False) -> Proces
         False, pid,
     )
     if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
+        error = ctypes.get_last_error()
+        if error == 87:
+            raise ProcessLookupError(errno.ESRCH, "native process no longer exists")
+        raise ctypes.WinError(error)
 
     def close() -> None:
         if not kernel32.CloseHandle(handle):
             raise ctypes.WinError(ctypes.get_last_error())
 
-    reference = ProcessExitReference(
-        pid, token, lambda timeout: diagnostic_exit.wait_windows(kernel32, handle, timeout), close,
-    )
     try:
         creation, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
         if not kernel32.GetProcessTimes(
@@ -132,6 +134,18 @@ def _open_windows(pid: int, token: str, *, allow_exited: bool = False) -> Proces
         ):
             raise ctypes.WinError(ctypes.get_last_error())
         actual = str((creation.dwHighDateTime << 32) | creation.dwLowDateTime)
+        return kernel32, handle, actual, close
+    except BaseException:
+        close()
+        raise
+
+
+def _open_windows(pid: int, token: str, *, allow_exited: bool = False) -> ProcessExitReference:
+    kernel32, handle, actual, close = _windows_process(pid)
+    reference = ProcessExitReference(
+        pid, token, lambda timeout: diagnostic_exit.wait_windows(kernel32, handle, timeout), close,
+    )
+    try:
         if actual != token:
             raise ProcessLookupError("process identity does not match captured reference")
         if reference.wait(0) and not allow_exited:
@@ -140,6 +154,18 @@ def _open_windows(pid: int, token: str, *, allow_exited: bool = False) -> Proces
     except BaseException:
         reference.close()
         raise
+
+
+def _validate_identity(pid: int, expected_start_time: str) -> None:
+    if (
+        type(pid) is not int
+        or not 0 < pid <= 0xFFFFFFFF
+        or not isinstance(expected_start_time, str)
+        or not 0 < len(expected_start_time) <= 64
+        or not expected_start_time.isascii()
+        or not expected_start_time.isdecimal()
+    ):
+        raise ValueError("process identity requires a positive PID and ASCII decimal start token")
 
 
 def open_process(
@@ -152,15 +178,7 @@ def open_process(
     """
     if type(allow_exited) is not bool:
         raise ValueError("allow_exited requires a boolean")
-    if (
-        type(pid) is not int
-        or not 0 < pid <= 0xFFFFFFFF
-        or not isinstance(expected_start_time, str)
-        or not 0 < len(expected_start_time) <= 64
-        or not expected_start_time.isascii()
-        or not expected_start_time.isdecimal()
-    ):
-        raise ValueError("process identity requires a positive PID and ASCII decimal start token")
+    _validate_identity(pid, expected_start_time)
     if sys.platform == "win32":
         if allow_exited:
             return _open_windows(pid, expected_start_time, allow_exited=True)
@@ -170,3 +188,58 @@ def open_process(
             return _open_linux(pid, expected_start_time, allow_exited=True)
         return _open_linux(pid, expected_start_time)
     raise NotImplementedError("native process exit references require Windows or Linux")
+
+
+def _observe_linux(pid: int, token: str) -> bool:
+    from .singleton_linux import _open_pidfd
+
+    try:
+        fd = _open_pidfd(pid)
+    except ProcessLookupError:
+        return True
+    try:
+        if diagnostic_exit.wait_posix(fd, 0):
+            return True
+        try:
+            with Path(f"/proc/{pid}/stat").open("rb") as handle:
+                raw = handle.read(65_537)
+        except FileNotFoundError:
+            if diagnostic_exit.wait_posix(fd, 0):
+                return True
+            raise ProcessLookupError("live process reference has unavailable birth evidence") from None
+        rparen = raw.rfind(b")")
+        fields = raw[rparen + 1:].split() if rparen >= 0 else []
+        if (
+            len(raw) > 65_536 or not raw.startswith(f"{pid} (".encode("ascii"))
+            or len(fields) < 20 or not fields[19].isdigit()
+        ):
+            raise ValueError("native process birth evidence is malformed")
+        return fields[19].decode("ascii") != token or diagnostic_exit.wait_posix(fd, 0)
+    finally:
+        os.close(fd)
+
+
+def _observe_windows(pid: int, token: str) -> bool:
+    try:
+        kernel32, handle, actual, close = _windows_process(pid)
+    except ProcessLookupError:
+        return True
+    try:
+        return actual != token or diagnostic_exit.wait_windows(kernel32, handle, 0)
+    finally:
+        close()
+
+
+def observe_original_exit(pid: int, expected_start_time: str) -> bool:
+    """Read-only crash recovery: prove the original identity is no longer live.
+
+    Unlike ``open_process``, this can observe an already-exited or reused PID.
+    Denied, malformed and unsupported native evidence raises, never means exit.
+    It confers no control, signaling, writer, installation or retirement authority.
+    """
+    _validate_identity(pid, expected_start_time)
+    if sys.platform == "win32":
+        return _observe_windows(pid, expected_start_time)
+    if sys.platform == "linux":
+        return _observe_linux(pid, expected_start_time)
+    raise NotImplementedError("native original-exit observation requires Windows or Linux")

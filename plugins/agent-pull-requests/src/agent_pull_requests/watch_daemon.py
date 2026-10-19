@@ -20,6 +20,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 from work_coalescing_singleton import CoalescingServer
 
@@ -101,6 +102,7 @@ class WatchDaemon:
         idle_exit: float = _POLLER_IDLE_EXIT_S,
         persist: bool = True,
         active: bool = True,
+        state_root: Path | None = None,
     ) -> None:
         self._registry = WatchRegistry()
         self._fetch = fetch
@@ -108,6 +110,7 @@ class WatchDaemon:
         self._poll_interval = poll_interval
         self._idle_exit = idle_exit
         self._persist_enabled = persist
+        self._state_root = state_root
         self._persistence_error: str | None = None
         self._persist_lock = threading.RLock()
         self._pollers: dict[WatchKey, threading.Thread] = {}
@@ -132,13 +135,19 @@ class WatchDaemon:
         """Reload every subscriber a prior generation persisted, and
         immediately resume polling each restored key -- no caller needs to
         re-``subscribe``; the reattach is transparent to them."""
-        entries = read_subscriptions_state()
+        entries = self._read_state()
         if not entries:
             return
         self._registry.restore_state(entries)
         self._deliveries.resume()
         for key in self._registry.active_keys():
             self._ensure_poller(key)
+
+    def _read_state(self) -> list[dict]:
+        return (
+            read_subscriptions_state() if self._state_root is None
+            else read_subscriptions_state(self._state_root)
+        )
 
     def _persist(self, entries: list[dict] | None = None) -> None:
         """Serialize every persist call against every other -- multiple
@@ -153,9 +162,11 @@ class WatchDaemon:
             return
         with self._persist_lock:
             try:
-                write_subscriptions_state(
-                    self._registry.snapshot_state() if entries is None else entries,
-                )
+                snapshot = self._registry.snapshot_state() if entries is None else entries
+                if self._state_root is None:
+                    write_subscriptions_state(snapshot)
+                else:
+                    write_subscriptions_state(snapshot, self._state_root)
             except OSError:
                 self._persistence_error = "state_write_failed"
                 raise
@@ -301,6 +312,11 @@ class WatchDaemon:
     def quiescent(self) -> bool:
         return self._quiescent
 
+    @property
+    def effects_enabled(self) -> bool:
+        with self._admission:
+            return self._accepting_mutations and not self._shutdown_event.is_set()
+
     @contextmanager
     def _lifecycle_operation(self, timeout: float) -> Iterator[float]:
         deadline = time.monotonic() + positive_seconds(timeout)
@@ -351,7 +367,7 @@ class WatchDaemon:
                 raise RuntimeError("PR watch state adoption requires durable persistence")
             self._state_loaded = False
             registry = WatchRegistry()
-            registry.restore_state(read_subscriptions_state(), strict=True)
+            registry.restore_state(self._read_state(), strict=True)
             self._check_lifecycle_deadline(deadline)
             self._registry = registry
             self._deliveries = Deliveries(

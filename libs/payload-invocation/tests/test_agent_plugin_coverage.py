@@ -91,6 +91,10 @@ def test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary() -> N
                 plugin / "scripts" / f"bootstrap-check.{suffix}",
                 plugin / "scripts" / f"emit-command-catalog.{suffix}",
             ]
+            if name == "agent-pull-requests":
+                required_scripts.append(
+                    plugin / "scripts" / f"bootstrap-check-admission.{suffix}"
+                )
             if name != "agent-worktrees":
                 required_scripts.append(
                     plugin / "scripts" / f"write-session-guidance.{suffix}"
@@ -123,7 +127,9 @@ def test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary() -> N
             "hook_client.py" if name == "agent-worktrees" else "write-session-guidance"
         ]
         if data["sessionStartBootstrap"]:
-            required_hook_names.insert(0, "bootstrap-check")
+            required_hook_names.insert(
+                0, "bootstrap-check-admission" if name == "agent-pull-requests" else "bootstrap-check",
+            )
         for shell_field, required_hooks in (
             (
                 "bash",

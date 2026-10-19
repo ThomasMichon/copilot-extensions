@@ -158,6 +158,19 @@ exact installation, receipt, instance, route and governance authority before
 requesting shutdown or mutating writer custody. A matching process token alone
 does not authorize owner retirement, selection, or rollback.
 
+`observe_original_exit(pid, expected_start_time)` supplies read-only crash
+recovery when the original controller lost its captured handles. It proves
+only that the exact original process is no longer live: native absence,
+confirmed exit through an opened reference, or a different native birth at
+the same PID. Access denial, unavailable/malformed birth evidence, native
+API failures and unsupported platforms raise rather than mean absence.
+Windows uses query/synchronization rights only; Linux uses a pidfd and strict
+birth evidence without tolerant diagnostics. macOS remains explicitly
+unsupported. This observation cannot signal a reused PID, authorize graceful
+control, transfer writer authority or substitute for installation/transaction
+custody. A consumer must still acquire the real writer lease before reload
+or resumption.
+
 ### `zdd.cutover` -- the cutover orchestrator
 
 `CutoverOrchestrator` drives one active/passive cutover: spawn the new daemon on
@@ -413,6 +426,10 @@ Only its acquiring process and thread may lend or release that guard. A forked
 child refuses release before touching an inherited thread lock or unlocking its
 parent's native lease. Overlapping or
 nested borrowers and release during a borrow are refused.
+An owner callback that already runs inside that borrowed transaction may use
+`require_owned()` to revalidate the acquiring process/thread and held native
+guard without opening a second borrow. This check neither transfers custody
+nor lends or releases the guard.
 Hold that same guard across the entire transaction, including cold selection,
 rollback, commit-forward, and every mutating repair path.
 The conditional and pre-publication drain opt-ins cannot be combined: conditional

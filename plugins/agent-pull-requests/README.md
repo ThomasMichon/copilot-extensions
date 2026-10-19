@@ -38,6 +38,12 @@ and `.install-stage` coordination, so the install directory may remain.
 Normal self-staging reap removes dead-owner stages on later invocations; purge
 never replaces a held lock.
 
+The installation-cell adopter remains under validation below. Its generated
+payload command and `scripts/init.ps1` / `scripts/init.sh` resolve native
+governance before touching a runtime. Missing/false policy retains legacy
+bootstrap, including first use before Python is installed. Namespaced requests
+never fall back to that legacy root.
+
 ## Verbs
 
 ```text
@@ -84,6 +90,9 @@ are discarded. Callbacks run headlessly with a positive, finite deadline
 (default 30 seconds, configurable up to 30 with `--notify-timeout`).
 The subscription's optional `--timeout` must also be a finite positive number;
 expiration fires a durable `timed_out` event, even during polling outages.
+Acknowledged subscriptions retain their original absolute deadline across
+state writes and reloads; persistence never resamples a wall/monotonic clock
+pair to invent a replacement deadline.
 
 Delivery is **at least once, not exactly-once subprocess execution**. Retry
 delays are 1, 2, 4, 8, 16, 32, then 60 seconds, capped at 60 indefinitely.
@@ -165,10 +174,11 @@ for resident-daemon rollout requirements.
 ## Governed watch-state groundwork (internal)
 
 The watch-state core supplies an inactive construction and quiescence boundary
-for the reviewed governed-cutover design. **No installer or service currently
-opts into it:** ordinary `serve`, stop/restart and callback wire contracts keep
-their existing behavior. These Python methods are owner-adapter seams, not new
-operator commands or evidence that installation-cell adoption is complete.
+for the reviewed governed-cutover design. This adoption is not yet released or
+advertised in the peer roster. Policy-default legacy `serve`, stop/restart and callback
+wire contracts keep their existing behavior. The internal explicit-context entry
+now composes the core with the shared orchestrator, but is not evidence that
+installation-cell adoption or deployment is complete.
 
 `WatchDaemon(active=False)` does not read subscriptions, persist state, start
 polling or callbacks, or accept registration/cancellation mutations.
@@ -202,6 +212,316 @@ followed by activation erasing the stop signal. Invalid close budgets are
 rejected before changing owner state. The installation transaction,
 exact-instance control and retirement, writer-lease handoff, crash journal and governed installer activation
 remain the adopter's separate obligations.
+
+The internal `WatchWriter` adapter binds an inactive core and the real
+`SingleInstance` writer lease to an explicit absolute state root. It requires
+a caller-supplied authority validator, with no permissive default, before
+adoption, activation, predecessor drain, post-drain release and resumption.
+An incomplete validator result refuses the transition. The validator still
+owes current installation receipts, governance, exact instance and transaction
+authorization; constructing this adapter is not that evidence.
+
+`adopt()` acquires the native lease before final reload and leaves effects
+disabled. `activate()` authorizes effects separately. `drain_and_release()`
+retains the lease on incomplete drain or post-drain authority refusal; a
+release response alone is not proof that the successor acquired it.
+An incomplete-drain `resume()` retains the original registry and accepted work.
+After writer transfer, resumption requires caller-proven exact successor exit,
+then actual native reacquisition and final reload before effects. Failed reads
+and incomplete close keep native ownership accountable for recovery. Inherited
+processes refuse before touching parent-owned state or locks.
+
+Explicitly bound roots retain their own subscription state even if an ambient
+legacy override changes; the adapter does not rewrite that override.
+Ordinary no-context daemon construction and service commands are unchanged.
+The internal explicit-context entry connects this adapter to authenticated
+lifecycle control and completed-target installer activation through the
+production installation-cell launcher.
+
+`WatchInstallation` is the internal receipt/governance boundary. Its script
+bootstrap and wheel carry generated, byte-identical canonical
+installation-context primitives. Capturing a binding pins the exact plugin,
+cell, payload, receipt generations and roots without provisioning watch state
+or publishing discovery. Each mutation boundary revalidates that evidence
+and the authoritative default-off installation-mode policy; disabled policy,
+maintenance, missing activation, foreign environment, or changed receipts
+refuse rather than select legacy state.
+
+Its `transaction()` holds the canonical installation-local `CutoverLock`
+across the caller's entire operation, including rollback or commit-forward,
+and rechecks governance after acquisition. The shared orchestrator must borrow
+that exact guard; startup and mutating reconciliation must use the same run
+root. This binding alone supplies neither completed-runtime/process evidence
+nor transaction authorization.
+
+`WatchRuntime` composes that current binding with canonical immutable snapshot,
+slot ownership and build completion evidence. A freshly governed action can
+attest an older owned incumbent without treating the new payload as its loaded
+runtime. Rewritten completion evidence refuses. `WatchInstance` pins runtime,
+PID/native birth token and a random instance ID. Native exit-reference capture
+opens a non-signaling exact-process reference, then brackets one actual
+authenticated health exchange with fresh runtime and native-birth checks,
+closing the reference on any refusal or observed exit. These are
+evidence boundaries, not permission to promote or retire an owner.
+
+The internal `WatchJournal` records random transaction authorization, exact
+instances, prior marker/manifest/route bytes and the completed target separately
+from ZDD's breadcrumb. Journal writes require custody of the installation's
+canonical guard, including inside borrowed orchestrator callbacks. Recorded
+drain/release/read-ready phases authorize bounded control intent; they are not
+proof that control or native writer transfer succeeded. Commit requires coherent
+target selection and an exact effect-free read-ready writer. Its durable commit
+precedes effect authorization and changes recovery to forward-only, even if the
+write acknowledgement or shared breadcrumb is lost. Rollback resumption requires
+captured native successor exit and coherent prior metadata; terminal completion
+also requires the appropriate active-writer and retirement evidence.
+The journal brackets the actual health RPC itself before checking readiness;
+its transport-only client callback grants no installation or process authority.
+Ordinary client health retains its own complete validation bracket. Neither
+path caches authority across an RPC or extends the transaction deadline.
+
+Rollback route restoration uses the public native routing CAS, not a raw
+snapshot overwrite. The journal records the exact prepublication route under
+that CAS before restoring the predecessor with a monotonically newer generation.
+The shared sticky publication history remains intact, including a successor
+that briefly became active. Recovery accepts only the attributable restored
+route and unchanged prior markers/manifest; a matching PID or instance alone
+cannot authorize resumption. Interrupted conservative-history publication can
+be retried from that exact durable intent. Neither lost acknowledgement nor a
+later same-instance reannouncement can erase or replace the recorded custody.
+
+Receiver-side control validation requires the exact current process, runtime,
+instance, transaction capability, permitted phase, current governance and the
+native transaction guard held by the live recorded controller. Local callbacks
+validate the actual held guard; remote receivers must observe native contention,
+not merely a stale PID file. Recovery rotates the capability under that guard
+before accepting more control.
+
+Explicit-context stop uses separate private withdrawal custody referencing the
+exact archived terminal owner; it is not a synthetic upgrade or PID-only route
+cleanup. The caller holds the same whole-transaction guard, captures native
+exit before authenticated shutdown, and proves both original-process exit and
+actual writer availability before withdrawing the native route by exact CAS.
+The owner revalidates stop authority after quiescing accepted work and before
+releasing the lease. Pending subscriptions and deliveries remain durable.
+Incomplete or ambiguous shutdown stays pending for reconciliation without
+spawning another owner. A completed withdrawal retains publication history
+and the stopped endpoint's generation witness; later cold activation or
+on-demand start accepts that route only with archived exact withdrawal proof
+and advances the generation. A reachable PID, stale rendezvous file or free
+writer lease alone cannot provide that proof.
+
+Disabled policy, stale receipts and route drift block ordinary control or
+recovery rather than bypass them. Read-only canonical installation/build
+identity is separate from permission to mutate. Restricted cleanup uses the
+same native transaction guard and exact capability, accepts only unchanged
+precommit selection, and checks that the actual child has no writer,
+read-readiness or effects. Missing/default-off policy may permit this cleanup;
+malformed policy, maintenance, missing activation or changed receipts do not.
+
+The journal reserves a random successor identity before attributable spawning,
+so a crash between spawn and ordinary binding still has exact cleanup custody.
+Authenticated passive health can bind only that pre-reserved child to recovery,
+never an arbitrary discovered process.
+Recovery also reclaims the exact reserved launch endpoint when a controller dies
+after binding that successor but before persisting its endpoint. It validates the
+private launch receipt and fresh authenticated instance health before recording
+endpoint custody; missing or conflicting evidence leaves recovery pending.
+`cleanup-stop` is separately authorized
+before and after passive close, and exit recording requires a non-signaling
+native reference captured before control. After controller loss, strict shared
+read-only original-exit observation can record the exact already-gone child,
+including a private reserved launch that never reached ordinary binding.
+Denied, unknown or unsupported native evidence never means exit, and policy-off
+observation still cannot resume a writer or complete the transaction.
+Native governed-owner identity and exit references currently support Windows
+and Linux. On macOS, unavailable native birth evidence refuses governed startup,
+and unsupported exit evidence refuses cleanup/recovery rather than guessing from
+a PID or switching to legacy state. An absent-owner stop remains bounded;
+ordinary no-context legacy commands retain their existing behavior.
+Cleanup preserves the pending phase
+and prior selection; it does not claim rollback completion, resume a
+predecessor, acquire a writer or enable effects. An adopted writer, published
+selection or durable commit requires explicit governed reconciliation instead.
+
+`WatchInvocation` additionally checks the actual interpreter's venv and
+installation-local completed slot, the loaded package version, and all loaded
+owner/shared-runtime modules' placement beneath that slot's installed library
+roots. Receipt discovery or a rebound home cannot supply those proofs.
+Current action bindings refresh management receipts in the already-known cell
+while retaining the incumbent's immutable historical runtime identity and
+original state/run roots; a fresh receipt cannot relocate an already-running
+owner's writer or controller custody. The PR owner is registered as both a
+same-cell caller and peer. Its authentication prefix loads the canonical
+boundary and packaged validator from that runtime's validated immutable
+snapshot, never a replaceable management payload or machine-global fallback.
+Neither the in-process loader nor its bytecode-disabled bootstrap writes cache
+files into the snapshot. Peer-launched PR commands receive the exact receipt's
+state root rather than an inherited legacy override.
+
+The internal `WatchControlOwner`/`WatchControlClient` adapter uses the existing
+authenticated loopback TCP protocol, not a new HTTP service. Authority-bearing
+requests derive their coalescing identity from their entire payload rather than
+the caller's key. Different transaction, operation, capability, nonce or instance
+values cannot join an already-authorized execution. Control refusals produce an
+explicit sanitized response. Adoption acquires/reloads without effects;
+ZDD's post-commit adoption hook separately activates effects. Only an authorized
+terminal control closes the owner loop; writer quiescence leaves the listener
+alive. Retirement acknowledgement is not native exit confirmation.
+
+Private launch custody now records only the transaction's pre-reserved actual
+child and authenticated loopback endpoint before controller binding, independently
+of active discovery or the spawning controller's stdout. Readers validate the
+known cell, immutable completed runtime, native instance and reservation; an
+authenticated live/passive health check is still required before binding or
+cleanup. Controller recovery rotates its capability without changing the launch
+receipt. A reserved but unbound child blocks predecessor resumption and rollback
+completion rather than being mistaken for an absent child.
+
+Journal, launch and history capabilities are private to the OS account: mode
+`0600` and current UID on POSIX, a protected owner/SYSTEM-only DACL and current
+token owner on Windows. New Windows capability files explicitly assign that
+token user before secret publication rather than inheriting an elevated
+process's default group owner. Permission or link failures refuse rather than repair
+foreign custody. Secret-bearing temporary files are protected before writing;
+publication is exclusive for launch/history, atomic for journal replacement and
+crash-durable. Endpoint tokens never appear in public route or health evidence.
+Lifecycle preflight, capability lookup, control and confirmation share the
+caller's remaining budget, including a monotonic whole-transport deadline.
+
+Terminal transactions require explicit durable archival before a subsequent
+transaction can replace the live journal. Pending, malformed or unarchived
+custody is never overwritten. A new transaction retains the exact surviving
+owner and endpoint; immutable history tolerates only recovery's controller,
+capability and revision rotation. After a canonical receipt update, only
+already-archived terminal history in the same known cell can seed the next
+transaction. Current governance and immutable historical runtime proofs are
+rechecked; ordinary recovery and all pending controls still require their exact
+pinned receipt generations.
+
+Stopping a restored predecessor derives its native route from the archived
+rollback intent, including the restoration's incremented generation and
+preserved publication history, rather than treating the pre-restoration route
+as the restored state.
+
+The explicit-context CLI now captures its physical completed runtime before
+discovery. It uses private journal-bound endpoints, never the legacy rendezvous
+or PATH peer authentication. With validated explicit context, `serve` ensures a detached
+owner and returns; the reserved passive child retains the foreground listener.
+No-context `serve` retains its foreground behavior. Governed `stop` uses the
+exact withdrawal and native-exit contract above, never legacy shutdown.
+
+`WatchDriver` delegates lifecycle sequencing to the public
+`CutoverOrchestrator(drain_before_publish=True)` under the already-held owner
+guard. Its adapters journal commit before effects or predecessor retirement,
+confirm native exit before returning the shared retirement acknowledgement,
+and verify the actual surviving writer before completing and archiving.
+Native publication intent retains exact generation and known promotion history.
+For the first native publication, the adapter captures the routing-owned epoch
+under guarded exact-endpoint validation rather than inventing an epoch or
+rewriting native history. Availability-driven reassertion can advance only the
+same effect-free, read-ready successor before owner commit.
+
+Pending reconciliation never spawns a replacement. Committed recovery activates
+only the known read-ready target and retires only the exact recorded obsolete
+instance, or uses strict read-only original-exit observation after it has gone.
+An interrupted first native write can finish the exact reserved publication
+from its conservative promotion history, without spawning, discarding history
+or inventing a new generation. Foreign or missing history refuses that retry.
+Precommit cleanup stops and proves the known successor's exit before restoring
+selection and resuming a predecessor. An unresolved reserved launch, uncertain
+native identity, foreign metadata or changed governance stays pending.
+
+`WatchSelection` composes a held owner transaction with the canonical completed
+runtime-slot CAS and nested genesis/install metadata locks. It writes the
+journal's exact nonsecret manifest bytes separately from native service
+routing. Interrupted current/last-known-good/manifest publication may retry
+only captured prior or target metadata. Precommit rollback restores the exact
+prior bytes; a committed cold selection repairs only its known target forward.
+Unknown metadata, governance changes or lost guard custody refuse. This
+metadata helper does not discover or prove incumbent absence: the installer
+must establish that under the whole transaction guard before choosing the cold
+path. Its cold tests start no process, publish no route and create no watch
+state. On-demand startup uses the same guard, reserves its child before spawning,
+and commits only after writer acquisition and native publication.
+
+The explicit installer adapter dispatches before legacy staging, locks or
+writes. Cell operations require `-Context` / `--context` and
+`-ExpectedMarketplaceId` / `--expected-marketplace-id`; an ambient context
+variable alone is not write authority. `-InstallDir` / `--install-dir` and
+force-rebuild options cannot be combined with a cell request.
+`snapshot-stamp`, `snapshot-validate`, `slot-provision`, `slot-validate`,
+`slot-complete` and `slot-completion-validate` delegate only their named metadata
+operation to the canonical installation-context API. Snapshot stamping also
+requires both expected receipt generations; slot operations require explicit
+snapshot and runtime identities.
+
+`snapshot-prepare` constructs immutable input without starting a runtime or
+owner. A development checkout uses that checkout's canonical release
+materializer to expand local libraries, installer-engine references and
+packaged launcher assets; a published standalone payload must already contain
+them. Receipt generations and source content are rechecked before publication.
+The snapshot name includes its content digest. Atomic directory creation
+claims production, final bytes are checked, and canonical provenance publishes
+completion last. Existing incomplete, changed or unattributed snapshots refuse
+without overwrite; only the invocation's unexposed staging directory is
+discarded on failure.
+
+Cell `provision` constructs the owned version slot using the shared installer
+engine's venv and package-install helpers. It never selects the runtime or
+starts an owner. An explicit prepared snapshot remains supported; otherwise
+`provision`, `install` and `update` prepare their own snapshot and derive the
+runtime version from the owning payload. The snapshot must include local shared
+libraries and the installer engine; an explicitly supplied raw development-tree
+snapshot is refused. Incomplete, nonempty builds require explicit repair, not
+in-place overwrite. A completed slot is validated and reused.
+
+Package construction sources the shared engine from its disposable payload
+copy and uses that copy as its working directory, keeping dependency-policy
+source attribution aligned with the packages being built. The policy owns
+its private retained inputs under the inherited temporary root; nesting those
+inputs inside an already deep version-slot path can exceed native Windows
+subprocess path limits.
+
+Cell `install` and `update` invoke `agent_pull_requests.watch_install` in that
+actual completed target and await its bounded, journaled lifecycle result.
+Bounded construction helpers retain their kill-on-close jobs; activation does
+not add another construction job around the durable owner. The caller's outer
+containment and the canonical daemon primitive's contained-test suppression
+remain intact. Native target failure and malformed completion output refuse
+activation rather than reporting success. Its physical runtime, explicit
+snapshot/version, current receipt and management payload must agree. Activation acquires the
+whole native owner guard before metadata locks. With verified writer absence,
+it selects only target markers and a matching manifest and archives the cold
+transaction; it publishes no route and creates no watch state. A known live
+incumbent uses the same governed cutover driver as on-demand startup.
+Normal payload bootstrap uses native installation status before selecting
+Python. With enabled governance and genuinely absent legacy state, canonical
+receipt stamping and generation-pinned activation establish the fresh cell.
+Existing unactivated receipts, legacy state, migration requirements, invalid
+policy or missing provenance require an explicit decision rather than implicit
+repair. An active cell builds through its own installer; cold bootstrap starts
+no owner. The session-start admission wrapper leaves the shared legacy
+reconciler unchanged and never runs it for a governed cell. Cell construction
+and activation remain explicit/on-demand, not a new background reconciler.
+
+Commands require coherent current/last-known-good markers and a matching
+schema-3 manifest, canonical slot ownership, immutable snapshot provenance and
+build completion. Only an entirely absent selection may provision on first
+command; partial/corrupt selection refuses without scanning for a different
+slot. An older owned, completed selected runtime remains usable under current
+management receipts until an installer-driven update selects its replacement.
+The follow-on command preserves the caller's outside-payload working directory,
+argument vector, standard streams and native exit status. Context-bearing
+invocation requires an existing Python 3.10+ interpreter; this prerequisite does
+not affect native legacy first-touch installation.
+
+These adapters do not yet advertise the PR owner in the generated peer roster
+or complete the shipped independent-cell proof. A live lease-only holder without
+verifiable same-cell ownership blocks activation, even when its legacy endpoint
+is reachable. PID text and an endpoint token do not license installer shutdown
+or fabrication of a governed instance. There is no automatic lease-only
+migration or new one-time authorization surface.
 
 ## Current constraint
 

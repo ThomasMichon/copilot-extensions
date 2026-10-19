@@ -4,9 +4,16 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'uninstall', 'stamp', 'provision')]
+    [ValidateSet('install', 'update', 'status', 'uninstall', 'stamp', 'provision', 'snapshot-prepare', 'snapshot-stamp', 'snapshot-validate', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate')]
     [string]$Action = 'install',
     [string]$InstallDir,
+    [string]$Context,
+    [string]$DurableHome,
+    [string]$ExpectedMarketplaceId,
+    [string]$SnapshotId,
+    [string]$RuntimeVersion,
+    [string]$ExpectedNamespaceGeneration,
+    [string]$ExpectedInstallGeneration,
     [switch]$Force
 )
 
@@ -19,6 +26,48 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+# Cell dispatch precedes self-staging, locks, and every legacy-root write.
+$cellParameters = @('Context', 'DurableHome', 'ExpectedMarketplaceId', 'SnapshotId',
+    'RuntimeVersion', 'ExpectedNamespaceGeneration', 'ExpectedInstallGeneration')
+$cellRequested = $Action -like 'snapshot-*' -or $Action -like 'slot-*'
+foreach ($name in $cellParameters) {
+    if ($PSBoundParameters.ContainsKey($name)) { $cellRequested = $true }
+}
+if ($cellRequested) {
+    if (-not $PSBoundParameters.ContainsKey('Context') -or [string]::IsNullOrWhiteSpace($Context)) {
+        throw 'Cell actions require explicit -Context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization'
+    }
+    if ($PSBoundParameters.ContainsKey('InstallDir')) {
+        throw '-Context and -InstallDir cannot be combined'
+    }
+    if ($Force) { throw '-Force cannot replace an immutable cell slot' }
+    $forward = @($Action, '--context', $Context)
+    foreach ($pair in @(
+        @('DurableHome', '--durable-home'), @('ExpectedMarketplaceId', '--expected-marketplace-id'),
+        @('SnapshotId', '--snapshot-id'), @('RuntimeVersion', '--runtime-version'),
+        @('ExpectedNamespaceGeneration', '--expected-namespace-generation'),
+        @('ExpectedInstallGeneration', '--expected-install-generation')
+    )) {
+        if ($PSBoundParameters.ContainsKey($pair[0])) {
+            $forward += @($pair[1], [string]$PSBoundParameters[$pair[0]])
+        }
+    }
+    $cellEntry = Join-Path $PSScriptRoot 'cell-install.ps1'
+    $cellWorkingDirectory = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+    Set-Location -LiteralPath $cellWorkingDirectory
+    [IO.Directory]::SetCurrentDirectory($cellWorkingDirectory)
+    & $cellEntry @forward
+    exit $LASTEXITCODE
+}
+
+if ($Action -cne 'status') {
+    $mode = & (Join-Path $PSScriptRoot 'payload-mode.ps1')
+    if ($mode -cne 'legacy') {
+        throw 'Governed installation requires explicit -Context; use payload init for first touch'
+    }
+}
+
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===

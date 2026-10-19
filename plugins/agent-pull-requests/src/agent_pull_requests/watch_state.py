@@ -31,9 +31,7 @@ class RegistryState:
                         entry.update(
                             notification_protocol=ACKNOWLEDGED_NOTIFICATIONS,
                             registration_id=sub.registration_id, pending=sub.pending,
-                            deadline_at=(
-                                time.time() + sub.deadline - now if sub.deadline is not None else None
-                            ),
+                            deadline_at=sub.deadline_at,
                         )
                     out.append(entry)
             return copy.deepcopy(out)
@@ -115,8 +113,8 @@ class RegistryState:
                     if opted_in and entry["deadline_at"] is None and remaining is not None:
                         raise ValueError("inconsistent acknowledged deadline")
                     if opted_in and entry.get("deadline_at") is not None:
-                        deadline_at = positive_seconds(entry["deadline_at"])
-                        remaining = max(0.0, deadline_at - time.time())
+                        sub.deadline_at = positive_seconds(entry["deadline_at"])
+                        remaining = max(0.0, sub.deadline_at - time.time())
                     if remaining is not None:
                         if (opted_in or strict) and remaining != 0:
                             positive_seconds(remaining)

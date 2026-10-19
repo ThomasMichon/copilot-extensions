@@ -162,6 +162,26 @@ def test_packaged_canonical_change_requires_consumer_bump(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-pull-requests"])
+def test_peer_boundary_change_charges_registered_owner(repo: Path, plugin: str):
+    _plugin(repo, plugin, "1.0.0-dev1")
+    _write(repo, "libs/peer-launch/peer_launch.py", "before = True\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "declare packaged peer owner")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "libs/peer-launch/peer_launch.py", "after = True\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "change canonical peer boundary")
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert plugin in result.stdout + result.stderr
+    _set_plugin_version(repo, plugin, "1.0.0-dev2")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "declare peer owner release")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_library_change_does_not_charge_retired_artifact_only_consumer(repo: Path):
     _write(repo, ".gitignore", ".ruff_cache/\n*.egg-info/\n")
     _git(repo, "add", ".gitignore")

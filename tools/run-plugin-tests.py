@@ -119,6 +119,13 @@ _PLUGIN_TIMEOUT_OVERRIDES: dict[str, float] = {
     "agent-index": 2700.0,
     "agent-machines": 2700.0,
 }
+if sys.platform == "win32":
+    # Real receipt/slot/journal validation at every owner action measured
+    # 850.50s for 348 passing tests (2026-10-14). Keep native test-item
+    # deadlines and other plugins unchanged; allow this aggregate I/O cost.
+    _SUBSUITE_TIMEOUT_OVERRIDES["agent-pull-requests"] = 1200.0
+    _PLUGIN_TIMEOUT_OVERRIDES["agent-pull-requests"] = 1800.0
+
 # Several agent-index installer tests genuinely need real PowerShell/venv
 # subprocess work that can exceed the global blanket 30s-per-test
 # pytest-timeout default under real full-matrix host load (Phase 3.5,

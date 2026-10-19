@@ -1,9 +1,15 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-pull-requests",
   "module": "agent_pull_requests",
-  "runtimeRoot": ".agent-pull-requests",
+  "legacyRuntimeRoot": ".agent-pull-requests",
+  "installationContext": "required",
+  "payloadRootEnv": "AGENT_PULL_REQUESTS_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/invoke-payload-runtime.sh",
+    "windows": "scripts/invoke-payload-runtime.ps1"
+  },
   "noSelfProvisionEnv": "AGENT_PULL_REQUESTS_NO_SELFPROVISION",
   "purpose": "Read and later drive cross-repository pull request state",
   "installer": "install",
