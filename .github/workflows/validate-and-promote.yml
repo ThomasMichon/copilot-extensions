@@ -113,7 +113,7 @@ permissions:
 
 env:
   # Reviewed, merged source helpers; never resolve this from mutable Dev.
-  RELEASE_HELPERS_SHA: "87bfbec660f6901ad95f3b418e6746812141676e"
+  RELEASE_HELPERS_SHA: "e81a305c6056454971773c24d31e3a03e43184d0"
 
 jobs:
   gate:
