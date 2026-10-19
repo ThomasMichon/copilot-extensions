@@ -178,8 +178,8 @@ a sibling.
 Both roles also share one **stopping rule for Copilot's own verdict** —
 spelled out in full in `CONTRIBUTING.md` § "Waiting for a verdict": `Approve`,
 or a `Comment` verdict with zero Medium/High-severity findings open, satisfies
-that gate (on a Contributor PR, only after one full review loop — a
-first-round clean `Comment` still needs another attempt). A still-open
+that gate (on a Contributor PR, only under the bounded verdict-shape exception
+documented there — a first-round clean `Comment` still needs another attempt). A still-open
 Low-severity finding at that point is either genuinely valuable to fix, or
 already considered and dismissed — spinning a further review round solely to
 make the comment thread read zero is chasing a bar that neither this repo's
@@ -187,8 +187,9 @@ contribution flow nor the reviewer's own directives require. Required status
 checks are a separate merge gate, independent of this verdict condition.
 **Satisfying Copilot's verdict is never merge authorization by itself** — a
 Contributor PR still needs a separate Maintainer-approval review before
-merging (see "Review" in `CONTRIBUTING.md`); only the repo owner's own
-bypassed PRs skip that second gate. If you are driving a PR toward merge and
+merging (see "Review" in `CONTRIBUTING.md`); an authorized Maintainer's
+review-rule exception skips only that additional vote. If you are driving a PR
+toward merge and
 unsure whether you've reached the applicable point, re-read that section
 before assuming a further round is needed.
 
@@ -227,7 +228,7 @@ across at least two periodic cycles.
 
 This repo is **PR-required** and uses the `pr-self-merge` profile. Work in an
 isolated worktree, publish with `copilot-extensions create-pr`, then follow
-the wait-for-a-verdict loop below before merging with
+the verdict loop in `CONTRIBUTING.md` before merging with
 `copilot-extensions pr-merge <PR> --now` and finalizing. Direct pushes to
 `dev` are blocked by tooling and repository policy; `main` accepts no direct
 pushes from anyone (including the CI promotion pipeline itself) -- it only
@@ -235,55 +236,21 @@ ever lands through that pipeline's own generated PR, or explicit admin
 escalation -- see `docs/pipelines.md` for the full gating and promotion
 mechanics.
 
-**Wait for a real verdict before merging -- contributor and maintainer PRs
-alike.** Copilot code review can only ever render `Approve` or `Comment`
-(there is no "Request changes" capability in the product at all -- see
-CONTRIBUTING.md § "Waiting for a verdict" for the current GitHub-docs
-citation); Approvals
-are enabled in this repo, so a genuinely ready **contributor** PR should
-come back `Approve`, not merely `Comment` (see `REVIEW.md`). **This repo's
-own owner-authored PRs are a documented, empirically confirmed exception**
-(`plugins/agent-worktrees/src/agent_worktrees/pr_contract.py`'s
-`NONBLOCKING_VERDICT_STATES`; every merged owner-authored PR in this repo's
-history has been `Comment`-only, never `Approve`) -- there, a clean
-`Comment` (zero Medium/High findings open) *is* the passing verdict, not an
-unfinished one. Either way, a `Comment` review with a Medium/High finding
-still open is never a pass:
-1. Open/update the PR, wait ~5 minutes for a review. No review landed
-   (a timeout, not a review event): skip straight to step 4 -- there's
-   nothing to address or push yet.
-2. Contributor PR, `Approve` landed: merge (subject to the separate
-   Maintainer-approval gate on a Contributor's PR). Owner-authored PR,
-   `Comment` landed with zero Medium/High findings open: merge -- that's
-   the passing verdict here.
-3. `Comment` landed: address genuinely valuable findings (explain/dismiss
-   the rest). If that requires an actual change, push it and wait ~5
-   minutes for the automatic post-push review; if every finding was
-   dismissed/explained with no real change needed, skip the push (there's
-   nothing new for a re-review to see) and go straight to step 4.
-4. Still not passing (a `Comment` with a Medium/High finding still open on
-   either PR type, or a contributor PR still short of `Approve`, including
-   a post-push timeout, which counts the same as a `Comment`): explicitly
-   re-request review via the API (see CONTRIBUTING.md § "Requesting a
-   fresh review" for the exact call) and wait ~5 minutes again -- do not
-   just keep pushing small commits hoping the next automatic pass flips on
-   its own.
-5. **Narrow verdict-shape exception, Contributor PRs only:** after at least
-   one full loop, if the *current* `Comment` review's remaining findings
-   are all Low severity, Copilot's own verdict requirement (this step) is
-   satisfied without chasing a further `Approve`, stating what was
-   dismissed and why. **This is strictly about Copilot's verdict and never
-   substitutes for the separate, always-required Maintainer-approval gate**
-   on a Contributor's PR -- satisfying this step alone never authorizes a
-   merge by itself. Any Medium/High finding blocks proceeding past this
-   step at all, regardless of who authored the PR.
-Full mechanics, the re-request API call, and the Maintainer-approval gate
-this doesn't override: CONTRIBUTING.md § "Waiting for a verdict". **This is
-agent discipline, not yet tool-enforced** -- `pr-merge --now` does not itself
-check Copilot's verdict before merging (`.agent-worktrees/config.yaml`'s
-`review_blocking: false` makes it pass `--admin` unconditionally); follow
-the loop deliberately rather than relying on the tooling to refuse a
-premature merge.
+**Wait for a passing review before merging -- contributor and Maintainer PRs
+alike.** `Approve` is valid for either author type. On an owner-authored PR,
+a clean `Comment` with zero Medium/High findings open is also a passing
+Copilot verdict; do not infer that an owner approval is impossible or chase
+another review after a passing result. A Contributor's separate
+Maintainer-acceptance gate still applies. Outstanding reviewer change requests
+and required CI remain independent merge gates.
+
+`CONTRIBUTING.md` § "Waiting for a verdict" owns the full review loop,
+re-request timing and bounded Contributor exception; do not substitute an
+older copied loop. The managed provider attempts a normal head-pinned merge
+first and verifies required checks before an authorized fallback. That does
+not assess whether Copilot's findings were addressed: follow the documented
+review policy rather than assuming `review_blocking: false` makes an
+unreviewed PR ready.
 
 **Never post an `@copilot review` (or any `@copilot` mention) comment to
 request a fresh pass.** GitHub's automatic review already fires on every push
