@@ -50,6 +50,8 @@ class SpawnTarget:
     native_resume_id: str | None = None
     static_plugin_args: StaticPluginArgs | None = None
     local_plugin_preparation: bool = False
+    prepared_plugins: dict | None = None
+    plugin_preparation_request: dict | None = None
 
     def to_json(self) -> str:
         """Keep runtime-only native admission out of persisted target metadata.
@@ -59,7 +61,7 @@ class SpawnTarget:
         """
         return json.dumps({
             key: value for key, value in asdict(self).items()
-            if key != "native_resume_id"
+            if key not in {"native_resume_id", "prepared_plugins", "plugin_preparation_request"}
             and (
                 key not in {"execution_space_key", "remote_acp", "remote_acp_capabilities"}
                 or value is not None

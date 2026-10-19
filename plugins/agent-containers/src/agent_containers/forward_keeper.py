@@ -46,6 +46,19 @@ def read_state(name: str) -> dict[str, Any] | None:
     return _STORE.read(name)
 
 
+def record_pending_delivery(name: str, hold_id: str, pending: dict | None) -> None:
+    with _keeper_lock(name):
+        state = read_state(name) or {}
+        if hold_id not in _read_holds(state):
+            raise RuntimeError("Pending delivery has no owning forward-keeper hold")
+        ledger = dict(state.get("pending_deliveries") or {})
+        if pending is None:
+            ledger.pop(hold_id, None)
+        else:
+            ledger[hold_id] = pending
+        _STORE.write(name, {**state, "pending_deliveries": ledger})
+
+
 def _holds() -> KeeperHoldStore:
     return KeeperHoldStore(
         _STORE,

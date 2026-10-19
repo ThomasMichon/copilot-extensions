@@ -1516,6 +1516,8 @@ def _ssh_session(
                     worktree_id=getattr(args, "plugin_worktree_id", None),
                     repo_roots=getattr(args, "plugin_roots", []),
                     prelude=relay_env, relay_port=None if args.no_relay else relay_port,
+                    **({"prepared_context": args.plugin_prepared_context}
+                       if getattr(args, "plugin_prepared_context", None) is not None else {}),
                 )
 
             tracker.reached(ConnectStage.TARGET_BINSTUB)
@@ -1992,6 +1994,7 @@ async def _register_codespace_plugins(
     manager, name: str, repo: str | None, config, *, workspace: str | None = None,
     sources=(), worktree_id: str | None = None, repo_roots=(),
     prelude: str = "", relay_port: int | None = None,
+    prepared_context: dict | None = None,
 ) -> list[str]:
     """Install/copy all selections, then register locally before either launch."""
     from .plugin_preparation import prepare_plugins
@@ -2005,6 +2008,7 @@ async def _register_codespace_plugins(
         manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
         repo_roots=repo_roots,
         prelude=prelude, relay_port=relay_port,
+        **({"prepared_context": prepared_context} if prepared_context is not None else {}),
     )
 
 

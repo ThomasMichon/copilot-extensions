@@ -107,7 +107,7 @@ async def test_real_allocation_and_plan_environment_precede_barrier(tmp_path, mo
         return {"launch": {"cmd": [sys.executable], "work_dir": str(allocated),
                            "worktree_id": "allocated-id", "env": {"CHILD": "plan"}}}
 
-    async def prepare(received, cwd, env):
+    async def prepare(received, cwd, env, *, prepared_context=None):
         assert Path(cwd).is_dir() and env["CHILD"] == "plan"
         assert received.worktree_id == "allocated-id"
         observed.append(cwd)
@@ -370,7 +370,7 @@ async def test_real_child_environment_installer_and_direct_reference_barrier(
         assert len(native) == 1 and (Path(native[0]) / "plugin.json").exists()
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert [call["argv"][:2] for call in calls] == [
-        ["plugin", "marketplace"], ["plugin", "install"],
+        ["plugin", "install"],
     ]
     assert all(not Path(call["cwd"]).is_relative_to(root) for call in calls)
     assert target.copilot_args[-2:] == ["--plugin-dir", "request"]
@@ -511,3 +511,29 @@ async def test_mixed_physical_reference_origins_reach_local_acp(
         args, _, _ = await transport.resolve_local_launch(target)
         assert str(host) in args and str(native) in args
     assert not list((root / ".git").rglob("marketplace.json"))
+
+
+@pytest.mark.asyncio
+async def test_local_producer_rebinds_only_proven_target_owned_absolute_catalog(
+    tmp_path, isolated_selection,
+):
+    anchor = checkout(tmp_path / "anchor")
+    callee, controller = tmp_path / "callee", tmp_path / "controller"
+    original = marketplace(anchor, "anchor")
+    subprocess.run(
+        ["git", "-C", str(anchor), "worktree", "add", "--orphan", str(callee)],
+        check=True, capture_output=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    target_payload = marketplace(callee, "actual-target")
+    (callee / ".github" / "copilot" / "settings.json").unlink()
+    marketplace(controller)
+    path = controller / ".github" / "copilot" / "settings.json"
+    data = json.loads(path.read_text())
+    data["extraKnownMarketplaces"]["local"]["source"]["path"] = str(original.parent)
+    atomic_json(path, data)
+    args, cwd, _environment = await transport.resolve_local_launch(target_for(callee, controller))
+    assert cwd == str(callee)
+    assert str(target_payload) in args and str(original) not in args
+    settings = json.loads((callee / ".github" / "copilot" / "settings.local.json").read_text())
+    assert settings["extraKnownMarketplaces"]["local"]["source"]["path"] == "./.ai"

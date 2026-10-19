@@ -386,21 +386,9 @@ def github_slug(remote: str) -> str | None:
     unparseable remote. Same host-boundary-aware matching as
     :func:`github_owner` -- see its docstring.
     """
-    if not remote:
-        return None
-    url = remote.strip()
-    m = re.match(
-        r"https?://(?:[^@/]+@)?(?:www\.)?github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$",
-        url,
-    )
-    if m:
-        return f"{m.group(1)}/{m.group(2)}"
-    m = re.match(
-        r"(?:ssh://)?git@github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$", url
-    )
-    if m:
-        return f"{m.group(1)}/{m.group(2)}"
-    return None
+    from plugin_resolve.target import github_repository_slug
+
+    return github_repository_slug(remote)
 
 
 def account_from_map(owner: str | None) -> str | None:

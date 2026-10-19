@@ -266,6 +266,117 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-18 - Detached seed integration and admission ambiguity review
+
+- Detached Codespace/container owners now carry the writer-produced context,
+  withhold owned terminal seeds and use the protocol-gated Bridge queue. Existing
+  creation-seed receipts retain deferred delivery and settlement; ordinary
+  attached/operator input remains distinct.
+- An independent source check exercised the real HTTP router, SQLite queue,
+  public client, native SDK readiness observation and native task delivery
+  together. One queued task invoked the selected skill, an identical operation
+  retry returned the same message, and changed compiled selection was refused.
+  Preferences and target settings stayed byte-identical. The isolated test
+  server and native processes were stopped; this is not installed rollout or a
+  full remote lifecycle proof.
+- Independent review found a blocking ambiguity: a lost response after durable
+  admission could be mistaken for non-admission and cause a newly created
+  session to be stopped while its task was already running. The correction must
+  reconcile the same operation and retain native/session-connection ownership
+  while admission is unknown. Review, contract attestation and publication stay
+  open until this case is fixed and verified.
+
+### 2026-10-18 - Automatic acquisition candidate and compiled native loadout
+
+- Ordinary local ACP acquisition now invokes preparation automatically. Native
+  CLI acquisition uses the existing Worktrees launch owner after its real
+  profile-environment merge, before mux creation, and carries the writer's
+  compiled selection into task admission. Legacy live CLI without a matching
+  native-bound preparation receipt is refused rather than guessed or reseeded.
+- The compiled context comes from the effective registration under its existing
+  lock: actual projected identities, logical identities, available versions and
+  known local marketplace roots. A private Git acquisition root is not reported
+  as the productive native marketplace root. Remote transports can opt into the
+  versioned context record without changing prepared-directory parsing.
+- Independent source-owner verification used the real controller selection
+  reader, a separate Worktrees preparation process and the actual native
+  installer. A fresh interactive frontend then accepted the compiled set of a
+  target-native local plugin, a controller-local alias and a Git-sourced plugin.
+  The two local plugins had no skills, so skill discovery was not the readiness
+  oracle. All three registered before one SDK-delivered task invoked the
+  selected Git skill; preferences and target settings stayed byte-identical.
+- This check exercised real owner preparation, compilation, native registration
+  and source inbox delivery with a synthetic queue. It did not replace the
+  pending full managed-owner/HTTP-daemon or external-venue acceptance lanes.
+  Detached provider seed forwarding remains the next source integration step;
+  native session registration alone is not its completion condition.
+
+### 2026-10-18 - Candidate native gate and remote ownership integration
+
+- The source readiness observer passed in an actual joined interactive CLI:
+  selected registered plugins were ready, a missing plugin remained pending,
+  and a mismatched session was refused. Session and cwd remained stable. The
+  temporary observer was removed; no plugin installation, activation, reload,
+  task send or preference write was used by the observation.
+- A fresh interactive native consumer then exercised the source observer and
+  inbox-delivery helper together. A synthetic queue's missing-plugin seed was
+  held with zero SDK sends; the actual registered loadout was observed before
+  exactly one SDK send and successful skill invocation. The productive test
+  profile's preferences and target settings stayed byte-identical. This used a
+  real frontend and SDK, not a model's readiness statement; the queue adapter
+  was synthetic, so it is not full acquisition-owner or HTTP-daemon evidence.
+- The candidate typed gate does not by itself cover real startup owners.
+  Automatic local acquisition preparation, compiled effective expectations and
+  withholding of owned seeds remain a separate integration step before claiming
+  end-to-end readiness.
+- Trusted Codespace/container producers now derive target-owned annotations
+  from explicit repository-registry bindings. Bridge preserves that identity
+  when merging provider and related plans. Unrelated checkouts are not inferred
+  from a matching basename or remote.
+- A new registered-bare-anchor case exposed a missing source-side identity
+  path; the candidate now handles that anchor without relaxing the receiver's
+  real-checkout requirement or nested-repository refusal. Focused contained
+  selections passed 40 Codespace, 30 container, 120 Bridge and 14 shared-parser
+  compatibility contracts. Read-only source-peer CLI checks also resolved the
+  bindings with sibling Python imports unavailable. These are candidate results,
+  not merge, release or rollout evidence.
+- Owned mode controls now retain their readiness requirement and recheck it
+  immediately before applying autopilot. A successful initial observation cannot
+  authorize a later mode change after cwd or plugin state changes; ordinary
+  operator mode controls retain their existing shape.
+
+### 2026-10-18 - Native selector and registration grounding
+
+- An isolated native CLI acquisition fetched an explicitly selected non-default
+  Git branch and installed the plugin at that revision's nested catalog
+  location. The installed version and a revision-specific skill marker matched
+  the selected branch, not the default branch's root-level plugin. The source
+  declaration was unchanged; no transport rewrite was used.
+- A separate fresh-profile run used only the target repository's declaration,
+  with no global plugin-management commands. The actual CLI loaded and invoked
+  that same non-default, nested plugin. An unrelated repository using the same
+  profile and cache did not load it. User settings remained byte-identical after
+  both runs, and the target's Git source declaration was preserved.
+- The candidate shared preparation engine also acquired that revision through
+  the actual native installer, retained the original Git declaration, returned
+  the verified payload directory, and repeated without changing productive
+  preferences or installing into the productive profile.
+- A separate candidate-engine check rebound an absolute anchor reference to
+  `./.ai` in the actual execution worktree. The settings-only native CLI loaded
+  and invoked that worktree's distinct skill, not the anchor's version, without
+  snapshots or source-catalog changes. This does not establish remote-producer
+  ownership annotation.
+- The first synthetic run hit a Windows Git cache-path limit. A shorter isolated
+  native cache path succeeded; an operation-scoped long-path setting alone did
+  not. This is acquisition evidence, not an external-network acceptance result
+  or authorization for user-global plugin management.
+- A read-only, temporary extension in an actual interactive native CLI session
+  observed its registered plugins through the public session RPC, with stable
+  session and checkout metadata. Optional installation-path fields were absent
+  on the selected entries. The observer was removed afterward. This grounds the
+  readiness API but does not close the fresh-start task-delivery integration
+  gate.
+
 ### 2026-10-18 - Startup-readiness ordering accepted
 
 - The operator selected native repository-scoped startup activation, with task

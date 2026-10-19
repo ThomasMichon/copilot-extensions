@@ -7,12 +7,14 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from .plugin_readiness import PluginReadinessRequest, PluginReadinessResult
 
 #: A Copilot CLI session's agent mode, as ``/autopilot`` and ``/plan`` set it.
 LiveSessionMode = Literal["interactive", "plan", "autopilot"]
 #: The ``live_messages.kind`` of a mode change (a session control, polled apart
 #: from messages so it is never delivered as a prompt).
 SET_MODE_CONTROL = "control:set-mode"
+SET_MODE_READY_CONTROL = "control:set-mode-ready"
 #: The longest a requester waits for a control (``SetModeRequest.wait_timeout``).
 MAX_CONTROL_WAIT_SECONDS = 120.0
 #: After its requester's wait, how long a control the extension already
@@ -31,6 +33,7 @@ class SetModeRequest(BaseModel):
     #: How long to wait for the session's extension to apply it (seconds).
     wait_timeout: float = Field(default=30.0, ge=1.0, le=MAX_CONTROL_WAIT_SECONDS)
     expected_session_id: str | None = None
+    plugin_readiness: PluginReadinessRequest | None = None
 
 
 #: How a mode change ended: ``applied``; ``rejected`` by the session;
@@ -61,3 +64,4 @@ class ControlAckRequest(BaseModel):
     ids: list[int]
     #: False when the session couldn't apply them (recorded as ``rejected``).
     applied: bool = True
+    plugin_readiness: PluginReadinessResult | None = None

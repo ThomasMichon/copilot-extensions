@@ -856,22 +856,81 @@ class TestCmdEmbody:
         monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: "dead")
         monkeypatch.setattr(embody_resume, "session_liveness", lambda _: "dead")
         seen = []
+        order = []
 
         def select(*args, **kwargs):
             seen.append(kwargs)
             return profile_assignment.LaunchProfileSelection(profile=None)
 
         monkeypatch.setattr(m, "_launch_profile_selection", select)
-        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **kw: {
-            "ok": True, "session": "wt-wtR", "new_pane": "%5",
-        })
+        monkeypatch.setattr(m, "_build_env", lambda *a, **kw: {"COPILOT_HOME": "selected-profile"})
+        def prepare(args, wt, cwd, env):
+            assert env["COPILOT_HOME"].endswith("selected-profile")
+            order.append("prepare")
+            return {"cwd": cwd, "plugins": [], "logical_payloads": {}}, lambda: None
+        monkeypatch.setattr(bridge_acquisition_launch, "prepare_plugins", prepare)
+        def spawn(*args, **kwargs):
+            assert order == ["prepare"]
+            order.append("spawn")
+            return {"ok": True, "session": "wt-wtR", "new_pane": "%5"}
+        monkeypatch.setattr(sessions, "mux_new_session", spawn)
         assert m.cmd_embody(_ns(
             worktree_id="wtR", dry_run=dry_run, bridge_acquisition="native-original",
             require_native_admission=True, copilot_args=[],
+            require_plugin_preparation=True, bridge_plugin_request="synthetic-request",
         )) == 0
         assert seen[0]["resume_session"] == "native-original"
         assert seen[0]["allocate_new"] is False
         assert json.loads(capfd.readouterr().out)["resume_session"] == "native-original"
+        assert order == ([] if dry_run else ["prepare", "spawn"])
+
+    def test_plugin_preparation_failure_proves_no_native_spawn(self, monkeypatch, capfd, tmp_path):
+        from types import SimpleNamespace
+        from agent_worktrees import bridge_acquisition_launch
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(m.tracking, "load_record", lambda _: SimpleNamespace(
+            worktree_path="/w/wtR", resolved_head_session="native-original", status="active",
+        ))
+        monkeypatch.setattr(bridge_acquisition_launch, "session_liveness", lambda _: "dead")
+        def fail(*args):
+            raise ValueError("original marketplace origin missing")
+        monkeypatch.setattr(bridge_acquisition_launch, "prepare_plugins", fail)
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **kw: pytest.fail("must not spawn"))
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", bridge_acquisition="native-original", copilot_args=[],
+            require_plugin_preparation=True, bridge_plugin_request="synthetic-request",
+        )) == 3
+        outcome = json.loads(capfd.readouterr().out)
+        assert outcome["plugin_preparation_version"] == 1
+        assert outcome["native_launch_started"] is False
+        assert outcome["worktree_id"] == "wtR"
+
+    def test_bridge_owned_seed_never_enters_tty_and_preserves_new_task_intent(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        from types import SimpleNamespace
+        from agent_worktrees import bridge_seed_delivery
+
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(m.tracking, "load_record", lambda _: SimpleNamespace(
+            worktree_path="/w/wtR", resolved_head_session="native-original", status="active",
+        ))
+        report = {"bridge_seed_deferred": True, "bridge_seed_operation": "operation",
+                  "deferred_creation_seed": {"seed": {"text": "creation task"}}}
+        monkeypatch.setattr(bridge_seed_delivery, "claim", lambda *args: report)
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *args, **kwargs: {
+            "ok": True, "session": "wt-wtR", "new_pane": "%5",
+        })
+        monkeypatch.setattr(sessions, "mux_seed_pane", lambda *args, **kwargs: pytest.fail("never TTY"))
+        assert m.cmd_embody(_ns(
+            worktree_id="wtR", bridge_scope_id="scope", bridge_seed_operation="operation",
+            bridge_seed_pending=True, copilot_args=["--no-ask-user"],
+        )) == 0
+        outcome = json.loads(capfd.readouterr().out)
+        assert outcome["bridge_seed_deferred"] is True and outcome["seeded"] is False
+        assert outcome["deferred_creation_seed"]["seed"]["text"] == "creation task"
+        assert outcome["resume_session"] is None
 
     @pytest.mark.parametrize("dry_run", [True, False])
     def test_fresh_bridge_embody_uses_armed_allocation_not_native_replay(

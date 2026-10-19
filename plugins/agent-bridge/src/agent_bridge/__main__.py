@@ -178,7 +178,9 @@ def _worktrees_get(key: str) -> str | None:
     if not exe:
         return None
     try:
-        r = subprocess.run([exe, "get", key], capture_output=True, text=True, timeout=8)
+        r = subprocess.run(
+            [exe, "get", key], capture_output=True, text=True, timeout=8, **no_window_kwargs(),
+        )
     except Exception:
         return None
     if r.returncode != 0:

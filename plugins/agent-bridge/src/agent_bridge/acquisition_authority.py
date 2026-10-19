@@ -30,11 +30,29 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
         env=env, **no_window_kwargs(),
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), 120)
+        if "--bridge-plugin-request" in args:
+            # The producer cooperatively cancels this bounded preparation and
+            # awaits this owner before releasing its operation files/locks.
+            stdout, stderr = await proc.communicate()
+        else:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), 120)
     except (TimeoutError, asyncio.TimeoutError) as exc:
         # The owner may still be launching. Never terminate it or retry a launch.
         raise AcquisitionRefused("owner_operation_pending", "worktree owner operation timed out") from exc
     if proc.returncode:
+        if "--bridge-plugin-request" in args:
+            try:
+                failure = json.loads(stdout)
+            except (ValueError, TypeError):
+                failure = None
+            if (
+                isinstance(failure, dict) and failure.get("plugin_preparation_version") == 1
+                and failure.get("native_launch_started") is False
+                and failure.get("worktree_id") == args[args.index("--worktree-id") + 1]
+            ):
+                raise AcquisitionRefused(
+                    "plugin_preparation_failed", str(failure.get("error") or "plugin preparation failed before launch"),
+                )
         if proc.returncode == 3 and args[0] == "create" and "--creation-key" in args:
             try:
                 failure = json.loads(stdout)

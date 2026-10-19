@@ -1,6 +1,7 @@
 """Prompt submission and target-resolution commands for ``agent-bridge``."""
 
 from __future__ import annotations
+import json
 
 import argparse
 import os
@@ -114,6 +115,11 @@ def _send(args: argparse.Namespace) -> None:
     client = core._get_client()
     min_protocol = getattr(args, "min_daemon_protocol", None)
     if min_protocol and not client.daemon_supports(min_protocol):
+        if getattr(args, "plugin_context_stdin", False):
+            raise SendRefused(
+                "refused_unavailable", reason="unsupported_protocol", retryable=False,
+                target=args.target, error="prepared startup requires daemon protocol 41",
+            )
         print(f"[FAIL] The running bridge daemon predates protocol {min_protocol}; "
               "update agent-bridge, restart its daemon, then send again.", file=sys.stderr)
         sys.exit(3)
@@ -121,6 +127,36 @@ def _send(args: argparse.Namespace) -> None:
         _hold_protocol_floor(client, min_protocol)
     target = args.target
     prompt = _resolve_prompt(args, required=True)
+    if getattr(args, "plugin_context_stdin", False):
+        from .plugin_readiness import PluginReadinessRequest
+        from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+        if getattr(args, "expected_native_session_id", None) is not None:
+            raise SendRefused("refused_invalid", reason="startup_target", retryable=False,
+                              target=target, error="prepared startup is a live CLI message, not an ACP turn")
+
+        if getattr(args, "prompt_file", None) != "-" or not getattr(args, "idempotency_key", None):
+            raise SendRefused("refused_invalid", reason="startup_input", retryable=False,
+                              target=target, error="plugin context requires stdin and an operation key")
+        try:
+            envelope = json.loads(prompt)
+            context = envelope["plugin_context"]
+            prompt = envelope["prompt"]
+            if (
+                type(context.get("version")) is not int or context["version"] != 1
+                or context.get("acp_only_sources") or not isinstance(prompt, str)
+            ):
+                raise ValueError("invalid native CLI context")
+            args.plugin_readiness = PluginReadinessRequest(
+                owner="bridge", cwd=context["cwd"], plugins=context["plugins"],
+            ).model_dump()
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise SendRefused("refused_invalid", reason="startup_input", retryable=False,
+                              target=target, error="invalid prepared plugin context") from exc
+        if not client.daemon_supports(PLUGIN_READINESS_PROTOCOL_VERSION):
+            raise SendRefused("refused_unavailable", reason="startup_protocol", retryable=False,
+                              target=target, error="prepared startup requires daemon protocol 41")
+        _hold_protocol_floor(client, PLUGIN_READINESS_PROTOCOL_VERSION)
+        args.delivery = "queue"
 
     if getattr(args, "expected_native_session_id", None) is not None:
         if any(getattr(args, option, False) for option in ("force", "queue", "new")):
@@ -162,6 +198,9 @@ def _send(args: argparse.Namespace) -> None:
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
     if address is not None:
+        if getattr(args, "plugin_context_stdin", False):
+            raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
+                              target=target, error="prepared startup requires the registered native session")
         _deliver_to_live_session(client, args, target, prompt, remote_address=address)
         return
     if getattr(args, "expected_session_id", None):
@@ -170,6 +209,9 @@ def _send(args: argparse.Namespace) -> None:
             error=f"Target {target!r} has no live session matching {args.expected_session_id!r}.",
         )
 
+    if getattr(args, "plugin_context_stdin", False):
+        raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
+                          target=target, error="prepared startup cannot fall back to ACP or create a session")
     caller_id = core._caller_id_for(args)
     session_id = core._resolve_target(client, target, force=getattr(args, "force", False))
     if not getattr(args, "full_history", False):
@@ -247,7 +289,10 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
                 retryable=False, target=session_id,
             ) from exc
     sender = core._live_sender_label(args)
-    reply_to = core._live_reply_to(args)
+    reply_to = (
+        getattr(args, "reply_to", None) if getattr(args, "plugin_context_stdin", False)
+        else core._live_reply_to(args)
+    )
     kind = core._live_message_kind(args)
     delivery = core._live_message_delivery(args)
     idempotency = getattr(args, "idempotency_key", None)
@@ -257,6 +302,8 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         delivery_options["idempotency_key"] = idempotency
     if expected_session_id:
         delivery_options["expected_session_id"] = expected_session_id
+    if getattr(args, "plugin_readiness", None) is not None:
+        delivery_options["plugin_readiness"] = args.plugin_readiness
     try:
         if remote_address is not None:
             from .live_peer_address import send_remote_peer
@@ -961,6 +1008,8 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("--force", action="store_true", help="If the target's session is busy running a turn, terminate that in-flight turn and start a fresh session to deliver this prompt (discards the in-flight turn's work). Without --force, a busy target is rejected with guidance to wait/observe or end it.")
     send_p.add_argument("--queue", action="store_true", help="If the target's session is busy, durably queue this prompt server-side (in the bridge's pending_prompts table) for FIFO delivery when the current turn settles -- surviving a caller remount and a bridge/host restart -- instead of rejecting it. The opposite of --force: it preserves the in-flight turn.")
     send_p.add_argument("--idempotency-key", help="stable producer key; retries return the original live-message id instead of enqueuing a duplicate")
+    send_p.add_argument("--plugin-context-stdin", action="store_true",
+                        help="Read a Bridge-owned prompt/prepared-context JSON envelope from --prompt-file -")
     send_p.add_argument("--expected-session-id", help="deliver only if the target still resolves to this exact live session id (checked again atomically when enqueuing)")
     send_p.add_argument("--min-daemon-protocol", type=int, default=None, metavar="N", help="send nothing (exit 3) unless the running daemon advertises HTTP protocol N or newer")
     send_p.add_argument("--expected-native-session-id", default=None, metavar="UUID", help="Admit an immediate prompt only to this exact running native conversation; never resume, recreate, queue, or hand off")

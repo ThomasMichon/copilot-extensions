@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+from .plugin_readiness import PluginReadinessRequest
 
 if TYPE_CHECKING:
     from .acquisition_policy import AcquisitionDecision
@@ -41,6 +42,18 @@ class AcquisitionRequest(BaseModel):
     reservation_key: str = Field(min_length=1)
     driver: str = "agent-dispatch"
     verify_timeout: float = Field(default=0.0, ge=0, le=600)
+    plugin_readiness: PluginReadinessRequest | None = None
+    caller_worktree: str | None = Field(default=None, min_length=1)
+    caller_owner_ref: str | None = Field(default=None, min_length=1)
+    caller_session_id: str | None = Field(default=None, min_length=1)
+
+    @model_serializer(mode="wrap")
+    def serialize_request(self, handler):
+        result = handler(self)
+        for field in ("plugin_readiness", "caller_worktree", "caller_owner_ref", "caller_session_id"):
+            if getattr(self, field) is None:
+                result.pop(field, None)
+        return result
 
     @model_validator(mode="after")
     def validate_intent(self) -> AcquisitionRequest:

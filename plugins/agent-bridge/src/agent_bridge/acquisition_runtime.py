@@ -155,6 +155,8 @@ class AcquisitionRuntime:
                     preflight.get("dry_run") is not True
                     or preflight.get("worktree_id") != req.worktree_id
                     or preflight.get("resume_session") != (None if intent == "fresh" else intent)
+                    or target.plugin_preparation_request is not None
+                    and preflight.get("plugin_preparation_version") != 1
                 ):
                     raise AcquisitionRefused(
                         "cli_capability_missing",
@@ -210,9 +212,17 @@ class AcquisitionRuntime:
             decision.conversation.session_id if decision.conversation else None,
             decision.conversation.native_session_id if decision.conversation else None,
         )
+        from pathlib import Path
+
+        checkout = Path(row["path"]).resolve()
+        preparation_required = target.plugin_preparation_request is not None or (
+            req.mode == "acp" and decision.conversation is None and target.local_plugin_preparation
+            and any((parent / ".git").exists() for parent in (checkout, *checkout.parents))
+        )
         self.store.stage(
             req,
             "launching",
+            plugin_preparation_required=preparation_required,
             acquired=decision.acquired,
             session_id=decision.conversation.session_id if decision.conversation else None,
             native_session_id=decision.conversation.native_session_id
@@ -370,6 +380,8 @@ class AcquisitionRuntime:
                     target,
                     agent_name=req.target,
                     caller_id=f"acquisition:{req.delivery_id}",
+                    caller_owner_ref=req.caller_owner_ref,
+                    caller_session_id=req.caller_session_id,
                     copilot_args=["--agent", req.charter] if req.charter else None,
                     model=req.model,
                     effort=req.effort,
@@ -379,6 +391,17 @@ class AcquisitionRuntime:
                 raise AcquisitionRefused(
                     "native_start_unproven", "ACP launch did not prove an idle native conversation"
                 )
+            context = self._prepared_context(
+                session.target, row, session.acp_session_id,
+                require_prepared=decision.conversation is None,
+            )
+            _token, stage, data = self.store.recovery(req)
+            self.store.stage(
+                req, stage, **{
+                    **data, "prepared_context": context,
+                    "session_id": session.session_id, "native_session_id": session.acp_session_id,
+                },
+            )
             if not self.db.reserve_worktree_ownership(
                 req.worktree_id,
                 session.session_id,
@@ -400,6 +423,22 @@ class AcquisitionRuntime:
             return session.session_id, session.acp_session_id
         if decision.acquired == "reused":
             assert decision.conversation and decision.conversation.native_session_id
+            if target.plugin_preparation_request is not None:
+                from plugin_resolve.reflection import plan_digest
+
+                context = self.store.prepared_context(
+                    req.worktree_id, decision.conversation.native_session_id, "cli",
+                )
+                if context is None:
+                    raise AcquisitionRefused(
+                        "plugins_not_prepared", "retained CLI has no native-bound preparation receipt",
+                    )
+                if context.get("producer_plan_digest") != plan_digest(target.plugin_preparation_request):
+                    raise AcquisitionRefused(
+                        "plugins_not_prepared", "retained CLI producer selection changed; strict owner resume is required",
+                    )
+                _token, stage, data = self.store.recovery(req)
+                self.store.stage(req, stage, **{**data, "prepared_context": context})
             return decision.conversation.session_id, decision.conversation.native_session_id
         driver = cli_driver(req)
         reservation = self.db.create_cli_mode_reservation(
@@ -413,8 +452,7 @@ class AcquisitionRuntime:
             )
         resume_id = decision.conversation.native_session_id if decision.conversation else "fresh"
         assert resume_id is not None
-        await worktree_command(
-            [
+        owner_args = [
                 "embody",
                 "--worktree-id",
                 req.worktree_id,
@@ -425,9 +463,16 @@ class AcquisitionRuntime:
                 driver,
                 "--verify-timeout",
                 str(req.verify_timeout),
-            ],
-            req.project,
-        )
+            ]
+        if target.plugin_preparation_request is not None:
+            from .acquisition_plugins import launch_prepared
+
+            await launch_prepared(
+                self, req, row, target, owner_args, worktree_command,
+                reservation_id=reservation,
+            )
+        else:
+            await worktree_command(owner_args, req.project)
         return await self._cli_native(req, driver, decision)
 
     async def _prepare_target(
@@ -437,10 +482,11 @@ class AcquisitionRuntime:
     ) -> tuple[Any, dict[str, str]]:
         if req.mode == "cli" and req.target == DEFAULT_CLI_WORKER_TARGET:
             # The worktree owner, not an ACP profile, owns CLI launch defaults.
-            return SpawnTarget(
+            target = SpawnTarget(
                 type="local", cwd=row["path"], worktree_id=req.worktree_id,
-                explicit_cwd=True,
-            ), {}
+                explicit_cwd=True, project=req.project or row.get("repo"),
+            )
+            return await self._local_preparation_target(req, row, target), {}
         try:
             target = await self.resolver.resolve_async(req.target)
         except KeyError as exc:
@@ -462,7 +508,84 @@ class AcquisitionRuntime:
             self.state,
             target,
         )
-        return target, request_env
+        return await self._local_preparation_target(req, row, target), request_env
+
+    async def _local_preparation_target(
+        self, req: AcquisitionRequest, row: dict[str, Any], target: SpawnTarget,
+    ) -> SpawnTarget:
+        from pathlib import Path
+        from .venue_plugins import with_controller_origin
+
+        # Existing structured exclusions remain authoritative. Only an ordinary
+        # unstructured local target needs the provenance introduced here.
+        ordinary = not any((
+            target.elevated, target.spawn_command, target.host, target.user,
+            target.codespace, target.container, target.remote_acp,
+            target.execution_space_key, target.remote_acp_capabilities,
+        ))
+        if target.static_plugin_args is None and ordinary:
+            target = replace(
+                target, static_plugin_args={"base": list(target.copilot_args), "automatic": []},
+                local_plugin_preparation=True,
+            )
+        target = replace(
+            target, project=target.project or req.project or row.get("repo"),
+            caller_worktree=req.caller_worktree if req.caller_worktree is not None else target.caller_worktree,
+            caller_owner_ref=req.caller_owner_ref if req.caller_owner_ref is not None else target.caller_owner_ref,
+        )
+        if target.local_plugin_preparation:
+            from .session_manager import _REQUEST_OVERRIDES_KEY
+
+            provenance = (target.venue or {}).get(_REQUEST_OVERRIDES_KEY, {})
+            origin = "explicit" if req.caller_worktree is not None else provenance.get(
+                "controller_worktree_origin",
+                "explicit" if target.caller_worktree is not None else "affinity",
+            )
+            target = with_controller_origin(
+                target, origin,
+                caller_session_id=req.caller_session_id,
+            )
+            if req.mode == "cli":
+                import os
+                from .venue_plugins import local_plugin_request
+
+                checkout = Path(row["path"]).resolve()
+                if any((parent / ".git").exists() for parent in (checkout, *checkout.parents)):
+                    target = replace(
+                        target,
+                        plugin_preparation_request=await local_plugin_request(
+                            target, row["path"], dict(os.environ),
+                        ),
+                    )
+        return target
+
+    def _prepared_context(
+        self, target: SpawnTarget, row: dict[str, Any], native_session_id: str,
+        recovery_context: dict[str, Any] | None = None,
+        *, require_prepared: bool = True,
+    ) -> dict[str, Any] | None:
+        from pathlib import Path
+        from .plugin_readiness import PluginReadinessError, prepared_readiness
+
+        context = target.prepared_plugins
+        if context is None:
+            context = recovery_context
+        if context is None and target.worktree_id:
+            context = self.store.prepared_context(target.worktree_id, native_session_id, "acp")
+        checkout = Path(row["path"]).resolve()
+        if context is None:
+            if require_prepared and target.local_plugin_preparation and any(
+                (parent / ".git").exists() for parent in (checkout, *checkout.parents)
+            ):
+                raise AcquisitionRefused(
+                    "plugins_not_prepared", "the ACP process has no verified prepared selection",
+                )
+            return None
+        try:
+            prepared_readiness(context, cwd=row["path"], session_id=native_session_id)
+        except PluginReadinessError as exc:
+            raise AcquisitionRefused("plugins_not_prepared", str(exc)) from exc
+        return context
 
     async def _cli_native(
         self,
@@ -526,7 +649,39 @@ class AcquisitionRuntime:
         _, head = await verify_worktree(req)
         if head != result.native_session_id:
             raise AcquisitionRefused("head_changed", "native head changed before delivery")
+        _token, _stage, data = self.store.recovery(req)
+        if data.get("plugin_preparation_required") and data.get("prepared_context") is None:
+            raise AcquisitionRefused("plugins_not_prepared", "required compiled selection is missing")
         if req.mode == "cli":
+            readiness_control = None
+            context = data.get("prepared_context")
+            if req.plugin_readiness is not None or context is not None:
+                from pathlib import Path
+                from .plugin_readiness import PluginReadinessError, prepared_readiness, wait_plugin_readiness
+
+                row, _head = await verify_worktree(req)
+                expectation = req.plugin_readiness
+                if context is not None:
+                    try:
+                        expectation = prepared_readiness(
+                            context, cwd=row["path"], session_id=result.native_session_id,
+                            assertion=expectation,
+                        )
+                    except PluginReadinessError as exc:
+                        raise AcquisitionRefused("plugins_not_ready", str(exc)) from exc
+                assert expectation is not None
+                if expectation.cwd is not None and Path(expectation.cwd).resolve() != Path(row["path"]).resolve():
+                    raise AcquisitionRefused("plugins_not_ready", "expected plugin checkout changed")
+                if expectation.expected_session_id not in (None, result.native_session_id):
+                    raise AcquisitionRefused("plugins_not_ready", "expected plugin native session changed")
+                expectation = expectation.model_copy(update={
+                    "cwd": row["path"], "expected_session_id": result.native_session_id,
+                })
+                try:
+                    observed = await wait_plugin_readiness(self.db, result.session_id, expectation)
+                    readiness_control = observed.control_id
+                except PluginReadinessError as exc:
+                    raise AcquisitionRefused("plugins_not_ready", str(exc)) from exc
             await self._verify_delivery_admission(req, result)
             await bind_dispatch_receipt(req, result, self.resolver)
             await self._verify_delivery_admission(req, result)
@@ -538,6 +693,7 @@ class AcquisitionRuntime:
                 now=time.time(),
                 expected_session_id=result.native_session_id,
                 idempotency_key=f"acquisition:{req.delivery_id}",
+                kind=f"startup:prompt:{readiness_control}" if readiness_control is not None else "prompt",
                 require_idle=True,
             )
             if message is None:
@@ -671,6 +827,10 @@ class AcquisitionRuntime:
                         session.session_id, drain=False, allow_recreate=False
                     )
                 session_id, native = session.session_id, session.acp_session_id
+                context = self._prepared_context(
+                    session.target, row, native, data.get("prepared_context"), require_prepared=False,
+                )
+                self.store.stage(req, stage, **{**data, "prepared_context": context})
             else:
                 session_id, native = await self._cli_native(req, cli_driver(req), recovery_decision)
             if data.get("native_session_id") and data["native_session_id"] != native:
@@ -744,6 +904,10 @@ class AcquisitionRuntime:
         )
         return {
             "delivery_id": delivery_id, "state": row["state"],
+            "caller_context": {
+                field: value for field, value in data.get("_request", {}).items()
+                if field in {"caller_worktree", "caller_owner_ref", "caller_session_id"}
+            },
             "stage": row["stage"] or "prepared", "worktree_id": row["worktree_id"],
             "native_evidence": [dict(item) for item in sessions],
             "recorded_result": data.get("result"),

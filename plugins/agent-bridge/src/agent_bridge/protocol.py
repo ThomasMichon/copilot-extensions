@@ -211,7 +211,8 @@ REMOTE_ACP_TARGETS_PROTOCOL_VERSION = 41
 ATTENTION_BOUNDARY_PROTOCOL_VERSION = 42
 # Managed remote ownership is independent of the attention boundary capability.
 REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION = 43
-HTTP_PROTOCOL_VERSION = 43
+PLUGIN_READINESS_PROTOCOL_VERSION = 44
+HTTP_PROTOCOL_VERSION = 44
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

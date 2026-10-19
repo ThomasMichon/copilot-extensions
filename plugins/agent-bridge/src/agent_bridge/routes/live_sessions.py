@@ -43,12 +43,17 @@ from ..live_controls import (
     CLAIMED_CONTROL_GRACE_SECONDS,
     CONTROL_MAX_AGE_SECONDS,
     SET_MODE_CONTROL,
+    SET_MODE_READY_CONTROL,
     ControlAckRequest,
     SetModeRequest,
     SetModeResult,
 )
 from .. import live_backfill as _backfill
 from ..live_message_receipts import admission_evidence, record_consumption
+from ..plugin_readiness import (
+    READINESS_CONTROL, PluginReadinessError, PluginReadinessRequest,
+    PluginReadinessResult, wait_plugin_readiness,
+)
 from ..live_representation import (
     progress_from_events,
     await_turn_reply,
@@ -684,6 +689,31 @@ async def stream_live_events(
     )
 
 
+def _existing_startup_kind(db, key: str, expectation: PluginReadinessRequest) -> str | None:
+    rows = db.execute_read("SELECT kind FROM live_messages WHERE idempotency_key=?", (key,))
+    if not rows:
+        return None
+    kind = rows[0]["kind"]
+    if not kind.startswith("startup:prompt:"):
+        raise HTTPException(409, detail="operation was already used without startup readiness")
+    try:
+        control = db.live_control_state(
+            expectation.expected_session_id, int(kind.rsplit(":", 1)[1]), include_body=True,
+        )
+        original = json.loads(control["body"])
+        original.pop("selection_digest", None)
+        previous = PluginReadinessRequest.model_validate(original)
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(409, detail="operation readiness receipt is unavailable") from None
+    def selection(value):
+        data = value.model_dump(exclude={"timeout_seconds", "expected_session_id"})
+        data["plugins"] = sorted(data["plugins"], key=lambda item: item["projected_source"])
+        return data
+    if selection(previous) != selection(expectation):
+        raise HTTPException(409, detail="operation compiled plugin selection changed")
+    return kind
+
+
 @router.post("/{session_id}/messages", response_model=SendMessageResult)
 async def post_live_message(
     session_id: str, body: SendMessageRequest, request: Request
@@ -700,10 +730,44 @@ async def post_live_message(
             status_code=400,
             detail="control kinds are reserved; use the session's control routes (e.g. /mode)",
         )
+    if body.kind.startswith("startup:"):
+        raise HTTPException(400, detail="startup kinds require typed Bridge-owned acquisition")
     db = _db(request)
     now = time.time()
     target = db.get_live_session(session_id)
     target_session_id = target["session_id"] if target is not None else session_id
+    message_kind = body.kind
+    expected_session_id = body.expected_session_id
+    if body.plugin_readiness is not None:
+        if body.kind != "prompt" or body.delivery != "queue" or not body.idempotency_key:
+            raise HTTPException(400, detail="owned startup requires a queued prompt and operation key")
+        if target is None:
+            raise HTTPException(404, detail="live session not found")
+        expectation = body.plugin_readiness.model_copy(update={"expected_session_id": target_session_id})
+        if body.plugin_readiness.expected_session_id not in (None, target_session_id):
+            raise HTTPException(409, detail="startup native session changed")
+        message_kind = _existing_startup_kind(db, body.idempotency_key, expectation)
+        if message_kind is None:
+            try:
+                import hashlib
+
+                selection = expectation.model_dump(exclude={"timeout_seconds", "expected_session_id"})
+                selection["plugins"] = sorted(selection["plugins"], key=lambda value: value["projected_source"])
+                input_digest = hashlib.sha256(json.dumps({
+                    "selection": selection, "body": body.body, "sender": body.sender,
+                    "reply_to": body.reply_to, "delivery": body.delivery,
+                }, sort_keys=True).encode()).hexdigest()
+                observed = await wait_plugin_readiness(
+                    db, target_session_id, expectation,
+                    operation_key=body.idempotency_key, operation_digest=input_digest,
+                )
+            except PluginReadinessError as exc:
+                raise HTTPException(409, detail={"code": "plugins_not_ready", "reason": str(exc)}) from exc
+            message_kind = _existing_startup_kind(db, body.idempotency_key, expectation)
+            if message_kind is None:
+                message_kind = f"startup:prompt:{observed.control_id}"
+        expected_session_id = target_session_id
+        now = time.time()
 
     # Freshness lease (#2906): validate the target registration's heartbeat
     # lease and enqueue *atomically* -- the check + insert run under one write
@@ -727,9 +791,9 @@ async def post_live_message(
         body=body.body,
         now=now,
         reply_to=body.reply_to,
-        kind=body.kind,
+        kind=message_kind,
         delivery=body.delivery,
-        expected_session_id=body.expected_session_id,
+        expected_session_id=expected_session_id,
         idempotency_key=body.idempotency_key,
         report_duplicate=True,
     )
@@ -820,6 +884,16 @@ async def post_live_message(
 MODE_POLL_SECONDS = 0.25
 
 
+@router.post("/{session_id}/plugin-readiness", response_model=PluginReadinessResult)
+async def plugin_readiness(
+    session_id: str, body: PluginReadinessRequest, request: Request,
+) -> PluginReadinessResult:
+    try:
+        return await wait_plugin_readiness(_db(request), session_id, body)
+    except PluginReadinessError as exc:
+        raise HTTPException(409, detail={"code": "plugins_not_ready", "reason": str(exc)}) from exc
+
+
 @router.post("/{session_id}/mode", response_model=SetModeResult)
 async def set_live_mode(
     session_id: str, body: SetModeRequest, request: Request
@@ -836,16 +910,35 @@ async def set_live_mode(
     on briefly for its outcome, else reported ``in_flight`` (it may still apply).
     """
     db = _db(request)
+    expected_mode_session = body.expected_session_id
+    control_kind, control_body = SET_MODE_CONTROL, body.mode
+    if body.plugin_readiness is not None:
+        try:
+            observed = await wait_plugin_readiness(db, session_id, body.plugin_readiness)
+        except PluginReadinessError as exc:
+            raise HTTPException(409, detail={"code": "plugins_not_ready", "reason": str(exc)}) from exc
+        if expected_mode_session is not None and expected_mode_session != observed.session_id:
+            raise HTTPException(409, detail="mode/readiness native session mismatch")
+        expected_mode_session = observed.session_id
+        control_kind = SET_MODE_READY_CONTROL
+        control_body = json.dumps({
+            "mode": body.mode,
+            "plugin_readiness": {
+                **body.plugin_readiness.model_dump(),
+                "expected_session_id": observed.session_id,
+                "selection_digest": observed.selection_digest,
+            },
+        })
     target = db.get_live_session(session_id)
     target_session_id = target["session_id"] if target is not None else session_id
     control_id, reason = db.enqueue_live_message_if_fresh(
         target_session_id,
         sender=body.sender,
-        body=body.mode,
+        body=control_body,
         now=time.time(),
-        kind=SET_MODE_CONTROL,
+        kind=control_kind,
         delivery="queue",
-        expected_session_id=body.expected_session_id,
+        expected_session_id=expected_mode_session,
     )
     if reason == "not_found":
         raise HTTPException(status_code=404, detail="live session not found")
@@ -934,16 +1027,29 @@ async def ack_live_controls(
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
     target_session_id = row["session_id"]
+    if body.plugin_readiness is not None:
+        if len(body.ids) != 1:
+            raise HTTPException(400, detail="readiness acknowledgment requires one control")
+        control = db.live_control_state(target_session_id, body.ids[0], include_body=True)
+        if control is None or control.get("kind") != READINESS_CONTROL:
+            raise HTTPException(400, detail="not a readiness control")
+        expected = json.loads(control["body"])
+        if (
+            body.plugin_readiness.session_id != expected["expected_session_id"]
+            or body.plugin_readiness.selection_digest != expected["selection_digest"]
+        ):
+            raise HTTPException(409, detail="readiness acknowledgment context changed")
     acked = db.ack_live_messages(
         target_session_id, body.ids, now=time.time(), controls=True,
-        outcome="applied" if body.applied else "rejected",
+        outcome=body.plugin_readiness.model_dump_json() if body.plugin_readiness is not None
+        else "applied" if body.applied else "rejected",
     )
     return AckMessagesResult(acked=acked)
 
 
 @router.get("/{session_id}/messages", response_model=LiveMessageListResponse)
 async def list_live_messages(
-    session_id: str, request: Request
+    session_id: str, request: Request, plugin_readiness: bool = False,
 ) -> LiveMessageListResponse:
     """Pending (undelivered) messages for a live session, oldest-first.
 
@@ -956,20 +1062,31 @@ async def list_live_messages(
         raise HTTPException(status_code=404, detail="live session not found")
     target_session_id = row["session_id"]
     rows = db.list_pending_live_messages(target_session_id)
-    return LiveMessageListResponse(
-        messages=[
-            LiveMessage(
+    messages = []
+    for r in rows:
+        readiness = None
+        kind = r.get("kind") or "prompt"
+        if kind.startswith("startup:prompt:"):
+            if not plugin_readiness:
+                continue
+            try:
+                control_id = int(kind.rsplit(":", 1)[1])
+                control = db.live_control_state(target_session_id, control_id, include_body=True)
+                if control is not None and control.get("kind") == READINESS_CONTROL:
+                    readiness = json.loads(control["body"])
+            except (ValueError, TypeError):
+                pass
+        messages.append(LiveMessage(
                 id=r["id"],
                 sender=r["sender"],
                 body=r["body"],
                 reply_to=r.get("reply_to"),
-                kind=r.get("kind") or "prompt",
+                kind=kind,
                 delivery=r.get("delivery") or "queue",
                 created_at=r["created_at"],
-            )
-            for r in rows
-        ]
-    )
+                plugin_readiness=readiness,
+        ))
+    return LiveMessageListResponse(messages=messages)
 
 
 @router.post("/{session_id}/messages/ack", response_model=AckMessagesResult)

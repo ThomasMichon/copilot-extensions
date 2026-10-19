@@ -8,6 +8,150 @@ import pytest
 from agent_bridge.venue_plugins import prepare_venue_plugins
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repository", ["app-alias", "example/app"])
+async def test_target_binding_uses_only_registered_identity(monkeypatch, tmp_path, repository):
+    from agent_bridge.venue_plugins import _registered_target_binding
+
+    owner = AsyncMock(side_effect=[
+        {"inventory_authority": "complete", "repos": [
+            {"name": "app-alias", "remote": "git@github.com:example/app.git"},
+            {"name": "app", "remote": "https://github.com/another/app.git"},
+        ]},
+        {"registration": "ready", "name": "app-alias",
+         "remote": "git@github.com:example/app.git", "path": str(tmp_path)},
+    ])
+    monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", owner)
+    binding = await _registered_target_binding(repository)
+    assert binding["target_source_roots"] == [tmp_path]
+    assert binding["target_repository"] == (
+        "app-alias" if repository == "app-alias" else "network:github.com/example/app"
+    )
+    assert owner.await_args_list[0].args == (["repos", "list", "--strict", "--json"], None)
+    assert owner.await_args_list[1].args == (
+        ["repos", "find", "app-alias", "--registered-only", "--json"], None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_incomplete_registry_cannot_prove_target_ownership(monkeypatch):
+    from agent_bridge.venue_plugins import _registered_target_binding
+
+    monkeypatch.setattr(
+        "agent_bridge.acquisition_authority.worktree_command",
+        AsyncMock(return_value={"repos": []}),
+    )
+    with pytest.raises(RuntimeError, match="complete repository registry"):
+        await _registered_target_binding("example/app")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_plan", [False, True])
+async def test_absolute_target_source_survives_real_bridge_plan_and_receiver(
+    monkeypatch, tmp_path, provider_plan,
+):
+    import base64
+    import re
+    import subprocess
+    from plugin_resolve.preparation import prepare
+
+    anchor, target, controller = [tmp_path / name for name in ("anchor", "target", "controller")]
+    for root in (anchor, target):
+        subprocess.run(
+            ["git", "init", "--quiet", str(root)], check=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        payload = root / ".ai" / "sample"
+        payload.mkdir(parents=True)
+        (payload / "plugin.json").write_text(json.dumps({"name": "sample", "version": "1.0.0"}))
+        (payload / "marker").write_text(root.name)
+        (payload.parent / "marketplace.json").write_text(json.dumps({
+            "name": "synthetic", "owner": {"name": "Synthetic"},
+            "plugins": [{"name": "sample", "source": "./sample"}],
+        }))
+    settings = controller / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "synthetic": {"source": {"source": "directory", "path": str(anchor / ".ai")}},
+        },
+    }))
+    monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+    monkeypatch.setattr("agent_bridge.related_plugins.related_plugins_for_repo", lambda *a, **kw: [])
+    binding = AsyncMock(return_value={
+        "target_repository": "registered-alias", "target_source_roots": [anchor],
+    })
+    monkeypatch.setattr("agent_bridge.venue_plugins._registered_target_binding", binding)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport._run_provider",
+        AsyncMock(return_value=(0, json.dumps({
+            "plugins": [], "target_repository": "registered-alias",
+        }).encode(), b"")),
+    )
+    observed = []
+
+    async def receive(command, *, input_bytes, timeout):
+        assert command == "bash -ls"
+        encoded = re.search(
+            r"request=json.loads\(base64.b64decode\('([^']+)'\)\)", input_bytes.decode(),
+        ).group(1)
+        request = json.loads(base64.b64decode(encoded))
+        observed.append(request)
+        assert "target_relative" in request["plugins"][0]
+        assert "archive" not in request["plugins"][0]
+        anchor.rename(tmp_path / "unavailable-host-source")
+        return 0, "__VENUE_PLUGINS__" + json.dumps(prepare(request)), ""
+
+    transport = AsyncMock()
+    transport.run.side_effect = receive
+    directories = await prepare_venue_plugins(
+        {"name": "synthetic", "repo": "registered-alias",
+         "related_plugins": ["sample@synthetic"], "plugin_plan": provider_plan,
+         "provider_command": ["provider"]},
+        transport, str(target), controller_cwd=str(controller),
+    )
+    binding.assert_awaited_once_with("registered-alias")
+    assert observed[0]["target_repository"] == "registered-alias"
+    assert directories == [str(target / ".ai" / "sample")]
+    assert (target / ".ai" / "sample" / "marker").read_text() == "target"
+
+
+@pytest.mark.asyncio
+async def test_related_merge_retains_provider_target_ownership(monkeypatch, tmp_path):
+    from agent_bridge.transport import PluginRef
+
+    identity = "network:github.com/example/app"
+    item = {"source": "sample@synthetic", "enable": True}
+    monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+    monkeypatch.setattr(
+        "agent_bridge.related_plugins.related_plugins_for_repo",
+        lambda *a, **kw: [PluginRef(item["source"])],
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport._run_provider",
+        AsyncMock(return_value=(0, json.dumps({
+            "plugins": [item], "target_repository": identity,
+        }).encode(), b"")),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.venue_plugins.build_plan",
+        lambda *a, **kw: {"plugins": [item], "marketplaces": {}},
+    )
+    observed = []
+    monkeypatch.setattr(
+        "agent_bridge.venue_plugins.build_prepare_script",
+        lambda plan, workspace: observed.append(plan) or "PREPARE",
+    )
+    transport = AsyncMock()
+    transport.run.return_value = (0, "__VENUE_PLUGINS__{}", "")
+    await prepare_venue_plugins(
+        {"name": "synthetic", "repo": "example/app", "plugin_plan": True,
+         "provider_command": ["provider"]},
+        transport, "/actual/callee", controller_cwd=str(tmp_path),
+    )
+    assert observed[0]["target_repository"] == identity
+
+
 @pytest.fixture
 def controller(monkeypatch, tmp_path):
     from agent_bridge.transport import SpawnTarget

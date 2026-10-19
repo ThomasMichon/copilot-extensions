@@ -40,11 +40,12 @@ checkout, the daemon's working directory, or an assumed repository anchor.
 
 | Launch owner | Settings destination | Automatically supplied plugin directories |
 |---|---|---|
-| Ordinary static-registry local ACP | Actual allocated local checkout, or the explicit existing checkout | Every effective prepared plugin |
+| Ordinary static-registry local ACP and ordinary local ACP acquisition | Actual allocated local checkout, or the explicit existing checkout | Every effective prepared plugin |
+| Native local CLI acquisition with preparation-capable owner | Actual allocated checkout; compiled receipt bound to the native session | None for identities already registered through settings; owned task waits for native registration |
 | Trusted Codespace ACP | Actual resolved checkout inside the Codespace | Every effective prepared plugin |
 | Trusted container ACP | Actual resolved checkout inside the container | Every effective prepared plugin |
 | Existing headed Codespace/container CLI owner | That same prepared venue checkout | None for identities already registered through settings |
-| Local acquisition, static SSH, privileged or receiver-local integration | Separate integration work; do not infer preparation from a successful connection | Not established by the ordinary static-local ACP adapter |
+| Static SSH, privileged or receiver-local integration | Separate integration work; do not infer preparation from a successful connection | Not established by the ordinary local adapters |
 | Restricted container | Automatic controller projection is refused | No automatic projection |
 
 The file is always `<execution-checkout>/.github/copilot/settings.local.json`.
@@ -243,6 +244,24 @@ The target's corresponding projection retains that source:
 Any supported revision or plugin-location fields in the effective input remain
 part of the declaration and acquisition requirements. Merely writing those
 fields into a receipt does not establish that the requested revision was fetched.
+
+For example, an explicit Git URL and non-default branch retain this same
+marketplace value in the target settings:
+
+```json
+{
+  "source": {
+    "source": "git",
+    "url": "https://example.org/shared-tools.git",
+    "ref": "release-tools"
+  }
+}
+```
+
+If that revision's catalog locates `helper` under `./packages/helper`, acquisition
+must use that catalog entry, not a same-named plugin at the repository root or
+the default branch's entry. The catalog's plugin-relative location is not an
+installation-cache path to substitute into `extraKnownMarketplaces`.
 
 Suppose scoped native preparation verifies the executing profile's payload at
 `/home/agent/.copilot/installed-plugins/shared-tools/helper`. ACP receives:

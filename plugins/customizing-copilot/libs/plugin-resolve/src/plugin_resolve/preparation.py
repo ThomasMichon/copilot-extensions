@@ -26,6 +26,7 @@ from .registration import (
 )
 from .settings import RepoPluginSettings, local_marketplace_path
 from .inventory import inventory_paths, installed_item
+from .target import bind_target
 
 _GIT_SELECTORS = {
     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX",
@@ -80,10 +81,17 @@ def _unpack(content: bytes, destination: Path) -> None:
                 pending.unlink(missing_ok=True)
 
 
-def _installed_metadata(home: Path, source: str, *, required: bool = True) -> tuple[dict, dict] | None:
+def _installed_metadata(
+    home: Path, source: str, *, required: bool = True, cache_root: Path | None = None,
+) -> tuple[dict, dict] | None:
     name, marketplace = identity(source)
-    cache = home / "cache" / "marketplaces"
-    cache.resolve().relative_to(home.resolve())
+    if cache_root is None:
+        cache_root = home / "cache"
+        cache_root.resolve().relative_to(home.resolve())
+    if cache_root.is_symlink() or (cache_root.exists() and getattr(cache_root.lstat(), "st_reparse_tag", 0)):
+        raise ValueError("Linked native cache root is not operation-owned")
+    cache = cache_root / "marketplaces"
+    cache.resolve().relative_to(cache_root.resolve())
     if cache.is_symlink() or (cache.exists() and getattr(cache.lstat(), "st_reparse_tag", 0)):
         raise ValueError("Linked native marketplace cache is not operation-owned")
     matches = []
@@ -163,15 +171,22 @@ def _install(source: str, definition: dict, home: Path, repo: Path,
             check_cancelled()
             atomic_json(receipt, {"source": source, "catalog": metadata, "entry": entry})
             return payload, metadata, entry
-    env = {**_environment(environment), "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(home / "cache"),
-           "COPILOT_AUTO_UPDATE": "false"}
     origin = definition.get("source", {})
     location = origin.get("repo") if origin.get("source") == "github" else origin.get("url")
     if not isinstance(location, str) or not location:
         raise ValueError(f"Unsupported remote marketplace installation source: {marketplace}")
+    if registered is None:
+        settings.setdefault("extraKnownMarketplaces", {})[marketplace] = definition
+        check_cancelled()
+        atomic_json(settings_path, settings)
     with tempfile.TemporaryDirectory(prefix="copilot-venue-install-") as neutral:
         if Path(neutral).resolve().is_relative_to(repo.resolve()):
             raise ValueError("Native installation commands require a neutral cwd outside the target checkout")
+        cache_root = Path(neutral) / "cache"
+        env = {
+            **_environment(environment), "COPILOT_HOME": str(home),
+            "COPILOT_CACHE_HOME": str(cache_root), "COPILOT_AUTO_UPDATE": "false",
+        }
         def command(arguments, operation):
             check_cancelled()
             result = subprocess.run(
@@ -183,16 +198,11 @@ def _install(source: str, definition: dict, home: Path, repo: Path,
                 raise _failure(operation, source, result)
             check_cancelled()
 
-        if registered is None:
-            command(["plugin", "marketplace", "add", location], "Required marketplace registration")
-            settings = strict_json(settings_path)
-            settings.setdefault("extraKnownMarketplaces", {})[marketplace] = definition
-            check_cancelled()
-            atomic_json(settings_path, settings)
-        elif _installed_metadata(home, source, required=False) is None:
+        if reusable and _installed_metadata(home, source, required=False) is None:
             command(["plugin", "marketplace", "update", marketplace], "Required marketplace refresh")
         if not reusable:
             command(["plugin", "install", source], "Required plugin installation")
+        metadata, entry = _installed_metadata(home, source, cache_root=cache_root)
     if _settings_document(settings_path).get("extraKnownMarketplaces", {}).get(marketplace) != definition:
         raise ValueError(f"Registered marketplace origin changed during installation: {marketplace}")
     manifest = strict_json(payload / "plugin.json") or strict_json(
@@ -200,7 +210,6 @@ def _install(source: str, definition: dict, home: Path, repo: Path,
     )
     if manifest.get("name") != name:
         raise RuntimeError(f"Installer did not produce the requested payload: {source}")
-    metadata, entry = _installed_metadata(home, source)
     catalog_metadata(source, manifest, metadata, entry)
     check_cancelled()
     atomic_json(receipt, {"source": source, "catalog": metadata, "entry": entry})
@@ -211,6 +220,7 @@ def prepare(
     request: dict, *, copilot_command: tuple[str, ...] = ("copilot",),
     diagnostics: list[dict] | None = None,
     environment: dict[str, str] | None = None, check_cancelled=lambda: None,
+    prepared_context: dict | None = None,
 ) -> dict[str, str]:
     check_cancelled()
     local_mode = request.get("local_mode", "copy")
@@ -237,7 +247,13 @@ def prepare(
         _name, marketplace = identity(item["source"])
         origin = native_settings.marketplaces.get(marketplace)
         selected = None
-        if origin is not None:
+        if "target_relative" in item and native_settings.enabled.get(item["source"]) is False:
+            continue
+        if origin is not None and not (
+            item.get("local_source")
+            and origin.get("source", {}).get("source") in REMOTE_MARKETPLACE_SOURCE_KINDS
+            and item["source"] not in native_settings.enabled
+        ):
             kind = origin.get("source", {}).get("source")
             if kind not in REMOTE_MARKETPLACE_SOURCE_KINDS | LOCAL_MARKETPLACE_SOURCE_KINDS:
                 raise ValueError(f"Unsupported target marketplace source: {marketplace}")
@@ -248,8 +264,12 @@ def prepare(
                     native_settings.enabled.get(item["source"], False) if local_mode == "reference"
                     else item["source"] in native_settings.enabled
                 ) or bool(item.get("resolve_on_target")),
-                local_mode=local_mode,
+                local_mode="reference" if kind in LOCAL_MARKETPLACE_SOURCE_KINDS else local_mode,
             )
+            if selected is not None and kind in LOCAL_MARKETPLACE_SOURCE_KINDS:
+                selected["native_local"] = True
+        if selected is None and "target_relative" in item:
+            item = bind_target(item, repo, request.get("target_repository"), environment)
         host_selection.append(selected if selected is not None else item)
     native_selection = []
     for source in native_settings.enabled_sources():
@@ -275,25 +295,36 @@ def prepare(
         native_selection.append(_plan_item(
             {"source": source, "enable": True}, (repo, owner_settings), declarations,
             allow_external=True, existing_root=staging,
-            local_mode=local_mode,
+            local_mode="reference" if marketplace in native_settings.marketplaces
+            and native_settings.marketplaces[marketplace].get("source", {}).get("source")
+            in LOCAL_MARKETPLACE_SOURCE_KINDS else local_mode,
         ))
+        if native_selection[-1].get("reference") is not None:
+            native_selection[-1]["native_local"] = True
     selected = [*host_selection, *native_selection]
-    if local_mode == "reference":
+    if selected:
         occupied = {}
         for item in selected:
             _name, marketplace = identity(item["source"])
             native_root = local_marketplace_path(marketplace, native_settings, repo_dir=repo)
             if native_root is not None:
                 occupied[marketplace] = native_root.resolve()
+            elif marketplace in native_settings.marketplaces:
+                occupied[marketplace] = json.dumps(native_settings.marketplaces[marketplace], sort_keys=True)
+            elif item.get("native_local") and item.get("reference"):
+                occupied.setdefault(marketplace, Path(item["reference"]["marketplace_root"]).resolve())
         projected = []
         for item in selected:
             reference = item.get("reference")
-            if reference is None:
+            local_source = item.get("local_source")
+            if (reference is None and local_source is None) or "local_path" in item:
                 projected.append(item)
                 continue
             logical = item["source"]
             name, marketplace = identity(logical)
-            root = Path(reference["marketplace_root"]).resolve()
+            root = Path(
+                reference["marketplace_root"] if reference else local_source["marketplace_root"],
+            ).resolve()
             previous_root = occupied.setdefault(marketplace, root)
             if root != previous_root:
                 digest = hashlib.sha256(f"{marketplace}\0{root}".encode()).hexdigest()[:16]
@@ -310,7 +341,8 @@ def prepare(
                         {"source": source, "enable": item["enable"]}, (repo, native_settings),
                         native_settings.marketplaces, allow_external=True, local_mode="reference",
                     )
-                else:
+                    item["native_local"] = True
+                elif reference is not None:
                     definition = reference["definition"]
                     item = {
                         **item, "source": source,
@@ -324,6 +356,8 @@ def prepare(
                             },
                         },
                     }
+                else:
+                    item = {**item, "source": source}
                 item["logical_source"] = logical
                 if native_settings.enabled.get(logical) is False:
                     item["enable"] = False
@@ -340,7 +374,7 @@ def prepare(
             continue
         _name, marketplace = identity(source)
         if inventory is not None and "marketplace" in item:
-            registered = _settings_document(inventory[0] / "settings.json").get(
+            registered = _settings_document(inventory[0] / "settings.json", jsonc_header=True).get(
                 "extraKnownMarketplaces", {},
             ).get(marketplace)
             payload = inventory[0] / "installed-plugins" / marketplace / _name
@@ -367,7 +401,7 @@ def prepare(
             continue
         reference = item.get("reference")
         if reference is not None:
-            if local_mode != "reference":
+            if local_mode != "reference" and not item.get("target_owned") and not item.get("native_local"):
                 raise ValueError("Filesystem references require explicit reference mode")
             payload = Path(reference["payload"]).resolve(strict=True)
             root = Path(reference["marketplace_root"]).resolve(strict=True)
@@ -434,6 +468,7 @@ def prepare(
         diagnostics=requirements, initial_owned_plugins=ownership.get("enabledPlugins", {}),
         check_cancelled=check_cancelled,
         inventory=inventory,
+        prepared_context=prepared_context,
     )
     if diagnostics is not None:
         diagnostics.extend(requirements)

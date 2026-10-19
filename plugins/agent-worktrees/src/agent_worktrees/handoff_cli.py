@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import time
 from contextlib import ExitStack
 
@@ -10,7 +11,7 @@ from . import config as cfg, output, profile_assignment, sessions, tracking, tra
 from . import launch_seed_state, embody_resume
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
-from . import bridge_acquisition_launch, native_restart_launch
+from . import bridge_acquisition_launch, bridge_seed_delivery, native_restart_launch
 from .launch_passthrough import passthrough_error as _passthrough_error
 
 
@@ -122,6 +123,10 @@ def add_parsers(sub) -> None:
     g.add_argument("--codename", default=None, help="Embody the worktree with this codename (pr-attribution-codenames Phase 2/3) -- resolved locally first, then via a cross-machine SSH scan. A codename found on a DIFFERENT machine fails closed with the machine name (remote launch is not supported); resolve/embody there directly instead.")
     g.add_argument("--anchor", action="store_true", help="Embody directly in the active project's ANCHOR checkout instead of any worktree -- no worktree is created or required. Matches the existing headless-dispatch behavior (a CodeSpace/container ACP session already runs in the anchor, never a worktree); this brings CLI-mode into line with that same contract. Session id is synthesized as `anchor-<repo_name>` (one live anchor session per repo, same one-live-session-per-target rule as an ordinary worktree). The anchor is not writable through this harness's own PR-gated flow (see AGENTS.md) -- use for reads/exploration or a repo whose anchor is otherwise safe to drive directly; an actual change still belongs in a worktree/PR.")
     p.add_argument("--seed", default=None, help="Seed prompt injected as the session's first interactive turn once Copilot is ready")
+    p.add_argument("--bridge-seed-operation", default=None,
+                   help="Defer this Bridge-owned seed operation to readiness-bound inbox delivery")
+    p.add_argument("--bridge-seed-pending", action="store_true",
+                   help="Preserve new-task conversation intent while withholding the Bridge seed")
     r = p.add_mutually_exclusive_group()
     bridge_acquisition_launch.add_arguments(p, r)
     native_restart_launch.add_arguments(p, r)
@@ -135,6 +140,12 @@ def add_parsers(sub) -> None:
     p.add_argument("--dry-run", action="store_true", help="Print the resolved plan without spawning anything")
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only; always on)")
     add_launch_passthrough_args(p)
+    p = sub.add_parser("bridge-seed-settle", help="Finish an existing Bridge-deferred creation-seed receipt")
+    p.add_argument("--worktree-id", required=True)
+
+
+def cmd_bridge_seed_settle(args):
+    return bridge_seed_delivery.settle(args)
 
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     """Live-cutover handoff: spawn/refocus a successor Copilot or retire a pane.
@@ -250,6 +261,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
     raw_id = getattr(args, "worktree_id", None)
     if getattr(args, "require_native_admission", False) and getattr(args, "bridge_acquisition", None) in {None, "fresh"}:
         return output._json_error("Native admission requires an exact existing conversation", exit_code=3)
+    if (
+        getattr(args, "require_plugin_preparation", False) or getattr(args, "bridge_plugin_request", None)
+    ) and not getattr(args, "bridge_acquisition", None):
+        return output._json_error("Plugin preparation requires typed Bridge acquisition", exit_code=3)
     if getattr(args, "bridge_acquisition", None) and (not raw_id or getattr(args, "seed", None) or getattr(args, "copilot_args", None)):
         return output._json_error("bridge acquisition requires an explicit worktree and no seed/passthrough args", exit_code=3)
     codename_arg = getattr(args, "codename", None)
@@ -289,6 +304,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return output._json_error(str(e))
 
     if anchor_mode:
+        if getattr(args, "bridge_seed_operation", None):
+            try:
+                args._bridge_seed_report = bridge_seed_delivery.claim(args)
+            except ValueError as exc:
+                return output._json_error(str(exc), exit_code=3)
         return _cmd_embody_anchor(args, config)
 
     # Resolve target worktree id + path (creating a fresh worktree for --new).
@@ -389,11 +409,21 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "would": "resume" if already else "create",
                 "resume_session": resume_target,
                 **({"native_admission_version": 1} if acquisition else {}),
+                **({"plugin_preparation_version": 1} if acquisition else {}),
                 "cmd": list(launch_cmd),
                 "seed_len": len(seed) if seed else 0,
             }
         )
         return 0
+
+    deferred = {}
+    if getattr(args, "bridge_seed_operation", None):
+        try:
+            deferred = bridge_seed_delivery.claim(args, cfg.tracking_dir() / f"{wt_id}.yaml")
+            if not seed and deferred["deferred_creation_seed"].get("seed"):
+                seed = deferred["deferred_creation_seed"]["seed"]["text"]
+        except (ValueError, OSError, TimeoutError) as exc:
+            return output._json_error(str(exc), exit_code=3)
 
     if already:
         # Legacy New fallback targets only the registered Copilot pane.
@@ -402,7 +432,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         copilot_pane = sessions.mux_copilot_pane(wt_id)
         claimed = None
         creation_receipt = {"seed": None}
-        if copilot_pane:
+        if copilot_pane and not deferred:
             try:
                 creation_receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
                 claimed = creation_receipt["seed"]["text"] if creation_receipt["seed"] else None
@@ -419,6 +449,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         output._json_output(
             {
                 "ok": True,
+                **deferred,
                 "worktree_id": wt_id,
                 "session": sessions.mux_session_name(wt_id),
                 "work_dir": work_dir,
@@ -461,6 +492,17 @@ def cmd_embody(args: argparse.Namespace) -> int:
     repo = _repo_for_record(config, record)
     if repo is None:
         return output._json_error(f"Repository not found for worktree: {record.repo}")
+    if getattr(args, "bridge_plugin_request", None):
+        env = bridge_acquisition_launch.preparation_environment(env, work_dir)
+    try:
+        prepared_context, check_plugin_cancelled = bridge_acquisition_launch.prepare_plugins(
+            args, wt_id, work_dir, env,
+        )
+    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        if getattr(args, "bridge_plugin_request", None):
+            output._json_output(bridge_acquisition_launch.preparation_failure(wt_id, work_dir, exc))
+            return 3
+        return output._json_error(str(exc), exit_code=3)
     admission = ExitStack()
     try:
         admission.enter_context(bridge_acquisition_launch.launch_fence(
@@ -502,6 +544,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             output._json_output(
                 {
                     "ok": True,
+                    **deferred,
                     "worktree_id": wt_id,
                     "session": sessions.mux_session_name(wt_id),
                     "work_dir": work_dir,
@@ -536,6 +579,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
         refusal = embody_resume.live_head_refusal(resume_target, wt_id)
         if refusal:
             return output._json_error(refusal, exit_code=3)
+        try:
+            check_plugin_cancelled()
+        except InterruptedError as exc:
+            output._json_output(bridge_acquisition_launch.preparation_failure(wt_id, work_dir, exc))
+            return 3
         result = sessions.mux_new_session(
             wt_id, work_dir, embody_resume.with_resume(launch_cmd, resume_target), env)
     finally:
@@ -550,7 +598,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     # Reserve only New intent at delivery; failed typing retains it.
     claimed_seed: str | None = None
     creation_receipt = {"seed": None}
-    if record is not None and not acquisition:
+    if record is not None and not acquisition and not deferred:
         try:
             creation_receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
         except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
@@ -567,7 +615,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     seed_result = (
         sessions.mux_seed_pane(new_pane, seed, session_name=result.get("session"),
                                ready_timeout=seed_ready_timeout)
-        if (new_pane and seed)
+        if (new_pane and seed and not deferred)
         else {}
     )
     settled = launch_seed_state.settle_creation(
@@ -586,6 +634,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
 
     response = {
         "ok": True,
+        **deferred,
+        **({"prepared_context": prepared_context} if prepared_context is not None else {}),
         "worktree_id": wt_id,
         "session": sessions.mux_session_name(wt_id),
         "work_dir": work_dir,
@@ -650,6 +700,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         return output._json_error(
             f"project {repo_name!r} has no resolved anchor path", exit_code=2,
         )
+    deferred = getattr(args, "_bridge_seed_report", {})
     wt_id = f"anchor-{repo_name}"
     seed = getattr(args, "seed", None)
 
@@ -669,6 +720,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
             "dry_run": True,
             "worktree_id": wt_id,
             "anchor": True,
+            **deferred,
             "session": sessions.mux_session_name(wt_id),
             "work_dir": work_dir,
             "would": "resume" if already else "create",
@@ -682,6 +734,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
             "ok": True,
             "worktree_id": wt_id,
             "anchor": True,
+            **deferred,
             "session": sessions.mux_session_name(wt_id),
             "work_dir": work_dir,
             "created": False,
@@ -710,6 +763,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
             "ok": True,
             "worktree_id": wt_id,
             "anchor": True,
+            **deferred,
             "session": sessions.mux_session_name(wt_id),
             "work_dir": work_dir,
             "created": False,
@@ -751,6 +805,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         "ok": True,
         "worktree_id": wt_id,
         "anchor": True,
+        **deferred,
         "session": sessions.mux_session_name(wt_id),
         "work_dir": work_dir,
         "created": True,

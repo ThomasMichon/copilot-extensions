@@ -11,20 +11,25 @@ from typing import Any
 from .acquisition_contract import AcquisitionRequest, AcquisitionResult
 from .client import BridgeClientError
 
-from .protocol import ACQUISITION_WORKSPACE_PROTOCOL_VERSION
+from .protocol import ACQUISITION_WORKSPACE_PROTOCOL_VERSION, PLUGIN_READINESS_PROTOCOL_VERSION
 
 ACQUISITION_PROTOCOL_VERSION = ACQUISITION_WORKSPACE_PROTOCOL_VERSION
 
 
 def acquire(client: Any, request: AcquisitionRequest) -> AcquisitionResult:
-    if not client.daemon_supports(ACQUISITION_PROTOCOL_VERSION):
+    required = PLUGIN_READINESS_PROTOCOL_VERSION if request.mode == "cli" or any(
+        getattr(request, field) is not None
+        for field in ("caller_worktree", "caller_owner_ref", "caller_session_id")
+    ) \
+        else ACQUISITION_PROTOCOL_VERSION
+    if not client.daemon_supports(required):
         raise BridgeClientError(426, {
             "code": "unsupported_acquisition_protocol",
             "message": "daemon does not support strict session acquisition",
             "effect": "not_started",
         })
     payload = request.model_dump(mode="json")
-    payload["protocol_version"] = ACQUISITION_PROTOCOL_VERSION
+    payload["protocol_version"] = required
     result = client._request("POST", "/api/v1/acquisitions", payload, request_timeout=max(240, request.verify_timeout + 240))
     return AcquisitionResult.model_validate(result)
 
@@ -34,7 +39,31 @@ def command(args: argparse.Namespace) -> None:
     text = sys.stdin.read() if args.request_file == "-" else Path(args.request_file).read_text(encoding="utf-8")
     request = AcquisitionRequest.model_validate_json(text)
     try:
-        result = acquire(core._get_client(), request)
+        client = core._get_client()
+        if client.daemon_supports(PLUGIN_READINESS_PROTOCOL_VERSION) and all(
+            getattr(request, field) is None
+            for field in ("caller_worktree", "caller_owner_ref", "caller_session_id")
+        ):
+            from urllib.parse import quote
+
+            try:
+                prior = client._request("GET", f"/api/v1/acquisitions/{quote(request.delivery_id, safe='')}")
+            except BridgeClientError as exc:
+                if not isinstance(exc.detail, dict) or exc.detail.get("code") != "acquisition_not_found":
+                    raise
+                context = {
+                    "caller_worktree": core._get_caller_id(),
+                    "caller_owner_ref": core._worktrees_get("owner-ref"),
+                    "caller_session_id": core._get_caller_session_id(),
+                }
+            else:
+                context = prior.get("caller_context", {})
+            request = request.model_copy(update={
+                field: value for field, value in context.items()
+                if field in {"caller_worktree", "caller_owner_ref", "caller_session_id"}
+                and getattr(request, field) is None and value is not None
+            })
+        result = acquire(client, request)
     except BridgeClientError as exc:
         print(json.dumps({"ok": False, "status": exc.status, "detail": exc.detail}))
         raise SystemExit(1) from exc
@@ -56,8 +85,8 @@ def register(subparsers: Any) -> None:
 
 def readiness_command(args: argparse.Namespace) -> None:
     from . import __main__ as core
-    supported = core._get_client().daemon_supports(ACQUISITION_PROTOCOL_VERSION)
-    print(json.dumps({"supported": supported, "required_protocol": ACQUISITION_PROTOCOL_VERSION}))
+    supported = core._get_client().daemon_supports(PLUGIN_READINESS_PROTOCOL_VERSION)
+    print(json.dumps({"supported": supported, "required_protocol": PLUGIN_READINESS_PROTOCOL_VERSION}))
     if not supported:
         raise SystemExit(1)
 

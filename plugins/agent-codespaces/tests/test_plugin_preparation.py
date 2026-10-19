@@ -14,6 +14,97 @@ import pytest
 from agent_codespaces.plugin_preparation import prepare_plugins
 
 
+@pytest.mark.parametrize("bare_source", [False, True])
+@pytest.mark.parametrize("nested_source", [False, True])
+def test_registered_target_absolute_source_rebinds_through_provider_plan(
+    monkeypatch, tmp_path, bare_source, nested_source,
+):
+    from agent_codespaces.plugin_preparation import plugin_plan
+    from plugin_resolve.preparation import prepare
+
+    anchor, target, controller = [tmp_path / name for name in ("anchor", "target", "controller")]
+    for root in (anchor, target):
+        subprocess.run(
+            ["git", "init", "--quiet", *(["--bare"] if root == anchor and bare_source else []), str(root)],
+            check=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        payload = root / ".ai" / "sample"
+        payload.mkdir(parents=True)
+        (payload / "plugin.json").write_text(json.dumps({"name": "sample", "version": "1.0.0"}))
+        (payload / "marker").write_text(root.name)
+        (payload.parent / "marketplace.json").write_text(json.dumps({
+            "name": "synthetic", "owner": {"name": "Synthetic"},
+            "plugins": [{"name": "sample", "source": "./sample"}],
+        }))
+    settings = controller / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "synthetic": {"source": {"source": "directory", "path": str(anchor / ".ai")}},
+        },
+    }))
+    observed = []
+
+    def registered(repository):
+        observed.append(repository)
+        return {
+            "target_repository": "network:github.com/example/app",
+            "target_source_roots": [anchor],
+        }
+
+    monkeypatch.setattr("agent_codespaces.plugin_preparation._registered_target_binding", registered)
+    if nested_source:
+        subprocess.run(
+            ["git", "init", "--quiet", str(anchor / ".ai" / "sample")],
+            check=True, timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        with pytest.raises(ValueError, match="nested repository"):
+            plugin_plan("example/app", SimpleNamespace(
+                source_paths=[controller], codespace_plugins=[{"source": "sample@synthetic"}],
+            ))
+        return
+    plan = plugin_plan("example/app", SimpleNamespace(
+        source_paths=[controller], codespace_plugins=[{"source": "sample@synthetic"}],
+    ))
+    assert observed == ["example/app"]
+    assert plan["plugins"][0]["target_relative"]["marketplace_relative"] == ".ai"
+    assert "archive" not in plan["plugins"][0]
+    anchor.rename(tmp_path / "unavailable-host-source")
+    prepared = prepare({"repo": str(target), **plan})
+    assert prepared == {"sample@synthetic": str(target / ".ai" / "sample")}
+    assert Path(prepared["sample@synthetic"], "marker").read_text() == "target"
+    generated = json.loads((target / ".github" / "copilot" / "settings.local.json").read_text())
+    assert generated["extraKnownMarketplaces"]["synthetic"]["source"]["path"] == "./.ai"
+
+
+def test_target_binding_reads_only_complete_explicit_registry_records(monkeypatch, tmp_path):
+    from agent_codespaces.plugin_preparation import _registered_target_binding
+    from unittest.mock import Mock
+
+    (tmp_path / "registered").mkdir()
+    replies = [
+        {"inventory_authority": "complete", "repos": [
+            {"name": "app-alias", "remote": "git@github.com:example/app.git"},
+            {"name": "app", "remote": "https://github.com/another/app.git"},
+        ]},
+        {"registration": "ready", "name": "app-alias",
+         "remote": "git@github.com:example/app.git", "path": str(tmp_path / "registered")},
+    ]
+    run = Mock(side_effect=[
+        subprocess.CompletedProcess([], 0, json.dumps(reply), "") for reply in replies
+    ])
+    monkeypatch.setattr("agent_codespaces.coordination._run", run)
+    monkeypatch.setitem(sys.modules, "agent_worktrees", None)
+    binding = _registered_target_binding("example/app")
+    assert binding["target_source_roots"] == [tmp_path / "registered"]
+    assert binding["target_repository"] == "network:github.com/example/app"
+    assert run.call_args_list[0].args == (["repos", "list", "--strict", "--json"],)
+    assert run.call_args_list[1].args == (
+        ["repos", "find", "app-alias", "--registered-only", "--json"],
+    )
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("installed", [False, True])
 def test_manifest_enablement_and_worktree_payload_precedence_are_independent(
@@ -105,7 +196,9 @@ async def test_provider_selection_registers_before_consumer(tmp_path):
             child = subprocess.run(
                 [sys.executable, "-c",
                  "import json,sys;from plugin_resolve.preparation import prepare;"
-                 "print('__VENUE_PLUGINS__'+json.dumps(prepare(json.loads(sys.argv[1]))))",
+                 "c={};p=prepare(json.loads(sys.argv[1]),prepared_context=c);"
+                 "print('__VENUE_PLUGINS__'+json.dumps(p));"
+                 "print('__VENUE_PLUGIN_CONTEXT__'+json.dumps({'version':1,**c}))",
                  request],
                 env={**os.environ, "PYTHONPATH": str(shared)},
                 capture_output=True, text=True, timeout=timeout,
@@ -113,11 +206,16 @@ async def test_provider_selection_registers_before_consumer(tmp_path):
             )
             return SimpleNamespace(exit_code=child.returncode, stdout=child.stdout, stderr=child.stderr)
 
-    directories = await prepare_plugins(Transport(), "synthetic", "owner/project", config, str(target))
+    context = {}
+    directories = await prepare_plugins(
+        Transport(), "synthetic", "owner/project", config, str(target), prepared_context=context,
+    )
     assert len(directories) == 1
     assert (Path(directories[0]) / "plugin.json").is_file()
     settings = json.loads((target / ".github" / "copilot" / "settings.local.json").read_text())
     assert settings["enabledPlugins"]["sample@synthetic"] is True
+    assert context["plugin_context"]["cwd"] == str(target)
+    assert context["plugin_context"]["logical_payloads"] == {"sample@synthetic": directories[0]}
 
 
 @pytest.mark.asyncio
@@ -131,7 +229,8 @@ async def test_explicit_worktree_uses_the_native_resolve_contract_before_prepare
         SimpleNamespace(exit_code=0, stdout=json.dumps({
             "launch": {"action": "exec", "worktree_id": "selected", "work_dir": "/workspaces/selected"},
         }), stderr=""),
-        SimpleNamespace(exit_code=0, stdout="__VENUE_PLUGINS__{}", stderr=""),
+        SimpleNamespace(exit_code=0, stdout='__VENUE_PLUGINS__{}\n__VENUE_PLUGIN_CONTEXT__'
+                        '{"version":1,"cwd":"/workspaces/selected","plugins":[],"logical_payloads":{}}', stderr=""),
     ]))
     context = {}
     await prepare_plugins(
@@ -148,7 +247,8 @@ async def test_explicit_worktree_uses_the_native_resolve_contract_before_prepare
     )[1]
     assert json.loads(base64.b64decode(encoded))["repo"] == "/workspaces/selected"
     assert "worktree_id" not in json.loads(base64.b64decode(encoded))
-    assert context == {"workspace": "/workspaces/selected"}
+    assert context["workspace"] == "/workspaces/selected"
+    assert context["plugin_context"]["cwd"] == "/workspaces/selected"
 
 
 @pytest.mark.parametrize("login_project", ["neutral", "wrong-project"])

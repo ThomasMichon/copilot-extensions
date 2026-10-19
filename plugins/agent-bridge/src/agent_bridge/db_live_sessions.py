@@ -950,10 +950,13 @@ class _LiveSessionsMixin:
         )
         return cur.rowcount == 1
 
-    def live_control_state(self, session_id: str, control_id: int) -> dict[str, Any] | None:
+    def live_control_state(
+        self, session_id: str, control_id: int, *, include_body: bool = False,
+    ) -> dict[str, Any] | None:
         """A control's ``claimed_at`` and ``outcome`` (``None`` if unknown)."""
+        columns = "claimed_at, outcome, kind, body" if include_body else "claimed_at, outcome"
         rows = self.execute_read(
-            "SELECT claimed_at, outcome FROM live_messages "
+            f"SELECT {columns} FROM live_messages "
             f"WHERE session_id={_CANON} AND id=? AND kind LIKE 'control:%'",
             (session_id, session_id, control_id),
         )

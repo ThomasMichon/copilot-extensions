@@ -46,7 +46,6 @@ from venue_copilot import (
     pending_seed_report,
     read_seed,
     reserve_with_retry,
-    seed_delivery,
     trust_folder_command,
     with_new_session,
 )
@@ -571,6 +570,27 @@ def cmd_detach(
     _progress("hold", f"Owner session tenant {plan['tenant']} (bridge port {daemon_port})")
     held = owner.get_hold(args.name)
     prior_session = dict((held.sessions.get(plan["tenant"]) if held else None) or {}) or None
+    if prior_session and prior_session.get("pending_delivery"):
+        from venue_copilot.refs import reconcile_owned_delivery, settle_deferred_seed
+        pending = prior_session["pending_delivery"]
+        result = reconcile_owned_delivery(pending)
+        if result.status == "admitted" and settle_deferred_seed(
+            lambda command, stdin: _remote(args.name, command, timeout=60, input_bytes=stdin),
+            plan["identity"], pending["envelope"]["plugin_context"]["cwd"],
+            pending.get("creation_receipt"),
+        ):
+            owner.record_pending_delivery(args.name, plan["tenant"], None)
+            release_cli_mode(plan["scope_id"], reservation_id=pending.get("reservation_id"))
+            print(json.dumps({"ok": True, **plan, "session_id": result.session_id,
+                              "recovered": True, "seed_delivery": "bridge", "seed_admitted": True,
+                              "message_id": result.message_id}, indent=2))
+            return 0
+        pending.update(result.recovery())
+        owner.record_pending_delivery(args.name, plan["tenant"], pending)
+        print(json.dumps({"ok": False, **plan, "pending": True, "session_id": pending["session_id"],
+                          "pending_delivery": result.recovery(),
+                          "error": "owned delivery remains pending; original native session and ownership retained"}, indent=2))
+        return _BUSY_EXIT
     prior_forwards = dict(getattr(held, "reverse_forwards", None) or {})
     prior_local = dict(getattr(held, "local_forwards", None) or {})
     prior_assigned_local = dict(getattr(held, "assigned_local_forwards", None) or {})
@@ -581,6 +601,7 @@ def cmd_detach(
         **({"local_forwards": local_forwards} if local_forwards else {}),
     )
     ok = False
+    pending_delivery = False
     created = False
     reservation: dict[str, Any] | None = None
     try:
@@ -618,18 +639,21 @@ def cmd_detach(
             seed = f"{seed.rstrip()}\n\n{refs_note_text}" if seed else refs_note_text
 
         captured: dict[str, Any] = {}
-        typed_seed, seed_prefix = seed_delivery(seed, plan["scope_id"])
         seed_ready_timeout = max(args.register_timeout, 180.0)
 
         def builder(plugin_dirs: list[str]) -> str:
+            from venue_copilot.refs import require_cli_context
+            context = require_cli_context(captured["prepared_context"]["plugin_context"])
+            captured["plugin_context"] = context
             # CLI discovers the registered identities through repository settings.
             # Repeating them as external directories loads duplicate plugins.
             extra = copilot_args
             captured["plugin_dirs"] = list(plugin_dirs)
-            command = seed_prefix + build_copilot_remote_command(
-                plan["identity"], anchor=plan["anchor"], driver=args.driver, seed=typed_seed,
+            command = build_copilot_remote_command(
+                plan["identity"], anchor=plan["anchor"], driver=args.driver, seed=None,
                 seed_ready_timeout=seed_ready_timeout,
                 ensure_mux=args.ensure_mux, detach=True, bridge_scope_id=plan["scope_id"],
+                bridge_seed_operation=reservation["reservation_id"], bridge_seed_pending=bool(seed),
                 copilot_args=extra, login_shell=False,
             )
             # Run from the product checkout, exactly like headless dispatch's
@@ -637,7 +661,7 @@ def cmd_detach(
             # (and the anchor) from the working directory. A CodeSpace's
             # checkout is often not an adopted agent-worktrees project yet;
             # adopt it once, as the anchor-only (base-repo) project it is.
-            workspace = plan.get("workspace_folder")
+            workspace = context["cwd"]
             if not workspace:
                 return command
             prefix = (
@@ -659,12 +683,14 @@ def cmd_detach(
         _progress("launch", "venue prep + `agent-worktrees embody` (can take minutes on first use)")
         # `embody` is idempotent (it rejoins a running session and never
         # re-seeds it), so a launch whose *transport* failed is retried.
-        uncertain = False  # an earlier attempt may have run (and seeded) unseen
+        uncertain = False
         for attempt in range(_LAUNCH_ATTEMPTS):
             captured.pop("result", None)
+            captured["prepared_context"] = {}
             try:
                 ssh_args = _ssh_namespace(args, "agent-worktrees embody", timeout=launch_timeout)
                 ssh_args.plugin_worktree_id = getattr(args, "worktree_id", None)
+                ssh_args.plugin_prepared_context = captured["prepared_context"]
                 rc = ssh_session(
                     ssh_args,
                     remote_cmd_builder=builder, result_sink=sink, settle_on_disconnect=False,
@@ -672,7 +698,7 @@ def cmd_detach(
             except ContextRefused as exc:
                 print(f"[BLOCKED] CodeSpace installation context refused: {exc}", file=sys.stderr)
                 return _COORDINATION_EXIT
-            except (RuntimeError, OSError) as exc:
+            except (RuntimeError, ValueError, KeyError, OSError) as exc:
                 if attempt + 1 < _LAUNCH_ATTEMPTS and _transient(str(exc)):
                     uncertain = True
                     _progress("launch-retry", f"transient connection failure: {str(exc)[:200]}")
@@ -696,6 +722,7 @@ def cmd_detach(
         stdout = getattr(result, "stdout", "") or ""
         stderr = getattr(result, "stderr", "") or ""
         embodied = _last_json(stdout)
+        created = bool(embodied.get("created"))
         if "agent-worktrees: command not found" in stderr + stdout:
             return _fail(
                 "agent-worktrees is not installed on the CodeSpace and could not be "
@@ -729,9 +756,16 @@ def cmd_detach(
             if refused is not None:  # ok stays False: cleanup stops the session it really started
                 print(json.dumps({"ok": False, "error": "launch refused by the host launch policy", **plan}, indent=2))
                 return refused
-        from venue_copilot import seed_outcome
-
-        seed_delivery_status, seed_needs_bridge = seed_outcome(embodied, created=created, seed=seed)
+        from venue_copilot.refs import deferred_seed
+        try:
+            if not created and not uncertain and not (embodied.get("deferred_creation_seed") or {}).get("seed"):
+                seed = refs_note_text
+            seed, delivery_operation, creation_receipt = deferred_seed(
+                embodied, seed, reservation["reservation_id"],
+            )
+        except ValueError as exc:
+            return _fail(str(exc), plan)
+        seed_delivery_status, seed_needs_bridge = None, bool(seed)
         if seed_delivery_status == "failed":
             _progress("seed-draft", f"typed seed was not submitted ({embodied.get('seed_reason')}); "
                       "not resending: the draft may remain in Copilot's input")
@@ -745,8 +779,7 @@ def cmd_detach(
         # blindly nor report it seeded. Without a host seed, a worktree launch's
         # lost attempt may have delivered the worktree's pending seed -- unless
         # this retry reports a concrete outcome for it, which then stands.
-        seed_unconfirmed = bool(uncertain and not created and (seed or (
-            not plan["anchor"] and not pending_seed_report(embodied, seed=None))))
+        seed_unconfirmed = False  # Every attempt used the explicit never-TTY ownership contract.
         _progress("register", "waiting for the session to register with the host bridge")
         session_id = _await_claim(plan["scope_id"], reservation["reservation_id"], args.register_timeout)
         if not session_id:
@@ -758,7 +791,7 @@ def cmd_detach(
             )
         # A resume by id may claim through a placeholder whose process then exits:
         # renew the claim (and venue) for the resumed id. Bounded: ~2 heartbeats.
-        operation = reservation["reservation_id"]
+        operation = delivery_operation
         session_id, reservation = settle_resumed_claim(
             plan["scope_id"], reservation, plan["venue"], expected=resume_target(copilot_args),
             claimed=session_id, timeout=min(args.register_timeout, 75.0), ttl_seconds=_RESERVATION_TTL,
@@ -774,19 +807,65 @@ def cmd_detach(
         # with live-session aliases carries a bridge message (seed or note) across it.
         # A rejoin's own flags (or none) say nothing about how the running
         # session was launched -- it may still be resuming -- so it always does.
-        from venue_copilot import LIVE_SESSION_ALIAS_PROTOCOL, may_switch_session_id
+        from venue_copilot import LIVE_SESSION_ALIAS_PROTOCOL
 
-        alias_floor = ({"min_daemon_protocol": LIVE_SESSION_ALIAS_PROTOCOL}
-                       if resuming or may_switch_session_id(copilot_args) else {})
+        alias_floor = {"min_daemon_protocol": max(41, LIVE_SESSION_ALIAS_PROTOCOL)}
         if seed_needs_bridge:
-            from venue_copilot.refs import deliver_note
+            from venue_copilot.refs import deliver_note, owned_result
+            pending = owned_result(
+                False, session_id=session_id, operation=operation,
+                note=seed, context=captured["plugin_context"],
+            ).recovery()
+            ledger = {
+                **pending, "envelope": {"prompt": seed, "plugin_context": captured["plugin_context"]},
+                "creation_receipt": creation_receipt, "reservation_id": reservation.get("reservation_id"),
+                "scope_id": plan["scope_id"],
+            }
+            owner.record_pending_delivery(args.name, plan["tenant"], ledger)
+            pending_delivery = True
 
             reason = embodied.get("seed_reason")
             detail = f"seed was never typed ({reason}); delivering over bridge" if reason else (
                 "seed was never typed; delivering over bridge"
             )
             _progress("seed-bridge", detail)
-            seed_delivery_status = "bridge" if deliver_note(session_id, seed, operation=operation, **alias_floor) else "failed"
+            delivery_result = deliver_note(
+                session_id, seed, operation=operation, prepared_context=captured["plugin_context"],
+                **alias_floor,
+            )
+            delivery_result = owned_result(
+                delivery_result, session_id=session_id, operation=operation,
+                note=seed, context=captured["plugin_context"],
+            )
+            ledger.update(delivery_result.recovery())
+            owner.record_pending_delivery(args.name, plan["tenant"], ledger)
+            if delivery_result.status == "unknown":
+                print(json.dumps({
+                    "ok": False, **plan, "pending": True, "session_id": session_id,
+                    "pending_delivery": delivery_result.recovery(),
+                    "recovery_handle": f"{plan['tenant']}:{delivery_result.idempotency_key}",
+                    "error": "owned seed admission is unknown; native session and ownership retained",
+                }, indent=2))
+                return _BUSY_EXIT
+            if delivery_result.status == "refused":
+                owner.record_pending_delivery(args.name, plan["tenant"], None)
+                pending_delivery = False
+                return _fail("owned seed was not admitted after plugin readiness", plan)
+            seed_delivery_status = "bridge"
+            ok = True  # Admission owns the running task even if receipt settlement loses its reply.
+            from venue_copilot.refs import settle_deferred_seed
+            if not settle_deferred_seed(
+                lambda command, stdin: _remote(args.name, command, timeout=60, input_bytes=stdin),
+                plan["identity"], captured["plugin_context"]["cwd"], creation_receipt,
+            ):
+                print(json.dumps({
+                    "ok": False, **plan, "pending": True, "session_id": session_id,
+                    "seed_admitted": True, "pending_delivery": delivery_result.recovery(),
+                    "error": "owned seed admitted; creation receipt settlement unconfirmed",
+                }, indent=2))
+                return _BUSY_EXIT
+            owner.record_pending_delivery(args.name, plan["tenant"], None)
+            pending_delivery = False
         refs_delivered = None
         if refs_note_text:
             # A typed new session got the note in its seed; a running one (or a
@@ -831,15 +910,15 @@ def cmd_detach(
             _local_forwards_ready(args.name, reported_local, local_forwards, prior_assigned_local)
             if reported_local else {}
         )
-        pending_report = {} if created and seed else pending_seed_report(embodied, seed=seed)
+        pending_report = {} if seed else pending_seed_report(embodied, seed=seed)
         print(json.dumps({
             "ok": True, **plan, "session_id": session_id, "created": created,
             **({"ref_files": refs_note_text.splitlines()[1:], "refs_delivered": refs_delivered}
                if refs_note_text else {}),
             "resumed": not created,
-            "seeded": bool(created and seed and seed_delivery_status in {"typed", "bridge"})
+            "seeded": bool((created or uncertain or creation_receipt) and seed and seed_delivery_status == "bridge")
             or pending_report.get("seed_delivery") == "typed",
-            **({"seed_delivery": seed_delivery_status} if created and seed else pending_report),
+            **({"seed_delivery": seed_delivery_status} if seed else pending_report),
             **({"seed_delivery": "unconfirmed",
                 "warning": "a lost earlier launch attempt may have started this session; "
                            "its seed can't be confirmed -- check `agent-bridge result "
@@ -860,9 +939,9 @@ def cmd_detach(
         }, indent=2))
         return 0
     finally:
-        if reservation:
+        if reservation and not pending_delivery:
             release_cli_mode(plan["scope_id"], reservation_id=reservation.get("reservation_id"))
-        if not ok:
+        if not ok and not pending_delivery:
             if created:
                 _progress("cleanup", f"stopping the unrepresented session {plan['mux_session']}")
                 _remote(args.name, f"tmux kill-session -t {shlex.quote('=' + plan['mux_session'])}")

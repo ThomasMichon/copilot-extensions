@@ -9,6 +9,10 @@ import io
 import json
 import shlex
 import types
+import dataclasses
+import sqlite3
+import subprocess
+from venue_copilot.refs import deliver_note as _real_deliver_note
 
 import pytest
 import venue_copilot
@@ -37,7 +41,7 @@ def seams(monkeypatch):
         holds=[], releases=[], reserve=[], release_res=[], remote=[], ssh=[], deregistered=[], ref_payloads=[],
         live_rows={"anchor-example-web@cs-1": {"session_id": "sid-42", "venue": {"target": "cs-1"}},
                    "sid-42": {"session_id": "sid-42", "venue": {"target": "cs-1"}}},
-        claim_rows=[{"reservation_id": "r1", "claimed_by_session_id": "sid-42"}],
+        claim_rows=[{"reservation_id": "r1", "claimed_by_session_id": "sid-42"}], messages=[], pending={},
     )
     monkeypatch.setattr(
         cs_config, "load_merged_config",
@@ -67,6 +71,12 @@ def seams(monkeypatch):
     monkeypatch.setattr(owner, "hold", lambda *a, **k: calls.holds.append((a, k)))
     monkeypatch.setattr(owner, "release", lambda *a, **k: calls.releases.append((a, k)))
     monkeypatch.setattr(owner, "get_hold", lambda *a, **k: None)
+    def pending(name, tenant, value):
+        if value is None:
+            calls.pending.pop(tenant, None)
+        else:
+            calls.pending[tenant] = value
+    monkeypatch.setattr(owner, "record_pending_delivery", pending)
 
     async def _fwd(name, timeout=0):
         return True
@@ -102,21 +112,74 @@ def seams(monkeypatch):
     )
     monkeypatch.setattr(venue_copilot, "live_session_for",
                         lambda handle, strict=False: calls.live_rows.get(handle, {}))
+    monkeypatch.setattr("venue_copilot.refs.deliver_note",
+                        lambda sid, note, **kwargs: calls.messages.append((sid, note, kwargs)) or True)
     return calls
 
 
 def _ssh(calls, *, stdout="", stderr="", code=0, rc=None):
     def fake(ns, *, remote_cmd_builder=None, result_sink=None, settle_on_disconnect=True):
+        if hasattr(ns, "plugin_prepared_context"):
+            ns.plugin_prepared_context.update({
+                "workspace": "/workspaces/example-web", "plugin_context": {
+                    "version": 1, "cwd": "/workspaces/example-web",
+                    "plugins": [{"projected_source": "example-agent@local"}],
+                    "logical_payloads": {"example-agent@local": "/stage/example-agent"},
+                },
+            })
         remote = remote_cmd_builder(["/stage/example-agent"]) if remote_cmd_builder else ns.remote_cmd
         calls.ssh.append({"ns": ns, "remote": remote, "settle": settle_on_disconnect})
-        result = types.SimpleNamespace(exit_code=code, stdout=stdout, stderr=stderr)
+        payload = detach._last_json(stdout)
+        if payload.get("ok"):
+            payload.setdefault("bridge_seed_deferred", True)
+            payload.setdefault("bridge_seed_operation", "r1")
+            stdout_result = json.dumps(payload)
+        else:
+            stdout_result = stdout
+        result = types.SimpleNamespace(exit_code=code, stdout=stdout_result, stderr=stderr)
         out = result_sink(result) if result_sink else code
         return out if rc is None else rc
     return fake
 
 
+def _prepared_namespace(ns):
+    ns.plugin_prepared_context.update({
+        "workspace": "/workspaces/example-web", "plugin_context": {
+            "version": 1, "cwd": "/workspaces/example-web",
+            "plugins": [{"projected_source": "example-agent@local"}],
+            "logical_payloads": {"example-agent@local": "/stage/example-agent"},
+        },
+    })
+
+
+def _refused_delivery(sid, note, kwargs):
+    from venue_copilot.refs import owned_result
+    return dataclasses.replace(owned_result(
+        False, session_id=sid, operation=kwargs["operation"],
+        note=note, context=kwargs["prepared_context"],
+    ), status="refused")
+
+
+def test_pending_delivery_roundtrips_in_existing_owner_hold_and_survives_heartbeat(monkeypatch, tmp_path):
+    import contextlib
+    monkeypatch.setattr(owner, "OWNER_FILE", tmp_path / "owner.json")
+    monkeypatch.setattr(owner, "ensure_runtime_dir", lambda: None)
+    monkeypatch.setattr(owner, "_owner_lock", contextlib.nullcontext)
+    owner.hold("synthetic", "cli:scope", mux_session="wt-scope", confirmed=True)
+    pending = {"version": 1, "status": "unknown", "operation": "operation", "session_id": "native"}
+    owner.record_pending_delivery("synthetic", "cli:scope", pending)
+    owner.heartbeat("synthetic", "cli:scope")
+    owner.hold("synthetic", "cli:scope", mux_session="wt-scope", confirmed=True)
+    assert owner.get_hold("synthetic").sessions["cli:scope"]["pending_delivery"] == pending
+    with pytest.raises(RuntimeError, match="must be reconciled"):
+        owner.hold("synthetic", "cli:scope", mux_session="wt-new", fresh=True)
+    owner.record_pending_delivery("synthetic", "cli:scope", None)
+    assert "pending_delivery" not in owner.get_hold("synthetic").sessions["cli:scope"]
+
+
 _CREATED = json.dumps({
-    "ok": True, "created": True, "resumed": False, "seed_submitted": True,
+    "ok": True, "created": True, "resumed": False, "seed_submitted": False,
+    "bridge_seed_deferred": True, "bridge_seed_operation": "r1",
     "session": "wt-anchor-example-web",
 }, indent=2)
 
@@ -187,8 +250,11 @@ def test_detach_success_reports_exact_session_and_keeps_forwards(seams, capsys):
     assert argv[argv.index("--bridge-scope-id") + 1] == "anchor-example-web@cs-1"
     assert "--copilot-arg=--plugin-dir=/stage/example-agent" not in argv
     assert "--copilot-arg=--no-ask-user" in argv
-    assert argv[argv.index("--seed") + 1] == "do the task"
-    assert argv[argv.index("--seed-ready-timeout") + 1] == "180.0"
+    assert "--seed" not in argv and "--seed-ready-timeout" not in argv
+    assert argv[argv.index("--bridge-seed-operation") + 1] == "r1"
+    assert "--bridge-seed-pending" in argv
+    assert seams.messages[0][1] == "do the task"
+    assert seams.messages[0][2]["prepared_context"]["plugins"] == [{"projected_source": "example-agent@local"}]
     assert launch["ns"].auth_cache_warmup is True and launch["ns"].no_provision is False
 
 
@@ -219,6 +285,7 @@ def test_detach_rejoin_of_running_session_does_not_reseed(seams, capsys):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["resumed"] is True and out["seeded"] is False
+    assert seams.messages == []
     assert seams.remote == []  # nothing killed
 
 
@@ -251,10 +318,9 @@ def test_a_typed_but_unsubmitted_seed_is_not_resent_over_bridge(seams, monkeypat
     drafted = json.dumps({"ok": True, "created": True, "seeded": True, "seed_submitted": False,
                           "seed_reason": "enter-failed"})
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=drafted))
-    assert rc == 0
+    assert rc == 1
     out = json.loads(capsys.readouterr().out)
-    assert out["seed_delivery"] == "failed" and out["seeded"] is False
-    assert out["session_id"] == "sid-42" and seams.releases == []
+    assert "never typed" in out["error"]
     assert sent == []
 
 
@@ -269,16 +335,19 @@ def test_a_resumed_seed_needs_a_daemon_that_follows_renames(
     sent = []
     monkeypatch.setattr(
         venue_refs, "deliver_note",
-        lambda sid, note, **kw: sent.append({k: v for k, v in kw.items() if k != "operation"}) or daemon_has_aliases,
+        lambda sid, note, **kw: sent.append({k: v for k, v in kw.items() if k != "operation"})
+        or (True if daemon_has_aliases else _refused_delivery(sid, note, kw)),
     )
     unready = json.dumps({"ok": True, "created": True, "seed_submitted": False})
     rc = detach.cmd_detach(_args(copilot_args=["--resume=abc"]), ssh_session=_ssh(seams, stdout=unready))
-    assert rc == 0
-    assert sent == [{"min_daemon_protocol": 21}]
+    assert rc == (0 if daemon_has_aliases else 1)
+    assert len(sent) == 1 and sent[0]["min_daemon_protocol"] == 41
+    assert sent[0]["prepared_context"]["version"] == 1
     out = json.loads(capsys.readouterr().out)
-    assert out["seed_delivery"] == ("bridge" if daemon_has_aliases else "failed")
-    assert out["seeded"] is daemon_has_aliases
-    assert out["session_id"] == "sid-42" and seams.releases == []  # the session is kept
+    if daemon_has_aliases:
+        assert out["seed_delivery"] == "bridge" and out["seeded"] is True
+    else:
+        assert "not admitted" in out["error"]
 
 
 def test_a_resume_whose_placeholder_exited_and_resumed_id_never_registered_fails(seams, capsys):
@@ -286,7 +355,7 @@ def test_a_resume_whose_placeholder_exited_and_resumed_id_never_registered_fails
     (seen live: a bridge that refused the resumed id's new process): there is no
     session, so the launch fails rather than report the gone placeholder."""
     seams.live_rows = {}
-    resumed = json.dumps({"ok": True, "created": True, "seed_submitted": True})
+    resumed = json.dumps({"ok": True, "created": True, "seed_submitted": False})
     rc = detach.cmd_detach(_args(copilot_args=["--resume=sid-9"], seed=None),
                            ssh_session=_ssh(seams, stdout=resumed))
     assert rc != 0
@@ -301,7 +370,7 @@ def test_a_resume_from_a_new_process_keeps_its_venue_and_reports_the_resumed_id(
     seams.live_rows = {"sid-9": {"session_id": "sid-9"}}  # sid-42 (the placeholder) is gone
     seams.claim_rows += [{"reservation_id": "r1", "claimed_by_session_id": "sid-42"},  # still the stale claim
                          {"reservation_id": "r1", "claimed_by_session_id": "sid-9"}]  # the renewal, claimed
-    resumed = json.dumps({"ok": True, "created": True, "seed_submitted": True})
+    resumed = json.dumps({"ok": True, "created": True, "seed_submitted": False})
     rc = detach.cmd_detach(_args(copilot_args=["--resume=sid-9"], seed=None),
                            ssh_session=_ssh(seams, stdout=resumed))
     assert rc == 0
@@ -439,12 +508,10 @@ def test_seed_file_from_stdin(seams, monkeypatch, capsys):
     assert rc == 0
     remote = seams.ssh[0]["remote"]
     staged, embody = remote.split(" && agent-worktrees embody", 1)
-    # The multi-line task is staged verbatim to a file; a one-line pointer is typed.
-    assert "printf %s " in staged and "/.agent-bridge/seeds/" in staged
-    assert shlex.split(staged.split("printf %s ", 1)[1].split(" > ", 1)[0]) == ["line 1\nline \"2\"\n"]
+    assert "/.agent-bridge/seeds/" not in staged and "printf %s " not in staged
     argv = shlex.split("agent-worktrees embody" + embody)
-    pointer = argv[argv.index("--seed") + 1]
-    assert "\n" not in pointer and pointer.startswith("Read the task file ~/.agent-bridge/seeds/")
+    assert "--seed" not in argv
+    assert seams.messages[0][1] == "line 1\nline \"2\"\n"
 
 
 def test_oversized_seed_is_refused(seams, capsys):
@@ -576,7 +643,7 @@ def test_ttl_seconds_is_usage_error_with_detach_or_stop(monkeypatch, capsys):
 
 
 def test_venue_reported_mux_name_wins_for_probe_and_handle(seams, capsys):
-    other = json.dumps({"ok": True, "created": True, "seed_submitted": True,
+    other = json.dumps({"ok": True, "created": True, "seed_submitted": False,
                         "session": "wt-anchor-renamed"})
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=other))
     assert rc == 0
@@ -596,13 +663,13 @@ def test_stop_targets_the_recorded_mux_session(seams, monkeypatch, capsys):
     assert "=wt-anchor-renamed" in seams.ssh[0]["remote"]
 
 
-def test_short_single_line_seed_is_typed_directly():
-    typed, prefix = detach.seed_delivery("  fix the flaky test  ", "x@cs-1")
+def test_short_attached_single_line_seed_keeps_legacy_typing_helper():
+    typed, prefix = venue_copilot.seed_delivery("  fix the flaky test  ", "x@cs-1")
     assert typed == "fix the flaky test" and prefix == ""
 
 
-def test_long_single_line_seed_is_staged():
-    typed, prefix = detach.seed_delivery("y" * 500, "x@cs-1")
+def test_long_attached_single_line_seed_keeps_legacy_staging_helper():
+    typed, prefix = venue_copilot.seed_delivery("y" * 500, "x@cs-1")
     assert prefix and "\n" not in typed and typed.startswith("Read the task file")
 
 
@@ -978,11 +1045,96 @@ def test_ref_files_are_copied_before_launch_and_named_in_the_seed(seams, tmp_pat
     assert rc == 0
     assert seams.ref_payloads and "base64 -d | tar -xzf -" in seams.remote[0]
     launch = seams.ssh[0]["remote"]
-    assert "/home/codespace/.agent-bridge/refs/batch-1/trace.har" in launch  # in the staged seed
-    assert "do the task" in launch
+    assert "/home/codespace/.agent-bridge/refs/batch-1/trace.har" not in launch
+    assert "do the task" not in launch
+    assert "do the task" in seams.messages[0][1] and "refs/batch-1/trace.har" in seams.messages[0][1]
+    assert len(seams.messages) == 1
     out = json.loads(capsys.readouterr().out)
-    assert out["refs_delivered"] == "seed"
+    assert out["refs_delivered"] == "message"
     assert any("trace.har" in line for line in out["ref_files"])
+
+
+@pytest.mark.parametrize("created", [False, True])
+def test_owned_readiness_refusal_never_falls_back_or_reports_seeded(
+    seams, monkeypatch, capsys, tmp_path, created,
+):
+    attempted = []
+    from venue_copilot.refs import owned_result
+    def refuse(sid, note, **kwargs):
+        attempted.append(kwargs)
+        return dataclasses.replace(owned_result(
+            False, session_id=sid, operation=kwargs["operation"], note=note,
+            context=kwargs["prepared_context"],
+        ), status="refused")
+    monkeypatch.setattr("venue_copilot.refs.deliver_note",
+                        refuse)
+    output = json.dumps({"ok": True, "created": created})
+    args = _args() if created else _args(ref_files=[_ref_file(tmp_path)])
+    assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=output)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False and "not admitted" in report["error"]
+    assert len(attempted) == 1 and attempted[0]["prepared_context"]["version"] == 1
+    assert any("tmux kill-session" in command for command in seams.remote) is created
+
+
+def test_deferred_creation_seed_is_queued_once_and_finished_by_receipt(seams, capsys):
+    receipt = {"seed": {"text": "creation task", "handoff_id": "bridge-original-operation"}}
+    output = json.dumps({
+        "ok": True, "created": True, "bridge_seed_deferred": True,
+        "bridge_seed_operation": "original-operation", "deferred_creation_seed": receipt,
+    })
+    assert detach.cmd_detach(_args(worktree_id="wt-7", seed=None),
+                             ssh_session=_ssh(seams, stdout=output)) == 0
+    assert len(seams.messages) == 1 and seams.messages[0][1] == "creation task"
+    assert seams.messages[0][2]["operation"] == "original-operation"
+    assert any("agent-worktrees bridge-seed-settle --worktree-id wt-7" in value for value in seams.remote)
+    assert json.loads(capsys.readouterr().out)["seed_delivery"] == "bridge"
+
+
+def test_admitted_seed_with_lost_responses_retains_owner_and_rejoins_same_operation(
+    seams, monkeypatch, capsys, tmp_path,
+):
+    queue = sqlite3.connect(tmp_path / "admitted.sqlite")
+    queue.execute("CREATE TABLE messages (key TEXT PRIMARY KEY, body TEXT)")
+    attempts = []
+    lost = [True]
+    def run(argv, **kwargs):
+        key = argv[argv.index("--idempotency-key") + 1]
+        attempts.append((list(argv), kwargs["input"]))
+        queue.execute("INSERT OR IGNORE INTO messages VALUES (?,?)", (key, kwargs["input"]))
+        queue.commit()
+        if lost[0]:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps({
+            "accepted": True, "session_id": "sid-42", "message_id": 1, "duplicate": True,
+            "receipt": {"session_id": "sid-42", "stage": "admitted"},
+        }))
+    monkeypatch.setattr("venue_copilot.refs.deliver_note",
+                        lambda sid, note, **kwargs: _real_deliver_note(
+                            sid, note, run=run, **{k: v for k, v in kwargs.items() if k != "run"}))
+    receipt = {"seed": {"text": "creation task", "handoff_id": "bridge-r1"}}
+    output = json.dumps({**json.loads(_CREATED), "deferred_creation_seed": receipt})
+    assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams, stdout=output)) == 75
+    report = json.loads(capsys.readouterr().out)
+    assert report["pending"] is True and report["pending_delivery"]["status"] == "unknown"
+    assert queue.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
+    assert not any("tmux kill-session" in value for value in seams.remote)
+    assert seams.release_res == [] and seams.releases == []
+    pending = seams.pending["cli:wt-7@cs-1"]
+    assert pending["creation_receipt"] == receipt and pending["operation"] == "r1"
+    monkeypatch.setattr(owner, "get_hold", lambda *args: types.SimpleNamespace(
+        sessions={"cli:wt-7@cs-1": {"pending_delivery": pending, "mux_session": "wt-wt-7"}},
+    ))
+    # A failed reconciliation preserves the ledger and never relaunches.
+    assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams)) == 75
+    capsys.readouterr()
+    lost[0] = False
+    assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams)) == 0
+    assert json.loads(capsys.readouterr().out)["message_id"] == 1
+    assert len(seams.ssh) == 1 and seams.pending == {}
+    assert queue.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
+    assert all(value == attempts[0] for value in attempts)
+    queue.close()
 
 
 def test_ref_files_for_a_running_session_are_sent_as_a_message(seams, tmp_path, monkeypatch, capsys):
@@ -1012,17 +1164,22 @@ def test_a_resumed_rejoin_sends_ref_notes_only_through_a_daemon_that_follows_ren
     sent = []
     monkeypatch.setattr(
         venue_refs, "deliver_note",
-        lambda sid, note, **kw: sent.append({k: v for k, v in kw.items() if k != "operation"}) or daemon_has_aliases,
+        lambda sid, note, **kw: sent.append({k: v for k, v in kw.items() if k != "operation"})
+        or (True if daemon_has_aliases else _refused_delivery(sid, note, kw)),
     )
     resumed = json.dumps({"ok": True, "created": False, "resumed": True})
     rc = detach.cmd_detach(
         _args(ref_files=[_ref_file(tmp_path)], copilot_args=copilot_args),
         ssh_session=_ssh(seams, stdout=resumed),
     )
-    assert rc == 0
-    assert sent == [{"min_daemon_protocol": 21}]
+    assert rc == (0 if daemon_has_aliases else 1)
+    assert len(sent) == 1 and sent[0]["min_daemon_protocol"] == 41
+    assert sent[0]["prepared_context"]["version"] == 1
     out = json.loads(capsys.readouterr().out)
-    assert out["refs_delivered"] == ("message" if daemon_has_aliases else "failed")
+    if daemon_has_aliases:
+        assert out["refs_delivered"] == "message"
+    else:
+        assert "not admitted" in out["error"]
 
 
 def test_missing_ref_file_fails_before_touching_anything(seams, capsys):
@@ -1087,6 +1244,7 @@ def test_launch_retries_a_transient_transport_failure_then_succeeds(seams, monke
                 types.SimpleNamespace(exit_code=0, stdout=_CREATED, stderr="")]
 
     def fake(ns, *, remote_cmd_builder=None, result_sink=None, settle_on_disconnect=True):
+        _prepared_namespace(ns)
         seams.ssh.append({"ns": ns, "remote": remote_cmd_builder(["/stage/x"]), "settle": settle_on_disconnect})
         return result_sink(outcomes.pop(0))
 
@@ -1104,25 +1262,28 @@ def test_a_lost_create_result_then_a_rejoin_never_reports_the_seed_delivered(
     retry rejoins it. The seed's fate is unknown: not resent, not claimed --
     nor its reference note, which rode in that same seed."""
     rejoined = json.dumps({"ok": True, "created": False, "resumed": True,
+                           "bridge_seed_deferred": True, "bridge_seed_operation": "r1",
                            "session": "wt-anchor-example-web"})
     outcomes = [types.SimpleNamespace(exit_code=255, stdout="", stderr="ssh: connection reset"),
                 types.SimpleNamespace(exit_code=0, stdout=rejoined, stderr="")]
 
     def fake(ns, *, remote_cmd_builder=None, result_sink=None, settle_on_disconnect=True):
+        _prepared_namespace(ns)
         seams.ssh.append({"ns": ns, "remote": remote_cmd_builder(["/stage/x"]), "settle": settle_on_disconnect})
         return result_sink(outcomes.pop(0))
 
     from venue_copilot import refs
 
-    monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend the seed"))
+    delivered = []
+    monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: delivered.append((a, k)) or True)
     monkeypatch.setattr(detach.time, "sleep", lambda s: None)
     args = _args(ref_files=[_ref_file(tmp_path)]) if with_refs else _args()
     assert detach.cmd_detach(args, ssh_session=fake) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["seeded"] is False and out["seed_delivery"] == "unconfirmed"
-    assert "agent-bridge send" in out["warning"]
+    assert out["seeded"] is True and out["seed_delivery"] == "bridge"
+    assert len(delivered) == 1 and delivered[0][1]["prepared_context"]["version"] == 1
     if with_refs:
-        assert out["refs_delivered"] == "unconfirmed"
+        assert out["refs_delivered"] == "message"
 
 
 @pytest.mark.parametrize("retry_reports, delivery", [
@@ -1148,9 +1309,9 @@ def test_a_lost_worktree_launch_result_without_a_host_seed_never_hides_the_pendi
     from venue_copilot import refs
 
     monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend"))
-    assert detach.cmd_detach(_args(worktree_id="wt-7", seed=None), ssh_session=fake) == 0
+    assert detach.cmd_detach(_args(worktree_id="wt-7", seed=None), ssh_session=fake) == 1
     out = json.loads(capsys.readouterr().out)
-    assert out["seed_delivery"] == delivery
+    assert "never typed" in out["error"]
 
 
 def test_a_flagless_rejoin_on_a_daemon_without_aliases_reports_a_provisional_handle(
@@ -1188,8 +1349,8 @@ def test_a_rejoin_with_a_host_seed_still_reports_the_pending_seed_outcome(seams,
     monkeypatch.setattr(venue_refs, "deliver_note", lambda *a, **k: True)
     rejoined = json.dumps({"ok": True, "created": False, "resumed": True, "session": "wt-wt-7",
                            "seed_unconfirmed": True, "seed_reason": "enter-failed"})
-    assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams, stdout=rejoined)) == 0
-    assert json.loads(capsys.readouterr().out)["seed_delivery"] == "unconfirmed"
+    assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams, stdout=rejoined)) == 1
+    assert "never typed" in json.loads(capsys.readouterr().out)["error"]
 
 
 def test_the_reservation_outlives_every_launch_attempt_and_registration(seams, monkeypatch, capsys):
@@ -1242,8 +1403,11 @@ def test_a_pending_seed_outcome_is_reported_without_a_host_seed(
     embodied = json.dumps({"ok": True, "created": True, "session": "wt-wt-7", **embody_says})
     rc = detach.cmd_detach(_args(worktree_id="wt-7", seed=None),
                            ssh_session=_ssh(seams, stdout=embodied))
-    assert rc == 0
+    assert rc == (1 if embody_says.get("seeded") or embody_says.get("seed_unconfirmed") else 0)
     out = json.loads(capsys.readouterr().out)
+    if rc:
+        assert "never typed" in out["error"]
+        return
     assert (out["seed_delivery"], out["seeded"]) == (delivery, seeded)
     if delivery != "typed":
         assert embody_says["seed_reason"] in out["warning"]

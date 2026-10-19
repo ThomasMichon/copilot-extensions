@@ -600,7 +600,10 @@ async def resolve_local_launch(
     ):
         from .venue_plugins import prepare_local_plugins
 
-        replacement = await prepare_local_plugins(target, work_dir, env)
+        prepared_context = {}
+        target.prepared_plugins = None
+        replacement = await prepare_local_plugins(target, work_dir, env, prepared_context=prepared_context)
+        target.prepared_plugins = prepared_context
         if replacement is not None:
             prefix = target.static_plugin_args
             if not isinstance(prefix, dict):

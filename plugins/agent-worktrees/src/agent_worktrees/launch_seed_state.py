@@ -337,11 +337,12 @@ def stage(
     return LaunchSeed(**result["seed"]) if result["seed"] is not None else None
 
 
-def take(yaml_path: Path, *, seed_id: str | None = None, kind: str | None = None) -> dict:
+def take(yaml_path: Path, *, seed_id: str | None = None, kind: str | None = None,
+         handoff_id: str | None = None) -> dict:
     return _dispatch("launch_seed_take", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "seed_id": seed_id, "kind": kind,
-        "handoff_id": uuid.uuid4().hex,
+        "handoff_id": handoff_id or uuid.uuid4().hex,
     })
 
 

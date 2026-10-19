@@ -16,6 +16,7 @@ from pathlib import Path
 from .marketplace import load_marketplace, plugin_dir
 from .payload import dependencies, plugin_manifest, publication_metadata, report_diagnostic
 from .settings import local_marketplace_path, marketplace_manifest_name, read_repo_settings, split_source
+from .target import common_identity, owned_relative, repository_info
 
 _EXCLUDED = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache",
              ".mypy_cache", ".ruff_cache", ".test-venvs"}
@@ -123,6 +124,7 @@ def subset(root: Path, payload: Path) -> bytes:
 def _plan_item(
     spec, owner, declarations: dict, *, allow_external: bool = False,
     existing_root: Path | None = None, required: bool = True, local_mode: str = "copy",
+    target_repository: str | None = None, target_source_roots=(), environment=None,
 ) -> dict | None:
     """Plan against supplied authority, without re-reading a generated overlay."""
     item = selection_spec(spec)
@@ -132,21 +134,34 @@ def _plan_item(
     if local is not None:
         local = local.resolve(strict=True)
         base = owner[0].resolve()
-        if not local.is_relative_to(base):
-            if not allow_external:
-                raise ValueError(f"Local marketplace escapes declaring checkout: {marketplace}")
+        external = not local.is_relative_to(base)
+        if external and allow_external:
             base = local
         manifest = load_marketplace(local)
         if manifest is not None and manifest.name != marketplace_manifest_name(marketplace, owner[1]):
             raise ValueError(f"Required local marketplace identity mismatch: {marketplace}")
         payload = plugin_dir(manifest, name) if manifest else None
         if payload is None:
+            if manifest is not None and name in manifest.plugins and isinstance(manifest.plugins[name].source, dict):
+                raise ValueError(f"Acquisition of a remote-source entry in a local catalog is not supported: {source}")
             if not required:
                 return None
             raise ValueError(f"Required local plugin is absent: {source}")
         declared = plugin_manifest(payload)
         item["catalog"], item["entry"] = publication_metadata(local, source)
         item["requirements"] = dependencies(declared, marketplace)
+        definition = owner[1].marketplaces[marketplace]
+        item["local_source"] = {
+            "definition": definition, "authored_absolute": Path(definition["source"]["path"]).is_absolute(),
+            "marketplace_root": str(local),
+        }
+        if item["local_source"]["authored_absolute"] and target_repository:
+            descriptor = owned_relative(local, payload, target_repository, target_source_roots, environment)
+            if descriptor is not None:
+                item["target_relative"] = descriptor
+                return item
+        if external and not allow_external:
+            raise ValueError(f"Local marketplace escapes declaring checkout: {marketplace}")
         if local_mode == "reference":
             item["reference"] = {
                 "marketplace_root": str(local), "payload": str(payload),
@@ -180,12 +195,23 @@ def build_plan(
     specs: list[dict], repo_roots: list[Path], *, marketplaces: dict | None = None,
     allow_external: bool = False, existing_root: Path | None = None,
     local_mode: str = "copy",
+    target_checkout: Path | None = None, target_repository: str | None = None,
+    target_source_roots=(), environment=None,
 ) -> dict:
     """Resolve local sources first-wins; remote sources remain install requests."""
     if local_mode not in {"copy", "reference"}:
         raise ValueError("Unknown local payload preparation mode")
     declarations = dict(marketplaces or {})
     owners = {}
+    bound_roots = list(target_source_roots)
+    if target_checkout is not None:
+        target_info = repository_info(Path(target_checkout), environment)
+        if target_info is None:
+            raise ValueError("Target checkout has no Git repository identity")
+        target_repository = target_repository or common_identity(target_info)
+        bound_roots.append(target_checkout)
+    if bound_roots and not target_repository:
+        raise ValueError("Registered target source roots require an exact target repository identity")
     for root in repo_roots:
         settings = read_repo_settings(root)
         for key, definition in settings.marketplaces.items():
@@ -205,11 +231,20 @@ def build_plan(
             normalized, owners.get(marketplace), declarations,
             allow_external=allow_external, existing_root=existing_root,
             local_mode=local_mode,
+            target_repository=target_repository, target_source_roots=bound_roots, environment=environment,
         ))
-    return {"plugins": plugins, "marketplaces": declarations}
+    return {
+        "plugins": plugins, "marketplaces": declarations,
+        **({"target_repository": target_repository} if target_repository else {}),
+    }
 
 
-def build_prepare_script(plan: dict, repo: str) -> str:
+def plan_digest(plan: dict) -> str:
+    """Identify producer inputs without persisting their contents in a receipt."""
+    return hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def build_prepare_script(plan: dict, repo: str, *, include_prepared_context: bool = False) -> str:
     """Ship the stdlib-only engine over an existing script/stdin transport."""
     if not isinstance(repo, str) or not repo.strip():
         raise ValueError("Plugin preparation requires the execution checkout")
@@ -220,7 +255,7 @@ def build_prepare_script(plan: dict, repo: str) -> str:
             archive.add(path, arcname=f"plugin_resolve/{path.name}")
     encoded = base64.b64encode(gzip.compress(buffer.getvalue(), mtime=0)).decode("ascii")
     request = base64.b64encode(json.dumps({
-        "repo": repo, **plan,
+        **plan, "repo": repo,
     }).encode()).decode("ascii")
     # stdin is the script, not an unbounded SSH argv payload.
     return (
@@ -242,11 +277,55 @@ def build_prepare_script(plan: dict, repo: str) -> str:
         "from plugin_resolve.preparation import prepare\n"
         f"request=json.loads(base64.b64decode({request!r}))\n"
         "diagnostics=[]\n"
-        "prepared=prepare(request,diagnostics=diagnostics)\n"
+        "context={}\n"
+        "prepared=prepare(request,diagnostics=diagnostics,prepared_context=context)\n"
         "if diagnostics: print('__VENUE_REQUIREMENTS__'+json.dumps(diagnostics))\n"
         "print('__VENUE_PLUGINS__'+json.dumps(prepared))\n"
+        + ("print('__VENUE_PLUGIN_CONTEXT__'+json.dumps({'version':1,**context}))\n"
+           if include_prepared_context else "")
+        +
         "VENUE_PLUGIN_PREPARE\n"
     )
+
+
+def parse_prepared_context(output: str, *, expected_repo: str | None = None) -> dict:
+    """Read opt-in effective-selection metadata without changing dir parsing."""
+    lines = output.splitlines()
+    directories = next(
+        ((index, json.loads(line.removeprefix("__VENUE_PLUGINS__")))
+         for index, line in reversed(list(enumerate(lines))) if line.startswith("__VENUE_PLUGINS__")),
+        None,
+    )
+    for index, line in reversed(list(enumerate(lines))):
+        if line.startswith("__VENUE_PLUGIN_CONTEXT__"):
+            context = json.loads(line.removeprefix("__VENUE_PLUGIN_CONTEXT__"))
+            if (
+                not isinstance(context, dict) or type(context.get("version")) is not int
+                or context["version"] != 1
+                or not isinstance(context.get("cwd"), str) or not context["cwd"].strip()
+                or not isinstance(context.get("plugins"), list)
+                or not isinstance(context.get("logical_payloads"), dict)
+            ):
+                raise ValueError("Invalid prepared plugin context")
+            if directories is None or index < directories[0] or context["logical_payloads"] != directories[1]:
+                raise ValueError("Prepared plugin context does not match the final directory frame")
+            if expected_repo is not None:
+                import ntpath
+                import posixpath
+
+                normalize = ntpath.normcase if ntpath.splitdrive(expected_repo)[0] else lambda value: value
+                path = ntpath if ntpath.splitdrive(expected_repo)[0] else posixpath
+                if normalize(path.normpath(context["cwd"])) != normalize(path.normpath(expected_repo)):
+                    raise ValueError("Prepared plugin context does not match the execution checkout")
+            for item in context["plugins"]:
+                if not isinstance(item, dict) or not isinstance(item.get("projected_source"), str):
+                    raise ValueError("Invalid prepared plugin identity")
+                identity(item["projected_source"])
+            logical = {item.get("logical_source") or item["projected_source"] for item in context["plugins"]}
+            if logical != set(context["logical_payloads"]):
+                raise ValueError("Prepared plugin identities do not cover the final directory frame")
+            return context
+    raise ValueError("Plugin preparation returned no compiled context")
 
 
 def parse_prepared(output: str) -> list[str]:

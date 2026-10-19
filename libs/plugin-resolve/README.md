@@ -127,10 +127,17 @@ including a selected non-default plugin, before publishing local registration.
 An undeclared target marketplace or absent selected target payload fails closed.
 The target-side `plugin_resolve.preparation.prepare` completes every local copy
 and remote installation before registering anything in the target checkout.
-Remote plugins use the supported `copilot plugin marketplace add` and
-`copilot plugin install` commands with isolated `COPILOT_HOME` and
-`COPILOT_CACHE_HOME` beneath the checkout's Git-local `copilot-venue-plugins`
-state directory. The native `marketplaces/` cache supplies the installed
+Remote plugins use the supported `copilot plugin install` command with an isolated
+`COPILOT_HOME` beneath the checkout's Git-local `copilot-venue-plugins` state.
+Its private native cache uses the existing short-lived neutral acquisition
+directory, avoiding deeply nested native Git cache paths on Windows. Native
+catalog metadata is read before that cache is removed and retained in the
+completed operation receipt; legacy persisted caches remain readable.
+The original structured marketplace declaration is written into
+that private operation home's settings **before** acquisition. Native installation
+therefore receives its complete source, including revision and location fields;
+the engine does not reconstruct a URI or register one source and rewrite its
+metadata afterward. The native `marketplaces/` cache supplies the installed
 marketplace's catalog metadata and selected entry, using the same publication
 normalization as local reflection (including removal of relocated `pluginRoot`).
 Each immediate cached clone contributes only its existing native-priority
@@ -148,8 +155,7 @@ cannot shadow that installation authority. A matching old source-only receipt
 and installed payload hydrate from the actual catalog without reinstalling.
 If that catalog is unavailable, only the explicitly named
 `copilot plugin marketplace update NAME` refreshes it. A partial install retains
-its successful registration and retries installation without another add.
-Fresh registration still uses the normal add; mismatches and native failures
+its private declaration and retries installation. Mismatches and native failures
 are explicit, never accepted by parsing an "already registered" error.
 The target's own
 enabled declarations join host selections, including target-native remote
@@ -157,8 +163,11 @@ marketplaces; unrelated host-global plugins do not. Installer success alone is
 insufficient: each resulting payload must have the requested manifest identity.
 No user-global registration or enablement is required by the launched agent.
 
-Preparation publishes native-valid local subset catalogs, retaining marketplace
-owner metadata and each payload's version, and atomically merges
+Preparation publishes native-valid subset catalogs **only for reflected local
+sources**, retaining marketplace owner metadata and each payload's version.
+Git declarations remain the original Git objects in target settings; an installed
+directory is availability evidence, never replacement acquisition authority.
+Preparation atomically merges
 `.github/copilot/settings.local.json` under a checkout lock. It preserves base
 settings, unrelated keys, enabled native plugins and explicit local overrides.
 An ownership receipt records entries created or previously owned by this
@@ -169,18 +178,16 @@ declarations. Unchanged receipt-owned generated values are projections, not
 operator overrides. Base/Claude declarations are read fresh on every preparation
 and rechecked under the registration lock; explicit `False` remains authoritative.
 A target-native remote origin wins over a host snapshot with the same identity
-in every supported layer and is installed before localization. Only overwritten
-authored Copilot-local origins are saved in `marketplaceOrigins`; lower layers
-stay on disk rather than being pinned in the receipt. That original local
-override remains authoritative while its generated projection is still owned,
-but a genuine operator path change relinquishes ownership. Native local catalogs
-are likewise re-read behind generated subsets, reflecting payload edits and
-newly enabled entries instead of using stale snapshots. Existing snapshots
+in every supported layer and is acquired without converting its declaration to
+a directory. Legacy unchanged owned directory projections with saved Git origins
+migrate back to those original Git declarations; authored operator edits are
+not migrated or overwritten. Native local catalogs are read directly in the
+execution checkout instead of being copied into a second subset. Existing snapshots
 are retained, so another launch does not invalidate a running child's paths.
 Marketplace authority is reconciled once from the lock-entry operator snapshot,
 not from values generated for an earlier plugin in the same transaction.
 Before any catalog, ownership receipt or local-settings publication, every
-effectively enabled source must resolve under that same lock, including operator
+effectively enabled source must have verified availability under that same lock, including operator
 enablement added while installation was running. An unresolved new selection
 fails the barrier without publishing partial state or undoing the operator's
 edit. Explicitly disabled sources and unselected companion requirements do not
@@ -202,6 +209,15 @@ directories remain usable; a projected local origin needs preparation evidence.
 These checks only read existing state under the lock: they never install,
 refresh or retry there. Disabled entries and inactive namespaces do not gain
 new origin requirements. Refusal preserves prior publication and operator edits.
+
+The local-only `resolve_repo_plugins` API deliberately still reports Git sources
+as unresolved. Preparation validates those sources through their completed
+private installation records and returns their actual directories for ACP.
+This is not a claim that the productive child's home already has native
+installation bookkeeping. Headed startup uses native repo-scoped activation
+with the original Git declarations; its launch owner must withhold productive
+task delivery until the required registered/enabled loadout is ready. Productive
+HOME, authentication and preference authority are not switched by preparation.
 
 Each complete preparation reads ownership and authored settings together under
 the checkout lock. Publication prunes unchanged owned enablement observed in
@@ -302,6 +318,42 @@ isolated native installer after removing Git selectors. Omission retains the
 ambient-environment contract. `check_cancelled` may stop preparation between
 bounded operations and before publication; callers using a worker thread must
 await its quiescence rather than abandon it.
+
+## Target-owned absolute local sources
+
+`build_plan(..., target_checkout=actual_checkout)` can recognize an authored
+absolute local marketplace belonging to the same Git common repository. It
+records `target_relative: {repository, marketplace_relative}` instead of copying
+or pinning the producer's anchor. The receiver validates that binding, resolves
+the catalog in its actual execution checkout and publishes a relative local
+declaration such as `"path": "./.ai"`. Plugin paths come from that target catalog.
+Native operator origins and disablement remain authoritative.
+
+The authored-absolute bit is captured before path normalization. Relative
+authored paths and unrelated worktree references do not acquire this exception.
+Escapes, linked target paths and nested-repository confusion are rejected.
+For a cross-world producer, `target_repository` plus `target_source_roots` may
+be supplied only from an existing exact registered/provider repository binding;
+basename or remote-URL equality alone is insufficient. The receiver never opens
+a producer-only absolute path. Producers without such a binding cannot claim
+automatic target-owned relocation.
+
+Trusted Codespace and container producers use explicit repository-registry
+bindings for this annotation; Bridge retains the binding when composing provider
+and related selections. Registry aliases and declared repository identities
+identify registered source roots, not arbitrary checkouts with a matching remote
+or basename. Providers query the registry through their existing attributable
+Worktrees command boundary, without importing its sibling Python runtime.
+Incomplete or unsupported strict inventory is refused rather than replaced by
+fallback checkout discovery. Git common-repository checks then establish
+membership. Registered bare source anchors are supported without treating a
+nested repository as part of its parent. The receiver still requires an actual
+execution checkout.
+Relative local sources and Git-only selections do not trigger ownership lookup.
+
+Child-inventory settings accept the existing bounded leading-`//` comment-header
+convention used by activation readers. This is read-only compatibility, not a
+claim of a general JSONC parser; other malformed settings still fail explicitly.
 
 ## Sources
 

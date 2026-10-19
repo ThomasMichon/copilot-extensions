@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
+from .plugin_readiness import PluginReadinessRequest
 
 LiveMessageDelivery = Literal["queue", "steer", "interrupt"]
 DEFAULT_LIVE_REPLY_TIMEOUT = 120.0
@@ -40,6 +41,14 @@ class SendMessageRequest(BaseModel):
     expected_session_id: str | None = None
     #: Stable producer key: an identical retry returns the original message ID.
     idempotency_key: str | None = None
+    plugin_readiness: PluginReadinessRequest | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_request(self, handler):
+        result = handler(self)
+        if self.plugin_readiness is None:
+            result.pop("plugin_readiness", None)
+        return result
 
 
 class LiveMessageReceipt(BaseModel):
@@ -83,6 +92,14 @@ class LiveMessage(BaseModel):
     kind: str = "prompt"
     delivery: LiveMessageDelivery = "steer"
     created_at: float
+    plugin_readiness: dict | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_message(self, handler):
+        result = handler(self)
+        if self.plugin_readiness is None:
+            result.pop("plugin_readiness", None)
+        return result
 
 
 class LiveMessageListResponse(BaseModel):

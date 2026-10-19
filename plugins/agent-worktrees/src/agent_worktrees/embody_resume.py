@@ -23,7 +23,7 @@ def resume_target(
         return None if acquisition == "fresh" else acquisition
     if make_new or record is None or getattr(args, "fresh", False):
         return None
-    if seed and not getattr(args, "resume_head", False):
+    if (seed or getattr(args, "bridge_seed_pending", False)) and not getattr(args, "resume_head", False):
         return None
     for arg in getattr(args, "copilot_args", None) or []:
         if str(arg).split("=", 1)[0] in ("--resume", "--continue"):

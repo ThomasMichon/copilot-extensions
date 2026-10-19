@@ -216,6 +216,8 @@ def _read_holds() -> dict[str, OwnerHold]:
                         "mux_session": mux, "expires_at": expires_at,
                         "confirmed": bool(meta.get("confirmed", False)),
                         "generation": str(meta.get("generation") or ""),
+                        **({"pending_delivery": meta["pending_delivery"]}
+                           if isinstance(meta.get("pending_delivery"), dict) else {}),
                     }
         hold.sessions = sessions
         holds[codespace] = hold
@@ -354,12 +356,16 @@ def hold(
         if pin:
             existing.pinned = True
         if mux_session:
-            prior = restore if restore is not None else ({} if fresh else existing.sessions.get(tenant) or {})
+            current = existing.sessions.get(tenant) or {}
+            prior = restore if restore is not None else ({} if fresh else current)
+            if current.get("pending_delivery") and fresh:
+                raise RuntimeError("A pending owned delivery must be reconciled before starting another launch")
             existing.sessions[tenant] = {
                 "mux_session": mux_session,
                 "expires_at": prior.get("expires_at", now + max_lease),
                 "confirmed": bool(confirmed or prior.get("confirmed", False)),
                 "generation": prior.get("generation") or uuid.uuid4().hex,
+                **({"pending_delivery": prior["pending_delivery"]} if prior.get("pending_delivery") else {}),
             }
         port = _sanitize_port(daemon_port)
         if port is not None:
@@ -369,6 +375,20 @@ def hold(
         set_hold_forwards(existing, reverse_forwards, local_forwards, (restore or {}).get("assigned_local_forwards"))
         _write_holds(holds)
         return existing
+
+
+def record_pending_delivery(codespace: str, tenant: str, pending: dict | None) -> None:
+    """Journal the owned send on its existing connection tenant."""
+    with _owner_lock():
+        holds = _read_holds()
+        hold = holds.get(codespace)
+        if hold is None or tenant not in hold.sessions:
+            raise RuntimeError("Pending delivery has no owning connection tenant")
+        if pending is None:
+            hold.sessions[tenant].pop("pending_delivery", None)
+        else:
+            hold.sessions[tenant]["pending_delivery"] = pending
+        _write_holds(holds)
 
 def heartbeat(
     codespace: str, tenant: str, ttl: float = DEFAULT_TTL,

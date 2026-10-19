@@ -21,6 +21,7 @@ from agent_bridge.acquisition_executor import executor
 from agent_bridge.acquisition_runtime import AcquisitionRuntime
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.models import SessionStatus
+from agent_bridge.protocol import PLUGIN_READINESS_PROTOCOL_VERSION
 from agent_bridge.routes.acquisitions import router
 from agent_bridge.session_manager import SessionManager
 from agent_bridge.transport import SpawnTarget
@@ -381,7 +382,8 @@ async def test_prepare_target_does_not_layer_same_padded_binding_twice(rig, bind
     rig.runtime.resolver = resolver
     row = {"bound_agent": binding}
     result, _env = await rig.runtime._prepare_target(req(), row)
-    assert result is target
+    assert result is not target
+    assert target.static_plugin_args is None
     assert result.copilot_args == original_args
     assert row["bound_agent"] == binding
     resolver.canonical_agent_name.assert_not_called()
@@ -700,7 +702,7 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
         assert refused.json()["detail"]["code"] == "cli_options_unsupported"
         assert refused.json()["detail"]["effect"] == "not_started"
     client = BridgeClient("http://unused", "unused", connect_grace=0)
-    client._daemon_proto = (ACQUISITION_PROTOCOL_VERSION, 1)
+    client._daemon_proto = (PLUGIN_READINESS_PROTOCOL_VERSION, 1)
     sent = []
 
     def request(method, path, body, **kw):
@@ -711,7 +713,7 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
     result = client_acquire(client, req(mode="cli"))
     assert result.native_session_id == response.json()["native_session_id"]
     assert sent[0][:2] == ("POST", "/api/v1/acquisitions")
-    assert sent[0][2]["protocol_version"] == ACQUISITION_PROTOCOL_VERSION
+    assert sent[0][2]["protocol_version"] == PLUGIN_READINESS_PROTOCOL_VERSION
     assert sent[0][2]["mode"] == "cli"
     for old_protocol in (30, 31):
         client._daemon_proto = (old_protocol, 1)

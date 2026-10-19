@@ -31,7 +31,9 @@ def inventory_paths(repo: Path, environment: dict[str, str] | None) -> tuple[Pat
 
 def installed_item(source: str, home: Path, cache: Path) -> dict:
     name, marketplace = split_source(source)
-    registration = _settings_document(home / "settings.json").get("extraKnownMarketplaces", {}).get(marketplace)
+    registration = _settings_document(home / "settings.json", jsonc_header=True).get(
+        "extraKnownMarketplaces", {},
+    ).get(marketplace)
     expected_name = marketplace
     declared_catalog = None
     if registration is not None:
