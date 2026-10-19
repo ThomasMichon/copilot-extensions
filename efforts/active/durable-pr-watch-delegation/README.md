@@ -256,6 +256,34 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-19 - Preserve native acceptance while reconciling current-base CI
+
+- Published bounded recovery at `e9e9f37ad` on the existing #7160, replied to
+  and resolved the two proven admission findings, and updated the reviewable
+  rationale. Native acceptance `39208728241` succeeds on that exact head:
+  all 15 selected Linux/Windows/macOS jobs pass; only the two unselected
+  diagnostic jobs skip. macOS remains refusal evidence, not positive operation.
+- The scoped review wait reaches its genuine 600-second deadline without a
+  new review event. Its conflict report is confirmed by Git's non-mutating
+  merge calculation: upstream's preserved-controller compatibility branch and
+  this PR's additional smoke partition overlap in one test assertion.
+  Supported synchronization aborts safely with the old head retained; the
+  documented owned-PR rebase then replays all four commits, preserving upstream
+  controller/fixture changes and counting three extra partitions only for the
+  modern matrix. The reconciled partition/native-scope contracts pass all
+  187 cases in 20.23 seconds. No runtime bytes change in the rebase.
+- The shared workflow reference is aligned to the existing four effective
+  profiles and explicit self-merge versus consent verbs. It recognizes genuine
+  current-head approval without a categorical owner-authorship assumption;
+  documented clean-comment acceptance remains conditional on the target repo.
+  Caller role, actual review, ownership, holds, conflict and required-CI vetoes
+  remain binding. This documentation does not change another campaign's
+  classifier, consent automation or repository configuration.
+- Current-base publication still owes a subsequent actual review and new-head
+  required CI/native acceptance. Historical green native jobs do not authorize
+  merging a different head. No CI bypass, shared-owner replacement or rollout
+  is performed; the effort remains Active.
+
 ### 2026-10-19 - Implement the selected bounded installer reconciliation
 
 - The completed-target installer now retains one original 300-second activation
