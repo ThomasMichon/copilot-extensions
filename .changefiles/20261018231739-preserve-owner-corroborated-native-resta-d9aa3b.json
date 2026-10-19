@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve owner-corroborated native restart evidence without enabling recovery",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

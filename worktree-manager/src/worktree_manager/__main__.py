@@ -1598,7 +1598,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         real project identity, faked worktree/pivot data")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
-        print("  mux-daemon <run|ensure|register|remove|show|status [--json]>  (daemons status|mappings; #5001)")
+        print("  mux-daemon <run|ensure|register|remove|show|status|recovery-evidence>  (managed mux)")
         print()
         print("A bare invocation reads current installation state without changing it.")
         return 0

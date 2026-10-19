@@ -95,7 +95,7 @@ means of fulfilling the operator's request. They require normal source review.
   bounded periodic cadence, under the existing attributable installation.
   Bind the exact native conversation, project/worktree, host environment,
   boot epoch, execution incarnation and observation sequence/freshness.
-- [ ] Preserve recovery evidence independently of current reachability and
+- [x] Preserve recovery evidence independently of current reachability and
   display tombstones. Store only necessary metadata in private local state,
   not transcripts, secrets, environment dumps or untrusted executable commands.
 - [ ] Record reasoned intentional-exit evidence durably; delayed observations
@@ -195,3 +195,31 @@ The umbrella effort remains Active independently of this slice's completion.
 - Assigned the dedicated native CLI implementer after this proposal's review
   gate. Implementation and platform qualification remain open; no host
   configuration, session recovery or automatic startup has been enabled.
+
+### 2026-10-19 - Evidence foundation and existing-daemon integration
+
+- The reviewed planning proposal merged in #7224. The declared restart recovery
+  implementer picked up the focused slice; other umbrella ownership is unchanged.
+- Added a private recovery-evidence journal, not another worktree/session
+  authority. Positive evidence carries canonical native identity and native
+  boot/environment/incarnation metadata; reasoned exit events preserve the last
+  positive observation and reject stale-generation teardown. Shutdown-pending
+  and cancelled-notification state are distinct from explicit closure and
+  unconfirmed loss.
+- Added the minimal read-only engine corroboration mode
+  `session-role --hosting-evidence`. It reuses current head/session and native
+  process/mux-binding owners, rechecks owner state after probing, and never
+  performs succession, task policy, claims or launch decisions itself.
+- Integrated inspection before the existing active daemon's status server and
+  bounded periodic sampling inside its existing lease/drain fence. The first
+  regressions failed before the evidence APIs existed; the integrated bounded,
+  network-disconnected regression run passed 204 Manager tests and 64 Worktrees
+  tests, with three native-platform skips. A drain-fence regression found during
+  integration was fixed before that run. Subsequent final-diff qualification is
+  recorded with the source contribution.
+- Added report-only inspection and explicit unqualified-platform reporting.
+  `automatic_eligible` remains false. The first source slice does not complete
+  this plan: actual native notification/startup adapters, lifecycle producers,
+  enrollment/admission, exact-conversation cold Resume, acknowledged status-first
+  seed delivery and remaining native qualification are still open. No live
+  recovery, host configuration, daemon restart or rollout was performed.

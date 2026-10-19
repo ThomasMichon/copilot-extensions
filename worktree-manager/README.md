@@ -402,6 +402,46 @@ launcher/child identity. Repair that Python installation before retrying.
 Existing launcher/child pairs are not rewritten or stopped by this change;
 their identity must be classified before automated retirement.
 
+## Restart evidence (inspection only)
+
+The existing active mux daemon maintains a private, bounded recovery-evidence
+journal under its runtime root at `restart-recovery/evidence.sqlite3`. This is
+not a second session or worktree authority. Each positive observation binds the
+canonical native conversation UUID, worktree, native environment and boot epoch,
+mux incarnation, mapping revision and observation sequence. The engine
+corroborates the current native head, conversation data, process identity and mux
+binding over its normal process boundary; stale or uncertain evidence is not
+recorded as live. A detached live session remains observable.
+
+The daemon inspects previous evidence before admitting ordinary status requests,
+then samples at most one mapping per 20 seconds with a four-second owner-query
+deadline. Sampling shares the existing active lease and drain fence; passive
+cutover generations do not sample. Last-positive evidence survives missing-mux
+display tombstones. The journal retains at most 16 events per worktree and
+refuses new subjects after 4,096 worktrees rather than growing without bound.
+Corrupt, unavailable or incompatible storage remains an explicit blocker.
+
+```bash
+worktree-manager mux-daemon recovery-evidence
+```
+
+This read-only JSON report creates no missing journal and accepts no apply flag.
+It distinguishes same-boot observations, foreign environments, explicit closure
+evidence and unconfirmed previous-boot candidates. `automatic_eligible` is always
+`false`: this evidence foundation does **not** launch or enroll recovery,
+configure boot startup, deliver a restart seed, or grant operational permission.
+The journal's reasoned exit/shutdown APIs are not themselves native shutdown
+notification adapters. Missing hooks, generic tombstones and exit codes alone
+never assert intentional closure or recovery permission.
+
+Native Linux and WSL have evidence-epoch readers; WSL includes its init-process
+incarnation because a distro can restart without restarting the shared kernel.
+Native Windows, macOS and container epochs are explicitly unqualified, not
+silently treated as Linux. Native shutdown notification, automatic admission,
+exact-conversation Resume and acknowledged restart-seed delivery remain tracked
+under [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564).
+An evidence report is not completed restoration or installed-release proof.
+
 ## Manage the harness (state views)
 
 Once set up, the Worktree Manager provides state views read from the harness's

@@ -13,10 +13,20 @@ def cmd_mux_daemon(rest: list[str]) -> int:
     if not args:
         print(
             "usage: worktree-manager mux-daemon "
-            "<run|ensure|register|remove|show|status> [...]"
+            "<run|ensure|register|remove|show|status|recovery-evidence> [...]"
         )
         return 2
     action = args.pop(0)
+    if action == "recovery-evidence":
+        from .restart_observer import RestartObserver
+        from .self_install import default_root
+
+        if args:
+            print("error: recovery-evidence accepts no arguments")
+            return 2
+        result = RestartObserver(default_root()).startup()
+        print(json.dumps(result))
+        return 1 if result.get("blocker") else 0
     if action == "status":
         from .daemons_cli import cmd_daemons
 

@@ -367,6 +367,21 @@ An empty registry is cheap and does not trigger historical session discovery;
 explicit recovery and the resident reconciliation cursor own registry repair.
 Thus unrelated session history cannot multiply the cost of a resume check.
 
+`session-role --hosting-evidence --worktree-id <exact-id> --json` is a separate
+read-only corroboration mode for the Manager's private restart-evidence journal.
+Its payload identifies `schema: "native-hosting-evidence"` and `version: 1`.
+`confirmed: true` requires a current, unpaused active native head with real
+conversation data, a live native process and a unique PID/birth-correlated mux
+binding, followed by an unchanged owner-record reread. The result includes the
+exact native UUID, worktree path, native platform, head revision and mux/pane
+identity. Missing, uncertain, foreign, superseded or hosted-provider evidence
+returns `confirmed: false` with a reason; unreadable owner state is a JSON error.
+The mode requires an exact worktree id and never infers the daemon caller's
+session, selects a filesystem-latest replacement, mutates a head, or launches.
+Native Windows hosting proof remains explicitly unqualified. The payload's
+`automatic_eligible` is always false: task policy, claims, holds, recovery
+enrollment and launch admission remain their existing owners' responsibilities.
+
 The Manager requests `resolve --stage-launch-seed --require-native-seed` for
 prompted requests. The latter is a capability handshake: engines without the
 native execution-leg fence reject it before allocation or staging. The fence

@@ -1,0 +1,319 @@
+"""Private recovery evidence; head, task and launch authority stay with owners."""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import math
+import sqlite3
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from uuid import UUID
+
+from .private_state import protect, reject_links
+
+
+class RecoveryEvidenceError(RuntimeError):
+    """Recovery evidence is unavailable or incompatible; never assume it empty."""
+
+
+def _text(value: object, name: str, limit: int = 4096) -> None:
+    if (
+        not isinstance(value, str) or not value or len(value) > limit
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise ValueError(f"Invalid recovery evidence {name}")
+
+
+@dataclass(frozen=True)
+class PositiveEvidence:
+    """One confirmed native hosting observation, with no executable payload."""
+
+    project: str
+    worktree_id: str
+    worktree_path: str
+    native_session_id: str
+    session_incarnation: str
+    mapping_revision: int
+    platform: str
+    environment_id: str
+    boot_id: str
+    observed_at: float
+    observation_sequence: int
+
+    def __post_init__(self) -> None:
+        for name in (
+            "project", "worktree_id", "worktree_path", "native_session_id",
+            "session_incarnation", "environment_id", "boot_id",
+        ):
+            _text(getattr(self, name), name)
+        if str(UUID(self.native_session_id)) != self.native_session_id:
+            raise ValueError("Recovery evidence requires a canonical native UUID")
+        if self.platform not in {"linux", "wsl", "windows"}:
+            raise ValueError("Unknown recovery evidence platform")
+        if type(self.mapping_revision) is not int or self.mapping_revision < 0:
+            raise ValueError("Invalid recovery mapping revision")
+        if type(self.observation_sequence) is not int or self.observation_sequence < 1:
+            raise ValueError("Invalid recovery observation sequence")
+        if (
+            type(self.observed_at) not in {float, int}
+            or not math.isfinite(self.observed_at) or self.observed_at <= 0
+        ):
+            raise ValueError("Invalid recovery observation time")
+
+    def identity(self) -> tuple:
+        """The exact execution generation, excluding observation freshness."""
+        return tuple(
+            getattr(self, field.name) for field in dataclasses.fields(self)
+            if field.name not in {"observed_at", "observation_sequence"}
+        )
+
+
+_TABLE = (
+    "CREATE TABLE journal (id INTEGER PRIMARY KEY, project TEXT NOT NULL, "
+    "worktree_id TEXT NOT NULL, payload TEXT NOT NULL)"
+)
+_INDEX = "CREATE INDEX journal_subject ON journal(project, worktree_id, id)"
+_APPLICATION_ID = 0x57525231
+_DISPOSITIONS = {
+    "live", "unknown", "intentional", "shutdown-pending", "shutdown-interrupted",
+}
+_INTENTIONAL_DETAILS = {"operator-stop", "native-session-end"}
+_HISTORY_PER_SUBJECT = 16
+_MAX_SUBJECTS = 4096
+
+
+def _decode(payload: str) -> dict:
+    row = json.loads(payload)
+    if (
+        not isinstance(row, dict)
+        or set(row) != {"last_positive", "disposition", "detail", "notification_id"}
+        or row["disposition"] not in _DISPOSITIONS
+        or not isinstance(row["detail"], str)
+        or not isinstance(row["notification_id"], str)
+    ):
+        raise ValueError("Invalid recovery journal event")
+    PositiveEvidence(**row["last_positive"])
+    if row["disposition"] == "intentional" and row["detail"] not in _INTENTIONAL_DETAILS:
+        raise ValueError("Invalid intentional recovery exit evidence")
+    return row
+
+
+class RecoveryJournal:
+    """Bounded transactional event journal, independent of display tombstones.
+
+    A row is only evidence. Even ``live`` never authorizes automatic recovery;
+    current agency and hosting owners must corroborate every candidate.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.path = root / "restart-recovery" / "evidence.sqlite3"
+
+    def _protect(self) -> None:
+        reject_links(self.path)
+        protect(self.path.parent, directory=True)
+        if self.path.exists():
+            protect(self.path)
+        for suffix in ("-journal", "-wal", "-shm"):
+            sidecar = self.path.with_name(self.path.name + suffix)
+            reject_links(sidecar)
+            try:
+                protect(sidecar)
+            except FileNotFoundError:
+                pass
+
+    @staticmethod
+    def _schema(conn: sqlite3.Connection, *, create: bool) -> bool:
+        objects = dict(conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+        ))
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        application = conn.execute("PRAGMA application_id").fetchone()[0]
+        pages = conn.execute("PRAGMA page_count").fetchone()[0]
+        free = conn.execute("PRAGMA freelist_count").fetchone()[0]
+        if not objects and version == application == free == 0 and pages in (0, 1):
+            if not create:
+                raise RecoveryEvidenceError("Recovery journal is uninitialized.")
+            conn.execute(_TABLE)
+            conn.execute(_INDEX)
+            conn.execute("PRAGMA user_version=1")
+            conn.execute(f"PRAGMA application_id={_APPLICATION_ID}")
+            return True
+        if (
+            objects != {"journal": _TABLE, "journal_subject": _INDEX}
+            or version != 1 or application != _APPLICATION_ID
+        ):
+            raise RecoveryEvidenceError("Recovery journal has an incompatible schema.")
+        return True
+
+    @contextmanager
+    def _transaction(self):
+        try:
+            reject_links(self.path)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._protect()
+            with closing(sqlite3.connect(self.path, timeout=5)) as conn, conn:
+                protect(self.path)
+                conn.execute("PRAGMA synchronous=FULL")
+                conn.execute("BEGIN IMMEDIATE")
+                self._schema(conn, create=True)
+                yield conn
+        except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise RecoveryEvidenceError("Could not persist restart recovery evidence.") from exc
+
+    @staticmethod
+    def _latest(conn: sqlite3.Connection, evidence: PositiveEvidence) -> dict | None:
+        row = conn.execute(
+            "SELECT payload FROM journal WHERE project=? AND worktree_id=? "
+            "ORDER BY id DESC LIMIT 1", (evidence.project, evidence.worktree_id),
+        ).fetchone()
+        return _decode(row[0]) if row else None
+
+    @staticmethod
+    def _append(conn: sqlite3.Connection, evidence: PositiveEvidence, row: dict) -> None:
+        conn.execute(
+            "INSERT INTO journal(project, worktree_id, payload) VALUES (?, ?, ?)",
+            (evidence.project, evidence.worktree_id, json.dumps(row, allow_nan=False)),
+        )
+        conn.execute(
+            "DELETE FROM journal WHERE project=? AND worktree_id=? AND id NOT IN "
+            "(SELECT id FROM journal WHERE project=? AND worktree_id=? ORDER BY id DESC LIMIT ?)",
+            (evidence.project, evidence.worktree_id, evidence.project, evidence.worktree_id,
+             _HISTORY_PER_SUBJECT),
+        )
+
+    def observe(self, evidence: PositiveEvidence) -> dict:
+        """Persist positive evidence without reopening a retired incarnation."""
+        with self._transaction() as conn:
+            current = self._latest(conn, evidence)
+            if current:
+                previous = PositiveEvidence(**current["last_positive"])
+                if evidence.mapping_revision < previous.mapping_revision:
+                    return {"applied": False, "reason": "stale"}
+                if evidence.mapping_revision == previous.mapping_revision:
+                    if evidence.identity() != previous.identity():
+                        return {"applied": False, "reason": "identity-conflict"}
+                    if current["disposition"] == "intentional":
+                        return {"applied": False, "reason": "closed"}
+                    if (
+                        evidence.observation_sequence <= previous.observation_sequence
+                        or evidence.observed_at < previous.observed_at
+                    ):
+                        return {"applied": False, "reason": "stale"}
+            else:
+                count = conn.execute(
+                    "SELECT count(*) FROM (SELECT 1 FROM journal GROUP BY project, worktree_id)"
+                ).fetchone()[0]
+                if count >= _MAX_SUBJECTS:
+                    raise RecoveryEvidenceError("Recovery journal subject limit reached.")
+            row = {
+                "last_positive": dataclasses.asdict(evidence),
+                "disposition": "live", "detail": "", "notification_id": "",
+            }
+            if (
+                current and evidence.identity() == previous.identity()
+                and current["disposition"] in {"shutdown-pending", "shutdown-interrupted"}
+            ):
+                row["disposition"] = current["disposition"]
+                row["notification_id"] = current["notification_id"]
+                row["detail"] = current["detail"]
+            self._append(conn, evidence, row)
+            return {"applied": True}
+
+    def record_exit(
+        self, evidence: PositiveEvidence, *, reason: str, detail: str = "",
+    ) -> dict:
+        """Fence reasoned exit evidence to the exact last-positive generation."""
+        if reason not in {"intentional", "unknown", "shutdown-interrupted"}:
+            raise ValueError("Unsupported recovery exit reason")
+        if reason == "intentional" and detail not in _INTENTIONAL_DETAILS:
+            raise ValueError("Intentional closure requires explicit operator or native exit evidence")
+        if detail:
+            _text(detail, "exit detail", 256)
+        with self._transaction() as conn:
+            current = self._latest(conn, evidence)
+            if (
+                current is None
+                or PositiveEvidence(**current["last_positive"]).identity() != evidence.identity()
+            ):
+                return {"applied": False, "reason": "superseded"}
+            if current["disposition"] == "intentional":
+                return {"applied": False, "reason": "closed"}
+            if reason == "shutdown-interrupted" and not current["notification_id"]:
+                return {"applied": False, "reason": "unconfirmed-shutdown"}
+            row = dict(current)
+            row["disposition"] = (
+                "shutdown-interrupted"
+                if reason == "unknown" and current["disposition"] == "shutdown-pending"
+                else reason
+            )
+            row["detail"] = detail
+            self._append(conn, evidence, row)
+            return {"applied": True}
+
+    def _shutdown_event(
+        self, platform: str, environment_id: str, boot_id: str, notification_id: str, *,
+        cancelled: bool,
+    ) -> None:
+        for name, value in (
+            ("platform", platform), ("environment", environment_id),
+            ("boot", boot_id), ("notification", notification_id),
+        ):
+            _text(value, name, 256)
+        with self._transaction() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM journal WHERE id IN "
+                "(SELECT max(id) FROM journal GROUP BY project, worktree_id)"
+            ).fetchall()
+            for (payload,) in rows:
+                row = _decode(payload)
+                evidence = PositiveEvidence(**row["last_positive"])
+                if (evidence.platform, evidence.environment_id, evidence.boot_id) != (
+                    platform, environment_id, boot_id,
+                ):
+                    continue
+                if cancelled:
+                    if (
+                        row["disposition"] != "shutdown-pending"
+                        or row["notification_id"] != notification_id
+                    ):
+                        continue
+                    row.update(disposition="live", notification_id="")
+                else:
+                    if row["disposition"] != "live":
+                        continue
+                    row.update(disposition="shutdown-pending", notification_id=notification_id)
+                self._append(conn, evidence, row)
+
+    def shutdown_pending(
+        self, platform: str, environment_id: str, boot_id: str, *, notification_id: str,
+    ) -> None:
+        """Freeze eligible positive generations before shutdown teardown."""
+        self._shutdown_event(platform, environment_id, boot_id, notification_id, cancelled=False)
+
+    def shutdown_cancelled(
+        self, platform: str, environment_id: str, boot_id: str, *, notification_id: str,
+    ) -> None:
+        """Cancel only the matching notification, never revive an explicit exit."""
+        self._shutdown_event(platform, environment_id, boot_id, notification_id, cancelled=True)
+
+    def snapshot(self) -> list[dict]:
+        """Read latest evidence without creating absent storage or launch intent."""
+        try:
+            reject_links(self.path)
+            if not self.path.exists():
+                return []
+            self._protect()
+            uri = self.path.absolute().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(uri, uri=True, timeout=5)) as conn:
+                conn.execute("BEGIN")
+                self._schema(conn, create=False)
+                rows = conn.execute(
+                    "SELECT payload FROM journal WHERE id IN "
+                    "(SELECT max(id) FROM journal GROUP BY project, worktree_id) "
+                    "ORDER BY project, worktree_id"
+                ).fetchall()
+                return [{**_decode(row[0]), "automatic_eligible": False} for row in rows]
+        except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise RecoveryEvidenceError("Could not read restart recovery evidence.") from exc

@@ -38,6 +38,34 @@ def test_mux_daemon_unknown_action(capsys):
     assert "unknown mux-daemon action" in capsys.readouterr().out
 
 
+def test_mux_daemon_recovery_evidence_is_read_only(tmp_path, monkeypatch, capsys):
+    from worktree_manager import restart_observer, self_install
+
+    monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(restart_observer, "native_epoch", lambda: restart_observer.HostEpoch(
+        "linux", "example-environment", "example-boot",
+    ))
+    assert main(["mux-daemon", "recovery-evidence"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report == {"candidates": [], "automatic_eligible": False}
+    assert not (tmp_path / "restart-recovery").exists()
+    assert main(["mux-daemon", "recovery-evidence", "--apply"]) == 2
+
+
+def test_mux_daemon_recovery_evidence_reports_epoch_blocker(tmp_path, monkeypatch, capsys):
+    from worktree_manager import restart_observer, self_install
+
+    monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
+
+    def unavailable():
+        raise restart_observer.RecoveryEvidenceError("unqualified epoch")
+
+    monkeypatch.setattr(restart_observer, "native_epoch", unavailable)
+    assert main(["mux-daemon", "recovery-evidence"]) == 1
+    assert json.loads(capsys.readouterr().out)["blocker"] == "unqualified epoch"
+    assert not (tmp_path / "restart-recovery").exists()
+
+
 def test_mux_daemon_status_delegates_to_daemons_cli(monkeypatch, capsys):
     """``mux-daemon status`` (and its ``daemons status`` alias dispatched
     from ``__main__``) both route into the shared Phase 1 observability

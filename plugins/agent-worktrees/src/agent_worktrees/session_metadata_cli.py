@@ -128,6 +128,10 @@ def add_parsers(sub) -> None:
         help="Report this session's role vs the worktree head (head/superseded/...)",
     )
     p.add_argument(
+        "--hosting-evidence", action="store_true",
+        help="Read-only exact native head/process evidence; requires an exact --worktree-id",
+    )
+    p.add_argument(
         "--session-id", default=None, help="Session id (default: COPILOT_AGENT_SESSION_ID)"
     )
     p.add_argument(
@@ -274,6 +278,22 @@ def _effort_orientation(record) -> str:
 
 def cmd_session_role(args) -> int:
     """Report THIS session's role relative to its worktree's head (JSON out)."""
+    if getattr(args, "hosting_evidence", False):
+        from . import native_hosting_evidence
+        import yaml
+
+        worktree_id = getattr(args, "worktree_id", None)
+        if not worktree_id:
+            return output._json_error("Hosting evidence requires an exact --worktree-id")
+        try:
+            result = native_hosting_evidence.observe(
+                worktree_id,
+                loader=lambda: tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml"),
+            )
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            return output._json_error(f"Could not read native hosting evidence: {exc}")
+        output._json_output(result)
+        return 0
     session_id = getattr(args, "session_id", None) or (
         os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     )
