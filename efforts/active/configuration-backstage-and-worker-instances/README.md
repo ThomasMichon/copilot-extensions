@@ -30,7 +30,7 @@ distinct consequences before submission.
 - **Topology:** Dependency-ordered PRs; separate worktrees for independently owned implementation slices.
 - **Host (owns PRs):** Coordinator.
 - **Delegates:** Backend implementer owns only its assigned worker lifecycle slice; shared contribution contracts stay Coordinator-owned.
-- **Release cooperation:** The peer's bounded public claim deduplication and owner follow-through for #6758/#6759 completed when #6763 merged. Original writers retain code, PR and merge custody; Coordinator retains release observation, the sole updater, installed Config proof and effort completion.
+- **Release cooperation:** The peer's bounded public claim deduplication and owner follow-through for #6758/#6759 completed when #6763 merged. Original writers retain code, PR and merge custody. All further recovery/update execution remains with the retained #6600 owner; Coordinator retains installed Configuration/Workers acceptance and effort completion, not updater execution.
 - **Handoff:** Each slice reports cited changes and validation against the reviewed contract; Coordinator integrates and owns the end-to-end completion gate.
 - The earlier local override controls remain shipped by #6306. Remote machine selection and second-machine validation remain separately owned by #6283; this effort does not take or close that work.
 - **Cross-surface alignment:** The Manager and Companion clients share the
