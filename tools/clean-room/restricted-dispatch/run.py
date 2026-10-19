@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
+import re
+import runpy
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +22,117 @@ REPO = Path(__file__).resolve().parents[3]
 MANIFEST = Path(__file__).with_name("manifest.json")
 TEST_FILE = "tests/test_restricted_supervisor_docker.py"
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+CLEANUP_RESERVE_SECONDS = 30
+
+
+def resource_names(suffix: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if not re.fullmatch(r"[0-9a-f]{12}", suffix):
+        raise ValueError("restricted resource suffix must be twelve lowercase hexadecimal digits")
+    return (
+        tuple(f"restricted-proof-{part}-{suffix}" for part in ("worker", "central")),
+        tuple(f"restricted-proof-{part}-{suffix}" for part in ("net", "management")),
+    )
+
+
+def _cleanup_docker(containers, networks, *, deadline: float | None = None):
+    failures = []
+    for kind, names in (("container", containers), ("network", networks)):
+        for name in names:
+            argv = ["docker", "rm", "-f", "-v", name] if kind == "container" else [
+                "docker", "network", "rm", name,
+            ]
+
+            def call(command):
+                remaining = 30 if deadline is None else min(30, deadline - time.monotonic())
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, 0)
+                return subprocess.run(
+                    command, capture_output=True, text=True, timeout=remaining, **NO_WINDOW,
+                )
+
+            try:
+                removed = call(argv)
+                inventory = ["docker", kind, "ls", "--filter", f"name=^/?{re.escape(name)}$"]
+                if kind == "container":
+                    inventory.append("--all")
+                inventory.extend(["--format", "{{json .Names}}" if kind == "container" else "{{json .Name}}"])
+                inspected = call(inventory)
+                if inspected.returncode:
+                    failures.append(
+                        f"{kind} inventory unavailable: {name}: exit={inspected.returncode}; "
+                        f"stdout={inspected.stdout!r}; stderr={inspected.stderr!r}"
+                    )
+                else:
+                    present = [json.loads(line) for line in inspected.stdout.splitlines()]
+                    if any(not isinstance(value, str) for value in present):
+                        failures.append(f"{kind} inventory malformed: {name}")
+                    elif name in present:
+                        failures.append(
+                            f"{kind} still exists: {name}: exit={removed.returncode}; "
+                            f"stdout={removed.stdout!r}; stderr={removed.stderr!r}"
+                        )
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                failures.append(f"{kind} cleanup failed: {name}: {exc}")
+    assert not failures, "\n".join(failures)
+
+
+def _run_case(argv: list[str], *, env: dict[str, str], log, timeout: float) -> int:
+    execution_seconds = timeout - CLEANUP_RESERVE_SECONDS
+    if execution_seconds <= 0:
+        raise ValueError("case budget must include execution and reserved cleanup")
+    if os.name == "nt":
+        return subprocess.run(
+            argv, cwd=REPO, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+            timeout=execution_seconds, **NO_WINDOW,
+        ).returncode
+    if signal.getitimer(signal.ITIMER_REAL)[0]:
+        raise ValueError("case owner cannot replace an existing deadline timer")
+    expired = False
+
+    def interrupt_owner(_signal, _frame):
+        nonlocal expired
+        expired = True
+        raise KeyboardInterrupt
+
+    old_handler = signal.signal(signal.SIGALRM, interrupt_owner)
+    old_env, old_argv, old_path, old_cwd = dict(os.environ), sys.argv, sys.path[:], Path.cwd()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    stdout_fd, stderr_fd = os.dup(1), os.dup(2)
+    try:
+        os.environ.clear()
+        os.environ.update(env)
+        sys.argv = argv[1:]
+        sys.path.insert(0, str(Path(argv[1]).parent))
+        os.chdir(REPO)
+        os.dup2(log.fileno(), 1)
+        os.dup2(log.fileno(), 2)
+        signal.setitimer(signal.ITIMER_REAL, execution_seconds)
+        with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+            try:
+                runpy.run_path(argv[1], run_name="__main__")
+                result = 0
+            except SystemExit as exc:
+                result = 0 if exc.code is None else int(exc.code)
+            except KeyboardInterrupt:
+                if not expired:
+                    raise
+                result = 130
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
+        log.flush()
+        os.dup2(stdout_fd, 1)
+        os.dup2(stderr_fd, 2)
+        os.close(stdout_fd)
+        os.close(stderr_fd)
+        os.environ.clear()
+        os.environ.update(old_env)
+        sys.argv, sys.path[:] = old_argv, old_path
+        os.chdir(old_cwd)
+    if expired:
+        raise subprocess.TimeoutExpired(argv, execution_seconds)
+    return result
 
 
 def verify_case(root: Path, outcome: str) -> dict:
@@ -85,32 +201,36 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
         # The contained fixture creates its evidence directory exclusively.
         evidence = case / "evidence"
         env = dict(os.environ)
+        suffix = uuid.uuid4().hex[:12]
+        containers, networks = resource_names(suffix)
         env.update({
             "AGENT_DISPATCH_RESTRICTED_E2E": "1",
             "AGENT_DISPATCH_E2E_CENTRAL_IMAGE": central_image,
             "AGENT_DISPATCH_E2E_BRIDGE_PYTHON": str(bridge_python),
             "AGENT_DISPATCH_E2E_PROVIDER_PYTHON": str(provider_python),
             "AGENT_DISPATCH_E2E_EVIDENCE_DIR": str(evidence),
+            "AGENT_DISPATCH_E2E_RESOURCE_SUFFIX": suffix,
         })
         started = time.monotonic()
         stage = {"case": outcome, "status": "fail", "log": f"{outcome}/runner.log"}
         phase = "runner"
         runner_failed = False
+        launched = False
         try:
             case.mkdir()
-            with (case / "runner.log").open("wb") as log:
-                process = subprocess.run(
+            with (case / "runner.log").open("w", encoding="utf-8") as log:
+                launched = True
+                returncode = _run_case(
                     [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"),
                      "agent-dispatch", "--test-file", TEST_FILE, "-k", outcome,
                      "--test-timeout", str(limits["pytest_item"]),
                      "--timeout", str(limits["contained_case"]),
                      "--plugin-timeout", str(limits["contained_case"])],
-                    cwd=REPO, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                    timeout=limits["contained_case"], **NO_WINDOW,
+                    env=env, log=log, timeout=limits["contained_case"],
                 )
-            if process.returncode:
+            if returncode:
                 runner_failed = True
-                raise ValueError(f"Contained case exited {process.returncode}")
+                raise ValueError(f"Contained case exited {returncode}")
             phase = "proof"
             verify_case(evidence, outcome)
             stage["status"] = "pass"
@@ -133,6 +253,19 @@ def run(root: Path, *, central_image: str, bridge_python: Path, provider_python:
                 "category": category, "evidence": stage["log"], "hint": hints[category],
                 "error_type": stage["error_type"], "error": stage["error"],
             })
+        finally:
+            if launched:
+                try:
+                    _cleanup_docker(containers, networks, deadline=started + limits["contained_case"])
+                    stage["owned_resource_cleanup"] = "complete"
+                except AssertionError as exc:
+                    stage["status"] = "fail"
+                    stage["owned_resource_cleanup"] = "failed"
+                    report["jams"].append({
+                        "category": "cleanup-incomplete", "evidence": str(case),
+                        "error_type": type(exc).__name__, "error": str(exc),
+                        "hint": "Reconcile the exact owned resources; failed cleanup never proves absence.",
+                    })
         stage["duration_seconds"] = time.monotonic() - started
         report["stages"].append(stage)
         if stage["status"] != "pass":

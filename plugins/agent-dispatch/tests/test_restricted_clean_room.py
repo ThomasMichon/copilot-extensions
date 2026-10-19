@@ -16,11 +16,12 @@ import pytest
 
 
 @pytest.fixture
-def lane():
+def lane(monkeypatch):
     script = Path(__file__).resolve().parents[3] / "tools/clean-room/restricted-dispatch/run.py"
     spec = importlib.util.spec_from_file_location("restricted_clean_room", script)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "_cleanup_docker", lambda *_args, **_kwargs: None)
     return module
 
 
@@ -49,9 +50,9 @@ def test_clean_room_retains_two_independent_cases_and_original_limits(lane, tmp_
         evidence = Path(kwargs["env"]["AGENT_DISPATCH_E2E_EVIDENCE_DIR"])
         assert not evidence.exists()
         _proof(evidence, outcome)
-        return SimpleNamespace(returncode=0)
+        return 0
 
-    monkeypatch.setattr(lane.subprocess, "run", run)
+    monkeypatch.setattr(lane, "_run_case", run)
     report = lane.run(
         tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
     )
@@ -103,9 +104,9 @@ def test_clean_room_fails_closed_and_never_resamples(lane, tmp_path, monkeypatch
                     '{"stage":"acceptance","event":"complete"}\n'
                     '{"stage":"cleanup","event":"start"}\n', encoding="utf-8",
                 )
-        return SimpleNamespace(returncode=1 if failure == "nonzero" else 0)
+        return 1 if failure == "nonzero" else 0
 
-    monkeypatch.setattr(lane.subprocess, "run", run)
+    monkeypatch.setattr(lane, "_run_case", run)
     report = lane.run(
         tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
     )
@@ -133,7 +134,7 @@ def test_manifest_failure_never_launches_or_passes_without_original_cases(lane, 
     path = tmp_path / "manifest.json"
     path.write_text("{" if failure == "json" else json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr(lane, "MANIFEST", path)
-    monkeypatch.setattr(lane.subprocess, "run", lambda *a, **kw: pytest.fail("invalid manifest launched"))
+    monkeypatch.setattr(lane, "_run_case", lambda *a, **kw: pytest.fail("invalid manifest launched"))
     report = lane.run(
         tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
     )
@@ -181,6 +182,105 @@ def test_case_directory_failure_is_reported_without_launch(lane, tmp_path, monke
     assert report["result"] == "fail"
     assert report["jams"][0]["category"] == "runner-io"
     assert len(report["stages"]) == 1
+
+
+def test_timeout_reconciles_only_preassigned_resources_within_original_clock(lane, tmp_path, monkeypatch):
+    observed = []
+
+    def timeout(argv, **kwargs):
+        suffix = kwargs["env"]["AGENT_DISPATCH_E2E_RESOURCE_SUFFIX"]
+        observed.append(lane.resource_names(suffix))
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    def cleanup(containers, networks, *, deadline):
+        assert (containers, networks) == observed[0]
+        assert 0 < deadline - lane.time.monotonic() <= 360
+        observed.append("confirmed-absent")
+
+    monkeypatch.setattr(lane, "_run_case", timeout)
+    monkeypatch.setattr(lane, "_cleanup_docker", cleanup)
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "fail"
+    assert report["jams"][0]["category"] == "contained-timeout"
+    assert report["stages"][0]["owned_resource_cleanup"] == "complete"
+    assert observed[-1] == "confirmed-absent"
+
+
+def test_cleanup_failure_preserves_primary_runner_failure(lane, tmp_path, monkeypatch):
+    monkeypatch.setattr(lane, "_run_case", lambda *_args, **_kwargs: 1)
+
+    def cleanup(*_args, **_kwargs):
+        raise AssertionError("owned resource remains")
+
+    monkeypatch.setattr(lane, "_cleanup_docker", cleanup)
+    report = lane.run(
+        tmp_path, central_image="candidate", bridge_python=Path("bridge"), provider_python=Path("provider"),
+    )
+    assert report["result"] == "fail"
+    assert [jam["category"] for jam in report["jams"]] == ["runner-exit", "cleanup-incomplete"]
+    assert report["stages"][0]["owned_resource_cleanup"] == "failed"
+    assert "owned resource remains" in report["jams"][1]["error"]
+
+
+@pytest.mark.parametrize("suffix", ["", "../foreign", "ABCDEF012345", "0" * 13])
+def test_resource_names_refuse_foreign_cleanup_scope(lane, suffix):
+    with pytest.raises(ValueError, match="twelve lowercase hexadecimal"):
+        lane.resource_names(suffix)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner-interrupt regression")
+def test_posix_deadline_unwinds_actual_containment_owner_and_reaps_grandchild(lane, tmp_path):
+    tools = Path(lane.__file__).resolve().parents[2]
+    receipt = tmp_path / "pids.json"
+    body = tmp_path / "body.py"
+    body.write_text(
+        "import json,os,signal,subprocess,sys,time\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\n"
+        "def stop(*_args):\n    child.wait(timeout=5)\n    raise SystemExit(0)\n"
+        "signal.signal(signal.SIGTERM,stop)\n"
+        f"with open({str(receipt)!r},'w') as out:\n"
+        "    json.dump({'parent':os.getpid(),'child':child.pid,'group':os.getpgrp()},out)\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    owner = tmp_path / "owner.py"
+    owner.write_text(
+        "import os,sys\nfrom pathlib import Path\n"
+        f"sys.path.insert(0,{str(tools)!r})\n"
+        "from plugin_test_containment import Limits,run_contained\n"
+        f"raise SystemExit(run_contained([sys.executable,{str(body)!r}],"
+        f"cwd=Path({str(tmp_path)!r}),env=os.environ,sandbox=Path({str(tmp_path / 'sandbox')!r}),"
+        "limits=Limits(wall_seconds=60,poll_seconds=0.05)))\n",
+        encoding="utf-8",
+    )
+    driver = tmp_path / "driver.py"
+    driver.write_text(
+        "import importlib.util,json,os,subprocess,sys,time\nfrom pathlib import Path\n"
+        f"spec=importlib.util.spec_from_file_location('lane',{lane.__file__!r})\n"
+        "lane=importlib.util.module_from_spec(spec)\nspec.loader.exec_module(lane)\n"
+        f"lane.REPO=Path({str(tmp_path)!r})\n"
+        f"with open({str(tmp_path / 'runner.log')!r},'w') as log:\n"
+        "    try:\n"
+        f"        lane._run_case([sys.executable,{str(owner)!r}],env=dict(os.environ),log=log,"
+        "timeout=lane.CLEANUP_RESERVE_SECONDS+3)\n"
+        "    except subprocess.TimeoutExpired:\n        pass\n"
+        "    else:\n        raise AssertionError('deadline did not interrupt owner')\n"
+        f"pids=json.loads(Path({str(receipt)!r}).read_text())\n"
+        "for pid in (pids['parent'],pids['child']):\n"
+        "    try:\n        os.kill(pid,0)\n"
+        "    except ProcessLookupError:\n        continue\n"
+        "    raise AssertionError(f'descendant {pid} survived owner unwind')\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(driver)], cwd=tmp_path,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "interrupted; reaping contained process tree" in (tmp_path / "runner.log").read_text()
+    assert not (tmp_path / "sandbox" / ".containment-ready").exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits do not prove a Windows ACL")

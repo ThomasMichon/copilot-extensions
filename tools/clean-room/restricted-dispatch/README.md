@@ -34,6 +34,15 @@ any case launches; an empty case list cannot produce a passing report.
 The manifest supplies execution limits only after validation against the
 original two-case 300/360-second contract. Pytest-owned Docker finalizers report
 cleanup errors separately, preserving an earlier acceptance failure as well.
+The wrapper preassigns each case's exact container/network names and also
+verifies their removal after the runner unwinds, including timeout/fatal-exit
+paths. Cleanup failures remain separate jams rather than masking the primary
+failure. Thirty seconds of the original 360-second case budget are reserved
+for owner unwinding and verified cleanup; no item or aggregate budget grows.
+On POSIX the canonical containment owner executes in the wrapper's process:
+deadline interruption runs its process-group reaping `finally` instead of
+killing that owner while its worker lives in another session. Native descendant
+regressions exercise that actual interrupt/reaping boundary.
 
 Each case has independent new containers, networks, Bridge state, signed
 credentials and native conversation. The worker is UID 1000 with only its

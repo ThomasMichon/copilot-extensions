@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import os
-import re
 import shutil
 import subprocess
 import time
@@ -54,43 +54,13 @@ def _wait(probe, *, timeout=30, diagnostic=lambda: ""):
     pytest.fail("real integration boundary did not become ready before its deadline\n" + diagnostic())
 
 
-def _cleanup_docker(containers, networks):
-    failures = []
-    for kind, names in (("container", containers), ("network", networks)):
-        for name in names:
-            argv = ["docker", "rm", "-f", "-v", name] if kind == "container" else [
-                "docker", "network", "rm", name,
-            ]
-            try:
-                removed = subprocess.run(
-                    argv, capture_output=True, text=True, timeout=30,
-                    creationflags=no_window_flags(),
-                )
-                inventory = ["docker", kind, "ls", "--filter", f"name=^/?{re.escape(name)}$"]
-                if kind == "container":
-                    inventory.append("--all")
-                inventory.extend(["--format", "{{json .Names}}" if kind == "container" else "{{json .Name}}"])
-                inspected = subprocess.run(
-                    inventory, capture_output=True, text=True,
-                    timeout=30, creationflags=no_window_flags(),
-                )
-                if inspected.returncode:
-                    failures.append(
-                        f"{kind} inventory unavailable: {name}: exit={inspected.returncode}; "
-                        f"stdout={inspected.stdout!r}; stderr={inspected.stderr!r}"
-                    )
-                else:
-                    present = [json.loads(line) for line in inspected.stdout.splitlines()]
-                    if any(not isinstance(value, str) for value in present):
-                        failures.append(f"{kind} inventory malformed: {name}")
-                    elif name in present:
-                        failures.append(
-                            f"{kind} still exists: {name}: exit={removed.returncode}; "
-                            f"stdout={removed.stdout!r}; stderr={removed.stderr!r}"
-                        )
-            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
-                failures.append(f"{kind} cleanup failed: {name}: {exc}")
-    assert not failures, "\n".join(failures)
+_LANE_SPEC = importlib.util.spec_from_file_location(
+    "restricted_dispatch_lane",
+    Path(__file__).resolve().parents[3] / "tools/clean-room/restricted-dispatch/run.py",
+)
+_LANE = importlib.util.module_from_spec(_LANE_SPEC)
+_LANE_SPEC.loader.exec_module(_LANE)
+_cleanup_docker = _LANE._cleanup_docker
 
 
 def _register_docker_cleanup(request, containers, networks, trace):
@@ -160,9 +130,8 @@ def test_real_supervisor_delivers_rotates_and_finishes_own_task(tmp_path, monkey
     bridge_python = os.environ["AGENT_DISPATCH_E2E_BRIDGE_PYTHON"]
     provider_python = os.environ["AGENT_DISPATCH_E2E_PROVIDER_PYTHON"]
     central_image = os.environ["AGENT_DISPATCH_E2E_CENTRAL_IMAGE"]
-    suffix = uuid.uuid4().hex[:12]
-    network, central, worker = (f"restricted-proof-{part}-{suffix}" for part in ("net", "central", "worker"))
-    management = f"restricted-proof-management-{suffix}"
+    suffix = os.environ.get("AGENT_DISPATCH_E2E_RESOURCE_SUFFIX") or uuid.uuid4().hex[:12]
+    (worker, central), (network, management) = _LANE.resource_names(suffix)
     _register_docker_cleanup(request, (worker, central), (network, management), trace)
     bridge_root, provider_root = tmp_path / "bridge", tmp_path / "provider"
     bridge_root.mkdir()
