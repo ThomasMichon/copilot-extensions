@@ -20,6 +20,7 @@ reachability probe of a single target, use ``agent-ssh verify``/``explore``.)
 from __future__ import annotations
 
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -108,6 +109,8 @@ def find_machines_file(start: Path | None = None) -> Path | None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=10,
+            env={key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")},
             creationflags=no_window_flags(),
         )
         if top.returncode == 0:
@@ -115,6 +118,8 @@ def find_machines_file(start: Path | None = None) -> Path | None:
             return _machines_file_at(root)
     except FileNotFoundError:
         pass
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("timed out resolving the calling Git repository") from exc
     for parent in (start, *start.parents):
         cand = _machines_file_at(parent)
         if cand is not None:

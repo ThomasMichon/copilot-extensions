@@ -212,6 +212,31 @@ def test_discovery_stops_at_git_boundary(tmp_path: Path) -> None:
     assert mesh_mod.find_machines_file(sub) is None
 
 
+def test_inherited_git_directory_cannot_select_another_repo(tmp_path: Path, monkeypatch) -> None:
+    repos = [tmp_path / name for name in ("caller", "other")]
+    for repo in repos:
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, **no_window_kwargs())
+        (repo / "machines.yaml").write_text(SAMPLE, encoding="utf-8")
+    caller, other = repos
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+    assert mesh_mod.find_machines_file(caller) == caller / "machines.yaml"
+
+
+def test_git_lookup_timeout_does_not_fall_back(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "machines.yaml").write_text(SAMPLE, encoding="utf-8")
+
+    def timeout(argv, **kwargs):
+        assert kwargs["timeout"] == 10
+        raise subprocess.TimeoutExpired(argv, 10)
+
+    monkeypatch.setattr(mesh_mod.subprocess, "run", timeout)
+    with pytest.raises(ValueError, match="timed out"):
+        mesh_mod.find_machines_file(tmp_path)
+
+
 def test_discovery_without_git_stops_at_worktree_gitfile(
     tmp_path: Path, monkeypatch,
 ) -> None:

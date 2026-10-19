@@ -128,6 +128,8 @@ order, `machines.yaml`, `.agent-worktrees/machines.yaml`,
 conventional-location priority. They never borrow topology from outside that
 Git repository or from a nearer subdirectory. Without Git, parent walking
 remains available but stops at a `.git` directory or worktree file.
+Git source lookup is bounded to ten seconds and ignores inherited `GIT_*`
+overrides, so another checkout cannot redirect the calling-repository scope.
 Running either through agent-worktrees' `<repo> ssh …` front door (e.g.
 `<repo> ssh mesh-status`) pins this to the named `<repo>`'s own checkout
 regardless of the invoking shell's actual cwd -- agent-worktrees resolves
