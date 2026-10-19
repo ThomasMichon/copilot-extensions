@@ -192,6 +192,12 @@ during Phase 2; any material expansion returns through proposal review first.
 - Catalog, cache, HTTP roster and runtime validation passed 117 cases; Python
   lint passed. Contract re-attestation, fresh review and final-head CI remain
   required. No scope, capability-floor or rollout gate was relaxed.
+- Re-attested the same current HTTP41 metadata to committed source
+  `460a21bfbc9f614d98820294e6cf041a315f70da`, preserving all expected bodies,
+  historical vectors and capability floors. Independent checking passed all
+  265 fixtures and the combined contract/provider consumer lane passed 115
+  cases. The 35-source/32-provenance closure retains explicit source-only
+  classification for native credential-command dependencies.
 
 ### 2026-10-19 - Production HTTP source registration
 

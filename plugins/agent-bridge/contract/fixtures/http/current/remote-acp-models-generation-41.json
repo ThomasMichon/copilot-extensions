@@ -45,7 +45,7 @@
     "ordinary_provider_instance_default": false
   },
   "captured_from": {
-    "commit": "862f3f48f8fd0af32344cbf148c9228726c6bc27",
+    "commit": "460a21bfbc9f614d98820294e6cf041a315f70da",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
