@@ -358,6 +358,16 @@ application approvals remain answerable through the bridge's correlated
 headless interaction path. A live offered action and its exact answer determine
 approval; historical text, reconnect, and broad local tool authority do not.
 
+A target can be addressed by configured name or an explicit secure endpoint
+under the same locally approved connection policy. An endpoint is an address,
+not authority to connect or obtain credentials. Enabled plugins can contribute
+declarative connection and authentication requirements while adopter-owned
+configuration supplies concrete bindings. Neither a contribution nor discovery
+grants credential-source approval, executes an authentication command, or
+creates a remote agent. Token-scheme selection preserves the existing scoped
+credential owner's isolation rather than introducing arbitrary header templates
+or ambient-auth fallback.
+
 ### cursor-stable-event-replay
 
 Session events form an ordered, reconnect-safe stream with stable identities and
@@ -370,6 +380,13 @@ Named agents and sessions resolve through project context, worktree state,
 machine topology, namespace providers, and capability probes. A target may be
 local, remote, elevated, dynamic, or venue-provided, while the caller sees one
 catalog and one resolution contract.
+
+That catalog includes enabled-plugin remote target contributions with
+attributable ownership and explicit configuration precedence. An unbound or
+invalid contribution remains inspectable with its binding requirement or
+unavailability reason, never falsely ready. Roster and detail inspection do not
+contact remote endpoints or acquire credentials. Discovery, complete binding,
+successful connection and a running conversation remain distinct facts.
 
 ### conventional-repository-discovery
 After basic installation, Bridge derives declared targets and existing
