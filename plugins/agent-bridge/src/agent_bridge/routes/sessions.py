@@ -637,26 +637,21 @@ async def start_session(req: StartSessionRequest, request: Request):
             )
 
     if agent_name and is_remote_address(agent_name):
-        from ..remote_acp_sessions import connect_remote_session, has_local_launch_options
-        if has_local_launch_options(req):
+        from .. import remote_acp_sessions as remote_api
+        if remote_api.has_local_launch_options(req):
             raise HTTPException(422, "Remote ACP target does not launch local resources")
         try:
-            remote = await connect_remote_session(
+            remote = await remote_api.connect_remote_session(
                 mgr, agent_name.removeprefix("remote-acp:"),
                 cwd=req.target_dir or "/", caller_id=req.caller_id,
                 caller_session_id=req.caller_session_id,
-                remote_session_id=req.remote_session_id,
-                reuse=not req.force_new,
+                remote_session_id=req.remote_session_id, reuse=not req.force_new,
                 **({"project": req.sender_repo} if req.sender_repo is not None else {}),
             )
+        except remote_api.RemoteSessionBusy as exc:
+            raise HTTPException(409, exc.detail) from None
         except (ValueError, PermissionError, ConnectionError):
             raise HTTPException(422, "Remote ACP target/connection refused") from None
-        if remote.status == SessionStatus.RUNNING:
-            raise HTTPException(409, {
-                "error": "session_conflict",
-                "existing_session_id": remote.session_id,
-                "message": "The selected remote conversation is busy",
-            })
         return StartSessionResponse(
             session_id=remote.session_id, name=remote.name, status=remote.status,
             caller_session_id=remote.caller_session_id,

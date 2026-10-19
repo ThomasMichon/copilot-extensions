@@ -18,6 +18,16 @@ if TYPE_CHECKING:
     from .session_manager import Session, SessionManager
 
 
+class RemoteSessionBusy(RuntimeError):
+    def __init__(self, session_id: str):
+        super().__init__("The selected remote conversation is busy")
+        self.detail = {
+            "error": "session_conflict",
+            "existing_session_id": session_id,
+            "message": str(self),
+        }
+
+
 def has_local_launch_options(request: StartSessionRequest) -> bool:
     return any((
         request.worktree_id, request.creation_key, request.provider_instance,
@@ -93,6 +103,8 @@ async def _attach_remote_session(
                 continue
             if RemoteAcpTarget.model_validate(candidate.target.remote_acp).model_dump(mode="json") != snapshot:
                 raise ValueError("Remote endpoint/profile/identity changed; explicit new attachment required")
+            if candidate.status == SessionStatus.RUNNING:
+                raise RemoteSessionBusy(candidate.session_id)
             if candidate.status != SessionStatus.STOPPED:
                 return candidate
             session = candidate
