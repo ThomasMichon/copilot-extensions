@@ -19,7 +19,8 @@ def needs_descendant_details(row: dict) -> bool:
         return True
     summary = row.get("claims_assets")
     if isinstance(summary, dict):
-        return bool(summary.get("by_kind", {}).get("worktree"))
+        counts = summary.get("by_kind")
+        return not isinstance(counts, dict) or bool(counts.get("worktree"))
     return any(
         isinstance(claim, dict) and claim.get("kind") == "worktree"
         and claim.get("state", "") in ("", "active")
@@ -46,6 +47,7 @@ def claim_coverage(rec: dict) -> list[str]:
         notices.append("incomplete")
     unknown = (
         type(complete) is not bool or not known_count
+        or (rec.get("asset_hints") or {}).get("coverage_unknown")
         or (projection is not None and (
             not isinstance(projection, dict)
             or type(projection.get("complete")) is not bool
@@ -124,6 +126,14 @@ def asset_hints(row: dict) -> dict:
         counts = summary.get("by_kind")
         count = summary.get("held_count")
         available = summary.get("details_available")
+        if "by_kind" in summary and counts is None:
+            result = {
+                "hints": [], "overflow": 0, "details": [],
+                "details_available": True, "coverage_unknown": True,
+            }
+            if type(count) is int and count >= 0:
+                result["held_count"] = count
+            return result
         if (
             not isinstance(counts, dict) or len(counts) > 128
             or type(count) is not int or count < 0

@@ -210,6 +210,44 @@ def test_legacy_child_without_links_is_unknown_not_an_empty_complete_subtree():
     assert "coverage unknown" in _claims_cell(row, 12).plain
 
 
+@pytest.mark.parametrize("counts", [None, [], "unknown"])
+def test_descendant_kind_guard_keeps_nonmapping_evidence_unknown(counts):
+    from worktree_manager.production_picker.picker_tui.worktree_assets import needs_descendant_details
+
+    assert needs_descendant_details(_raw(claims_assets={"by_kind": counts})) is True
+
+
+@pytest.mark.parametrize("count", [None, 0, 3])
+def test_partial_claim_summary_survives_admission_and_normalization_as_unknown(count):
+    from worktree_manager.production_picker.picker_tui.engine_helpers import _claims_cell
+    from worktree_manager.production_picker.picker_tui.worktree_details_screen import WtDetailsScreen
+    from worktree_manager.worktree_rows_contract import parse_current_rows
+
+    summary = {"by_kind": None}
+    if count is not None:
+        summary["held_count"] = count
+    raw = _projected(
+        claims_assets=summary, claims_link_count=2, claims_links_complete=True,
+        claims_projection={"inherited_pr_count": 0, "unresolved_count": 0, "complete": True},
+    )
+    raw = parse_current_rows({
+        "ok": True, "contract_version": 1, "worktrees": [raw],
+        "projection": {
+            "schema_version": 1, "quality": "current", "generation": "a" * 32,
+            "revision": 1, "observed_at": 1, "roster_count": 1, "selected_count": 1,
+        },
+    })[0]
+    row = derive.norm(raw, "host", "windows")
+    assert row["claims_descendants_available"] is True
+    assert row["asset_hints"]["coverage_unknown"] is True
+    assert row["asset_hints"]["details_available"] is True
+    assert row["asset_hints"].get("held_count") == count
+    assert "coverage unknown" in _claims_cell(row, 12).plain
+    screen = WtDetailsScreen(row)
+    expected = "unknown" if count is None else str(count)
+    assert f"held claims ({expected}): loading full details" in screen._body().plain
+
+
 def test_current_claim_evidence_survives_local_and_ssh_adapters(monkeypatch):
     import json
     from types import SimpleNamespace

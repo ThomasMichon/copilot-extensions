@@ -129,7 +129,7 @@ class WtDetailsScreen(ModalScreen[None]):
                 lock = ""
             text.append(f"\nsession   {sid}{lock}\n", style=C_DIM)
         if self._loading:
-            count = (rec.get("asset_hints") or {}).get("held_count", 0)
+            count = (rec.get("asset_hints") or {}).get("held_count", "unknown")
             text.append(f"\nheld claims ({count}): loading full details...\n", style=C_DIM)
         elif self._error:
             text.append(f"\nheld claims: {self._error}\n", style=C_WARN)
