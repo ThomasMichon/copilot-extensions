@@ -222,9 +222,7 @@ These negatives assert the intended admission diagnostic, not just a nonzero
 exit that could hide a broken test harness.
 
 The full gate executes from a real LF step file, matching Actions rather than
-transporting a multiline heredoc through Windows Bash arguments. An initial
-local argv-based harness failed parsing; changing the fixture's transport did
-not change the gate, candidate, production deadline or expected verdict.
+transporting a multiline heredoc through Windows Bash arguments.
 
 Run it through the repository's existing bounded pytest environment:
 
