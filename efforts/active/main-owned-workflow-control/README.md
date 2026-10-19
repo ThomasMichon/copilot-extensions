@@ -345,38 +345,51 @@ regressions, retained-owner seams and the completion gate.
   or silently copy descendant ownership into an ancestor's ledger.
   Manager completeness/detail implementation merged in #7228; qualified
   release and installed-view acceptance remain open.
-- [ ] Reuse the existing invited-collaborator plus root CODEOWNERS Maintainer
+- [x] Reuse the existing invited-collaborator plus root CODEOWNERS Maintainer
   boundary. Propose an initial Dev-only, same-repository, nondraft scope:
   exclude Main, generated release candidates and the promotion publisher.
   Require the `auto-merge` consent label and respect configured holds.
-- [ ] Evaluate fresh current-head required CI, including required check-source
+  Disabled source and admission contracts merged in #7244; no live consent
+  binding or automation identity is activated.
+- [x] Evaluate fresh current-head required CI, including required check-source
   identities, and the latest actual current-head Copilot `APPROVED` verdict
   after any reopen or base-change epoch.
   Reject active change requests from every other reviewer. Paginate history;
   a later `COMMENTED` or pending review does not clear a human negative.
-- [ ] Use native GitHub `REBASE` with expected-head compare-and-swap when an
+  Shared policy and disabled-controller contracts merged in #7232 and #7244;
+  actual mutation-identity and event-order qualification remain below.
+- [x] Use native GitHub `REBASE` with expected-head compare-and-swap when an
   update is necessary for a clean, policy-compliant merge. Do not substitute a
   merge update, execute PR hooks/code, resolve conflicts or reuse old-head
   approval/CI. Return genuine conflicts to the original submitter with one
   deduplicated notification; races and unknown responses are not conflicts.
+  #7244 proves these source contracts without enabling the writer. Current
+  Dev policy is non-strict; base movement alone does not require a rebase.
 - [ ] Implement a short, event-driven trusted-default-Main reconciler, with
   bounded manual/catch-up recovery for event-order gaps. Treat trigger data as
   hints and re-read actual PR state before each write. Do not hold runners
   waiting for CI/reviews, launch review waves or retry uncertain writes blindly.
+  The bounded manual implementation merged in #7244. Automatic subscriptions
+  remain unwired pending the separate activation decision.
 - [ ] Keep mutation authority out of head-controlled review events and
   untrusted checkouts. Prefer a short-lived, single-repository automation
   identity with only needed permissions. A new App, credential, review-only
   bypass entry or live enablement needs explicit operator approval; existing
   human exemptions and the licensed review-request credential do not imply it.
   CI protections and Main publication requirements remain unchanged.
-- [ ] Prove external rebase compatibility with the owning managed worktree:
+- [x] Prove external rebase compatibility with the owning managed worktree:
   stale local publication refuses, unpublished work/backups survive, and a
   later verified squash merge supports `pr-complete` and claim settlement.
   Extend existing provider/lifecycle seams only if focused tests expose a gap.
+  Three real-Git source-level contracts passed and merged in #7244. These do
+  not replace the separately authorized live App canary.
 - [ ] Land the implementation disabled through reviewed Dev contribution and
   normal qualified promotion. Keep it Dev-owned unless an independently
   governed critical-control requirement is separately approved; do not expand
   the Main preservation allowlist merely because the job is privileged.
+  Reviewed disabled Dev source merged in #7244; qualified delivery and
+  installed behavior remain blocked. The normal consumer update reproduced
+  the existing #6947 and #6564 installation failures without bypassing them.
 - [ ] After authority acceptance, prove report-only operation and one
   explicitly consented rebase/new-CI/new-approval/merge canary. Verify both
   CI-first and review-first event ordering and the actual mutation identity.

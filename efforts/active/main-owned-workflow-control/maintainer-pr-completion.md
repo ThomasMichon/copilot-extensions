@@ -7,10 +7,12 @@ and [claims presentation](../../../visions/venue-pivots-ux/README.md).
 
 ## Status and ownership
 
-The contract was reviewed and merged in #7219. Implementation is active; live
-authority and activation remain separately gated. The **PR completion steward**
-owns this Phase 5a slice and its readiness, guidance and completion visibility
-prerequisites. The parent campaign remains Active.
+The contract was reviewed and merged in #7219. Readiness/guidance source merged
+in #7225 and #7232, claims presentation in #7228, and the disabled controller in
+#7244. Qualified release, installed behavior, live authority and activation
+remain gated. The **PR completion steward** owns this Phase 5a slice and its
+readiness, guidance and completion visibility prerequisites. The parent
+campaign remains Active.
 
 This extends the existing plan from #7165, not a second automation campaign.
 Existing #3336 release, #7122 capacity, #1303 coverage, source-attribution and
@@ -159,6 +161,14 @@ weaken per-hop finalization.
 Steps 2 and 3 may use independent worktrees after plan review. Step 4 depends
 on the readiness contract, not on every unrelated portfolio wave. Steps 5 and
 6 retain explicit policy/credential/rollout approval gates.
+
+The source-delivery boundary is now recorded, not an activation decision.
+Read-only checks of six execution-user legacy project configurations found
+the expected required GitHub direct-submit profile and no local PR override.
+Other users and separately provisioned installation cells are not thereby
+audited. The existing Windows consumer failures in #6947 and #6564 still block
+installed acceptance; source merges and a refreshed payload manifest are not
+proof that the fixes are running.
 
 ## Validation and completion gate
 
