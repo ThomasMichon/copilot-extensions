@@ -1,18 +1,25 @@
 # Main-Owned Workflow Control
 
-- **Subject:** recoverable release control independent of ordinary contribution
+- **Subject:** efficient workflow orchestration with recoverable release control
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-18
 - **Reality docs:** `docs/pipelines.md`, `docs/patterns/dev-main-promotion-pipeline.md`
 
 ## Purpose & Intent
+
+The workflow portfolio should deliver timely contributor feedback, dependable
+releases and useful code review with the least redundant execution and status
+reporting needed to preserve assurance. Each invocation should have an explicit
+purpose, coverage contract and accountable owner. Consolidation should improve
+observed review and delivery headroom, not merely make a workflow list shorter.
 
 The release branch should retain a narrow, owner-governed control layer that can
 be repaired independently of ordinary contribution validation. A repair should
 survive the next release without opening a route for unvalidated product changes.
 Reusable implementations should continue through reviewed, validated contribution
-and promotion, including implementations submitted by administrators.
+and promotion, including implementations submitted by administrators. Independent
+control is an enabling mechanism, not a prerequisite for every safe reduction.
 
 ## Concepts & Components
 
@@ -24,8 +31,37 @@ and promotion, including implementations submitted by administrators.
   control content, with attributable input identities and final-tree validation.
 - **Trusted admission:** authorization independent of candidate-controlled code,
   applying to complete diffs rather than branch names or claimed authorship.
+- **Workflow portfolio:** contributor acceptance, source qualification,
+  generated-release validation, deep/platform coverage, review and maintenance
+  form one legible orchestration map without losing their distinct contracts.
+- **Validation identity:** source, recipe, selected coverage, platform and
+  execution evidence determine whether prior work can satisfy a requirement.
+- **Execution placement:** hosted and explicitly admitted self-hosted capacity
+  run only workloads whose trust, tooling, isolation and resource contracts fit.
 
 ## Features
+
+### minimal-redundant-invocations
+
+Compatible event handlers share established trusted entrypoints rather than
+creating repeated workflow runs and checks for the same obligation. Distinct
+trust boundaries and timely failure feedback remain visible. A skipped job is
+not reported as an eliminated workflow invocation.
+
+### coverage-preserving-reuse
+
+Equivalent trusted validation is reused only with complete, current evidence
+for its actual input and coverage contract. Source and generated-output checks,
+native platforms, installation acceptance and stress coverage retain their
+independent assurance where their contracts differ.
+
+### supported-capacity-and-review-headroom
+
+Qualified execution capacity performs useful admitted work without duplicating
+its hosted equivalent. Code review retains a supported execution path and
+explicit capacity ownership. Routing, failover and load-balancing claims reflect
+provider guarantees and actual observed assignments, not the mere presence of
+another runner pool.
 
 ### independent-control-repair
 
@@ -46,6 +82,20 @@ the resulting composition, not just source before transformation. Concurrent
 control repairs cannot be overwritten by a stale promotion.
 
 ## Behaviors
+
+### one-coordinated-portfolio
+
+One canonical effort records the audit, prioritized reductions, slice owners,
+dependencies and acceptance evidence. Existing release, runner, coverage and
+remediation authorities retain their responsibilities; a new coordinator does
+not create a competing controller or preempt an active contribution.
+
+### measurable-assurance-preserving-reduction
+
+Before and after comparisons distinguish workflow invocations, allocated jobs,
+check records, selected coverage and observed queue/review outcomes over
+comparable events. Missing, skipped or failed evidence cannot authorize removal.
+Independent runner and review-service limits are reported separately.
 
 ### contribution-authority-is-not-an-admin-exemption
 
@@ -72,10 +122,18 @@ ownership; rollback does not undo an independent control repair.
 - No duplicate competing release writers or mutable second implementation.
 - No weakening contributor acceptance, fork isolation or required validation.
 - No automatic rollout or temporary policy relaxation inferred from plan approval.
+- No shorter workflow list obtained by hiding failures or dropping distinct
+  platform, generated-output, installation or stress assurance.
+- No unsupported failover claim, untrusted workload admission or capacity grant
+  inferred from an available runner.
+- No competing test portfolio or release controller; this vision governs their
+  workflow orchestration and ownership seams.
 
 ## See Also
 
 - `../README.md`
 - `../coverage-guided-ci/README.md`
+- `../test-portfolio/README.md`
+- `../release-pipeline/README.md`
 - `../ci-failure-remediation/README.md`
 - `../../efforts/active/main-owned-workflow-control/README.md`
