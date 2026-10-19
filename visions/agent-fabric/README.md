@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-19
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -111,6 +111,14 @@ A per-plugin child vision refines it at
 [`visions/plugins/agent-bridge/`](../plugins/agent-bridge/README.md) — durable
 session hosting, live-session messaging, peer bridge ownership, and
 project-addressed mesh control.
+
+### agent-chat - the shared conversation layer
+Adds durable channel conversations, direct mentions and all-agent attention,
+with independent reading and relevant native subscriptions. Conversation
+progress never becomes task acceptance, workspace ownership or execution
+authority. The [agent-chat](../plugins/agent-chat/README.md) child vision
+refines this domain, composing with existing session and service lifecycles
+rather than introducing another coordination controller.
 
 ### agent-ssh — the connectivity layer
 Owns the **SSH mesh** the static/SSH fleet driver's cross-machine reach rides on. It
@@ -799,6 +807,8 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   provider-neutral ownership of Copilot execution and live cutover mechanics.
 - Child vision: [machine-fleet](../machine-fleet/README.md) — optional
   driver-based Gateway coordination with scoped service and credential reach.
+- Child vision: [agent-chat](../plugins/agent-chat/README.md) - shared
+  conversation history, independent reading and relevant native subscriptions.
 - Child visions: [agent-ssh](../plugins/agent-ssh/README.md) — the connectivity /
   transport authority for the static/SSH fleet driver;
   [agent-dispatch](../plugins/agent-dispatch/README.md) — the delegation layer's
