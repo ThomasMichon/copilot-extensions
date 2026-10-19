@@ -112,7 +112,10 @@ checkout-free merger retains only its existing non-administrator Actions
 authority. No second publisher or merge writer is introduced.
 
 `promotion_lifecycle.py` reads the complete open-Main-PR inventory before a new
-generation starts. A failed, cancelled or interrupted producing run does not
+generation starts. It uses creation-ordered stable cursors, not page offsets
+that can skip a surviving promotion when an earlier PR closes. Changed totals,
+duplicate identities or invalid cursors refuse admission rather than claiming
+the inventory is idle. A failed, cancelled or interrupted producing run does not
 release its open promotion PR. The source-owned trigger declines another
 dispatch, and the trusted Main admission gate independently refuses new source
 validation. Incomplete or ambiguous inventory, an unexpected same-repository

@@ -1082,6 +1082,13 @@ ordinary PR-closure event. Source CI still requires success, and no merged PR
 means no deferred retry. Focused unit and literal dispatcher regressions retain
 strict owner provenance and cover both successful recovery and refusal.
 
+The next review identified offset-pagination drift in active-PR admission.
+Open and closed-unmerged Main inventories now share a stable cursor reader;
+open traversal is creation-ascending, preserving surviving entries when an
+earlier PR closes. Inconsistent totals or cursor/identity ambiguity refuse
+admission. A regression closes the first ordinary PR between page reads and
+proves that the following promotion cannot be mistaken for an idle inventory.
+
 ### 2026-10-18 - Reviewed lifecycle charter implemented locally; Main activation pending
 
 Plan amendment #7199 merged as

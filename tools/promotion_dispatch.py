@@ -124,9 +124,15 @@ def _newer_admitted(request: Callable[[str], object], repository: str, run: dict
     return False
 
 
-def _retirements(request: Callable[..., object], repository: str) -> list[dict]:
-    """CLOSED excludes MERGED here; REST's state=closed includes both."""
+def main_pull_requests(
+    request: Callable[..., object], repository: str, state: str,
+) -> list[dict]:
+    """Stable cursors retain surviving entries when earlier PRs leave the set."""
+    if state not in ("OPEN", "CLOSED"):
+        raise PromotionDispatchError("invalid Main PR inventory state")
     owner, name = repository.split("/")
+    direction = "ASC" if state == "OPEN" else "DESC"
+    inventory = "open Main PR" if state == "OPEN" else "closed-unmerged promotion"
     cursor = None
     rows: list[dict] = []
     seen: set[int] = set()
@@ -134,16 +140,16 @@ def _retirements(request: Callable[..., object], repository: str) -> list[dict]:
         query = (
             "query($owner:String!,$name:String!,$cursor:String){"
             "repository(owner:$owner,name:$name){pullRequests("
-            "states:CLOSED,baseRefName:\"main\",first:100,after:$cursor,"
-            "orderBy:{field:CREATED_AT,direction:DESC}){totalCount "
+            f"states:{state},baseRefName:\"main\",first:100,after:$cursor,"
+            f"orderBy:{{field:CREATED_AT,direction:{direction}}}){{totalCount "
             "pageInfo{hasNextPage endCursor} nodes{number state merged "
-            "headRefName headRefOid headRepository{nameWithOwner} author{login}}}}}"
+            "baseRefName headRefName headRefOid headRepository{nameWithOwner} author{login}}}}}"
         )
         data = request("graphql", body={
             "query": query, "variables": {"owner": owner, "name": name, "cursor": cursor},
         })
         if not isinstance(data, dict) or data.get("errors"):
-            raise PromotionDispatchError("closed-unmerged promotion history is unavailable")
+            raise PromotionDispatchError(f"{inventory} history is unavailable")
         payload = data.get("data")
         repo = payload.get("repository") if isinstance(payload, dict) else None
         connection = repo.get("pullRequests") if isinstance(repo, dict) else None
@@ -154,28 +160,34 @@ def _retirements(request: Callable[..., object], repository: str) -> list[dict]:
             or type(info.get("hasNextPage")) is not bool
             or type(connection.get("totalCount")) is not int
         ):
-            raise PromotionDispatchError("closed-unmerged promotion history is incomplete")
+            raise PromotionDispatchError(f"{inventory} history is incomplete")
         for row in batch:
             if (
                 not isinstance(row, dict) or type(row.get("number")) is not int
                 or row["number"] <= 0 or row["number"] in seen
-                or row.get("state") != "CLOSED" or row.get("merged") is not False
+                or row.get("state") != state or row.get("merged") is not False
+                or row.get("baseRefName") != "main"
             ):
-                raise PromotionDispatchError("closed-unmerged promotion identity is invalid")
+                raise PromotionDispatchError(f"{inventory} identity is invalid")
             seen.add(row["number"])
             rows.append(row)
         if not info["hasNextPage"]:
             if connection["totalCount"] != len(rows):
-                raise PromotionDispatchError("closed-unmerged promotion history changed")
+                raise PromotionDispatchError(f"{inventory} history changed")
             return rows
         next_cursor = info.get("endCursor")
         if (
             not batch or not isinstance(next_cursor, str) or not 0 < len(next_cursor) <= 1024
             or next_cursor == cursor
         ):
-            raise PromotionDispatchError("closed-unmerged promotion cursor is invalid")
+            raise PromotionDispatchError(f"{inventory} cursor is invalid")
         cursor = next_cursor
-    raise PromotionDispatchError("closed-unmerged promotion history exceeds the pagination limit")
+    raise PromotionDispatchError(f"{inventory} history exceeds the pagination limit")
+
+
+def _retirements(request: Callable[..., object], repository: str) -> list[dict]:
+    # GraphQL CLOSED excludes MERGED, unlike REST's state=closed.
+    return main_pull_requests(request, repository, "CLOSED")
 
 
 def retired_source(

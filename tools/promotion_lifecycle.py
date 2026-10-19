@@ -14,7 +14,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify_promotion_workflows import VerificationError, _api  # noqa: E402
-from promotion_dispatch import PromotionDispatchError, pending_source, require_automatic_source  # noqa: E402
+from promotion_dispatch import (  # noqa: E402
+    PromotionDispatchError, main_pull_requests, pending_source, require_automatic_source,
+)
 
 SCHEMA = "copilot-extensions.promotion-admission"
 _REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9_.-]+")
@@ -45,54 +47,42 @@ def active_promotions(
         or type(wait_seconds) not in (int, float) or not 0 < wait_seconds <= 120
     ):
         raise PromotionAdmissionError("invalid promotion inventory request")
-    request = _api if api is None else api
+    caller = _api if api is None else api
     owner = repository.split("/", 1)[0].casefold()
     deadline = time.monotonic() + wait_seconds
-    seen: set[int] = set()
     promotions: list[ActivePromotion] = []
-    for page in range(1, 11):
+
+    def request(path: str, *, body: dict) -> object:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise PromotionAdmissionError("promotion inventory deadline expired")
-        rows = request(
-            f"repos/{repository}/pulls?state=open&base=main&sort=created&direction=asc"
-            f"&per_page=100&page={page}",
-            timeout=min(30, remaining),
-        )
-        if not isinstance(rows, list) or len(rows) > 100:
-            raise PromotionAdmissionError("open Main PR inventory is incomplete or invalid")
-        for row in rows:
-            if not isinstance(row, dict):
-                raise PromotionAdmissionError("open Main PR inventory contains an invalid row")
-            number, head, base, user = (
-                row.get("number"), row.get("head"), row.get("base"), row.get("user"),
-            )
-            if (
-                type(number) is not int or number <= 0 or number in seen
-                or row.get("state") != "open"
-                or not isinstance(base, dict) or base.get("ref") != "main"
-                or not isinstance(head, dict) or not isinstance(head.get("ref"), str)
-                or not isinstance(user, dict) or not isinstance(user.get("login"), str)
-            ):
-                raise PromotionAdmissionError("open Main PR inventory is ambiguous or invalid")
-            seen.add(number)
-            branch = head["ref"]
-            if not branch.startswith("release/promote-"):
-                continue
-            source = head.get("repo")
-            if not isinstance(source, dict) or not isinstance(source.get("full_name"), str):
-                raise PromotionAdmissionError("promotion PR source repository is unavailable")
-            if source["full_name"].casefold() != repository.casefold():
-                continue
-            if user["login"].casefold() != owner:
-                raise PromotionAdmissionError("an active same-repository promotion has an unexpected publisher")
-            match, sha = _BRANCH.fullmatch(branch), head.get("sha")
-            if match is None or not isinstance(sha, str) or not _SHA.fullmatch(sha):
-                raise PromotionAdmissionError("an active promotion PR has an invalid identity")
-            promotions.append(ActivePromotion(number, branch, sha, int(match[1])))
-        if len(rows) < 100:
-            return tuple(sorted(promotions, key=lambda promotion: promotion.number))
-    raise PromotionAdmissionError("open Main PR inventory exceeds the bounded pagination limit")
+        return caller(path, body=body, timeout=min(30, remaining))
+
+    try:
+        rows = main_pull_requests(request, repository, "OPEN")
+    except PromotionDispatchError as error:
+        raise PromotionAdmissionError(f"open Main PR inventory: {error}") from error
+    for row in rows:
+        branch, user = row.get("headRefName"), row.get("author")
+        if (
+            not isinstance(branch, str) or not isinstance(user, dict)
+            or not isinstance(user.get("login"), str)
+        ):
+            raise PromotionAdmissionError("open Main PR inventory is ambiguous or invalid")
+        if not branch.startswith("release/promote-"):
+            continue
+        source = row.get("headRepository")
+        if not isinstance(source, dict) or not isinstance(source.get("nameWithOwner"), str):
+            raise PromotionAdmissionError("promotion PR source repository is unavailable")
+        if source["nameWithOwner"].casefold() != repository.casefold():
+            continue
+        if user["login"].casefold() != owner:
+            raise PromotionAdmissionError("an active same-repository promotion has an unexpected publisher")
+        match, sha = _BRANCH.fullmatch(branch), row.get("headRefOid")
+        if match is None or not isinstance(sha, str) or not _SHA.fullmatch(sha):
+            raise PromotionAdmissionError("an active promotion PR has an invalid identity")
+        promotions.append(ActivePromotion(row["number"], branch, sha, int(match[1])))
+    return tuple(sorted(promotions, key=lambda promotion: promotion.number))
 
 
 def require_idle(

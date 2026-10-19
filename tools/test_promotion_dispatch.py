@@ -80,7 +80,10 @@ class Backend:
         if relative == "actions/runs/600":
             return copy.deepcopy(self.source_ci)
         if path == "graphql":
-            assert body is not None and "states:CLOSED" in body["query"]
+            assert body is not None
+            if "states:OPEN" in body["query"]:
+                return retirement_page([retirement_row(row, state="OPEN") for row in self.active])
+            assert "states:CLOSED" in body["query"]
             return retirement_page([retirement_row(self.pr)] if self.closed and not self.pr["merged"] else [])
         if relative.startswith("pulls?state=closed&base=main&head="):
             return copy.deepcopy(self.closed)
@@ -300,9 +303,9 @@ def admitted_jobs() -> list[dict]:
     ]
 
 
-def retirement_row(pr: dict) -> dict:
+def retirement_row(pr: dict, *, state: str = "CLOSED") -> dict:
     return {
-        "number": pr["number"], "state": "CLOSED", "merged": False,
+        "number": pr["number"], "state": state, "merged": False, "baseRefName": "main",
         "headRefName": pr["head"]["ref"], "headRefOid": pr["head"]["sha"],
         "headRepository": {"nameWithOwner": pr["head"]["repo"]["full_name"]},
         "author": pr["user"],

@@ -25,14 +25,38 @@ def pr(number: int = 123, branch: str = "release/promote-456") -> dict:
     }
 
 
+def page(rows: object, *, total: int | None = None, cursor: str | None = None) -> dict:
+    nodes = rows
+    if isinstance(rows, list):
+        nodes = []
+        for row in rows:
+            if not isinstance(row, dict):
+                nodes.append(row)
+                continue
+            head, base, user = row.get("head"), row.get("base"), row.get("user")
+            source = head.get("repo") if isinstance(head, dict) else None
+            state = row.get("state")
+            nodes.append({
+                "number": row.get("number"), "state": state.upper() if isinstance(state, str) else state,
+                "merged": False, "baseRefName": base.get("ref") if isinstance(base, dict) else None,
+                "headRefName": head.get("ref") if isinstance(head, dict) else None,
+                "headRefOid": head.get("sha") if isinstance(head, dict) else None,
+                "headRepository": {"nameWithOwner": source.get("full_name")} if isinstance(source, dict) else None,
+                "author": user,
+            })
+    return {"data": {"repository": {"pullRequests": {
+        "nodes": nodes, "totalCount": len(rows) if total is None and isinstance(rows, list) else total,
+        "pageInfo": {"hasNextPage": cursor is not None, "endCursor": cursor},
+    }}}}
+
+
 def inventory(rows: object) -> tuple[lifecycle.ActivePromotion, ...]:
-    def api(path: str, *, timeout: float) -> object:
-        assert path == (
-            "repos/example/project/pulls?state=open&base=main&sort=created&direction=asc"
-            "&per_page=100&page=1"
-        )
+    def api(path: str, *, timeout: float, body: dict) -> object:
+        assert path == "graphql"
+        assert "states:OPEN" in body["query"] and "direction:ASC" in body["query"]
+        assert body["variables"] == {"owner": "example", "name": "project", "cursor": None}
         assert 0 < timeout <= 30
-        return copy.deepcopy(rows)
+        return page(copy.deepcopy(rows))
 
     return lifecycle.active_promotions(REPOSITORY, api=api)
 
@@ -122,13 +146,13 @@ def test_all_pages_are_read_before_admission() -> None:
     calls = []
     first = [pr(index, "ordinary-control") for index in range(1, 101)]
 
-    def api(path: str, *, timeout: float) -> object:
-        calls.append(path)
+    def api(path: str, *, timeout: float, body: dict) -> object:
+        calls.append(body["variables"]["cursor"])
         assert 0 < timeout <= 30
-        return first if len(calls) == 1 else [pr(101)]
+        return page(first, total=101, cursor="after-100") if len(calls) == 1 else page([pr(101)], total=101)
 
     promotions = lifecycle.active_promotions(REPOSITORY, api=api)
-    assert len(calls) == 2 and calls[-1].endswith("page=2")
+    assert calls == [None, "after-100"]
     assert promotions[0].number == 101
     with pytest.raises(lifecycle.PromotionAdmissionError):
         lifecycle.require_idle(promotions)
@@ -137,9 +161,10 @@ def test_all_pages_are_read_before_admission() -> None:
 def test_bounded_pagination_refuses_instead_of_silently_truncating() -> None:
     calls = []
 
-    def api(path: str, *, timeout: float) -> object:
+    def api(path: str, *, timeout: float, body: dict) -> object:
         calls.append(path)
-        return [pr(index, "ordinary-control") for index in range((len(calls) - 1) * 100 + 1, len(calls) * 100 + 1)]
+        rows = [pr(index, "ordinary-control") for index in range((len(calls) - 1) * 100 + 1, len(calls) * 100 + 1)]
+        return page(rows, total=1001, cursor=f"after-{len(calls)}")
 
     with pytest.raises(lifecycle.PromotionAdmissionError, match="pagination limit"):
         lifecycle.active_promotions(REPOSITORY, api=api)
@@ -158,7 +183,7 @@ def test_invalid_repository_refuses_before_any_api_call(repository: str) -> None
 def test_cli_status_blocks_dispatch_without_claiming_a_completed_promotion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(lifecycle, "_api", lambda *args, **kwargs: [pr()])
+    monkeypatch.setattr(lifecycle, "_api", lambda *args, **kwargs: page([pr()]))
     output = tmp_path / "output"
     assert lifecycle.main(["--repository", REPOSITORY, "--github-output", str(output)]) == 0
     result = capsys.readouterr()
@@ -172,7 +197,7 @@ def test_cli_status_blocks_dispatch_without_claiming_a_completed_promotion(
 def test_cli_existing_pr_opening_is_idempotent_but_never_makes_dispatch_idle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(lifecycle, "_api", lambda *args, **kwargs: [pr()])
+    monkeypatch.setattr(lifecycle, "_api", lambda *args, **kwargs: page([pr()]))
     output = tmp_path / "output"
     assert lifecycle.main([
         "--repository", REPOSITORY, "--require-idle", "--github-output", str(output),
@@ -203,3 +228,22 @@ def test_real_isolated_cli_bootstraps_its_own_read_only_helper() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "--require-idle" in result.stdout
+
+
+def test_closing_an_earlier_pr_between_cursor_pages_cannot_hide_a_surviving_promotion() -> None:
+    calls = []
+    ordinary = [pr(number, "ordinary-control") for number in range(1, 101)]
+
+    def api(path: str, *, timeout: float, body: dict) -> object:
+        cursor = body["variables"]["cursor"]
+        calls.append(cursor)
+        if cursor is None:
+            return page(ordinary, total=101, cursor="after-100")
+        assert cursor == "after-100"
+        # PR 1 closes after page one. Unlike offset page 2, the cursor still
+        # returns the promotion after PR 100; changed totals also refuse idle.
+        return page([pr(101)], total=100)
+
+    with pytest.raises(lifecycle.PromotionAdmissionError, match="history changed"):
+        lifecycle.active_promotions(REPOSITORY, api=api)
+    assert calls == [None, "after-100"]
