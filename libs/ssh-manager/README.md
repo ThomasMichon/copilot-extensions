@@ -28,7 +28,9 @@ agent-codespaces) import this library instead of spawning SSH directly.
   stderr tail; user-only (0700 directory, 0600 files) on POSIX, one file per exact
   target (a readable prefix plus a digest). Recording is best-effort and never raises into a dial (on an event loop's thread it does no file I/O: a bounded background writer appends the line, dropping it when saturated);
   `ssh_manager.dial_log.summary()` counts dials per outcome over the last 10
-  minutes and hour.
+  minutes and hour. File locks work from an empty lock file, without an
+  unowned seed-byte write on Windows. Lock contention retains the two-second
+  best-effort deadline; admitted records remain serialized without interleaving.
 - **Safe carrier startup diagnostics** -- failed framed-HELLO negotiation reports
   its stage, exception type, observed pre-cleanup exit code (or unknown), and an
   allowlisted stderr reason. Stderr is drained concurrently with raw protocol
