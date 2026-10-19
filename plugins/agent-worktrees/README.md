@@ -385,7 +385,38 @@ standalone-behavior changes.
 |------|---------|--------------|
 | `preToolUse` | Tool calls | Runs statelessness, cross-repo, and anchor-write guards from `~/.agent-worktrees/bin/` when deployed |
 | `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks. When cwd/env identity is absent, registration recovers the exact binding from the session lock PID -> process ancestry -> owning `wt-<id>` mux pane/session |
-| `sessionEnd` | Session end | Reads the authoritative hook payload, resolves the exact prior association, and closes the latest activation interval without concluding the resumable session |
+| `sessionEnd` | Session end | Uses original source evidence to close the matching activation, not a replacement; legacy unqualified records retain their prior behavior. Ending an interval does not conclude the resumable session |
+
+Native Linux/WSL lifecycle hooks capture bounded original ancestor PID/birth and
+boot/environment metadata before contacting the resident monitor. Registration
+qualifies an opaque activation source only when that original process actually
+holds the exact conversation's `inuse.<pid>.hold` inode. It does not infer source
+identity from the current head, a PID-shaped pathname, or the resident daemon's
+environment. Unsupported or inaccessible source evidence remains unconfirmed.
+
+Reasoned End observations match that source in the existing canonical activation
+history. A delayed historical End cannot end a replacement interval, release its
+self-session claim, stop its fsmonitor, or capture its title. Missing or ambiguous
+source cannot retire a qualified interval. Repeated logical activations in one
+physical CLI with the same native UUID are deliberately unconfirmed; the ambiguity
+survives history pruning. Duplicate old Start delivery cannot reactivate an ended
+claim. Both lifecycle writes require the version-3 owner verb, including legacy
+requests, so an older resident cannot silently discard the new fields.
+
+Warm source-aware hooks require `session-start-source-v1` or
+`session-end-source-v1` acknowledgement as appropriate. An older Linux resident
+uses the current source-aware CLI fallback; its explicit flag is rejected by
+older runtimes, and source-aware Start never downgrades to old startup scripts.
+Original Start bindings come only from the transported hook environment, not the
+resident's inherited environment. No End path runs the terminal attachment
+probe. Windows native End remains visibly unqualified; a missing new warm-hook
+capability does not introduce a new console helper or fallback spawn.
+
+`session-role --hosting-evidence --worktree-id <exact-id> --json` is read-only.
+An optional explicit `--session-id <native-uuid>` asks for that conversation's
+bounded activation lifecycle in the same owner read, even when it is no longer
+the hosted head. This mode never substitutes the ambient session ID. Hosting and
+lifecycle observations do not authorize automatic restart recovery.
 
 The bundled live-pulse extension writes `substatus.json` beside Copilot session
 state so the picker can show live intent/rest state. It is passive; durable

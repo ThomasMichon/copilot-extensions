@@ -482,8 +482,9 @@ def test_session_start_fallback_uses_one_runtime_process(monkeypatch, tmp_path):
     assert seen["kwargs"]["env"]["PYTHONPATH"] == ""
 
 
-def test_session_start_rejects_old_resident_without_lifecycle_capability(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize("kind", ["sessionStart", "sessionEnd"])
+def test_session_hook_rejects_old_resident_without_lifecycle_capability(
+    monkeypatch, tmp_path, kind,
 ):
     runtime = tmp_path / ".agent-worktrees"
     runtime.mkdir(parents=True)
@@ -517,7 +518,77 @@ def test_session_start_rejects_old_resident_without_lifecycle_capability(
         "create_connection",
         lambda *args, **kwargs: Connection(),
     )
-    assert hook_client._request("sessionStart", {}, tmp_path) is None
+    result = hook_client._request(kind, {}, tmp_path)
+    if kind == "sessionEnd" and os.name == "nt":
+        assert "unqualified" in result["_stderr"]
+    else:
+        assert result is None
+
+
+def test_source_aware_start_does_not_accept_legacy_start_capability(monkeypatch, tmp_path):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "status-monitor.lock").write_text(json.dumps({
+        "hook_transport": "tcp", "hook_endpoint": "127.0.0.1:1234", "hook_token": "token",
+    }))
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def settimeout(self, timeout):
+            pass
+
+        def sendall(self, request):
+            pass
+
+        def recv(self, size):
+            return b'{"version":1,"capabilities":["session-lifecycle-v1"],"result":{}}\n'
+
+    monkeypatch.setattr(hook_client.socket, "create_connection", lambda *args, **kwargs: Connection())
+    result = hook_client._request("sessionStart", {
+        "_agentWorktrees": {"nativeSource": {"qualified": False}},
+    }, tmp_path)
+    if os.name == "nt":
+        assert "unavailable" in result["_stderr"]
+    else:
+        assert result is None
+
+
+@pytest.mark.parametrize("runtime_version,returncode,stdout", [
+    ("1.0.0", 0, "{}"), ("1.0.0", 2, ""), ("1.0.0", 0, "not-json"),
+    ("0.9.0", 0, "{}"),
+])
+def test_source_aware_start_never_downgrades_to_old_startup_scripts(
+    monkeypatch, tmp_path, runtime_version, returncode, stdout,
+):
+    python = tmp_path / "versions" / runtime_version / "bin" / "python"
+    monkeypatch.setattr(hook_client, "_runtime_python", lambda home: python)
+    monkeypatch.setattr(
+        hook_client, "_fallback_legacy_session_start",
+        lambda *_args, **_kwargs: pytest.fail("source-aware packet downgraded to legacy"),
+    )
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", run)
+    result = hook_client._fallback_session_start({
+        "_agentWorktrees": {"pluginVersion": "1.0.0", "nativeSource": {"qualified": False}},
+    }, tmp_path)
+    if runtime_version == "0.9.0":
+        assert calls == []
+    else:
+        assert "--source-bound" in calls[0]
+    if runtime_version != "1.0.0" or returncode or stdout != "{}":
+        assert result["_stderr"]
+    else:
+        assert result == {}
 
 
 @pytest.mark.parametrize("installed", [False, True])
@@ -2204,9 +2275,74 @@ def test_explicit_context_session_end_uses_cell_runtime(
         "agent_worktrees",
         "deregister-session",
         "--stdin",
+        "--source-bound",
     ]
     assert json.loads(seen["kwargs"]["input"]) == payload
     assert seen["kwargs"]["timeout"] == hook_client._SESSION_END_TIMEOUT_S
+
+
+def test_session_end_transports_original_source_without_terminal_or_env_probe(monkeypatch, tmp_path):
+    origin = {"version": 1, "qualified": True, "ancestors": [{"pid": 101, "start_time": "100"}]}
+    monkeypatch.setattr(hook_client, "_capture_native_source", lambda: origin)
+    monkeypatch.setattr(
+        hook_client, "_probe_terminal", lambda: pytest.fail("End must not attach/probe consoles"),
+    )
+    seen = {}
+    monkeypatch.setattr(
+        hook_client, "_request",
+        lambda kind, payload, home: seen.update(kind=kind, payload=payload) or {},
+    )
+    payload = {"sessionId": "old-session", "reason": "user_exit"}
+    assert hook_client.decide("sessionEnd", payload, home=tmp_path) == {}
+    assert seen["payload"] == {
+        **payload, "_agentWorktrees": {"nativeSource": origin},
+    }
+
+
+def test_resident_dispatches_source_bound_session_end(monkeypatch, tmp_path):
+    from agent_worktrees import session_binding_cli
+
+    monkeypatch.setattr(main.sys, "platform", "linux")
+    original = {"qualified": True, "ancestors": [{"pid": 101, "start_time": "100"}]}
+    payload = {
+        "sessionId": "old-session", "cwd": str(tmp_path), "reason": "user_exit",
+        "_agentWorktrees": {"nativeSource": original},
+    }
+    seen = []
+
+    def end(args):
+        seen.append(args)
+        args.result_holder.append({"ok": True, "lifecycle": "historical"})
+        return 0
+
+    monkeypatch.setattr(session_binding_cli, "cmd_deregister_session", end)
+    result = main._resident_hook_decision(
+        "sessionEnd", payload, segment_cache=SimpleNamespace(), policy=SimpleNamespace(),
+    )
+    assert result == {"ok": True, "lifecycle": "historical"}
+    assert len(seen) == 1
+    assert seen[0].resident_environment is True
+    assert seen[0].source_bound is True
+    assert seen[0].hook_payload is payload
+    assert seen[0].launch_id is None
+
+
+def test_native_session_end_roundtrip_is_not_an_empty_unhandled_success(tmp_path):
+    seen = []
+    server = HookIpcServer(
+        lambda kind, payload, deadline: seen.append((kind, payload)) or {"lifecycle": "historical"},
+    )
+    server.start()
+    try:
+        runtime = tmp_path / ".agent-worktrees"
+        runtime.mkdir()
+        (runtime / "status-monitor.lock").write_text(json.dumps(server.rendezvous()))
+        payload = {"sessionId": "old-session", "reason": "user_exit"}
+        result = hook_client._request("sessionEnd", payload, tmp_path)
+        assert result == {"lifecycle": "historical"}
+        assert seen == [("sessionEnd", payload)]
+    finally:
+        server.close()
 
 
 def test_started_resident_lifecycle_suppresses_duplicate_fallback(

@@ -112,6 +112,8 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
     timeout = (
         _SESSION_START_TIMEOUT_S
         if kind == "sessionStart"
+        else _SESSION_END_TIMEOUT_S
+        if kind == "sessionEnd"
         else _CONNECT_TIMEOUT_S
     )
     decision_timeout = (
@@ -162,7 +164,16 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
     if kind == "sessionStart" and (
         not isinstance(capabilities, list)
         or "session-lifecycle-v1" not in capabilities
+        or _source_aware_lifecycle(payload) and "session-start-source-v1" not in capabilities
     ):
+        if _source_aware_lifecycle(payload) and os.name == "nt":
+            return {"_stderr": "[agent-worktrees] Resident source-aware sessionStart is unavailable.\n"}
+        return None
+    if kind == "sessionEnd" and (
+        not isinstance(capabilities, list) or "session-end-source-v1" not in capabilities
+    ):
+        if os.name == "nt":
+            return {"_stderr": "[agent-worktrees] Resident native sessionEnd is unqualified here.\n"}
         return None
     result = value.get("result")
     return result if isinstance(result, dict) else {}
@@ -198,8 +209,38 @@ def _enrich_session_payload(payload: dict) -> dict:
             if key != "WORKTREE_ID"
         },
         "terminal": _probe_terminal(),
+        "nativeSource": _capture_native_source(),
     }
     return enriched
+
+
+def _capture_native_source() -> dict:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "agent_worktrees" / "native_source_context.py"
+    )
+    try:
+        spec = importlib.util.spec_from_file_location("_agent_worktrees_native_source", path)
+        if spec is None or spec.loader is None:
+            raise ImportError("Native source metadata helper is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.capture()
+    except (OSError, ImportError, ValueError) as exc:
+        sys.stderr.write(f"[agent-worktrees] Native lifecycle source unavailable: {exc}\n")
+        return {"version": 1, "qualified": False, "reason": "native-source-unavailable"}
+
+
+def _enrich_session_end_payload(payload: dict) -> dict:
+    return {
+        **payload,
+        "_agentWorktrees": {"nativeSource": _capture_native_source()},
+    }
+
+
+def _source_aware_lifecycle(payload: dict) -> bool:
+    metadata = payload.get("_agentWorktrees")
+    return isinstance(metadata, dict) and "nativeSource" in metadata
 
 
 def _probe_terminal() -> dict:
@@ -710,11 +751,17 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
         else ""
     )
     runtime_version = python.parents[1].name
+    source_aware = _source_aware_lifecycle(payload)
     if (
         isinstance(payload_version, str)
         and payload_version
         and _version_key(runtime_version) < _version_key(payload_version)
     ):
+        if source_aware:
+            return {"_stderr": (
+                "[agent-worktrees] Native source registration requires the current runtime; "
+                "older lifecycle fallback refused.\n"
+            )}
         if _external_update_driver_active(home, python):
             return {} if contextual else _fallback_legacy_session_start(
                 payload, skip_reconcile=True
@@ -730,6 +777,7 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
                 "agent_worktrees",
                 "session-lifecycle",
                 "--stdin",
+                *(["--source-bound"] if source_aware else []),
                 "--timeout-seconds",
                 str(_SESSION_START_DECISION_S),
             ],
@@ -740,15 +788,24 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
             check=False,
             env=environment,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        if source_aware:
+            return {"_stderr": f"[agent-worktrees] Source-aware sessionStart failed: {exc}\n"}
         return {}
     if result.returncode != 0:
+        if source_aware:
+            return {"_stderr": (
+                f"[agent-worktrees] Source-aware sessionStart failed ({result.returncode}); "
+                "older lifecycle fallback refused.\n" + str(result.stderr or "")[-4096:]
+            )}
         return {} if contextual else _fallback_legacy_session_start(payload)
     if result.stderr:
         sys.stderr.write(result.stderr)
     try:
         value = json.loads(result.stdout or "{}")
     except (TypeError, ValueError):
+        if source_aware:
+            return {"_stderr": "[agent-worktrees] Source-aware sessionStart returned invalid output.\n"}
         return {} if contextual else _fallback_legacy_session_start(payload)
     return value if isinstance(value, dict) else {}
 
@@ -756,17 +813,18 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
 def _fallback_session_end(payload: dict, home: Path) -> dict:
     python = _runtime_python(home)
     if python is None:
-        return {}
+        return {"_stderr": "[agent-worktrees] SessionEnd runtime is unavailable; closure is unconfirmed.\n"}
     try:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = ""
-        subprocess.run(
+        result = subprocess.run(
             [
                 str(python),
                 "-m",
                 "agent_worktrees",
                 "deregister-session",
                 "--stdin",
+                "--source-bound",
             ],
             input=json.dumps(payload, separators=(",", ":")),
             capture_output=True,
@@ -775,8 +833,15 @@ def _fallback_session_end(payload: dict, home: Path) -> dict:
             check=False,
             env=environment,
         )
-    except (OSError, subprocess.SubprocessError):
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"_stderr": f"[agent-worktrees] SessionEnd failed; closure is unconfirmed: {exc}\n"}
+    if result.returncode:
+        return {"_stderr": (
+            f"[agent-worktrees] SessionEnd failed ({result.returncode}); closure is unconfirmed.\n"
+            + str(result.stderr or "")[-4096:]
+        )}
+    if result.stderr:
+        return {"_stderr": str(result.stderr)[-4096:]}
     return {}
 
 
@@ -912,6 +977,8 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
         and not isinstance(payload.get("_agentWorktrees"), dict)
     ):
         payload = _enrich_session_payload(payload)
+    if kind == "sessionEnd" and not isinstance(payload.get("_agentWorktrees"), dict):
+        payload = _enrich_session_end_payload(payload)
     remote = _request(kind, payload, home)
     if remote is not None:
         return remote
@@ -942,6 +1009,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = _enrich_session_payload(payload)
             # Catalog evidence must survive cancellation of slow lifecycle work.
             _write_session_guidance(payload)
+        elif kind == "sessionEnd":
+            payload = _enrich_session_end_payload(payload)
         if kind == "postToolUse" and "--local-fallback" in argv[1:]:
             result = _fallback_post(payload, Path.home())
         else:
@@ -960,7 +1029,7 @@ def main(argv: list[str] | None = None) -> int:
                     else ""
                 ),
             )
-        elif result:
+        elif result and kind != "sessionEnd":
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
     except Exception:
         pass

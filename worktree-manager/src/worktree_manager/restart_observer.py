@@ -58,11 +58,12 @@ def native_epoch() -> HostEpoch:
         raise RecoveryEvidenceError("Native boot/environment identity is unavailable.") from exc
 
 
-def _owner_probe(project: str, worktree_id: str) -> dict:
+def _owner_probe(project: str, worktree_id: str, native_session_id: str | None) -> dict:
+    args = ["session-role", "--hosting-evidence", "--worktree-id", worktree_id, "--json"]
+    if native_session_id is not None:
+        args.extend(("--session-id", native_session_id))
     return engine_client.run_json(
-        project,
-        ["session-role", "--hosting-evidence", "--worktree-id", worktree_id, "--json"],
-        timeout=4,
+        project, args, timeout=4,
     )
 
 
@@ -78,7 +79,7 @@ class RestartObserver:
 
     def __init__(
         self, root: Path, *, epoch: HostEpoch | None = None,
-        owner_probe: Callable[[str, str], dict] = _owner_probe,
+        owner_probe: Callable[[str, str, str | None], dict] = _owner_probe,
     ) -> None:
         self.journal = RecoveryJournal(root)
         self.epoch = epoch
@@ -127,6 +128,66 @@ class RestartObserver:
             log.warning("Restart evidence startup blocked: %s", exc)
         return self.startup_result
 
+    def _lifecycle_exit(self, owner: dict, row: dict) -> dict:
+        evidence = PositiveEvidence(**row["last_positive"])
+        if (
+            not evidence.lifecycle_qualified
+            or owner.get("lifecycle_capability") != "source-bound-v1"
+        ):
+            return {"applied": False, "reason": "lifecycle-unqualified"}
+        lifecycle = owner.get("lifecycle")
+        if (
+            not isinstance(lifecycle, dict)
+            or lifecycle.get("schema") != "native-activation-evidence"
+            or type(lifecycle.get("version")) is not int or lifecycle["version"] != 1
+            or lifecycle.get("native_session_id") != evidence.native_session_id
+            or type(lifecycle.get("owner_revision")) is not int
+            or lifecycle["owner_revision"] < evidence.owner_revision
+        ):
+            raise ValueError("Native lifecycle owner returned incompatible evidence")
+        activations = lifecycle.get("activations")
+        if not isinstance(activations, list) or len(activations) > 128:
+            raise ValueError("Invalid native lifecycle activation budget")
+        ordinals = [
+            item.get("ordinal") for item in activations if isinstance(item, dict)
+        ]
+        if (
+            len(ordinals) != len(activations)
+            or any(type(value) is not int or value <= 0 for value in ordinals)
+            or len(set(ordinals)) != len(ordinals)
+        ):
+            raise ValueError("Invalid native lifecycle activation identity")
+        matches = [
+            item for item in activations
+            if item.get("source_identity") == evidence.source_identity
+        ]
+        if (
+            len(matches) != 1 or matches[0]["ordinal"] != evidence.activation_ordinal
+            or matches[0].get("source_ambiguous") is not False
+        ):
+            return {"applied": False, "reason": "lifecycle-unconfirmed"}
+        ended = matches[0].get("ended_at")
+        if ended is None:
+            return {"applied": False, "reason": "activation-open"}
+        if not isinstance(ended, str) or not ended or len(ended) > 128:
+            raise ValueError("Invalid native lifecycle end observation")
+        for field, limit in (("end_reason", 64), ("end_source", 128)):
+            value = matches[0].get(field)
+            if value is not None and (
+                not isinstance(value, str) or not value or len(value) > limit
+                or any(ord(character) < 32 for character in value)
+            ):
+                raise ValueError(f"Invalid native lifecycle {field}")
+        reason = "unknown"
+        detail = "native-end-cause-unconfirmed"
+        if (
+            matches[0].get("end_reason") == "user_exit"
+            and matches[0].get("end_source") in {"hook", "hook:exit"}
+        ):
+            reason = "intentional"
+            detail = "native-session-end"
+        return self.journal.record_exit(evidence, reason=reason, detail=detail)
+
     def observe(self, registry: MuxMappingRegistry, *, now: float | None = None) -> None:
         """Persist only independently owner-confirmed, identity-fenced evidence."""
         started = time.monotonic() if now is None else now
@@ -139,30 +200,52 @@ class RestartObserver:
             if not self._startup_complete or self.epoch is None:
                 self.last_result = {"applied": False, "reason": "startup-blocked"}
                 return
-            entries = sorted(
-                (key, entry) for key, entry in registry.snapshot().items()
+            mappings = registry.snapshot()
+            entries = {
+                key: entry for key, entry in mappings.items()
                 if entry["live"] and entry.get("session_incarnation")
-            )
-            if not entries:
+            }
+            rows = {
+                (row["last_positive"]["project"], row["last_positive"]["worktree_id"]): row
+                for row in self.journal.snapshot()
+            }
+            keys = sorted(entries.keys() | rows.keys())
+            if not keys:
                 self.last_result = {"applied": False, "reason": "no-live-mapping"}
                 return
-            key, entry = next(
-                (item for item in entries if self._last_key is None or item[0] > self._last_key),
-                entries[0],
+            key = next(
+                (item for item in keys if self._last_key is None or item > self._last_key),
+                keys[0],
             )
             self._last_key = key
-            owner = self.owner_probe(*key)
-            if not isinstance(owner, dict) or owner.get("confirmed") is not True:
+            entry = entries.get(key)
+            previous_row = rows.get(key)
+            previous = previous_row["last_positive"] if previous_row is not None else None
+            owner = self.owner_probe(*key, previous["native_session_id"] if previous else None)
+            if not isinstance(owner, dict):
                 self.last_result = {"applied": False, "reason": "owner-unconfirmed"}
                 return
             if (
                 owner.get("schema") != "native-hosting-evidence"
                 or type(owner.get("version")) is not int or owner["version"] != 1
-                or owner.get("worktree_id") != entry["worktree_id"]
-                or owner.get("worktree_path") != entry.get("worktree_path")
-                or owner.get("mux_session") != entry["mux_session"]
-                or owner.get("session_incarnation") != entry["session_incarnation"]
+                or owner.get("worktree_id") != key[1]
+                or owner.get("worktree_path") != (entry or previous)["worktree_path"]
                 or owner.get("platform") != self.epoch.platform
+            ):
+                raise ValueError("Native hosting owner returned incompatible evidence")
+            exit_result = (
+                self._lifecycle_exit(owner, previous_row)
+                if previous_row is not None else None
+            )
+            if owner.get("confirmed") is not True or entry is None:
+                self.last_result = (
+                    exit_result if exit_result and exit_result.get("applied")
+                    else {"applied": False, "reason": "owner-unconfirmed"}
+                )
+                return
+            if (
+                owner.get("mux_session") != entry["mux_session"]
+                or owner.get("session_incarnation") != entry["session_incarnation"]
                 or owner.get("liveness") != "live"
                 or owner.get("binding_proof") != NATIVE_BINDING_PROOF
             ):
@@ -171,12 +254,6 @@ class RestartObserver:
             if current is None or _mapping_identity(current) != _mapping_identity(entry):
                 self.last_result = {"applied": False, "reason": "mapping-changed"}
                 return
-            rows = self.journal.snapshot()
-            previous = next(
-                (row["last_positive"] for row in rows if (
-                    row["last_positive"]["project"], row["last_positive"]["worktree_id"],
-                ) == key), None,
-            )
             sequence = 1 if previous is None else previous["observation_sequence"] + 1
             evidence = PositiveEvidence(
                 project=entry["project"], worktree_id=entry["worktree_id"],
@@ -189,6 +266,9 @@ class RestartObserver:
                 mapping_revision=entry["mapping_revision"], platform=self.epoch.platform,
                 environment_id=self.epoch.environment_id, boot_id=self.epoch.boot_id,
                 observed_at=time.time(), observation_sequence=sequence,
+                activation_ordinal=owner.get("activation_ordinal", 0),
+                source_identity=owner.get("source_identity"),
+                lifecycle_qualified=owner.get("lifecycle_qualified", False),
             )
             self.last_result = self.journal.observe(evidence)
         except (engine_client.EngineError, RecoveryEvidenceError, OSError, ValueError, KeyError) as exc:

@@ -74,6 +74,76 @@ def test_dead_or_uncertain_is_not_positive_hosting(
     assert result["liveness"] == state
 
 
+def test_exact_historical_lifecycle_survives_no_current_hosting(owner, native_record, monkeypatch):
+    monkeypatch.setattr(owner.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(owner.sessions, "session_has_conversation_data", lambda _: True)
+    monkeypatch.setattr(owner, "session_liveness", lambda _: "dead")
+    historical = tracking.SessionEntry(
+        OTHER_NATIVE_ID, "old", ended_at="exit", activations=[
+            tracking.SessionActivation(
+                1, "old", "old", ended_at="exit", end_source="hook",
+                source_identity="native:old", end_reason="user_exit",
+            ),
+        ],
+    )
+    record = replace(native_record, sessions=[historical, *native_record.sessions])
+    result = owner.observe(
+        record.worktree_id, loader=lambda: record, native_session_id=OTHER_NATIVE_ID,
+    )
+    assert result["confirmed"] is False
+    assert result["native_session_id"] == NATIVE_ID
+    assert result["lifecycle_capability"] == "source-bound-v1"
+    assert result["lifecycle"]["native_session_id"] == OTHER_NATIVE_ID
+    assert result["lifecycle"]["activations"][0]["end_reason"] == "user_exit"
+    assert record.resolved_head_session == NATIVE_ID
+    assert record.session_entry(NATIVE_ID).ended_at is None
+
+
+@pytest.mark.parametrize("ambiguity,confirmed", [(False, True), (True, False)])
+def test_positive_lifecycle_requires_unique_canonical_physical_source(
+    owner, native_record, monkeypatch, ambiguity, confirmed,
+):
+    from agent_worktrees import native_source_context
+
+    epoch = {
+        "platform": "linux", "environment_id": "a" * 32,
+        "boot_id": OTHER_NATIVE_ID,
+    }
+    token = native_source_context.identity(NATIVE_ID, 101, "100", epoch)
+    record = replace(native_record, sessions=[
+        tracking.SessionEntry(NATIVE_ID, "start", activations=[
+            tracking.SessionActivation(
+                3, "start", "start", source_identity=token, source_ambiguous=ambiguity,
+            ),
+        ]),
+    ])
+    monkeypatch.setattr(owner.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(native_source_context, "epoch", lambda: epoch)
+    monkeypatch.setattr(owner.sessions, "session_has_conversation_data", lambda _: True)
+    monkeypatch.setattr(owner, "session_liveness", lambda _: "live")
+    monkeypatch.setattr(owner.sessions, "mux_binding_for_session", lambda *_args, **_kwargs: {
+        "session_name": owner.sessions.mux_session_name(record.worktree_id),
+        "pane_id": "%1", "copilot_pid": 101, "copilot_start_time": "100",
+        "pane_start_time": "99", "session_incarnation": "mux:1:100",
+    })
+    result = owner.observe(record.worktree_id, loader=lambda: record)
+    assert result["confirmed"] is confirmed
+    assert result["lifecycle_qualified"] is confirmed
+    assert result["activation_ordinal"] == (3 if confirmed else 0)
+    assert result["source_identity"] == (token if confirmed else None)
+
+
+def test_ended_native_interval_is_not_checkpointed_again(owner, native_record, monkeypatch):
+    monkeypatch.setattr(owner.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(
+        owner, "session_liveness", lambda _: pytest.fail("ended activation must not be reopened"),
+    )
+    native_record.sessions[0].ended_at = "exit"
+    result = owner.observe(native_record.worktree_id, loader=lambda: native_record)
+    assert result["confirmed"] is False
+    assert result["reason"] == "ended-native-activation"
+
+
 def test_head_change_during_probe_is_uncertain(owner, native_record, monkeypatch):
     monkeypatch.setattr(owner.cfg, "detect_platform", lambda: "linux")
     monkeypatch.setattr(owner.sessions, "session_has_conversation_data", lambda _: True)
@@ -126,6 +196,22 @@ def test_hosting_cli_is_explicit_and_has_no_ambient_session_fallback(monkeypatch
     assert args.hosting_evidence is True
     assert args.worktree_id == "worktree-one"
     assert getattr(args, "session_id", None) is None
+
+
+def test_hosting_cli_passes_only_an_explicit_lifecycle_session(monkeypatch):
+    from agent_worktrees import native_hosting_evidence
+
+    seen = []
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", OTHER_NATIVE_ID)
+    monkeypatch.setattr(
+        native_hosting_evidence, "observe",
+        lambda worktree_id, **kwargs: seen.append(kwargs["native_session_id"]) or {},
+    )
+    for requested in (None, NATIVE_ID):
+        assert session_metadata_cli.cmd_session_role(argparse.Namespace(
+            hosting_evidence=True, worktree_id="exact-worktree", session_id=requested,
+        )) == 0
+    assert seen == [None, NATIVE_ID]
 
 
 def test_legacy_session_role_still_uses_existing_path(monkeypatch):

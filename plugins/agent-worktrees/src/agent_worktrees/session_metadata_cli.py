@@ -129,7 +129,8 @@ def add_parsers(sub) -> None:
     )
     p.add_argument(
         "--hosting-evidence", action="store_true",
-        help="Read-only exact native head/process evidence; requires an exact --worktree-id",
+        help="Read-only native hosting and optional exact --session-id lifecycle evidence; "
+        "requires an exact --worktree-id (no ambient session fallback)",
     )
     p.add_argument(
         "--session-id", default=None, help="Session id (default: COPILOT_AGENT_SESSION_ID)"
@@ -289,6 +290,7 @@ def cmd_session_role(args) -> int:
             result = native_hosting_evidence.observe(
                 worktree_id,
                 loader=lambda: tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml"),
+                native_session_id=getattr(args, "session_id", None),
             )
         except (OSError, ValueError, yaml.YAMLError) as exc:
             return output._json_error(f"Could not read native hosting evidence: {exc}")

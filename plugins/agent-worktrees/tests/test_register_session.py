@@ -1019,6 +1019,76 @@ def test_deregister_session_worktree_is_optional_for_hook_inference():
 
 
 class TestDeregisterSessionStdin:
+    def test_resident_binding_uses_only_transported_origin_environment(self, monkeypatch):
+        from agent_worktrees import session_binding_cli
+
+        keys = (
+            session_binding_cli._session_bind_session_key(),
+            session_binding_cli._session_bind_worktree_key(),
+            session_binding_cli._session_bind_project_key(),
+        )
+        for key, value in zip(keys, ("native-session", "stale-worktree", "stale-project")):
+            monkeypatch.setenv(key, value)
+        monkeypatch.setattr(
+            session_binding_cli, "_resolve_active_project", lambda project: (project, None),
+        )
+        assert session_binding_cli._activate_hook_session_binding(
+            "native-session", {}, resident=True,
+        ) is None
+        origin = dict(zip(keys, ("native-session", "original-worktree", "original-project")))
+        assert session_binding_cli._activate_hook_session_binding(
+            "native-session", {"_agentWorktrees": {"environment": origin}}, resident=True,
+        ) == "original-worktree"
+
+    def test_resident_old_source_end_preserves_current_same_uuid_activation(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch,
+    ):
+        from agent_worktrees import native_source_context, obligations
+
+        sid = "00000000-0000-4000-8000-000000000001"
+        epoch = {"platform": "linux", "environment_id": "a" * 32, "boot_id": sid}
+        token = native_source_context.identity(sid, 101, "100", epoch)
+        monkeypatch.setattr(native_source_context, "epoch", lambda: epoch)
+        monkeypatch.setattr(
+            native_source_context, "capture",
+            lambda: pytest.fail("resident must use original transported ancestry"),
+        )
+        _save_record(tmp_tracking_dir, "wt-end", "/tmp/src/wt-end")
+        m.tracking.register_session(
+            "wt-end", sid, started_at="old", source_identity=token,
+        )
+        m.tracking.register_session(
+            "wt-end", sid, started_at="current", source_identity="native:current",
+        )
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "wrong-resident-session")
+        monkeypatch.setattr(
+            m, "_capture_session_title", lambda *_: pytest.fail("historical End title write"),
+        )
+        holder = []
+        args = argparse.Namespace(
+            worktree_id="wt-end", session_id=None, cwd=None, stdin=False,
+            resident_environment=True, source_bound=True, result_holder=holder,
+            hook_payload={
+                "sessionId": sid, "reason": "user_exit",
+                "timestamp": "2026-08-27T11:00:00Z",
+                "_agentWorktrees": {"nativeSource": {
+                    "version": 1, "qualified": True, **epoch,
+                    "ancestors": [{"pid": 101, "start_time": "100"}],
+                }},
+            },
+        )
+        assert m.cmd_deregister_session(args) == 0
+        assert holder[-1]["lifecycle"] == "historical"
+        record = load_record(tmp_tracking_dir / "wt-end.yaml")
+        entry = record.session_entry(sid)
+        assert entry.ended_at is None
+        assert entry.activations[-1].ended_at is None
+        assert entry.activations[0].end_reason == "user_exit"
+        ref = m.tracking.format_claim_ref(
+            record.machine, record.repo, record.worktree_id, session=sid,
+        )
+        assert next(item for item in record.resources if item.ref == ref).state == obligations.ACTIVE
+
     def test_session_end_emits_stage_12_via_the_existing_session_ended_event(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

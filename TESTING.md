@@ -116,6 +116,20 @@ cases on Linux rather than only collecting them. POSIX GitHub Actions refuses
 missing tmux instead of silently skipping that proof. Local native cases skip
 when POSIX tmux is unavailable; this is not a live Copilot or Windows psmux test.
 
+Source-bound native lifecycle and restart-evidence contracts use the existing
+bounded runner:
+
+```text
+python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_lifecycle_source or test_tracking_session_registration_write or test_tracking_session_deregistration_write or test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_hook_ipc or test_register_session'
+```
+
+The fixtures cover original-source transport, real held-file ownership, source
+PID/birth mismatch, delayed historical End versus a replacement self-claim,
+history-pruning ambiguity, old-daemon capability refusal, tombstone-visible
+closure and shutdown/cancellation ordering. They do not reboot a machine, kill a
+production session, qualify Windows native source capture, or prove acknowledged
+restart-seed delivery. Those remain separate native integration obligations.
+
 Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:
 

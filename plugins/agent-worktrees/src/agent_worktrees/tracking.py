@@ -221,6 +221,27 @@ class SessionActivation:
     ended_at: str | None = None
     end_recorded_at: str | None = None
     end_source: str | None = None
+    source_identity: str | None = None
+    end_reason: str | None = None
+    source_ambiguous: bool = False
+
+    def __post_init__(self) -> None:
+        _activation_token(self.source_identity, field="source_identity")
+        _activation_token(self.end_reason, field="end_reason", limit=64)
+        if type(self.source_ambiguous) is not bool:
+            raise ValueError("Invalid activation source ambiguity")
+
+
+def _activation_token(value: object, *, field: str, limit: int = 128) -> str | None:
+    """Validate optional opaque lifecycle metadata without inventing legacy proof."""
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str) or not value or len(value) > limit
+        or re.fullmatch(r"[A-Za-z0-9._:-]+", value) is None
+    ):
+        raise ValueError(f"Invalid activation {field}")
+    return value
 
 
 @dataclass
@@ -1672,6 +1693,15 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
                                     str(raw_activation["end_source"])
                                     if raw_activation.get("end_source") else None
                                 ),
+                                source_identity=_activation_token(
+                                    raw_activation.get("source_identity"),
+                                    field="source_identity",
+                                ),
+                                end_reason=_activation_token(
+                                    raw_activation.get("end_reason"), field="end_reason",
+                                    limit=64,
+                                ),
+                                source_ambiguous=raw_activation.get("source_ambiguous", False),
                             ))
                     sessions_list.append(SessionEntry(
                         session_id=str(entry["session_id"]),
@@ -2970,6 +3000,14 @@ def _save_record_unlocked(
                             "start_recorded_at": activation.start_recorded_at,
                             "start_source": activation.start_source,
                             **(
+                                {"source_identity": activation.source_identity}
+                                if activation.source_identity else {}
+                            ),
+                            **(
+                                {"source_ambiguous": True}
+                                if activation.source_ambiguous else {}
+                            ),
+                            **(
                                 {"ended_at": activation.ended_at}
                                 if activation.ended_at else {}
                             ),
@@ -2980,6 +3018,10 @@ def _save_record_unlocked(
                             **(
                                 {"end_source": activation.end_source}
                                 if activation.end_source else {}
+                            ),
+                            **(
+                                {"end_reason": activation.end_reason}
+                                if activation.end_reason else {}
                             ),
                         }
                         for activation in s.activations

@@ -46,6 +46,24 @@ def owner_result():
     }
 
 
+def source_bound_owner(*, ended_at=None, end_reason=None, **changes):
+    return {
+        **owner_result(),
+        "activation_ordinal": 1, "source_identity": "native:original",
+        "lifecycle_qualified": True, "lifecycle_capability": "source-bound-v1",
+        "lifecycle": {
+            "schema": "native-activation-evidence", "version": 1,
+            "native_session_id": NATIVE_ID, "owner_revision": 1,
+            "activations": [{
+                "ordinal": 1, "source_identity": "native:original",
+                "source_ambiguous": False, "ended_at": ended_at,
+                "end_reason": end_reason, "end_source": "hook" if ended_at else None,
+            }],
+        },
+        **changes,
+    }
+
+
 def build_observer(module, tmp_path, **kwargs):
     return module.RestartObserver(
         tmp_path, epoch=module.HostEpoch("linux", "environment-one", "boot-one"),
@@ -111,6 +129,131 @@ def test_reasonless_tombstone_cannot_erase_journal(tmp_path, observer_module, ma
     mapping.remove("example", "worktree-one")
     observer.observe(mapping, now=100.0)
     assert observer.journal.snapshot()[0]["last_positive"] == original
+
+
+def test_exact_lifecycle_closure_is_observed_after_mapping_tombstone(
+    tmp_path, observer_module, mapping,
+):
+    result = source_bound_owner()
+    calls = []
+
+    def probe(*args):
+        calls.append(args)
+        return result
+
+    observer = build_observer(observer_module, tmp_path, owner_probe=probe)
+    observer.observe(mapping, now=10.0)
+    original = observer.journal.snapshot()[0]["last_positive"]
+    mapping.remove("example", "worktree-one")
+    result = source_bound_owner(
+        confirmed=False, ended_at="exit", end_reason="user_exit", liveness="dead",
+    )
+    observer.observe(mapping, now=100.0)
+    row = observer.journal.snapshot()[0]
+    assert row["last_positive"] == original
+    assert row["disposition"] == "intentional"
+    assert row["detail"] == "native-session-end"
+    assert calls == [
+        ("example", "worktree-one", None),
+        ("example", "worktree-one", NATIVE_ID),
+    ]
+    assert row["automatic_eligible"] is False
+
+
+@pytest.mark.parametrize("reason", ["complete", "error", "abort", "timeout", None])
+def test_other_native_end_reasons_are_not_intentional(
+    tmp_path, observer_module, mapping, reason,
+):
+    result = source_bound_owner()
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: result)
+    observer.observe(mapping, now=10.0)
+    result = source_bound_owner(confirmed=False, ended_at="end", end_reason=reason)
+    observer.observe(mapping, now=100.0)
+    assert observer.journal.snapshot()[0]["disposition"] == "unknown"
+
+
+@pytest.mark.parametrize("change", [
+    {"ordinal": 2}, {"source_identity": "native:other"}, {"source_ambiguous": True},
+    {"source_ambiguous": None},
+])
+def test_uncorroborated_lifecycle_cannot_retire_last_positive(
+    tmp_path, observer_module, mapping, change,
+):
+    result = source_bound_owner()
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: result)
+    observer.observe(mapping, now=10.0)
+    before = observer.journal.snapshot()[0]
+    result = source_bound_owner(confirmed=False, ended_at="end", end_reason="user_exit")
+    result["lifecycle"]["activations"][0].update(change)
+    observer.observe(mapping, now=100.0)
+    assert observer.journal.snapshot()[0] == before
+
+
+@pytest.mark.parametrize("change", [
+    {"end_reason": ["user_exit"]}, {"end_source": ["hook"]},
+    {"end_source": "hook\nunsafe"}, {"ended_at": []},
+])
+def test_invalid_end_metadata_is_reported_not_applied(
+    tmp_path, observer_module, mapping, change,
+):
+    result = source_bound_owner()
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: result)
+    observer.observe(mapping, now=10.0)
+    before = observer.journal.snapshot()[0]
+    result = source_bound_owner(confirmed=False, ended_at="end", end_reason="user_exit")
+    result["lifecycle"]["activations"][0].update(change)
+    observer.observe(mapping, now=100.0)
+    assert observer.journal.snapshot()[0] == before
+    assert observer.last_result["reason"] == "evidence-unavailable"
+    assert "Invalid native lifecycle" in observer.last_result["error"]
+
+
+def test_delayed_old_end_cannot_retire_same_uuid_replacement(
+    tmp_path, observer_module, mapping,
+):
+    result = source_bound_owner()
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: result)
+    observer.observe(mapping, now=10.0)
+    result = source_bound_owner(
+        native_incarnation="native:replacement", owner_revision=2,
+        activation_ordinal=2, source_identity="native:replacement",
+    )
+    result["lifecycle"]["owner_revision"] = 2
+    result["lifecycle"]["activations"].append({
+        "ordinal": 2, "source_identity": "native:replacement",
+        "source_ambiguous": False, "ended_at": None, "end_reason": None, "end_source": None,
+    })
+    observer.observe(mapping, now=100.0)
+    result["lifecycle"]["activations"][0].update(
+        ended_at="old-exit", end_reason="user_exit", end_source="hook",
+    )
+    observer.observe(mapping, now=200.0)
+    row = observer.journal.snapshot()[0]
+    assert row["disposition"] == "live"
+    assert row["last_positive"]["activation_ordinal"] == 2
+    assert row["last_positive"]["source_identity"] == "native:replacement"
+
+
+def test_shutdown_notification_racing_native_end_wins_inside_journal_transaction(
+    tmp_path, observer_module, mapping,
+):
+    result = source_bound_owner()
+    observer = build_observer(observer_module, tmp_path, owner_probe=lambda *_: result)
+    observer.observe(mapping, now=10.0)
+
+    def probe(*_):
+        observer.journal.shutdown_pending(
+            "linux", "environment-one", "boot-one", notification_id="shutdown-one",
+        )
+        return source_bound_owner(
+            confirmed=False, ended_at="exit", end_reason="user_exit",
+        )
+
+    observer.owner_probe = probe
+    observer.observe(mapping, now=100.0)
+    row = observer.journal.snapshot()[0]
+    assert row["disposition"] == "shutdown-interrupted"
+    assert row["notification_id"] == "shutdown-one"
 
 
 def test_owner_live_mux_incarnation_must_match_registry(tmp_path, observer_module, mapping):

@@ -98,6 +98,8 @@ means of fulfilling the operator's request. They require normal source review.
 - [x] Preserve recovery evidence independently of current reachability and
   display tombstones. Store only necessary metadata in private local state,
   not transcripts, secrets, environment dumps or untrusted executable commands.
+  The evidence foundation landed in [#7230](https://github.com/ThomasMichon/copilot-extensions/pull/7230);
+  lifecycle producers and restoration remain separate open items.
 - [ ] Record reasoned intentional-exit evidence durably; delayed observations
   from an older incarnation must not retire a replacement.
 - [ ] Handle native restart/shutdown notification by checkpointing the eligible
@@ -246,3 +248,75 @@ The umbrella effort remains Active independently of this slice's completion.
   enrollment/admission, exact-conversation cold Resume, acknowledged status-first
   seed delivery and remaining native qualification are still open. No live
   recovery, host configuration, daemon restart or rollout was performed.
+
+### 2026-10-19 - Evidence foundation merged; lifecycle slice next
+
+- [#7230](https://github.com/ThomasMichon/copilot-extensions/pull/7230) merged to
+  `dev` at `62b095042dbc1c143635bb813fe7986e6e35081b` after independent Copilot
+  approval of exact head `c76c40e81868acb314051084d1d3fde297cbfab6`, with no open
+  findings, and the actual required PR gate passing in
+  [CI run 39222700357](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39222700357).
+  The initial canonical merge refusal while that gate was missing was respected.
+- The final bounded, network-disconnected regression receipt is tied to source
+  tree `71cda78cdd58f66c40dcb56cf477ff5cd60cd080`: 229 Manager tests passed with
+  three native-platform skips, and 226 Worktrees tests passed. The selected lane
+  includes the journal/observer, native ownership proof, existing mux daemon,
+  attachment, binding and session contracts. Private raw logs are retained with
+  the implementation record, not published.
+- Canonical post-merge completion initially stopped on already-landed incremental
+  replays. The documented owning-branch conflict continuation preserved current
+  upstream content and its documentation additions; only inspected empty replays
+  were skipped. The original full recovery reference remains retained. The
+  resulting branch and every tracked path matched fresh `origin/dev`, then
+  canonical `pr-complete` succeeded.
+- Only independent evidence persistence is closed by this foundation. #4564 and
+  the umbrella effort remain open. Next is the bounded reasoned-exit/lifecycle
+  producer contract: bind observations to their original native generation,
+  preserve shutdown interruption versus explicit closure, and keep unavailable
+  or ambiguous cause unconfirmed. Native notification/startup, enrollment,
+  owner-authorized exact-conversation Resume, acknowledged status-first seed
+  delivery and remaining platform qualification still follow.
+- This records a source merge, not a verified release, installation or running
+  recovery. No live enrollment, host configuration, shared-daemon restart,
+  production-session operation or rollout was authorized or performed.
+
+### 2026-10-19 - Source-bound lifecycle producer
+
+- Extended the existing owner activation intervals with optional opaque source,
+  reasoned End and persistent ambiguity metadata. Qualified Linux/WSL Start
+  evidence requires the actual original UUID's open native hold, captured with
+  original ancestor process birth and boot/environment metadata. It does not
+  create a second registry, invent a source during periodic observation, or
+  alter launch environment/authority.
+- Both lifecycle writes require the version-3 owner verb, even for legacy
+  requests. Source rejection precedes self-session claim acquisition. A new
+  physical source opens a new interval; a true same-source bind is idempotent.
+  Delayed old Start delivery cannot reactivate an ended claim. End matches a
+  unique canonical historical source under the registration lock; historical
+  facts cannot close a replacement or release its claim/fsmonitor. Ambiguity
+  from repeated logical intervals in one physical CLI survives history pruning.
+- The warm End path now processes the original hook context instead of
+  acknowledging an unhandled event. It never probes/attaches a terminal or
+  recaptures resident ancestry. Its compatibility capability and source-bound
+  fallback flag prevent silent old-runtime downgrades. Start likewise requires
+  source-aware acknowledgement and never falls back to older startup writers;
+  original binding environment is transported rather than inherited from the
+  resident. Windows native source
+  capture remains visibly unqualified without a new warm-path helper spawn.
+- One read-only owner query supplies current hosting and an explicitly requested
+  prior native conversation's bounded lifecycle. The Manager samples retained
+  journal subjects even after display tombstones. Qualified source and ordinal
+  corroboration are required for reasoned native closure. Shutdown precedence is
+  checked inside the journal transaction; delayed End after cancellation stays
+  uncertain rather than guessing cause from wall-clock order.
+- The first historical-End/current-claim regression failed on the old behavior.
+  The final integrated bounded, disconnected lane passed 449 Worktrees tests
+  with 12 platform-specific skips and 232 Manager tests with three native skips.
+  This selected lane also covers real old-daemon refusal, unchanged hook/daemon
+  boundaries and resident-to-canonical historical End.
+  This is source/fixture evidence, not native restart or seed-acknowledgement
+  qualification. Publication and actual merge are recorded separately.
+- `automatic_eligible` remains false. Native shutdown notification, startup and
+  enrollment, recovery admission/attempt reconciliation, exact native Resume,
+  acknowledged status-first seed and platform qualification remain open. The
+  full plan and #4564 are not completed by this producer slice.

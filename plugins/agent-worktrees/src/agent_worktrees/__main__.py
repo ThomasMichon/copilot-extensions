@@ -3991,7 +3991,9 @@ def _run_session_lifecycle(
                 from . import session_binding_cli as _session_binding_cli
 
                 _register_session_fn = _session_binding_cli.cmd_register_session
-            _register_session_fn(registration_args)
+            registration_code = _register_session_fn(registration_args)
+            if registration_code not in (0, None):
+                diagnostics += "[agent-worktrees] Session registration was refused; native activation is unconfirmed.\n"
         except Exception as exc:
             diagnostics += f"[agent-worktrees] Session registration failed: {exc}\n"
         registration_output = (
@@ -4273,6 +4275,23 @@ def _resident_hook_decision(
                 provisioning_start_event=provisioning_start_event,
                 plugin_related_anchors=policy.plugin_related_anchors(),
             )
+        if kind == "sessionEnd":
+            if not sys.platform.startswith("linux"):
+                return {"_stderr": "[agent-worktrees] Native source-bound sessionEnd is unqualified here.\n"}
+            holder: list[dict] = []
+            code = _session_binding_cli.cmd_deregister_session(argparse.Namespace(
+                worktree_id=None, session_id=payload.get("sessionId"), cwd=cwd,
+                stdin=False, resident_environment=True, hook_payload=payload,
+                result_holder=holder, launch_id=None, source_bound=True,
+            ))
+            if code:
+                return {"_stderr": "[agent-worktrees] Native source-bound sessionEnd failed.\n"}
+            result = holder[-1] if holder else {
+                "lifecycle": "unconfirmed", "reason": "unbound-session",
+            }
+            if result.get("lifecycle") == "unconfirmed":
+                result["_stderr"] = "[agent-worktrees] Original sessionEnd source is unconfirmed; activation retained.\n"
+            return result
         return {}
     finally:
         cfg.set_active_project(previous_project)

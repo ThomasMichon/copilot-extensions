@@ -47,6 +47,9 @@ class PositiveEvidence:
     boot_id: str
     observed_at: float
     observation_sequence: int
+    activation_ordinal: int = 0
+    source_identity: str | None = None
+    lifecycle_qualified: bool = False
 
     def __post_init__(self) -> None:
         for name in (
@@ -64,6 +67,17 @@ class PositiveEvidence:
             raise ValueError("Invalid recovery mapping revision")
         if type(self.owner_revision) is not int or self.owner_revision < 0:
             raise ValueError("Invalid recovery owner revision")
+        if type(self.activation_ordinal) is not int or self.activation_ordinal < 0:
+            raise ValueError("Invalid recovery activation ordinal")
+        if type(self.lifecycle_qualified) is not bool:
+            raise ValueError("Invalid recovery lifecycle qualification")
+        if self.source_identity is not None:
+            _text(self.source_identity, "activation source", 128)
+        if (
+            (self.source_identity is None) != (self.activation_ordinal == 0)
+            or self.lifecycle_qualified and self.source_identity is None
+        ):
+            raise ValueError("Unconfirmed recovery activation identity")
         if type(self.observation_sequence) is not int or self.observation_sequence < 1:
             raise ValueError("Invalid recovery observation sequence")
         if (
@@ -78,6 +92,7 @@ class PositiveEvidence:
             getattr(self, field.name) for field in dataclasses.fields(self)
             if field.name not in {
                 "observed_at", "observation_sequence", "owner_revision", "mapping_revision",
+                "lifecycle_qualified",
             }
         )
 
@@ -88,6 +103,7 @@ class PositiveEvidence:
             if field.name not in {
                 "observed_at", "observation_sequence", "owner_revision",
                 "native_session_id", "native_incarnation", "mapping_revision",
+                "activation_ordinal", "source_identity", "lifecycle_qualified",
             }
         )
 
@@ -102,6 +118,7 @@ _DISPOSITIONS = {
     "live", "unknown", "intentional", "shutdown-pending", "shutdown-interrupted",
 }
 _INTENTIONAL_DETAILS = {"operator-stop", "native-session-end"}
+_CANCELLED_SHUTDOWN_DETAILS = {"shutdown-cancelled", "native-end-after-cancel-unconfirmed"}
 _HISTORY_PER_SUBJECT = 16
 _MAX_SUBJECTS = 4096
 
@@ -248,6 +265,11 @@ class RecoveryJournal:
                 row["disposition"] = current["disposition"]
                 row["notification_id"] = current["notification_id"]
                 row["detail"] = current["detail"]
+            elif (
+                current and evidence.identity() == previous.identity()
+                and current["detail"] in _CANCELLED_SHUTDOWN_DETAILS
+            ):
+                row["detail"] = current["detail"]
             self._append(conn, evidence, row)
             return {"applied": True}
 
@@ -270,6 +292,13 @@ class RecoveryJournal:
                 return {"applied": False, "reason": "superseded"}
             if current["disposition"] == "intentional":
                 return {"applied": False, "reason": "closed"}
+            if reason == "intentional" and detail == "native-session-end":
+                if current["disposition"] in {"shutdown-pending", "shutdown-interrupted"}:
+                    reason = "shutdown-interrupted"
+                    detail = "native-session-end-during-shutdown"
+                elif current["detail"] in _CANCELLED_SHUTDOWN_DETAILS:
+                    reason = "unknown"
+                    detail = "native-end-after-cancel-unconfirmed"
             if reason == "shutdown-interrupted" and not current["notification_id"]:
                 return {"applied": False, "reason": "unconfirmed-shutdown"}
             row = dict(current)
@@ -311,7 +340,7 @@ class RecoveryJournal:
                         or row["notification_id"] != notification_id
                     ):
                         continue
-                    row.update(disposition="live", notification_id="")
+                    row.update(disposition="live", notification_id="", detail="shutdown-cancelled")
                 else:
                     if row["disposition"] != "live":
                         continue

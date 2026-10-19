@@ -101,7 +101,9 @@ class _Handler(socketserver.StreamRequestHandler):
                     time.sleep(delay_s)
             response = {
                 "version": 1,
-                "capabilities": ["session-lifecycle-v1"],
+                "capabilities": [
+                    "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
+                ],
                 "result": result,
             }
             self.wfile.write(

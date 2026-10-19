@@ -1,5 +1,9 @@
 """``session_register`` verb.
 
+Version 3 carries an optional opaque original-source identity. Source rejection
+precedes claim acquisition; source-bound interval changes and self-session claim
+reactivation remain one canonical transaction.
+
 ``agent-worktrees-authoritative-daemon`` effort, Phase 3 -- the seventh
 migrated call-site cluster, and the first ever taken from the
 sessionStart-hook-critical path: ``tracking_session_registry.register_session``
@@ -129,6 +133,13 @@ def _apply_session_register_locked(args: dict) -> dict:
     handoff_token = args.get("handoff_token")
     candidate_token = args.get("candidate_token")
     initial_projection = bool(args.get("initial_projection"))
+    try:
+        source_identity = tracking._activation_token(
+            args.get("source_identity"), field="source_identity",
+        )
+    except ValueError as exc:
+        logging.getLogger(__name__).warning("Invalid session start evidence: %s", exc)
+        return {"error": "lifecycle", "message": str(exc)}
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
@@ -152,6 +163,29 @@ def _apply_session_register_locked(args: dict) -> dict:
             }
         if record.sessions is None:
             record.sessions = []
+        existing = record.session_entry(session_id)
+        if existing is not None:
+            latest = max(existing.activations, key=lambda item: item.ordinal, default=None)
+            if (
+                source_identity is not None and started_at is not None
+                and source.startswith("hook")
+                and any(
+                    item.source_identity == source_identity and item.started_at == started_at
+                    and item.ended_at is not None
+                    for item in existing.activations
+                )
+            ):
+                return {"ok": True, "linked_handoff": None, "lifecycle": "duplicate"}
+            if any(item.source_identity for item in existing.activations):
+                stale_source = source_identity is not None and any(
+                    item.source_identity == source_identity
+                    and (latest is None or latest.source_identity != source_identity)
+                    for item in existing.activations
+                )
+                if source_identity is None or stale_source:
+                    message = "Registration source is unavailable or superseded"
+                    logging.getLogger(__name__).warning("%s for %s", message, session_id)
+                    return {"error": "lifecycle", "message": message}
         event_at = started_at or tracking._now_iso()
         observed_at = recorded_at or tracking._now_iso()
         tracking._ensure_head_ledger(record)
@@ -189,6 +223,7 @@ def _apply_session_register_locked(args: dict) -> dict:
                 continue
             activation_added = _start_session_activation(
                 entry, event_at=event_at, recorded_at=observed_at, source=source,
+                source_identity=source_identity,
             )
             if pid:
                 entry.pid = pid
@@ -289,6 +324,7 @@ def _apply_session_register_locked(args: dict) -> dict:
                     started_at=event_at,
                     start_recorded_at=observed_at,
                     start_source=source,
+                    source_identity=source_identity,
                 )
             ],
         )
@@ -338,4 +374,4 @@ def _apply_session_register_locked(args: dict) -> dict:
         }
 
 
-tracking_write.register_verb("session_register", apply_session_register, version=2)
+tracking_write.register_verb("session_register", apply_session_register, version=3)

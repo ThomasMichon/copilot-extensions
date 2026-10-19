@@ -440,7 +440,7 @@ refreshes but are not execution identity: rejoining the same execution cannot
 clear intentional closure or shutdown-interruption evidence.
 
 The daemon inspects previous evidence before admitting ordinary status requests,
-then samples at most one mapping per 20 seconds with a four-second owner-query
+then samples at most one subject per 20 seconds with a four-second owner-query
 deadline. Sampling shares the existing active lease and drain fence; passive
 cutover generations do not sample. Last-positive evidence survives missing-mux
 display tombstones. The journal retains at most 16 events per worktree and
@@ -451,6 +451,22 @@ transaction while reading existing storage at startup. This neither creates a
 missing database nor resets an incompatible schema. Report-only inspection
 keeps a read-only connection: if SQLite needs that rollback, the report exposes
 the read-only blocker rather than repairing the database itself.
+
+Sampling includes stored journal subjects as well as live mappings. One owner
+query returns current hosting and the exact previously observed conversation's
+canonical activation lifecycle, so a tombstone cannot hide its subsequent End.
+New qualified observations bind the activation ordinal and opaque original
+source in addition to the native/mux generation. Legacy evidence defaults to
+unqualified; periodic reads never invent or assign a registration source.
+
+Only a uniquely source-bound native `user_exit` can assert intentional closure.
+Other reasons, repeated same-physical/same-UUID activations, missing source proof
+and incompatible owner responses stay unknown or unconfirmed. A historical End
+cannot retire a replacement. The journal serializes native End with shutdown
+metadata: a racing notification takes precedence over an apparent user exit, and
+an End after cancelled shutdown remains conservatively uncertain for that
+execution generation. This does not infer a shutdown cause from an exit code or
+wall-clock timestamp, and it does not install a native notification adapter.
 
 ```bash
 worktree-manager mux-daemon recovery-evidence
