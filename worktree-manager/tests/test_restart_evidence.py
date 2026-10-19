@@ -27,6 +27,8 @@ def positive(recovery, **changes):
         "worktree_id": "worktree-1",
         "worktree_path": "/path/to/worktree-1",
         "native_session_id": NATIVE_ID,
+        "native_incarnation": "native:original",
+        "owner_revision": 1,
         "session_incarnation": "mux:1:100",
         "mapping_revision": 3,
         "platform": "linux",
@@ -99,6 +101,35 @@ def test_same_revision_different_identity_is_ambiguous_not_replacement(tmp_path,
     assert journal.snapshot()[0]["last_positive"]["native_session_id"] == NATIVE_ID
 
 
+def test_native_restart_inside_same_mux_fences_old_exit(tmp_path, recovery):
+    journal = recovery.RecoveryJournal(tmp_path)
+    first = positive(recovery)
+    journal.observe(first)
+    replacement = dataclasses.replace(
+        first, native_incarnation="native:replacement", owner_revision=2,
+        observation_sequence=2, observed_at=110.0,
+    )
+    assert journal.observe(replacement)["applied"]
+    assert journal.record_exit(first, reason="intentional", detail="native-session-end") == {
+        "applied": False, "reason": "superseded",
+    }
+    assert journal.snapshot()[0]["last_positive"]["native_incarnation"] == "native:replacement"
+
+
+def test_old_native_generation_cannot_overwrite_same_mux_replacement(tmp_path, recovery):
+    journal = recovery.RecoveryJournal(tmp_path)
+    first = positive(recovery)
+    journal.observe(first)
+    replacement = dataclasses.replace(
+        first, native_incarnation="native:replacement", owner_revision=2,
+        observation_sequence=2, observed_at=110.0,
+    )
+    journal.observe(replacement)
+    delayed = dataclasses.replace(first, observation_sequence=3, observed_at=120.0)
+    assert journal.observe(delayed) == {"applied": False, "reason": "stale"}
+    assert journal.snapshot()[0]["last_positive"]["native_incarnation"] == "native:replacement"
+
+
 def test_shutdown_cancel_restores_only_the_frozen_generation(tmp_path, recovery):
     journal = recovery.RecoveryJournal(tmp_path)
     evidence = positive(recovery)
@@ -150,6 +181,9 @@ def test_stale_positive_cannot_overwrite_fresh_observation(tmp_path, recovery):
 @pytest.mark.parametrize("changes", [
     {"native_session_id": "not-a-native-uuid"},
     {"session_incarnation": ""},
+    {"native_incarnation": ""},
+    {"owner_revision": True},
+    {"owner_revision": -1},
     {"boot_id": ""},
     {"environment_id": ""},
     {"platform": "unknown"},

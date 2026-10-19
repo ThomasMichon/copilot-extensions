@@ -33,6 +33,7 @@ def owner_result():
     return {
         "schema": "native-hosting-evidence", "version": 1,
         "confirmed": True, "native_session_id": NATIVE_ID,
+        "native_incarnation": "native:original", "owner_revision": 1,
         "worktree_id": "worktree-one", "worktree_path": "/path/to/worktree-one",
         "mux_session": "wt-worktree-one",
         "platform": "linux", "liveness": "live", "automatic_eligible": False,
@@ -114,6 +115,9 @@ def test_reasonless_tombstone_cannot_erase_journal(tmp_path, observer_module, ma
     {"mux_session": "other-mux"},
     {"schema": "other"},
     {"version": 2},
+    {"version": True},
+    {"native_incarnation": ""},
+    {"owner_revision": True},
     {"liveness": "unknown"},
 ])
 def test_malformed_or_foreign_owner_evidence_is_visible(

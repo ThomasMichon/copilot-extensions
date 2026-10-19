@@ -217,6 +217,11 @@ The umbrella effort remains Active independently of this slice's completion.
   tests, with three native-platform skips. A drain-fence regression found during
   integration was fixed before that run. Subsequent final-diff qualification is
   recorded with the source contribution.
+- A subsequent source self-check added failing regressions for a native process
+  restarting inside an unchanged mux. Evidence now also carries native process
+  birth identity and the canonical owner lifecycle revision, fencing delayed
+  old-native exit and observation events without inventing a second succession
+  authority.
 - Added report-only inspection and explicit unqualified-platform reporting.
   `automatic_eligible` remains false. The first source slice does not complete
   this plan: actual native notification/startup adapters, lifecycle producers,

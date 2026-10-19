@@ -34,6 +34,8 @@ class PositiveEvidence:
     worktree_id: str
     worktree_path: str
     native_session_id: str
+    native_incarnation: str
+    owner_revision: int
     session_incarnation: str
     mapping_revision: int
     platform: str
@@ -45,7 +47,7 @@ class PositiveEvidence:
     def __post_init__(self) -> None:
         for name in (
             "project", "worktree_id", "worktree_path", "native_session_id",
-            "session_incarnation", "environment_id", "boot_id",
+            "native_incarnation", "session_incarnation", "environment_id", "boot_id",
         ):
             _text(getattr(self, name), name)
         if str(UUID(self.native_session_id)) != self.native_session_id:
@@ -54,6 +56,8 @@ class PositiveEvidence:
             raise ValueError("Unknown recovery evidence platform")
         if type(self.mapping_revision) is not int or self.mapping_revision < 0:
             raise ValueError("Invalid recovery mapping revision")
+        if type(self.owner_revision) is not int or self.owner_revision < 0:
+            raise ValueError("Invalid recovery owner revision")
         if type(self.observation_sequence) is not int or self.observation_sequence < 1:
             raise ValueError("Invalid recovery observation sequence")
         if (
@@ -66,7 +70,17 @@ class PositiveEvidence:
         """The exact execution generation, excluding observation freshness."""
         return tuple(
             getattr(self, field.name) for field in dataclasses.fields(self)
-            if field.name not in {"observed_at", "observation_sequence"}
+            if field.name not in {"observed_at", "observation_sequence", "owner_revision"}
+        )
+
+    def provider_identity(self) -> tuple:
+        """The enclosing host generation, independent of its native occupant."""
+        return tuple(
+            getattr(self, field.name) for field in dataclasses.fields(self)
+            if field.name not in {
+                "observed_at", "observation_sequence", "owner_revision",
+                "native_session_id", "native_incarnation",
+            }
         )
 
 
@@ -192,9 +206,15 @@ class RecoveryJournal:
                 if evidence.mapping_revision < previous.mapping_revision:
                     return {"applied": False, "reason": "stale"}
                 if evidence.mapping_revision == previous.mapping_revision:
+                    if evidence.owner_revision < previous.owner_revision:
+                        return {"applied": False, "reason": "stale"}
                     if evidence.identity() != previous.identity():
-                        return {"applied": False, "reason": "identity-conflict"}
-                    if current["disposition"] == "intentional":
+                        if (
+                            evidence.provider_identity() != previous.provider_identity()
+                            or evidence.owner_revision <= previous.owner_revision
+                        ):
+                            return {"applied": False, "reason": "identity-conflict"}
+                    elif current["disposition"] == "intentional":
                         return {"applied": False, "reason": "closed"}
                     if (
                         evidence.observation_sequence <= previous.observation_sequence

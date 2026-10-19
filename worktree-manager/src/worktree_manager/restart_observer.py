@@ -151,7 +151,8 @@ class RestartObserver:
                 self.last_result = {"applied": False, "reason": "owner-unconfirmed"}
                 return
             if (
-                owner.get("schema") != "native-hosting-evidence" or owner.get("version") != 1
+                owner.get("schema") != "native-hosting-evidence"
+                or type(owner.get("version")) is not int or owner["version"] != 1
                 or owner.get("worktree_id") != entry["worktree_id"]
                 or owner.get("worktree_path") != entry.get("worktree_path")
                 or owner.get("mux_session") != entry["mux_session"]
@@ -174,6 +175,8 @@ class RestartObserver:
                 project=entry["project"], worktree_id=entry["worktree_id"],
                 worktree_path=entry["worktree_path"],
                 native_session_id=owner["native_session_id"],
+                native_incarnation=owner["native_incarnation"],
+                owner_revision=owner["owner_revision"],
                 session_incarnation=entry["session_incarnation"],
                 mapping_revision=entry["mapping_revision"], platform=self.epoch.platform,
                 environment_id=self.epoch.environment_id, boot_id=self.epoch.boot_id,

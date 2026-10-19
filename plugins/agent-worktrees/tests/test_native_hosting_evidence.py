@@ -27,6 +27,7 @@ def native_record(sample_record, tmp_path, monkeypatch):
         "worktree_id": sample_record.worktree_id,
         "session_name": sessions.mux_session_name(sample_record.worktree_id),
         "pane_id": "%1", "copilot_start_time": "native:100", "pane_start_time": "native:99",
+        "copilot_pid": 101,
     })
     worktree = tmp_path / "worktree"
     worktree.mkdir()
@@ -46,6 +47,7 @@ def test_confirmed_native_head_uses_owners_exact_identity(owner, native_record, 
     result = owner.observe(native_record.worktree_id, loader=lambda: native_record)
     assert result["confirmed"] is True
     assert result["native_session_id"] == NATIVE_ID
+    assert result["native_incarnation"] == "101:native:100"
     assert result["liveness"] == "live"
     assert result["worktree_path"] == native_record.worktree_path
     assert result["automatic_eligible"] is False

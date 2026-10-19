@@ -408,7 +408,10 @@ The existing active mux daemon maintains a private, bounded recovery-evidence
 journal under its runtime root at `restart-recovery/evidence.sqlite3`. This is
 not a second session or worktree authority. Each positive observation binds the
 canonical native conversation UUID, worktree, native environment and boot epoch,
-mux incarnation, mapping revision and observation sequence. The engine
+mux incarnation, native process birth identity, owner/mapping revisions and
+observation sequence. A new native occupant of an unchanged mux requires an
+advanced owner lifecycle revision; delayed evidence from the prior native
+process cannot retire its replacement. The engine
 corroborates the current native head, conversation data, process identity and mux
 binding over its normal process boundary; stale or uncertain evidence is not
 recorded as live. A detached live session remains observable.

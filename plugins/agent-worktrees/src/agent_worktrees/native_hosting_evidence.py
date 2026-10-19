@@ -69,10 +69,15 @@ def observe(
     if state == "live" and (
         not binding or binding.get("worktree_id") != worktree_id
         or not binding.get("copilot_start_time") or not binding.get("pane_start_time")
+        or type(binding.get("copilot_pid")) is not int or binding["copilot_pid"] <= 0
     ):
         return {**result, "reason": "native-host-unconfirmed", "liveness": state}
     if binding:
-        result.update(mux_session=binding["session_name"], pane_id=binding["pane_id"])
+        result.update(
+            mux_session=binding["session_name"], pane_id=binding["pane_id"],
+            native_incarnation=f"{binding['copilot_pid']}:{binding['copilot_start_time']}",
+            owner_revision=record.lifecycle_revision,
+        )
     return {
         **result, "liveness": state, "confirmed": state == "live",
         "reason": "native-head-live" if state == "live" else f"native-head-{state}",

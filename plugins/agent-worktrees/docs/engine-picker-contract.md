@@ -373,8 +373,9 @@ Its payload identifies `schema: "native-hosting-evidence"` and `version: 1`.
 `confirmed: true` requires a current, unpaused active native head with real
 conversation data, a live native process and a unique PID/birth-correlated mux
 binding, followed by an unchanged owner-record reread. The result includes the
-exact native UUID, worktree path, native platform, head revision and mux/pane
-identity. Missing, uncertain, foreign, superseded or hosted-provider evidence
+exact native UUID, native process birth identity, owner lifecycle revision,
+worktree path, native platform, head revision and mux/pane identity.
+Missing, uncertain, foreign, superseded or hosted-provider evidence
 returns `confirmed: false` with a reason; unreadable owner state is a JSON error.
 The mode requires an exact worktree id and never infers the daemon caller's
 session, selects a filesystem-latest replacement, mutates a head, or launches.
