@@ -116,6 +116,31 @@ def commit(root):
     return head
 
 
+@pytest.fixture
+def chat_subject(subject):
+    root, _, _, main = subject
+    dev_root = root.parent / "validated-dev"
+    for checkout in (root, dev_root):
+        roster = checkout / "tools/standalone_consumers.py"
+        original = roster.read_text("utf-8")
+        assert original.count("'services/dispatch')") == 1
+        roster.write_text(
+            original.replace("'services/dispatch')", "'services/dispatch', 'services/chat')"),
+            encoding="utf-8",
+        )
+        package = checkout / "services/chat/pyproject.toml"
+        package.parent.mkdir()
+        package.write_text('[project]\nname="fixture-chat"\n', encoding="utf-8")
+    git(dev_root, "add", ".")
+    git(dev_root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "fixture chat registration")
+    dev = git(dev_root, "rev-parse", "HEAD")
+    state = json.loads((root / candidate.STATE).read_text("utf-8"))
+    state["last_promotion"]["dev_head"] = dev
+    (root / candidate.STATE).write_text(json.dumps(state), encoding="utf-8")
+    return root, commit(root), dev, main
+
+
 def test_exact_candidate_and_real_consumer_preserve_tracked_inputs(subject):
     root, head, dev, main = subject
     identity = candidate.validate(root, head, dev, main)
@@ -248,6 +273,50 @@ def test_complete_matrix_and_exact_existing_recipes(subject):
     ]
 
 
+def test_chat_registration_has_both_platform_rows_and_the_actual_ci_recipe(chat_subject):
+    root, _, dev, _ = chat_subject
+    rows = candidate.matrix(root, root.parent / "validated-dev", dev)["include"]
+    assert {(row["component"], row["os"], row["minutes"], row["job_minutes"])
+            for row in rows if row["component"] == "chat"} == {
+        ("chat", "ubuntu-latest", 6, 11), ("chat", "windows-latest", 6, 11),
+    }
+    commands = candidate.recipes(root, "chat")
+    assert commands == [(
+        [sys.executable, str(root / "tools/run-standalone-tests.py"), "services/chat",
+         "--prepare", "--admission-wait", "60", "--timeout", "120"], root,
+    )]
+    job = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text("utf-8"))["jobs"]["agent-chat-service"]
+    invocation = next(step["run"] for step in job["steps"] if step.get("run"))
+    assert invocation.split()[2:] == commands[0][0][2:]
+
+
+def test_registered_chat_recipe_executes_and_preserves_candidate_identity(chat_subject):
+    root, head, dev, main = chat_subject
+    result = candidate.run(
+        root, head, dev, main, "chat", dev_root=root.parent / "validated-dev",
+    )
+    assert result["component"] == "chat" and result["outcome"] == "success"
+    assert (root / "fleet-selector.txt").is_file()
+    assert candidate.validate(root, head, dev, main)["candidate_sha"] == head
+
+
+def test_missing_registered_chat_package_refuses(chat_subject):
+    root, _, dev, _ = chat_subject
+    (root / "services/chat/pyproject.toml").unlink()
+    with pytest.raises(candidate.CandidateValidationError, match="absent"):
+        candidate.matrix(root, root.parent / "validated-dev", dev)
+
+
+def test_actual_canonical_roster_has_executable_chat_rows():
+    rows = candidate.inventory_matrix(
+        ROOT, candidate.python_suites(ROOT), candidate.standalone_roster(ROOT),
+    )["include"]
+    assert {row["os"] for row in rows if row["component"] == "chat"} == {
+        "ubuntu-latest", "windows-latest",
+    }
+    assert candidate.recipes(ROOT, "chat")[0][0][2] == "services/chat"
+
+
 def test_missing_inventory_or_unknown_consumer_cannot_silently_skip(subject):
     root, head, dev, main = subject
     with pytest.raises(candidate.CandidateValidationError, match="absent"):
@@ -313,10 +382,11 @@ def test_development_inventory_must_be_the_validated_input(subject, invalid):
         candidate.matrix(root, source, dev)
 
 
-def test_windows_standalone_recipe_uses_canonical_component_id(subject, monkeypatch):
-    monkeypatch.setitem(candidate.STANDALONE, "index", PureWindowsPath("services", "index"))
-    argv, _ = candidate.recipes(subject[0], "index")[0]
-    assert argv[2] == "services/index"
+@pytest.mark.parametrize("component", ["index", "chat"])
+def test_windows_standalone_recipe_uses_canonical_component_id(subject, monkeypatch, component):
+    monkeypatch.setitem(candidate.STANDALONE, component, PureWindowsPath("services", component))
+    argv, _ = candidate.recipes(subject[0], component)[0]
+    assert argv[2] == f"services/{component}"
 
 
 def test_omitted_canonical_standalone_consumer_cannot_authorize_inventory(subject, monkeypatch):

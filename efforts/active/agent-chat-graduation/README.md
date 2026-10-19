@@ -113,6 +113,9 @@ requirements.
   no source checkout, sibling venv or Copilot plugin is required to host it.
 - [ ] Publish bounded capabilities and errors, endpoint discovery and explicit
   setup. Preserve normal no-gap output/flush/CAS and uncertain-effect recovery.
+- [ ] Coordinate trusted materialized-consumer and CI qualification inventory
+  support with the existing release owner under #6237 before promoting the
+  expanded standalone roster; source review alone is not Main activation.
 - [ ] Prove a real installed-client/service/independent-peer exchange before
   widening adoption; a source test or delivered setup message is insufficient.
 
@@ -242,3 +245,17 @@ graduation still requires the declared native and lifecycle guarantees.
   executes the conversation contract after the fixture source is removed.
   Remaining client, hosting, native and lifecycle work is not completed by
   this core implementation.
+
+### 2026-10-19 - Core publication review
+
+- Implementation PR #7242 exposed coupled qualification-inventory omissions.
+  Its source fixes recognize both mandatory Chat CI platform rows and add
+  executable materialized-consumer recipes while preserving the older
+  standalone roster. Unknown or narrowed coverage still refuses.
+- Review also identified committed-post recovery after leave. Persisted
+  request reconciliation now precedes active-membership admission; changed
+  content conflicts and new posts still require membership. The regression
+  exercises leave and restart without silently rejoining.
+- The trusted tooling activation dependency is recorded with the existing
+  #6237 release owner. That owner's Main/pause, publisher and qualification
+  scope are unchanged; delivery and acceptance are not asserted here.

@@ -25,6 +25,12 @@ boundaries isolate their source dependencies.
 
 Chat source changes select the bounded conversation-core contracts on Linux
 and Windows. This does not qualify hosted transport or managed service lifecycle.
+Materialized-consumer qualification includes both Chat platforms when the
+validated standalone roster registers `services/chat`; the supported older
+roster remains usable without it. Each row runs the same bounded standalone
+recipe. Trusted Main-owned validator support must be delivered through the
+existing release owner's qualified tooling path before promoting the expanded
+roster; a Dev source merge alone does not activate that trusted support.
 
 An effort/document-only selection can skip those jobs without omitting the
 fixed `PR gate (required check)`. That aggregate requires successful discovery,

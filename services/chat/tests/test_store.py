@@ -100,6 +100,23 @@ def test_expected_owner_leave_succession_and_inactive_cursor(store):
     assert not rpc(store, "leave", channel="absent", codename="absent")["active"]
 
 
+def test_committed_post_retry_after_leave_is_reconciled_without_rejoining(store, tmp_path):
+    join(store, session_id="session-1")
+    original = post(store)["event"]
+    rpc(store, "leave", channel="room", codename="agent-a")
+    store.close()
+    reopened = ChatStore(tmp_path / "data", "example-installation")
+    try:
+        assert post(reopened) == {"event": original, "duplicate": True}
+        expect("conflict", post, reopened, text="changed")
+        expect("conflict", post, reopened, channel="other")
+        expect("notjoined", post, reopened, request_id="new-request")
+        assert reopened._db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+        assert reopened._db.execute("SELECT active FROM memberships").fetchone()[0] == 0
+    finally:
+        reopened.close()
+
+
 def test_post_failure_rolls_back_counter_event_and_request_identity(store):
     join(store)
     retained = post(store)["event"]

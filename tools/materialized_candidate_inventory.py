@@ -10,6 +10,7 @@ from pathlib import Path
 PLUGIN = re.compile(r"[a-z][a-z0-9-]{0,63}")
 STANDALONE = {
     "dispatch": Path("services") / "dispatch", "index": Path("services") / "index",
+    "chat": Path("services") / "chat",
     "fleet-manager": Path("fleet-manager"),
 }
 
@@ -125,7 +126,7 @@ def matrix(
     root: Path, expected: set[str], standalone: set[str],
 ) -> dict[str, list[dict[str, str | int]]]:
     supported = {"worktree-manager", *(path.as_posix() for path in STANDALONE.values())}
-    if standalone != supported:
+    if standalone not in (supported, supported - {"services/chat"}):
         raise CandidateValidationError("standalone recipes do not cover the validated canonical roster")
     actual = python_suites(root)
     if not expected or len(expected) > 64 or "agent-worktrees" not in expected:
@@ -149,8 +150,11 @@ def matrix(
         ("manager", ("ubuntu-latest",)),
         ("dispatch", ("ubuntu-latest",)),
         ("index", ("ubuntu-latest", "windows-latest")),
+        ("chat", ("ubuntu-latest", "windows-latest")),
         ("fleet-manager", ("ubuntu-latest", "windows-latest")),
     ):
+        if component == "chat" and "services/chat" not in standalone:
+            continue
         relative = Path("worktree-manager") if component == "manager" else STANDALONE[component]
         regular(root, relative / "pyproject.toml")
         if component == "fleet-manager":

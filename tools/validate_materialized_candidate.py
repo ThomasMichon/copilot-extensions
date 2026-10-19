@@ -154,6 +154,8 @@ def recipes(
             argv += ["--timeout", "180"]
         elif component == "index":
             argv += ["--smoke"]
+        elif component == "chat":
+            argv += ["--timeout", "120"]
         else:
             argv += ["--timeout", "120"]
             return [

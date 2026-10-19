@@ -459,7 +459,6 @@ class ChatStore:
 
     def _post(self, request):
         channel, codename = request["channel"], request["codename"]
-        self._member(channel, codename)
         old = self._db.execute(
             "SELECT * FROM events WHERE codename=? AND request_id=?",
             (codename, request["request_id"]),
@@ -468,6 +467,7 @@ class ChatStore:
             if old["channel"] != channel or old["text"] != request["text"]:
                 raise ChatError("conflict", "Request ID already has different content.")
             return {"event": self._event(old), "duplicate": True}
+        self._member(channel, codename)
         size = len(request["text"].encode("utf-8"))
         counts = dict(self._db.execute(
             "SELECT key, value FROM settings WHERE key IN ('event_count', 'message_bytes')"

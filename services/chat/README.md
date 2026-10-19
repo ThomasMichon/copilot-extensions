@@ -77,7 +77,9 @@ those claims.
 
 Posts deduplicate by codename/request ID, binding the channel and text.
 Identical replay returns the original immutable event with `duplicate: true`;
-changed content refuses. Reading returns a bounded page **without consuming
+changed content refuses. Committed requests remain reconcilable after leave
+without reactivating membership; new posts still require an active membership.
+Reading returns a bounded page **without consuming
 it**. An actual client writes and flushes output before the separate cursor
 compare-and-set. Leave/rejoin preserves progress, and an expected-owner leave
 refuses a conflicting source identity.
