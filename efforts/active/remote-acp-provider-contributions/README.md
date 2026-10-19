@@ -194,6 +194,12 @@ during Phase 2; any material expansion returns through proposal review first.
   138 cases before adding the explicit simultaneous-source-error cases.
   Python lint passed; final validation and contract re-attestation follow.
   No authority or deployment gate changes.
+- The final lane passed all 140 cases, including simultaneous source errors.
+  Strict module limits passed for 35 changed files. Re-attested current HTTP41
+  metadata to committed runtime `b9658fe848ab7f13f87f454b642e472c238ce2a5`;
+  independent checking passed 265 fixtures and the contract/provider consumer
+  lane passed 115 cases. Expected bodies, historical vectors, capability floors
+  and source-only evidence classifications remain unchanged.
 
 ### 2026-10-19 - Roster binding reads off the event loop
 
