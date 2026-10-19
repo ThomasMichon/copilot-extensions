@@ -61,7 +61,9 @@ def _checkout(root: Path, name: str, config: str) -> Path:
     return checkout
 
 
-@pytest.mark.parametrize("bare_knowledge", [False, True])
+@pytest.mark.parametrize(
+    "bare_knowledge", [pytest.param(False, marks=pytest.mark.guard), True]
+)
 def test_first_touch_binds_declared_roles_then_creates_real_pair(
     tmp_path, monkeypatch, bare_knowledge
 ):
