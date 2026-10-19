@@ -310,7 +310,7 @@ The umbrella effort remains Active independently of this slice's completion.
   checked inside the journal transaction; delayed End after cancellation stays
   uncertain rather than guessing cause from wall-clock order.
 - The first historical-End/current-claim regression failed on the old behavior.
-  The final integrated bounded, disconnected lane passed 449 Worktrees tests
+  The final integrated bounded, disconnected lane passed 456 Worktrees tests
   with 12 platform-specific skips and 232 Manager tests with three native skips.
   This selected lane also covers real old-daemon refusal, unchanged hook/daemon
   boundaries and resident-to-canonical historical End.
@@ -320,3 +320,9 @@ The umbrella effort remains Active independently of this slice's completion.
   enrollment, recovery admission/attempt reconciliation, exact native Resume,
   acknowledged status-first seed and platform qualification remain open. The
   full plan and #4564 are not completed by this producer slice.
+- The actual PR module-size guard rejected growth in three existing modules.
+  Extracted the generic activation model, locked title capture and captured
+  lifecycle subprocess transport along their responsibility boundaries.
+  Compatibility aliases and the source-string transport guard follow those
+  owners. The tracking baseline only shrank; no ceiling was widened. The final
+  targeted run above also covers the original title-capture contracts.

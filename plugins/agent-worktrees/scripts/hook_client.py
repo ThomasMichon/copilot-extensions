@@ -767,82 +767,26 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
                 payload, skip_reconcile=True
             )
         return {} if contextual else _fallback_legacy_session_start(payload)
-    try:
-        environment = os.environ.copy()
-        environment["PYTHONPATH"] = ""
-        result = subprocess.run(
-            [
-                str(python),
-                "-m",
-                "agent_worktrees",
-                "session-lifecycle",
-                "--stdin",
-                *(["--source-bound"] if source_aware else []),
-                "--timeout-seconds",
-                str(_SESSION_START_DECISION_S),
-            ],
-            input=json.dumps(payload, separators=(",", ":")),
-            capture_output=True,
-            text=True,
-            timeout=_SESSION_START_TIMEOUT_S,
-            check=False,
-            env=environment,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        if source_aware:
-            return {"_stderr": f"[agent-worktrees] Source-aware sessionStart failed: {exc}\n"}
-        return {}
-    if result.returncode != 0:
-        if source_aware:
-            return {"_stderr": (
-                f"[agent-worktrees] Source-aware sessionStart failed ({result.returncode}); "
-                "older lifecycle fallback refused.\n" + str(result.stderr or "")[-4096:]
-            )}
-        return {} if contextual else _fallback_legacy_session_start(payload)
-    if result.stderr:
-        sys.stderr.write(result.stderr)
-    try:
-        value = json.loads(result.stdout or "{}")
-    except (TypeError, ValueError):
-        if source_aware:
-            return {"_stderr": "[agent-worktrees] Source-aware sessionStart returned invalid output.\n"}
-        return {} if contextual else _fallback_legacy_session_start(payload)
-    return value if isinstance(value, dict) else {}
+    helper = _load_sibling("hook_lifecycle_runtime.py")
+    if helper is None:
+        return {"_stderr": "[agent-worktrees] Lifecycle transport is unavailable.\n"}
+    result = helper.run_start(
+        python, payload, source_aware=source_aware,
+        timeout=_SESSION_START_TIMEOUT_S, decision_timeout=_SESSION_START_DECISION_S,
+    )
+    return result if result is not None else (
+        {} if contextual else _fallback_legacy_session_start(payload)
+    )
 
 
 def _fallback_session_end(payload: dict, home: Path) -> dict:
     python = _runtime_python(home)
     if python is None:
         return {"_stderr": "[agent-worktrees] SessionEnd runtime is unavailable; closure is unconfirmed.\n"}
-    try:
-        environment = os.environ.copy()
-        environment["PYTHONPATH"] = ""
-        result = subprocess.run(
-            [
-                str(python),
-                "-m",
-                "agent_worktrees",
-                "deregister-session",
-                "--stdin",
-                "--source-bound",
-            ],
-            input=json.dumps(payload, separators=(",", ":")),
-            capture_output=True,
-            text=True,
-            timeout=_SESSION_END_TIMEOUT_S,
-            check=False,
-            env=environment,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return {"_stderr": f"[agent-worktrees] SessionEnd failed; closure is unconfirmed: {exc}\n"}
-    if result.returncode:
-        return {"_stderr": (
-            f"[agent-worktrees] SessionEnd failed ({result.returncode}); closure is unconfirmed.\n"
-            + str(result.stderr or "")[-4096:]
-        )}
-    if result.stderr:
-        return {"_stderr": str(result.stderr)[-4096:]}
-    return {}
+    helper = _load_sibling("hook_lifecycle_runtime.py")
+    if helper is None:
+        return {"_stderr": "[agent-worktrees] Lifecycle transport is unavailable.\n"}
+    return helper.run_end(python, payload, timeout=_SESSION_END_TIMEOUT_S)
 
 
 @cache

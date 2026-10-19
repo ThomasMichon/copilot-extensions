@@ -48,6 +48,7 @@ from pathlib import Path
 
 from . import tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
+from .tracking_session_activations import activation_token
 from .tracking_session_registry import (
     _end_session_activation,
     _record_has_open_session,
@@ -74,10 +75,10 @@ def apply_session_deregister(args: dict) -> dict:
     source = args.get("source", "hook")
     recorded_at = args.get("recorded_at")
     try:
-        source_identity = tracking._activation_token(
+        source_identity = activation_token(
             args.get("source_identity"), field="source_identity",
         )
-        end_reason = tracking._activation_token(
+        end_reason = activation_token(
             args.get("end_reason"), field="end_reason", limit=64,
         )
     except ValueError as exc:

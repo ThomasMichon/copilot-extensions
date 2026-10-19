@@ -57,6 +57,7 @@ from pathlib import Path
 
 from . import config_authority, obligations, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError
+from .tracking_session_activations import activation_token
 from .tracking_session_registry import _start_session_activation
 
 
@@ -134,7 +135,7 @@ def _apply_session_register_locked(args: dict) -> dict:
     candidate_token = args.get("candidate_token")
     initial_projection = bool(args.get("initial_projection"))
     try:
-        source_identity = tracking._activation_token(
+        source_identity = activation_token(
             args.get("source_identity"), field="source_identity",
         )
     except ValueError as exc:

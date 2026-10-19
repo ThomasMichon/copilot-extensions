@@ -25,6 +25,7 @@ from . import config as cfg
 from . import disposition_history, record_cache
 from .effort_focus import ActiveEffort, active_effort_from_mapping
 from .record_io import load_record_uncached as _load_record_uncached
+from .tracking_session_activations import SessionActivation as SessionActivation
 
 #: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
 #: status bar (120-col default) and the Worktree Picker's table rows; longer prose
@@ -203,45 +204,6 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
         supervisor=strings["supervisor"],
         creator_machine=strings["creator_machine"],
     )
-
-
-@dataclass
-class SessionActivation:
-    """One observed interval in which a session was associated with a worktree.
-
-    Hook delivery is at-least-once and a Copilot session may be resumed many
-    times.  Keeping each interval append-only preserves that history instead of
-    overwriting the session's original ``started_at`` on every resume.
-    """
-
-    ordinal: int
-    started_at: str
-    start_recorded_at: str
-    start_source: str = "hook"
-    ended_at: str | None = None
-    end_recorded_at: str | None = None
-    end_source: str | None = None
-    source_identity: str | None = None
-    end_reason: str | None = None
-    source_ambiguous: bool = False
-
-    def __post_init__(self) -> None:
-        _activation_token(self.source_identity, field="source_identity")
-        _activation_token(self.end_reason, field="end_reason", limit=64)
-        if type(self.source_ambiguous) is not bool:
-            raise ValueError("Invalid activation source ambiguity")
-
-
-def _activation_token(value: object, *, field: str, limit: int = 128) -> str | None:
-    """Validate optional opaque lifecycle metadata without inventing legacy proof."""
-    if value is None:
-        return None
-    if (
-        not isinstance(value, str) or not value or len(value) > limit
-        or re.fullmatch(r"[A-Za-z0-9._:-]+", value) is None
-    ):
-        raise ValueError(f"Invalid activation {field}")
-    return value
 
 
 @dataclass
@@ -1693,14 +1655,8 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
                                     str(raw_activation["end_source"])
                                     if raw_activation.get("end_source") else None
                                 ),
-                                source_identity=_activation_token(
-                                    raw_activation.get("source_identity"),
-                                    field="source_identity",
-                                ),
-                                end_reason=_activation_token(
-                                    raw_activation.get("end_reason"), field="end_reason",
-                                    limit=64,
-                                ),
+                                source_identity=raw_activation.get("source_identity"),
+                                end_reason=raw_activation.get("end_reason"),
                                 source_ambiguous=raw_activation.get("source_ambiguous", False),
                             ))
                     sessions_list.append(SessionEntry(

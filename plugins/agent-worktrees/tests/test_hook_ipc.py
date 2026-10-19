@@ -433,9 +433,11 @@ def test_advisory_guard_does_not_suppress_later_deny(monkeypatch, tmp_path):
 
 def test_client_does_not_import_agent_worktrees_main():
     text = _SCRIPT.read_text("utf-8")
+    runtime_text = _SCRIPT.with_name("hook_lifecycle_runtime.py").read_text("utf-8")
     assert "agent_worktrees.__main__" not in text
-    assert '"agent_worktrees",' in text
-    assert '"session-lifecycle"' in text
+    assert "agent_worktrees.__main__" not in runtime_text
+    assert '"agent_worktrees",' in runtime_text
+    assert '"session-lifecycle"' in runtime_text
 
 
 def test_session_start_fallback_uses_one_runtime_process(monkeypatch, tmp_path):
