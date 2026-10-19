@@ -131,12 +131,14 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
             "AGENT_DISPATCH_RUN_DIR": str(Path(context["pluginRoot"]) / "run"),
         })
         for key in (
+            "AGENT_DISPATCH_TASK_AUTHORITY",
             "AGENT_DISPATCH_URL",
             "AGENT_DISPATCH_TOKEN",
             "AGENT_DISPATCH_CONTROL_TOKEN",
             "AGENT_DISPATCH_CONTROL_TOKEN_COMMAND",
             "AGENT_DISPATCH_SHARED_URL",
             "AGENT_DISPATCH_SHARED_TOKEN",
+            "AGENT_DISPATCH_SHARED_CONTROL_TOKEN",
             "AGENT_DISPATCH_SHARED_TOKEN_COMMAND",
             "AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND",
             "AGENT_DISPATCH_ENDPOINT",
