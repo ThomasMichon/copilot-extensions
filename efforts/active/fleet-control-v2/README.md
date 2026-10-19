@@ -1828,6 +1828,15 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   boundary, then closed that issue. Its no-baseline full fallback remains an
   explicitly disclosed edge, not a newly proven bounded fallback here. This
   effort did not modify the shared pipeline or weaken a deadline.
+- Journal publication exposed the independent Repositories Configuration
+  contract's stale equality with the path-selected Manager job. The failing
+  run reported one failure and 26 passes; #7191 now records the retained
+  owner's already-merged repair in #7187. Reconciled the original journal
+  branch without replacing the independent workflow-roadmap index entry.
+  All 29 repaired contracts pass locally after provisioning a missing test-only
+  YAML dependency through the existing seasoning gate. No workflow, assertion,
+  coverage or deadline was changed by this documentation slice; fresh review
+  and required hosted CI remain necessary after the reconciliation.
 - Stopped the PR-specific periodic monitor after actual merge. Managed
   pull-forward initially tried to replay already-squashed commits and safely
   aborted. Verified every changed path exactly matched upstream, retained a
