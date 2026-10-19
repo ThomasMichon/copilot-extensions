@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
+    "commit": "72e899fa1dfbc0447c74da68609c3ee8de80db78",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/plugin_readiness.py",
-    "source_git_blob": "2f660cd0234f7c1c6ba84ce34896ad9ed532beed",
-    "source_sha256": "8e90e855990492b9cd01ba3fa833007ab202d4c8c43b119b2ce495a1859c4a04"
+    "source_git_blob": "fd51388e8fd1b97f6374e61a7a8acd78b98799d3",
+    "source_sha256": "6e093a8eca89febc0360577a081e91c6f25bb9ae8f684c8c24b9f8a4a710dbe8"
   },
   "response": {
     "protocol_version": 41,

@@ -298,7 +298,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/plugin_readiness.py",
-          "sha256": "8e90e855990492b9cd01ba3fa833007ab202d4c8c43b119b2ce495a1859c4a04",
+          "sha256": "6e093a8eca89febc0360577a081e91c6f25bb9ae8f684c8c24b9f8a4a710dbe8",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1878,7 +1878,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-generation-41.json",
-          "sha256": "861b53a01a52e7a2da9067faa91e1681b904c5498ee8df27a24f69c78294de45",
+          "sha256": "6f128f0601e6a70bf3f5af45725fd8100c6efcf7eec7ce9d33b95a212ef19f7d",
           "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
           "generation": 41
         },
@@ -4679,12 +4679,12 @@
           "capture_method": "Preserve the independent generation-40 packet and capability floors; re-attest its owning source at HTTP 41 with only current protocol advertisements advanced."
         },
         {
-          "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
+          "commit": "72e899fa1dfbc0447c74da68609c3ee8de80db78",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/plugin_readiness.py",
-          "source_git_blob": "2f660cd0234f7c1c6ba84ce34896ad9ed532beed",
-          "capture_method": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference."
+          "source_git_blob": "fd51388e8fd1b97f6374e61a7a8acd78b98799d3",
+          "capture_method": "Freeze the HTTP-41 typed startup-readiness golden packet from the actual tolerant-reader correction; additive request, nested plugin and result fields are ignored while ownership and required-state guards remain enforced."
         },
         {
           "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
