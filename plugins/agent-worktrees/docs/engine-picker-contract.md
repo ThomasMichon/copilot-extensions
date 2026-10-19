@@ -430,7 +430,12 @@ Current generation is evidence for a future fence, not a generation reservation
 or proof of continuity with an earlier task incarnation.
 Opaque/unmatched dispatch provenance, legacy task refs, inbound ownership,
 mixed/other/historical/producer claims and bound/profile-assigned worktrees
-remain unqualified. Even a matching worktree always returns
+remain unqualified.
+Unknown persisted state/ref/kind metadata is not canonical active-claim proof:
+the owner codec retains `metadata_opaque: true` through projections and saves,
+while preserving conservative active finality treatment. Malformed claim
+collections/items retain opaque placeholders, not apparent absence.
+Even a matching worktree always returns
 `launch_authorized: false` and `automatic_eligible: false`.
 Action-time task/claim admission, launch fencing and acknowledged restart-seed
 pickup remain separate requirements. Ended shutdown activations are not reopened.

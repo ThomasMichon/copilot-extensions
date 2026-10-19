@@ -19,7 +19,25 @@ def parse_mapping(raw: dict, *, claim_factory: Callable[..., ResourceClaim]) -> 
         handoff_bundle=str(raw.get("handoff_bundle", "")),
         producer=raw.get("producer"),
         producer_present="producer" in raw,
+        metadata_opaque=(
+            raw.get("metadata_opaque", False) is not False
+            or "state" in raw and state_raw not in ("active", "at-rest", "released", "abandoned")
+            or not isinstance(raw.get("kind", "worktree"), str) or not raw.get("kind", "worktree")
+            or not isinstance(raw.get("ref", ""), str)
+            or not raw.get("ref") and "producer" not in raw
+        ),
     )
+
+
+def parse_list(raw: object, *, claim_factory: Callable[..., ResourceClaim]) -> list[ResourceClaim]:
+    """Retain malformed collections/items as explicit conservative placeholders."""
+    if not isinstance(raw, list):
+        return [claim_factory(metadata_opaque=True)]
+    return [
+        parse_mapping(item, claim_factory=claim_factory)
+        if isinstance(item, dict) else claim_factory(metadata_opaque=True)
+        for item in raw
+    ]
 
 
 def yaml_mapping(claim: ResourceClaim) -> dict[str, object]:
@@ -34,4 +52,6 @@ def yaml_mapping(claim: ResourceClaim) -> dict[str, object]:
         data["handoff_bundle"] = claim.handoff_bundle
     if claim.has_producer:
         data["producer"] = claim.producer
+    if claim.metadata_opaque:
+        data["metadata_opaque"] = True
     return data

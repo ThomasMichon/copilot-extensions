@@ -469,6 +469,11 @@ released/producer claims, inbound ownership and bound/profile-assigned worktrees
 remain unqualified. Missing/old providers refuse without default-writer guesses,
 self-provisioning or legacy retries. The check never changes task/head state,
 reserves a launch or grants automatic restoration.
+Unknown persisted claim states still count as active for existing conservative
+finality checks, but carry `metadata_opaque: true` through full/public projections
+and later saves. Malformed claim collections/items retain conservative opaque
+placeholders rather than becoming an empty ledger. Neither can qualify for
+restart inspection.
 
 The bundled live-pulse extension writes `substatus.json` beside Copilot session
 state so the picker can show live intent/rest state. It is passive; durable

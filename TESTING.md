@@ -252,6 +252,11 @@ opt-in flag and no-self-provision environment. These are disposable protocol
 fixtures, not live task acquisition, automatic launch permission or native
 restart qualification. Mixed/legacy/released/producer claims remain blocked;
 generation snapshots are not reservations.
+Persisted-record regressions cover unknown/null/structured claim states and
+malformed claim collections through actual owner load/save. `test_claim_codec`
+checks the retained `metadata_opaque` marker, conservative placeholders and
+unchanged valid/legacy wire shapes. Normalized active state cannot become
+restart admission proof; ordinary finality handling stays conservative.
 
 The frozen-identity lane covers no-write default/passive/inspection paths, legacy
 binding refusal, original-snapshot retention, cancelled-shutdown fences, private

@@ -272,6 +272,7 @@ class ResourceClaim:
     handoff_bundle: str = ""
     producer: object = None
     producer_present: bool = False
+    metadata_opaque: bool = False
 
     def to_dict(self) -> dict:
         """Full wire shape, with producer metadata absent for legacy claims."""
@@ -282,6 +283,8 @@ class ResourceClaim:
         if self.has_producer:
             from .resource_producer import wire_metadata
             result["producer"] = wire_metadata(self.producer)
+        if self.metadata_opaque:
+            result["metadata_opaque"] = True
         return result
 
     def to_public_dict(self) -> dict[str, object]:
@@ -295,6 +298,8 @@ class ResourceClaim:
         if self.has_producer:
             from .resource_producer import wire_metadata
             result["producer"] = wire_metadata(self.producer)
+        if self.metadata_opaque:
+            result["metadata_opaque"] = True
         return result
 
     @property

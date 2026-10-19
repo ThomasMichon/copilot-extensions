@@ -34,7 +34,7 @@ def check(record: tracking.WorktreeRecord, expected: dict) -> tuple[str | None, 
     if len(record.resources) != 1:
         return "claim-policy-unqualified", []
     claim = record.resources[0]
-    if claim.kind != "task" or claim.state != "active" or claim.has_producer:
+    if claim.kind != "task" or claim.state != "active" or claim.has_producer or claim.metadata_opaque:
         return "claim-policy-unqualified", []
     split = claim_providers.split_namespaced_ref(claim.ref)
     if (

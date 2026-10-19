@@ -730,3 +730,13 @@ The umbrella effort remains Active independently of this slice's completion.
   lane passed 365 dispatch and 198 owner tests; unchanged Manager source
   retains its 16-test receipt. The fix still awaits a new exact-head verdict
   and required CI; the full restoration gate remains open.
+- The next review of #7280 found that persisted unknown claim state was
+  normalized to active before the policy check. Eleven real owner-load
+  regressions failed first, also covering malformed collections/items silently
+  disappearing into an apparently empty ledger. The codec now preserves an
+  explicit opaque metadata marker through full/public projections and later
+  saves, retaining conservative active finality handling and opaque
+  placeholders rather than granting active-claim proof. Known/legacy valid
+  shapes are unchanged. The expanded disconnected owner/claim/finality lane
+  passed 1,163 tests; unchanged dispatch/Manager sources retain their 365/16
+  receipts. This fix still needs exact-head provider review and required CI.

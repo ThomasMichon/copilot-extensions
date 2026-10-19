@@ -358,7 +358,7 @@ def test_parsed_dispatch_provenance_is_not_a_substitute_for_current_task(task_po
 
 @pytest.mark.parametrize("change", [
     {"state": "released"}, {"state": "at-rest"}, {"producer_present": True},
-    {"kind": "pr"}, {"state": "unknown"},
+    {"kind": "pr"}, {"state": "unknown"}, {"metadata_opaque": True},
 ])
 def test_nonactive_or_other_claims_remain_unqualified(task_policy, change):
     owner, record, expected, policy, calls = task_policy
@@ -371,6 +371,44 @@ def test_mixed_claims_do_not_create_an_unbounded_probe_loop(task_policy):
     owner, record, expected, policy, calls = task_policy
     record.resources.append(tracking.ResourceClaim(kind="task", ref="dispatch-central-task:other"))
     assert owner.check(expected, loader=lambda: record)["reason"] == "claim-policy-unqualified"
+    assert calls == []
+
+
+@pytest.mark.parametrize("state", ["unknown", "", None, False, [], {}])
+def test_persisted_unknown_claim_state_never_becomes_restart_qualification(task_policy, tmp_path, state):
+    import yaml
+
+    owner, record, expected, policy, calls = task_policy
+    path = tmp_path / f"{record.worktree_id}.yaml"
+    tracking.save_record(record, path)
+    raw = yaml.safe_load(path.read_text())
+    raw["resources"][0]["state"] = state
+    path.write_text(yaml.safe_dump(raw))
+    loaded = tracking.load_record(path)
+    assert loaded.resources[0].is_live is True  # Preserve conservative finality handling.
+    result = owner.check(expected, loader=lambda: tracking.load_record(path))
+    assert result["worktree_qualified"] is False
+    assert result["reason"] == "claim-policy-unqualified"
+    assert calls == []
+    tracking.save_record(loaded, path)
+    assert owner.check(expected, loader=lambda: tracking.load_record(path))["worktree_qualified"] is False
+
+
+@pytest.mark.parametrize("resources", [None, {}, "unknown", [None], [{}]])
+def test_malformed_persisted_claim_collection_cannot_look_unclaimed(task_policy, tmp_path, resources):
+    import yaml
+
+    owner, record, expected, policy, calls = task_policy
+    path = tmp_path / f"{record.worktree_id}.yaml"
+    tracking.save_record(record, path)
+    raw = yaml.safe_load(path.read_text())
+    raw["resources"] = resources
+    path.write_text(yaml.safe_dump(raw))
+    loaded = tracking.load_record(path)
+    assert owner.check(expected, loader=lambda: loaded)["worktree_qualified"] is False
+    tracking.save_record(loaded, path)
+    reloaded = tracking.load_record(path)
+    assert owner.check(expected, loader=lambda: reloaded)["worktree_qualified"] is False
     assert calls == []
 
 

@@ -1802,21 +1802,14 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
     # agent-fabric resource-claims: the forward outbound list. Absent in
     # worktrees that own nothing (the common case), so legacy records parse to
     # an empty list and re-serialize byte-identically.
-    resources_list: list[ResourceClaim] = []
-    raw_resources = data.get("resources")
-    if isinstance(raw_resources, list):
-        for raw in raw_resources:
-            if isinstance(raw, dict) and (raw.get("ref") or "producer" in raw):
-                resources_list.append(_parse_claim_mapping(raw))
+    from .claim_codec import parse_list
+    resources_list = parse_list(data.get("resources", []), claim_factory=ResourceClaim)
 
     # worktree-finality-and-obligations Phase 2: the most recent finalize
     # cascade's release snapshot (see the field docstring on WorktreeRecord).
-    last_finalize_released_list: list[ResourceClaim] = []
-    raw_last_finalize_released = data.get("last_finalize_released")
-    if isinstance(raw_last_finalize_released, list):
-        for raw in raw_last_finalize_released:
-            if isinstance(raw, dict) and (raw.get("ref") or "producer" in raw):
-                last_finalize_released_list.append(_parse_claim_mapping(raw))
+    last_finalize_released_list = parse_list(
+        data.get("last_finalize_released", []), claim_factory=ResourceClaim,
+    )
 
     # worktree-finality-and-obligations Phase 3: itemized follow-up ledger.
     # Absent in un-annotated worktrees, so legacy records parse to an empty
