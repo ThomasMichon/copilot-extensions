@@ -74,6 +74,40 @@ def _make_resolver_with_namespace(prefix: str = "ns") -> tuple[AgentResolver, _C
     return resolver, ns_resolver
 
 
+@pytest.mark.asyncio
+async def test_namespace_replaced_during_off_thread_row_composition_is_not_republished(monkeypatch):
+    resolver, old = _make_resolver_with_namespace()
+    old.outcomes = [[_agent("old")]]
+    cache = AgentRosterCache(resolver, refresh_interval=60)
+    assert any(row["name"] == "ns:old" for row in (await cache.get_snapshot()).rows)
+    started, release = threading.Event(), threading.Event()
+    original = resolver.list_agents
+
+    def compose():
+        started.set()
+        assert release.wait(2)
+        return original()
+
+    monkeypatch.setattr(resolver, "list_agents", compose)
+    pending = asyncio.create_task(cache.get_snapshot())
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        replacement = _ControllableResolver("ns")
+        replacement.outcomes = [[_agent("new")]]
+        resolver.unregister_namespace_resolver("ns")
+        resolver.register_namespace_resolver(replacement)
+        release.set()
+        snapshot = await pending
+        assert not any(row["name"] == "ns:old" for row in snapshot.rows)
+        assert "ns" in snapshot.incomplete_namespaces
+        refreshed = await cache.get_snapshot()
+        assert any(row["name"] == "ns:new" for row in refreshed.rows)
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        await cache.stop()
+
+
 # -- default watchdog_timeout must never undercut the scan's own timeout ------
 
 

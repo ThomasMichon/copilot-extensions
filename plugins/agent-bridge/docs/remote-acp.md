@@ -191,6 +191,9 @@ bindings in that project before filtering contributions, including cached
 rosters. Detail accepts the same `project` query. Plain and streaming CLI rosters
 and remote detail pass their selected project; ordinary static/provider rows
 retain their behavior.
+Cached and uncached asynchronous roster paths compose repository-backed rows
+off the event loop. Discovery publication retains its generation guard, and
+cached namespace membership/freshness is rechecked after row composition.
 Disabled contributions withdraw; uncertain activation cannot retain runnable
 authority from a previous scan. Source-level discovery failures are reported,
 not treated as authoritative emptiness.

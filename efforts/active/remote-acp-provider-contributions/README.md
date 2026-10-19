@@ -176,6 +176,23 @@ during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
 
+### 2026-10-19 - Roster binding reads off the event loop
+
+- Fresh review confirmed production HTTP-source registration and identified
+  another roster consumer boundary: cached synchronous row assembly inferred
+  a single project's repository binding on the event loop before the later
+  project-specific offload.
+- Calibrated failures in both cached and uncached roster polling. Both now
+  compose repository-backed rows off-thread; uncached discovery also uses the
+  existing scan/apply split so publication and its generation guard stay on
+  the event loop.
+- Reconcile cached namespace membership and freshness again after asynchronous
+  row composition. A deterministic replacement-during-composition test proves
+  the old provider's rows cannot reappear across that added await.
+- Catalog, cache, HTTP roster and runtime validation passed 117 cases; Python
+  lint passed. Contract re-attestation, fresh review and final-head CI remain
+  required. No scope, capability-floor or rollout gate was relaxed.
+
 ### 2026-10-19 - Production HTTP source registration
 
 - Fresh current-head review confirmed the global/project repair and found

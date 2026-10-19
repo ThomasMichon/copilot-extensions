@@ -78,6 +78,36 @@ def binding(**changes):
     })
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached", [False, True])
+async def test_roster_poll_binding_reads_never_run_on_event_loop(contribution, cached):
+    import threading
+
+    from agent_bridge.agent_registry_cache import AgentRosterCache
+
+    loop_thread = threading.get_ident()
+    calls = []
+
+    def project_bindings(project):
+        calls.append((project, threading.get_ident()))
+        assert threading.get_ident() != loop_thread
+        return {"assistant": binding()}
+
+    catalog = RemoteAcpCatalog({}, project_bindings=project_bindings)
+    catalog.apply(discover_remote_contributions())
+    resolver = AgentResolver({}, {})
+    resolver.remote_acp_catalog = catalog
+    cache = AgentRosterCache(resolver, refresh_interval=60)
+    try:
+        for _ in range(2):
+            rows = (await cache.get_snapshot()).rows if cached else await resolver.list_agents_async()
+            remote = next(row for row in rows if row["name"] == "remote-acp:assistant")
+            assert remote["state"] == "bound" and remote["project"] == "demo"
+        assert len(calls) == 2 and all(project == "demo" for project, _ in calls)
+    finally:
+        await cache.stop()
+
+
 def test_unbound_contribution_is_visible_without_connection_or_credential_lookup(contribution):
     report = discover_remote_contributions()
     assert report.errors == []

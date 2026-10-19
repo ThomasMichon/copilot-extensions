@@ -16,7 +16,7 @@ from .agent_registry_common import (
     AgentConfig,
     AmbiguousAgentError,
 )
-from .agent_registry_discovery import _ProviderDiscoveryMixin
+from .agent_registry_discovery import DiscoveryResult, _ProviderDiscoveryMixin
 from .agent_registry_namespace import NamespaceResolver
 from .cold_store_sources import ColdStoreProviderRegistry
 from .provider_sources import ProviderManifest
@@ -929,8 +929,10 @@ class AgentResolver(_ProviderDiscoveryMixin):
         go through :class:`AgentRosterCache` (e.g. the daemon's own
         pre-topology-ready placeholder resolver, or a test that exercises
         the resolver directly)."""
-        self.refresh_provider_resolvers()
-        result = self.list_agents()
+        outcome = await asyncio.to_thread(self._scan_provider_report, force=False)
+        if not isinstance(outcome, DiscoveryResult):
+            self._apply_provider_report(*outcome)
+        result = await asyncio.to_thread(self.list_agents)
         prefixes = list(self._namespace_resolvers.keys())
 
         listings = await asyncio.gather(

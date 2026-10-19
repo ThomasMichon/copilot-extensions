@@ -920,8 +920,11 @@ class AgentRosterCache(_DiscoveryMixin):
         # without this recheck, its last-known-good rows would still
         # publish as current/complete even though the refresh this request
         # itself waited on never actually happened.
+        rows = list(await asyncio.to_thread(self._resolver.list_agents))
+        # Row composition may read repository bindings; reconcile again after
+        # that await so a replaced namespace cannot publish its old rows.
+        self._reconcile_namespace_set()
         now = time.monotonic()
-        rows = list(self._resolver.list_agents())
         incomplete_namespaces: list[str] = []
         # Iterate the *live* resolver's own namespace-registration order
         # (not `self._entries`'s own dict order, which a namespace removed
