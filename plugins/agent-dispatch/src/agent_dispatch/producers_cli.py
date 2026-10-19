@@ -250,8 +250,12 @@ def _cmd_webhook(args: argparse.Namespace) -> int:
     if args.token:
         config["coordinator_token"] = args.token
     kwargs = {}
-    if client_authority(args) != "legacy":
-        kwargs["client_factory"] = lambda: _client(args)
+    authority = client_authority(args)
+    target_args = args
+    if authority == "pinned_url" and not args.token and config.get("coordinator_token"):
+        target_args = argparse.Namespace(**{**vars(args), "token": config["coordinator_token"]})
+    if authority != "legacy":
+        kwargs["client_factory"] = lambda: _client(target_args)
     webhook.serve(config, host=args.host, port=args.port, **kwargs)
     return 0
 

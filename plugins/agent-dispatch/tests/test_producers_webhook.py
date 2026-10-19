@@ -34,6 +34,36 @@ def _client(config=None):
     return TestClient(app), sink
 
 
+@pytest.mark.parametrize("cli_token", [None, "explicit-reader"])
+def test_raw_url_cli_preserves_config_authentication_without_mutating_arguments(
+    tmp_path, monkeypatch, cli_token,
+):
+    from agent_dispatch import __main__ as core
+
+    monkeypatch.delenv("AGENT_DISPATCH_TASK_AUTHORITY", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "unrelated-ambient-reader")
+    config = tmp_path / "webhook.json"
+    config.write_text(json.dumps({
+        "url": "http://configured:8787", "coordinator_token": "configured-reader",
+    }), encoding="utf-8")
+    observed = []
+
+    def serve(cfg, **kwargs):
+        with kwargs["client_factory"]() as client:
+            observed.append(client.base_url)
+            assert client._http.headers["Authorization"].endswith(cli_token or "configured-reader")
+        assert cfg["url"] == "http://explicit:8787"
+
+    monkeypatch.setattr(webhook, "serve", serve)
+    flags = ["--token", cli_token] if cli_token else []
+    args = core.build_parser().parse_args([
+        "--url", "http://explicit:8787", *flags, "webhook", "--config", str(config),
+    ])
+    assert args.func(args) == 0
+    assert args.token == cli_token
+    assert observed == ["http://explicit:8787"]
+
+
 _MERGED_PR = {
     "action": "closed",
     "number": 42,
