@@ -31,6 +31,7 @@ async def connect_remote_session(
     caller_session_id: str | None = None, remote_session_id: str | None = None,
     session: Session | None = None,
     project: str | None = None,
+    reuse: bool = False,
 ) -> Session:
     if manager.is_draining:
         raise ValueError("Bridge is draining")
@@ -41,6 +42,7 @@ async def connect_remote_session(
             caller_session_id=caller_session_id, remote_session_id=remote_session_id,
             session=session,
             project=project,
+            reuse=reuse,
         )
     finally:
         manager._active_acquisitions -= 1
@@ -51,6 +53,7 @@ async def _attach_remote_session(
     caller_session_id: str | None = None, remote_session_id: str | None = None,
     session: Session | None = None,
     project: str | None = None,
+    reuse: bool = False,
 ) -> Session:
     from .session_manager import Session
 
@@ -70,14 +73,37 @@ async def _attach_remote_session(
     if manager.is_draining:
         raise ValueError("Bridge is draining")
     snapshot = spec.model_dump(mode="json")
+    policy = getattr(manager, "_remote_credential_policy", None)
+    auth_factory = policy.bind(spec) if policy is not None else None
+    if session is None and reuse and caller_id:
+        for candidate in reversed(list(manager._sessions.values())):
+            if (
+                candidate.target.type != "remote-acp"
+                or candidate.agent_name != "remote-acp:" + name
+                or candidate.caller_id != caller_id
+                or candidate.target.project != project
+                or candidate.target.cwd != cwd
+                or candidate.status not in {
+                    SessionStatus.CREATED, SessionStatus.STARTING, SessionStatus.RUNNING,
+                    SessionStatus.IDLE, SessionStatus.STOPPED,
+                }
+                or (remote_session_id and candidate.acp_session_id != remote_session_id)
+                or (candidate.status == SessionStatus.STOPPED and not candidate.acp_session_id)
+            ):
+                continue
+            if RemoteAcpTarget.model_validate(candidate.target.remote_acp).model_dump(mode="json") != snapshot:
+                raise ValueError("Remote endpoint/profile/identity changed; explicit new attachment required")
+            if candidate.status != SessionStatus.STOPPED:
+                return candidate
+            session = candidate
+            remote_session_id = candidate.acp_session_id
+            break
     previous_spec = (
         RemoteAcpTarget.model_validate(session.target.remote_acp).model_dump(mode="json")
         if session is not None else None
     )
     if session is not None and previous_spec != snapshot:
         raise ValueError("Remote endpoint/profile/identity changed; explicit new attachment required")
-    policy = getattr(manager, "_remote_credential_policy", None)
-    auth_factory = policy.bind(spec) if policy is not None else None
     if session is None:
         if len(manager._sessions) >= manager.MAX_SESSIONS:
             raise ValueError("Bridge session limit exceeded")
@@ -103,12 +129,6 @@ async def _attach_remote_session(
     cookies = session._remote_affinity_cookies
     if cookies is None:
         cookies = getattr(transport, "cookies", None)
-    if previous is not None:
-        await previous.shutdown()
-    if manager.is_draining:
-        raise ValueError("Bridge is draining")
-    if manager._sessions.get(session.session_id) is not session or session.status == SessionStatus.ENDED:
-        raise RemoteTransportError("Remote session ended or was superseded during attachment")
     def on_event(kind: str, data: dict) -> None:
         if session.client is not client or manager._sessions.get(session.session_id) is not session:
             return
@@ -139,6 +159,12 @@ async def _attach_remote_session(
             raise RemoteTransportError("Remote session startup was closed or superseded")
 
     try:
+        if previous is not None:
+            await previous.shutdown()
+        if manager.is_draining:
+            raise ValueError("Bridge is draining")
+        if manager._sessions.get(session.session_id) is not session or session.status != SessionStatus.STARTING:
+            raise RemoteTransportError("Remote session ended or was superseded during attachment")
         if auth_factory is None:
             await client.start_remote(spec, cookies=cookies)
         else:

@@ -189,3 +189,27 @@ def test_remote_cli_start_supplies_explicit_project_to_request(monkeypatch, targ
     ) == "created"
     assert requests[0][0:2] == ("POST", "/api/v1/sessions")
     assert requests[0][2]["sender_repo"] == "demo"
+
+
+@pytest.mark.parametrize("target", ["remote-acp:example", "https://example.com/acp"])
+@pytest.mark.parametrize("force", [False, True])
+def test_remote_cli_reuse_and_takeover_require_daemon_binding_resolution(monkeypatch, target, force):
+    from agent_bridge.client import BridgeClient
+
+    monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "selected")
+    monkeypatch.setattr(cli, "_get_caller_id", lambda: "caller")
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
+    requests = []
+    client = BridgeClient.__new__(BridgeClient)
+    client.daemon_supports = lambda version: True
+
+    def request(method, path, *args, **kwargs):
+        requests.append((method, path, args))
+        assert (method, path) == ("POST", "/api/v1/sessions")
+        return {"session_id": "validated", "name": "example", "status": "idle"}
+
+    client._request = request
+    assert _start_agent_session(client, target, force=force) == "validated"
+    assert requests[0][2][0]["sender_repo"] == "selected"
+    assert requests[0][2][0]["caller_id"] == "caller"

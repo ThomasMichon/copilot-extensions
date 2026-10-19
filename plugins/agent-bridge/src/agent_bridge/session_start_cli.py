@@ -258,6 +258,7 @@ def _start_agent_session(
 ) -> str:
     core = _core()
     from .client import BridgeClientError
+    from .remote_acp_config import is_remote_address
     from .session_targeting_cli import _AgentSessionConflict, _busy_session_message
 
     if sender_preference is not None and sender_preference.agent_name != agent_name:
@@ -265,7 +266,8 @@ def _start_agent_session(
         raise SystemExit(2)
     caller_id = core._get_caller_id()
 
-    if not force_new:
+    # Only the daemon can validate the selected project's current remote binding.
+    if not force_new and not is_remote_address(agent_name):
         existing = _find_caller_session(client, agent_name, caller_id)
         if existing is not None:
             existing = _await_coming_up_settled(client, existing)

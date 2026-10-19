@@ -102,12 +102,12 @@ def test_guard_routed_project_on_fleet_global_is_silent(monkeypatch):
     assert "AGENT_WORKTREES_PROJECT_ROUTED" not in os.environ
 
 
-@pytest.mark.parametrize("verb", ["agents", "machines", "send", "create"])
+@pytest.mark.parametrize("verb", ["agents", "agent-show", "machines", "send", "create"])
 def test_guard_explicit_project_on_consuming_verb_ok(monkeypatch, verb):
     monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
     parser = m.build_parser()
     argv = ["--project", "foo", verb]
-    if verb in {"send", "create"}:
+    if verb in {"agent-show", "send", "create"}:
         argv.append("target")
     args = parser.parse_args(argv)
     m._guard_project_scope(parser, args)  # consuming verb -> no raise

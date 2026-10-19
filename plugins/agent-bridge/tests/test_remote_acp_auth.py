@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 
 import pytest
 from credential_relay.http_auth import HttpAuthContext
 from credential_relay.http_sources import HttpSourceRegistry
+from credential_relay.sources.git_credential import GitCredentialSource
 
 from agent_bridge.models import ServiceConfig
 from agent_bridge.remote_acp_auth import RemoteCredentialPolicy
@@ -126,3 +128,119 @@ def test_explicit_source_registry_refresh_does_not_create_false_ambiguity():
     selected.register_sources(registry)
     assert selected.bind(target())
     assert source.calls == []
+
+
+@pytest.mark.asyncio
+async def test_registered_custom_source_is_reused_across_auth_instances():
+    selected, source = policy()
+    spec = target()
+    factory = selected.bind(spec)
+    context = HttpAuthContext(
+        spec.origin, spec.auth.identity, "generation", spec.auth.resource, spec.auth.scope,
+    )
+    first_auth = factory(context)
+    second_auth = factory(replace(context, generation="next"))
+    headers = await asyncio.gather(
+        first_auth.headers(context),
+        second_auth.headers(replace(context, generation="next")),
+    )
+    assert all(
+        header["Authorization"].split(" ", 1) == ["Example", "synthetic-credential"]
+        for header in headers
+    )
+    assert [call[:2] for call in source.calls] == [
+        ("supports", "get"), ("resolve", "get"),
+        ("supports", "get"), ("resolve", "get"),
+    ]
+
+
+@pytest.mark.parametrize("reference", ["builtin/git-credential", "unknown@example/grant"])
+def test_builtin_selection_retains_explicit_approval_and_registration(reference):
+    spec = target(credential_source=reference, scheme="Bearer", resource="", scope="")
+    with pytest.raises(PermissionError, match="approval required"):
+        RemoteCredentialPolicy().bind(spec)
+    selected = RemoteCredentialPolicy({
+        reference: RemoteAuthApproval(origin=spec.origin, identity=spec.auth.identity),
+    })
+    selected.sources = HttpSourceRegistry()
+    with pytest.raises(PermissionError, match="unavailable"):
+        selected.bind(spec)
+
+
+def test_builtin_source_is_fresh_for_each_factory_invocation():
+    reference = "builtin/git-credential"
+    selected = RemoteCredentialPolicy({
+        reference: RemoteAuthApproval(origin="https://example.com", identity="synthetic"),
+    })
+    spec = target(credential_source=reference, scheme="Bearer", resource="", scope="")
+    factory = selected.bind(spec)
+    context = HttpAuthContext(spec.origin, spec.auth.identity, "generation")
+    first_auth = factory(context)
+    second_auth = factory(replace(context, generation="next"))
+    assert isinstance(first_auth._source, GitCredentialSource)
+    assert isinstance(second_auth._source, GitCredentialSource)
+    assert first_auth._source is not second_auth._source
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh_registry", [False, True])
+async def test_builtin_git_source_isolates_concurrent_endpoint_paths(monkeypatch, refresh_registry):
+    reference = "builtin/git-credential"
+    approval = RemoteAuthApproval(origin="https://example.com", identity="synthetic")
+    selected = RemoteCredentialPolicy({reference: approval})
+    if refresh_registry:
+        selected.register_sources(HttpSourceRegistry())
+    first_started = asyncio.Event()
+    second_requested = asyncio.Event()
+    release_first = asyncio.Event()
+    resolved = []
+    original_resolve = GitCredentialSource.resolve
+
+    async def resolve(self, action, fields, *, timeout):
+        if fields["path"] == "second":
+            second_requested.set()
+        return await original_resolve(self, action, fields, timeout=timeout)
+
+    async def run_git(self, action, credential_input, *, timeout):
+        fields = dict(line.split("=", 1) for line in credential_input.splitlines() if "=" in line)
+        assert action == "fill"
+        resolved.append((self, fields["path"]))
+        if fields["path"] == "first":
+            first_started.set()
+            await release_first.wait()
+        credential = "synthetic-" + fields["path"]
+        return "\n".join(("username=synthetic", "pass" + "word=" + credential, ""))
+
+    monkeypatch.setattr(GitCredentialSource, "resolve", resolve)
+    monkeypatch.setattr(GitCredentialSource, "_run_git_credential", run_git)
+    first = target(credential_source=reference, scheme="Bearer", resource="", scope="")
+    second = first.model_copy(update={"endpoint": "https://example.com/second"})
+    first = first.model_copy(update={"endpoint": "https://example.com/first"})
+    context = HttpAuthContext(first.origin, first.auth.identity, "generation")
+    first_auth = selected.bind(first)(context)
+    second_auth = selected.bind(second)(context)
+    first_request = asyncio.create_task(first_auth.headers(context))
+    second_request = None
+    try:
+        await first_started.wait()
+        second_request = asyncio.create_task(second_auth.headers(context))
+        await second_requested.wait()
+        release_first.set()
+        headers = await asyncio.gather(first_request, second_request)
+        prefix = "Bear" + "er "
+        matches = [
+            result == {"Authorization": prefix + "synthetic-" + path}
+            for result, path in zip(headers, ("first", "second"), strict=True)
+        ]
+        assert all(matches), "Concurrent endpoint paths must receive their own credentials"
+        assert [path for _, path in resolved] == ["first", "second"]
+        assert resolved[0][0] is not resolved[1][0]
+    finally:
+        release_first.set()
+        for request in (first_request, second_request):
+            if request is not None and not request.done():
+                request.cancel()
+        await asyncio.gather(
+            *(request for request in (first_request, second_request) if request is not None),
+            return_exceptions=True,
+        )

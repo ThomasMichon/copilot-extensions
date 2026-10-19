@@ -66,6 +66,172 @@ def remote_manager(tmp_db, monkeypatch):
     return manager, calls
 
 
+def _remote_request(manager):
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        session_manager=manager, resolver=None, ready=True,
+    )))
+
+
+@pytest.mark.asyncio
+async def test_route_url_and_name_reuse_same_canonical_conversation_and_resume(remote_manager):
+    manager, calls = remote_manager
+    request = _remote_request(manager)
+    first = await start_session(StartSessionRequest(
+        agent="https://example.com/acp", caller_id="caller",
+    ), request)
+    again = await start_session(StartSessionRequest(
+        agent="remote-acp:example", caller_id="caller",
+    ), request)
+    assert first.session_id == again.session_id
+    assert calls == ["connect", "new"]
+    await manager.stop_session(first.session_id)
+    resumed = await start_session(StartSessionRequest(
+        agent="https://example.com/acp", caller_id="caller",
+    ), request)
+    assert resumed.session_id == first.session_id and resumed.status == SessionStatus.IDLE
+    assert calls == ["connect", "new", "connect", ("load", "server-owned-session")]
+    await manager.stop_session(first.session_id)
+
+
+@pytest.mark.asyncio
+async def test_route_reuse_rechecks_current_credential_approval(remote_manager):
+    from fastapi import HTTPException
+
+    manager, calls = remote_manager
+    request = _remote_request(manager)
+    body = StartSessionRequest(agent="remote-acp:example", caller_id="caller")
+    first = await start_session(body, request)
+    manager._remote_credential_policy = SimpleNamespace(
+        bind=Mock(side_effect=PermissionError("Approval withdrawn")),
+    )
+    with pytest.raises(HTTPException) as refused:
+        await start_session(body, request)
+    assert refused.value.status_code == 422 and calls == ["connect", "new"]
+    assert manager.get_session(first.session_id).status == SessionStatus.IDLE
+    await manager.stop_session(first.session_id)
+
+
+@pytest.mark.asyncio
+async def test_reuse_resolves_selected_project_and_current_binding_before_busy_conflict(remote_manager):
+    from fastapi import HTTPException
+
+    manager, calls = remote_manager
+    original = manager._remote_acp_targets["example"]
+    bindings = {
+        "one": original,
+        "two": original.model_copy(update={"endpoint": "https://second.example.com/acp"}),
+    }
+    manager._remote_acp_catalog = SimpleNamespace(
+        resolve=lambda address, *, project: ("example", bindings[project]),
+    )
+    request = _remote_request(manager)
+    first = await start_session(StartSessionRequest(
+        agent="remote-acp:example", caller_id="caller", sender_repo="one",
+    ), request)
+    first_session = manager.get_session(first.session_id)
+    first_session.status = SessionStatus.RUNNING
+    second = await start_session(StartSessionRequest(
+        agent="remote-acp:example", caller_id="caller", sender_repo="two",
+    ), request)
+    assert second.session_id != first.session_id
+    assert manager.get_session(second.session_id).target.remote_acp["endpoint"] == bindings["two"].endpoint
+    with pytest.raises(HTTPException) as busy:
+        await start_session(StartSessionRequest(
+            agent="remote-acp:example", caller_id="caller", sender_repo="one",
+        ), request)
+    assert busy.value.status_code == 409
+    assert busy.value.detail["existing_session_id"] == first.session_id
+    bindings["one"] = bindings["two"]
+    with pytest.raises(HTTPException) as refused:
+        await start_session(StartSessionRequest(
+            agent="remote-acp:example", caller_id="caller", sender_repo="one",
+        ), request)
+    assert refused.value.status_code == 422
+    assert first_session.status == SessionStatus.RUNNING
+    assert calls == ["connect", "new", "connect", "new"]
+    fresh = await start_session(StartSessionRequest(
+        agent="remote-acp:example", caller_id="caller", sender_repo="one", force_new=True,
+    ), request)
+    assert fresh.session_id not in {first.session_id, second.session_id}
+    for session in list(manager._sessions.values()):
+        await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("options", [
+    {"caller_id": None}, {"caller_id": "caller", "force_new": True},
+])
+async def test_route_does_not_reuse_anonymous_or_explicit_new_requests(remote_manager, options):
+    manager, calls = remote_manager
+    request = _remote_request(manager)
+    first = await start_session(StartSessionRequest(agent="remote-acp:example", **options), request)
+    second = await start_session(StartSessionRequest(agent="remote-acp:example", **options), request)
+    assert first.session_id != second.session_id and calls.count("new") == 2
+    await manager.stop_session(first.session_id)
+    await manager.stop_session(second.session_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reuse_reserves_starting_before_handshake(remote_manager, monkeypatch):
+    manager, calls = remote_manager
+    original = AcpClient.start_remote
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed(client, *args, **kwargs):
+        entered.set()
+        await release.wait()
+        await original(client, *args, **kwargs)
+
+    monkeypatch.setattr(AcpClient, "start_remote", delayed)
+    request = _remote_request(manager)
+    body = StartSessionRequest(agent="remote-acp:example", caller_id="caller")
+    pending = asyncio.create_task(start_session(body, request))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        second = await asyncio.wait_for(start_session(body, request), 2)
+        assert second.status == SessionStatus.STARTING and len(manager._sessions) == 1
+        release.set()
+        first = await asyncio.wait_for(pending, 2)
+        assert first.session_id == second.session_id and calls == ["connect", "new"]
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        for session in list(manager._sessions.values()):
+            await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_stopped_reuse_reserves_before_old_client_shutdown(remote_manager):
+    manager, calls = remote_manager
+    session = await connect_remote_session(manager, "example", caller_id="caller")
+    session.client._remote_lost()
+    session.status = SessionStatus.STOPPED
+    original = session.client.shutdown
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed():
+        entered.set()
+        await release.wait()
+        await original()
+
+    session.client.shutdown = delayed
+    request = _remote_request(manager)
+    body = StartSessionRequest(agent="remote-acp:example", caller_id="caller")
+    pending = asyncio.create_task(start_session(body, request))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        second = await asyncio.wait_for(start_session(body, request), 2)
+        assert second.session_id == session.session_id and second.status == SessionStatus.STARTING
+        release.set()
+        first = await asyncio.wait_for(pending, 2)
+        assert first.session_id == session.session_id
+        assert calls == ["connect", "new", "connect", ("load", "server-owned-session")]
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        await manager.stop_session(session.session_id)
+
+
 @pytest.mark.asyncio
 async def test_remote_new_stop_resume_persists_no_workspace_or_process(remote_manager):
     manager, calls = remote_manager

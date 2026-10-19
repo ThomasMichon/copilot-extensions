@@ -646,10 +646,17 @@ async def start_session(req: StartSessionRequest, request: Request):
                 cwd=req.target_dir or "/", caller_id=req.caller_id,
                 caller_session_id=req.caller_session_id,
                 remote_session_id=req.remote_session_id,
+                reuse=not req.force_new,
                 **({"project": req.sender_repo} if req.sender_repo is not None else {}),
             )
         except (ValueError, PermissionError, ConnectionError):
             raise HTTPException(422, "Remote ACP target/connection refused") from None
+        if remote.status == SessionStatus.RUNNING:
+            raise HTTPException(409, {
+                "error": "session_conflict",
+                "existing_session_id": remote.session_id,
+                "message": "The selected remote conversation is busy",
+            })
         return StartSessionResponse(
             session_id=remote.session_id, name=remote.name, status=remote.status,
             caller_session_id=remote.caller_session_id,

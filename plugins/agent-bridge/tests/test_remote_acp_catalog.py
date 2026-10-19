@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -261,6 +262,142 @@ def test_fresh_resolve_does_not_publish_over_background_catalog_generation(contr
     assert catalog.contribution_report is cached
     catalog._discover = lambda: (_ for _ in ()).throw(AssertionError("static roster must not discover"))
     assert catalog.rows(refresh=False)[0]["name"] == "remote-acp:assistant"
+
+
+@pytest.mark.parametrize("changes,reason", [
+    ({"project": "other"}, "binding-project-mismatch"),
+    ({"project": "other", "plugin": "foreign@example"}, "binding-owner-mismatch"),
+])
+def test_invalid_binding_cannot_move_activation_scope(contribution, changes, reason):
+    catalog = RemoteAcpCatalog({}, bindings={"assistant": binding(**changes)})
+    row = catalog.rows("demo")[0]
+    assert row["projects"] == ["demo"] and not row["global_scope"]
+    assert row["unavailable_reason"] == reason and not row["spawnable"]
+    assert catalog.detail("remote-acp:assistant", "demo") == row
+    assert catalog.rows("other") == []
+    assert catalog.detail("remote-acp:assistant", "other") is None
+
+
+@pytest.mark.parametrize("publish_unavailable", [False, True])
+def test_fresh_detail_retains_known_unavailable_without_publishing(contribution, publish_unavailable):
+    _root, plugin, _activation = contribution
+    catalog = RemoteAcpCatalog({}, bindings={"assistant": binding()})
+    assert catalog.rows("demo")[0]["spawnable"]
+    report = discover_remote_contributions(ActivationReport(
+        ScanAuthority.INDETERMINATE, {plugin.source: EntryDecision.active(plugin)},
+    ))
+    catalog._discover = lambda: report
+    if publish_unavailable:
+        catalog.apply(report)
+    cached = catalog.contribution_report
+    row = catalog.detail("remote-acp:assistant", "demo")
+    assert row is not None
+    assert row["unavailable_reason"] == "contribution-unavailable" and not row["spawnable"]
+    assert catalog.detail("remote-acp:assistant", "other") is None
+    assert catalog.contribution_report is cached
+    assert report.targets == {}
+    with pytest.raises(ValueError):
+        catalog.resolve("remote-acp:assistant", project="demo")
+    catalog._discover = RemoteContributionReport
+    assert catalog.detail("remote-acp:assistant", "demo") is None
+    assert catalog.contribution_report is cached
+    assert catalog.rows("demo") == []
+
+
+@pytest.mark.parametrize("declarations", [False, True])
+def test_alternate_manifest_matches_activation_without_false_unavailability(contribution, declarations):
+    root, plugin, _activation = contribution
+    manifest = root / "plugin.json"
+    alternate = root / ".claude-plugin"
+    alternate.mkdir()
+    data = json.loads(manifest.read_text()) if declarations else {"name": plugin.name}
+    (alternate / "plugin.json").write_text(json.dumps(data))
+    manifest.unlink()
+    report = discover_remote_contributions()
+    assert report.errors == [] and report.unavailable_owners == set()
+    assert list(report.targets) == (["assistant"] if declarations else [])
+
+
+def test_native_manifest_precedes_alternate_manifest(contribution):
+    root, plugin, _activation = contribution
+    alternate = root / ".claude-plugin"
+    alternate.mkdir()
+    (alternate / "plugin.json").write_text(json.dumps({
+        "name": plugin.name, "bridgeConfig": "../outside.json",
+    }))
+    report = discover_remote_contributions()
+    assert report.errors == [] and list(report.targets) == ["assistant"]
+
+
+def test_alternate_manifest_reparse_parent_is_refused(contribution, monkeypatch):
+    from pathlib import Path
+
+    root, plugin, _activation = contribution
+    alternate = root / ".claude-plugin"
+    alternate.mkdir()
+    (root / "plugin.json").rename(alternate / "plugin.json")
+    original = Path.lstat
+
+    def lstat(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path == alternate:
+            return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    report = discover_remote_contributions()
+    assert plugin.source in report.unavailable_owners
+    assert report.errors and not report.targets
+
+
+@pytest.mark.asyncio
+async def test_malformed_remote_contribution_does_not_block_real_roster_startup(
+    contribution, monkeypatch, tmp_path,
+):
+    from agent_bridge import agent_registry_discovery, app_agent_roster
+    from agent_bridge.agent_registry import NamespaceAgentInfo
+    from agent_bridge.provider_sources import effective_config_dir, scan_provider_registry
+
+    root, plugin, _activation = contribution
+    catalog = RemoteAcpCatalog({"healthy": configured()})
+    catalog.apply(catalog.discover())
+    (root / ".agent-bridge" / "config.yaml").write_text("[invalid]")
+    directory = effective_config_dir() / "providers.d"
+    directory.mkdir()
+    monkeypatch.setattr(
+        agent_registry_discovery, "scan_provider_registry",
+        lambda **kwargs: scan_provider_registry(
+            directory, activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+            **kwargs,
+        ),
+    )
+    resolver = AgentResolver({}, {})
+    resolver.remote_acp_catalog = catalog
+    healthy = SimpleNamespace(
+        prefix="healthy",
+        list=AsyncMock(return_value=[NamespaceAgentInfo(
+            name="local", display_name="Local", description="", state="available",
+        )]),
+        invalidate_list_cache=lambda: None,
+    )
+    resolver.register_namespace_resolver(healthy)
+    app = SimpleNamespace(state=SimpleNamespace())
+    try:
+        await asyncio.wait_for(app_agent_roster.start_agent_roster_cache(
+            app, resolver, SimpleNamespace(agent_roster_cache_interval=60.0),
+        ), timeout=2.0)
+        cache = app.state.agent_roster_cache
+        assert cache.discovery_ever_ok
+        assert await cache.wait_until_warm(timeout=0.1)
+        assert healthy.list.await_count >= 1
+        rows = {row["name"]: row for row in catalog.rows("demo", refresh=False)}
+        assert rows["remote-acp:healthy"]["spawnable"]
+        assert rows["remote-acp:assistant"]["unavailable_reason"] == "contribution-unavailable"
+        assert not rows["remote-acp:assistant"]["spawnable"]
+        assert plugin.source in catalog.contribution_report.unavailable_owners
+        assert catalog.errors == [f"{plugin.source}:contribution-unavailable"]
+    finally:
+        await app_agent_roster.stop_agent_roster_cache(app)
 
 
 @pytest.mark.asyncio

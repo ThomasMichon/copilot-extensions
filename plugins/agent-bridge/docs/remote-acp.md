@@ -85,6 +85,14 @@ Endpoint/profile/identity changes refuse resume and require a new explicit
 attachment. A configured remote target rejects local launch flags, environment,
 worktree creation, model flags and per-session MCP process definitions.
 
+Named and URL starts with `caller_id` reuse that caller's conversation only
+after resolving the selected project's current canonical target and policy.
+Reuse requires the same project, server-side cwd and complete binding snapshot;
+a stopped conversation loads its retained remote ID. Another project's binding
+never reuses or takes over that session. A changed binding refuses reuse until
+an explicit new attachment (`force_new: true`); anonymous starts always create
+a new conversation. Concurrent starts share the reserved starting session.
+
 An explicit URL must match exactly one bound target policy in the requested
 project context before credentials,
 network access or session creation. HTTPS uses the policy's selected transport;

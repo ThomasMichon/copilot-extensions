@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import yaml
 from dropin_registry import ScanAuthority
 from plugin_activation import ActivationReport, resolve_active_plugins
+from plugin_resolve import PLUGIN_MANIFEST_RELS
 from pydantic import ValidationError
 
 from .remote_acp_config import RemoteAcpRequirements, TARGET_NAME_PATTERN
@@ -86,6 +87,15 @@ def _add(
     report.targets[name] = contribution
 
 
+def _manifest_path(root: Path) -> Path:
+    for parts in PLUGIN_MANIFEST_RELS:
+        try:
+            return owned_path(root, "/".join(parts))
+        except FileNotFoundError:
+            continue
+    raise ValueError("missing-plugin-manifest")
+
+
 def discover_remote_contributions(
     activation: ActivationReport | None = None,
 ) -> RemoteContributionReport:
@@ -104,7 +114,7 @@ def discover_remote_contributions(
     for source, active in sorted(activation.active.items()):
         for selected in active.live_roots:
             try:
-                manifest_path = owned_path(selected.root, "plugin.json")
+                manifest_path = _manifest_path(selected.root)
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 if not isinstance(manifest, dict):
                     raise ValueError("invalid-plugin-manifest")

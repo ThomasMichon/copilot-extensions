@@ -268,10 +268,9 @@ class _ProviderDiscoveryMixin:
         # the resolved entry set reflects the true current intent -- a
         # resolver set that's actually gone stale must never be reported as
         # a clean pass just because nothing outright failed or raised.
-        indeterminate = (
-            any(finding.status == "indeterminate" for finding in report.findings)
-            or (report.remote_acp is not None and bool(report.remote_acp.errors))
-        )
+        # Remote contribution failures are isolated in the catalog as
+        # unavailable entries; they must not fail baseline daemon readiness.
+        indeterminate = any(finding.status == "indeterminate" for finding in report.findings)
         # Only now -- actually applied -- is it safe to advance both the
         # generation (so a stale, still-in-flight scan is rejected rather
         # than rolling this state back) and the scan-TTL timestamp (so a

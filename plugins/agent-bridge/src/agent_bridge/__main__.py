@@ -196,7 +196,7 @@ def _set_project_override(project: str | None) -> None:
     _PROJECT_OVERRIDE = project.strip() if project and project.strip() else None
 
 
-_PROJECT_CONSUMING_VERBS = frozenset({"agents", "create", "machines", "send"})
+_PROJECT_CONSUMING_VERBS = frozenset({"agents", "agent-show", "create", "machines", "send"})
 
 
 def _guard_project_scope(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

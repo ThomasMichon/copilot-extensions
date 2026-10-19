@@ -51,8 +51,13 @@ class RemoteCredentialPolicy:
                 context.origin, context.identity, context.resource, context.scope,
             ) != actual[:4]:
                 raise PermissionError("Remote HTTP credential context mismatch")
+            # Git's in-flight coalescing key omits path even with cache_ttl=0.
+            source = (
+                GitCredentialSource(cache_ttl=0)
+                if reference == "builtin/git-credential" else registered.source
+            )
             return SourceHttpAuth(
-                registered.source, context, target.endpoint,
+                source, context, target.endpoint,
                 scheme=target.auth.scheme, scoped=registered.scoped,
             )
 

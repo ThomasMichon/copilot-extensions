@@ -80,14 +80,18 @@ class RemoteAcpCatalog:
         return self._discover()
 
     def apply(self, report: RemoteContributionReport) -> None:
+        self.contribution_report = self._project_report(report)
+        self._contributions = dict(self.contribution_report.targets)
+
+    def _project_report(self, report: RemoteContributionReport) -> RemoteContributionReport:
+        """Retain known unavailable names without publishing a fresh scan."""
         contributions = dict(report.targets)
         for name, previous in self._contributions.items():
             if previous.plugin in report.unavailable_owners and name not in contributions:
                 contributions[name] = RemoteContribution(
                     name, previous.plugin, previous.scopes, None, "contribution-unavailable",
                 )
-        self._contributions = contributions
-        self.contribution_report = RemoteContributionReport(
+        return RemoteContributionReport(
             contributions, set(report.unavailable_owners), list(report.errors),
         )
 
@@ -137,8 +141,8 @@ class RemoteAcpCatalog:
             entries[name] = RemoteTargetEntry(
                 name, target, contribution.plugin,
                 requirement.description if requirement else "",
-                (binding.project,) if binding and binding.project else projects,
-                "global" in scopes and not (binding and binding.project), reason,
+                (binding.project,) if target and binding and binding.project else projects,
+                "global" in scopes and not (target and binding and binding.project), reason,
             )
         # Explicit complete service entries retain their existing authority.
         for name, target in self.targets.items():
@@ -165,7 +169,8 @@ class RemoteAcpCatalog:
         ]
 
     def detail(self, name: str, project: str | None = None) -> dict | None:
-        entry = self._entries(self.discover(), project).get(name.removeprefix("remote-acp:"))
+        report = self._project_report(self.discover())
+        entry = self._entries(report, project).get(name.removeprefix("remote-acp:"))
         if entry and (project is None or entry.global_scope or project in entry.projects):
             return entry.row()
         return None
