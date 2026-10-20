@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -173,3 +175,42 @@ async def test_exact_reader_refuses_invalid_cli_envelopes(mutation):
 
     with pytest.raises(AcquisitionRefused):
         await acquisition_authority.read_worktree_record("worktree-a", "project-a", command=command)
+
+
+_VECTORS = json.loads((
+    Path(__file__).resolve().parents[1]
+    / "contract/fixtures/http/current/workspace-exact-owner-generation-41.json"
+).read_text(encoding="utf-8"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", _VECTORS["cases"], ids=lambda case: case["name"])
+async def test_committed_exact_owner_contract_vectors(monkeypatch, case):
+    row = {**_VECTORS["record"], **case["record_changes"]}
+    head = {**_VECTORS["head"], **case["head_changes"]}
+    calls = []
+
+    async def command(args, project):
+        assert project == "project-a"
+        calls.append(args[0])
+        if args[0] == "record":
+            return {"version": 1, "ok": True, "worktree": row}
+        assert args[0] == "head-session", "roster is not known-workspace authority"
+        return head
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", command)
+    if case["expected_error"]:
+        with pytest.raises(AcquisitionRefused) as refused:
+            await workspace_creation._workspace("project-a", "worktree-a", expected=_VECTORS["record"])
+        assert refused.value.code == case["expected_error"]
+    else:
+        actual, native = await workspace_creation._workspace(
+            "project-a", "worktree-a", expected=_VECTORS["record"],
+        )
+        manager = SimpleNamespace(
+            db=SimpleNamespace(list_fresh_live_sessions=lambda *a, **k: [],
+                               get_worktree_ownership=lambda *a: None),
+            list_sessions=lambda: [],
+        )
+        assert workspace_creation._sessionless(manager, actual, native, "worktree-a") is case["expected_sessionless"]
+    assert "list" not in calls

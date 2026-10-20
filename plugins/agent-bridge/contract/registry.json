@@ -184,7 +184,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
-          "sha256": "f92a052889feda87ce29dd63b4e3f2fa42b8a21fc1dbae699a4f6a24ecbd0a8e",
+          "sha256": "109fb934c134206c8d07432734ad4872e79a708bd2ca55db707a93af23f4237a",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -1856,6 +1856,12 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-targets-generation-41.json",
           "sha256": "456476b7672aa4b42d10eb9909c291a476fbe14490bb25a70cfd95e88527c97d",
           "role": "Independent hand-authored HTTP-41 URL floor, ordinary roster, exact binding/source approval and fail-closed target vectors",
+          "generation": 41
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-exact-owner-generation-41.json",
+          "sha256": "5249926bd05064ac74f0360639867997a9b270544f8c1ec554485ccad8eb670a",
+          "role": "Independent exact-owner identity, lifecycle and sessionless admission vectors; source evidence, not a native or HTTP body capture",
           "generation": 41
         }
       ],
@@ -4635,6 +4641,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/provider_sources.py",
           "source_git_blob": "e69f697fb799e830677ab2aee51f6a0c6c93f541",
           "capture_method": "Source-only transitive closure attestation: verify exact committed Git blob and LF-normalized source SHA-256 for the production native HTTP credential registration path. Local native provider manifest discovery validates attribution, activation and the http_credentials_version opt-in. These on-disk/native-command declarations are not agent-bridge HTTP payload fields. Pin the actual adapter discovery dependency without presenting unchanged HTTP fixtures as native provider protocol captures. No native command is executed, no credential is obtained, and no producer snapshot is used as an expected HTTP body."
+        },
+        {
+          "commit": "02ed44e8a43b1c552f9f8c59368358642b67b5b1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 41,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "f2b8f169e27726313c50cd2cd5a8e662e11c7563",
+          "capture_method": "Hand-author independent exact-owner admission vectors and exercise them through test_exact_workspace_preflight.test_committed_exact_owner_contract_vectors against the actual committed preflight and sessionless predicate. Verify source Git blob and LF-normalized SHA-256. Cover cold inventory, finalization, changed nonce, opaque/unindexed history and a foreign head. These are source-level admission expectations, not producer-generated HTTP bodies or qualified native lifecycle captures. Historical fixtures and protocol floors remain unchanged."
         }
       ],
       "support_window": "HTTP generations 1 through 41 remain supported. Direct URL endpoint targets require generation 41; named remote ACP retains floor 38, receipts retain 39, and exact-native worktree resume retains 40. Historical independent fixtures remain immutable; generation-41 re-attestations retain their original capability floors.",
