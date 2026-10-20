@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Gateway Native Qualification](active/gateway-native-qualification/README.md) | Active; plan review precedes explicit native amd64/ARM64 witness support and actual isolated qualification | #7257; source/qualification only, no live adoption or provider authority transfer |
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Blocked; generic contract reviewed and merged, implementation authorization and owner assignment next | #7268; no runtime implementation or adoption |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Active; proposal and target-contribution prerequisite merged, qualified relationship claim integration next | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
