@@ -1145,12 +1145,45 @@ and exceed Windows' relative-path limit.
 
 `agent-chat-service` resolves to `services/chat` through that same canonical
 preparation and environment-admission path. Its dependency-free conversation
-core has a bounded native Windows/Linux CI lane selected before runner
-allocation. The required PR aggregate refuses missing admission or a selected
-but skipped core job. Portable SQLite contracts and one real wheel/fresh-target
-installation probe run within the existing contained standalone harness; no
-listener, credentials, model, plugin activation or managed service deployment
-is exercised or claimed.
+core and optional client role have an **on-demand contained standalone
+portfolio**, not required native Windows/Linux CI lanes. Current source CI
+executes the admitted [unit-only packet](#unit-only-promotion-packet); its green
+required aggregate does not qualify this standalone portfolio or either native
+client platform. The existing periodic integration portfolio does not currently
+enroll `services/chat`.
+
+Portable SQLite, real CLI/provider/loopback HTTP contracts,
+process-crash reader-lock recovery and source-independent core/client wheel
+installation run within the existing contained standalone harness. A fresh
+default-core environment proves the helper is absent; the separate offline
+client-role environment installs its declared canonical helper and uses the
+actual console after both fixture sources are removed. Temporary listeners
+and credentials are synthetic fixtures, not production authentication, model
+wake, plugin activation or managed service deployment.
+Auxiliary parser/offline dispatch checks run in-process, without replacing the
+real provider/HTTP operations. Actual CLI round trips, installed-console death,
+source-independent artifacts and worker-shadow cases retain their real process
+boundaries. Capacity setup seeds existing valid records; the actual final
+admission, overflow refusal and uncertain-request recovery still use the normal
+client and its durable writer at the unchanged 128-record boundary.
+
+For a complete timing/value evaluation of the expanded matrix, use the
+standalone runner's existing allowance:
+`python tools/run-standalone-tests.py services/chat --prepare --timeout 600`.
+The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
+and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)
+separate the full222-case snapshot from explicit42/221-case candidates measured
+under120s. Neither subset is full-matrix acceptance, and the evaluation does not
+change required CI, per-operation bounds, containment or the unfiltered source
+selection. Use pytest's built-in JUnit call-duration reporting plus
+`--durations=0 --durations-min=0` to retain every case and fixture cost; quote
+Windows output paths inside `PYTEST_ADDOPTS` so its argument parser preserves
+backslashes. Shared artifact setup must not be charged solely to its first user.
+Record the exercised platform and artifact separately. The retained client
+candidate still refuses native POSIX execution until it actually consumes and
+qualifies the now-published caller-death API; source release alone does not
+update its resolved installation. Portable-core or unsupported-mode
+control results are not positive native Linux client qualification.
 
 The index-service smoke lane includes offline container-context and explicit
 fleet-image profile contracts; neither needs Docker, a model or enrollment.

@@ -35,9 +35,13 @@ explicit optional `service` role for independently installed foreground hosting.
 That role reuses canonical single-instance/endpoint ownership, authenticated
 bounded local HTTP and the store-owned drain boundary. POSIX uses a private
 Unix socket; Windows currently uses the documented OS-assigned loopback fallback.
-Default imports do not start a listener, and hosting supplies no installer,
-supervisor, plugin, installed user-facing client or managed cutover. Those
-remain separate slices of the
+The separate optional `client` role uses canonical owned provider execution.
+Its installed command uses explicit nonsecret configuration and
+preserves output/flush/CAS and stable-request recovery. The core also provides
+an explicit store-owned drain/undrain boundary for an embedding lifecycle owner,
+preserving committed state and fencing held waits. Default imports do not start
+a listener. Neither role supplies an installer, supervisor, connection plugin or
+managed cutover; those remain separate slices of the
 [graduation effort](../efforts/active/agent-chat-graduation/README.md).
 
 ### Runtime plugins (installer-deployed runtime + payload-local commands)

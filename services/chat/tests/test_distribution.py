@@ -1,57 +1,23 @@
 import json
 import os
-import shutil
 import subprocess
-import sys
-from pathlib import Path
+
+import pytest
 
 
-def run(argv, *, cwd=None):
-    environment = dict(os.environ)
-    environment.pop("PYTHONPATH", None)
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    result = subprocess.run(
-        argv, cwd=cwd, env=environment, capture_output=True, text=True,
-        timeout=30, check=False, **options,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    return result.stdout
-
-
-def test_source_independent_wheel(tmp_path):
-    project = Path(__file__).resolve().parents[1]
-    source = tmp_path / "source"
-    shutil.copytree(
-        project, source,
-        ignore=shutil.ignore_patterns("build", "dist", "*.egg-info", "__pycache__",
-                                     ".venv", ".pytest_cache"),
-    )
-    wheels = tmp_path / "wheels"
-    wheels.mkdir()
-    run([
-        sys.executable, "-I", "-c",
-        "from setuptools.build_meta import build_wheel; import sys; build_wheel(sys.argv[1])",
-        str(wheels),
-    ], cwd=source)
-    built = list(wheels.glob("agent_chat_service-*.whl"))
-    assert len(built) == 1
-    uv = shutil.which("uv")
-    assert uv is not None, "Artifact qualification requires the repository's uv tool"
-    target = tmp_path / "installed"
-    run([
-        uv, "pip", "install", "--python", sys.executable, "--target", str(target),
-        "--no-deps", "--offline", "--no-index", str(built[0]),
-    ])
-    shutil.rmtree(source)
-    assert not source.exists()
+def test_source_independent_wheel(tmp_path, rpc_endpoint, installed_chat):
+    run = installed_chat.run
     probe = """
 import importlib.metadata
+import importlib.util
 import json
 import sys
 from pathlib import Path
-sys.path.insert(0, sys.argv[1])
 import agent_chat_service as chat
 assert Path(chat.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve())
+assert importlib.util.find_spec("agent_procutil") is None
+assert importlib.util.find_spec("single_instance_lease") is None
+assert importlib.util.find_spec("endpoint_rendezvous") is None
 assert importlib.metadata.version("agent-chat-service") == chat.__version__.replace("-dev", ".dev")
 store = chat.ChatStore(sys.argv[2], "example-installation")
 try:
@@ -81,6 +47,106 @@ finally:
     store.close()
 """
     result = json.loads(run([
-        sys.executable, "-I", "-c", probe, str(target), str(tmp_path / "data"),
+        str(installed_chat.core_python), "-I", "-c", probe,
+        str(installed_chat.core_target), str(tmp_path / "data"),
     ], cwd=tmp_path))
     assert result["installed"] and result["messages"] == 1 and result["cursor"] == 0
+    console = installed_chat.console
+    assert run([str(console), "--version"], cwd=tmp_path).strip() == result["version"]
+    assert json.loads(run([str(console), "scan", "--describe"], cwd=tmp_path))["version"] == 1
+    catalog = json.loads(run([str(console), "--config", str(tmp_path / "missing"), "catalog"],
+                             cwd=tmp_path))
+    assert catalog["schema"] == "agent-chat.client-catalog" and catalog["version"] == 1
+    assert catalog["evidence"] == "local-installed-resource-record"
+    assert not any(catalog[key] for key in (
+        "release_selection_verified", "remote_verified",
+        "native_listening_verified", "mutations_performed",
+    ))
+    exact = catalog["commands"][0]
+    assert exact == {
+        "id": "agent-chat",
+        "argv": [str(installed_chat.interpreter), "-I", "-m", "agent_chat_service.cli"],
+        "shell": "direct", "availability": "ready",
+    }
+    assert len(catalog["resource_sha256s"]) == 7
+    assert "hosting.py" in catalog["resource_sha256s"]
+    offline = """
+from contextlib import redirect_stdout
+import io,json
+from agent_chat_service.cli import main
+def invoke(args):
+    output=io.StringIO()
+    with redirect_stdout(output):
+        try:
+            code=main(args)
+        except SystemExit as error:
+            code=error.code
+    assert code==0
+    return output.getvalue()
+print(json.dumps({
+    "version":invoke(["--version"]).strip(),
+    "catalog":json.loads(invoke(["catalog"])),
+    "capability":json.loads(invoke(["scan","--describe"])),
+}),flush=True)
+"""
+    outputs = json.loads(run([exact["argv"][0], "-I", "-c", offline], cwd=tmp_path))
+    assert outputs["version"] == result["version"]
+    assert outputs["catalog"] == catalog
+    assert outputs["capability"]["version"] == 1
+    configuration = tmp_path / "client.json"
+    configuration.write_text(json.dumps({
+        "schema": "agent-chat.client", "version": 1,
+        "endpoint": rpc_endpoint.endpoint, "state_dir": str(tmp_path / "client-state"),
+        "actor": {"codename": "artifact-agent"},
+        "token_command": [str(installed_chat.interpreter), "-c", "print('synthetic-credential')"],
+    }), encoding="utf-8")
+    command = [str(console), "--config", str(configuration)]
+    assert json.loads(run([*command, "join", "room"], cwd=tmp_path))["membership"]["active"]
+    command = [*exact["argv"], "--config", str(configuration)]
+    members = json.loads(run([*command, "members", "room", "--limit", "1"], cwd=tmp_path))
+    assert [member["codename"] for member in members["members"]] == ["artifact-agent"]
+    assert members["more"] is False and members["next_after"] is None
+    posted = json.loads(run([
+        *command, "post", "room", "installed conversation", "--request-id", "installed-request",
+    ], cwd=tmp_path))["event"]
+    assert json.loads(run([*command, "read", "room"], cwd=tmp_path))["messages"] == [posted]
+    assert json.loads(run([*command, "read", "room"], cwd=tmp_path))["messages"] == []
+    assert not json.loads(run([*command, "leave", "room"], cwd=tmp_path))["active"]
+
+
+@pytest.mark.parametrize("shadow_source", ["cwd", "pythonpath"])
+def test_installed_catalog_worker_preserves_isolation(
+    tmp_path, rpc_endpoint, installed_chat, shadow_source,
+):
+    shadow = tmp_path / "shadow"
+    package = shadow / "agent_chat_service"
+    package.mkdir(parents=True)
+    marker = tmp_path / "untrusted-worker-loaded"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "transport.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise SystemExit(9)\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "client.json"
+    config.write_text(json.dumps({
+        "schema": "agent-chat.client", "version": 1,
+        "endpoint": rpc_endpoint.endpoint, "state_dir": str(tmp_path / "client-state"),
+        "actor": {"codename": "isolated-agent"},
+        "token_command": [str(installed_chat.interpreter), "-I", "-c",
+                          "print('synthetic-credential')"],
+    }), encoding="utf-8")
+    catalog = json.loads(installed_chat.run([str(installed_chat.console), "catalog"], cwd=tmp_path))
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
+    if shadow_source == "pythonpath":
+        environment["PYTHONPATH"] = str(shadow)
+    result = subprocess.run(
+        [*catalog["commands"][0]["argv"], "--config", str(config), "join", "room"],
+        cwd=shadow if shadow_source == "cwd" else tmp_path,
+        env=environment, capture_output=True, text=True, encoding="utf-8", timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert not marker.exists(), "HTTP worker imported the shadow package"
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["actor"]["codename"] == "isolated-agent"
+    assert rpc_endpoint.state.authenticated == 1

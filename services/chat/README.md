@@ -1,18 +1,21 @@
 # agent-chat-service
 
-Dependency-free conversation state, a callable RPC core and an explicit local
-hosting role for
+Dependency-free conversation state and a callable RPC core, with explicit
+installed client and local hosting roles for
 [agent-chat graduation](../../efforts/active/agent-chat-graduation/README.md).
 The distribution provides durable channels, membership, events, independent
-cursors and bounded notification metadata.
+cursors and bounded notification metadata. The optional `client` role adds
+the canonical process helper for owned credential/stdio provider execution;
+the optional `service` role supplies the foreground local host.
 
 **Default imports do not start a listener, acquire credentials, discover a
 foreground session, install a plugin or implement managed service lifecycle.**
-The optional `service` role provides the foreground host below. Managed
-installation/cutover, Gateway adaptation, the installed user-facing client,
-native attachment and fleet-manager integration remain separate slices.
+Credentials are obtained only by an explicitly invoked client RPC through its
+configured provider. Managed installation/cutover, Gateway adaptation, native
+attachment and fleet-manager integration remain separate slices. A working
+client or foreground host is not evidence of those capabilities.
 
-## Use
+## Callable core
 
 Install the distribution with the chosen package manager. Runtime dependencies
 are only Python's standard library; Copilot and a source checkout are not needed.
@@ -147,12 +150,147 @@ health-gated route commit, rollback and post-caller health remain the existing
 managed-lifecycle integration under #6424/#6240. Do not infer those capabilities
 from the host's lease, health response or endpoint descriptor.
 
+## Installed client role
+
+Install the selected distribution's `client` extra through the adopter's normal
+verified artifact/role flow. It adds the standalone `agent-chat` console command
+and the canonical `agent-procutil` dependency; it does not provide an installer
+or change an existing selected client. No Copilot, source checkout or sibling
+runtime is required. An older helper without `owned_process.run_owned` reports
+an explicit unsupported capability rather than falling back to unowned execution.
+
+**Current transport limitation:** native POSIX provider and HTTP-worker execution
+refuses with `provider_unsupported` before launch because the published canonical
+helper does not yet supply the required caller-death lifetime guarantee.
+Offline catalog/status/capability operations and the callable core are separate
+from that transport limitation. Windows qualification does not establish a
+portable client release; the remaining execution gate must be resolved before
+the client is merge-ready.
+
+The provider response byte checks currently happen after canonical capture
+completes; they are not streaming stdout/stderr memory limits. Integrating
+canonical bounded capture with owned-tree cleanup on overflow is an additional
+open merge gate. Wire-size validation and finite deadlines do not substitute
+for that process-output bound.
+
+All network operations require an explicit nonsecret configuration:
+
+```json
+{
+  "schema": "agent-chat.client",
+  "version": 1,
+  "endpoint": "https://conversation.example",
+  "state_dir": "/path/to/owned/client-state",
+  "actor": {"codename": "agent-a"},
+  "token_command": ["/path/to/owned/credential-provider", "get-token"]
+}
+```
+
+Paths are illustrative; supply actual absolute owned paths appropriate for the
+platform. Provider argv must name a complete native executable/interpreter
+invocation, not a relative command or implicit shell/script launcher.
+`token_command` returns an ASCII credential on stdout, within its deadline;
+stderr is not exposed as protocol output. Credentials are not written to state,
+messages or diagnostics. The client uses HTTPS or an existing owned loopback
+route, keeps TLS verification enabled, and follows neither redirects nor ambient
+HTTP proxy variables. The fixed RPC path is `/api/v1/chat`.
+An on-demand, canonically owned worker bounds the entire HTTP operation,
+including DNS, connect, TLS, headers and body, to 15 seconds for ordinary RPCs
+or the requested long-poll duration plus 15 seconds. Continuing trickle traffic
+cannot extend that total deadline. Credentials and requests reach this finite
+worker only over bounded stdin, never argv, environment or credential files.
+The worker is not a resident service, and deadline failure does not retry.
+Its Python invocation explicitly preserves isolated mode, excluding workspace
+and `PYTHONPATH` package substitutions even when the parent is already isolated.
+
+An explicit `request_command` instead of `token_command` delegates that fixed
+loopback route to an existing owned stdio provider, using the version-1
+`agent-chat.gateway-request` / `agent-chat.gateway-response` envelopes. The two
+provider modes cannot be mixed. Provider processes use the canonical native
+owned execution helper, never a daemon or sibling-runtime import. Cross-OS
+provider execution is unsupported in this slice; direct Windows executables
+on POSIX and `wsl.exe` refuse before launch. The separate canonical opt-in
+utility work must be published and integrated before that capability is offered.
+
+```text
+agent-chat --config client.json join room
+agent-chat --config client.json post room - --request-id example-request-1
+agent-chat --config client.json read room --limit 10
+agent-chat --config client.json wait room --timeout 300 --batch-ms 250
+agent-chat --config client.json members room --limit 100
+agent-chat --config client.json members room --limit 100 --after last-codename
+agent-chat --config client.json status
+agent-chat --config client.json leave room
+agent-chat scan --describe
+```
+
+`post ... -` accepts bounded UTF-8 text on stdin. Each explicit post needs its
+original stable request ID. Before transport, the client writes and flushes that
+request. Lost, mismatched or uncertain responses retain it; no automatic retry
+or fresh-ID replay occurs. Explicit owner recovery can retry the same original
+ID/content under the server's deduplication contract. Changed retained content
+refuses locally. A later refusal does not erase a previously uncertain request.
+At most 128 pending records are admitted per transport/viewer namespace;
+capacity refusal preserves them. This is not a total filesystem-usage guarantee.
+
+`read` serializes local viewer operations with a crash-released OS lock. It
+validates the complete page, writes and flushes bounded UTF-8 JSON, then sends
+cursor CAS. Failed output never advances progress; an unconfirmed CAS reports
+that the printed batch may replay. Independent viewers have independent progress.
+`scan --request-file -` accepts bounded version-1 controls, validates body-free
+returned-only positions and never calls semantic read or cursor advancement.
+`members` and `resolve` return recorded metadata, not verified liveness.
+`members --limit` / `--after`, or `Client.members(channel, limit=..., after=...)`,
+explicitly opt into the bounded pages described in the RPC contract below.
+The client validates page size, ordering and continuation without reading or
+advancing any semantic cursor. Calls without page controls retain the ordinary
+legacy response shape; no automatic enumeration loop is introduced.
+
+`status`, `scan --describe` and `--version` do not invoke providers or contact
+an endpoint. Status reports local pending IDs, not bodies or remote readiness.
+There is no implicit home, endpoint discovery, automatic join, wait/rearm loop
+or subscription activation. Actor metadata is not authentication or a native
+claim: a connection/native owner must establish real obligations before join
+and confirm remote leave before settling them. This client creates no replacement
+claim database and cannot certify native listening or finalization readiness.
+
+### Offline installed invocation catalog
+
+Invoke `catalog` through the adopter's explicitly chosen installed console or
+interpreter, not a command found by searching `PATH`:
+
+```text
+<chosen-interpreter> -I -m agent_chat_service.cli catalog
+```
+
+The version-1 `agent-chat.client-catalog` returns the current distribution
+identity, SHA-256 wheel RECORD evidence for all seven packaged Python modules
+(including `hosting.py`) and one exact
+`agent-chat` argv. That argv preserves the current interpreter, including a
+virtual environment's interpreter spelling, and uses isolated module invocation.
+Source-only, editable, user-site-only, mismatched, redirected or incomplete
+installations refuse instead of advertising an unusable isolated invocation.
+The command does not read client configuration, run a provider, contact a
+service or write installation state.
+Verifying the host module's bytes does not import its optional dependencies,
+start a listener or establish that the service role is installed or ready.
+
+This is attributable **local installed-resource evidence**, not authenticated
+release selection, an installer receipt or proof that executable dependencies,
+the remote service or native subscriptions are ready. The caller still chooses
+and trusts the initial installation through its existing lifecycle owner.
+RECORD checks are not a security boundary against a writer that can alter the
+installation and its metadata together. Ordinary explicit wheel/package-manager
+setup remains available; receipt-owned managed setup/selection is still the
+existing fleet lifecycle dependency under #6424/#6240. A connection plugin must
+not turn this catalog into a competing installer or silently change selection.
 ## RPC contract
 
 `dispatch` accepts one strict operation object. Unknown fields, invalid types,
 ambiguous JSON and violated bounds raise `ChatError`, carrying `code`,
 `message`, a suggested HTTP `status` and `as_dict()`. The core itself is not an
 HTTP server. `strict_json` bounds and validates untrusted serialized input;
+its default remains 64 KiB, with an explicit bound up to 1 MiB for client replies.
 `json_bytes` emits finite UTF-8 JSON.
 
 | Operation | Required fields besides `op` | Optional fields |
@@ -275,10 +413,18 @@ python tools/run-standalone-tests.py services/chat --prepare
 
 Portable contracts cover real SQLite state, independent progress, atomic
 deduplication, failure rollback, bounded pages, waiter cleanup and metadata
-scans. Artifact qualification builds a wheel, installs it into a fresh target,
-removes the fixture source and exercises the installed core with an isolated
-Python process. This proves source-independent package use, not a version-slot
-installer, hosted service or live native SDK adoption.
+scans. Client contracts exercise real credential-provider/HTTP/core/SQLite
+round trips, output/flush/CAS, retained uncertainty and actual CLI death with
+lock release observed before releasing the held response or outer fixture
+cleanup. Artifact qualification builds
+the distribution and its declared canonical helper, installs the real `client`
+extra offline into a fresh environment, removes both fixture sources, then
+uses the actual installed console for join/post/read/leave and forced console
+termination/recovery. The default core is
+also exercised without the helper dependency. This proves source-independent
+package use, not a version-slot installer, hosted service or live native SDK
+adoption. Test credentials and local authorization fixtures are synthetic,
+not live JWT or production evidence.
 
 - [Standing vision](../../visions/plugins/agent-chat/README.md)
 - [Architecture proposal](../../efforts/active/agent-chat-graduation/architecture.md)

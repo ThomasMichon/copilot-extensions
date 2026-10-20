@@ -23,9 +23,16 @@ notification helper per session. This preserves the parent service model,
 not an exemption tailored to a particular implementation.
 
 The vision states the standing interaction and resilience intent.
-[Architecture](architecture.md) is the proposed component and lifecycle
-contract; this effort owns sequencing, qualification and progress. None of
-these documents asserts that the capability is already implemented or released.
+[Architecture](architecture.md) is the component and lifecycle contract;
+this effort owns sequencing, qualification and progress. Qualified core
+slices do not establish a complete or released capability.
+
+The existing process-utility contributor relayed a renewed operator direction:
+keep driving with the existing coordinator toward a plugin and independent
+service delivered through the standard plugin/service installation flow and
+Worktree Manager, enhanced rather than replaced by fleet-manager. This is a
+public-safe restatement, not a copy of private actor names or a new rollout,
+release-activation, transport-policy or predecessor-retirement grant.
 
 ## Participants
 
@@ -34,10 +41,11 @@ Use #7238 to accept a slice and record its source boundary before editing it.
 
 | Participant | Responsibility | Reached via |
 |-------------|----------------|-------------|
-| Proposal editor | Single vision/effort writer; service, client and lifecycle integration | #7238 and the proposal PR |
-| Plugin contributor | Supported native attachment, pending/admission state and plugin delivery contract | #7238; input integrated by the proposal editor |
+| Proposal editor | Sole shared vision/effort/service-lifecycle writer; `services/chat` core, client and hosting integration | #7238 and the proposal PR |
+| Plugin contributor | Disjoint `plugins/agent-chat` connection/native contribution; exact paths claimed before edits | #7238; input integrated by the proposal editor |
 | Qualification contributor | Installed-consumer, native lifecycle and platform-boundary cases | #7238; input integrated by the proposal editor |
 | Conduct contributor | Generic scoped-peer ambient policy and discoverable rules-of-engagement skill, after the intent amendment clears review; no Chat/Bridge/Logger source | [Accepted disjoint scope](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6303930285) |
+| Process utility contributor | Canonical `libs/agent-procutil` caller-bounded cross-OS source, tests and library docs | [Public source claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6274245326) |
 | Existing lifecycle owners | Review integration with fleet-manager, shared process utilities and service primitives | Their existing public issues, linked below |
 
 ## Coordination
@@ -54,6 +62,10 @@ Use #7238 to accept a slice and record its source boundary before editing it.
 - Normal already-authorized operations proceed within their accepted scope.
   Changed scope, destructive migration and activation remain decisions of
   their real owners, not per-message consent or a second controller.
+- The process utility lane owns its canonical implementation, not another Chat
+  proposal. Required generated copies are coordinated with their existing
+  consuming owners first; Chat consumes published APIs without a vendor fork.
+  Utility qualification remains parallel to ordinary working native clients.
 - No release-pipeline, shared deployment, private-provider or fleet activation
   change is included in the proposal PR.
 
@@ -85,8 +97,8 @@ the connection plugin, hosted service and normal lifecycle. Support channel
 subscriptions, direct mentions and all-agent attention, and use lessons from
 real cooperation to improve robustness.
 
-This is an intent summary, not a verbatim transcript. The current contribution
-is the reviewed proposal. It does not claim completed qualification or grant
+This is an intent summary, not a verbatim transcript. The proposal and bounded
+core have landed; remaining qualification is open. This does not grant
 permission to install, activate, migrate data or restart another owner.
 
 The collaboration amendment requests one canonical conversation store with
@@ -124,13 +136,20 @@ requirements.
 
 - [x] Claim a bounded implementation slice and extract/reuse the conversation
   core, independent cursor and stable-request semantics with synthetic tests.
-- [ ] Package a dependency-light client and independently operable service;
-  no source checkout, sibling venv or Copilot plugin is required to host it.
-  The current foreground `service`-role candidate supplies a bounded local
-  host artifact, not managed installation or activation; native platform
-  qualification remains explicit.
-- [ ] Publish bounded capabilities and errors, endpoint discovery and explicit
-  setup. Preserve normal no-gap output/flush/CAS and uncertain-effect recovery.
+- [x] Package a dependency-light installed client with no source checkout,
+  sibling venv or Copilot requirement for its actual command.
+- [ ] Provide selected-client identity/catalog and explicit setup through the
+  existing lifecycle primitives before plugin/harness adoption. The service
+  writer owns this integration; connection and adopter code must not fork
+  an installer or infer selection from PATH.
+- [ ] Package an independently operable hosted service with no source checkout,
+  sibling venv or Copilot plugin requirement.
+  The foreground `service` artifact merged in #7361 with Windows qualification;
+  native POSIX qualification and managed installation/activation remain open.
+- [x] Publish client bounds, errors, offline scan capability and explicit
+  configuration. Preserve output/flush/CAS and retained stable-request recovery.
+- [ ] Supply hosted endpoint discovery and explicit service setup through the
+  existing lifecycle owners; client configuration is not hosting readiness.
 - [ ] Resolve trusted host-init session ID and CWD through the workspace owner:
   real-worktree participant continuity, session-segmented anchor participants,
   and existing local service/bridge-owned inbox/source assignment. Keep friendly
@@ -204,9 +223,11 @@ requirements.
 
 ## Validation Plan
 
-- [ ] **Store and client:** monotonic event identity, independent viewers,
-  bounded pages, stable request replay/conflict, flush-before-cursor-CAS,
-  crash-released reader locks and visible capacity refusal.
+- [x] **Portable store:** monotonic event identity, independent viewers,
+  bounded pages, stable request replay/conflict and visible capacity refusal;
+  installed source-independent artifacts and both native platform CI lanes.
+- [x] **Installed client:** flush-before-cursor-CAS and crash-released reader
+  locks through the actual installed command, not just the callable core.
 - [ ] **Installed boundary:** fresh and repeat installation, actual console/
   payload invocation, no source fallback, compatible previous selection and
   source-independent operation after the fixture checkout is unavailable.
@@ -271,8 +292,8 @@ requirements.
 
 ## Proposal
 
-Review the vision and [architecture](architecture.md) as one coherent design,
-then assign implementation in small compatible slices. Existing manual client
+Build the remaining reviewed [architecture](architecture.md) in small
+compatible slices. Existing manual client
 use remains valuable while an unsupported native host seam is resolved; full
 graduation still requires the declared native and lifecycle guarantees.
 
@@ -290,6 +311,85 @@ graduation still requires the declared native and lifecycle guarantees.
 - Retained the portable/adopter boundary, standard installation and Worktree
   Manager baseline, and existing Gateway/SSH, Vault and lifecycle owners.
   No runtime API, new process, deployment or permission grant is supplied.
+
+### 2026-10-20 - Per-test value and smaller local portfolio evaluation
+
+- At the operator's direction, evaluated the entire expanded portfolio with the
+  existing 600-second allowance rather than deleting cases to force it into
+  120 seconds. All222 cases passed in126.610s, without failures, errors or skips.
+  Every case has call/setup/teardown timing and a source-grounded value/risk
+  assessment in [the per-test matrix](test-portfolio.csv), covering80 families.
+  This is the pre-#7372-consumer Windows candidate: base443f, component input
+  digest `cddc75b0c8f420c48358e2b0daf6bb4c1794798856496aaee9b25165a8b4d43f`.
+  Inputs were verified unchanged across the measured runs.
+- Priorities describe contract importance and distinct evidence, not measured
+  line coverage or automatic CI eligibility. `P0` protects durable progress,
+  uncertainty, custody, execution lifetime, resource limits or actual artifacts.
+  `P1` remains worthwhile validation/diagnostics or broader integration.
+  Zero displayed call time means below report resolution, not free execution.
+  JUnit call times retain millisecond precision; terminal setup/teardown values
+  are rounded. The11.10s first-use setup includes shared actual wheel/role
+  environments and is not a cost unique to the console-death test.
+
+| Evaluation | Cases | JUnit suite elapsed | Meaning |
+| --- | ---: | ---: | --- |
+| Complete matrix | 222 | 126.610s | All cases, evaluated with600s; not a120s full-matrix pass |
+| Focused canary candidate | 42 | 75.976s | Selected hard boundaries and known regressions; incomplete contract coverage |
+| Broad confidence candidate | 221 | 84.022s | All but the broad normal CLI integration flow; complete expected node set verified |
+
+- Prefer the221-case confidence candidate for ordinary fast feedback over
+  aggressively pruning cheap contracts: removing179 more cases bought only
+  8.046s in these separate runs. These are observations, not a controlled causal
+  speedup or latency guarantee. The31.231s broad normal CLI test alone consumed
+  about a quarter of the complete run; it is high-value but overlaps the
+  installed client, store and host checks. Keep it in the full matrix and run it
+  for CLI, transport, actor/identity or end-to-end fixture changes. No test was
+  deleted, no default selector or required CI packet changed, and neither
+  smaller candidate is credited as full222 acceptance.
+- The42-case candidate is only an early canary. Both candidate runs used the
+  unchanged120s supervisor and were checked against their exact expected node
+  sets, not merely a passing count. Their matrix flags are explicit proposals,
+  not new release/adoption gates. The complete source remains the full suite.
+- Source review also records where names can overstate evidence: the short-key
+  test does not yet exercise its named non-ASCII variant; duplicate-host refusal
+  needs a constructor witness to assert before-store-open ordering directly;
+  and console-death proof should explicitly reject expiry of the held-response
+  watchdog. The complete run's5.309s console-death call was shorter than that
+  10s watchdog, but slower future runs must not gain a false cleanup witness.
+  Negative POSIX/cross-OS controls are not positive platform qualification.
+- The canonical lifetime/stream API is now actually published by #7372 and
+  released containing the same API in immutable Main
+  `d018b57f094ae068fbc9d58edd9a86e077d29607`; its `owned_process.py` blob
+  `b192016355e7d71210a828134a9d1255f59ea05b` matches the reviewed Dev merge.
+  The next retained consumer step is actual library integration and positive
+  installed/platform qualification, not another availability/consent loop or
+  utility-source takeover. This timing baseline does not prove that consumption,
+  native POSIX Chat, managed installation or public native-plugin adoption.
+
+### 2026-10-20 - Merged host integrated with the retained client
+
+- Own #7361 actually merged to `dev` as
+  `443fa1fce46daf06e9ef5e645ae32f997b4f71ac` at09:17:50Z after current-head
+  Copilot review had no Medium/High findings and all required checks passed.
+  All three concrete review defects were reproduced and corrected; the final
+  refreshed native Windows host portfolio passed111 contracts in48.74s under
+  the unchanged120-second bound. Native POSIX readiness, managed lifecycle and
+  live activation were not inferred from that source merge.
+- Re-read the canonical Plan and Validation Plan after merge; the full parent
+  stays Active. The completed sessionless host child was finalized normally,
+  settling only its own parent resource. The retained client is the next source
+  stretch, not another proposal, connection-plugin writer or installer.
+- Preserve the complete previously published client tip in an explicit local
+  backup. One three-way squash integration onto fresh `dev` reconciles the
+  owned host/client documentation and role metadata without raw reset,
+  amendment, stash, force push or repeatedly resolving eight historical commits.
+  The actual original PR remains the only client publication target.
+- The new host module must join the client's explicit installed RECORD closure,
+  and the client must expose the core's opt-in bounded membership pages.
+  Measure the actual combined installed portfolio under the unchanged budget.
+  The canonical #7341 capability was initially unavailable. Its later actual
+  #7372 publication and containing Main release now permit consumer integration;
+  an agreed signature or unrelated Windows source merge alone never cleared it.
 
 ### 2026-10-20 - Independent local host artifact
 
@@ -351,6 +451,160 @@ graduation still requires the declared native and lifecycle guarantees.
   two correctly sequenced queued-primary runs. That is neither this new host's
   adoption nor non-primary/steered qualification. Remaining native uncertainty,
   gaps, succession and cleanup stay with the retained connection owner.
+
+### 2026-10-19 - Isolated worker and qualification-reference corrections
+
+- Preserve isolated mode in the finite HTTP worker, not only its invoking
+  catalog argv. Real fresh installed invocations from a shadow working
+  directory and with a shadow `PYTHONPATH` both reproduced unintended worker
+  imports before the fix; explicit child `-I` makes both use the installed
+  worker and complete the authenticated synthetic RPC.
+- Corrected this PR's stale testing-reference claim: the standalone portfolio
+  is on-demand, while required source CI runs the admitted unit-only packet.
+  Its green checks do not establish native client qualification. No CI lane,
+  selection exemption or native test deadline was added or changed.
+- The complete current Windows portfolio passed 171 tests in 99.42 seconds
+  under the unchanged 120-second bound. Six focused installed/deadline/crash
+  cases also passed. Initial full runs exceeded the bound; profiling identified
+  repeated auxiliary parser startup and durability work in preexisting
+  capacity-fixture setup. Auxiliary dispatch remains backed by real providers
+  and HTTP; actual CLI round trips, installed-console death, artifact and shadow
+  boundaries remain separate real processes. All cases and the actual durable
+  128th admission, 129th refusal and uncertain-request preservation remain.
+- The existing utility owner proposed an opt-in finite caller-owned execution
+  API. This consumer accepts that direction and returned exact lifetime and
+  separately bounded stdout/stderr requirements without taking over canonical
+  library or other consumer ownership. API agreement is not publication:
+  streaming capture and positive native POSIX lifetime qualification remain
+  real merge gates. The original client PR remains reviewable, not parked
+  as a dependency-wait draft.
+
+### 2026-10-19 - Client review readiness is separate from merge readiness
+
+- The original #7266 is reviewable with the native POSIX lifetime dependency
+  explicitly retained in its description and open finding, rather than parked
+  as a draft solely while waiting for that dependency. This changes neither
+  execution support nor the remaining qualification and merge gates.
+
+### 2026-10-19 - Original client PR review follow-up
+
+- Prepared the client-owned HTTP total-deadline and real installed-console
+  crash fixes on the original #7266, together with its qualified offline
+  installed invocation catalog. Keep that PR draft while native POSIX
+  caller-death-safe execution remains unavailable from the canonical helper.
+- The native POSIX refusal is explicit before helper execution; a focused
+  negative control does not replace or hide the existing positive platform
+  cases. This is an incomplete portable transport, not a Windows-only scope
+  change or a claim that all three review findings are resolved.
+- Utility implementation and native host adoption remain with their existing
+  owners. This source follow-up does not alter another contributor's PR,
+  drive its merge, restart a peer or substitute another installer.
+
+### 2026-10-19 - Merged drain integrated with the held client
+
+- The independent core drain slice #7284 actually merged to `dev` as
+  `af4ef48d7175d6e2a3aace81bc61017efd45e315`, after exact-head Copilot approval,
+  no open findings and current required checks passed. Its sessionless source
+  worktree was finalized normally. This is source delivery, not Main promotion,
+  hosting activation or completed lifecycle integration.
+- Rebased the retained client/catalog work onto that core, preserving the
+  operator's trusted-init/assignment contract and both component histories.
+  No transport review finding was cleared or client revision pushed merely
+  because the independent core landed.
+- The combined native Windows portfolio passed all 168 contracts in 114.03
+  seconds under the unchanged 120-second contained limit, with the current
+  rebuilt artifact verified against source. Initial combined runs exceeded
+  that limit. Profiling isolated quadratic capacity-test setup: repeated client
+  posts re-read the growing complete pending inventory. The fixture now seeds
+  127 valid durable records, exercises the actual 128th uncertain post and
+  rejects the 129th without transport, then proves a later refusal preserves
+  that actual uncertain request. The exact production bound remains 128;
+  no runtime change, test exclusion, deadline increase or fake passing status.
+- Current source CI has moved to the reviewed unit-only packet. Its green
+  checks are not native Linux or fresh installed-client proof. The existing
+  periodic hardened Linux route does not enroll this standalone service;
+  its Windows job is disabled. Existing release/qualification ownership under
+  #6237 retains that explicit platform/inventory gate. No new lane or unrelated
+  full-portfolio dispatch was introduced.
+- Public #7266 still awaits the canonical caller-death-safe POSIX utility API
+  and its native qualification. The client/catalog candidate remains local and
+  unpublished; source progress does not change the existing selected clients.
+
+### 2026-10-19 - Installed catalog prerequisite qualified
+
+- The explicit offline `catalog` command now returns this executing
+  interpreter-local wheel's identity, RECORD-bound Python resource digests and
+  exact isolated client argv. It refuses source-only, user-site-only,
+  redirected, incomplete or inconsistent installations rather than selecting
+  a command through PATH. It reads no client configuration or credentials.
+- Fresh offline wheels with both fixture sources removed qualify the actual
+  console, returned argv and authenticated synthetic conversation exchange.
+  The full changed Windows portfolio passed152 contracts in88.57 seconds under
+  the unchanged120-second contained deadline. Focused catalog/artifact cases
+  and touched-Python lint passed. Native Linux and live external service
+  qualification remain unperformed for this local revision.
+- Current lifecycle-owner evidence under #6424 still exposes admission only:
+  construction and activation are not available through that published
+  boundary. The catalog therefore does not claim trusted release selection,
+  managed setup, executable-dependency readiness or native listening. Those
+  portions of Phase2 remain open; no duplicate installer was added.
+- This prerequisite remains local on the held #7266 source workspace. The
+  canonical caller-death-safe POSIX utility dependency still blocks publishing
+  and merging that transport revision. No review thread was resolved on the
+  strength of unrelated catalog work.
+
+### 2026-10-19 - Intent amendment landed; transport recovery qualification
+
+- The canonical initialization/participant amendment #7279 merged to `dev`
+  as `1e3bf7a802f8422a78524c17788914acd4dfdccc` after exact-head Copilot approval,
+  no open findings and all checks passed. This refines the one existing design;
+  it does not complete participant assignment, hosting or native adoption.
+- Installed-client review follow-up now exercises actual trickle-header/body
+  total HTTP deadlines and lock/unread recovery. The fresh wheel-console death
+  case checks offline lock acquisition before releasing the held response or
+  the outer fixture containment boundary. All132 changed Windows contracts
+  passed in87.96 seconds under the existing120-second contained limit.
+- Native POSIX caller-death ownership remains a canonical process-utility
+  dependency. The incomplete local transport revision is not a released
+  cross-platform client; the open #7266 cannot merge until that review defect
+  and the appropriate platform qualification are resolved.
+- The next integration stretch remains selected-client identity/catalog/setup
+  and service-owned assignment, with the connection contributor consuming the
+  shared trusted-init seam. #7238 and all remaining native/lifecycle gates stay
+  open.
+
+### 2026-10-19 - Independent installed client slice
+
+- Added the explicit optional client role to the existing distribution, with
+  canonical native owned provider execution and no implicit home, native
+  claim authority, daemon or source-runtime fallback.
+- Local qualification covers the actual UTF-8 CLI/provider/HTTP/core chain,
+  forward-only reader progress, stable-request uncertainty, body-free
+  returned-only scans and CLI death before outer fixture cleanup.
+- Fresh isolated core installation proves the helper is absent. A separate
+  offline client-role installation consumes both real wheels and runs the
+  installed console after both fixture sources are removed.
+- The existing fixed platform CI lanes and 120-second contained budget remain
+  unchanged. Cross-OS execution stays unsupported until the canonical utility
+  owner publishes and qualifies its explicit opt-in seam. No candidate
+  adoption, hosted lifecycle, native wake or live migration is asserted here.
+- The installed wheel command is qualified, but a normally selected runtime,
+  attributable catalog and explicit setup entry point remain the service
+  writer's next delivery prerequisite for connection/harness consumers.
+
+### 2026-10-19 - Portable core landed
+
+- Core PR #7242 merged to `dev` as
+  `900578f06f9e63250f0b8aa8e5952f549985554e` after exact-head Copilot approval
+  with no open findings and all required checks. The parent #7238 remains open.
+- The installed core has 62 passing contracts, including a real built wheel
+  after fixture-source removal, post recovery after leave and fixed-clock
+  membership fencing. Both fixed Linux/Windows core lanes, native runner
+  contracts and source-owned publication contracts passed.
+- This completes only the bounded core extraction and store qualification.
+  The next stretch is the dependency-light installed client and explicit
+  hosted transport boundary. Native attachment, managed lifecycle, release
+  activation under #6237 and live migration remain open owner-scoped work.
 
 ### 2026-10-19 - Conversation-owned safe drain boundary
 

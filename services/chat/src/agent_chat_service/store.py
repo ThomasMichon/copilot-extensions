@@ -76,9 +76,11 @@ def _unicode(value):
         raise ChatError("invalid", "Nonfinite numbers are not allowed.")
 
 
-def strict_json(data: bytes):
+def strict_json(data: bytes, *, max_bytes=MAX_BODY_BYTES):
     """Decode one bounded UTF-8 JSON value, without ambiguous extensions."""
-    if len(data) > MAX_BODY_BYTES:
+    if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_PAGE_BYTES:
+        raise ChatError("invalid", "Invalid JSON byte bound.")
+    if len(data) > max_bytes:
         raise ChatError("invalid", "Request body is too large.")
 
     def pairs(items):
