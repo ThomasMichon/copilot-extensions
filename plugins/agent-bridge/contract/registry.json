@@ -1860,7 +1860,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-exact-owner-generation-41.json",
-          "sha256": "a17f722bca10cd8ed4cb19e588427c30e58b8f6476ad0b65fd295f41734dae8e",
+          "sha256": "abe31cc2517a16dbbe19a654549fca526b4045b7b22d4b05f471fdebf32d6eae",
           "role": "Independent exact-owner identity, lifecycle, legacy metadata and fresh/retained positive nonce admission vectors; source evidence, not a native or HTTP body capture",
           "generation": 41
         }
@@ -4643,12 +4643,12 @@
           "capture_method": "Source-only transitive closure attestation: verify exact committed Git blob and LF-normalized source SHA-256 for the production native HTTP credential registration path. Local native provider manifest discovery validates attribution, activation and the http_credentials_version opt-in. These on-disk/native-command declarations are not agent-bridge HTTP payload fields. Pin the actual adapter discovery dependency without presenting unchanged HTTP fixtures as native provider protocol captures. No native command is executed, no credential is obtained, and no producer snapshot is used as an expected HTTP body."
         },
         {
-          "commit": "25382bc74ad1d0b4a9dfe205d7475ca869dc91c2",
+          "commit": "929f9926543e144bba65fc9a21c91224d9d4cad0",
           "plugin_version": "0.4.1-dev3",
           "generation": 41,
           "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
           "source_git_blob": "7eae54d09a321567bca551daa899c6fd73cdc526",
-          "capture_method": "Hand-author independent exact-owner admission vectors and exercise them through test_exact_workspace_preflight.test_committed_exact_owner_contract_vectors, test_keyed_creation_refuses_nonpositive_allocation_nonce and test_acquisition_authority.test_version_one_accepts_owner_supported_legacy_metadata against the actual committed preflight, keyed creation and shared metadata reader. Verify source Git blob and LF-normalized SHA-256. Cover cold inventory, finalization, changed nonce, opaque/unindexed history, a foreign head, legacy companion/null/empty metadata and fresh/retained allocated/terminal refusal of nonpositive or non-string nonces. These are source-level admission expectations, not producer-generated HTTP bodies or qualified native lifecycle captures. Historical fixtures and protocol floors remain unchanged."
+          "capture_method": "Hand-author independent exact-owner admission vectors and exercise them through test_exact_workspace_preflight.test_committed_exact_owner_contract_vectors, test_keyed_creation_refuses_nonpositive_allocation_nonce and test_acquisition_authority.test_version_one_accepts_owner_supported_legacy_metadata against the actual committed preflight, keyed creation and shared metadata reader. Verify source Git blob and LF-normalized SHA-256. Cover cold inventory, finalization, changed nonce, opaque/unindexed history, a foreign head, legacy companion/string-or-null metadata including whitespace-only strings, and fresh/retained allocated/terminal refusal of nonpositive or non-string nonces. These are source-level admission expectations, not producer-generated HTTP bodies or qualified native lifecycle captures. Historical fixtures and protocol floors remain unchanged."
         }
       ],
       "support_window": "HTTP generations 1 through 41 remain supported. Direct URL endpoint targets require generation 41; named remote ACP retains floor 38, receipts retain 39, and exact-native worktree resume retains 40. Historical independent fixtures remain immutable; generation-41 re-attestations retain their original capability floors.",

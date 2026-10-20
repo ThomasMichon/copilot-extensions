@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "25382bc74ad1d0b4a9dfe205d7475ca869dc91c2",
+    "commit": "929f9926543e144bba65fc9a21c91224d9d4cad0",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
