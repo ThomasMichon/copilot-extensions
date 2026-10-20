@@ -168,6 +168,8 @@ class ServiceConnector:
             },
         ) as response:
             check(200 <= response.status <= 599, "invalid-backend-response")
+            check(not 300 <= response.status <= 399 or response.status == 304,
+                  "invalid-backend-response")
             check(response.headers.get("Content-Encoding", "identity") == "identity",
                   "invalid-backend-response")
             selected = headers(response.headers.items(), RESPONSE_HEADERS)

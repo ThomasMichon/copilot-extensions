@@ -229,6 +229,31 @@ def test_cacheable_variants_retain_backend_freshness_and_variation(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("status", [300, 301, 302, 303, 305, 306, 307, 308])
+def test_backend_redirects_refuse_before_successful_public_headers(tmp_path, status):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            async with await rig.request(f"/api/redirect?status={status}") as response:
+                assert response.status == 502
+                assert await response.json() == {"error": "invalid-backend-response"}
+            assert len(rig.backends[0].requests) == 1
+    asyncio.run(scenario())
+
+
+def test_backend_not_modified_is_not_rejected_as_redirect(tmp_path):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            async with await rig.request(
+                "/api/not-modified", headers={"If-None-Match": '"unchanged"'},
+            ) as response:
+                assert response.status == 304
+                assert response.headers["ETag"] == '"unchanged"'
+                assert await response.read() == b""
+    asyncio.run(scenario())
+
+
 def test_http_10_stream_request_refuses_before_backend_dispatch(tmp_path):
     async def scenario():
         async with running(tmp_path) as rig:

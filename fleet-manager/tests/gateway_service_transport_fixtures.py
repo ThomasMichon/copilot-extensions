@@ -93,6 +93,11 @@ class Backend:
                 "Date": "Wed, 21 Oct 2015 07:28:00 GMT", "Age": "290",
                 "Expires": "Wed, 21 Oct 2015 07:33:00 GMT",
             })
+        if request.path == "/redirect":
+            return web.Response(status=int(request.query["status"]),
+                                headers={"Location": "/login"})
+        if request.path == "/not-modified":
+            return web.Response(status=304, headers={"ETag": '"unchanged"'})
         return web.json_response(
             {"service": self.name, "path": request.raw_path, "body": body.decode()},
             headers={"Set-Cookie": "fixture=not-forwarded", "X-Identity": "not-forwarded",
